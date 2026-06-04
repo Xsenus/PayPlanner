@@ -186,6 +186,7 @@ public class ReportsControllerTests
             CancellationToken.None);
         var csv = Assert.IsType<FileContentResult>(csvAction);
         Assert.Equal("text/csv; charset=utf-8", csv.ContentType);
+        Assert.Matches(@"^legal-work-report-\d{8}-\d{4}\.csv$", csv.FileDownloadName);
 
         var excelAction = await controller.ExportLegalWorkExcel(
             today.AddDays(-30),
@@ -394,6 +395,106 @@ public class ReportsControllerTests
             file.FileDownloadName == $"legal-work-report-{beforeFileStamp}.pdf" ||
             file.FileDownloadName == $"legal-work-report-{afterFileStamp}.pdf",
             $"PDF file name must use Europe/Samara local time. Expected {beforeFileStamp} or {afterFileStamp}. Actual: {file.FileDownloadName}");
+    }
+
+    [Fact]
+    public async Task LegalWorkExports_FormatReportDatesInProfileTimeZone()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "reports-exporter-dates", Description = "Reports exporter dates" };
+        var user = new User
+        {
+            Email = "reports-exporter-dates@example.test",
+            FullName = "Reports Exporter Dates",
+            IsActive = true,
+            Role = role,
+        };
+        var client = new Client
+        {
+            Name = "Timezone Report Client",
+            ResponsibleUser = user,
+        };
+        db.Roles.Add(role);
+        db.Users.Add(user);
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Reports,
+                CanView = true,
+                CanExport = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Cases,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Tasks,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Accounts,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            });
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = user.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Europe/Samara",
+        });
+
+        var instantUtc = DateTime.SpecifyKind(DateTime.UtcNow.Date.AddHours(22).AddMinutes(30), DateTimeKind.Utc);
+        db.ClientCases.Add(new ClientCase
+        {
+            ClientId = client.Id,
+            CaseNumber = "TZ-REPORT",
+            Title = "Timezone report case",
+            CaseType = "Суд",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = user.Id,
+            CreatedAt = instantUtc,
+            StartDate = instantUtc.Date,
+            NextHearingAt = instantUtc,
+            FeeAmount = 10_000m,
+        });
+        await db.SaveChangesAsync();
+
+        var pdfService = new FakeInvoiceDocumentPdfService([0x25, 0x50, 0x44, 0x46]);
+        var controller = CreateController(db, CreateUserPrincipal(user.Id), pdfService);
+        var from = instantUtc.Date.AddDays(-1);
+        var to = instantUtc.Date.AddDays(2);
+        var expectedDate = CalendarTimeZoneHelper
+            .ToUserLocal(instantUtc, CalendarTimeZoneHelper.ResolveTimeZone("Europe/Samara"))
+            .ToString("dd.MM.yyyy", System.Globalization.CultureInfo.GetCultureInfo("ru-RU"));
+
+        var csv = Assert.IsType<FileContentResult>(
+            await controller.ExportLegalWorkCsv(from, to, null, null, null, CancellationToken.None));
+        var csvText = System.Text.Encoding.UTF8.GetString(csv.FileContents);
+        Assert.Matches(@"^legal-work-report-\d{8}-\d{4}\.csv$", csv.FileDownloadName);
+        Assert.Contains(expectedDate, csvText, StringComparison.Ordinal);
+
+        var excel = Assert.IsType<FileContentResult>(
+            await controller.ExportLegalWorkExcel(from, to, null, null, null, CancellationToken.None));
+        var excelText = System.Text.Encoding.UTF8.GetString(excel.FileContents);
+        Assert.Contains(expectedDate, excelText, StringComparison.Ordinal);
+
+        var pdf = Assert.IsType<FileContentResult>(
+            await controller.ExportLegalWorkPdf(from, to, null, null, null, CancellationToken.None));
+        Assert.Equal("application/pdf", pdf.ContentType);
+        Assert.Contains(expectedDate, pdfService.LastHtml, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -172,7 +172,11 @@ public class ReportsController : ControllerBase
             return error;
         }
 
-        return File(BuildLegalWorkCsv(report!), "text/csv; charset=utf-8", "legal-work-report.csv");
+        var now = await ResolveReportNowAsync(ct);
+        return File(
+            BuildLegalWorkCsv(report!, now.TimeZone),
+            "text/csv; charset=utf-8",
+            $"legal-work-report-{now.Local:yyyyMMdd-HHmm}.csv");
     }
 
     [HttpGet("legal-work.xls")]
@@ -193,7 +197,7 @@ public class ReportsController : ControllerBase
         var now = await ResolveReportNowAsync(ct);
         var fileName = $"legal-work-report-{now.Local:yyyyMMdd-HHmm}.xls";
         return File(
-            Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(BuildLegalWorkExcelXml(report!))).ToArray(),
+            Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(BuildLegalWorkExcelXml(report!, now.TimeZone))).ToArray(),
             "application/vnd.ms-excel; charset=utf-8",
             fileName);
     }
@@ -2049,7 +2053,7 @@ public class ReportsController : ControllerBase
         return builder.ToString();
     }
 
-    private static byte[] BuildLegalWorkCsv(LegalWorkReportDto report)
+    private static byte[] BuildLegalWorkCsv(LegalWorkReportDto report, TimeZoneInfo timeZone)
     {
         var builder = new StringBuilder();
         AppendCsvRow(builder, [
@@ -2095,7 +2099,7 @@ public class ReportsController : ControllerBase
                 item.ResponsibleName,
                 item.StatusLabel,
                 item.CaseType,
-                $"{item.CreatedAt:yyyy-MM-dd}",
+                DateCell(item.CreatedAt, timeZone),
                 item.FeeAmount.ToString("0.##"),
                 item.PaidTotal.ToString("0.##"),
                 item.OutstandingTotal.ToString("0.##"),
@@ -2149,7 +2153,7 @@ public class ReportsController : ControllerBase
         return Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(builder.ToString())).ToArray();
     }
 
-    private static string BuildLegalWorkExcelXml(LegalWorkReportDto report)
+    private static string BuildLegalWorkExcelXml(LegalWorkReportDto report, TimeZoneInfo timeZone)
     {
         var builder = new StringBuilder();
         builder.AppendLine("""<?xml version="1.0" encoding="utf-8"?>""");
@@ -2201,7 +2205,7 @@ public class ReportsController : ControllerBase
                 item.ResponsibleName,
                 item.StatusLabel,
                 item.CaseType,
-                item.CreatedAt.ToString("dd.MM.yyyy", CultureInfo.GetCultureInfo("ru-RU")),
+                DateCell(item.CreatedAt, timeZone),
                 MoneyCell(item.FeeAmount),
                 MoneyCell(item.PaidTotal),
                 MoneyCell(item.OutstandingTotal),
@@ -2266,7 +2270,7 @@ public class ReportsController : ControllerBase
                 string.IsNullOrWhiteSpace(item.CaseNumber) ? item.CaseTitle : $"{item.CaseNumber} {item.CaseTitle}",
                 item.ClientName,
                 item.ResponsibleName,
-                item.DueAt.ToString("dd.MM.yyyy", CultureInfo.GetCultureInfo("ru-RU")),
+                LegalWorkDeadlineDateCell(item, timeZone),
                 FormatLegalWorkDeadlineOffset(item.DaysOffset),
             ]);
         }
@@ -2362,7 +2366,7 @@ public class ReportsController : ControllerBase
                 .Append("</td><td>").Append(Html(string.IsNullOrWhiteSpace(item.CaseNumber) ? item.CaseTitle : $"{item.CaseNumber} {item.CaseTitle}"))
                 .Append("</td><td>").Append(Html(item.ClientName))
                 .Append("</td><td>").Append(Html(item.ResponsibleName))
-                .Append("</td><td>").Append(Html($"{item.DueAt:dd.MM.yyyy}"))
+                .Append("</td><td>").Append(Html(LegalWorkDeadlineDateCell(item, timeZone)))
                 .Append("</td><td>").Append(Html(FormatLegalWorkDeadlineOffset(item.DaysOffset)))
                 .AppendLine("</td></tr>");
         }
@@ -2386,10 +2390,18 @@ public class ReportsController : ControllerBase
     private static string PercentCell(decimal value)
         => $"{value.ToString("0.##", CultureInfo.InvariantCulture)}%";
 
-    private static string DateCell(DateTime? value)
+    private static string DateCell(DateTime? value, TimeZoneInfo? timeZone = null)
         => value.HasValue
-            ? value.Value.ToString("dd.MM.yyyy", CultureInfo.GetCultureInfo("ru-RU"))
+            ? (timeZone is null
+                ? value.Value
+                : CalendarTimeZoneHelper.ToUserLocal(value.Value, timeZone))
+                .ToString("dd.MM.yyyy", CultureInfo.GetCultureInfo("ru-RU"))
             : string.Empty;
+
+    private static string LegalWorkDeadlineDateCell(LegalWorkDeadlineItemDto item, TimeZoneInfo timeZone)
+        => string.Equals(item.DeadlineType, "hearing", StringComparison.OrdinalIgnoreCase)
+            ? DateCell(item.DueAt, timeZone)
+            : DateCell(item.DueAt);
 
     private static string DateTimeCell(DateTime? value, TimeZoneInfo? timeZone = null)
         => value.HasValue
