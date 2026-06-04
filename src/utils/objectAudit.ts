@@ -444,11 +444,16 @@ function looksLikeDate(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}(?:[T\s]\d{2}:\d{2}(?::\d{2})?)?/u.test(value.trim());
 }
 
-function formatDateValue(value: string): string {
+function formatDateValue(value: string, timeZoneId?: string | null): string {
   const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?/u);
   if (!match) return value.trim();
 
   const [, year, month, day, hour, minute, second] = match;
+  const hasExplicitOffset = /(?:Z|[+-]\d{2}:?\d{2})$/u.test(value.trim());
+  if (hasExplicitOffset && hour && (hour !== '00' || minute !== '00' || (second && second !== '00'))) {
+    return formatDateTimeInTimeZone(value, timeZoneId) || value.trim();
+  }
+
   const datePart = `${day}.${month}.${year}`;
   if (!hour || (hour === '00' && minute === '00' && (!second || second === '00'))) {
     return datePart;
@@ -757,6 +762,7 @@ export function formatAuditValue(
   value: string | null | undefined,
   objectType?: string | null,
   fieldName?: string | null,
+  timeZoneId?: string | null,
 ): string {
   void objectType;
   const trimmed = value?.trim();
@@ -773,7 +779,7 @@ export function formatAuditValue(
   }
 
   if (looksLikeDate(trimmed)) {
-    return formatDateValue(trimmed);
+    return formatDateValue(trimmed, timeZoneId);
   }
 
   if (shouldFormatAsMoney(fieldName)) {
@@ -807,3 +813,4 @@ export function formatAuditChangeSummary(objectType: string | null | undefined, 
     ? `Изменены поля: ${visibleFields} и ещё ${remainingCount}`
     : `Изменены поля: ${visibleFields}`;
 }
+import { formatDateTimeInTimeZone } from './timeZoneDate';

@@ -1,6 +1,7 @@
 import { Filter, Loader2, RefreshCw, Search, ShieldCheck } from 'lucide-react';
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import {
   apiService,
   type ObjectAuditEventDto,
@@ -17,6 +18,7 @@ import {
   parseAuditChangedFields,
   parseAuditFieldChanges,
 } from '../../utils/objectAudit';
+import { formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
 import { TablePagination } from '../ui/TablePagination';
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
@@ -68,16 +70,12 @@ const ACTION_OPTIONS = [
   'TextFileUpdated',
 ] as const;
 
-function formatDateTime(value?: string | null) {
+function formatDateTime(value?: string | null, timeZoneId?: string | null) {
   if (!value) {
     return 'Неизвестно';
   }
 
-  try {
-    return new Date(value).toLocaleString('ru-RU');
-  } catch {
-    return value;
-  }
+  return formatDateTimeInTimeZone(value, timeZoneId) || value;
 }
 
 function getEventDescription(item: ObjectAuditEventDto) {
@@ -92,6 +90,7 @@ function getEventDescription(item: ObjectAuditEventDto) {
 }
 
 export function ObjectAuditPage() {
+  const { timeZoneId } = useUserTimeZone();
   const [items, setItems] = useState<ObjectAuditEventDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -472,7 +471,7 @@ export function ObjectAuditPage() {
                           <td className="px-4 py-3 font-medium text-slate-900">
                             {getObjectAuditActorLabel(item.actorUserName)}
                           </td>
-                          <td className="px-4 py-3 text-slate-500">{formatDateTime(item.createdAt)}</td>
+                          <td className="px-4 py-3 text-slate-500">{formatDateTime(item.createdAt, timeZoneId)}</td>
                           <td className="px-4 py-3 text-slate-700">
                             <div className="line-clamp-2">{getEventDescription(item)}</div>
                             {changedFields.length > 0 && !canExpand ? (
@@ -527,10 +526,10 @@ export function ObjectAuditPage() {
                                           {getObjectAuditFieldLabel(item.objectType, change.field)}
                                         </td>
                                         <td className="px-4 py-3 text-slate-600">
-                                          {formatAuditValue(change.oldValue, item.objectType, change.field)}
+                                          {formatAuditValue(change.oldValue, item.objectType, change.field, timeZoneId)}
                                         </td>
                                         <td className="px-4 py-3 text-slate-900">
-                                          {formatAuditValue(change.newValue, item.objectType, change.field)}
+                                          {formatAuditValue(change.newValue, item.objectType, change.field, timeZoneId)}
                                         </td>
                                       </tr>
                                     ))}

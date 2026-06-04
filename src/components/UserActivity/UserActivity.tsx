@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
 import { useToast } from '../../hooks/useToast';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { apiService } from '../../services/api';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
@@ -15,6 +16,7 @@ import type {
   UserActivityStatus,
 } from '../../types/userActivity';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
 
 const statusStyles: Record<UserActivityStatus, string> = {
   Info: 'bg-slate-100 text-slate-700 border border-slate-200',
@@ -46,12 +48,8 @@ const USER_ACTIVITY_COLUMNS = [
 
 type UserActivityColumnKey = (typeof USER_ACTIVITY_COLUMNS)[number]['key'];
 
-function formatDate(value: string) {
-  try {
-    return new Date(value).toLocaleString('ru-RU');
-  } catch {
-    return value;
-  }
+function formatDate(value: string, timeZoneId?: string | null) {
+  return formatDateTimeInTimeZone(value, timeZoneId) || value;
 }
 
 function formatMetadata(metadata: unknown): string {
@@ -71,6 +69,7 @@ function formatMetadata(metadata: unknown): string {
 
 export const UserActivity = () => {
   const { user, isAdmin } = useAuth();
+  const { timeZoneId } = useUserTimeZone();
   const [logs, setLogs] = useState<UserActivityLogItem[]>([]);
   const [filters, setFilters] = useState<UserActivityFiltersResponse | null>(null);
   const [actors, setActors] = useState<UserActivityActor[]>([]);
@@ -280,7 +279,7 @@ export const UserActivity = () => {
 
     switch (columnKey) {
       case 'createdAt':
-        return <span className="whitespace-nowrap text-slate-700">{formatDate(log.createdAt)}</span>;
+        return <span className="whitespace-nowrap text-slate-700">{formatDate(log.createdAt, timeZoneId)}</span>;
       case 'user':
         return (
           <>

@@ -1,4 +1,6 @@
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { getObjectAuditActorLabel } from '../../utils/objectAudit';
+import { formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
 
 interface AuditInfoCardProps {
   createdAt?: string | null;
@@ -17,30 +19,20 @@ interface AuditInfoRowProps {
   label: string;
   userName?: string | null;
   date?: string | null;
+  timeZoneId?: string | null;
   emptyText: string;
 }
 
-function formatAuditDate(value?: string | null): string | null {
+function formatAuditDate(value?: string | null, timeZoneId?: string | null): string | null {
   if (!value) {
     return null;
   }
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
-
-  return date.toLocaleString('ru-RU', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return formatDateTimeInTimeZone(value, timeZoneId) || null;
 }
 
-function AuditInfoRow({ label, userName, date, emptyText }: AuditInfoRowProps) {
-  const formattedDate = formatAuditDate(date);
+function AuditInfoRow({ label, userName, date, timeZoneId, emptyText }: AuditInfoRowProps) {
+  const formattedDate = formatAuditDate(date, timeZoneId);
   const displayUserName = userName?.trim() ? getObjectAuditActorLabel(userName) : null;
   const hasValue = Boolean(displayUserName || formattedDate);
 
@@ -73,6 +65,7 @@ export function AuditInfoCard({
   layout = 'auto',
   className = '',
 }: AuditInfoCardProps) {
+  const { timeZoneId } = useUserTimeZone();
   const gridTemplateColumns =
     layout === 'stack'
       ? 'minmax(0, 1fr)'
@@ -100,12 +93,14 @@ export function AuditInfoCard({
           label="Создал"
           userName={createdByUserName}
           date={createdAt}
+          timeZoneId={timeZoneId}
           emptyText="Автор не сохранен для старых данных."
         />
         <AuditInfoRow
           label="Изменил"
           userName={updatedByUserName}
           date={updatedAt}
+          timeZoneId={timeZoneId}
           emptyText="Изменений по объекту пока нет."
         />
         {(isDeleted || deletedAt || deletedByUserName) && (
@@ -113,6 +108,7 @@ export function AuditInfoCard({
             label="Удалил"
             userName={deletedByUserName}
             date={deletedAt}
+            timeZoneId={timeZoneId}
             emptyText="Удаление не зафиксировано."
           />
         )}

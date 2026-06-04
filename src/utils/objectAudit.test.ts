@@ -119,6 +119,7 @@ describe('objectAudit utilities', () => {
     expect(formatAuditValue('task', 'task-journal-item', 'Type')).toBe('Задача');
     expect(formatAuditValue('courtHearing', 'task-journal-item', 'Type')).toBe('Судебное заседание');
     expect(formatAuditValue('2026-04-27 00:00:00', 'payment', 'Date')).toBe('27.04.2026');
+    expect(formatAuditValue('2026-06-04T20:30:00Z', 'task-journal-item', 'DueAt', 'Europe/Samara')).toBe('05.06.2026, 00:30');
     expect(formatAuditValue('1500.00', 'payment', 'Amount')).toMatch(/1\s*500\s*₽/u);
     expect(formatAuditValue('42', 'payment', 'Payment Status Id')).toBe('ID 42');
   });

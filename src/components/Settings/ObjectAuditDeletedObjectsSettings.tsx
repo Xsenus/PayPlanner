@@ -2,9 +2,11 @@ import { Loader2, RefreshCw, Search, ShieldAlert } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useDialog } from '../../hooks/useDialog';
 import { useToast } from '../../hooks/useToast';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { apiService, type DeletedObjectAuditItemDto } from '../../services/api';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { getObjectAuditActorLabel } from '../../utils/objectAudit';
+import { formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
 
 type DeletedObjectType =
   | 'client'
@@ -29,26 +31,22 @@ const OBJECT_TYPES: Array<{ key: DeletedObjectType; label: string; hint: string 
   { key: 'contact', label: 'Сторонние контакты', hint: 'Контакты вне клиентского справочника.' },
 ];
 
-function formatDateTime(value?: string | null) {
+function formatDateTime(value?: string | null, timeZoneId?: string | null) {
   if (!value) {
     return '—';
   }
 
-  try {
-    return new Date(value).toLocaleString('ru-RU');
-  } catch {
-    return value;
-  }
+  return formatDateTimeInTimeZone(value, timeZoneId) || value;
 }
 
 function formatAuditUserName(value?: string | null) {
   return value?.trim() ? getObjectAuditActorLabel(value) : '—';
 }
 
-function getRestoreDescription(item: DeletedObjectAuditItemDto) {
+function getRestoreDescription(item: DeletedObjectAuditItemDto, timeZoneId?: string | null) {
   const parts = [
     item.deletedByUserName ? `Удалил: ${formatAuditUserName(item.deletedByUserName)}` : null,
-    item.deletedAt ? `Когда: ${formatDateTime(item.deletedAt)}` : null,
+    item.deletedAt ? `Когда: ${formatDateTime(item.deletedAt, timeZoneId)}` : null,
   ].filter(Boolean);
 
   return parts.length > 0 ? parts.join(' • ') : 'Удаление было зафиксировано в системе.';
@@ -59,6 +57,7 @@ export function ObjectAuditDeletedObjectsSettings({
 }: DeletedObjectsSettingsProps) {
   const toast = useToast();
   const { confirm } = useDialog();
+  const { timeZoneId } = useUserTimeZone();
   const [activeType, setActiveType] = useState<DeletedObjectType>('client');
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
@@ -290,12 +289,12 @@ export function ObjectAuditDeletedObjectsSettings({
                           <div className="mt-1 text-sm text-slate-500">{item.subtitle}</div>
                         ) : null}
                         <div className="mt-3 grid gap-2 text-xs text-slate-500 md:grid-cols-2">
-                          <div>Создан: {formatDateTime(item.createdAt)}</div>
+                          <div>Создан: {formatDateTime(item.createdAt, timeZoneId)}</div>
                           <div>Создал: {formatAuditUserName(item.createdByUserName)}</div>
-                          <div>Обновлён: {formatDateTime(item.updatedAt)}</div>
+                          <div>Обновлён: {formatDateTime(item.updatedAt, timeZoneId)}</div>
                           <div>Изменил: {formatAuditUserName(item.updatedByUserName)}</div>
                         </div>
-                        <div className="mt-3 text-xs text-slate-500">{getRestoreDescription(item)}</div>
+                        <div className="mt-3 text-xs text-slate-500">{getRestoreDescription(item, timeZoneId)}</div>
                       </div>
 
                       <div className="shrink-0">

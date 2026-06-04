@@ -1,6 +1,7 @@
 import { Clock3, Loader2, RefreshCw, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { apiService, type ObjectAuditEventDto } from '../../services/api';
 import {
   formatAuditChangeSummary,
@@ -14,6 +15,7 @@ import {
   parseAuditFieldChanges,
   parseAuditReason,
 } from '../../utils/objectAudit';
+import { formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
 
 interface ObjectAuditHistoryCardProps {
   objectType?: string | null;
@@ -21,23 +23,12 @@ interface ObjectAuditHistoryCardProps {
   compact?: boolean;
 }
 
-function formatDateTime(value?: string | null): string {
+function formatDateTime(value?: string | null, timeZoneId?: string | null): string {
   if (!value) {
     return 'Неизвестно';
   }
 
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
-
-  return parsed.toLocaleString('ru-RU', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return formatDateTimeInTimeZone(value, timeZoneId) || value;
 }
 
 function getEventDescription(item: ObjectAuditEventDto): string {
@@ -69,7 +60,7 @@ function EmptyState({
   );
 }
 
-function HistoryTimeline({ items }: { items: ObjectAuditEventDto[] }) {
+function HistoryTimeline({ items, timeZoneId }: { items: ObjectAuditEventDto[]; timeZoneId?: string | null }) {
   return (
     <div className="space-y-4">
       {items.map((item) => {
@@ -94,7 +85,7 @@ function HistoryTimeline({ items }: { items: ObjectAuditEventDto[] }) {
                   >
                     {getObjectAuditActionLabel(item.action)}
                   </span>
-                  <span className="text-xs text-slate-400">{formatDateTime(item.createdAt)}</span>
+                  <span className="text-xs text-slate-400">{formatDateTime(item.createdAt, timeZoneId)}</span>
                 </div>
 
                 <p className="mt-3 break-words text-sm font-semibold text-slate-900">
@@ -125,7 +116,7 @@ function HistoryTimeline({ items }: { items: ObjectAuditEventDto[] }) {
                               Было
                             </p>
                             <p className="mt-2 break-words text-sm leading-6 text-slate-700">
-                              {formatAuditValue(change.oldValue, item.objectType, change.field)}
+                              {formatAuditValue(change.oldValue, item.objectType, change.field, timeZoneId)}
                             </p>
                           </div>
                           <div className="rounded-xl bg-emerald-50/80 px-3 py-3">
@@ -133,7 +124,7 @@ function HistoryTimeline({ items }: { items: ObjectAuditEventDto[] }) {
                               Стало
                             </p>
                             <p className="mt-2 break-words text-sm leading-6 text-slate-900">
-                              {formatAuditValue(change.newValue, item.objectType, change.field)}
+                              {formatAuditValue(change.newValue, item.objectType, change.field, timeZoneId)}
                             </p>
                           </div>
                         </div>
@@ -168,6 +159,7 @@ export function ObjectAuditHistoryCard({
   objectId,
   compact = false,
 }: ObjectAuditHistoryCardProps) {
+  const { timeZoneId } = useUserTimeZone();
   const [items, setItems] = useState<ObjectAuditEventDto[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -290,7 +282,7 @@ export function ObjectAuditHistoryCard({
           />
         ) : (
           <div className="mt-5">
-            <HistoryTimeline items={visibleItems} />
+            <HistoryTimeline items={visibleItems} timeZoneId={timeZoneId} />
           </div>
         )}
       </section>
@@ -317,7 +309,7 @@ export function ObjectAuditHistoryCard({
                 </div>
                 <div className="overflow-y-auto bg-slate-50/70 px-6 py-5">
                   {items.length > 0 ? (
-                    <HistoryTimeline items={items} />
+                    <HistoryTimeline items={items} timeZoneId={timeZoneId} />
                   ) : (
                     <EmptyState
                       title="Записей пока нет"
