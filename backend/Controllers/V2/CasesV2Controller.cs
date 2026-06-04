@@ -1656,6 +1656,7 @@ public class CasesV2Controller : ControllerBase
         var caseNumber = !string.IsNullOrWhiteSpace(clientCase.CaseNumber)
             ? clientCase.CaseNumber.Trim()
             : clientCase.Id.ToString();
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
 
         return Ok(new RenderedCaseDocumentTemplateDto
         {
@@ -1663,7 +1664,7 @@ public class CasesV2Controller : ControllerBase
             TemplateLabel = template.Title,
             DocumentType = documentType,
             FileName = $"{template.Title} - дело {caseNumber}.html",
-            Html = BuildCaseDocumentTemplateHtml(clientCase, template, documentType),
+            Html = BuildCaseDocumentTemplateHtml(clientCase, template, documentType, timeZone),
         });
     }
 
@@ -3675,7 +3676,8 @@ public class CasesV2Controller : ControllerBase
             return BadRequest(new { message = "Шаблон документа не привязан к типу этого дела." });
         }
 
-        var template = BuildCaseDocumentTemplate(clientCase, request, templateDefinitionResult.Template);
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        var template = BuildCaseDocumentTemplate(clientCase, request, templateDefinitionResult.Template, timeZone);
         var latestVersion = await _db.ClientCaseDocuments
             .Where(item => item.ClientCaseId == id && item.DocumentKey == template.DocumentKey)
             .MaxAsync(item => (int?)item.Version, ct) ?? 0;
@@ -7304,7 +7306,8 @@ public class CasesV2Controller : ControllerBase
     private static CaseDocumentTemplate BuildCaseDocumentTemplate(
         ClientCase clientCase,
         GenerateCaseDocumentTemplateRequest? request,
-        CaseDocumentTemplateDefinition definition)
+        CaseDocumentTemplateDefinition definition,
+        TimeZoneInfo timeZone)
     {
         var documentType = NormalizeOptional(request?.DocumentType) ?? definition.DocumentType;
         var status = NormalizeRequired(request?.Status, "Подготовлен");
@@ -7318,7 +7321,7 @@ public class CasesV2Controller : ControllerBase
             documentType,
             status,
             fileName,
-            BuildCaseDocumentTemplateHtml(clientCase, definition, documentType));
+            BuildCaseDocumentTemplateHtml(clientCase, definition, documentType, timeZone));
     }
 
     private async Task<IReadOnlyList<CaseDocumentTemplateDefinition>> GetCaseDocumentTemplateLibraryAsync(CancellationToken ct)
@@ -7792,14 +7795,15 @@ public class CasesV2Controller : ControllerBase
     private static string BuildCaseDocumentTemplateHtml(
         ClientCase clientCase,
         CaseDocumentTemplateDefinition definition,
-        string documentType)
+        string documentType,
+        TimeZoneInfo timeZone)
     {
         var ownerName = ResolveCaseOwnerName(clientCase);
         var responsibleName = clientCase.ResponsibleUser?.FullName ?? string.Empty;
-        var now = DateTime.UtcNow;
+        var now = CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone);
         if (!string.IsNullOrWhiteSpace(definition.Content))
         {
-            return BuildCustomCaseDocumentTemplateHtml(clientCase, definition, ownerName, responsibleName, documentType, now);
+            return BuildCustomCaseDocumentTemplateHtml(clientCase, definition, ownerName, responsibleName, documentType, now, timeZone);
         }
 
         var html = new StringBuilder();
@@ -7861,7 +7865,7 @@ public class CasesV2Controller : ControllerBase
         AppendTemplateRow(html, "Третьи лица", clientCase.ThirdParties);
         AppendTemplateRow(html, "Представители", clientCase.Representatives);
         AppendTemplateRow(html, "Судья", clientCase.JudgeName);
-        AppendTemplateRow(html, "Ближайшее заседание", FormatTemplateDateTime(clientCase.NextHearingAt));
+        AppendTemplateRow(html, "Ближайшее заседание", FormatTemplateDateTime(clientCase.NextHearingAt, timeZone));
         AppendTemplateRow(html, "Дата подачи заявления", FormatTemplateDate(clientCase.ClaimFiledAt));
         AppendTemplateRow(html, "Дата решения суда", FormatTemplateDate(clientCase.CourtDecisionAt));
         AppendTemplateRow(html, "Срок апелляции", FormatTemplateDate(clientCase.AppealDeadlineAt));
@@ -7870,7 +7874,7 @@ public class CasesV2Controller : ControllerBase
 
         html.AppendLine("    <div class=\"body\">");
         html.AppendLine("      <h2>Текст документа</h2>");
-        foreach (var paragraph in BuildTemplateParagraphs(definition.Key, clientCase, ownerName, documentType))
+        foreach (var paragraph in BuildTemplateParagraphs(definition.Key, clientCase, ownerName, documentType, timeZone))
         {
             html.Append("      <p>");
             html.Append(E(paragraph));
@@ -7899,7 +7903,8 @@ public class CasesV2Controller : ControllerBase
         string ownerName,
         string responsibleName,
         string documentType,
-        DateTime now)
+        DateTime now,
+        TimeZoneInfo timeZone)
     {
         var renderedContent = ReplaceCaseDocumentTemplateTokens(
             definition.Content ?? string.Empty,
@@ -7907,7 +7912,8 @@ public class CasesV2Controller : ControllerBase
             ownerName,
             responsibleName,
             documentType,
-            now);
+            now,
+            timeZone);
         if (renderedContent.Contains("<html", StringComparison.OrdinalIgnoreCase))
         {
             return renderedContent;
@@ -7963,7 +7969,8 @@ public class CasesV2Controller : ControllerBase
         string ownerName,
         string responsibleName,
         string documentType,
-        DateTime now)
+        DateTime now,
+        TimeZoneInfo timeZone)
     {
         var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -7982,7 +7989,7 @@ public class CasesV2Controller : ControllerBase
             ["{{thirdParties}}"] = clientCase.ThirdParties ?? string.Empty,
             ["{{representatives}}"] = clientCase.Representatives ?? string.Empty,
             ["{{judge.name}}"] = clientCase.JudgeName ?? string.Empty,
-            ["{{nextHearingAt}}"] = FormatTemplateDateTime(clientCase.NextHearingAt),
+            ["{{nextHearingAt}}"] = FormatTemplateDateTime(clientCase.NextHearingAt, timeZone),
             ["{{claimFiledAt}}"] = FormatTemplateDate(clientCase.ClaimFiledAt),
             ["{{courtDecisionAt}}"] = FormatTemplateDate(clientCase.CourtDecisionAt),
             ["{{appealDeadlineAt}}"] = FormatTemplateDate(clientCase.AppealDeadlineAt),
@@ -8005,7 +8012,8 @@ public class CasesV2Controller : ControllerBase
         string templateKey,
         ClientCase clientCase,
         string ownerName,
-        string documentType)
+        string documentType,
+        TimeZoneInfo timeZone)
         => templateKey switch
         {
             "claim" =>
@@ -8047,7 +8055,7 @@ public class CasesV2Controller : ControllerBase
             "procedural-document" =>
             [
                 $"Процессуальный документ подготовлен по делу «{ValueOrDash(clientCase.Title)}».",
-                $"Документ связан со стадией «{ValueOrDash(clientCase.Stage)}», ближайшее заседание: {ValueOrDash(FormatTemplateDateTime(clientCase.NextHearingAt))}.",
+                $"Документ связан со стадией «{ValueOrDash(clientCase.Stage)}», ближайшее заседание: {ValueOrDash(FormatTemplateDateTime(clientCase.NextHearingAt, timeZone))}.",
                 "Перед подачей необходимо проверить процессуальный срок, адресата, полномочия подписанта, список приложений и доказательств."
             ],
             _ =>
@@ -8098,8 +8106,8 @@ public class CasesV2Controller : ControllerBase
     private static string FormatTemplateDate(DateTime? value)
         => value.HasValue ? value.Value.ToString("dd.MM.yyyy") : string.Empty;
 
-    private static string FormatTemplateDateTime(DateTime? value)
-        => value.HasValue ? value.Value.ToString("dd.MM.yyyy HH:mm") : string.Empty;
+    private static string FormatTemplateDateTime(DateTime? value, TimeZoneInfo timeZone)
+        => value.HasValue ? CalendarTimeZoneHelper.FormatUserDateTime(value.Value, timeZone) : string.Empty;
 
     private static string ValueOrDash(string? value)
         => string.IsNullOrWhiteSpace(value) ? "—" : value.Trim();

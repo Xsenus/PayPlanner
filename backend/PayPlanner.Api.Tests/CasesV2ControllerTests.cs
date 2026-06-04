@@ -3130,8 +3130,17 @@ public class CasesV2ControllerTests
             CourtName = "Арбитражный суд Самарской области",
             ResponsibleUserId = owner.Id,
             Status = ClientCaseStatus.Open,
+            NextHearingAt = new DateTime(2026, 6, 5, 12, 0, 0, DateTimeKind.Utc),
         };
         db.ClientCases.Add(clientCase);
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = owner.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Europe/Samara",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
         await db.SaveChangesAsync();
         var controller = CreateController(db, owner);
 
@@ -3156,7 +3165,7 @@ public class CasesV2ControllerTests
             new CasesV2Controller.UpsertCaseDocumentTemplateRequest
             {
                 Label = "Обновленный шаблон",
-                Content = "<p>{{case.title}} / {{responsible.name}}</p>",
+                Content = "<p>{{case.title}} / {{responsible.name}} / {{nextHearingAt}}</p>",
             },
             CancellationToken.None);
 
@@ -3181,6 +3190,8 @@ public class CasesV2ControllerTests
         Assert.Equal("custom-claim", rendered.TemplateKey);
         Assert.Contains("Земцов - банкротство", rendered.Html, StringComparison.Ordinal);
         Assert.Contains("Владелец", rendered.Html, StringComparison.Ordinal);
+        Assert.Contains("05.06.2026 16:00", rendered.Html, StringComparison.Ordinal);
+        Assert.DoesNotContain("05.06.2026 12:00", rendered.Html, StringComparison.Ordinal);
 
         var restrictedCase = new ClientCase
         {
@@ -3646,9 +3657,18 @@ public class CasesV2ControllerTests
             Defendant = "Банк",
             Status = ClientCaseStatus.Open,
             ResponsibleUserId = owner.Id,
+            NextHearingAt = new DateTime(2026, 6, 5, 12, 0, 0, DateTimeKind.Utc),
         };
         db.Clients.Add(client);
         db.ClientCases.Add(clientCase);
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = owner.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Europe/Samara",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
         await db.SaveChangesAsync();
 
         var contentRoot = Path.Combine(Path.GetTempPath(), "payplanner-case-documents", Guid.NewGuid().ToString("N"));
@@ -3683,6 +3703,8 @@ public class CasesV2ControllerTests
         Assert.Contains("Исковое заявление", html, StringComparison.Ordinal);
         Assert.Contains("Земцов Виктор Александрович", html, StringComparison.Ordinal);
         Assert.Contains("Арбитражный суд Самарской области", html, StringComparison.Ordinal);
+        Assert.Contains("05.06.2026 16:00", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("05.06.2026 12:00", html, StringComparison.Ordinal);
 
         await db.Entry(clientCase).ReloadAsync();
         Assert.Contains("Сформирован шаблон", clientCase.EventHistory, StringComparison.Ordinal);
@@ -3774,9 +3796,18 @@ public class CasesV2ControllerTests
             CaseType = "Briefing",
             Status = ClientCaseStatus.Open,
             ResponsibleUserId = owner.Id,
+            NextHearingAt = new DateTime(2026, 6, 5, 12, 0, 0, DateTimeKind.Utc),
         };
         db.Clients.Add(client);
         db.ClientCases.Add(clientCase);
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = owner.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Europe/Samara",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
         await db.SaveChangesAsync();
 
         var contentRoot = Path.Combine(Path.GetTempPath(), "payplanner-case-documents", Guid.NewGuid().ToString("N"));
@@ -3789,7 +3820,7 @@ public class CasesV2ControllerTests
             DocumentType = "Brief",
             Heading = "Custom Heading",
             CaseTypes = new List<string> { "Briefing" },
-            Content = "<html><body><h1>{{case.title}}</h1><p>{{client.name}}</p><p>{{document.type}}</p></body></html>",
+            Content = "<html><body><h1>{{case.title}}</h1><p>{{client.name}}</p><p>{{document.type}}</p><p>{{nextHearingAt}}</p></body></html>",
         }, CancellationToken.None);
         Assert.IsType<CreatedResult>(createResult.Result);
 
@@ -3816,6 +3847,8 @@ public class CasesV2ControllerTests
         Assert.Contains("<h1>Custom Case</h1>", html, StringComparison.Ordinal);
         Assert.Contains("<p>Custom Client</p>", html, StringComparison.Ordinal);
         Assert.Contains("<p>Brief</p>", html, StringComparison.Ordinal);
+        Assert.Contains("<p>05.06.2026 16:00</p>", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("<p>05.06.2026 12:00</p>", html, StringComparison.Ordinal);
 
         var restrictedCase = new ClientCase
         {
