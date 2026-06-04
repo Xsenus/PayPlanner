@@ -341,6 +341,7 @@ public sealed partial class SpreadsheetImportService
         int batchId,
         InvoiceDraft draft,
         ImportState state,
+        DateTime localToday,
         CancellationToken cancellationToken)
     {
         var sourceKeys = BuildInvoiceMatchKeys(draft.ExternalId, draft.Number, draft.Date, draft.Type);
@@ -385,7 +386,7 @@ public sealed partial class SpreadsheetImportService
             }
 
             var invoiceEntity = await ResolveInvoiceEntityAsync(db, payment, draft, cancellationToken);
-            ApplyInvoiceValues(payment, draft, clientId.Value, responsibleId, invoiceEntity);
+            ApplyInvoiceValues(payment, draft, clientId.Value, responsibleId, invoiceEntity, localToday);
             SyncInvoiceLineItems(db, payment, BuildEffectiveLineItems(draft.ParsedLineItems, draft.Amount.Value, draft.Nomenclature, sourceTitle));
             SyncPaymentResponsibles(payment, responsibleId);
 
@@ -421,7 +422,7 @@ public sealed partial class SpreadsheetImportService
                 Amount = draft.Amount ?? 0m,
                 DueDate = draft.DueDate?.Date,
                 CounterpartyName = NormalizeText(draft.CounterpartyName),
-                Status = MapPaymentStatus(draft.StatusText, draft.DueDate ?? draft.Date, draft.PaidDate),
+                Status = MapPaymentStatus(draft.StatusText, draft.DueDate ?? draft.Date, draft.PaidDate, localToday),
                 Type = draft.Type,
                 PaidDate = draft.PaidDate?.Date,
                 ActReference = NormalizeText(draft.ActReference),

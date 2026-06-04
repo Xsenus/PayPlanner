@@ -355,7 +355,7 @@ public sealed partial class SpreadsheetImportService
         return tokens.Length == 0 ? null : tokens[^1];
     }
 
-    private static PaymentStatus MapPaymentStatus(string? statusText, DateTime? dueDate, DateTime? paidDate)
+    private static PaymentStatus MapPaymentStatus(string? statusText, DateTime? dueDate, DateTime? paidDate, DateTime localToday)
     {
         var normalized = NormalizeNameKey(statusText);
         if (!string.IsNullOrWhiteSpace(normalized))
@@ -391,7 +391,7 @@ public sealed partial class SpreadsheetImportService
             return PaymentStatus.Completed;
         }
 
-        return dueDate.HasValue && dueDate.Value.Date < DateTime.UtcNow.Date
+        return dueDate.HasValue && dueDate.Value.Date < localToday.Date
             ? PaymentStatus.Overdue
             : PaymentStatus.Pending;
     }

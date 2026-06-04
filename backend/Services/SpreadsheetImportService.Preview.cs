@@ -5,7 +5,7 @@ namespace PayPlanner.Api.Services;
 
 public sealed partial class SpreadsheetImportService
 {
-    private SpreadsheetImportPreviewDto BuildPreview(ParsedImportBundle parsed, ImportState state)
+    private SpreadsheetImportPreviewDto BuildPreview(ParsedImportBundle parsed, ImportState state, DateTime localToday)
     {
         var sections = new List<SpreadsheetImportPreviewSectionDto>();
         var counterpartyDrafts = BuildCounterpartyPlan(parsed.CounterpartyDrafts, parsed.InvoiceDrafts, parsed.ActDrafts);
@@ -17,7 +17,7 @@ public sealed partial class SpreadsheetImportService
 
         if (parsed.InvoiceDrafts.Count > 0)
         {
-            sections.Add(BuildInvoiceSection(parsed.InvoiceDrafts, state));
+            sections.Add(BuildInvoiceSection(parsed.InvoiceDrafts, state, localToday));
         }
 
         if (parsed.ActDrafts.Count > 0)
@@ -269,7 +269,8 @@ public sealed partial class SpreadsheetImportService
 
     private SpreadsheetImportPreviewSectionDto BuildInvoiceSection(
         IReadOnlyCollection<InvoiceDraft> drafts,
-        ImportState state)
+        ImportState state,
+        DateTime localToday)
     {
         var rows = new List<SpreadsheetImportPreviewRowDto>();
         var duplicateCounts = drafts
@@ -288,7 +289,7 @@ public sealed partial class SpreadsheetImportService
             var selectable = false;
             string? message;
             var existing = FindExistingInvoiceStateItem(state, sourceKeys);
-            var changes = BuildInvoiceChanges(draft, existing, state.Users);
+            var changes = BuildInvoiceChanges(draft, existing, state.Users, localToday);
 
             if (string.IsNullOrWhiteSpace(draft.Number))
             {
@@ -743,10 +744,11 @@ public sealed partial class SpreadsheetImportService
     private List<SpreadsheetImportPreviewChangeDto> BuildInvoiceChanges(
         InvoiceDraft draft,
         InvoiceStateItem? existing,
-        IReadOnlyCollection<UserStateItem> users)
+        IReadOnlyCollection<UserStateItem> users,
+        DateTime localToday)
     {
         var changes = new List<SpreadsheetImportPreviewChangeDto>();
-        var incomingStatus = FormatPaymentStatusLabel(MapPaymentStatus(draft.StatusText, draft.DueDate ?? draft.Date, draft.PaidDate));
+        var incomingStatus = FormatPaymentStatusLabel(MapPaymentStatus(draft.StatusText, draft.DueDate ?? draft.Date, draft.PaidDate, localToday));
         var incomingResponsible = ResolveResponsiblePreviewValue(users, draft.ResponsibleName ?? draft.CreatedByName);
 
         AddPreviewChange(changes, "externalId", "UID 1С", existing?.ExternalId, NormalizeOneCExternalId(draft.ExternalId));

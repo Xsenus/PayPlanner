@@ -15,7 +15,8 @@ public sealed partial class SpreadsheetImportService
         var parsed = ParseFiles(files);
         await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
         var state = await LoadStateAsync(db, cancellationToken);
-        return BuildPreview(parsed, state);
+        var localToday = await GetCurrentUserLocalDateAsync(db, cancellationToken);
+        return BuildPreview(parsed, state, localToday);
     }
 
     private async Task<SpreadsheetImportBatchDetailDto> ApplyCoreAsync(
@@ -36,7 +37,8 @@ public sealed partial class SpreadsheetImportService
         var parsed = ParseFiles(files);
         await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
         var state = await LoadStateAsync(db, cancellationToken);
-        var preview = BuildPreview(parsed, state);
+        var localToday = await GetCurrentUserLocalDateAsync(db, cancellationToken);
+        var preview = BuildPreview(parsed, state, localToday);
         var selectedPreviewRows = preview.Sections
             .SelectMany(section => section.Rows)
             .Where(row => selectedIds.Contains(row.PreviewId))
@@ -143,7 +145,7 @@ public sealed partial class SpreadsheetImportService
 
         foreach (var invoiceDraft in selectedInvoiceDrafts)
         {
-            await ApplyInvoiceAsync(db, batchId, invoiceDraft, state, cancellationToken);
+            await ApplyInvoiceAsync(db, batchId, invoiceDraft, state, localToday, cancellationToken);
         }
 
         foreach (var actDraft in selectedActDrafts)

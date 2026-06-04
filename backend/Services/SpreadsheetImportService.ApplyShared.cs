@@ -228,12 +228,18 @@ public sealed partial class SpreadsheetImportService
         return invoice;
     }
 
-    private void ApplyInvoiceValues(Payment payment, InvoiceDraft draft, int clientId, int? responsibleId, Invoice invoiceEntity)
+    private void ApplyInvoiceValues(
+        Payment payment,
+        InvoiceDraft draft,
+        int clientId,
+        int? responsibleId,
+        Invoice invoiceEntity,
+        DateTime localToday)
     {
         var amount = Math.Max(0m, draft.Amount ?? 0m);
-        var dueDate = (draft.DueDate ?? draft.Date ?? DateTime.UtcNow).Date;
-        var invoiceDate = (draft.Date ?? draft.DueDate ?? DateTime.UtcNow).Date;
-        var status = MapPaymentStatus(draft.StatusText, draft.DueDate ?? draft.Date, draft.PaidDate);
+        var dueDate = (draft.DueDate ?? draft.Date ?? localToday).Date;
+        var invoiceDate = (draft.Date ?? draft.DueDate ?? localToday).Date;
+        var status = MapPaymentStatus(draft.StatusText, draft.DueDate ?? draft.Date, draft.PaidDate, localToday);
 
         payment.DocumentKind = DocumentKind.Invoice;
         payment.Type = draft.Type;

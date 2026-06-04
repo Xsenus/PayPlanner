@@ -407,6 +407,12 @@ public sealed partial class SpreadsheetImportService
         return int.TryParse(value, out var userId) ? userId : null;
     }
 
+    private async Task<DateTime> GetCurrentUserLocalDateAsync(PaymentContext db, CancellationToken cancellationToken)
+    {
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(db, GetCurrentUserId(), cancellationToken);
+        return CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date;
+    }
+
     private string? GetCurrentUserName()
         => NormalizeText(_httpContextAccessor.HttpContext?.User?.FindFirstValue(ClaimTypes.Name));
 

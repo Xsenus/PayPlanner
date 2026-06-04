@@ -147,6 +147,77 @@ public class SpreadsheetImportServiceTests
     }
 
     [Fact]
+    public async Task ApplyAsync_UsesUserTimeZoneForImportedInvoiceOverdueStatus()
+    {
+        await using var connection = await CreateOpenConnectionAsync();
+        var service = await CreateServiceAsync(connection);
+        var selectedZone = ResolveTimeZoneWithDifferentLocalDate();
+        var dueDate = selectedZone.ProfileToday < selectedZone.UtcToday
+            ? selectedZone.ProfileToday
+            : selectedZone.UtcToday;
+        var expectedStatus = dueDate < selectedZone.ProfileToday
+            ? PaymentStatus.Overdue
+            : PaymentStatus.Pending;
+
+        await using (var db = CreateContext(connection))
+        {
+            db.Roles.Add(new Role
+            {
+                Id = 42,
+                Name = "import-timezone-user",
+                Description = "Import timezone user",
+            });
+            db.Users.Add(new User
+            {
+                Id = 42,
+                Email = "import-timezone@example.com",
+                PasswordHash = "hash",
+                FullName = "Import Timezone User",
+                RoleId = 42,
+                IsActive = true,
+                IsApproved = true,
+            });
+            db.UserSettings.Add(new UserSetting
+            {
+                UserId = 42,
+                Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+                Value = selectedZone.TimeZoneId,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var files = new[]
+        {
+            CreateInvoiceFile(
+                new[] { "Дата счета", "№ счета", "Сумма", "Контрагент", "Статус", "Оплатить до", "Номенклатурная часть" },
+                new[] { FormatImportDate(dueDate), "INV-TZ-001", "1500", "ООО Часовой Пояс", "", FormatImportDate(dueDate), "Юридические услуги 1 шт x 1500 р. = 1500 р." }),
+            CreateCounterpartiesFile(
+                new[] { "Название", "ИНН", "Контакт", "Телефон", "Email", "Договор", "Отсрочка дн.", "Статья приходов", "Ответственный" },
+                new[] { "ООО Часовой Пояс", "1234567890", "Иван", "+7 (999) 111-22-33", "tz@example.com", "Основной", "5", "Юр. услуги", "" }),
+        };
+
+        var preview = await service.PreviewAsync(files);
+        var batch = await service.ApplyAsync(files, new SpreadsheetImportApplyRequest
+        {
+            SelectedPreviewIds = preview.Sections
+                .SelectMany(section => section.Rows)
+                .Where(row => row.IsSelectable)
+                .Select(row => row.PreviewId)
+                .ToList(),
+        });
+
+        Assert.Equal(SpreadsheetImportBatchStatus.Applied, batch.Status);
+
+        await using var verificationDb = CreateContext(connection);
+        var payment = await verificationDb.Payments.SingleAsync(item => item.Account == "INV-TZ-001");
+        Assert.Equal(dueDate, payment.Date);
+        Assert.Equal(dueDate, payment.PlannedDate);
+        Assert.Equal(expectedStatus, payment.Status);
+    }
+
+    [Fact]
     public async Task RollbackAsync_WhenImportedInvoiceChanged_DoesNotCrashAndMarksConflicts()
     {
         await using var connection = await CreateOpenConnectionAsync();
@@ -1064,6 +1135,32 @@ public class SpreadsheetImportServiceTests
 
     private static SpreadsheetImportUploadFile CreateUploadFile(string fileName, byte[] content)
         => new(fileName, content);
+
+    private static string FormatImportDate(DateTime value)
+        => $"{value:dd.MM.yyyy}";
+
+    private static (string TimeZoneId, DateTime UtcToday, DateTime ProfileToday) ResolveTimeZoneWithDifferentLocalDate()
+    {
+        var nowUtc = DateTime.UtcNow;
+        var utcToday = nowUtc.Date;
+        foreach (var timeZoneId in new[]
+        {
+            "Pacific/Kiritimati",
+            "Line Islands Standard Time",
+            "Pacific/Pago_Pago",
+            "Samoa Standard Time",
+        })
+        {
+            var timeZone = CalendarTimeZoneHelper.ResolveTimeZone(timeZoneId);
+            var profileToday = CalendarTimeZoneHelper.ToUserLocal(nowUtc, timeZone).Date;
+            if (profileToday != utcToday)
+            {
+                return (timeZone.Id, utcToday, profileToday);
+            }
+        }
+
+        throw new InvalidOperationException("No test timezone with a local date different from UTC date was found.");
+    }
 
     private static async Task<SpreadsheetImportService> CreateServiceAsync(SqliteConnection connection)
     {
