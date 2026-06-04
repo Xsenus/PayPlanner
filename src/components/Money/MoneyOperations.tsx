@@ -32,10 +32,12 @@ import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useMoneyOperations } from '../../hooks/useMoneyOperations';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { useToast } from '../../hooks/useToast';
 import { apiService } from '../../services/api';
 import { useTabNavigation } from '../../contexts/TabContext';
 import { fromInputToApiDate, toDateInputValue, todayYMD } from '../../utils/dateUtils';
+import { formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { ObjectAuditModal } from '../ui/ObjectAuditModal';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
@@ -315,32 +317,37 @@ function findCategoryOption(
   );
 }
 
-function formatDate(value: string) {
+export function formatDate(value: string, timeZoneId?: string | null) {
   if (!value) return '—';
 
-  const isoDateMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  const trimmed = value.trim();
+  const isoDateMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (isoDateMatch) {
     return `${isoDateMatch[3]}.${isoDateMatch[2]}.${isoDateMatch[1]}`;
   }
 
-  const dotIsoDateMatch = value.match(/^(\d{4})\.(\d{2})\.(\d{2})/);
+  if (/^\d{4}-\d{2}-\d{2}T/.test(trimmed)) {
+    return formatDateTimeInTimeZone(trimmed, timeZoneId) || value;
+  }
+
+  const dotIsoDateMatch = trimmed.match(/^(\d{4})\.(\d{2})\.(\d{2})$/);
   if (dotIsoDateMatch) {
     return `${dotIsoDateMatch[3]}.${dotIsoDateMatch[2]}.${dotIsoDateMatch[1]}`;
   }
 
-  const malformedDateMatch = value.match(/^(\d{2})T\d{2}:\d{2}:\d{2}\.(\d{2})\.(\d{4})$/);
+  const malformedDateMatch = trimmed.match(/^(\d{2})T\d{2}:\d{2}:\d{2}\.(\d{2})\.(\d{4})$/);
   if (malformedDateMatch) {
     return `${malformedDateMatch[1]}.${malformedDateMatch[2]}.${malformedDateMatch[3]}`;
   }
 
-  const ruDateMatch = value.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
+  const ruDateMatch = trimmed.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
   if (ruDateMatch) {
     return `${ruDateMatch[1]}.${ruDateMatch[2]}.${ruDateMatch[3]}`;
   }
 
-  const parsedDate = new Date(value);
+  const parsedDate = new Date(trimmed);
   if (!Number.isNaN(parsedDate.getTime())) {
-    return parsedDate.toLocaleDateString('ru-RU');
+    return formatDateTimeInTimeZone(parsedDate, timeZoneId) || parsedDate.toLocaleDateString('ru-RU');
   }
 
   return value;
@@ -521,6 +528,7 @@ function getSavedBalanceDrift(current: DailyBalanceCheckSource, saved?: MoneyBal
 function renderSavedBalanceReconciliationBadge(
   current: DailyBalanceCheckSource,
   saved?: MoneyBalanceReconciliationResult | null,
+  timeZoneId?: string | null,
 ) {
   if (!saved) {
     return <span className="text-xs text-slate-400">Нет</span>;
@@ -531,7 +539,7 @@ function renderSavedBalanceReconciliationBadge(
     return (
       <span
         className="inline-flex rounded-full bg-rose-50 px-2 py-1 text-xs font-medium text-rose-700"
-        title={`Сохранено ${formatDate(saved.checkedAt)}. Изменение сумм: ${formatMoney(drift?.amountDifference ?? 0)} ₽`}>
+        title={`Сохранено ${formatDate(saved.checkedAt, timeZoneId)}. Изменение сумм: ${formatMoney(drift?.amountDifference ?? 0)} ₽`}>
         Изменилось
       </span>
     );
@@ -540,7 +548,7 @@ function renderSavedBalanceReconciliationBadge(
   return (
     <span
       className="inline-flex rounded-full bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700"
-      title={`Сохранено ${formatDate(saved.checkedAt)}`}>
+      title={`Сохранено ${formatDate(saved.checkedAt, timeZoneId)}`}>
       Актуально
     </span>
   );
@@ -737,6 +745,7 @@ function mapCashOrderToForm(order: CashOrder): CashOrder {
 function CashOrderModal({
   order,
   open,
+  timeZoneId,
   isSaving,
   onClose,
   onSave,
@@ -749,6 +758,7 @@ function CashOrderModal({
 }: {
   order: CashOrder | null;
   open: boolean;
+  timeZoneId?: string | null;
   isSaving: boolean;
   onClose: () => void;
   onSave: (payload: CashOrder) => Promise<void>;
@@ -957,7 +967,7 @@ function CashOrderModal({
             <div className="mt-5 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
               <div className="font-semibold">Документ отменён</div>
               <div className="mt-1">
-                {form.cancelledAt ? `Дата отмены: ${formatDate(form.cancelledAt)}.` : null}
+                {form.cancelledAt ? `Дата отмены: ${formatDate(form.cancelledAt, timeZoneId)}.` : null}
                 {form.cancelledReason ? ` Причина: ${form.cancelledReason}` : ' Причина не указана.'}
               </div>
             </div>
@@ -982,11 +992,11 @@ function CashOrderModal({
             </div>
             <div>
               <div className="text-xs uppercase text-slate-400">Создан</div>
-              <div className="mt-1 font-medium text-slate-800">{formatDate(form.createdAt)}</div>
+              <div className="mt-1 font-medium text-slate-800">{formatDate(form.createdAt, timeZoneId)}</div>
             </div>
             <div>
               <div className="text-xs uppercase text-slate-400">Обновлён</div>
-              <div className="mt-1 font-medium text-slate-800">{form.updatedAt ? formatDate(form.updatedAt) : '—'}</div>
+              <div className="mt-1 font-medium text-slate-800">{form.updatedAt ? formatDate(form.updatedAt, timeZoneId) : '—'}</div>
             </div>
           </div>
         </div>
@@ -2195,6 +2205,7 @@ export function MoneyOperations({
   onOpenInvoice?: (invoiceId: number, type?: 'Income' | 'Expense') => void;
 }) {
   const { user } = useAuth();
+  const profileTimeZoneId = useUserTimeZone();
   const permissions = useRolePermissions(user?.role?.id);
   const canExportJournal = permissions.payments.canExport;
   const { setActiveTab } = useTabNavigation();
@@ -4224,7 +4235,7 @@ export function MoneyOperations({
           </div>
           <div className="mt-2 text-xs text-blue-700">
             {bankAutoImportSettings.lastCheckedAt
-              ? `Последняя проверка: ${formatDate(bankAutoImportSettings.lastCheckedAt)}`
+              ? `Последняя проверка: ${formatDate(bankAutoImportSettings.lastCheckedAt, profileTimeZoneId)}`
               : 'Ожидает первой проверки.'}
           </div>
           {bankAutoImportRunResult && (
@@ -4706,7 +4717,7 @@ export function MoneyOperations({
                           Пропущено: {batch.skippedRows}, ошибок: {batch.errorRows}
                         </div>
                       </td>
-                      <td className="px-3 py-2 text-slate-600">{formatDate(batch.createdAt)}</td>
+                      <td className="px-3 py-2 text-slate-600">{formatDate(batch.createdAt, profileTimeZoneId)}</td>
                       <td className="px-3 py-2">
                         <div className="flex justify-end gap-2">
                           <button
@@ -4902,7 +4913,7 @@ export function MoneyOperations({
                 Начало дня + приход - расход = конец дня
                 {latestBalanceReconciliation && (
                   <span className="ml-2 text-slate-400">
-                    · сохранено {formatDate(latestBalanceReconciliation.checkedAt)}
+                    · сохранено {formatDate(latestBalanceReconciliation.checkedAt, profileTimeZoneId)}
                   </span>
                 )}
               </div>
@@ -4964,7 +4975,7 @@ export function MoneyOperations({
                         </span>
                       </td>
                       <td className="px-4 py-2 text-right">
-                        {renderSavedBalanceReconciliationBadge(item, savedResult)}
+                        {renderSavedBalanceReconciliationBadge(item, savedResult, profileTimeZoneId)}
                       </td>
                     </tr>
                   );
@@ -5445,6 +5456,7 @@ export function MoneyOperations({
       <CashOrderModal
         order={selectedCashOrder}
         open={cashOrderModalOpen}
+        timeZoneId={profileTimeZoneId}
         isSaving={cashOrderSaving}
         onClose={() => {
           setCashOrderModalOpen(false);
@@ -5470,7 +5482,7 @@ export function MoneyOperations({
                   <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
                     <span>ID {selectedBankImport.id}</span>
                     <span>•</span>
-                    <span>{formatDate(selectedBankImport.createdAt)}</span>
+                    <span>{formatDate(selectedBankImport.createdAt, profileTimeZoneId)}</span>
                     <span
                       className={`inline-flex rounded-full px-2 py-0.5 font-medium ${getBankImportStatusClassName(selectedBankImport.status)}`}>
                       {getBankImportStatusLabel(selectedBankImport.status)}
