@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { useUserTimeZone } from "../../hooks/useUserTimeZone";
 import { apiService } from "../../services/api";
 import type {
   Act,
@@ -613,6 +614,7 @@ export function ClientReconciliationAct({
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [savedLabel, setSavedLabel] = useState<string | null>(null);
+  const timeZoneId = useUserTimeZone();
 
   const updateDraft = useCallback(
     <K extends keyof ReconciliationDraft>(patch: DraftPatch<K>) => {
@@ -705,6 +707,7 @@ export function ClientReconciliationAct({
         includeInvoices: draft.includeInvoices,
         includeActs: draft.includeActs,
         includePayments: draft.includePayments,
+        timeZoneId,
       }),
     [
       acts,
@@ -717,6 +720,7 @@ export function ClientReconciliationAct({
       draft.periodTo,
       invoices,
       payments,
+      timeZoneId,
     ],
   );
 

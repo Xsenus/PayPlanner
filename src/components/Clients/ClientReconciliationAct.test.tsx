@@ -129,6 +129,43 @@ describe("buildReconciliationRows", () => {
     expect(rows).toHaveLength(2);
     expect(rows.map((row) => row.sourceId)).toEqual([10, 20]);
   });
+
+  it("uses the profile time zone when fallback dates are UTC instants", () => {
+    const rows = buildReconciliationRows({
+      invoices: [
+        invoice({
+          date: "",
+          createdAt: "2026-01-09T21:30:00Z",
+        }),
+      ],
+      acts: [
+        act({
+          date: "",
+          createdAt: "2026-01-09T21:30:00Z",
+        }),
+      ],
+      payments: [
+        payment({
+          date: "",
+          paidDate: "2026-01-09T21:30:00Z",
+          paymentDocumentDate: "2026-01-09T21:30:00Z",
+        }),
+      ],
+      periodFrom: "2026-01-10",
+      periodTo: "2026-01-10",
+      caseId: "all",
+      contractId: "all",
+      includeInvoices: true,
+      includeActs: true,
+      includePayments: true,
+      timeZoneId: "Europe/Samara",
+    });
+
+    expect(rows.map((row) => row.date)).toEqual(["2026-01-10", "2026-01-10", "2026-01-10"]);
+    expect(rows.map((row) => row.sourceKind)).toEqual(["invoice", "act", "payment"]);
+    expect(rows[0].description).toContain("10.01.2026");
+    expect(rows[2].note).toContain("10.01.2026");
+  });
 });
 
 describe("ClientReconciliationAct", () => {

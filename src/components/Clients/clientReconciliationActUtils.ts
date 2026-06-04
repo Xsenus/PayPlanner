@@ -1,5 +1,6 @@
 import type { Act, Invoice, Payment } from "../../types";
 import { toDateInputValue, toRuDate } from "../../utils/dateUtils";
+import { toTimeZoneDateKey } from "../../utils/timeZoneDate";
 
 type ReconciliationSourceKind = "invoice" | "act" | "payment";
 
@@ -28,6 +29,7 @@ export type BuildReconciliationRowsOptions = {
   includeInvoices: boolean;
   includeActs: boolean;
   includePayments: boolean;
+  timeZoneId?: string | null;
 };
 
 const SOURCE_ORDER: Record<ReconciliationSourceKind, number> = {
@@ -36,7 +38,17 @@ const SOURCE_ORDER: Record<ReconciliationSourceKind, number> = {
   payment: 3,
 };
 
-function normalizeDate(value: string | null | undefined) {
+const ZONED_DATE_TIME_RE = /^\d{4}-\d{2}-\d{2}T.+(?:Z|[+-]\d{2}:?\d{2})$/i;
+
+function normalizeDate(value: string | Date | null | undefined, timeZoneId?: string | null) {
+  if (value instanceof Date) {
+    return toTimeZoneDateKey(value, timeZoneId) || toDateInputValue(value);
+  }
+
+  if (typeof value === "string" && ZONED_DATE_TIME_RE.test(value)) {
+    return toTimeZoneDateKey(value, timeZoneId) || toDateInputValue(value);
+  }
+
   return toDateInputValue(value);
 }
 
@@ -108,8 +120,8 @@ function isCancelledWorkflow(status: string | null | undefined) {
   return status === "Cancelled" || status === "Terminated";
 }
 
-function getPaymentActualDate(payment: Payment) {
-  return normalizeDate(payment.paidDate ?? payment.lastPaymentDate ?? payment.date);
+function getPaymentActualDate(payment: Payment, timeZoneId?: string | null) {
+  return normalizeDate(payment.paidDate ?? payment.lastPaymentDate ?? payment.date, timeZoneId);
 }
 
 function getPaymentActualAmount(payment: Payment) {
@@ -125,10 +137,10 @@ function isActualPayment(payment: Payment) {
   );
 }
 
-function createInvoiceRow(invoice: Invoice): Omit<ReconciliationRow, "index" | "balance"> {
+function createInvoiceRow(invoice: Invoice, timeZoneId?: string | null): Omit<ReconciliationRow, "index" | "balance"> {
   const amount = Number(invoice.amount ?? 0);
   const isExpense = invoice.type === "Expense";
-  const date = normalizeDate(invoice.date || invoice.createdAt);
+  const date = normalizeDate(invoice.date || invoice.createdAt, timeZoneId);
 
   return {
     date,
@@ -147,10 +159,10 @@ function createInvoiceRow(invoice: Invoice): Omit<ReconciliationRow, "index" | "
   };
 }
 
-function createActRow(act: Act): Omit<ReconciliationRow, "index" | "balance"> {
+function createActRow(act: Act, timeZoneId?: string | null): Omit<ReconciliationRow, "index" | "balance"> {
   const amount = Number(act.amount ?? 0);
   const isExpense = act.type === "Expense";
-  const date = normalizeDate(act.date || act.createdAt);
+  const date = normalizeDate(act.date || act.createdAt, timeZoneId);
 
   return {
     date,
@@ -170,10 +182,10 @@ function createActRow(act: Act): Omit<ReconciliationRow, "index" | "balance"> {
   };
 }
 
-function createPaymentRow(payment: Payment): Omit<ReconciliationRow, "index" | "balance"> {
+function createPaymentRow(payment: Payment, timeZoneId?: string | null): Omit<ReconciliationRow, "index" | "balance"> {
   const amount = getPaymentActualAmount(payment);
   const isExpense = payment.type === "Expense";
-  const date = getPaymentActualDate(payment);
+  const date = getPaymentActualDate(payment, timeZoneId);
   const documentNumber = compactText([
     payment.paymentOrderNumber ? `№${payment.paymentOrderNumber}` : null,
     payment.id ? `ID ${payment.id}` : null,
@@ -191,7 +203,7 @@ function createPaymentRow(payment: Payment): Omit<ReconciliationRow, "index" | "
     debit: isExpense ? amount : 0,
     credit: isExpense ? 0 : amount,
     note: payment.paymentDocumentDate
-      ? `Дата документа: ${toRuDate(payment.paymentDocumentDate)}`
+      ? `Дата документа: ${toRuDate(normalizeDate(payment.paymentDocumentDate, timeZoneId))}`
       : "",
     sourceKind: "payment",
     sourceId: payment.id,
@@ -209,6 +221,7 @@ export function buildReconciliationRows({
   includeInvoices,
   includeActs,
   includePayments,
+  timeZoneId,
 }: BuildReconciliationRowsOptions): ReconciliationRow[] {
   const selectedCaseId = selectedNumber(caseId);
   const selectedContractId = selectedNumber(contractId);
@@ -220,11 +233,11 @@ export function buildReconciliationRows({
       if (isCancelledWorkflow(invoice.status) || isCancelledWorkflow(invoice.workflowStatus)) {
         return;
       }
-      const date = normalizeDate(invoice.date || invoice.createdAt);
+      const date = normalizeDate(invoice.date || invoice.createdAt, timeZoneId);
       if (!isWithinPeriod(date, periodFrom, periodTo)) return;
       if (!invoiceMatchesCase(invoice, selectedCaseId)) return;
       if (!matchesContract(invoice.contractId, selectedContractId)) return;
-      rows.push(createInvoiceRow(invoice));
+      rows.push(createInvoiceRow(invoice, timeZoneId));
     });
   }
 
@@ -233,11 +246,11 @@ export function buildReconciliationRows({
       if (isCancelledWorkflow(act.status) || isCancelledWorkflow(act.workflowStatus)) {
         return;
       }
-      const date = normalizeDate(act.date || act.createdAt);
+      const date = normalizeDate(act.date || act.createdAt, timeZoneId);
       if (!isWithinPeriod(date, periodFrom, periodTo)) return;
       if (!actMatchesCase(act, selectedCaseId, invoiceById)) return;
       if (!matchesContract(act.contractId, selectedContractId)) return;
-      rows.push(createActRow(act));
+      rows.push(createActRow(act, timeZoneId));
     });
   }
 
@@ -246,11 +259,11 @@ export function buildReconciliationRows({
       if (isCancelledWorkflow(payment.status) || !isActualPayment(payment)) {
         return;
       }
-      const date = getPaymentActualDate(payment);
+      const date = getPaymentActualDate(payment, timeZoneId);
       if (!isWithinPeriod(date, periodFrom, periodTo)) return;
       if (!paymentMatchesCase(payment, selectedCaseId, invoiceById)) return;
       if (!matchesContract(payment.contractId, selectedContractId)) return;
-      rows.push(createPaymentRow(payment));
+      rows.push(createPaymentRow(payment, timeZoneId));
     });
   }
 
