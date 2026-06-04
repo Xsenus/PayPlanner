@@ -204,6 +204,25 @@ describe('CalendarSyncProviderSettings', () => {
     expect(screen.getByText('Дело клиента')).toBeTruthy();
   });
 
+  it('applies calendar sync log datetime filters in the profile time zone', async () => {
+    const { container } = render(<CalendarSyncProviderSettings />);
+
+    await screen.findByText('26.05.2026, 21:20:00');
+    apiMock.getCalendarSyncLogs.mockClear();
+
+    const [createdFromInput, createdToInput] = Array.from(container.querySelectorAll('input[type="datetime-local"]')) as HTMLInputElement[];
+    fireEvent.change(createdFromInput, { target: { value: '2026-05-26T08:30' } });
+    fireEvent.change(createdToInput, { target: { value: '2026-05-26T22:45' } });
+    fireEvent.click(screen.getByRole('button', { name: /Применить фильтры/i }));
+
+    await waitFor(() => expect(apiMock.getCalendarSyncLogs).toHaveBeenCalledWith(expect.objectContaining({
+      createdFrom: '2026-05-26T04:30:00.000Z',
+      createdTo: '2026-05-26T18:45:00.000Z',
+      page: 1,
+      pageSize: 25,
+    })));
+  });
+
   it('saves calendar sync conflict settings', async () => {
     render(<CalendarSyncProviderSettings />);
 

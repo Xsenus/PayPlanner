@@ -11,7 +11,7 @@ import {
 } from '../../services/api';
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
-import { formatDateTimeInTimeZone, formatDateTimeWithSecondsInTimeZone } from '../../utils/timeZoneDate';
+import { formatDateTimeInTimeZone, formatDateTimeWithSecondsInTimeZone, fromTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
 import { TablePagination } from '../ui/TablePagination';
 
 const LOG_PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
@@ -101,12 +101,12 @@ export function CalendarSyncProviderSettings() {
     status: logFilters.status || undefined,
     operation: logFilters.operation || undefined,
     userId: logFilters.userId ? Number(logFilters.userId) : undefined,
-    createdFrom: logFilters.createdFrom ? new Date(logFilters.createdFrom).toISOString() : undefined,
-    createdTo: logFilters.createdTo ? new Date(logFilters.createdTo).toISOString() : undefined,
+    createdFrom: logFilters.createdFrom ? fromTimeZoneDateTimeInput(logFilters.createdFrom, timeZoneId) : undefined,
+    createdTo: logFilters.createdTo ? fromTimeZoneDateTimeInput(logFilters.createdTo, timeZoneId) : undefined,
     search: logFilters.search.trim() || undefined,
     page,
     pageSize,
-  }), [logFilters]);
+  }), [logFilters, timeZoneId]);
 
   const loadCalendarSyncLogs = useCallback(async (page = logPage, pageSize = logPageSize) => {
     setLogsLoading(true);
