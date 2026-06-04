@@ -454,6 +454,10 @@ function fromLocalInputValue(value: string) {
   return value ? fromTimeZoneDateTimeInput(value, activeTaskJournalTimeZoneId) : new Date().toISOString();
 }
 
+function fromLocalDateInputValue(value: string) {
+  return fromTimeZoneDateTimeInput(`${value}T00:00`, activeTaskJournalTimeZoneId);
+}
+
 function formatDateTime(value: string) {
   return formatDateTimeInTimeZone(value, activeTaskJournalTimeZoneId);
 }
@@ -2231,7 +2235,7 @@ export function TaskJournal({
       contractorPaymentEnabled: Boolean(form.contractorPaymentEnabled),
       contractorPaymentAmount: form.contractorPaymentEnabled ? Number(form.contractorPaymentAmount) : null,
       contractorPaymentDueDate: form.contractorPaymentEnabled && form.contractorPaymentDueDate
-        ? new Date(`${form.contractorPaymentDueDate}T00:00:00`).toISOString()
+        ? fromLocalDateInputValue(form.contractorPaymentDueDate)
         : null,
       contractorPaymentOnResult: Boolean(form.contractorPaymentEnabled && form.contractorPaymentOnResult),
       contractorPaymentResultDelayDays: form.contractorPaymentEnabled && form.contractorPaymentOnResult
