@@ -329,7 +329,7 @@ public class CasesV2Controller : ControllerBase
         }
 
         var statusClock = await ResolveCaseStatusClockAsync(ct);
-        var bytes = BuildRegistryCsv(items!);
+        var bytes = BuildRegistryCsv(items!, statusClock.TimeZone);
         var fileName = $"cases-registry-{FormatUserExportTimestamp(statusClock.NowLocal)}.csv";
         return File(bytes, "text/csv; charset=utf-8", fileName);
     }
@@ -378,7 +378,7 @@ public class CasesV2Controller : ControllerBase
         }
 
         var statusClock = await ResolveCaseStatusClockAsync(ct);
-        var bytes = BuildRegistryExcel(items!, statusClock.NowLocal);
+        var bytes = BuildRegistryExcel(items!, statusClock.NowLocal, statusClock.TimeZone);
         var fileName = $"cases-registry-{FormatUserExportTimestamp(statusClock.NowLocal)}.xls";
         return File(bytes, "application/vnd.ms-excel; charset=utf-8", fileName);
     }
@@ -432,7 +432,7 @@ public class CasesV2Controller : ControllerBase
         }
 
         var statusClock = await ResolveCaseStatusClockAsync(ct);
-        var bytes = await _pdfService.RenderAsync(BuildRegistryPrintHtml(items!, statusClock.NowLocal), ct);
+        var bytes = await _pdfService.RenderAsync(BuildRegistryPrintHtml(items!, statusClock.NowLocal, statusClock.TimeZone), ct);
         var fileName = $"cases-registry-{FormatUserExportTimestamp(statusClock.NowLocal)}.pdf";
         return File(bytes, "application/pdf", fileName);
     }
@@ -481,7 +481,7 @@ public class CasesV2Controller : ControllerBase
         }
 
         var statusClock = await ResolveCaseStatusClockAsync(ct);
-        return Content(BuildRegistryPrintHtml(items!, statusClock.NowLocal), "text/html; charset=utf-8", Encoding.UTF8);
+        return Content(BuildRegistryPrintHtml(items!, statusClock.NowLocal, statusClock.TimeZone), "text/html; charset=utf-8", Encoding.UTF8);
     }
 
     private async Task<(IReadOnlyList<ClientCase>? Items, IActionResult? Error)> LoadRegistryExportItemsAsync(
@@ -1156,7 +1156,7 @@ public class CasesV2Controller : ControllerBase
         return builder.ToString();
     }
 
-    private static byte[] BuildRegistryCsv(IReadOnlyCollection<ClientCase> items)
+    private static byte[] BuildRegistryCsv(IReadOnlyCollection<ClientCase> items, TimeZoneInfo timeZone)
     {
         var header = new[]
         {
@@ -1210,17 +1210,17 @@ public class CasesV2Controller : ControllerBase
                 item.OverdueTaskCount.ToString(CultureInfo.InvariantCulture),
                 item.CompletedTaskCount.ToString(CultureInfo.InvariantCulture),
                 $"{item.TaskProgressPercent}%",
-                FormatRuDateTime(GetLatestCaseActivityAt(item)),
+                FormatRuDateTime(GetLatestCaseActivityAt(item), timeZone),
                 FormatMoney(item.FeeAmount),
                 FormatMoney(item.IncomeTotal),
                 FormatMoney(item.IncomePaid),
                 FormatMoney(item.IncomeOutstanding),
-                FormatRuDateTime(item.LastViewedByResponsibleAt ?? item.LastViewedAt),
+                FormatRuDateTime(item.LastViewedByResponsibleAt ?? item.LastViewedAt, timeZone),
                 item.ActivityConfirmedByUserName,
                 GetPriorityLabel(item.Priority),
                 item.CourtName,
                 item.CourtCaseNumber,
-                FormatRuDateTime(item.NextHearingAt),
+                FormatRuDateTime(item.NextHearingAt, timeZone),
             }.Select(CsvCell)));
         }
 
@@ -1233,7 +1233,7 @@ public class CasesV2Controller : ControllerBase
         return result;
     }
 
-    private static byte[] BuildRegistryExcel(IReadOnlyCollection<ClientCase> items, DateTime generatedAtLocal)
+    private static byte[] BuildRegistryExcel(IReadOnlyCollection<ClientCase> items, DateTime generatedAtLocal, TimeZoneInfo timeZone)
     {
         var generatedAt = FormatUserGeneratedAt(generatedAtLocal);
         var totalFee = items.Sum(item => item.FeeAmount);
@@ -1303,17 +1303,17 @@ public class CasesV2Controller : ControllerBase
                 item.OverdueTaskCount.ToString(CultureInfo.InvariantCulture),
                 item.CompletedTaskCount.ToString(CultureInfo.InvariantCulture),
                 $"{item.TaskProgressPercent}%",
-                FormatRuDateTime(GetLatestCaseActivityAt(item)),
+                FormatRuDateTime(GetLatestCaseActivityAt(item), timeZone),
                 FormatMoney(item.FeeAmount),
                 FormatMoney(item.IncomeTotal),
                 FormatMoney(item.IncomePaid),
                 FormatMoney(item.IncomeOutstanding),
-                FormatRuDateTime(item.LastViewedByResponsibleAt ?? item.LastViewedAt),
+                FormatRuDateTime(item.LastViewedByResponsibleAt ?? item.LastViewedAt, timeZone),
                 item.ActivityConfirmedByUserName,
                 GetPriorityLabel(item.Priority),
                 item.CourtName,
                 item.CourtCaseNumber,
-                FormatRuDateTime(item.NextHearingAt));
+                FormatRuDateTime(item.NextHearingAt, timeZone));
         }
 
         builder
@@ -1329,7 +1329,7 @@ public class CasesV2Controller : ControllerBase
         return result;
     }
 
-    private static string BuildRegistryPrintHtml(IReadOnlyCollection<ClientCase> items, DateTime generatedAtLocal)
+    private static string BuildRegistryPrintHtml(IReadOnlyCollection<ClientCase> items, DateTime generatedAtLocal, TimeZoneInfo timeZone)
     {
         var generatedAt = FormatUserGeneratedAt(generatedAtLocal);
         var totalFee = items.Sum(item => item.FeeAmount);
@@ -1353,7 +1353,7 @@ public class CasesV2Controller : ControllerBase
               <td class="num">{Html(FormatMoney(item.IncomePaid))}</td>
               <td class="num">{Html(FormatMoney(item.IncomeOutstanding))}</td>
               <td>{item.OpenTaskCount} / {item.OverdueTaskCount}</td>
-              <td>{Html(FormatRuDateTime(GetLatestCaseActivityAt(item)))}</td>
+              <td>{Html(FormatRuDateTime(GetLatestCaseActivityAt(item), timeZone))}</td>
             </tr>
             """));
 
@@ -1458,9 +1458,9 @@ public class CasesV2Controller : ControllerBase
             ? value.Value.ToString("dd.MM.yyyy", CultureInfo.GetCultureInfo("ru-RU"))
             : string.Empty;
 
-    private static string FormatRuDateTime(DateTime? value)
+    private static string FormatRuDateTime(DateTime? value, TimeZoneInfo timeZone)
         => value.HasValue
-            ? value.Value.ToString("dd.MM.yyyy HH:mm", CultureInfo.GetCultureInfo("ru-RU"))
+            ? CalendarTimeZoneHelper.FormatUserDateTime(value.Value, timeZone, culture: CultureInfo.GetCultureInfo("ru-RU"))
             : string.Empty;
 
     private static string FormatMoney(decimal value)
@@ -4184,7 +4184,7 @@ public class CasesV2Controller : ControllerBase
         DateTime TodayDate,
         DateTime NowInstantUtc);
 
-    private readonly record struct CaseStatusClock(DateTime TodayDate, DateTime NowInstantUtc, DateTime NowLocal);
+    private readonly record struct CaseStatusClock(DateTime TodayDate, DateTime NowInstantUtc, DateTime NowLocal, TimeZoneInfo TimeZone);
 
     private async Task<CaseStatusClock> ResolveCaseStatusClockAsync(CancellationToken ct)
     {
@@ -4196,7 +4196,7 @@ public class CasesV2Controller : ControllerBase
         var nowUtc = DateTime.UtcNow;
         var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
         var nowLocal = CalendarTimeZoneHelper.ToUserLocal(nowUtc, timeZone);
-        var clock = new CaseStatusClock(nowLocal.Date, nowUtc, nowLocal);
+        var clock = new CaseStatusClock(nowLocal.Date, nowUtc, nowLocal, timeZone);
         _caseStatusClock = clock;
         return clock;
     }
@@ -4219,7 +4219,7 @@ public class CasesV2Controller : ControllerBase
             : null;
         var timeZone = CalendarTimeZoneHelper.ResolveTimeZone(timeZoneId);
         var nowLocal = CalendarTimeZoneHelper.ToUserLocal(nowUtc, timeZone);
-        var clock = new CaseStatusClock(nowLocal.Date, nowUtc, nowLocal);
+        var clock = new CaseStatusClock(nowLocal.Date, nowUtc, nowLocal, timeZone);
         _caseStatusClock = clock;
         return clock;
     }

@@ -515,14 +515,9 @@ public class CasesV2ControllerTests
         await using var db = await CreateContextAsync();
         var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
         var nowUtc = DateTime.UtcNow;
-        var selectedZone = TimeZoneInfo.GetSystemTimeZones()
-            .Select(zone => new
-            {
-                Zone = zone,
-                LocalNow = CalendarTimeZoneHelper.ToUserLocal(nowUtc, zone),
-            })
-            .FirstOrDefault(item => item.LocalNow.Date != nowUtc.Date);
-        Assert.NotNull(selectedZone);
+        var timeZone = CalendarTimeZoneHelper.ResolveTimeZone("Europe/Samara");
+        var localNow = CalendarTimeZoneHelper.ToUserLocal(nowUtc, timeZone);
+        var hearingAtUtc = new DateTime(2026, 6, 5, 12, 0, 0, DateTimeKind.Utc);
         var otherResponsible = await CreateUserAsync(db, "other@example.com", "Другой");
         var visibleClient = new Client
         {
@@ -546,6 +541,8 @@ public class CasesV2ControllerTests
                 ResponsibleUserId = owner.Id,
                 Status = ClientCaseStatus.Open,
                 FeeAmount = 25_000m,
+                NextHearingAt = hearingAtUtc,
+                LastViewedAt = hearingAtUtc,
             },
             new ClientCase
             {
@@ -560,12 +557,12 @@ public class CasesV2ControllerTests
         {
             UserId = owner.Id,
             Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
-            Value = selectedZone!.Zone.Id,
+            Value = timeZone.Id,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
-        var expectedFilePrefix = $"cases-registry-{selectedZone.LocalNow:yyyyMMdd}-";
+        var expectedFilePrefix = $"cases-registry-{localNow:yyyyMMdd}-";
         var pdfService = new FakeInvoiceDocumentPdfService("pdf");
         var controller = CreateController(db, owner, pdfService: pdfService);
 
@@ -594,6 +591,8 @@ public class CasesV2ControllerTests
         Assert.Contains("CASE-001", csv);
         Assert.Contains("Видимое дело", csv);
         Assert.Contains("В работе", csv);
+        Assert.Contains("05.06.2026 16:00", csv);
+        Assert.DoesNotContain("05.06.2026 12:00", csv);
         Assert.DoesNotContain("CASE-002", csv);
         Assert.DoesNotContain("Скрытое дело", csv);
 
@@ -622,6 +621,8 @@ public class CasesV2ControllerTests
         Assert.Contains("Excel.Sheet", excel);
         Assert.Contains("CASE-001", excel);
         Assert.Contains("Видимое дело", excel);
+        Assert.Contains("05.06.2026 16:00", excel);
+        Assert.DoesNotContain("05.06.2026 12:00", excel);
         Assert.DoesNotContain("CASE-002", excel);
 
         var pdfResult = await controller.ExportRegistryPdf(
@@ -648,6 +649,8 @@ public class CasesV2ControllerTests
         Assert.Equal(Encoding.UTF8.GetBytes("pdf"), pdfFile.FileContents);
         Assert.Contains("Реестр дел", pdfService.LastHtml);
         Assert.Contains("CASE-001", pdfService.LastHtml);
+        Assert.Contains("05.06.2026 16:00", pdfService.LastHtml);
+        Assert.DoesNotContain("05.06.2026 12:00", pdfService.LastHtml);
         Assert.DoesNotContain("CASE-002", pdfService.LastHtml);
     }
 
