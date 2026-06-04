@@ -90,7 +90,7 @@ function getEventDescription(item: ObjectAuditEventDto) {
 }
 
 export function ObjectAuditPage() {
-  const { timeZoneId } = useUserTimeZone();
+  const timeZoneId = useUserTimeZone();
   const [items, setItems] = useState<ObjectAuditEventDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

@@ -8,6 +8,7 @@ vi.mock('../../services/api', () => ({
   apiService: {
     getUsersOnline: vi.fn(),
     sendUserActivityHeartbeat: vi.fn(),
+    getUserSetting: vi.fn(),
   },
 }));
 
@@ -15,7 +16,9 @@ describe('UserOnlineSettings', () => {
   beforeEach(() => {
     vi.mocked(apiService.getUsersOnline).mockReset();
     vi.mocked(apiService.sendUserActivityHeartbeat).mockReset();
+    vi.mocked(apiService.getUserSetting).mockReset();
     vi.mocked(apiService.sendUserActivityHeartbeat).mockResolvedValue(undefined);
+    vi.mocked(apiService.getUserSetting).mockResolvedValue({ key: 'profile.timeZoneId', value: 'Europe/Samara' });
   });
 
   afterEach(() => {
@@ -80,6 +83,7 @@ describe('UserOnlineSettings', () => {
     expect(screen.getByText('Активность')).toBeTruthy();
     expect(screen.getByText('Обновлено')).toBeTruthy();
     expect(screen.getByText('25.05.2026')).toBeTruthy();
+    expect(await screen.findByText('12:00')).toBeTruthy();
     expect(screen.getByText('127.0.0.1')).toBeTruthy();
 
     await waitFor(() => {

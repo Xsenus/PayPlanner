@@ -1,18 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Download, RefreshCw, ShieldAlert } from 'lucide-react';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { apiService, type RolePermissionAuditReportDto, type RolePermissionAuditRoleDto } from '../../services/api';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
 
-function formatDateTime(value?: string | null) {
+function formatDateTime(value?: string | null, timeZoneId?: string | null) {
   if (!value) return '—';
 
-  return new Date(value).toLocaleString('ru-RU', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return formatDateTimeInTimeZone(value, timeZoneId) || value;
 }
 
 function countRoleWarnings(role: RolePermissionAuditRoleDto) {
@@ -43,6 +39,7 @@ function summarizeStrictWarnings(warningCount: number) {
 }
 
 export function RolePermissionAuditPanel() {
+  const timeZoneId = useUserTimeZone();
   const [report, setReport] = useState<RolePermissionAuditReportDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
@@ -124,7 +121,7 @@ export function RolePermissionAuditPanel() {
             {report ? (
               <>
                 <div className="mt-1 text-xs text-slate-500">
-                  Обновлено: {formatDateTime(report.generatedAtUtc)}
+                  Обновлено: {formatDateTime(report.generatedAtUtc, timeZoneId)}
                 </div>
                 <div className={`mt-2 text-xs font-medium ${hasStrictWarnings ? 'text-amber-700' : 'text-emerald-700'}`}>
                   {summarizeStrictWarnings(rolesWithBroadDataScope)}

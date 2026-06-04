@@ -14,7 +14,9 @@ import { authService, type User } from '../../services/authService';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
 import { useToast } from '../../hooks/useToast';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { formatDateInTimeZone } from '../../utils/timeZoneDate';
 import { TablePagination } from '../ui/TablePagination';
 import { TextPromptModal } from '../ui/TextPromptModal';
 
@@ -27,12 +29,12 @@ type UsersProps = {
   onEditUser: (userId: number) => void;
 };
 
-function formatDate(value?: string | null) {
+function formatDate(value?: string | null, timeZoneId?: string | null) {
   if (!value) {
     return '—';
   }
 
-  return new Date(value).toLocaleDateString('ru-RU');
+  return formatDateInTimeZone(value, timeZoneId) || value;
 }
 
 function roleBadgeClass(roleName?: string) {
@@ -52,6 +54,7 @@ function displayUserName(user: User) {
 
 export function Users({ onCreateUser, onEditUser }: UsersProps) {
   const { user: currentUser, isAdmin } = useAuth();
+  const timeZoneId = useUserTimeZone();
   const toast = useToast();
   const { confirm } = useDialog();
 
@@ -351,7 +354,7 @@ export function Users({ onCreateUser, onEditUser }: UsersProps) {
                         )}
                       </td>
                       <td className="px-5 py-4 align-top text-sm text-slate-600">
-                        {formatDate(user.createdAt)}
+                        {formatDate(user.createdAt, timeZoneId)}
                       </td>
                       <td className="px-5 py-4 align-top">
                         <div className="flex items-center justify-end gap-2">

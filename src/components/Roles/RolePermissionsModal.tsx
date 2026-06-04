@@ -37,7 +37,9 @@ import {
   type MenuSectionKey,
   type RolePermissions,
 } from '../../types/permissions';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { getObjectAuditActorLabel } from '../../utils/objectAudit';
+import { formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
 
 interface RolePermissionsModalProps {
   role: Role;
@@ -376,16 +378,10 @@ function PermissionToggle({
   );
 }
 
-function formatDateTime(value?: string | null) {
+function formatDateTime(value?: string | null, timeZoneId?: string | null) {
   if (!value) return '—';
 
-  return new Date(value).toLocaleString('ru-RU', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return formatDateTimeInTimeZone(value, timeZoneId) || value;
 }
 
 function formatAuditUserName(value?: string | null) {
@@ -449,6 +445,7 @@ export function RolePermissionsModal({
   onClose,
   onSaved,
 }: RolePermissionsModalProps) {
+  const timeZoneId = useUserTimeZone();
   const isProtectedRole = Boolean(role.isSystemRole);
   const isReadOnly = isProtectedRole || !canEdit;
 
@@ -782,7 +779,7 @@ export function RolePermissionsModal({
                     Последнее изменение
                   </div>
                   <div className="mt-3 text-xl font-semibold text-slate-900">
-                    {role.permissionsUpdatedAt ? formatDateTime(role.permissionsUpdatedAt) : '—'}
+                    {role.permissionsUpdatedAt ? formatDateTime(role.permissionsUpdatedAt, timeZoneId) : '—'}
                   </div>
                   <div className="mt-2 text-sm leading-6 text-slate-500">
                     {formatAuditUserName(role.permissionsUpdatedByUserName)}

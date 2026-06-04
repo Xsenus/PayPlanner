@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { RefreshCw, Users } from 'lucide-react';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { apiService } from '../../services/api';
 import type { UserOnlineResponse, UserOnlineStatus } from '../../types/userActivity';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { formatDateInTimeZone, formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
 
 const AUTO_REFRESH_MS = 10000;
 
@@ -48,33 +50,39 @@ const actionLabels: Record<string, string> = {
   CleanupAsync: 'Очистка',
 };
 
-function parseServerDate(value?: string | null) {
+function normalizeServerInstant(value?: string | null) {
   if (!value) return null;
 
-  const normalized = /(?:z|[+-]\d{2}:?\d{2})$/i.test(value) ? value : `${value}Z`;
+  return /(?:z|[+-]\d{2}:?\d{2})$/i.test(value) ? value : `${value}Z`;
+}
+
+function parseServerDate(value?: string | null) {
+  const normalized = normalizeServerInstant(value);
+  if (!normalized) return null;
+
   const date = new Date(normalized);
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-function formatDateTime(value?: string | null) {
+function formatDateTime(value?: string | null, timeZoneId?: string | null) {
   const date = parseServerDate(value);
   if (!date) return '—';
 
-  return date.toLocaleString('ru-RU');
+  return formatDateTimeInTimeZone(date, timeZoneId) || value || 'вЂ”';
 }
 
-function formatDate(value?: string | null) {
+function formatDate(value?: string | null, timeZoneId?: string | null) {
   const date = parseServerDate(value);
   if (!date) return '—';
 
-  return date.toLocaleDateString('ru-RU');
+  return formatDateInTimeZone(date, timeZoneId) || value || 'вЂ”';
 }
 
-function formatTime(value?: string | null) {
+function formatTime(value?: string | null, timeZoneId?: string | null) {
   const date = parseServerDate(value);
   if (!date) return '—';
 
-  return date.toLocaleTimeString('ru-RU');
+  return formatDateTimeInTimeZone(date, timeZoneId).split(',').at(-1)?.trim() || value || 'вЂ”';
 }
 
 function formatRelativeActivity(value?: string | null) {
@@ -116,6 +124,7 @@ function getUserStatusClass(user: UserOnlineStatus) {
 }
 
 export function UserOnlineSettings() {
+  const timeZoneId = useUserTimeZone();
   const [data, setData] = useState<UserOnlineResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -200,8 +209,8 @@ export function UserOnlineSettings() {
           </div>
           <div className="flex min-h-[112px] flex-col items-center justify-center rounded-xl border border-blue-100 bg-blue-50 p-4 text-center">
             <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">Обновлено</div>
-            <div className="mt-2 text-lg font-semibold text-blue-900">{formatDate(data?.generatedAt)}</div>
-            <div className="mt-1 text-sm font-medium text-blue-700">{formatTime(data?.generatedAt)}</div>
+            <div className="mt-2 text-lg font-semibold text-blue-900">{formatDate(data?.generatedAt, timeZoneId)}</div>
+            <div className="mt-1 text-sm font-medium text-blue-700">{formatTime(data?.generatedAt, timeZoneId)}</div>
           </div>
         </div>
       </div>
@@ -258,9 +267,9 @@ export function UserOnlineSettings() {
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-700">
                     <div>{formatRelativeActivity(user.lastActivityAt)}</div>
-                    <div className="mt-1 text-xs text-gray-500">{formatDateTime(user.lastActivityAt)}</div>
+                    <div className="mt-1 text-xs text-gray-500">{formatDateTime(user.lastActivityAt, timeZoneId)}</div>
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-700">{formatDateTime(user.lastLoginAt)}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700">{formatDateTime(user.lastLoginAt, timeZoneId)}</td>
                   <td className="px-4 py-3 text-sm text-gray-700">
                     <div>{translateValue(user.lastSection, sectionLabels)}</div>
                     <div className="mt-1 text-xs text-gray-500">{translateValue(user.lastAction, actionLabels)}</div>

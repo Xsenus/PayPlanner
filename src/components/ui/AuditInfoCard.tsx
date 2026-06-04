@@ -65,7 +65,7 @@ export function AuditInfoCard({
   layout = 'auto',
   className = '',
 }: AuditInfoCardProps) {
-  const { timeZoneId } = useUserTimeZone();
+  const timeZoneId = useUserTimeZone();
   const gridTemplateColumns =
     layout === 'stack'
       ? 'minmax(0, 1fr)'

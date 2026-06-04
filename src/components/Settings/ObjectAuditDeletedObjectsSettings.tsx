@@ -57,7 +57,7 @@ export function ObjectAuditDeletedObjectsSettings({
 }: DeletedObjectsSettingsProps) {
   const toast = useToast();
   const { confirm } = useDialog();
-  const { timeZoneId } = useUserTimeZone();
+  const timeZoneId = useUserTimeZone();
   const [activeType, setActiveType] = useState<DeletedObjectType>('client');
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');

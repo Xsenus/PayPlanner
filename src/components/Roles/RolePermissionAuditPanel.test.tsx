@@ -9,6 +9,7 @@ vi.mock('../../services/api', () => ({
   apiService: {
     getRolePermissionsAudit: vi.fn(),
     exportRolePermissionsAuditCsv: vi.fn(),
+    getUserSetting: vi.fn(),
   },
 }));
 
@@ -16,6 +17,8 @@ describe('RolePermissionAuditPanel', () => {
   beforeEach(() => {
     vi.mocked(apiService.getRolePermissionsAudit).mockReset();
     vi.mocked(apiService.exportRolePermissionsAuditCsv).mockReset();
+    vi.mocked(apiService.getUserSetting).mockReset();
+    vi.mocked(apiService.getUserSetting).mockResolvedValue({ key: 'profile.timeZoneId', value: 'Europe/Samara' });
   });
 
   it('shows role readiness diagnostics', async () => {
@@ -53,6 +56,7 @@ describe('RolePermissionAuditPanel', () => {
     expect(screen.getByText('lawyer')).toBeTruthy();
     expect(screen.getByText(/Готово: 2 из 3\. Проблемы: 1\. Широкий доступ: 1\./)).toBeTruthy();
     expect(screen.getByText(/Strict-проверка: требуется согласовать роли с широкой видимостью данных \(1\)\./)).toBeTruthy();
+    expect(await screen.findByText(/20\.05\.2026, 10:00/)).toBeTruthy();
     expect(screen.getByText(/нет секций: 1/)).toBeTruthy();
     expect(screen.getByText(/scope: 1/)).toBeTruthy();
     expect(screen.getByText(/Полная видимость: clients/)).toBeTruthy();

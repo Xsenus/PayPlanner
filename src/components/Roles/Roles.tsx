@@ -22,9 +22,11 @@ import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { MENU_SECTION_KEYS } from '../../types/permissions';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 import { getObjectAuditActorLabel } from '../../utils/objectAudit';
+import { formatDateInTimeZone, formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
 
@@ -51,26 +53,16 @@ const ROLE_COLUMN_LABELS: Record<RoleColumnKey, string> = ROLE_COLUMNS.reduce(
   {} as Record<RoleColumnKey, string>,
 );
 
-function formatDate(value?: string | null) {
+function formatDate(value?: string | null, timeZoneId?: string | null) {
   if (!value) return '—';
 
-  return new Date(value).toLocaleDateString('ru-RU', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-  });
+  return formatDateInTimeZone(value, timeZoneId) || value;
 }
 
-function formatDateTime(value?: string | null) {
+function formatDateTime(value?: string | null, timeZoneId?: string | null) {
   if (!value) return '—';
 
-  return new Date(value).toLocaleString('ru-RU', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return formatDateTimeInTimeZone(value, timeZoneId) || value;
 }
 
 function formatAuditUserName(value?: string | null) {
@@ -85,6 +77,7 @@ function getAccessibleSectionsLabel(role: Role) {
 
 export const Roles = () => {
   const { user, isAdmin } = useAuth();
+  const timeZoneId = useUserTimeZone();
   const currentRolePermissions = useRolePermissions(user?.role?.id);
   const toast = useToast();
   const { confirm } = useDialog();
@@ -276,7 +269,7 @@ export const Roles = () => {
         return (
           <div className="space-y-1">
             <div className="text-sm font-medium text-slate-900">
-              {role.permissionsUpdatedAt ? formatDateTime(role.permissionsUpdatedAt) : 'Не изменялись'}
+              {role.permissionsUpdatedAt ? formatDateTime(role.permissionsUpdatedAt, timeZoneId) : 'Не изменялись'}
             </div>
             <div className="text-xs text-slate-500">
               {formatAuditUserName(role.permissionsUpdatedByUserName)}
@@ -628,13 +621,13 @@ export const Roles = () => {
                   <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                     <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Создана</div>
                     <div className="mt-2 text-sm font-semibold text-slate-900">
-                      {formatDate(selectedRole.createdAt)}
+                      {formatDate(selectedRole.createdAt, timeZoneId)}
                     </div>
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                     <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Последнее изменение</div>
                     <div className="mt-2 text-sm font-semibold text-slate-900">
-                      {formatDateTime(selectedRole.permissionsUpdatedAt)}
+                      {formatDateTime(selectedRole.permissionsUpdatedAt, timeZoneId)}
                     </div>
                   </div>
                 </div>
@@ -664,7 +657,7 @@ export const Roles = () => {
                   {formatAuditUserName(selectedRole.permissionsUpdatedByUserName)}
                 </div>
                 <div className="mt-1 text-sm text-slate-500">
-                  {formatDateTime(selectedRole.permissionsUpdatedAt)}
+                  {formatDateTime(selectedRole.permissionsUpdatedAt, timeZoneId)}
                 </div>
               </div>
             ) : null}

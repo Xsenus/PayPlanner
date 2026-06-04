@@ -69,7 +69,7 @@ function formatMetadata(metadata: unknown): string {
 
 export const UserActivity = () => {
   const { user, isAdmin } = useAuth();
-  const { timeZoneId } = useUserTimeZone();
+  const timeZoneId = useUserTimeZone();
   const [logs, setLogs] = useState<UserActivityLogItem[]>([]);
   const [filters, setFilters] = useState<UserActivityFiltersResponse | null>(null);
   const [actors, setActors] = useState<UserActivityActor[]>([]);

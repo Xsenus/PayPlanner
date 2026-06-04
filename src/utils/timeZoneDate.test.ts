@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  formatDateInTimeZone,
   formatDateTimeInTimeZone,
   fromTimeZoneDateTimeInput,
   toTimeZoneDateTimeInput,
@@ -18,5 +19,10 @@ describe('timeZoneDate', () => {
 
   it('uses the selected time zone for display text', () => {
     expect(formatDateTimeInTimeZone('2026-06-05T12:00:00Z', 'Europe/Samara')).toContain('16:00');
+  });
+
+  it('formats date-only display in the selected user time zone', () => {
+    expect(formatDateInTimeZone('2026-06-04T22:30:00Z', 'Europe/Samara')).toBe('05.06.2026');
+    expect(formatDateInTimeZone('2026-06-04T22:30:00Z', 'Europe/Moscow')).toBe('05.06.2026');
   });
 });

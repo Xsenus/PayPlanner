@@ -159,7 +159,7 @@ export function ObjectAuditHistoryCard({
   objectId,
   compact = false,
 }: ObjectAuditHistoryCardProps) {
-  const { timeZoneId } = useUserTimeZone();
+  const timeZoneId = useUserTimeZone();
   const [items, setItems] = useState<ObjectAuditEventDto[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
