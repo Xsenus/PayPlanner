@@ -22,10 +22,11 @@ import type {
   PaymentStatus,
   ServiceDictionaryItem,
 } from '../../types';
-import { fromInputToApiDate, formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
+import { fromInputToApiDate, todayYMDInTimeZone, toDateInputValue } from '../../utils/dateUtils';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDictionaries } from '../../hooks/useDictionaries';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { apiService } from '../../services/api';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
@@ -297,8 +298,9 @@ function normalizeInvoiceToForm(
   defaultType?: PaymentKind,
   defaultExpenseClientId?: number,
   defaultExpenseLegalEntityId?: number,
+  timeZoneId?: string | null,
 ): FormState {
-  const today = formatLocalYMD(new Date());
+  const today = todayYMDInTimeZone(timeZoneId);
   const resolvedType: PaymentKind = defaultType ?? 'Income';
   if (!invoice) {
     return {
@@ -663,6 +665,7 @@ function deriveInvoiceStatusFromPayments(
   fallbackDueDate?: string | null,
   fallbackAmount?: string | number | null,
   fallbackPaidAmount?: string | number | null,
+  todayKey: string = todayYMDInTimeZone(),
 ): PaymentStatus {
   const sourcePayments = getStatusSourcePaymentsForInvoice(payments);
 
@@ -678,7 +681,7 @@ function deriveInvoiceStatusFromPayments(
     }
 
     const normalizedDueDate = toDateInputValue(fallbackDueDate ?? null);
-    if (normalizedDueDate && normalizedDueDate < formatLocalYMD(new Date())) {
+    if (normalizedDueDate && normalizedDueDate < todayKey) {
       return 'Overdue';
     }
 
@@ -783,9 +786,10 @@ function buildInvoiceStatusSnapshot(
   fallbackAmount?: string | number | null,
   fallbackPaidAmount?: string | number | null,
   fallbackOutstandingAmount?: string | number | null,
+  todayKey?: string,
 ): InvoiceStatusSnapshot {
   const sourcePayments = getStatusSourcePaymentsForInvoice(payments);
-  const status = deriveInvoiceStatusFromPayments(payments, fallbackStatus, fallbackDueDate, fallbackAmount, fallbackPaidAmount);
+  const status = deriveInvoiceStatusFromPayments(payments, fallbackStatus, fallbackDueDate, fallbackAmount, fallbackPaidAmount, todayKey);
   const fallbackAmountValue = parseMoneyInput(fallbackAmount);
   const fallbackPaidAmountValue = Math.min(parseMoneyInput(fallbackPaidAmount), Math.max(fallbackAmountValue, 0));
   const fallbackOutstandingAmountValue = parseMoneyInput(fallbackOutstandingAmount);
@@ -911,6 +915,9 @@ export function InvoiceModal({
   const { t } = useTranslation();
   const { confirm } = useDialog();
   const toast = useToast();
+  const profileTimeZoneId = useUserTimeZone();
+  const defaultDate = todayYMDInTimeZone(profileTimeZoneId);
+  const defaultDateRef = useRef(defaultDate);
   const typeOptions: PaymentKind[] = ['Income', 'Expense'];
   const typeBadgeClasses: Record<PaymentKind, string> = {
     Income: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
@@ -918,7 +925,7 @@ export function InvoiceModal({
   };
   const isTypeLocked = lockType && mode === 'create';
   const [form, setForm] = useState<FormState>(() =>
-    normalizeInvoiceToForm(invoice, defaultClientId, defaultLegalEntityId, defaultResponsibleId, defaultType, defaultExpenseClientId, defaultExpenseLegalEntityId),
+    normalizeInvoiceToForm(invoice, defaultClientId, defaultLegalEntityId, defaultResponsibleId, defaultType, defaultExpenseClientId, defaultExpenseLegalEntityId, profileTimeZoneId),
   );
   const [lineItems, setLineItems] = useState<LineItem[]>([]);
   const [lineItemLookupState, setLineItemLookupState] = useState<LineItemLookupState>(null);
@@ -939,7 +946,7 @@ export function InvoiceModal({
   const [draftAct, setDraftAct] = useState<DraftActForm>({
     number: '',
     title: '',
-    date: formatLocalYMD(new Date()),
+    date: defaultDate,
     amount: '',
     comment: '',
   });
@@ -992,7 +999,7 @@ export function InvoiceModal({
   const [cancelMoneyAction, setCancelMoneyAction] = useState<InvoiceCancellationMoneyAction>('LeaveAsAdvance');
   const [cancelTargetPaymentId, setCancelTargetPaymentId] = useState('');
   const [cancelRefundSource, setCancelRefundSource] = useState<InvoiceCancellationRefundSource>('Bank');
-  const [cancelRefundDate, setCancelRefundDate] = useState(() => formatLocalYMD(new Date()));
+  const [cancelRefundDate, setCancelRefundDate] = useState(defaultDate);
   const [cancelSubmitting, setCancelSubmitting] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
   const lastErrorToastRef = useRef<string | null>(null);
@@ -1750,7 +1757,16 @@ export function InvoiceModal({
 
   useEffect(() => {
     if (open) {
-      const nextForm = resumeDraft?.form ?? normalizeInvoiceToForm(invoice, defaultClientId, defaultLegalEntityId, defaultResponsibleId, defaultType, defaultExpenseClientId, defaultExpenseLegalEntityId);
+      const nextForm = resumeDraft?.form ?? normalizeInvoiceToForm(
+        invoice,
+        defaultClientId,
+        defaultLegalEntityId,
+        defaultResponsibleId,
+        defaultType,
+        defaultExpenseClientId,
+        defaultExpenseLegalEntityId,
+        profileTimeZoneId,
+      );
       setForm(nextForm);
       setLineItems(resumeDraft?.lineItems ?? normalizeLineItems(invoice?.lineItems, invoice?.amount));
       setSelectedActs(resumeDraft?.selectedActs ?? normalizeInvoiceActs(invoice));
@@ -1772,9 +1788,28 @@ export function InvoiceModal({
       if (presentation === 'page') {
         setPageViewMode(resumeDraft?.pageViewMode ?? true);
       }
+      defaultDateRef.current = defaultDate;
       lastAutoContractClientIdRef.current = nextForm.contractId ? nextForm.clientId : '';
     }
   }, [defaultClientId, defaultLegalEntityId, defaultExpenseClientId, defaultExpenseLegalEntityId, defaultClientCaseId, defaultResponsibleId, defaultType, invoice, open, presentation, relatedInstallmentPlan, resumeDraft]);
+
+  useEffect(() => {
+    if (!open || invoice || resumeDraft) {
+      defaultDateRef.current = defaultDate;
+      return;
+    }
+
+    setForm((current) => (
+      current.date === defaultDateRef.current ? { ...current, date: defaultDate } : current
+    ));
+    setDraftAct((current) => (
+      current.date === defaultDateRef.current ? { ...current, date: defaultDate } : current
+    ));
+    setCancelRefundDate((current) => (
+      current === defaultDateRef.current ? defaultDate : current
+    ));
+    defaultDateRef.current = defaultDate;
+  }, [defaultDate, invoice, open, resumeDraft]);
 
   useEffect(() => {
     if (!open || resumeDraft?.installmentPlan || installmentPlanTouched) {
@@ -2428,7 +2463,7 @@ export function InvoiceModal({
       setDraftAct({
         number: '',
         title: '',
-        date: form.date || formatLocalYMD(new Date()),
+        date: form.date || defaultDate,
         amount: form.amount,
         comment: '',
       });
@@ -2470,8 +2505,9 @@ export function InvoiceModal({
       form.amount,
       invoice?.paidAmount,
       invoice?.outstandingAmount,
+      defaultDate,
     ),
-    [form.amount, form.dueDate, form.status, invoice?.outstandingAmount, invoice?.paidAmount, relatedPayments],
+    [defaultDate, form.amount, form.dueDate, form.status, invoice?.outstandingAmount, invoice?.paidAmount, relatedPayments],
   );
   const hasGeneratedRelatedPayments = useMemo(
     () => relatedPayments.some((payment) => isGeneratedInstallmentPayment(payment)),
@@ -2697,7 +2733,7 @@ export function InvoiceModal({
       {
         number: draftAct.number.trim() || form.number.trim(),
         title: draftAct.title.trim() || form.description.trim(),
-        date: draftAct.date || form.date || formatLocalYMD(new Date()),
+        date: draftAct.date || form.date || defaultDate,
         amount: parseMoneyInput(draftAct.amount || form.amount),
         creationMode: linkedInvoiceId ? 'Full' : 'Manual',
         invoiceId: linkedInvoiceId,
@@ -2737,6 +2773,7 @@ export function InvoiceModal({
     isPageMode,
     onCreateActPage,
     selectedResponsibleId,
+    defaultDate,
   ]);
 
   const handleOpenClientCard = (clientId: number) => {
@@ -3140,7 +3177,7 @@ export function InvoiceModal({
     setCancelMoneyAction(cancelDialogHasReceivedMoney ? 'LeaveAsAdvance' : 'Reject');
     setCancelTargetPaymentId('');
     setCancelRefundSource('Bank');
-    setCancelRefundDate(formatLocalYMD(new Date()));
+    setCancelRefundDate(defaultDate);
     setCancelError(null);
     setCancelDialogOpen(true);
   };
@@ -3176,7 +3213,7 @@ export function InvoiceModal({
 
       if (receivedMoneyAction === 'Refund') {
         refundSource = cancelRefundSource;
-        refundDate = cancelRefundDate || formatLocalYMD(new Date());
+        refundDate = cancelRefundDate || defaultDate;
       }
     }
 
@@ -3317,7 +3354,7 @@ export function InvoiceModal({
                 ...payment,
                 status: nextStatus,
                 paidDate: nextStatus === 'Completed'
-                  ? (form.paidDate || payment.paidDate || formatLocalYMD(new Date()))
+                  ? (form.paidDate || payment.paidDate || defaultDate)
                   : undefined,
               }
             : payment

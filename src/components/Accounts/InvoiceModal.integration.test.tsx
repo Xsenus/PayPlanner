@@ -83,6 +83,10 @@ vi.mock('../../hooks/useTranslation', () => ({
   useTranslation: () => ({ t: () => undefined }),
 }));
 
+vi.mock('../../hooks/useUserTimeZone', () => ({
+  useUserTimeZone: () => 'Europe/Samara',
+}));
+
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({
     user: { id: 7, role: { id: 1 } },
@@ -320,6 +324,33 @@ describe('InvoiceModal integration', () => {
     vi.mocked(apiService.updateInvoice).mockClear();
     vi.mocked(apiService.cancelInvoice).mockReset();
     vi.mocked(apiService.createClient).mockReset();
+  });
+
+  it('uses the profile time zone for a new invoice default date near midnight', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-04T22:30:00.000Z'));
+
+    try {
+      const { container } = render(
+        <InvoiceModal
+          open
+          mode="create"
+          invoice={null}
+          onClose={vi.fn()}
+          onSubmit={vi.fn().mockResolvedValue(undefined)}
+          submitting={false}
+          clients={[]}
+          responsibles={[]}
+          lookupsLoading={false}
+          relatedPayments={[]}
+        />,
+      );
+
+      const dateInput = container.querySelector('input[type="date"]') as HTMLInputElement | null;
+      expect(dateInput?.value).toBe('2026-06-05');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('keeps the linked contract selected after invoice data is reopened and contracts finish loading', async () => {
