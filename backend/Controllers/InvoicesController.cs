@@ -1577,7 +1577,7 @@ public class InvoicesController : ControllerBase
             return Unauthorized();
         }
 
-        var targetDate = (date ?? DateTime.UtcNow).Date;
+        var targetDate = date?.Date ?? await ResolveInvoiceTodayAsync(ct);
         var settings = await _db.UserSettings
             .AsNoTracking()
             .Where(x => x.UserId == userId.Value && (x.Key == InvoiceNumberStartSettingKey || x.Key == InvoiceNumberStrategySettingKey))
@@ -2007,13 +2007,15 @@ public class InvoicesController : ControllerBase
 
         if (representative is not null && convertedLegacyAggregateDetected)
         {
+            var repairLocalToday = await ResolveInvoiceTodayAsync(ct);
             RepairConvertedLegacyInstallmentAggregate(
                 payments,
                 representative,
                 invoiceEntityId,
                 representativeInvoice,
                 summary,
-                dryRun);
+                dryRun,
+                repairLocalToday);
             if (dryRun)
             {
                 _db.ChangeTracker.Clear();
@@ -2032,7 +2034,8 @@ public class InvoicesController : ControllerBase
         var invoiceDate = representativeInvoice?.Date.Date
             ?? representative.AccountDate?.Date
             ?? representative.Date.Date;
-        var installmentPlan = BuildLegacyRepairInstallmentPlan(invoiceAmount, childPayments);
+        var localToday = await ResolveInvoiceTodayAsync(ct);
+        var installmentPlan = BuildLegacyRepairInstallmentPlan(invoiceAmount, childPayments, localToday);
         var effectiveClientId = representative.ClientId
             ?? childPayments.FirstOrDefault(payment => payment.ClientId.HasValue && payment.ClientId.Value > 0)?.ClientId;
         var effectiveClientCaseId = representative.ClientCaseId is > 0
@@ -5545,7 +5548,8 @@ public class InvoicesController : ControllerBase
         int invoiceEntityId,
         Invoice? representativeInvoice,
         InvoiceLegacyInstallmentRepairSummaryDto summary,
-        bool dryRun)
+        bool dryRun,
+        DateTime localToday)
     {
         var invoiceNumber = Normalize(representativeInvoice?.Number)
             ?? Normalize(representative.Account)
@@ -5605,7 +5609,7 @@ public class InvoicesController : ControllerBase
             }
         }
 
-        var installmentPlan = BuildLegacyRepairInstallmentPlan(resultingTotal, resultingInstallments);
+        var installmentPlan = BuildLegacyRepairInstallmentPlan(resultingTotal, resultingInstallments, localToday);
         for (var index = 0; index < resultingInstallments.Count; index++)
         {
             var payment = resultingInstallments[index];
@@ -5826,13 +5830,14 @@ public class InvoicesController : ControllerBase
 
     private static InvoiceInstallmentPlanRequest BuildLegacyRepairInstallmentPlan(
         decimal representativeAmount,
-        IReadOnlyList<Payment> childPayments)
+        IReadOnlyList<Payment> childPayments,
+        DateTime localToday)
     {
         var totalAmount = representativeAmount > 0m
             ? representativeAmount
             : childPayments.Sum(payment => payment.Amount);
         var startDate = childPayments.Count == 0
-            ? DateTime.UtcNow.Date
+            ? localToday.Date
             : ResolveLegacyInstallmentDate(childPayments[0]);
         var runningAmount = 0m;
         var items = new List<InvoiceInstallmentPlanItemRequest>(childPayments.Count);

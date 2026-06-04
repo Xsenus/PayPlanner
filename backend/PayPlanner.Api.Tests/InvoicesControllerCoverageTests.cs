@@ -429,6 +429,32 @@ public class InvoicesControllerCoverageTests
     }
 
     [Fact]
+    public async Task GetNextNumber_UsesProfileTimeZoneWhenDateIsNotProvided()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db, "Numbering Timezone User");
+        var selectedZone = ResolveTimeZoneWithDifferentLocalDate();
+
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = userId,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = selectedZone.TimeZoneId,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, isAdmin: false, userId: userId);
+
+        var nextAction = await controller.GetNextNumber(date: null, ct: CancellationToken.None);
+
+        var nextOk = Assert.IsType<OkObjectResult>(nextAction.Result);
+        Assert.Equal(selectedZone.ProfileToday.Year, GetAnonymousProperty<int>(nextOk.Value, "year"));
+        Assert.Equal("1", GetAnonymousProperty<string>(nextOk.Value, "nextNumber"));
+    }
+
+    [Fact]
     public async Task GetNumberingSettings_FallsBackForInvalidValues_AndUpdatesExistingUserSettings()
     {
         await using var db = await CreateContextAsync();
