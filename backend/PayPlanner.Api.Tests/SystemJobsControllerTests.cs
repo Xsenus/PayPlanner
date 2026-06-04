@@ -1,10 +1,13 @@
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using System.Security.Claims;
 using System.Text.Json;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
@@ -261,6 +264,81 @@ public class SystemJobsControllerTests
         var result = await controller.RunJob(SystemJobKeys.CourtSync, CancellationToken.None);
 
         Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task RunJob_UsesProfileTimeZoneForMoneyBalanceReconciliationDate()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var selectedZone = ResolveTimeZoneWithDifferentLocalDate();
+        var targetDate = selectedZone.ProfileToday.AddDays(-1);
+        var role = new Role { Name = $"money-admin-{Guid.NewGuid():N}", Description = "Money admin" };
+        scope.Db.Roles.Add(role);
+        await scope.Db.SaveChangesAsync();
+        var user = new User
+        {
+            Email = $"money-admin-{Guid.NewGuid():N}@example.com",
+            FullName = "Money Admin",
+            PasswordHash = "hash",
+            RoleId = role.Id,
+            IsApproved = true,
+            IsActive = true,
+        };
+        scope.Db.Users.Add(user);
+        await scope.Db.SaveChangesAsync();
+        scope.Db.UserSettings.Add(new UserSetting
+        {
+            UserId = user.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = selectedZone.TimeZoneId,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        scope.Db.MoneyOperations.Add(new MoneyOperation
+        {
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            AccountName = "Timezone bank",
+            Amount = 750m,
+            Currency = "RUB",
+            Date = targetDate,
+            CreatedAt = DateTime.UtcNow,
+        });
+        await scope.Db.SaveChangesAsync();
+
+        var services = new ServiceCollection();
+        services.AddScoped(_ => new PaymentContext(scope.Options, useObjectAuditModel: false));
+        services.AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance);
+        await using var provider = services.BuildServiceProvider();
+        var runner = new MoneyBalanceReconciliationSchedulerService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<MoneyBalanceReconciliationSchedulerService>.Instance);
+        var controller = new SystemJobsController(
+            scope.Db,
+            new ConfigurationBuilder().Build(),
+            new TestOptionsMonitor<AppFeatureFlagsOptions>(new AppFeatureFlagsOptions()),
+            moneyBalanceRunner: runner);
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                [
+                    new Claim(ClaimTypes.Role, "admin"),
+                    new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                ], "Test")),
+            },
+        };
+
+        var result = await controller.RunJob(SystemJobKeys.MoneyBalanceReconciliation, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<SystemJobManualRunResultDto>(ok.Value);
+        Assert.Contains($"{targetDate:dd.MM.yyyy}", dto.Summary);
+        var saved = Assert.Single(await scope.Db.MoneyBalanceReconciliationResults.AsNoTracking().ToListAsync());
+        Assert.Equal(targetDate, saved.Date);
+        Assert.Equal(750m, saved.Income);
     }
 
     [Fact]
@@ -608,6 +686,29 @@ public class SystemJobsControllerTests
         await db.Database.EnsureCreatedAsync();
 
         return new TestDbScope(connection, options, db);
+    }
+
+    private static (string TimeZoneId, DateTime UtcToday, DateTime ProfileToday) ResolveTimeZoneWithDifferentLocalDate()
+    {
+        var nowUtc = DateTime.UtcNow;
+        var utcToday = nowUtc.Date;
+        foreach (var timeZoneId in new[]
+        {
+            "Pacific/Kiritimati",
+            "Line Islands Standard Time",
+            "Pacific/Pago_Pago",
+            "Samoa Standard Time",
+        })
+        {
+            var timeZone = CalendarTimeZoneHelper.ResolveTimeZone(timeZoneId);
+            var profileToday = CalendarTimeZoneHelper.ToUserLocal(nowUtc, timeZone).Date;
+            if (profileToday != utcToday)
+            {
+                return (timeZone.Id, utcToday, profileToday);
+            }
+        }
+
+        throw new InvalidOperationException("No test timezone with a local date different from UTC date was found.");
     }
 
     private sealed class TestOptionsMonitor<T> : IOptionsMonitor<T>

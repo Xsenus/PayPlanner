@@ -44,7 +44,7 @@ public sealed class MoneyBalanceReconciliationSchedulerService : BackgroundServi
         {
             try
             {
-                var targetDate = DateTime.UtcNow.Date.AddDays(-1);
+                var targetDate = ResolveReconciliationTargetDate(DateTime.UtcNow);
                 if (_lastRunDate != targetDate)
                 {
                     var startedAt = DateTime.UtcNow;
@@ -126,5 +126,11 @@ public sealed class MoneyBalanceReconciliationSchedulerService : BackgroundServi
         return action.Result is OkObjectResult { Value: MoneyBalanceReconciliationRunResultDto result }
             ? result
             : null;
+    }
+
+    public static DateTime ResolveReconciliationTargetDate(DateTime nowUtc, TimeZoneInfo? timeZone = null)
+    {
+        var effectiveTimeZone = timeZone ?? TimeZoneInfo.Local;
+        return CalendarTimeZoneHelper.ToUserLocal(nowUtc, effectiveTimeZone).Date.AddDays(-1);
     }
 }

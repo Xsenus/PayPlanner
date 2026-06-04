@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using System.Security.Claims;
 using System.Text.Json;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
@@ -270,7 +271,8 @@ public sealed class SystemJobsController : ControllerBase
 
                 case SystemJobKeys.MoneyBalanceReconciliation:
                     EnsureRunner(_moneyBalanceRunner);
-                    var targetDate = DateTime.UtcNow.Date.AddDays(-1);
+                    var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, GetCurrentUserId(), ct);
+                    var targetDate = MoneyBalanceReconciliationSchedulerService.ResolveReconciliationTargetDate(DateTime.UtcNow, timeZone);
                     var moneyResult = await _moneyBalanceRunner!.RunForDateAsync(targetDate, ct);
                     processedCount = (moneyResult?.Created ?? 0) + (moneyResult?.Updated ?? 0);
                     summary = moneyResult is null
@@ -982,6 +984,12 @@ public sealed class SystemJobsController : ControllerBase
         {
             throw new InvalidOperationException("Ручной запуск сервиса недоступен в текущей конфигурации приложения.");
         }
+    }
+
+    private int? GetCurrentUserId()
+    {
+        var value = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        return int.TryParse(value, out var userId) ? userId : null;
     }
 
     private static bool ParseBool(string? value, bool fallback)

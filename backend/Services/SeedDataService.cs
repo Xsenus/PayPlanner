@@ -747,7 +747,7 @@ namespace PayPlanner.Api.Services
 
             var allCases = await context.ClientCases.AsNoTracking().ToListAsync();
 
-            var today = DateTime.UtcNow.Date;
+            var today = CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, TimeZoneInfo.Local).Date;
             var paymentsToEnsure = new PaymentSeedDefinition[]
             {
                 new PaymentSeedDefinition
