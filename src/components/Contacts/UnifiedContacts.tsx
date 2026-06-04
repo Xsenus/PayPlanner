@@ -15,10 +15,12 @@ import {
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { useToast } from '../../hooks/useToast';
 import { apiService } from '../../services/api';
 import type { Client, LegalEntityDetail, LegalEntityInput, LegalEntitySummary, PaymentKind, RelatedDocumentLink } from '../../types';
 import { getObjectAuditActorLabel } from '../../utils/objectAudit';
+import { formatDateInTimeZone } from '../../utils/timeZoneDate';
 import { LegalEntityModal } from '../LegalEntities/LegalEntityModal';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 
@@ -228,9 +230,9 @@ function columnsForScope(scope: ContactKind): ContactColumnConfig[] {
   return COMMON_CONTACT_COLUMNS;
 }
 
-function formatDate(value?: string | null) {
+export function formatDate(value?: string | null, timeZoneId?: string | null) {
   if (!value) return '';
-  return new Date(value).toLocaleDateString('ru-RU');
+  return formatDateInTimeZone(value, timeZoneId) || value;
 }
 
 function normalizeRelatedPaymentKind(value?: string | null): PaymentKind | undefined {
@@ -370,6 +372,7 @@ export function UnifiedContacts({
   onOpenPayment,
 }: UnifiedContactsProps) {
   const { user } = useAuth();
+  const profileTimeZoneId = useUserTimeZone();
   const toast = useToast();
   const permissions = useRolePermissions(user?.role?.id);
   const canEditLegalEntities = permissions.legalEntities.canEdit;
@@ -943,9 +946,9 @@ export function UnifiedContacts({
           onOpenPayment ? (link) => onOpenPayment(link.id, normalizeRelatedPaymentKind(link.type)) : undefined,
         );
       case 'createdAt':
-        return formatDate(item.createdAt) || '—';
+        return formatDate(item.createdAt, profileTimeZoneId) || '—';
       case 'updatedAt':
-        return formatDate(client?.auditUpdatedAt || legal?.updatedAt || legal?.auditUpdatedAt) || '—';
+        return formatDate(client?.auditUpdatedAt || legal?.updatedAt || legal?.auditUpdatedAt, profileTimeZoneId) || '—';
       case 'auditCreatedBy':
         return formatAuditUserName(client?.auditCreatedByUserName || legal?.auditCreatedByUserName);
       case 'auditUpdatedBy':
@@ -1116,7 +1119,7 @@ export function UnifiedContacts({
 
               <div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500">
                 <span className="truncate pr-3">{item.kind === 'legal' ? item.statusText : kindLabel(item.kind)}</span>
-                <span>{formatDate(item.createdAt)}</span>
+                <span>{formatDate(item.createdAt, profileTimeZoneId)}</span>
               </div>
             </button>
           ))}

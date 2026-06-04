@@ -33,8 +33,10 @@ import { useClientStatuses } from '../../hooks/useClientStatuses';
 import { useDialog } from '../../hooks/useDialog';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
 import { useTableSelection } from '../../hooks/useTableSelection';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { formatDateInTimeZone } from '../../utils/timeZoneDate';
 import { ClientStatusBadge } from './ClientStatusBadge';
 import { FormPromptModal } from '../ui/FormPromptModal';
 import { TableContextMenu, type TableContextMenuAction } from '../ui/TableContextMenu';
@@ -92,17 +94,9 @@ function statusClasses(statusRaw?: string) {
   return 'bg-slate-100 text-slate-700 border border-slate-200';
 }
 
-function formatDate(d?: string) {
+export function formatDate(d?: string | null, timeZoneId?: string | null) {
   if (!d) return '';
-  try {
-    return new Date(d).toLocaleDateString(undefined, {
-      year: 'numeric',
-      month: 'short',
-      day: '2-digit',
-    });
-  } catch {
-    return d;
-  }
+  return formatDateInTimeZone(d, timeZoneId) || d;
 }
 
 function getClientCaseCount(client: Client) {
@@ -381,6 +375,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
   const { statuses: clientStatuses } = useClientStatuses();
   const { t } = useTranslation();
   const { user } = useAuth();
+  const profileTimeZoneId = useUserTimeZone();
   const { confirm } = useDialog();
   const tableLayoutStorageKey = `${TABLE_SETTINGS_STORAGE_PREFIX}.${user?.id ?? 'guest'}.v1`;
   const filterSettingsStorageKey = `${FILTER_SETTINGS_STORAGE_PREFIX}.${user?.id ?? 'guest'}.v1`;
@@ -1167,7 +1162,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
           <span className="text-xs text-gray-400">—</span>
         );
       case 'createdAt':
-        return <span className="text-sm text-gray-600 block truncate">{formatDate(client.createdAt)}</span>;
+        return <span className="text-sm text-gray-600 block truncate">{formatDate(client.createdAt, profileTimeZoneId)}</span>;
       case 'isActive':
         return client.isActive ? (
           <span className="inline-flex items-center px-2 py-1 text-xs rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
@@ -1880,7 +1875,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
                                 </div>
                               )}
                               <div className="text-[11px] text-slate-400 mt-0.5">
-                                {t('created') || 'Создано'}: {formatDate(c.createdAt)}
+                                {t('created') || 'Создано'}: {formatDate(c.createdAt, profileTimeZoneId)}
                               </div>
                             </div>
                             <div className="flex items-center gap-1 shrink-0">
