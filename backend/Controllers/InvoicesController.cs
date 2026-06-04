@@ -58,6 +58,9 @@ public class InvoicesController : ControllerBase
         _yandexDiskService = yandexDiskService;
     }
 
+    private Task<TimeZoneInfo> ResolveInvoiceTimeZoneAsync(CancellationToken ct)
+        => CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+
     [HttpGet]
     public async Task<IActionResult> Get(
         [FromQuery] DateTime? from,
@@ -665,6 +668,7 @@ public class InvoicesController : ControllerBase
         var now = DateTime.UtcNow;
         var actor = User.GetDisplayName();
         var actorId = GetUserId(User);
+        var invoiceTimeZone = await ResolveInvoiceTimeZoneAsync(ct);
 
         if (request.CancellationScope == InvoiceCancellationScope.UnpaidInstallmentsOnly)
         {
@@ -672,7 +676,8 @@ public class InvoicesController : ControllerBase
                 payment,
                 generatedPayments,
                 reason,
-                now);
+                now,
+                invoiceTimeZone);
             if (unpaidInstallmentCancelError is not null)
             {
                 return unpaidInstallmentCancelError;
@@ -764,7 +769,8 @@ public class InvoicesController : ControllerBase
             generatedPayments,
             reason,
             allowReceivedMoney: hasReceivedMoney,
-            now: now);
+            now: now,
+            invoiceTimeZone: invoiceTimeZone);
         if (installmentCancelError is not null)
         {
             return installmentCancelError;
@@ -822,7 +828,8 @@ public class InvoicesController : ControllerBase
                 payment,
                 $"Оплата зачтена на счёт #{reallocationTarget.Id}: {reallocatedAmount:N2}",
                 now,
-                actor);
+                actor,
+                invoiceTimeZone);
         }
 
         payment.Status = PaymentStatus.Cancelled;
@@ -842,7 +849,7 @@ public class InvoicesController : ControllerBase
             : hasReceivedMoney
                 ? $" Полученная оплата перенесена в аванс контрагента: {receivedAmount:N2}."
                 : string.Empty;
-        PaymentDomainService.AppendSystemNote(payment, $"Счёт аннулирован. Причина: {reason}{advanceNote}", now, actor);
+        PaymentDomainService.AppendSystemNote(payment, $"Счёт аннулирован. Причина: {reason}{advanceNote}", now, actor, invoiceTimeZone);
 
         await _db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
@@ -1163,6 +1170,7 @@ public class InvoicesController : ControllerBase
         var originalWorkflowStatus = payment.InvoiceWorkflowStatus;
         var actor = User.GetDisplayName();
         var now = DateTime.UtcNow;
+        var invoiceTimeZone = await ResolveInvoiceTimeZoneAsync(ct);
         var actionReason = Normalize(request.ActionReason);
 
         if (originalStatus != request.Status
@@ -1250,7 +1258,8 @@ public class InvoicesController : ControllerBase
                 payment,
                 $"Статус обновлён: {originalStatus.ToDisplayString()} → {payment.Status.ToDisplayString()}",
                 now,
-                actor);
+                actor,
+                invoiceTimeZone);
         }
 
         await SyncInvoiceLineItemsAsync(payment, request.LineItems, ct);
@@ -4393,7 +4402,8 @@ public class InvoicesController : ControllerBase
         Payment invoicePayment,
         IReadOnlyCollection<Payment> generatedPayments,
         string reason,
-        DateTime now)
+        DateTime now,
+        TimeZoneInfo invoiceTimeZone)
     {
         if (generatedPayments.Count == 0)
         {
@@ -4427,7 +4437,7 @@ public class InvoicesController : ControllerBase
             payment.IsPaid = false;
             payment.PaidDate = null;
             payment.LastPaymentDate = null;
-            PaymentDomainService.AppendSystemNote(payment, $"Неоплаченный платёж рассрочки отменён. Причина: {reason}", now, actor);
+            PaymentDomainService.AppendSystemNote(payment, $"Неоплаченный платёж рассрочки отменён. Причина: {reason}", now, actor, invoiceTimeZone);
             PaymentDomainService.Normalize(payment);
         }
 
@@ -4436,7 +4446,8 @@ public class InvoicesController : ControllerBase
             invoicePayment,
             $"Отменены только неоплаченные платежи графика рассрочки ({unpaidGeneratedPayments.Count}). Оплаченные платежи сохранены: {paidGeneratedPayments.Count}. Причина: {reason}",
             now,
-            actor);
+            actor,
+            invoiceTimeZone);
         return null;
     }
 
@@ -4459,7 +4470,8 @@ public class InvoicesController : ControllerBase
         IReadOnlyCollection<Payment> generatedPayments,
         string reason,
         bool allowReceivedMoney,
-        DateTime now)
+        DateTime now,
+        TimeZoneInfo invoiceTimeZone)
     {
         var actor = User.GetDisplayName();
         foreach (var payment in generatedPayments)
@@ -4479,7 +4491,7 @@ public class InvoicesController : ControllerBase
             payment.IsPaid = false;
             payment.PaidDate = null;
             payment.LastPaymentDate = null;
-            PaymentDomainService.AppendSystemNote(payment, $"Платёж рассрочки аннулирован вместе со счётом. Причина: {reason}", now, actor);
+            PaymentDomainService.AppendSystemNote(payment, $"Платёж рассрочки аннулирован вместе со счётом. Причина: {reason}", now, actor, invoiceTimeZone);
         }
 
         return null;

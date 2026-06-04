@@ -1,6 +1,6 @@
 # Инвентаризация дат и времени
 
-Сгенерировано: 2026-06-04T03:30:20.116Z
+Сгенерировано: 2026-06-04T03:50:12.784Z
 
 Этот отчет собирает места, где проект работает с датами, временем, периодами, экспортами и календарными интеграциями. Его задача - помочь переводить систему на единое правило: хранение в UTC плюс явный timezone ID пользователя или организации.
 
@@ -13,13 +13,13 @@ npm run audit:dates
 ## Сводка
 
 - Проверено файлов: 1309
-- Найдено совпадений: 6332
+- Найдено совпадений: 6346
 
 | Категория | Совпадений | Что проверить |
 | --- | ---: | --- |
 | Backend: поля и свойства дат | 1444 | Места, где модель или DTO хранит дату/время и может требовать UTC + timezone ID. |
 | Backend: текущее время сервера | 1500 | Вызовы Now/UtcNow, которые надо привести к единому источнику времени. |
-| Backend: преобразования timezone | 467 | Ручные преобразования и явное назначение Kind, где чаще всего появляются сдвиги. |
+| Backend: преобразования timezone | 481 | Ручные преобразования и явное назначение Kind, где чаще всего появляются сдвиги. |
 | Ручные смещения времени | 216 | Жестко заданные часовые пояса и смещения, которые нельзя оставлять для пользователей из разных регионов. |
 | Frontend: работа с датами | 642 | JS/TS места, где браузер может применить локальную timezone пользователя автоматически. |
 | Фильтры и периоды | 910 | Параметры диапазонов дат в API и UI, где важны границы дня в timezone пользователя. |
@@ -40,9 +40,9 @@ npm run audit:dates
 | `backend/Controllers/TasksController.cs` | 126 |
 | `backend/PayPlanner.Api.Tests/TasksControllerTests.cs` | 118 |
 | `src/components/Tasks/TaskJournal.tsx` | 105 |
-| `backend/Controllers/InvoicesController.cs` | 94 |
+| `backend/Controllers/InvoicesController.cs` | 95 |
 | `backend/Services/YandexCalendarSyncService.cs` | 90 |
-| `backend/PayPlanner.Api.Tests/PaymentsControllerTests.cs` | 79 |
+| `backend/PayPlanner.Api.Tests/PaymentsControllerTests.cs` | 89 |
 | `src/types/index.ts` | 71 |
 | `src/components/Money/MoneyOperations.tsx` | 68 |
 | `backend/Controllers/CashOrdersController.cs` | 66 |
@@ -55,11 +55,11 @@ npm run audit:dates
 | `backend/PayPlanner.Api.Tests/InvoicesControllerCoverageTests.cs` | 47 |
 | `backend/PayPlanner.Api.Tests/InvoicesControllerCrudTests.cs` | 47 |
 | `src/components/Cases/CaseDetailPage.tsx` | 45 |
-| `backend/Controllers/PaymentsController.cs` | 42 |
+| `backend/Controllers/PaymentsController.cs` | 43 |
 | `src/components/Clients/ClientDetail.tsx` | 40 |
 | `src/components/Reports/Reports.tsx` | 40 |
 | `backend/Controllers/AccountsController.cs` | 36 |
-| `backend/Controllers/ContractsController.cs` | 34 |
+| `backend/Controllers/ContractsController.cs` | 33 |
 
 ## Детализация
 
@@ -133,68 +133,68 @@ npm run audit:dates
 | `backend/Controllers/ClientsController.cs` | 1518 | `DateTime? IssueDate` | public DateTime? IssueDate { get; init; } |
 | `backend/Controllers/ClientsController.cs` | 1522 | `DateTime? ValidFrom` | public DateTime? ValidFrom { get; init; } |
 | `backend/Controllers/ClientsController.cs` | 1523 | `DateTime? ValidTo` | public DateTime? ValidTo { get; init; } |
-| `backend/Controllers/ContractsController.cs` | 1397 | `DateTime? ValidUntil` | private async Task<(ActionResult? Error, string? Number, string? BillingMode, bool IsOpenEnded, decimal? Amount, DateTime? ValidUntil, List<(int ClientId, string? Comment)> Clients, List<(int LegalEntityId, string? Comme |
-| `backend/Controllers/ContractsController.cs` | 91 | `DateTime? from,` | public async Task<IActionResult> Get([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] int? clientId, |
-| `backend/Controllers/ContractsController.cs` | 91 | `DateTime? to,` | public async Task<IActionResult> Get([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] int? clientId, |
-| `backend/Controllers/ContractsController.cs` | 700 | `DateTime date,` | public async Task<ActionResult<NextContractNumberDto>> GetNextNumber([FromQuery] DateTime date, [FromQuery] int? excludeId, CancellationToken ct) |
-| `backend/Controllers/ContractsController.cs` | 1195 | `DateTime now)` | private void ApplyContractCancellationSideEffects(Contract contract, string reason, DateTime now) |
-| `backend/Controllers/ContractsController.cs` | 1519 | `DateTime date,` | private async Task<string> GenerateNextContractNumberAsync(DateTime date, int? excludeId, CancellationToken ct, ContractNumberingSettingsDto? settings = null) |
-| `backend/Controllers/ContractsController.cs` | 1563 | `DateTime date,` | private static string FormatGeneratedContractNumber(int sequence, DateTime date, string template) |
-| `backend/Controllers/ContractsController.cs` | 1580 | `DateTime date,` | private static bool TryParseGeneratedContractNumber(string? number, DateTime date, string template, out int sequence) |
-| `backend/Controllers/ContractsController.cs` | 1630 | `DateTime nowUtc,` | private async Task UpsertSystemSettingAsync(string key, string value, DateTime nowUtc, CancellationToken ct) |
-| `backend/Controllers/ContractsController.cs` | 1674 | `DateTime date,` | private static string RenderContractTemplate(string template, DateTime date, string sequenceText) |
-| `backend/Controllers/ContractsController.cs` | 1770 | `DateTime? from,` | DateTime? from, |
-| `backend/Controllers/ContractsController.cs` | 1771 | `DateTime? to,` | DateTime? to, |
-| `backend/Controllers/InvoicesController.cs` | 3170 | `DateTime EffectivePlannedDate` | private static DateTime EffectivePlannedDate(Payment payment) |
-| `backend/Controllers/InvoicesController.cs` | 3275 | `DateTime InvoiceDate` | DateTime InvoiceDate, |
-| `backend/Controllers/InvoicesController.cs` | 4624 | `DateTime ResolveInvoiceDueDate` | private static DateTime ResolveInvoiceDueDate(UpsertInvoiceRequest request) |
-| `backend/Controllers/InvoicesController.cs` | 5857 | `DateTime ResolveLegacyInstallmentDate` | private static DateTime ResolveLegacyInstallmentDate(Payment payment) |
-| `backend/Controllers/InvoicesController.cs` | 6317 | `DateTime StartDate` | public DateTime StartDate { get; init; } |
-| `backend/Controllers/InvoicesController.cs` | 6331 | `DateTime Date` | public DateTime Date { get; init; } |
-| `backend/Controllers/InvoicesController.cs` | 6338 | `DateTime Date` | private sealed record InstallmentScheduleItem(int Sequence, DateTime Date, decimal Amount, int Id); |
-| `backend/Controllers/InvoicesController.cs` | 6345 | `DateTime Date` | public DateTime Date { get; init; } |
-| `backend/Controllers/InvoicesController.cs` | 6346 | `DateTime? DueDate` | public DateTime? DueDate { get; init; } |
-| `backend/Controllers/InvoicesController.cs` | 6352 | `DateTime? SentForSigningAt` | public DateTime? SentForSigningAt { get; init; } |
-| `backend/Controllers/InvoicesController.cs` | 6353 | `DateTime? SignedAt` | public DateTime? SignedAt { get; init; } |
-| `backend/Controllers/InvoicesController.cs` | 6354 | `DateTime? CancelledAt` | public DateTime? CancelledAt { get; init; } |
-| `backend/Controllers/InvoicesController.cs` | 6358 | `DateTime? PaidDate` | public DateTime? PaidDate { get; init; } |
-| `backend/Controllers/InvoicesController.cs` | 6394 | `DateTime CreatedAt` | public DateTime CreatedAt { get; init; } |
-| `backend/Controllers/InvoicesController.cs` | 6397 | `DateTime? AuditUpdatedAt` | public DateTime? AuditUpdatedAt { get; init; } |
-| `backend/Controllers/InvoicesController.cs` | 6401 | `DateTime? AuditDeletedAt` | public DateTime? AuditDeletedAt { get; init; } |
-| `backend/Controllers/InvoicesController.cs` | 63 | `DateTime? from,` | [FromQuery] DateTime? from, |
-| `backend/Controllers/InvoicesController.cs` | 64 | `DateTime? to,` | [FromQuery] DateTime? to, |
-| `backend/Controllers/InvoicesController.cs` | 185 | `DateTime? from,` | [FromQuery] DateTime? from, |
-| `backend/Controllers/InvoicesController.cs` | 186 | `DateTime? to,` | [FromQuery] DateTime? to, |
-| `backend/Controllers/InvoicesController.cs` | 855 | `DateTime now,` | private async Task CancelLinkedActsAsync(Payment invoicePayment, string reason, DateTime now, int? actorId, CancellationToken ct) |
-| `backend/Controllers/InvoicesController.cs` | 879 | `DateTime now)` | private static string AppendActCancellationComment(string? comment, string invoiceNumber, string reason, DateTime now) |
-| `backend/Controllers/InvoicesController.cs` | 1277 | `DateTime invoiceDate,` | DateTime invoiceDate, |
-| `backend/Controllers/InvoicesController.cs` | 1278 | `DateTime dueDate,` | DateTime dueDate, |
-| `backend/Controllers/InvoicesController.cs` | 1557 | `DateTime? date,` | public async Task<ActionResult<object>> GetNextNumber([FromQuery] DateTime? date, CancellationToken ct) |
-| `backend/Controllers/InvoicesController.cs` | 2766 | `DateTime? from,` | DateTime? from, |
-| `backend/Controllers/InvoicesController.cs` | 2767 | `DateTime? to,` | DateTime? to, |
-| `backend/Controllers/InvoicesController.cs` | 3021 | `DateTime? paidDate)` | private static void ApplyPaidFlags(Payment payment, DateTime? paidDate) |
-| `backend/Controllers/InvoicesController.cs` | 3113 | `DateTime accountDate,` | DateTime accountDate, |
-| `backend/Controllers/InvoicesController.cs` | 3703 | `DateTime now,` | private void ApplyInvoiceWorkflowStatus(Payment payment, string workflowStatus, DateTime now, string? reason) |
-| `backend/Controllers/InvoicesController.cs` | 3747 | `DateTime now,` | DateTime now, |
-| `backend/Controllers/InvoicesController.cs` | 3771 | `DateTime? from,` | DateTime? from, |
-| `backend/Controllers/InvoicesController.cs` | 3772 | `DateTime? to,` | DateTime? to, |
-| `backend/Controllers/InvoicesController.cs` | 4396 | `DateTime now)` | DateTime now) |
-| `backend/Controllers/InvoicesController.cs` | 4446 | `DateTime now)` | DateTime now) |
-| `backend/Controllers/InvoicesController.cs` | 4462 | `DateTime now)` | DateTime now) |
-| `backend/Controllers/InvoicesController.cs` | 4495 | `DateTime now,` | DateTime now, |
-| `backend/Controllers/InvoicesController.cs` | 4588 | `DateTime date,` | private async Task<string> GenerateCashOrderNumberAsync(CashOrderType type, DateTime date, CancellationToken ct) |
-| `backend/Controllers/InvoicesController.cs` | 5277 | `DateTime targetDate,` | private async Task<int> GetNextInvoiceNumberAsync(DateTime targetDate, int startNumber, string allocationStrategy, CancellationToken ct) |
-| `backend/Controllers/InvoicesController.cs` | 5312 | `DateTime accountDate,` | private async Task<string?> ResolveInvoiceNumberForSaveAsync(string number, DateTime accountDate, int? excludeId, bool allowDuplicateOnImport, CancellationToken ct) |
-| `backend/Controllers/InvoicesController.cs` | 5344 | `DateTime accountDate,` | private async Task<HashSet<string>> LoadReservedInvoiceNumberLookupAsync(DateTime accountDate, int? excludeId, CancellationToken ct) |
-| `backend/Controllers/InvoicesController.cs` | 5366 | `DateTime accountDate,` | private async Task<ActionResult?> EnsureInvoiceNumberIsUniqueAsync(string number, DateTime accountDate, int? excludeId, CancellationToken ct) |
-| `backend/Controllers/InvoicesController.cs` | 5406 | `DateTime nowUtc,` | private async Task UpsertSystemSettingAsync(string key, string value, DateTime nowUtc, CancellationToken ct) |
-| `backend/Controllers/InvoicesController.cs` | 5445 | `DateTime invoiceDate,` | DateTime invoiceDate, |
-| `backend/Controllers/InvoicesController.cs` | 5492 | `DateTime invoiceDate,` | DateTime invoiceDate, |
-| `backend/Controllers/InvoicesController.cs` | 5507 | `DateTime invoiceDate)` | private static string BuildReservedInvoiceNumberKey(string number, DateTime invoiceDate) |
-| `backend/Controllers/InvoicesController.cs` | 5512 | `DateTime invoiceDate)` | private static void AssignLegacyAccountSource(Payment payment, string number, DateTime invoiceDate) |
-| `backend/Controllers/InvoicesController.cs` | 5646 | `DateTime invoiceDate,` | DateTime invoiceDate, |
-| `backend/Controllers/InvoicesController.cs` | 5702 | `DateTime invoiceDate,` | DateTime invoiceDate, |
-| `backend/Controllers/InvoicesController.cs` | 5862 | `DateTime nowUtc,` | private async Task UpsertUserSettingAsync(int userId, string key, string value, DateTime nowUtc, CancellationToken ct) |
+| `backend/Controllers/ContractsController.cs` | 1403 | `DateTime? ValidUntil` | private async Task<(ActionResult? Error, string? Number, string? BillingMode, bool IsOpenEnded, decimal? Amount, DateTime? ValidUntil, List<(int ClientId, string? Comment)> Clients, List<(int LegalEntityId, string? Comme |
+| `backend/Controllers/ContractsController.cs` | 94 | `DateTime? from,` | public async Task<IActionResult> Get([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] int? clientId, |
+| `backend/Controllers/ContractsController.cs` | 94 | `DateTime? to,` | public async Task<IActionResult> Get([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] int? clientId, |
+| `backend/Controllers/ContractsController.cs` | 705 | `DateTime date,` | public async Task<ActionResult<NextContractNumberDto>> GetNextNumber([FromQuery] DateTime date, [FromQuery] int? excludeId, CancellationToken ct) |
+| `backend/Controllers/ContractsController.cs` | 1200 | `DateTime now,` | private void ApplyContractCancellationSideEffects(Contract contract, string reason, DateTime now, TimeZoneInfo contractTimeZone) |
+| `backend/Controllers/ContractsController.cs` | 1525 | `DateTime date,` | private async Task<string> GenerateNextContractNumberAsync(DateTime date, int? excludeId, CancellationToken ct, ContractNumberingSettingsDto? settings = null) |
+| `backend/Controllers/ContractsController.cs` | 1569 | `DateTime date,` | private static string FormatGeneratedContractNumber(int sequence, DateTime date, string template) |
+| `backend/Controllers/ContractsController.cs` | 1586 | `DateTime date,` | private static bool TryParseGeneratedContractNumber(string? number, DateTime date, string template, out int sequence) |
+| `backend/Controllers/ContractsController.cs` | 1636 | `DateTime nowUtc,` | private async Task UpsertSystemSettingAsync(string key, string value, DateTime nowUtc, CancellationToken ct) |
+| `backend/Controllers/ContractsController.cs` | 1680 | `DateTime date,` | private static string RenderContractTemplate(string template, DateTime date, string sequenceText) |
+| `backend/Controllers/ContractsController.cs` | 1776 | `DateTime? from,` | DateTime? from, |
+| `backend/Controllers/ContractsController.cs` | 1777 | `DateTime? to,` | DateTime? to, |
+| `backend/Controllers/InvoicesController.cs` | 3179 | `DateTime EffectivePlannedDate` | private static DateTime EffectivePlannedDate(Payment payment) |
+| `backend/Controllers/InvoicesController.cs` | 3284 | `DateTime InvoiceDate` | DateTime InvoiceDate, |
+| `backend/Controllers/InvoicesController.cs` | 4636 | `DateTime ResolveInvoiceDueDate` | private static DateTime ResolveInvoiceDueDate(UpsertInvoiceRequest request) |
+| `backend/Controllers/InvoicesController.cs` | 5869 | `DateTime ResolveLegacyInstallmentDate` | private static DateTime ResolveLegacyInstallmentDate(Payment payment) |
+| `backend/Controllers/InvoicesController.cs` | 6329 | `DateTime StartDate` | public DateTime StartDate { get; init; } |
+| `backend/Controllers/InvoicesController.cs` | 6343 | `DateTime Date` | public DateTime Date { get; init; } |
+| `backend/Controllers/InvoicesController.cs` | 6350 | `DateTime Date` | private sealed record InstallmentScheduleItem(int Sequence, DateTime Date, decimal Amount, int Id); |
+| `backend/Controllers/InvoicesController.cs` | 6357 | `DateTime Date` | public DateTime Date { get; init; } |
+| `backend/Controllers/InvoicesController.cs` | 6358 | `DateTime? DueDate` | public DateTime? DueDate { get; init; } |
+| `backend/Controllers/InvoicesController.cs` | 6364 | `DateTime? SentForSigningAt` | public DateTime? SentForSigningAt { get; init; } |
+| `backend/Controllers/InvoicesController.cs` | 6365 | `DateTime? SignedAt` | public DateTime? SignedAt { get; init; } |
+| `backend/Controllers/InvoicesController.cs` | 6366 | `DateTime? CancelledAt` | public DateTime? CancelledAt { get; init; } |
+| `backend/Controllers/InvoicesController.cs` | 6370 | `DateTime? PaidDate` | public DateTime? PaidDate { get; init; } |
+| `backend/Controllers/InvoicesController.cs` | 6406 | `DateTime CreatedAt` | public DateTime CreatedAt { get; init; } |
+| `backend/Controllers/InvoicesController.cs` | 6409 | `DateTime? AuditUpdatedAt` | public DateTime? AuditUpdatedAt { get; init; } |
+| `backend/Controllers/InvoicesController.cs` | 6413 | `DateTime? AuditDeletedAt` | public DateTime? AuditDeletedAt { get; init; } |
+| `backend/Controllers/InvoicesController.cs` | 66 | `DateTime? from,` | [FromQuery] DateTime? from, |
+| `backend/Controllers/InvoicesController.cs` | 67 | `DateTime? to,` | [FromQuery] DateTime? to, |
+| `backend/Controllers/InvoicesController.cs` | 188 | `DateTime? from,` | [FromQuery] DateTime? from, |
+| `backend/Controllers/InvoicesController.cs` | 189 | `DateTime? to,` | [FromQuery] DateTime? to, |
+| `backend/Controllers/InvoicesController.cs` | 862 | `DateTime now,` | private async Task CancelLinkedActsAsync(Payment invoicePayment, string reason, DateTime now, int? actorId, CancellationToken ct) |
+| `backend/Controllers/InvoicesController.cs` | 886 | `DateTime now)` | private static string AppendActCancellationComment(string? comment, string invoiceNumber, string reason, DateTime now) |
+| `backend/Controllers/InvoicesController.cs` | 1286 | `DateTime invoiceDate,` | DateTime invoiceDate, |
+| `backend/Controllers/InvoicesController.cs` | 1287 | `DateTime dueDate,` | DateTime dueDate, |
+| `backend/Controllers/InvoicesController.cs` | 1566 | `DateTime? date,` | public async Task<ActionResult<object>> GetNextNumber([FromQuery] DateTime? date, CancellationToken ct) |
+| `backend/Controllers/InvoicesController.cs` | 2775 | `DateTime? from,` | DateTime? from, |
+| `backend/Controllers/InvoicesController.cs` | 2776 | `DateTime? to,` | DateTime? to, |
+| `backend/Controllers/InvoicesController.cs` | 3030 | `DateTime? paidDate)` | private static void ApplyPaidFlags(Payment payment, DateTime? paidDate) |
+| `backend/Controllers/InvoicesController.cs` | 3122 | `DateTime accountDate,` | DateTime accountDate, |
+| `backend/Controllers/InvoicesController.cs` | 3712 | `DateTime now,` | private void ApplyInvoiceWorkflowStatus(Payment payment, string workflowStatus, DateTime now, string? reason) |
+| `backend/Controllers/InvoicesController.cs` | 3756 | `DateTime now,` | DateTime now, |
+| `backend/Controllers/InvoicesController.cs` | 3780 | `DateTime? from,` | DateTime? from, |
+| `backend/Controllers/InvoicesController.cs` | 3781 | `DateTime? to,` | DateTime? to, |
+| `backend/Controllers/InvoicesController.cs` | 4405 | `DateTime now,` | DateTime now, |
+| `backend/Controllers/InvoicesController.cs` | 4457 | `DateTime now)` | DateTime now) |
+| `backend/Controllers/InvoicesController.cs` | 4473 | `DateTime now,` | DateTime now, |
+| `backend/Controllers/InvoicesController.cs` | 4507 | `DateTime now,` | DateTime now, |
+| `backend/Controllers/InvoicesController.cs` | 4600 | `DateTime date,` | private async Task<string> GenerateCashOrderNumberAsync(CashOrderType type, DateTime date, CancellationToken ct) |
+| `backend/Controllers/InvoicesController.cs` | 5289 | `DateTime targetDate,` | private async Task<int> GetNextInvoiceNumberAsync(DateTime targetDate, int startNumber, string allocationStrategy, CancellationToken ct) |
+| `backend/Controllers/InvoicesController.cs` | 5324 | `DateTime accountDate,` | private async Task<string?> ResolveInvoiceNumberForSaveAsync(string number, DateTime accountDate, int? excludeId, bool allowDuplicateOnImport, CancellationToken ct) |
+| `backend/Controllers/InvoicesController.cs` | 5356 | `DateTime accountDate,` | private async Task<HashSet<string>> LoadReservedInvoiceNumberLookupAsync(DateTime accountDate, int? excludeId, CancellationToken ct) |
+| `backend/Controllers/InvoicesController.cs` | 5378 | `DateTime accountDate,` | private async Task<ActionResult?> EnsureInvoiceNumberIsUniqueAsync(string number, DateTime accountDate, int? excludeId, CancellationToken ct) |
+| `backend/Controllers/InvoicesController.cs` | 5418 | `DateTime nowUtc,` | private async Task UpsertSystemSettingAsync(string key, string value, DateTime nowUtc, CancellationToken ct) |
+| `backend/Controllers/InvoicesController.cs` | 5457 | `DateTime invoiceDate,` | DateTime invoiceDate, |
+| `backend/Controllers/InvoicesController.cs` | 5504 | `DateTime invoiceDate,` | DateTime invoiceDate, |
+| `backend/Controllers/InvoicesController.cs` | 5519 | `DateTime invoiceDate)` | private static string BuildReservedInvoiceNumberKey(string number, DateTime invoiceDate) |
+| `backend/Controllers/InvoicesController.cs` | 5524 | `DateTime invoiceDate)` | private static void AssignLegacyAccountSource(Payment payment, string number, DateTime invoiceDate) |
+| `backend/Controllers/InvoicesController.cs` | 5658 | `DateTime invoiceDate,` | DateTime invoiceDate, |
+| `backend/Controllers/InvoicesController.cs` | 5714 | `DateTime invoiceDate,` | DateTime invoiceDate, |
+| `backend/Controllers/InvoicesController.cs` | 5874 | `DateTime nowUtc,` | private async Task UpsertUserSettingAsync(int userId, string key, string value, DateTime nowUtc, CancellationToken ct) |
 | `backend/Controllers/LegalEntitiesController.cs` | 2359 | `DateTimeOffset? LiquidationDate` | public DateTimeOffset? LiquidationDate { get; init; } |
 | `backend/Controllers/LegalEntitiesController.cs` | 2371 | `DateTimeOffset? RegistrationDate` | public DateTimeOffset? RegistrationDate { get; init; } |
 | `backend/Controllers/LegalEntitiesController.cs` | 52 | `DateTime? invoiceDate,` | DateTime? invoiceDate, |
@@ -244,31 +244,31 @@ npm run audit:dates
 | `backend/Controllers/MoneyOperationsController.cs` | 4672 | `DateTime date)` | private static bool TryParseStatementDate(string value, out DateTime date) |
 | `backend/Controllers/ObjectAuditController.cs` | 42 | `DateTime? from,` | [FromQuery] DateTime? from, |
 | `backend/Controllers/ObjectAuditController.cs` | 43 | `DateTime? to,` | [FromQuery] DateTime? to, |
-| `backend/Controllers/PaymentsController.cs` | 2020 | `DateTime RemainderDate` | DateTime RemainderDate); |
-| `backend/Controllers/PaymentsController.cs` | 2915 | `DateTime Date` | private static List<(string Number, DateTime Date)> BuildLookupCandidates(Payment payment) |
-| `backend/Controllers/PaymentsController.cs` | 2917 | `DateTime Date` | var candidates = new List<(string Number, DateTime Date)>(); |
-| `backend/Controllers/PaymentsController.cs` | 54 | `DateTime? from,` | [FromQuery] DateTime? from, |
-| `backend/Controllers/PaymentsController.cs` | 55 | `DateTime? to,` | [FromQuery] DateTime? to, |
-| `backend/Controllers/PaymentsController.cs` | 592 | `DateTime? from,` | [FromQuery] DateTime? from, |
-| `backend/Controllers/PaymentsController.cs` | 593 | `DateTime? to,` | [FromQuery] DateTime? to, |
-| `backend/Controllers/PaymentsController.cs` | 680 | `DateTime today,` | DateTime today, |
-| `backend/Controllers/PaymentsController.cs` | 1374 | `DateTime now,` | DateTime now, |
-| `backend/Controllers/PaymentsController.cs` | 1414 | `DateTime now,` | DateTime now, |
-| `backend/Controllers/PaymentsController.cs` | 1582 | `DateTime now,` | DateTime now, |
-| `backend/Controllers/PaymentsController.cs` | 1653 | `DateTime refundDate,` | DateTime refundDate, |
-| `backend/Controllers/PaymentsController.cs` | 1657 | `DateTime now,` | DateTime now, |
-| `backend/Controllers/PaymentsController.cs` | 1715 | `DateTime now,` | private async Task SyncPaymentCashOrderAsync(Payment payment, DateTime now, CancellationToken ct) |
-| `backend/Controllers/PaymentsController.cs` | 1942 | `DateTime date,` | private async Task<string> GenerateCashOrderNumberAsync(CashOrderType type, DateTime date, CancellationToken ct) |
-| `backend/Controllers/PaymentsController.cs` | 1975 | `DateTime now)` | private void AppendOverpaymentDecisionNote(Payment payment, string message, DateTime now) |
-| `backend/Controllers/PaymentsController.cs` | 1985 | `DateTime suggestedDate)` | private static bool TryInferSuggestedRemainderDate(Payment payment, out DateTime suggestedDate) |
-| `backend/Controllers/PaymentsController.cs` | 2119 | `DateTime remainderDate,` | DateTime remainderDate, |
-| `backend/Controllers/PaymentsController.cs` | 2120 | `DateTime now)` | DateTime now) |
-| `backend/Controllers/PaymentsController.cs` | 2276 | `DateTime remainderDate,` | DateTime remainderDate, |
-| `backend/Controllers/PaymentsController.cs` | 2277 | `DateTime now,` | DateTime now, |
-| `backend/Controllers/PaymentsController.cs` | 2293 | `DateTime remainderDate,` | DateTime remainderDate, |
-| `backend/Controllers/PaymentsController.cs` | 2294 | `DateTime now)` | DateTime now) |
-| `backend/Controllers/PaymentsController.cs` | 2666 | `DateTime lookupDate,` | private async Task<Payment?> ResolveInvoiceByPaymentHistoryAsync(Payment payment, string lookupNumber, DateTime lookupDate, CancellationToken ct) |
-| `backend/Controllers/PaymentsController.cs` | 2919 | `DateTime? date)` | void Add(string? number, DateTime? date) |
+| `backend/Controllers/PaymentsController.cs` | 2057 | `DateTime RemainderDate` | DateTime RemainderDate); |
+| `backend/Controllers/PaymentsController.cs` | 2954 | `DateTime Date` | private static List<(string Number, DateTime Date)> BuildLookupCandidates(Payment payment) |
+| `backend/Controllers/PaymentsController.cs` | 2956 | `DateTime Date` | var candidates = new List<(string Number, DateTime Date)>(); |
+| `backend/Controllers/PaymentsController.cs` | 57 | `DateTime? from,` | [FromQuery] DateTime? from, |
+| `backend/Controllers/PaymentsController.cs` | 58 | `DateTime? to,` | [FromQuery] DateTime? to, |
+| `backend/Controllers/PaymentsController.cs` | 610 | `DateTime? from,` | [FromQuery] DateTime? from, |
+| `backend/Controllers/PaymentsController.cs` | 611 | `DateTime? to,` | [FromQuery] DateTime? to, |
+| `backend/Controllers/PaymentsController.cs` | 698 | `DateTime today,` | DateTime today, |
+| `backend/Controllers/PaymentsController.cs` | 1403 | `DateTime now,` | DateTime now, |
+| `backend/Controllers/PaymentsController.cs` | 1445 | `DateTime now,` | DateTime now, |
+| `backend/Controllers/PaymentsController.cs` | 1616 | `DateTime now,` | DateTime now, |
+| `backend/Controllers/PaymentsController.cs` | 1689 | `DateTime refundDate,` | DateTime refundDate, |
+| `backend/Controllers/PaymentsController.cs` | 1693 | `DateTime now,` | DateTime now, |
+| `backend/Controllers/PaymentsController.cs` | 1751 | `DateTime now,` | private async Task SyncPaymentCashOrderAsync(Payment payment, DateTime now, CancellationToken ct) |
+| `backend/Controllers/PaymentsController.cs` | 1978 | `DateTime date,` | private async Task<string> GenerateCashOrderNumberAsync(CashOrderType type, DateTime date, CancellationToken ct) |
+| `backend/Controllers/PaymentsController.cs` | 2011 | `DateTime now,` | private void AppendOverpaymentDecisionNote(Payment payment, string message, DateTime now, TimeZoneInfo paymentTimeZone) |
+| `backend/Controllers/PaymentsController.cs` | 2022 | `DateTime suggestedDate)` | private static bool TryInferSuggestedRemainderDate(Payment payment, out DateTime suggestedDate) |
+| `backend/Controllers/PaymentsController.cs` | 2156 | `DateTime remainderDate,` | DateTime remainderDate, |
+| `backend/Controllers/PaymentsController.cs` | 2157 | `DateTime now)` | DateTime now) |
+| `backend/Controllers/PaymentsController.cs` | 2313 | `DateTime remainderDate,` | DateTime remainderDate, |
+| `backend/Controllers/PaymentsController.cs` | 2314 | `DateTime now,` | DateTime now, |
+| `backend/Controllers/PaymentsController.cs` | 2332 | `DateTime remainderDate,` | DateTime remainderDate, |
+| `backend/Controllers/PaymentsController.cs` | 2333 | `DateTime now)` | DateTime now) |
+| `backend/Controllers/PaymentsController.cs` | 2705 | `DateTime lookupDate,` | private async Task<Payment?> ResolveInvoiceByPaymentHistoryAsync(Payment payment, string lookupNumber, DateTime lookupDate, CancellationToken ct) |
+| `backend/Controllers/PaymentsController.cs` | 2958 | `DateTime? date)` | void Add(string? number, DateTime? date) |
 | `backend/Controllers/ReportsController.cs` | 531 | `DateTime Start` | private static (DateTime Start, DateTime End) ResolveLegalWorkPeriod(DateTime? from, DateTime? to) |
 | `backend/Controllers/ReportsController.cs` | 531 | `DateTime End` | private static (DateTime Start, DateTime End) ResolveLegalWorkPeriod(DateTime? from, DateTime? to) |
 | `backend/Controllers/ReportsController.cs` | 3666 | `DateTime ResolveCaseLastActivityAt` | private static DateTime ResolveCaseLastActivityAt(ClientCase clientCase, params DateTime?[] activitySignals) |
@@ -370,21 +370,19 @@ npm run audit:dates
 | `backend/Controllers/ContactsController.cs` | 306 | `DateTime.UtcNow` | entity.UpdatedAt = DateTime.UtcNow; |
 | `backend/Controllers/ContactsController.cs` | 427 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
 | `backend/Controllers/ContactsController.cs` | 806 | `DateTime.UtcNow` | contact.UpdatedAt = DateTime.UtcNow; |
-| `backend/Controllers/ContractsController.cs` | 310 | `DateTime.UtcNow` | CreatedAt = DateTime.UtcNow, |
-| `backend/Controllers/ContractsController.cs` | 422 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
-| `backend/Controllers/ContractsController.cs` | 436 | `DateTime.UtcNow` | contract.SentForSigningAt ??= DateTime.UtcNow; |
-| `backend/Controllers/ContractsController.cs` | 437 | `DateTime.UtcNow` | contract.UpdatedAt = DateTime.UtcNow; |
-| `backend/Controllers/ContractsController.cs` | 459 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
-| `backend/Controllers/ContractsController.cs` | 479 | `DateTime.UtcNow` | contract.UpdatedAt = DateTime.UtcNow; |
-| `backend/Controllers/ContractsController.cs` | 522 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
-| `backend/Controllers/ContractsController.cs` | 619 | `DateTime.UtcNow` | contract.UpdatedAt = DateTime.UtcNow; |
-| `backend/Controllers/ContractsController.cs` | 652 | `DateTime.UtcNow` | contract.CancelledAt ??= DateTime.UtcNow.Date; |
-| `backend/Controllers/ContractsController.cs` | 654 | `DateTime.UtcNow` | contract.UpdatedAt = DateTime.UtcNow; |
-| `backend/Controllers/ContractsController.cs` | 655 | `DateTime.UtcNow` | ApplyContractCancellationSideEffects(contract, reason, DateTime.UtcNow); |
-| `backend/Controllers/ContractsController.cs` | 675 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
-| `backend/Controllers/ContractsController.cs` | 692 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
-| `backend/Controllers/ContractsController.cs` | 748 | `DateTime.UtcNow` | CreatedAt = DateTime.UtcNow, |
-| `backend/Controllers/ContractsController.cs` | 805 | `DateTime.UtcNow` | contract.UpdatedAt = DateTime.UtcNow; |
+| `backend/Controllers/ContractsController.cs` | 313 | `DateTime.UtcNow` | CreatedAt = DateTime.UtcNow, |
+| `backend/Controllers/ContractsController.cs` | 425 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
+| `backend/Controllers/ContractsController.cs` | 439 | `DateTime.UtcNow` | contract.SentForSigningAt ??= DateTime.UtcNow; |
+| `backend/Controllers/ContractsController.cs` | 440 | `DateTime.UtcNow` | contract.UpdatedAt = DateTime.UtcNow; |
+| `backend/Controllers/ContractsController.cs` | 462 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
+| `backend/Controllers/ContractsController.cs` | 482 | `DateTime.UtcNow` | contract.UpdatedAt = DateTime.UtcNow; |
+| `backend/Controllers/ContractsController.cs` | 525 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
+| `backend/Controllers/ContractsController.cs` | 622 | `DateTime.UtcNow` | contract.UpdatedAt = DateTime.UtcNow; |
+| `backend/Controllers/ContractsController.cs` | 654 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
+| `backend/Controllers/ContractsController.cs` | 680 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
+| `backend/Controllers/ContractsController.cs` | 697 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
+| `backend/Controllers/ContractsController.cs` | 753 | `DateTime.UtcNow` | CreatedAt = DateTime.UtcNow, |
+| `backend/Controllers/ContractsController.cs` | 810 | `DateTime.UtcNow` | contract.UpdatedAt = DateTime.UtcNow; |
 | `backend/Controllers/DictionariesAdminController.cs` | 426 | `DateTime.UtcNow` | m.CreatedAt = DateTime.UtcNow; |
 | `backend/Controllers/DictionariesAdminController.cs` | 437 | `DateTime.UtcNow` | user.UpdatedAt = DateTime.UtcNow; |
 | `backend/Controllers/DictionariesAdminController.cs` | 470 | `DateTime.UtcNow` | user.UpdatedAt = DateTime.UtcNow; |
@@ -400,34 +398,34 @@ npm run audit:dates
 | `backend/Controllers/DictionariesAdminController.cs` | 1221 | `DateTime.UtcNow` | "invoice-item-names" => new InvoiceItemNameDictionaryItem { Name = name, Description = description, ColorHex = colorHex, IsActive = isActive, CreatedAt = DateTime.UtcNow }, |
 | `backend/Controllers/FormRequirementsController.cs` | 314 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
 | `backend/Controllers/GoogleCalendarController.cs` | 132 | `DateTime.UtcNow` | Response.Headers.RetryAfter = Math.Max(1, (int)Math.Ceiling((ex.AvailableAt - DateTime.UtcNow).TotalSeconds)).ToString(); |
-| `backend/Controllers/InvoicesController.cs` | 214 | `DateTime.UtcNow` | var today = DateTime.UtcNow.Date; |
-| `backend/Controllers/InvoicesController.cs` | 414 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
-| `backend/Controllers/InvoicesController.cs` | 492 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
-| `backend/Controllers/InvoicesController.cs` | 509 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
-| `backend/Controllers/InvoicesController.cs` | 525 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
-| `backend/Controllers/InvoicesController.cs` | 574 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
-| `backend/Controllers/InvoicesController.cs` | 665 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
-| `backend/Controllers/InvoicesController.cs` | 964 | `DateTime.UtcNow` | CreatedAt = DateTime.UtcNow, |
-| `backend/Controllers/InvoicesController.cs` | 996 | `DateTime.UtcNow` | CreatedAt = DateTime.UtcNow, |
-| `backend/Controllers/InvoicesController.cs` | 999 | `DateTime.UtcNow` | ApplyInvoiceWorkflowStatus(payment, workflowStatus, DateTime.UtcNow, reason: null); |
-| `backend/Controllers/InvoicesController.cs` | 1165 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
-| `backend/Controllers/InvoicesController.cs` | 1445 | `DateTime.UtcNow` | CreatedAt = DateTime.UtcNow, |
-| `backend/Controllers/InvoicesController.cs` | 1543 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
-| `backend/Controllers/InvoicesController.cs` | 1565 | `DateTime.UtcNow` | var targetDate = (date ?? DateTime.UtcNow).Date; |
-| `backend/Controllers/InvoicesController.cs` | 1603 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
-| `backend/Controllers/InvoicesController.cs` | 1639 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
-| `backend/Controllers/InvoicesController.cs` | 1785 | `DateTime.UtcNow` | CreatedAt = DateTime.UtcNow, |
-| `backend/Controllers/InvoicesController.cs` | 2286 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
-| `backend/Controllers/InvoicesController.cs` | 2339 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
-| `backend/Controllers/InvoicesController.cs` | 2549 | `DateTime.UtcNow` | CreatedAt = DateTime.UtcNow, |
-| `backend/Controllers/InvoicesController.cs` | 3038 | `DateTime.UtcNow` | payment.Status = payment.Date.Date < DateTime.UtcNow.Date |
-| `backend/Controllers/InvoicesController.cs` | 3925 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
-| `backend/Controllers/InvoicesController.cs` | 4228 | `DateTime.UtcNow` | CreatedAt = DateTime.UtcNow, |
-| `backend/Controllers/InvoicesController.cs` | 4684 | `DateTime.UtcNow` | PaymentDomainService.ApplyStatusRules(payment, DateTime.UtcNow); |
-| `backend/Controllers/InvoicesController.cs` | 5166 | `DateTime.UtcNow` | CreatedAt = DateTime.UtcNow, |
-| `backend/Controllers/InvoicesController.cs` | 5187 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
-| `backend/Controllers/InvoicesController.cs` | 5615 | `DateTime.UtcNow` | InvoicePaymentStateService.CalculateRepresentativeState(representative, resultingInstallments, DateTime.UtcNow)); |
-| `backend/Controllers/InvoicesController.cs` | 5817 | `DateTime.UtcNow` | ? DateTime.UtcNow.Date |
+| `backend/Controllers/InvoicesController.cs` | 217 | `DateTime.UtcNow` | var today = DateTime.UtcNow.Date; |
+| `backend/Controllers/InvoicesController.cs` | 417 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
+| `backend/Controllers/InvoicesController.cs` | 495 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
+| `backend/Controllers/InvoicesController.cs` | 512 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
+| `backend/Controllers/InvoicesController.cs` | 528 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
+| `backend/Controllers/InvoicesController.cs` | 577 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
+| `backend/Controllers/InvoicesController.cs` | 668 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
+| `backend/Controllers/InvoicesController.cs` | 971 | `DateTime.UtcNow` | CreatedAt = DateTime.UtcNow, |
+| `backend/Controllers/InvoicesController.cs` | 1003 | `DateTime.UtcNow` | CreatedAt = DateTime.UtcNow, |
+| `backend/Controllers/InvoicesController.cs` | 1006 | `DateTime.UtcNow` | ApplyInvoiceWorkflowStatus(payment, workflowStatus, DateTime.UtcNow, reason: null); |
+| `backend/Controllers/InvoicesController.cs` | 1172 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
+| `backend/Controllers/InvoicesController.cs` | 1454 | `DateTime.UtcNow` | CreatedAt = DateTime.UtcNow, |
+| `backend/Controllers/InvoicesController.cs` | 1552 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
+| `backend/Controllers/InvoicesController.cs` | 1574 | `DateTime.UtcNow` | var targetDate = (date ?? DateTime.UtcNow).Date; |
+| `backend/Controllers/InvoicesController.cs` | 1612 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
+| `backend/Controllers/InvoicesController.cs` | 1648 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
+| `backend/Controllers/InvoicesController.cs` | 1794 | `DateTime.UtcNow` | CreatedAt = DateTime.UtcNow, |
+| `backend/Controllers/InvoicesController.cs` | 2295 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
+| `backend/Controllers/InvoicesController.cs` | 2348 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
+| `backend/Controllers/InvoicesController.cs` | 2558 | `DateTime.UtcNow` | CreatedAt = DateTime.UtcNow, |
+| `backend/Controllers/InvoicesController.cs` | 3047 | `DateTime.UtcNow` | payment.Status = payment.Date.Date < DateTime.UtcNow.Date |
+| `backend/Controllers/InvoicesController.cs` | 3934 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
+| `backend/Controllers/InvoicesController.cs` | 4237 | `DateTime.UtcNow` | CreatedAt = DateTime.UtcNow, |
+| `backend/Controllers/InvoicesController.cs` | 4696 | `DateTime.UtcNow` | PaymentDomainService.ApplyStatusRules(payment, DateTime.UtcNow); |
+| `backend/Controllers/InvoicesController.cs` | 5178 | `DateTime.UtcNow` | CreatedAt = DateTime.UtcNow, |
+| `backend/Controllers/InvoicesController.cs` | 5199 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
+| `backend/Controllers/InvoicesController.cs` | 5627 | `DateTime.UtcNow` | InvoicePaymentStateService.CalculateRepresentativeState(representative, resultingInstallments, DateTime.UtcNow)); |
+| `backend/Controllers/InvoicesController.cs` | 5829 | `DateTime.UtcNow` | ? DateTime.UtcNow.Date |
 | `backend/Controllers/LegalEntitiesController.cs` | 177 | `DateTime.UtcNow` | var nowUtc = DateTime.UtcNow; |
 | `backend/Controllers/LegalEntitiesController.cs` | 530 | `DateTime.UtcNow` | SetProperty(created, "CreatedAt", DateTime.UtcNow); |
 | `backend/Controllers/LegalEntitiesController.cs` | 1041 | `DateTime.UtcNow` | CreatedAt = DateTime.UtcNow, |
@@ -480,15 +478,15 @@ npm run audit:dates
 | `backend/Controllers/NotificationInboxController.cs` | 441 | `DateTime.UtcNow` | item.ReadAt = DateTime.UtcNow; |
 | `backend/Controllers/NotificationsController.cs` | 188 | `DateTime.UtcNow` | var nowUtc = DateTime.UtcNow; |
 | `backend/Controllers/NotificationsController.cs` | 544 | `DateTime.UtcNow` | user.UpdatedAt = DateTime.UtcNow; |
-| `backend/Controllers/PaymentsController.cs` | 115 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
-| `backend/Controllers/PaymentsController.cs` | 180 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
-| `backend/Controllers/PaymentsController.cs` | 348 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
-| `backend/Controllers/PaymentsController.cs` | 445 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
-| `backend/Controllers/PaymentsController.cs` | 607 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
-| `backend/Controllers/PaymentsController.cs` | 803 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
-| `backend/Controllers/PaymentsController.cs` | 1038 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
-| `backend/Controllers/PaymentsController.cs` | 1098 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
-| `backend/Controllers/PaymentsController.cs` | 3280 | `DateTime.UtcNow` | await InvoicePaymentStateService.RefreshInvoiceAggregateAsync(_db, invoiceId.Value, DateTime.UtcNow, ct); |
+| `backend/Controllers/PaymentsController.cs` | 118 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
+| `backend/Controllers/PaymentsController.cs` | 184 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
+| `backend/Controllers/PaymentsController.cs` | 358 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
+| `backend/Controllers/PaymentsController.cs` | 457 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
+| `backend/Controllers/PaymentsController.cs` | 625 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
+| `backend/Controllers/PaymentsController.cs` | 821 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
+| `backend/Controllers/PaymentsController.cs` | 1062 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
+| `backend/Controllers/PaymentsController.cs` | 1124 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
+| `backend/Controllers/PaymentsController.cs` | 3319 | `DateTime.UtcNow` | await InvoicePaymentStateService.RefreshInvoiceAggregateAsync(_db, invoiceId.Value, DateTime.UtcNow, ct); |
 | `backend/Controllers/PowerOfAttorneyController.cs` | 64 | `DateTime.UtcNow` | entity.UpdatedAt = DateTime.UtcNow; |
 | `backend/Controllers/ProfileController.cs` | 208 | `DateTime.UtcNow` | var fileName = $"{DateTime.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid():N}{extension}"; |
 | `backend/Controllers/ReportsController.cs` | 170 | `DateTime.UtcNow` | var fileName = $"legal-work-report-{DateTime.UtcNow:yyyyMMdd-HHmm}.xls"; |
@@ -577,6 +575,8 @@ npm run audit:dates
 | `backend/Controllers/V2/CasesV2Controller.cs` | 1880 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
 | `backend/Controllers/V2/CasesV2Controller.cs` | 1932 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
 | `backend/Controllers/V2/CasesV2Controller.cs` | 1989 | `DateTime.UtcNow` | item.UpdatedAt = DateTime.UtcNow; |
+| `backend/Controllers/V2/CasesV2Controller.cs` | 2125 | `DateTime.UtcNow` | var now = DateTime.UtcNow; |
+| `backend/Controllers/V2/CasesV2Controller.cs` | 2229 | `DateTime.UtcNow` | deadline.UpdatedAt = DateTime.UtcNow; |
 | Еще 1250 совпадений | - | - | Категория ограничена первыми 250 строками, полное количество указано в сводке. |
 
 ### Backend: преобразования timezone
@@ -592,16 +592,19 @@ npm run audit:dates
 | `backend/Controllers/CalendarSyncController.cs` | 313 | `DateTime.SpecifyKind` | => value.Kind == DateTimeKind.Utc ? value : DateTime.SpecifyKind(value, DateTimeKind.Local).ToUniversalTime(); |
 | `backend/Controllers/ClientsController.cs` | 668 | `timezone` | timezone = result.Timezone, |
 | `backend/Controllers/ClientsController.cs` | 668 | `Timezone` | timezone = result.Timezone, |
+| `backend/Controllers/ContractsController.cs` | 66 | `CalendarTimeZoneHelper` | => CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct); |
 | `backend/Controllers/DatabaseAdminController.cs` | 366 | `TimeZone` | TimeZone = overview.TimeZone, |
 | `backend/Controllers/DictionariesAdminController.cs` | 223 | `Timezone` | (le, v) => le.Timezone = v, |
 | `backend/Controllers/DictionariesAdminController.cs` | 224 | `Timezone` | le => le.Timezone, |
 | `backend/Controllers/DictionariesAdminController.cs` | 765 | `Timezone` | if (await _db.LegalEntities.AsNoTracking().AnyAsync(le => le.Timezone == e.Name)) |
 | `backend/Controllers/FormRequirementsController.cs` | 106 | `Timezone` | new("Timezone", "Часовой пояс", "Реквизиты: Основные"), |
+| `backend/Controllers/InvoicesController.cs` | 62 | `CalendarTimeZoneHelper` | => CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct); |
 | `backend/Controllers/LegalEntitiesController.cs` | 348 | `Timezone` | Timezone = entity.Timezone, |
 | `backend/Controllers/LegalEntitiesController.cs` | 496 | `Timezone` | entity.Timezone = await ResolveDictionaryValueAsync(_db.Timezones, entity.Timezone, "Добавлено автоматически", "#8B5CF6", ct); |
 | `backend/Controllers/LegalEntitiesController.cs` | 1000 | `Timezone` | Timezone = NormalizeOptional(request.Timezone), |
 | `backend/Controllers/LegalEntitiesController.cs` | 1904 | `Timezone` | entity.Timezone = NormalizeOptional(request.Timezone); |
 | `backend/Controllers/LegalEntitiesController.cs` | 2088 | `Timezone` | Timezone: null); |
+| `backend/Controllers/PaymentsController.cs` | 47 | `CalendarTimeZoneHelper` | => CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct); |
 | `backend/Controllers/ReportsController.cs` | 197 | `CalendarTimeZoneHelper` | var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct); |
 | `backend/Controllers/ReportsController.cs` | 291 | `CalendarTimeZoneHelper` | var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct); |
 | `backend/Controllers/ReportsController.cs` | 2121 | `CalendarTimeZoneHelper` | .Append(Html(CalendarTimeZoneHelper.FormatUserDateTime(generatedAtUtc, timeZone, culture: CultureInfo.GetCultureInfo("ru-RU")))) |
@@ -671,6 +674,7 @@ npm run audit:dates
 | `backend/Controllers/V2/CasesV2Controller.cs` | 4374 | `timeZone` | var calendarTimeZone = timeZone ?? TimeZoneInfo.Local; |
 | `backend/Controllers/V2/CasesV2Controller.cs` | 4454 | `timeZone` | private static string FormatIcsDateTime(DateTime value, TimeZoneInfo timeZone) |
 | `backend/Controllers/V2/CasesV2Controller.cs` | 4455 | `timeZone` | => CalendarTimeZoneHelper.FormatUtcIcsDateTime(value, timeZone); |
+| `backend/Controllers/V2/PaymentsV2Controller.cs` | 26 | `CalendarTimeZoneHelper` | => CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct); |
 | `backend/Data/PaymentContext.cs` | 126 | `DateTime.SpecifyKind` | : DateTime.SpecifyKind(value, DateTimeKind.Unspecified); |
 | `backend/Data/PaymentContext.cs` | 493 | `Timezone` | entity.Property(e => e.Timezone).HasMaxLength(100); |
 | `backend/Migrations/20260216022940_AddCompanyProfileFieldsToLegalEntity.cs` | 49 | `Timezone` | name: "Timezone", |
@@ -831,11 +835,7 @@ npm run audit:dates
 | `backend/Migrations/PostgreSql/20260518002437_AddClientCaseRelatedPartiesPostgres.Designer.cs` | 2886 | `Timezone` | b.Property<string>("Timezone") |
 | `backend/Migrations/PostgreSql/20260518012203_AddClientCaseProceduralDeadlinesPostgres.Designer.cs` | 2898 | `Timezone` | b.Property<string>("Timezone") |
 | `backend/Migrations/PostgreSql/20260519062530_AddTaskApprovalDueAtPostgres.Designer.cs` | 2898 | `Timezone` | b.Property<string>("Timezone") |
-| `backend/Migrations/PostgreSql/20260519122626_AddClientCaseHiddenAccessFieldsPostgres.Designer.cs` | 2936 | `Timezone` | b.Property<string>("Timezone") |
-| `backend/Migrations/PostgreSql/20260520071340_AddClientCaseWorkOrdersPostgres.Designer.cs` | 3065 | `Timezone` | b.Property<string>("Timezone") |
-| `backend/Migrations/PostgreSql/20260520083207_AddClientCaseWorkOrderApprovalPostgres.Designer.cs` | 3098 | `Timezone` | b.Property<string>("Timezone") |
-| `backend/Migrations/PostgreSql/20260520085946_AddClientCaseRelatedPartyArchivePostgres.Designer.cs` | 3120 | `Timezone` | b.Property<string>("Timezone") |
-| Еще 217 совпадений | - | - | Категория ограничена первыми 250 строками, полное количество указано в сводке. |
+| Еще 231 совпадений | - | - | Категория ограничена первыми 250 строками, полное количество указано в сводке. |
 
 ### Ручные смещения времени
 
@@ -1375,27 +1375,27 @@ JS/TS места, где браузер может применить локал
 | `backend/Controllers/CashOrdersController.cs` | 752 | `DateTime? to` | DateTime? to, |
 | `backend/Controllers/CashOrdersController.cs` | 1313 | `DateTime? from` | private static string BuildRegisterPrintHtml(CashOrderRegisterResponseDto register, DateTime? from, DateTime? to, string? accountName) |
 | `backend/Controllers/CashOrdersController.cs` | 1313 | `DateTime? to` | private static string BuildRegisterPrintHtml(CashOrderRegisterResponseDto register, DateTime? from, DateTime? to, string? accountName) |
-| `backend/Controllers/ContractsController.cs` | 91 | `[FromQuery] DateTime?` | public async Task<IActionResult> Get([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] int? clientId, |
-| `backend/Controllers/ContractsController.cs` | 700 | `[FromQuery] DateTime` | public async Task<ActionResult<NextContractNumberDto>> GetNextNumber([FromQuery] DateTime date, [FromQuery] int? excludeId, CancellationToken ct) |
-| `backend/Controllers/ContractsController.cs` | 91 | `DateTime? from` | public async Task<IActionResult> Get([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] int? clientId, |
-| `backend/Controllers/ContractsController.cs` | 91 | `DateTime? to` | public async Task<IActionResult> Get([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] int? clientId, |
-| `backend/Controllers/ContractsController.cs` | 1770 | `DateTime? from` | DateTime? from, |
-| `backend/Controllers/ContractsController.cs` | 1771 | `DateTime? to` | DateTime? to, |
-| `backend/Controllers/InvoicesController.cs` | 63 | `[FromQuery] DateTime?` | [FromQuery] DateTime? from, |
-| `backend/Controllers/InvoicesController.cs` | 64 | `[FromQuery] DateTime?` | [FromQuery] DateTime? to, |
-| `backend/Controllers/InvoicesController.cs` | 185 | `[FromQuery] DateTime?` | [FromQuery] DateTime? from, |
-| `backend/Controllers/InvoicesController.cs` | 186 | `[FromQuery] DateTime?` | [FromQuery] DateTime? to, |
-| `backend/Controllers/InvoicesController.cs` | 1557 | `[FromQuery] DateTime?` | public async Task<ActionResult<object>> GetNextNumber([FromQuery] DateTime? date, CancellationToken ct) |
-| `backend/Controllers/InvoicesController.cs` | 63 | `DateTime? from` | [FromQuery] DateTime? from, |
-| `backend/Controllers/InvoicesController.cs` | 64 | `DateTime? to` | [FromQuery] DateTime? to, |
-| `backend/Controllers/InvoicesController.cs` | 185 | `DateTime? from` | [FromQuery] DateTime? from, |
-| `backend/Controllers/InvoicesController.cs` | 186 | `DateTime? to` | [FromQuery] DateTime? to, |
-| `backend/Controllers/InvoicesController.cs` | 2766 | `DateTime? from` | DateTime? from, |
-| `backend/Controllers/InvoicesController.cs` | 2767 | `DateTime? to` | DateTime? to, |
-| `backend/Controllers/InvoicesController.cs` | 3771 | `DateTime? from` | DateTime? from, |
-| `backend/Controllers/InvoicesController.cs` | 3772 | `DateTime? to` | DateTime? to, |
-| `backend/Controllers/InvoicesController.cs` | 5816 | `startDate` | var startDate = childPayments.Count == 0 |
-| `backend/Controllers/InvoicesController.cs` | 5843 | `startDate` | StartDate = startDate, |
+| `backend/Controllers/ContractsController.cs` | 94 | `[FromQuery] DateTime?` | public async Task<IActionResult> Get([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] int? clientId, |
+| `backend/Controllers/ContractsController.cs` | 705 | `[FromQuery] DateTime` | public async Task<ActionResult<NextContractNumberDto>> GetNextNumber([FromQuery] DateTime date, [FromQuery] int? excludeId, CancellationToken ct) |
+| `backend/Controllers/ContractsController.cs` | 94 | `DateTime? from` | public async Task<IActionResult> Get([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] int? clientId, |
+| `backend/Controllers/ContractsController.cs` | 94 | `DateTime? to` | public async Task<IActionResult> Get([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] int? clientId, |
+| `backend/Controllers/ContractsController.cs` | 1776 | `DateTime? from` | DateTime? from, |
+| `backend/Controllers/ContractsController.cs` | 1777 | `DateTime? to` | DateTime? to, |
+| `backend/Controllers/InvoicesController.cs` | 66 | `[FromQuery] DateTime?` | [FromQuery] DateTime? from, |
+| `backend/Controllers/InvoicesController.cs` | 67 | `[FromQuery] DateTime?` | [FromQuery] DateTime? to, |
+| `backend/Controllers/InvoicesController.cs` | 188 | `[FromQuery] DateTime?` | [FromQuery] DateTime? from, |
+| `backend/Controllers/InvoicesController.cs` | 189 | `[FromQuery] DateTime?` | [FromQuery] DateTime? to, |
+| `backend/Controllers/InvoicesController.cs` | 1566 | `[FromQuery] DateTime?` | public async Task<ActionResult<object>> GetNextNumber([FromQuery] DateTime? date, CancellationToken ct) |
+| `backend/Controllers/InvoicesController.cs` | 66 | `DateTime? from` | [FromQuery] DateTime? from, |
+| `backend/Controllers/InvoicesController.cs` | 67 | `DateTime? to` | [FromQuery] DateTime? to, |
+| `backend/Controllers/InvoicesController.cs` | 188 | `DateTime? from` | [FromQuery] DateTime? from, |
+| `backend/Controllers/InvoicesController.cs` | 189 | `DateTime? to` | [FromQuery] DateTime? to, |
+| `backend/Controllers/InvoicesController.cs` | 2775 | `DateTime? from` | DateTime? from, |
+| `backend/Controllers/InvoicesController.cs` | 2776 | `DateTime? to` | DateTime? to, |
+| `backend/Controllers/InvoicesController.cs` | 3780 | `DateTime? from` | DateTime? from, |
+| `backend/Controllers/InvoicesController.cs` | 3781 | `DateTime? to` | DateTime? to, |
+| `backend/Controllers/InvoicesController.cs` | 5828 | `startDate` | var startDate = childPayments.Count == 0 |
+| `backend/Controllers/InvoicesController.cs` | 5855 | `startDate` | StartDate = startDate, |
 | `backend/Controllers/MoneyOperationsController.cs` | 194 | `[FromQuery] DateTime?` | [FromQuery] DateTime? from, |
 | `backend/Controllers/MoneyOperationsController.cs` | 195 | `[FromQuery] DateTime?` | [FromQuery] DateTime? to, |
 | `backend/Controllers/MoneyOperationsController.cs` | 234 | `[FromQuery] DateTime?` | [FromQuery] DateTime? from, |
@@ -1462,14 +1462,14 @@ JS/TS места, где браузер может применить локал
 | `backend/Controllers/ObjectAuditController.cs` | 43 | `[FromQuery] DateTime?` | [FromQuery] DateTime? to, |
 | `backend/Controllers/ObjectAuditController.cs` | 42 | `DateTime? from` | [FromQuery] DateTime? from, |
 | `backend/Controllers/ObjectAuditController.cs` | 43 | `DateTime? to` | [FromQuery] DateTime? to, |
-| `backend/Controllers/PaymentsController.cs` | 54 | `[FromQuery] DateTime?` | [FromQuery] DateTime? from, |
-| `backend/Controllers/PaymentsController.cs` | 55 | `[FromQuery] DateTime?` | [FromQuery] DateTime? to, |
-| `backend/Controllers/PaymentsController.cs` | 592 | `[FromQuery] DateTime?` | [FromQuery] DateTime? from, |
-| `backend/Controllers/PaymentsController.cs` | 593 | `[FromQuery] DateTime?` | [FromQuery] DateTime? to, |
-| `backend/Controllers/PaymentsController.cs` | 54 | `DateTime? from` | [FromQuery] DateTime? from, |
-| `backend/Controllers/PaymentsController.cs` | 55 | `DateTime? to` | [FromQuery] DateTime? to, |
-| `backend/Controllers/PaymentsController.cs` | 592 | `DateTime? from` | [FromQuery] DateTime? from, |
-| `backend/Controllers/PaymentsController.cs` | 593 | `DateTime? to` | [FromQuery] DateTime? to, |
+| `backend/Controllers/PaymentsController.cs` | 57 | `[FromQuery] DateTime?` | [FromQuery] DateTime? from, |
+| `backend/Controllers/PaymentsController.cs` | 58 | `[FromQuery] DateTime?` | [FromQuery] DateTime? to, |
+| `backend/Controllers/PaymentsController.cs` | 610 | `[FromQuery] DateTime?` | [FromQuery] DateTime? from, |
+| `backend/Controllers/PaymentsController.cs` | 611 | `[FromQuery] DateTime?` | [FromQuery] DateTime? to, |
+| `backend/Controllers/PaymentsController.cs` | 57 | `DateTime? from` | [FromQuery] DateTime? from, |
+| `backend/Controllers/PaymentsController.cs` | 58 | `DateTime? to` | [FromQuery] DateTime? to, |
+| `backend/Controllers/PaymentsController.cs` | 610 | `DateTime? from` | [FromQuery] DateTime? from, |
+| `backend/Controllers/PaymentsController.cs` | 611 | `DateTime? to` | [FromQuery] DateTime? to, |
 | `backend/Controllers/ReportsController.cs` | 106 | `[FromQuery] DateTime?` | [FromQuery] DateTime? from, |
 | `backend/Controllers/ReportsController.cs` | 107 | `[FromQuery] DateTime?` | [FromQuery] DateTime? to, |
 | `backend/Controllers/ReportsController.cs` | 139 | `[FromQuery] DateTime?` | [FromQuery] DateTime? from, |
@@ -1645,12 +1645,12 @@ JS/TS места, где браузер может применить локал
 | `backend/Controllers/CashOrdersController.cs` | 632 | `DownloadPdf` | public async Task<IActionResult> DownloadPdf(int id, CancellationToken ct) |
 | `backend/Controllers/ContactsController.cs` | 385 | `ImportYealinkXml` | public async Task<ActionResult<YealinkContactImportResultDto>> ImportYealinkXml( |
 | `backend/Controllers/ContactsController.cs` | 337 | `DownloadYealinkXml` | public async Task<IActionResult> DownloadYealinkXml(CancellationToken ct) |
-| `backend/Controllers/ContractsController.cs` | 931 | `PDF` | "PDF-генератор не зарегистрирован на сервере. Проверьте настройки приложения."); |
+| `backend/Controllers/ContractsController.cs` | 936 | `PDF` | "PDF-генератор не зарегистрирован на сервере. Проверьте настройки приложения."); |
 | `backend/Controllers/DatabaseAdminController.cs` | 200 | `ImportSqliteAsync` | public async Task<ActionResult<DatabaseImportResultDto>> ImportSqliteAsync( |
 | `backend/Controllers/DatabaseAdminController.cs` | 218 | `ImportSqliteAsync` | var result = await _databaseImportService.ImportSqliteAsync(tempPath, cancellationToken); |
 | `backend/Controllers/DatabaseAdminController.cs` | 92 | `DownloadPath` | DownloadPath = result.DownloadPath, |
 | `backend/Controllers/DatabaseAdminController.cs` | 181 | `DownloadBackupAsync` | public IActionResult DownloadBackupAsync([FromQuery] string? relativePath) |
-| `backend/Controllers/InvoicesController.cs` | 2658 | `PDF` | "PDF-генератор не зарегистрирован на сервере. Проверьте настройки приложения."); |
+| `backend/Controllers/InvoicesController.cs` | 2667 | `PDF` | "PDF-генератор не зарегистрирован на сервере. Проверьте настройки приложения."); |
 | `backend/Controllers/MoneyOperationsController.cs` | 2129 | `CSV` | return BadRequest("Поддерживаются файлы CSV, TSV, TXT и 1C ClientBankExchange."); |
 | `backend/Controllers/MoneyOperationsController.cs` | 3297 | `PDF` | "PDF-генератор не зарегистрирован на сервере. Проверьте настройки приложения."); |
 | `backend/Controllers/MoneyOperationsController.cs` | 406 | `ExportCsv` | public async Task<IActionResult> ExportCsv( |

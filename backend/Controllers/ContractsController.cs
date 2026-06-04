@@ -62,6 +62,9 @@ public class ContractsController : ControllerBase
     private Task<DataVisibilityAccess?> ResolveContractsVisibilityAsync(CancellationToken ct)
         => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Contracts, ct);
 
+    private Task<TimeZoneInfo> ResolveContractTimeZoneAsync(CancellationToken ct)
+        => CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+
     private async Task<Contract?> LoadEditableContractAsync(int id, CancellationToken ct)
     {
         var visibility = await ResolveContractsVisibilityAsync(ct);
@@ -648,11 +651,13 @@ public class ContractsController : ControllerBase
             return BadRequest("Аннулирование доступно только для черновиков и договоров на подписании.");
         }
 
+        var now = DateTime.UtcNow;
+        var contractTimeZone = await ResolveContractTimeZoneAsync(ct);
         contract.Status = ContractStatus.Cancelled;
-        contract.CancelledAt ??= DateTime.UtcNow.Date;
+        contract.CancelledAt ??= now.Date;
         contract.CancelledReason = reason;
-        contract.UpdatedAt = DateTime.UtcNow;
-        ApplyContractCancellationSideEffects(contract, reason, DateTime.UtcNow);
+        contract.UpdatedAt = now;
+        ApplyContractCancellationSideEffects(contract, reason, now, contractTimeZone);
 
         await _db.SaveChangesAsync(ct);
 
@@ -1192,7 +1197,7 @@ public class ContractsController : ControllerBase
         return bool.TryParse(value, out var enabled) && enabled;
     }
 
-    private void ApplyContractCancellationSideEffects(Contract contract, string reason, DateTime now)
+    private void ApplyContractCancellationSideEffects(Contract contract, string reason, DateTime now, TimeZoneInfo contractTimeZone)
     {
         var actorId = User?.GetUserId();
         var actorName = User?.Identity?.Name;
@@ -1214,7 +1219,8 @@ public class ContractsController : ControllerBase
                 invoice,
                 $"Счёт аннулирован вместе с договором № {contract.Number}. Причина: {reason}",
                 now,
-                actorName);
+                actorName,
+                contractTimeZone);
         }
 
         var draftActs = GetContractDraftActs(contract);

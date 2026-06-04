@@ -970,6 +970,77 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task Update_AppendsSystemNoteTimestampInProfileTimeZone()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "payment-timezone-admin", Description = "Admin" };
+        var user = new User
+        {
+            Email = "payment-timezone@example.test",
+            FullName = "Payment Timezone User",
+            IsActive = true,
+            Role = role,
+        };
+        db.Roles.Add(role);
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = user.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Europe/Samara",
+        });
+
+        var payment = CreatePayment(new DateTime(2026, 1, 30), 15_000m, "Timezone payment");
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+
+        var model = CreatePayment(payment.Date, 16_000m, payment.Description);
+        model.Status = payment.Status;
+        var controller = new PaymentsController(db, new NoopFormRequirementsService())
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                        [
+                            new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                            new Claim(ClaimTypes.Name, user.FullName),
+                            new Claim(ClaimTypes.Role, "admin"),
+                        ],
+                        authenticationType: "Test")),
+                },
+            },
+        };
+
+        var expectedTimeZone = CalendarTimeZoneHelper.ResolveTimeZone("Europe/Samara");
+        var before = CalendarTimeZoneHelper.FormatUserDateTime(
+            DateTime.UtcNow,
+            expectedTimeZone,
+            "dd.MM.yyyy (HH:mm:ss)",
+            System.Globalization.CultureInfo.GetCultureInfo("ru-RU"));
+
+        var actionResult = await controller.Update(payment.Id, model, CancellationToken.None);
+
+        var after = CalendarTimeZoneHelper.FormatUserDateTime(
+            DateTime.UtcNow,
+            expectedTimeZone,
+            "dd.MM.yyyy (HH:mm:ss)",
+            System.Globalization.CultureInfo.GetCultureInfo("ru-RU"));
+        Assert.IsType<OkObjectResult>(actionResult);
+        db.ChangeTracker.Clear();
+
+        var stored = await db.Payments.FindAsync(payment.Id);
+        Assert.NotNull(stored);
+        Assert.True(
+            stored!.SystemNotes.Contains(before, StringComparison.Ordinal) ||
+            stored.SystemNotes.Contains(after, StringComparison.Ordinal),
+            $"System notes must contain timestamp in Europe/Samara. Expected {before} or {after}. Notes: {stored.SystemNotes}");
+    }
+
+    [Fact]
     public async Task UpdateInvoiceManaged_UpdatesGeneratedInstallmentPayment_AndPreservesInvoiceLink()
     {
         await using var db = await CreateContextAsync();

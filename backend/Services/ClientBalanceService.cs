@@ -60,6 +60,7 @@ public static class ClientBalanceService
 
         var actor = httpContext?.User.GetDisplayName();
         var actorUserId = httpContext?.User.GetUserId();
+        var actorTimeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(db, actorUserId, ct);
         var description = $"Переплата по платежу #{payment.Id}";
 
         if (existing is null)
@@ -170,6 +171,7 @@ public static class ClientBalanceService
 
         var actor = httpContext?.User.GetDisplayName();
         var actorUserId = httpContext?.User.GetUserId();
+        var actorTimeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(db, actorUserId, ct);
         db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
         {
             ClientId = clientId,
@@ -189,7 +191,8 @@ public static class ClientBalanceService
             payment,
             $"Зачтено с баланса контрагента: {applied:N2}",
             utcNow,
-            actor);
+            actor,
+            actorTimeZone);
 
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(db, payment, utcNow, ct);
 

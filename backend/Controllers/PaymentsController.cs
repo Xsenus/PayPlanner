@@ -43,6 +43,9 @@ public class PaymentsController : ControllerBase
     private Task<DataVisibilityAccess?> ResolvePaymentsVisibilityAsync(CancellationToken ct)
         => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
 
+    private Task<TimeZoneInfo> ResolvePaymentTimeZoneAsync(CancellationToken ct)
+        => CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+
     private async Task<bool> CanAccessPaymentAsync(int id, DataVisibilityAccess visibility, CancellationToken ct)
         => await _db.Payments
             .AsNoTracking()
@@ -113,6 +116,7 @@ public class PaymentsController : ControllerBase
         }
 
         var now = DateTime.UtcNow;
+        var paymentTimeZone = await ResolvePaymentTimeZoneAsync(ct);
         if (model.DocumentKind == default)
         {
             model.DocumentKind = DocumentKind.Payment;
@@ -136,7 +140,7 @@ public class PaymentsController : ControllerBase
 
         _db.Payments.Add(model);
         await _db.SaveChangesAsync(ct);
-        await ApplyPaymentOverpaymentHandlingAsync(model, rawPaidAmount, now, ct);
+        await ApplyPaymentOverpaymentHandlingAsync(model, rawPaidAmount, now, paymentTimeZone, ct);
         await SyncPaymentCashOrderAsync(model, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, model, now, ct);
         await _db.SaveChangesAsync(ct);
@@ -180,6 +184,7 @@ public class PaymentsController : ControllerBase
         var now = DateTime.UtcNow;
         var culture = CultureInfo.GetCultureInfo("ru-RU");
         var actor = User.GetDisplayName();
+        var paymentTimeZone = await ResolvePaymentTimeZoneAsync(ct);
 
         var originalDueDate = e.Date.Date;
         var originalPlannedDate = (e.PlannedDate == default ? e.Date : e.PlannedDate).Date;
@@ -259,7 +264,8 @@ public class PaymentsController : ControllerBase
                 e,
                 $"Изменена плановая дата: {originalPlannedDate:dd.MM.yyyy} → {e.PlannedDate:dd.MM.yyyy}",
                 now,
-                actor);
+                actor,
+                paymentTimeZone);
         }
 
         var userChangedDueDate = model.Date.Date != originalDueDate;
@@ -270,7 +276,8 @@ public class PaymentsController : ControllerBase
                 e,
                 $"Дата платежа изменена: {originalDueDate:dd.MM.yyyy} → {e.Date:dd.MM.yyyy}",
                 now,
-                actor);
+                actor,
+                paymentTimeZone);
         }
         else if (originalDueDate != e.Date.Date)
         {
@@ -278,7 +285,8 @@ public class PaymentsController : ControllerBase
                 e,
                 $"Дата платежа автоматически скорректирована на {e.Date:dd.MM.yyyy}",
                 now,
-                actor);
+                actor,
+                paymentTimeZone);
         }
 
         if (Math.Abs(originalPaidAmount - e.PaidAmount) > 0.009m)
@@ -287,7 +295,8 @@ public class PaymentsController : ControllerBase
                 e,
                 $"Изменена оплаченная сумма: было {originalPaidAmount.ToString("N2", culture)}, стало {e.PaidAmount.ToString("N2", culture)}",
                 now,
-                actor);
+                actor,
+                paymentTimeZone);
         }
 
         if (originalStatus != e.Status)
@@ -296,7 +305,8 @@ public class PaymentsController : ControllerBase
                 e,
                 $"Статус обновлён: {originalStatus.ToDisplayString()} → {e.Status.ToDisplayString()}",
                 now,
-                actor);
+                actor,
+                paymentTimeZone);
         }
 
         e.RescheduleCount = rescheduleCount;
@@ -304,7 +314,7 @@ public class PaymentsController : ControllerBase
         var overpaymentValidationError = await ValidatePaymentOverpaymentHandlingAsync(e, rawPaidAmount, ct);
         if (overpaymentValidationError is not null) return overpaymentValidationError;
 
-        await ApplyPaymentOverpaymentHandlingAsync(e, rawPaidAmount, now, ct);
+        await ApplyPaymentOverpaymentHandlingAsync(e, rawPaidAmount, now, paymentTimeZone, ct);
         await SyncPaymentCashOrderAsync(e, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, e, now, ct);
         if (originalInvoiceId.HasValue
@@ -347,6 +357,7 @@ public class PaymentsController : ControllerBase
 
         var now = DateTime.UtcNow;
         var actor = User.GetDisplayName();
+        var paymentTimeZone = await ResolvePaymentTimeZoneAsync(ct);
         var originalStatus = payment.Status;
         var reason = Normalize(request.Reason);
 
@@ -398,7 +409,8 @@ public class PaymentsController : ControllerBase
                 payment,
                 $"Статус обновлён: {originalStatus.ToDisplayString()} → {payment.Status.ToDisplayString()}",
                 now,
-                actor);
+                actor,
+                paymentTimeZone);
         }
 
         await ClientBalanceService.UpsertPaymentOverpaymentAsync(_db, payment, payment.PaidAmount, now, HttpContext, ct);
@@ -445,6 +457,7 @@ public class PaymentsController : ControllerBase
         var now = DateTime.UtcNow;
         var culture = CultureInfo.GetCultureInfo("ru-RU");
         var actor = User.GetDisplayName();
+        var paymentTimeZone = await ResolvePaymentTimeZoneAsync(ct);
 
         var originalDueDate = e.Date.Date;
         var originalPlannedDate = (e.PlannedDate == default ? e.Date : e.PlannedDate).Date;
@@ -534,7 +547,8 @@ public class PaymentsController : ControllerBase
                 e,
                 $"Изменена плановая дата: {originalPlannedDate:dd.MM.yyyy} → {e.PlannedDate:dd.MM.yyyy}",
                 now,
-                actor);
+                actor,
+                paymentTimeZone);
         }
 
         var userChangedDueDate = model.Date.Date != originalDueDate;
@@ -545,7 +559,8 @@ public class PaymentsController : ControllerBase
                 e,
                 $"Дата платежа изменена: {originalDueDate:dd.MM.yyyy} → {e.Date:dd.MM.yyyy}",
                 now,
-                actor);
+                actor,
+                paymentTimeZone);
         }
         else if (originalDueDate != e.Date.Date)
         {
@@ -553,7 +568,8 @@ public class PaymentsController : ControllerBase
                 e,
                 $"Дата платежа автоматически скорректирована на {e.Date:dd.MM.yyyy}",
                 now,
-                actor);
+                actor,
+                paymentTimeZone);
         }
 
         if (Math.Abs(originalPaidAmount - e.PaidAmount) > 0.009m)
@@ -562,7 +578,8 @@ public class PaymentsController : ControllerBase
                 e,
                 $"Изменена оплаченная сумма: было {originalPaidAmount.ToString("N2", culture)}, стало {e.PaidAmount.ToString("N2", culture)}",
                 now,
-                actor);
+                actor,
+                paymentTimeZone);
         }
 
         if (originalStatus != e.Status)
@@ -571,7 +588,8 @@ public class PaymentsController : ControllerBase
                 e,
                 $"Статус обновлён: {originalStatus.ToDisplayString()} → {e.Status.ToDisplayString()}",
                 now,
-                actor);
+                actor,
+                paymentTimeZone);
         }
 
         e.RescheduleCount = rescheduleCount;
@@ -579,7 +597,7 @@ public class PaymentsController : ControllerBase
         var overpaymentValidationError = await ValidatePaymentOverpaymentHandlingAsync(e, rawPaidAmount, ct);
         if (overpaymentValidationError is not null) return overpaymentValidationError;
 
-        await ApplyPaymentOverpaymentHandlingAsync(e, rawPaidAmount, now, ct);
+        await ApplyPaymentOverpaymentHandlingAsync(e, rawPaidAmount, now, paymentTimeZone, ct);
         await SyncPaymentCashOrderAsync(e, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, e, now, ct);
         await _db.SaveChangesAsync(ct);
@@ -803,6 +821,7 @@ public class PaymentsController : ControllerBase
         var now = DateTime.UtcNow;
         var culture = CultureInfo.GetCultureInfo("ru-RU");
         var actor = User.GetDisplayName();
+        var paymentTimeZone = await ResolvePaymentTimeZoneAsync(ct);
         var model = request.Payment;
         var sourceAmount = Math.Round(source.Amount, 2, MidpointRounding.AwayFromZero);
         var modelAmount = Math.Round(Math.Max(model.Amount, 0m), 2, MidpointRounding.AwayFromZero);
@@ -920,7 +939,8 @@ public class PaymentsController : ControllerBase
             remainderAmount,
             request.RemainderDate.Date,
             now,
-            actor);
+            actor,
+            paymentTimeZone);
         source.SystemNotes = ReplaceTechnicalMarkerLine(
             source.SystemNotes,
             PaymentRemainderTransferRules.PartialRemainderSourceMarker,
@@ -937,7 +957,8 @@ public class PaymentsController : ControllerBase
                 source,
                 $"Изменена плановая дата: {originalPlannedDate:dd.MM.yyyy} → {source.PlannedDate:dd.MM.yyyy}",
                 now,
-                actor);
+                actor,
+                paymentTimeZone);
         }
 
         var userChangedDueDate = model.Date != default && model.Date.Date != originalDueDate;
@@ -949,7 +970,8 @@ public class PaymentsController : ControllerBase
                 source,
                 $"Дата платежа изменена: {originalDueDate:dd.MM.yyyy} → {source.Date:dd.MM.yyyy}",
                 now,
-                actor);
+                actor,
+                paymentTimeZone);
         }
 
         if (Math.Abs(originalPaidAmount - source.PaidAmount) > 0.009m)
@@ -958,7 +980,8 @@ public class PaymentsController : ControllerBase
                 source,
                 $"Изменена оплаченная сумма: было {originalPaidAmount.ToString("N2", culture)}, стало {source.PaidAmount.ToString("N2", culture)}",
                 now,
-                actor);
+                actor,
+                paymentTimeZone);
         }
 
         if (originalStatus != source.Status)
@@ -967,7 +990,8 @@ public class PaymentsController : ControllerBase
                 source,
                 $"Статус обновлён: {originalStatus.ToDisplayString()} → {source.Status.ToDisplayString()}",
                 now,
-                actor);
+                actor,
+                paymentTimeZone);
         }
 
         source.RescheduleCount = rescheduleCount;
@@ -1037,6 +1061,7 @@ public class PaymentsController : ControllerBase
 
         var now = DateTime.UtcNow;
         var actor = User.GetDisplayName();
+        var paymentTimeZone = await ResolvePaymentTimeZoneAsync(ct);
         var culture = CultureInfo.GetCultureInfo("ru-RU");
         var source = pair.Value.Source;
         var remainder = pair.Value.Remainder;
@@ -1055,7 +1080,8 @@ public class PaymentsController : ControllerBase
             source,
             $"Перенос остатка отменен: платеж #{remainder.Id} на {marker.RemainderAmount.ToString("N2", culture)} удален, исходная сумма восстановлена до {marker.SourceOriginalAmount.ToString("N2", culture)}.",
             now,
-            actor);
+            actor,
+            paymentTimeZone);
         PaymentDomainService.Normalize(source);
         PaymentDomainService.ApplyStatusRules(source, now);
 
@@ -1097,6 +1123,7 @@ public class PaymentsController : ControllerBase
 
         var now = DateTime.UtcNow;
         var actor = User.GetDisplayName();
+        var paymentTimeZone = await ResolvePaymentTimeZoneAsync(ct);
         var culture = CultureInfo.GetCultureInfo("ru-RU");
         var source = pair.Value.Source;
         var remainder = pair.Value.Remainder;
@@ -1146,7 +1173,8 @@ public class PaymentsController : ControllerBase
             source,
             $"Разделение платежа изменено: оплачено {paidAmount.ToString("N2", culture)} / {sourceOriginalAmount.ToString("N2", culture)}, остаток {remainderAmount.ToString("N2", culture)} перенесен на {remainderDate:dd.MM.yyyy}.",
             now,
-            actor);
+            actor,
+            paymentTimeZone);
 
         remainder.Amount = remainderAmount;
         remainder.PaidAmount = 0m;
@@ -1169,7 +1197,8 @@ public class PaymentsController : ControllerBase
             remainder,
             $"Параметры перенесенного остатка изменены: сумма {remainderAmount.ToString("N2", culture)}, дата {remainderDate:dd.MM.yyyy}.",
             now,
-            actor);
+            actor,
+            paymentTimeZone);
 
         PaymentDomainService.Normalize(source);
         PaymentDomainService.ApplyStatusRules(source, now);
@@ -1372,6 +1401,7 @@ public class PaymentsController : ControllerBase
         Payment payment,
         decimal rawPaidAmount,
         DateTime now,
+        TimeZoneInfo paymentTimeZone,
         CancellationToken ct)
     {
         var overpaymentAmount = CalculateOverpaymentAmount(payment, rawPaidAmount);
@@ -1388,12 +1418,12 @@ public class PaymentsController : ControllerBase
             case PaymentOverpaymentHandling.NextInstallment:
                 await RemovePaymentOverpaymentRefundOperationAsync(payment.Id, ct);
                 await ClientBalanceService.UpsertPaymentOverpaymentAsync(_db, payment, payment.Amount, now, HttpContext, ct);
-                await ApplyOverpaymentToNextInstallmentAsync(payment, overpaymentAmount, now, ct);
+                await ApplyOverpaymentToNextInstallmentAsync(payment, overpaymentAmount, now, paymentTimeZone, ct);
                 break;
 
             case PaymentOverpaymentHandling.Refund:
                 await ClientBalanceService.UpsertPaymentOverpaymentAsync(_db, payment, payment.Amount, now, HttpContext, ct);
-                await UpsertPaymentOverpaymentRefundOperationAsync(payment, overpaymentAmount, now, ct);
+                await UpsertPaymentOverpaymentRefundOperationAsync(payment, overpaymentAmount, now, paymentTimeZone, ct);
                 break;
 
             case PaymentOverpaymentHandling.Advance:
@@ -1403,7 +1433,8 @@ public class PaymentsController : ControllerBase
                 AppendOverpaymentDecisionNote(
                     payment,
                     $"Переплата {FormatMoney(overpaymentAmount)} записана на баланс контрагента.",
-                    now);
+                    now,
+                    paymentTimeZone);
                 break;
         }
     }
@@ -1412,6 +1443,7 @@ public class PaymentsController : ControllerBase
         Payment payment,
         decimal overpaymentAmount,
         DateTime now,
+        TimeZoneInfo paymentTimeZone,
         CancellationToken ct)
     {
         var nextInstallment = await FindOverpaymentTargetInstallmentPaymentAsync(payment, track: true, ct);
@@ -1439,11 +1471,13 @@ public class PaymentsController : ControllerBase
         AppendOverpaymentDecisionNote(
             payment,
             $"Переплата {FormatMoney(overpaymentAmount)} зачтена в следующий платеж рассрочки #{nextInstallment.Id}.",
-            now);
+            now,
+            paymentTimeZone);
         AppendOverpaymentDecisionNote(
             nextInstallment,
             $"Зачтена переплата {FormatMoney(overpaymentAmount)} из платежа #{payment.Id}.",
-            now);
+            now,
+            paymentTimeZone);
     }
 
     private async Task<Payment?> FindOverpaymentTargetInstallmentPaymentAsync(
@@ -1580,6 +1614,7 @@ public class PaymentsController : ControllerBase
         Payment payment,
         decimal overpaymentAmount,
         DateTime now,
+        TimeZoneInfo paymentTimeZone,
         CancellationToken ct)
     {
         var key = BuildPaymentOverpaymentRefundKey(payment.Id);
@@ -1643,7 +1678,8 @@ public class PaymentsController : ControllerBase
         AppendOverpaymentDecisionNote(
             payment,
             $"Переплата {FormatMoney(overpaymentAmount)} оформлена к возврату клиенту.",
-            now);
+            now,
+            paymentTimeZone);
     }
 
     private async Task SyncRefundCashOrderAsync(
@@ -1972,14 +2008,15 @@ public class PaymentsController : ControllerBase
     private static string FormatMoney(decimal amount)
         => amount.ToString("N2", CultureInfo.GetCultureInfo("ru-RU"));
 
-    private void AppendOverpaymentDecisionNote(Payment payment, string message, DateTime now)
+    private void AppendOverpaymentDecisionNote(Payment payment, string message, DateTime now, TimeZoneInfo paymentTimeZone)
     {
         var comment = NormalizeOverpaymentComment(payment.OverpaymentComment);
         PaymentDomainService.AppendSystemNote(
             payment,
             string.IsNullOrWhiteSpace(comment) ? message : $"{message} Комментарий: {comment}",
             now,
-            User.GetDisplayName());
+            User.GetDisplayName(),
+            paymentTimeZone);
     }
 
     private static bool TryInferSuggestedRemainderDate(Payment payment, out DateTime suggestedDate)
@@ -2275,14 +2312,16 @@ public class PaymentsController : ControllerBase
         decimal remainderAmount,
         DateTime remainderDate,
         DateTime now,
-        string? actor)
+        string? actor,
+        TimeZoneInfo paymentTimeZone)
     {
         var culture = CultureInfo.GetCultureInfo("ru-RU");
         PaymentDomainService.AppendSystemNote(
             source,
             $"Частичная оплата: {paidAmount.ToString("N2", culture)} / {originalAmount.ToString("N2", culture)}. Остаток {remainderAmount.ToString("N2", culture)} перенесен на {remainderDate:dd.MM.yyyy}.",
             now,
-            actor);
+            actor,
+            paymentTimeZone);
     }
 
     private static Payment CreateRemainderPaymentFromSource(

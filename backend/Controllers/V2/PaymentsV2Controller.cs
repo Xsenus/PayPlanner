@@ -22,6 +22,9 @@ public class PaymentsV2Controller : ControllerBase
     private Task<DataVisibilityAccess?> ResolvePaymentsVisibilityAsync(CancellationToken ct)
         => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
 
+    private Task<TimeZoneInfo> ResolvePaymentTimeZoneAsync(CancellationToken ct)
+        => CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+
     [HttpGet]
     public async Task<ActionResult<PaymentsPageResponse>> Get(
         [FromQuery] DateTime? from,
@@ -246,6 +249,7 @@ public class PaymentsV2Controller : ControllerBase
         var now = DateTime.UtcNow;
         var culture = CultureInfo.GetCultureInfo("ru-RU");
         var actor = User.GetDisplayName();
+        var paymentTimeZone = await ResolvePaymentTimeZoneAsync(ct);
 
         var originalDueDate = entity.Date.Date;
         var originalPlannedDate = (entity.PlannedDate == default ? entity.Date : entity.PlannedDate).Date;
@@ -307,7 +311,8 @@ public class PaymentsV2Controller : ControllerBase
                 entity,
                 $"Изменена плановая дата: {originalPlannedDate:dd.MM.yyyy} → {entity.PlannedDate:dd.MM.yyyy}",
                 now,
-                actor);
+                actor,
+                paymentTimeZone);
         }
 
         var userChangedDueDate = model.Date.Date != originalDueDate;
@@ -318,7 +323,8 @@ public class PaymentsV2Controller : ControllerBase
                 entity,
                 $"Дата платежа изменена: {originalDueDate:dd.MM.yyyy} → {entity.Date:dd.MM.yyyy}",
                 now,
-                actor);
+                actor,
+                paymentTimeZone);
         }
         else if (originalDueDate != entity.Date.Date)
         {
@@ -326,7 +332,8 @@ public class PaymentsV2Controller : ControllerBase
                 entity,
                 $"Дата платежа автоматически скорректирована на {entity.Date:dd.MM.yyyy}",
                 now,
-                actor);
+                actor,
+                paymentTimeZone);
         }
 
         if (Math.Abs(originalPaidAmount - entity.PaidAmount) > 0.009m)
@@ -335,7 +342,8 @@ public class PaymentsV2Controller : ControllerBase
                 entity,
                 $"Изменена оплаченная сумма: было {originalPaidAmount.ToString("N2", culture)}, стало {entity.PaidAmount.ToString("N2", culture)}",
                 now,
-                actor);
+                actor,
+                paymentTimeZone);
         }
 
         if (originalStatus != entity.Status)
@@ -344,7 +352,8 @@ public class PaymentsV2Controller : ControllerBase
                 entity,
                 $"Статус обновлён: {originalStatus.ToDisplayString()} → {entity.Status.ToDisplayString()}",
                 now,
-                actor);
+                actor,
+                paymentTimeZone);
         }
 
         entity.RescheduleCount = rescheduleCount;
