@@ -1,3 +1,5 @@
+using System.Security.Claims;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -724,6 +726,78 @@ public class AccountsControllerTests
         Assert.Equal(1, supplierGroup.CaseCount);
     }
 
+    [Fact]
+    public async Task GetPayablesDashboard_UsesProfileTimeZoneForTodayBucket()
+    {
+        await using var db = await CreateContextAsync();
+
+        var (timeZoneId, profileToday) = ResolveTimeZoneWithDifferentLocalDate();
+        var role = new Role { Name = "admin", Description = "Admin" };
+        var user = new User
+        {
+            Email = "accounts-timezone@example.test",
+            FullName = "Accounts Timezone User",
+            IsActive = true,
+            Role = role,
+        };
+        db.Roles.Add(role);
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = user.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = timeZoneId,
+        });
+
+        var supplier = new Client { Name = "Timezone Supplier" };
+        db.Clients.Add(supplier);
+        await db.SaveChangesAsync();
+
+        var profileTodayPayment = CreatePayment(profileToday, 1_500m, "Profile today supplier debt");
+        profileTodayPayment.Type = PaymentType.Expense;
+        profileTodayPayment.Status = PaymentStatus.Pending;
+        profileTodayPayment.ClientId = supplier.Id;
+        profileTodayPayment.CounterpartyName = supplier.Name;
+
+        db.Payments.Add(profileTodayPayment);
+        await db.SaveChangesAsync();
+
+        var controller = new AccountsController(db)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                        [
+                            new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                            new Claim(ClaimTypes.Name, user.FullName),
+                            new Claim(ClaimTypes.Role, "admin"),
+                        ],
+                        authenticationType: "Test")),
+                },
+            },
+        };
+
+        var result = await controller.GetPayablesDashboard(
+            from: null,
+            to: null,
+            search: null,
+            clientId: null,
+            clientIds: null,
+            clientRole: null,
+            ct: CancellationToken.None);
+
+        var response = Assert.IsType<OkObjectResult>(result.Result);
+        var dashboard = Assert.IsType<PayablesDashboardDto>(response.Value);
+        var todayBucket = Assert.Single(dashboard.DueBuckets, bucket => bucket.Key == "today");
+
+        Assert.Equal(1_500m, todayBucket.Amount);
+        Assert.Equal(1, todayBucket.Count);
+    }
+
     private static async Task<PaymentContext> CreateContextAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");
@@ -736,6 +810,29 @@ public class AccountsControllerTests
         var db = new PaymentContext(options);
         await db.Database.EnsureCreatedAsync();
         return db;
+    }
+
+    private static (string TimeZoneId, DateTime ProfileToday) ResolveTimeZoneWithDifferentLocalDate()
+    {
+        var nowUtc = DateTime.UtcNow;
+        var utcToday = nowUtc.Date;
+        foreach (var timeZoneId in new[]
+        {
+            "Pacific/Kiritimati",
+            "Line Islands Standard Time",
+            "Pacific/Pago_Pago",
+            "Samoa Standard Time",
+        })
+        {
+            var timeZone = CalendarTimeZoneHelper.ResolveTimeZone(timeZoneId);
+            var profileToday = CalendarTimeZoneHelper.ToUserLocal(nowUtc, timeZone).Date;
+            if (profileToday != utcToday)
+            {
+                return (timeZoneId, profileToday);
+            }
+        }
+
+        throw new InvalidOperationException("No test timezone with a local date different from UTC was found.");
     }
 
     private static async Task CreateInvoiceWithDirectPartialPaymentAsync(PaymentContext db)

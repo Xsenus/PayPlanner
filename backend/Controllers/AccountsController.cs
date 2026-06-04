@@ -20,6 +20,12 @@ public class AccountsController : ControllerBase
 
     public AccountsController(PaymentContext db) => _db = db;
 
+    private async Task<DateTime> ResolveAccountsTodayAsync(CancellationToken ct)
+    {
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        return CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date;
+    }
+
     [HttpGet("registry")]
     public async Task<ActionResult<AccountsPageResponse>> GetRegistry(
         [FromQuery] DateTime? from,
@@ -575,7 +581,7 @@ public class AccountsController : ControllerBase
             .Where(payment => payment.Status is not PaymentStatus.Completed and not PaymentStatus.Cancelled)
             .ToList();
 
-        var today = DateTime.UtcNow.Date;
+        var today = await ResolveAccountsTodayAsync(ct);
         var upcomingLimit = today.AddDays(7);
         var rows = visiblePayments
             .Select(payment =>
