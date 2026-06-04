@@ -9,11 +9,12 @@ import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useTranslation } from '../../hooks/useTranslation';
 import { usePaymentsPaged } from '../../hooks/usePaymentsPaged';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import type { ClientCase, ClientRole, PartialPaymentRemainderCandidate, Payment, PaymentPayload, PaymentStatus } from '../../types';
 import { PaymentsTable, type PaymentTableColumnKey } from '../Calendar/PaymentsTable';
 import { PaymentModal } from '../Calendar/PaymentModal';
 import { formatCurrencySmart } from '../../utils/formatters';
-import { formatLocalYMD, fromInputToApiDate, toDateInputValue } from '../../utils/dateUtils';
+import { todayYMDInTimeZone, fromInputToApiDate, toDateInputValue } from '../../utils/dateUtils';
 import { useClients } from '../../hooks/useClients';
 import { useDictionaries } from '../../hooks/useDictionaries';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
@@ -253,13 +254,13 @@ function parseAmountInput(raw: string): number | null {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
-function defaultFromDate() {
-  const now = new Date();
-  return formatLocalYMD(new Date(now.getFullYear(), now.getMonth(), 1));
+function defaultFromDate(timeZoneId?: string | null) {
+  const today = todayYMDInTimeZone(timeZoneId);
+  return `${today.slice(0, 8)}01`;
 }
 
-function defaultToDate() {
-  return formatLocalYMD(new Date());
+function defaultToDate(timeZoneId?: string | null) {
+  return todayYMDInTimeZone(timeZoneId);
 }
 
 function formatCountLabel(template: string, count: number) {
@@ -286,9 +287,12 @@ export function Payments({
   const { t, formatDate } = useTranslation();
   const { clients } = useClients();
   const { dealTypes, incomeTypes, paymentSources } = useDictionaries();
+  const profileTimeZoneId = useUserTimeZone();
+  const defaultFrom = defaultFromDate(profileTimeZoneId);
+  const defaultTo = defaultToDate(profileTimeZoneId);
 
-  const [fromDate, setFromDate] = useState(() => defaultFromDate());
-  const [toDate, setToDate] = useState(() => defaultToDate());
+  const [fromDate, setFromDate] = useState(() => defaultFrom);
+  const [toDate, setToDate] = useState(() => defaultTo);
   const [selectedClientId, setSelectedClientId] = useState('');
   const [clientRoleFilter, setClientRoleFilter] = useState<ClientRoleFilter>('all');
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
@@ -328,6 +332,7 @@ export function Payments({
 
   const initialFromRef = useRef(fromDate);
   const initialToRef = useRef(toDate);
+  const defaultPeriodRef = useRef({ from: defaultFrom, to: defaultTo });
   const routePaymentRequestRef = useRef(0);
   const toastRef = useRef(toast);
   const [autoRetryScheduled, setAutoRetryScheduled] = useState(false);
@@ -364,6 +369,19 @@ export function Payments({
   useEffect(() => {
     toastRef.current = toast;
   }, [toast]);
+
+  useEffect(() => {
+    const previous = defaultPeriodRef.current;
+    setFromDate((current) => (current === previous.from ? defaultFrom : current));
+    setToDate((current) => (current === previous.to ? defaultTo : current));
+    if (initialFromRef.current === previous.from) {
+      initialFromRef.current = defaultFrom;
+    }
+    if (initialToRef.current === previous.to) {
+      initialToRef.current = defaultTo;
+    }
+    defaultPeriodRef.current = { from: defaultFrom, to: defaultTo };
+  }, [defaultFrom, defaultTo]);
 
   const minAmountValue = useMemo(() => parseAmountInput(minAmount), [minAmount]);
   const maxAmountValue = useMemo(() => parseAmountInput(maxAmount), [maxAmount]);
@@ -435,7 +453,7 @@ export function Payments({
     if (defaultType === 'Income' || defaultType === 'Expense') {
       setModalType(defaultType);
     }
-  }, [defaultType]);
+  }, [defaultFrom, defaultTo, defaultType]);
 
   useEffect(() => {
     setLastUpdated(new Date());
@@ -830,8 +848,10 @@ export function Payments({
   );
 
   const handleResetFilters = useCallback(() => {
-    setFromDate(defaultFromDate());
-    setToDate(defaultToDate());
+    setFromDate(defaultFrom);
+    setToDate(defaultTo);
+    initialFromRef.current = defaultFrom;
+    initialToRef.current = defaultTo;
     setSelectedClientId('');
     setClientRoleFilter('all');
     setSelectedCategories([]);
@@ -1004,7 +1024,7 @@ export function Payments({
       await apiService.updatePaymentStatus(
         statusChangePayment.id,
         statusChangeValue,
-        statusChangeValue === 'Completed' ? formatLocalYMD(new Date()) : null,
+        statusChangeValue === 'Completed' ? defaultTo : null,
         statusChangeReason.trim() || null,
       );
       setStatusChangePayment(null);
@@ -1016,7 +1036,7 @@ export function Payments({
     } finally {
       setStatusChangeSubmitting(false);
     }
-  }, [paymentsPermissions.canEdit, refresh, statusChangePayment, statusChangeReason, statusChangeValue, t, toast]);
+  }, [defaultTo, paymentsPermissions.canEdit, refresh, statusChangePayment, statusChangeReason, statusChangeValue, t, toast]);
 
   const handleSubmit = useCallback(
     async (payload: SubmitDTO) => {

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { Payment } from '../../types';
 import { Payments } from './Payments';
@@ -97,6 +97,10 @@ vi.mock('../../hooks/useDebouncedValue', () => ({
   useDebouncedValue: (value: string) => value,
 }));
 
+vi.mock('../../hooks/useUserTimeZone', () => ({
+  useUserTimeZone: () => 'Europe/Samara',
+}));
+
 vi.mock('../../hooks/useClients', () => ({
   useClients: () => ({
     clients: [],
@@ -138,18 +142,45 @@ vi.mock('../Calendar/PaymentsTable', () => ({
   PaymentsTable: (props: {
     payments: Payment[];
     onEditPayment?: (payment: Payment) => void;
+    onStatusChange?: (payment: Payment) => void;
   }) => (
     <div data-testid="payments-table">
       {props.payments.map((payment) => (
-        <button
-          key={payment.id}
-          type="button"
-          onClick={() => props.onEditPayment?.(payment)}
-        >
-          {`edit-payment-${payment.id}`}
-        </button>
+        <div key={payment.id}>
+          <button
+            type="button"
+            onClick={() => props.onEditPayment?.(payment)}
+          >
+            {`edit-payment-${payment.id}`}
+          </button>
+          <button
+            type="button"
+            onClick={() => props.onStatusChange?.(payment)}
+          >
+            {`status-payment-${payment.id}`}
+          </button>
+        </div>
       ))}
     </div>
+  ),
+}));
+
+vi.mock('../ui/StatusChangeModal', () => ({
+  StatusChangeModal: (props: {
+    open: boolean;
+    onChange: (value: Payment['status']) => void;
+    onConfirm: () => void;
+  }) => (
+    props.open ? (
+      <div data-testid="status-change-dialog">
+        <button type="button" onClick={() => props.onChange('Completed')}>
+          select-completed
+        </button>
+        <button type="button" onClick={props.onConfirm}>
+          confirm-status
+        </button>
+      </div>
+    ) : null
   ),
 }));
 
@@ -159,6 +190,7 @@ vi.mock('../../services/api', () => ({
     createPayment: vi.fn(),
     updatePayment: vi.fn(),
     updateInvoiceManagedPayment: vi.fn(),
+    updatePaymentStatus: vi.fn(),
     deletePayment: vi.fn(),
     getClientBalance: vi.fn(),
     applyClientBalance: vi.fn(),
@@ -176,6 +208,7 @@ describe('Payments integration', () => {
     vi.mocked(apiService.createPayment).mockReset();
     vi.mocked(apiService.updatePayment).mockReset();
     vi.mocked(apiService.updateInvoiceManagedPayment).mockReset();
+    vi.mocked(apiService.updatePaymentStatus).mockReset();
     vi.mocked(apiService.deletePayment).mockReset();
     vi.mocked(apiService.getClientBalance).mockReset();
     vi.mocked(apiService.applyClientBalance).mockReset();
@@ -197,6 +230,72 @@ describe('Payments integration', () => {
     usePaymentsPagedMock.mockReturnValue(paymentsPagedResult);
     paymentsPagedResult.payments = [];
     paymentsPagedResult.total = 0;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('uses the profile time zone for the default payments period near midnight', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-04T22:30:00.000Z'));
+
+    render(<Payments />);
+    vi.useRealTimers();
+
+    const lastCall = usePaymentsPagedMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(lastCall).toMatchObject({
+      from: '2026-06-01',
+      to: '2026-06-05',
+    });
+  });
+
+  it('uses the profile time zone for the paid date when completing a payment', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-04T22:30:00.000Z'));
+
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    const payment = {
+      id: 990,
+      amount: 12_000,
+      date: '2026-06-04',
+      plannedDate: '2026-06-04',
+      type: 'Income',
+      status: 'Pending',
+      description: 'Profile timezone payment',
+      notes: '',
+      systemNotes: '',
+      isPaid: false,
+      paidAmount: 0,
+      outstandingAmount: 12_000,
+      hasPartialPayment: false,
+      rescheduleCount: 0,
+      documentKind: 'Payment',
+    } as unknown as Payment;
+
+    usePaymentsPagedMock.mockReturnValue({
+      ...paymentsPagedResult,
+      payments: [payment],
+      total: 1,
+      refresh,
+    });
+    vi.mocked(apiService.updatePaymentStatus).mockResolvedValue({ ...payment, status: 'Completed' } as Payment);
+
+    render(<Payments />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'status-payment-990' }));
+    fireEvent.click(screen.getByRole('button', { name: 'select-completed' }));
+    fireEvent.click(screen.getByRole('button', { name: 'confirm-status' }));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(apiService.updatePaymentStatus).toHaveBeenCalledWith(
+      990,
+      'Completed',
+      '2026-06-05',
+      null,
+    );
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 
   it('opens the existing payment modal for invoice-managed payments', async () => {
