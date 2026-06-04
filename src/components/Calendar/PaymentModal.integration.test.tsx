@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PaymentModal } from './PaymentModal';
 
@@ -113,6 +113,10 @@ vi.mock('../../hooks/useFormRequirements', () => ({
 
 vi.mock('../../hooks/useToast', () => ({
   useToast: () => ({ error: toastErrorMock, success: toastSuccessMock, info: vi.fn() }),
+}));
+
+vi.mock('../../hooks/useUserTimeZone', () => ({
+  useUserTimeZone: () => 'Europe/Samara',
 }));
 
 vi.mock('../../services/api', () => ({
@@ -329,6 +333,50 @@ describe('PaymentModal integration', () => {
       type: 'Incoming',
       date: '2026-04-20',
     });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('uses the profile timezone day for new payment default dates', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-04T20:30:00.000Z'));
+
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(document.querySelector<HTMLInputElement>('input[name="date"]')?.value).toBe('2026-06-05');
+    expect(document.querySelector<HTMLInputElement>('input[name="plannedDate"]')?.value).toBe('2026-06-05');
+  });
+
+  it('uses the profile timezone day when marking a payment as paid', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-06-04T20:30:00.000Z'));
+
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    const amountInput = document.querySelector<HTMLInputElement>('input[name="amount"]');
+    const isPaidInput = document.querySelector<HTMLInputElement>('input[name="isPaid"]');
+    expect(amountInput).toBeTruthy();
+    expect(isPaidInput).toBeTruthy();
+
+    fireEvent.change(amountInput!, { target: { value: '12000' } });
+    fireEvent.click(isPaidInput!);
+
+    expect(document.querySelector<HTMLInputElement>('input[name="lastPaymentDate"]')?.value).toBe('2026-06-05');
+    expect(document.querySelector<HTMLInputElement>('input[name="paidDate"]')?.value).toBe('2026-06-05');
   });
 
   it('shows the locked linked invoice context for a payment created from an invoice', async () => {

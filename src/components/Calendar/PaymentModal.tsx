@@ -21,7 +21,7 @@ import type {
   ApplyClientBalanceResult,
   PaymentOverpaymentHandling,
 } from '../../types';
-import { toDateInputValue, fromInputToApiDate, todayYMD, toRuDate } from '../../utils/dateUtils';
+import { toDateInputValue, fromInputToApiDate, todayYMDInTimeZone, toRuDate } from '../../utils/dateUtils';
 import { buildOptionsWithSelected } from '../../utils/formOptions';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import { useDialog } from '../../hooks/useDialog';
@@ -39,6 +39,7 @@ import {
 import { parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
 import { buildCancelledPaymentPayload } from '../../utils/paymentActions';
 import { CounterpartyPickerModal } from '../ui/CounterpartyPickerModal';
+import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 
 type PaymentKind = 'Income' | 'Expense';
 type LinkedInvoiceContext = {
@@ -287,6 +288,9 @@ export function PaymentModal({
   const { confirm } = useDialog();
   const toast = useToast();
   const { isRequired } = useFormRequirements('payments', isOpen);
+  const profileTimeZoneId = useUserTimeZone();
+  const defaultDate = todayYMDInTimeZone(profileTimeZoneId);
+  const defaultDateRef = useRef(defaultDate);
 
   const [loading, setLoading] = useState(false);
   const [balanceApplyLoading, setBalanceApplyLoading] = useState(false);
@@ -310,8 +314,8 @@ export function PaymentModal({
   const [contractsError, setContractsError] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
-    date: todayYMD(),
-    plannedDate: todayYMD(),
+    date: defaultDate,
+    plannedDate: defaultDate,
     amount: '',
     paidAmount: '',
     status: 'Pending' as PaymentStatus,
@@ -479,7 +483,7 @@ export function PaymentModal({
 
     const clientId = formData.legalEntityId ? '' : formData.clientId || (defaultClientId ? String(defaultClientId) : '');
     const clientCaseId = formData.clientCaseId ? Number(formData.clientCaseId) : null;
-    const invoiceDate = formData.accountDate || formData.date || todayYMD();
+    const invoiceDate = formData.accountDate || formData.date || defaultDate;
     const dueDate = formData.date || invoiceDate;
     const amount = formData.amount.trim();
     const description = formData.description.trim();
@@ -520,7 +524,7 @@ export function PaymentModal({
       selectedActs: [],
       selectedClientCaseIds: clientCaseId ? [clientCaseId] : [],
     };
-  }, [defaultClientId, formData.account, formData.accountDate, formData.amount, formData.clientCaseId, formData.contractId, formData.date, formData.description, formData.expenseClientId, formData.expenseLegalEntityId, formData.legalEntityId, formData.paidDate, formData.status, formData.type, formData.clientId, invoiceCreateOpen, invoiceCreateSeedContractId]);
+  }, [defaultClientId, defaultDate, formData.account, formData.accountDate, formData.amount, formData.clientCaseId, formData.contractId, formData.date, formData.description, formData.expenseClientId, formData.expenseLegalEntityId, formData.legalEntityId, formData.paidDate, formData.status, formData.type, formData.clientId, invoiceCreateOpen, invoiceCreateSeedContractId]);
 
   useEffect(() => {
     if (!isOpen || !invoicePickerOpen || hasLockedInvoice) {
@@ -655,7 +659,7 @@ export function PaymentModal({
       formData.lastPaymentDate ||
       formData.paidDate ||
       formData.date ||
-      todayYMD();
+      defaultDate;
     const currentNumber = formData.paymentOrderNumber.trim();
     const currentDraft = autoCashOrderDraftRef.current;
 
@@ -731,6 +735,7 @@ export function PaymentModal({
     formData.paidDate,
     formData.paymentDocumentDate,
     formData.paymentOrderNumber,
+    defaultDate,
     isCashPaymentSource,
     isOpen,
   ]);
@@ -778,6 +783,7 @@ export function PaymentModal({
   useEffect(() => {
     if (!isOpen) {
       prevOpenRef.current = false;
+      defaultDateRef.current = defaultDate;
       setSyncDateWithPayment(false);
       setDetailsTab('details');
       setClientPickerOpen(false);
@@ -829,8 +835,8 @@ export function PaymentModal({
         }
         setAppliedClientBalanceAmount(appliedBalanceAmount);
         setFormData({
-          date: toDateInputValue(p.date) || todayYMD(),
-          plannedDate: toDateInputValue(p.plannedDate) || toDateInputValue(p.date) || todayYMD(),
+          date: toDateInputValue(p.date) || defaultDate,
+          plannedDate: toDateInputValue(p.plannedDate) || toDateInputValue(p.date) || defaultDate,
           amount: formatMoneyString(p.amount),
           paidAmount: formatMoneyString(Math.max(p.paidAmount ?? 0, appliedBalanceAmount)),
           status: p.status,
@@ -872,8 +878,8 @@ export function PaymentModal({
         const resolvedExpenseClientId = linkedInvoice?.expenseClientId ?? defaultExpenseClientId ?? null;
         setAppliedClientBalanceAmount(0);
         setFormData({
-          date: todayYMD(),
-          plannedDate: todayYMD(),
+          date: defaultDate,
+          plannedDate: defaultDate,
           amount: '',
           paidAmount: '',
           status: 'Pending',
@@ -910,7 +916,7 @@ export function PaymentModal({
       }
 
       const fallbackDate =
-        (p ? toDateInputValue(p.plannedDate) || toDateInputValue(p.date) : null) || todayYMD();
+        (p ? toDateInputValue(p.plannedDate) || toDateInputValue(p.date) : null) || defaultDate;
       const splitMetadata = p ? parsePartialRemainderTransferMetadata(p) : null;
       setRescheduleDate(fallbackDate);
       setPaymentMoveDate(fallbackDate);
@@ -924,9 +930,28 @@ export function PaymentModal({
       );
       setAdjustRemainderDate(toDateInputValue(splitMetadata?.remainderDate) || fallbackDate);
 
+      defaultDateRef.current = defaultDate;
       prevOpenRef.current = true;
     }
   }, [defaultClientCaseId, defaultClientId, defaultExpenseClientId, defaultExpenseLegalEntityId, defaultLegalEntityId, isOpen, linkedInvoice, type]);
+
+  useEffect(() => {
+    if (!isOpen || paymentRef.current) {
+      defaultDateRef.current = defaultDate;
+      return;
+    }
+
+    const previousDefaultDate = defaultDateRef.current;
+    setFormData((current) => ({
+      ...current,
+      date: current.date === previousDefaultDate ? defaultDate : current.date,
+      plannedDate: current.plannedDate === previousDefaultDate ? defaultDate : current.plannedDate,
+    }));
+    setRescheduleDate((current) => (current === previousDefaultDate ? defaultDate : current));
+    setPaymentMoveDate((current) => (current === previousDefaultDate ? defaultDate : current));
+    setAdjustRemainderDate((current) => (current === previousDefaultDate ? defaultDate : current));
+    defaultDateRef.current = defaultDate;
+  }, [defaultDate, isOpen]);
 
   const getSelectedClientCase = () => (
     formData.clientCaseId
@@ -1214,7 +1239,7 @@ export function PaymentModal({
 
   const markPaid = () =>
     setFormData((s) => {
-      const effectivePaidDate = s.paidDate || todayYMD();
+      const effectivePaidDate = s.paidDate || defaultDate;
       const paidAmount = s.amount && s.amount.trim() ? s.amount : s.paidAmount || s.amount;
       return {
         ...s,
@@ -2162,7 +2187,7 @@ export function PaymentModal({
   };
 
   const openPaymentMoveTools = () => {
-    setPaymentMoveDate(paymentMoveDate || formData.plannedDate || formData.date || todayYMD());
+    setPaymentMoveDate(paymentMoveDate || formData.plannedDate || formData.date || defaultDate);
     setPaymentMoveOpen(true);
   };
 
@@ -2322,8 +2347,8 @@ export function PaymentModal({
         paidAmount: formatMoneyDisplayValue(nextPaid),
         isPaid: nextPaid >= amount - 0.005,
         status: nextPaid >= amount - 0.005 ? 'Completed' : prev.status,
-        lastPaymentDate: prev.lastPaymentDate || todayYMD(),
-        paidDate: nextPaid >= amount - 0.005 ? prev.paidDate || todayYMD() : prev.paidDate,
+        lastPaymentDate: prev.lastPaymentDate || defaultDate,
+        paidDate: nextPaid >= amount - 0.005 ? prev.paidDate || defaultDate : prev.paidDate,
       }));
       setAppliedClientBalanceAmount((prev) =>
         Number((prev + appliedAmount).toFixed(2)),
@@ -2437,8 +2462,8 @@ export function PaymentModal({
           paidAmount: formatMoneyDisplayValue(nextPaid),
           isPaid: nextPaid >= amount - 0.005,
           status: nextPaid >= amount - 0.005 ? 'Completed' : prev.status,
-          lastPaymentDate: prev.lastPaymentDate || todayYMD(),
-          paidDate: nextPaid >= amount - 0.005 ? prev.paidDate || todayYMD() : prev.paidDate,
+          lastPaymentDate: prev.lastPaymentDate || defaultDate,
+          paidDate: nextPaid >= amount - 0.005 ? prev.paidDate || defaultDate : prev.paidDate,
         }));
         setAppliedClientBalanceAmount((prev) => Number((prev + appliedAmount).toFixed(2)));
       }
