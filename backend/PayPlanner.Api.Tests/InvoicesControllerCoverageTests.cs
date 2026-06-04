@@ -151,6 +151,57 @@ public class InvoicesControllerCoverageTests
     }
 
     [Fact]
+    public async Task GetSummary_UsesProfileTimeZoneForOverdueAging()
+    {
+        await using var db = await CreateContextAsync();
+        var clientId = await CreateClientAsync(db, "Timezone Aging Client");
+        var userId = await CreateUserAsync(db, "Timezone Aging Admin", roleName: "admin");
+        var selectedZone = ResolveTimeZoneWithDifferentLocalDate();
+
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = userId,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = selectedZone.TimeZoneId,
+        });
+
+        var dueDate = selectedZone.ProfileToday > selectedZone.UtcToday
+            ? selectedZone.ProfileToday.AddDays(-11)
+            : selectedZone.ProfileToday.AddDays(-10);
+
+        await CreateInvoicePaymentAsync(
+            db,
+            "SUM-TZ-001",
+            clientId,
+            dueDate,
+            900m,
+            PaymentStatus.Overdue,
+            PaymentType.Income);
+
+        var controller = CreateController(db, isAdmin: true, userId: userId);
+
+        var action = await controller.GetSummary(
+            from: null,
+            to: null,
+            status: null,
+            clientId: null,
+            caseId: null,
+            responsibleId: null,
+            search: null,
+            type: PaymentType.Income,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var summary = Assert.IsType<InvoiceSummaryDto>(ok.Value);
+
+        Assert.Equal(1, summary.Overdue.Count);
+        Assert.Equal(900m, summary.Overdue.Amount);
+        Assert.Equal(selectedZone.ProfileToday < selectedZone.UtcToday ? 900m : 0m, summary.OverdueAging.Day0To10);
+        Assert.Equal(selectedZone.ProfileToday > selectedZone.UtcToday ? 900m : 0m, summary.OverdueAging.Day11To30);
+        Assert.Equal(900m, summary.OverdueAging.Total);
+    }
+
+    [Fact]
     public async Task GetSummary_WhenFilteringAllStatuses_ExcludesCancelledInvoicesFromTotal()
     {
         await using var db = await CreateContextAsync();
@@ -1785,6 +1836,29 @@ public class InvoicesControllerCoverageTests
         db.Users.Add(user);
         await db.SaveChangesAsync();
         return user.Id;
+    }
+
+    private static (string TimeZoneId, DateTime UtcToday, DateTime ProfileToday) ResolveTimeZoneWithDifferentLocalDate()
+    {
+        var nowUtc = DateTime.UtcNow;
+        var utcToday = nowUtc.Date;
+        foreach (var timeZoneId in new[]
+        {
+            "Pacific/Kiritimati",
+            "Line Islands Standard Time",
+            "Pacific/Pago_Pago",
+            "Samoa Standard Time",
+        })
+        {
+            var timeZone = CalendarTimeZoneHelper.ResolveTimeZone(timeZoneId);
+            var profileToday = CalendarTimeZoneHelper.ToUserLocal(nowUtc, timeZone).Date;
+            if (profileToday != utcToday)
+            {
+                return (timeZoneId, utcToday, profileToday);
+            }
+        }
+
+        throw new InvalidOperationException("No test timezone with a local date different from UTC was found.");
     }
 
     private static async Task<int> CreateClientAsync(PaymentContext db, string name)

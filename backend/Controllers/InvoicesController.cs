@@ -61,6 +61,12 @@ public class InvoicesController : ControllerBase
     private Task<TimeZoneInfo> ResolveInvoiceTimeZoneAsync(CancellationToken ct)
         => CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
 
+    private async Task<DateTime> ResolveInvoiceTodayAsync(CancellationToken ct)
+    {
+        var timeZone = await ResolveInvoiceTimeZoneAsync(ct);
+        return CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date;
+    }
+
     [HttpGet]
     public async Task<IActionResult> Get(
         [FromQuery] DateTime? from,
@@ -214,7 +220,7 @@ public class InvoicesController : ControllerBase
             return BadRequest("Unknown invoice workflow status.");
         }
 
-        var today = DateTime.UtcNow.Date;
+        var today = await ResolveInvoiceTodayAsync(ct);
         var items = await QueryInvoiceDtosAsync(
             from,
             to,
@@ -1020,7 +1026,7 @@ public class InvoicesController : ControllerBase
             });
         }
 
-        ApplyPaidFlags(payment, request.PaidDate);
+        ApplyPaidFlags(payment, request.PaidDate, await ResolveInvoiceTodayAsync(ct));
 
         await using var createTransaction = await _db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
 
@@ -1249,7 +1255,7 @@ public class InvoicesController : ControllerBase
             });
         }
 
-        ApplyPaidFlags(payment, request.PaidDate);
+        ApplyPaidFlags(payment, request.PaidDate, await ResolveInvoiceTodayAsync(ct));
         await SyncSiblingInvoiceWorkflowStatusesAsync(payment, workflowStatus, now, actionReason, ct);
 
         if (originalStatus != payment.Status)
@@ -3027,7 +3033,7 @@ public class InvoicesController : ControllerBase
         };
     }
 
-    private static void ApplyPaidFlags(Payment payment, DateTime? paidDate)
+    private static void ApplyPaidFlags(Payment payment, DateTime? paidDate, DateTime today)
     {
         var effectiveDate = (paidDate ?? payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date).Date;
 
@@ -3044,7 +3050,7 @@ public class InvoicesController : ControllerBase
             payment.IsPaid = false;
             if (payment.PaidAmount <= 0m)
             {
-                payment.Status = payment.Date.Date < DateTime.UtcNow.Date
+                payment.Status = payment.Date.Date < today.Date
                     ? PaymentStatus.Overdue
                     : PaymentStatus.Pending;
                 payment.LastPaymentDate = null;
