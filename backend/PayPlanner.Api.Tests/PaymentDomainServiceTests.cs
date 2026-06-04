@@ -16,6 +16,7 @@ public class PaymentDomainServiceTests
             Date = new DateTime(2026, 6, 5, 23, 30, 0, DateTimeKind.Utc),
             PlannedDate = new DateTime(2026, 6, 7, 2, 15, 0, DateTimeKind.Local),
             AccountDate = new DateTime(2026, 6, 1, 12, 0, 0, DateTimeKind.Utc),
+            LegacyAccountDate = new DateTime(2026, 5, 31, 23, 45, 0, DateTimeKind.Utc),
             LastPaymentDate = new DateTime(2026, 6, 6, 21, 0, 0, DateTimeKind.Utc),
             PaidDate = new DateTime(2026, 6, 6, 21, 0, 0, DateTimeKind.Utc),
             PaymentDocumentDate = new DateTime(2026, 6, 4, 18, 45, 0, DateTimeKind.Utc),
@@ -31,6 +32,7 @@ public class PaymentDomainServiceTests
         AssertLocalDate(payment.Date, 2026, 6, 5);
         AssertLocalDate(payment.PlannedDate, 2026, 6, 7);
         AssertLocalDate(payment.AccountDate, 2026, 6, 1);
+        AssertLocalDate(payment.LegacyAccountDate, 2026, 5, 31);
         AssertLocalDate(payment.LastPaymentDate, 2026, 6, 6);
         AssertLocalDate(payment.PaidDate, 2026, 6, 6);
         AssertLocalDate(payment.PaymentDocumentDate, 2026, 6, 4);
@@ -39,11 +41,15 @@ public class PaymentDomainServiceTests
         {
             payment.Date,
             payment.PlannedDate,
+            payment.AccountDate,
+            payment.LegacyAccountDate,
             payment.PaidDate
         });
 
         Assert.Contains("\"Date\":\"2026-06-05T00:00:00\"", json);
         Assert.Contains("\"PlannedDate\":\"2026-06-07T00:00:00\"", json);
+        Assert.Contains("\"AccountDate\":\"2026-06-01T00:00:00\"", json);
+        Assert.Contains("\"LegacyAccountDate\":\"2026-05-31T00:00:00\"", json);
         Assert.Contains("\"PaidDate\":\"2026-06-06T00:00:00\"", json);
         Assert.DoesNotContain("Z", json);
     }
@@ -78,6 +84,9 @@ public class PaymentDomainServiceTests
         {
             Date = new DateTime(2026, 6, 10, 23, 30, 0, DateTimeKind.Utc),
             PlannedDate = default,
+            AccountDate = new DateTime(2026, 6, 8, 20, 0, 0, DateTimeKind.Utc),
+            LegacyAccountDate = new DateTime(2026, 6, 7, 20, 0, 0, DateTimeKind.Utc),
+            PaymentDocumentDate = new DateTime(2026, 6, 9, 20, 0, 0, DateTimeKind.Utc),
             Amount = 5_000m,
             PaidAmount = 0m,
             Type = PaymentType.Income,
@@ -90,6 +99,9 @@ public class PaymentDomainServiceTests
         Assert.Equal(PaymentStatus.Pending, payment.Status);
         AssertLocalDate(payment.Date, 2026, 6, 10);
         AssertLocalDate(payment.PlannedDate, 2026, 6, 10);
+        AssertLocalDate(payment.AccountDate, 2026, 6, 8);
+        AssertLocalDate(payment.LegacyAccountDate, 2026, 6, 7);
+        AssertLocalDate(payment.PaymentDocumentDate, 2026, 6, 9);
         Assert.Null(payment.PaidDate);
         Assert.Null(payment.LastPaymentDate);
     }

@@ -43,6 +43,7 @@ public static class PaymentDomainService
         payment.Date = NormalizeLocalDate(payment.Date);
         payment.PlannedDate = NormalizeLocalDate(payment.PlannedDate == default ? payment.Date : payment.PlannedDate);
         payment.AccountDate = NormalizeLocalDate(payment.AccountDate);
+        payment.LegacyAccountDate = NormalizeLocalDate(payment.LegacyAccountDate);
         payment.LastPaymentDate = NormalizeLocalDate(payment.LastPaymentDate);
         payment.PaidDate = NormalizeLocalDate(payment.PaidDate);
         payment.PaymentDocumentDate = NormalizeLocalDate(payment.PaymentDocumentDate);
@@ -57,8 +58,11 @@ public static class PaymentDomainService
 
         payment.Date = NormalizeLocalDate(payment.Date);
         payment.PlannedDate = NormalizeLocalDate(payment.PlannedDate == default ? payment.Date : payment.PlannedDate);
+        payment.AccountDate = NormalizeLocalDate(payment.AccountDate);
+        payment.LegacyAccountDate = NormalizeLocalDate(payment.LegacyAccountDate);
         payment.LastPaymentDate = NormalizeLocalDate(payment.LastPaymentDate);
         payment.PaidDate = NormalizeLocalDate(payment.PaidDate);
+        payment.PaymentDocumentDate = NormalizeLocalDate(payment.PaymentDocumentDate);
 
         var today = utcNow.Date;
         var fullyPaid = payment.PaidAmount >= payment.Amount - AmountEpsilon;
