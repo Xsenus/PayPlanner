@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Services.Contracts;
 
@@ -566,7 +567,7 @@ public static class ContractDocumentTemplateEngine
         };
 
     private static string FormatDate(DateTime? value)
-        => value.HasValue ? value.Value.ToString("dd.MM.yyyy", RuCulture) : "—";
+        => value.HasValue ? ContractDomainService.NormalizeLocalDate(value.Value).ToString("dd.MM.yyyy", RuCulture) : "—";
 
     private static string FormatMoney(decimal value)
         => value.ToString("N2", RuCulture) + " ₽";

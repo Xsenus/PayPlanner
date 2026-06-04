@@ -61,6 +61,70 @@ public class InvoiceDocumentTemplateTests
     }
 
     [Fact]
+    public void RenderHtml_FormatsInvoiceDocumentDatesAsLocalCalendarDates()
+    {
+        var payment = new Payment
+        {
+            Account = "INV-LOCAL-DOC",
+            AccountDate = new DateTime(2026, 6, 4, 23, 30, 0, DateTimeKind.Utc),
+            Date = new DateTime(2026, 6, 10, 22, 15, 0, DateTimeKind.Utc),
+            Amount = 12_000m,
+            Description = "Печатная проверка дат",
+            Type = PaymentType.Income,
+            Invoice = new Invoice
+            {
+                Number = "INV-LOCAL-DOC",
+                Date = new DateTime(2026, 6, 4, 23, 30, 0, DateTimeKind.Utc),
+            },
+            Contract = new Contract
+            {
+                Number = "DOG-LOCAL",
+                Date = new DateTime(2026, 6, 1, 23, 45, 0, DateTimeKind.Utc),
+                Title = "Договор с календарной датой",
+            },
+            Client = new Client
+            {
+                Name = "Клиент печатной формы",
+                Passports =
+                [
+                    new ClientPassport
+                    {
+                        Series = "1234",
+                        Number = "567890",
+                        IssuedAt = new DateTime(2026, 6, 5, 21, 0, 0, DateTimeKind.Utc),
+                        IssuedBy = "ОВД",
+                        IsPrimary = true,
+                    },
+                ],
+            },
+        };
+
+        var html = InvoiceDocumentTemplateEngine.RenderHtml(
+            "{{document.title}}|{{invoice.date}}|{{invoice.dueDate}}|{{buyer.contract}}|{{buyer.passport}}|{{invoice.qrCodeHtml}}",
+            payment,
+            [],
+            new LegalEntity
+            {
+                ShortName = "ООО Продавец",
+                FullName = "ООО Продавец",
+                Inn = "1234567890",
+                Kpp = "123456789",
+                TreasuryBankName = "Банк",
+                TreasuryBankBik = "044525225",
+                TreasuryAccountNumber = "40702810900000000001",
+            },
+            includeSignatureAndSeal: false);
+
+        Assert.Contains("Счет № INV-LOCAL-DOC от 04.06.2026", html);
+        Assert.Contains("|04.06.2026|10.06.2026|", html);
+        Assert.Contains("Договор № DOG-LOCAL от 01.06.2026", html);
+        Assert.Contains("выдан 05.06.2026", html);
+        Assert.Contains("от 04.06.2026 на сумму", Uri.UnescapeDataString(html));
+        Assert.DoesNotContain("T00:00:00", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("Z", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GetDocument_RendersActiveCustomTemplate_AsHtml()
     {
         await using var db = await CreateContextAsync();

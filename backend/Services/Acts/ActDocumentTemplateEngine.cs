@@ -3,6 +3,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.LegalEntities;
 
 namespace PayPlanner.Api.Services.Acts;
@@ -709,7 +710,7 @@ public static class ActDocumentTemplateEngine
         var invoiceDateValue = act.Invoice?.Invoice?.Date
             ?? act.Invoice?.AccountDate
             ?? (act.Invoice is { Date: var paymentDate } && paymentDate != default ? paymentDate : null);
-        var invoiceDate = invoiceDateValue?.ToString("dd.MM.yyyy", RuCulture);
+        var invoiceDate = FormatDate(invoiceDateValue);
 
         return string.IsNullOrWhiteSpace(invoiceDate)
             ? $"Счет № {invoiceNumber}"
@@ -839,7 +840,7 @@ public static class ActDocumentTemplateEngine
 
         if (issueDate.HasValue)
         {
-            parts.Add($"выдан {issueDate.Value:dd.MM.yyyy}");
+            parts.Add($"выдан {FormatDate(issueDate)}");
         }
 
         if (!string.IsNullOrWhiteSpace(issuedBy))
@@ -957,7 +958,10 @@ public static class ActDocumentTemplateEngine
         => value.ToString("0.####", RuCulture);
 
     private static string FormatLongDate(DateTime value)
-        => value.ToString("d MMMM yyyy 'г.'", RuCulture);
+        => ActDomainService.NormalizeLocalDate(value).ToString("d MMMM yyyy 'г.'", RuCulture);
+
+    private static string? FormatDate(DateTime? value)
+        => value.HasValue ? ActDomainService.NormalizeLocalDate(value.Value).ToString("dd.MM.yyyy", RuCulture) : null;
 
     private static string SpellMoney(decimal value)
     {

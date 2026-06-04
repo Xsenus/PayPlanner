@@ -13,4 +13,7 @@ public static class ActDomainService
 
     public static DateTime NormalizeLocalDate(DateTime value)
         => DateTime.SpecifyKind(value.Date, DateTimeKind.Unspecified);
+
+    public static DateTime? NormalizeLocalDate(DateTime? value)
+        => value.HasValue ? NormalizeLocalDate(value.Value) : null;
 }

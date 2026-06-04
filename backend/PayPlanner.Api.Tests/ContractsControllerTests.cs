@@ -8,6 +8,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Contracts;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
@@ -79,6 +80,41 @@ public class ContractsControllerTests
         Assert.Contains("\"StartDate\":\"2026-06-06T00:00:00\"", json);
         Assert.Contains("\"ValidUntil\":\"2026-12-31T00:00:00\"", json);
         Assert.DoesNotContain("Z", json);
+    }
+
+    [Fact]
+    public void ContractDocumentTemplateEngine_FormatsDocumentDatesAsLocalCalendarDates()
+    {
+        var contract = new Contract
+        {
+            Number = "CT-LOCAL-DOC",
+            Date = new DateTime(2026, 6, 5, 21, 30, 0, DateTimeKind.Utc),
+            StartDate = new DateTime(2026, 6, 6, 20, 15, 0, DateTimeKind.Utc),
+            ValidUntil = new DateTime(2026, 12, 31, 23, 45, 0, DateTimeKind.Utc),
+            TerminationDate = new DateTime(2026, 7, 1, 22, 0, 0, DateTimeKind.Utc),
+            CancelledAt = new DateTime(2026, 7, 2, 22, 0, 0, DateTimeKind.Utc),
+            BillingMode = ContractBillingMode.Fixed,
+            Amount = 20_000m,
+            Status = ContractStatus.Terminated,
+            TerminationReason = "Соглашение сторон",
+            TerminationTerms = "Услуги прекращаются",
+            TerminationFinancialTerms = "Без штрафов",
+            Title = "Юридическое сопровождение",
+        };
+
+        var html = ContractDocumentTemplateEngine.RenderHtml(
+            "{{contract.date}}|{{contract.startDate}}|{{contract.validUntil}}|{{contract.detailsRowsHtml}}|{{contract.conditionsHtml}}",
+            contract,
+            mainCompany: null);
+        var terminationHtml = ContractDocumentTemplateEngine.RenderTerminationAgreementHtml(contract, mainCompany: null);
+
+        Assert.Contains("05.06.2026|06.06.2026|31.12.2026", html);
+        Assert.Contains("Дата расторжения", html);
+        Assert.Contains("01.07.2026", html);
+        Assert.Contains("к договору от 05.06.2026", terminationHtml);
+        Assert.Contains("с 01.07.2026", terminationHtml);
+        Assert.DoesNotContain("T00:00:00", html + terminationHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Z", html + terminationHtml, StringComparison.Ordinal);
     }
 
     [Fact]

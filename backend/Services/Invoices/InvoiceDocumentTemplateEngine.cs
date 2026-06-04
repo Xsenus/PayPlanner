@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.LegalEntities;
 
 namespace PayPlanner.Api.Services.Invoices;
@@ -218,7 +219,8 @@ public static class InvoiceDocumentTemplateEngine
         bool includeSignatureAndSeal,
         string? installmentScheduleHtml)
     {
-        var invoiceDate = (payment.Invoice?.Date ?? payment.AccountDate ?? payment.Date).Date;
+        var invoiceDate = PaymentDomainService.NormalizeLocalDate(payment.Invoice?.Date ?? payment.AccountDate ?? payment.Date);
+        var dueDate = PaymentDomainService.NormalizeLocalDate(payment.Date);
         var number = payment.Invoice?.Number ?? payment.Account ?? "—";
         var normalizedLineItems = lineItems.Count > 0
             ? lineItems.ToList()
@@ -251,8 +253,8 @@ public static class InvoiceDocumentTemplateEngine
             : "Главный (старший) бухгалтер";
         var qrCodeHtml = BuildInvoiceQrCodeHtml(payment, seller, total, invoiceDate, number);
         var hasInstallmentSchedule = !string.IsNullOrWhiteSpace(installmentScheduleHtml);
-        var dueDateHtml = !hasInstallmentSchedule && payment.Date.Date != invoiceDate.Date
-            ? $"<div class=\"invoice-meta-line\"><strong>Срок оплаты:</strong> {Encode(payment.Date.ToString("dd.MM.yyyy", RuCulture))}</div>"
+        var dueDateHtml = !hasInstallmentSchedule && dueDate != invoiceDate
+            ? $"<div class=\"invoice-meta-line\"><strong>Срок оплаты:</strong> {Encode(FormatDate(dueDate))}</div>"
             : string.Empty;
         var clientCommentHtml = string.IsNullOrWhiteSpace(payment.Description)
             ? string.Empty
@@ -265,11 +267,11 @@ public static class InvoiceDocumentTemplateEngine
         {
             Tokens = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
-                ["document.title"] = Encode($"Счет № {number} от {invoiceDate:dd.MM.yyyy}"),
+                ["document.title"] = Encode($"Счет № {number} от {FormatDate(invoiceDate)}"),
                 ["invoice.number"] = Encode(number),
-                ["invoice.date"] = Encode(invoiceDate.ToString("dd.MM.yyyy", RuCulture)),
+                ["invoice.date"] = Encode(FormatDate(invoiceDate)),
                 ["invoice.dateLong"] = Encode(invoiceDate.ToString("d MMMM yyyy 'г.'", RuCulture)),
-                ["invoice.dueDate"] = Encode(payment.Date.ToString("dd.MM.yyyy", RuCulture)),
+                ["invoice.dueDate"] = Encode(FormatDate(dueDate)),
                 ["invoice.amount"] = Encode(FormatMoney(payment.Amount)),
                 ["invoice.amountWords"] = Encode(SpellMoney(payment.Amount)),
                 ["invoice.description"] = Encode(payment.Description),
@@ -630,7 +632,7 @@ public static class InvoiceDocumentTemplateEngine
 
         if (contract.Date != default)
         {
-            parts.Add($"от {contract.Date:dd.MM.yyyy}");
+            parts.Add($"от {FormatDate(ContractDomainService.NormalizeLocalDate(contract.Date))}");
         }
 
         if (!string.IsNullOrWhiteSpace(contract.Title))
@@ -751,7 +753,7 @@ public static class InvoiceDocumentTemplateEngine
 
         if (issueDate.HasValue)
         {
-            parts.Add($"выдан {issueDate.Value:dd.MM.yyyy}");
+            parts.Add($"выдан {FormatDate(PaymentDomainService.NormalizeLocalDate(issueDate.Value))}");
         }
 
         if (!string.IsNullOrWhiteSpace(issuedBy))
@@ -984,7 +986,7 @@ public static class InvoiceDocumentTemplateEngine
             return string.Empty;
         }
 
-        var purpose = $"Оплата счета №{invoiceNumber} от {invoiceDate:dd.MM.yyyy} на сумму {FormatMoney(total)} руб. (без НДС)";
+        var purpose = $"Оплата счета №{invoiceNumber} от {FormatDate(invoiceDate)} на сумму {FormatMoney(total)} руб. (без НДС)";
         var qrPayload =
             "ST00012"
             + $"|Name={seller.FullName}"
@@ -1004,6 +1006,9 @@ public static class InvoiceDocumentTemplateEngine
 
     private static string FormatMoney(decimal value)
         => value.ToString("N2", RuCulture);
+
+    private static string FormatDate(DateTime value)
+        => PaymentDomainService.NormalizeLocalDate(value).ToString("dd.MM.yyyy", RuCulture);
 
     private static string SpellMoney(decimal value)
     {

@@ -820,6 +820,69 @@ public class ActsControllerTests
     }
 
     [Fact]
+    public void ActDocumentTemplateEngine_FormatsDocumentDatesAsLocalCalendarDates()
+    {
+        var act = new Act
+        {
+            Number = "LOCAL-ACT",
+            Date = new DateTime(2026, 6, 8, 23, 30, 0, DateTimeKind.Utc),
+            Amount = 15_000m,
+            Client = new Client
+            {
+                Name = "Клиент акта",
+            },
+            Invoice = new Payment
+            {
+                Type = PaymentType.Income,
+                Account = "INV-ACT-LOCAL",
+                AccountDate = new DateTime(2026, 6, 4, 21, 30, 0, DateTimeKind.Utc),
+                Date = new DateTime(2026, 6, 12, 22, 0, 0, DateTimeKind.Utc),
+                Client = new Client
+                {
+                    Name = "Клиент счета",
+                    Passports =
+                    [
+                        new ClientPassport
+                        {
+                            Series = "4321",
+                            Number = "098765",
+                            IssuedAt = new DateTime(2026, 6, 5, 21, 0, 0, DateTimeKind.Utc),
+                            IssuedBy = "ОВД",
+                            IsPrimary = true,
+                        },
+                    ],
+                },
+                Invoice = new Invoice
+                {
+                    Number = "INV-ACT-LOCAL",
+                    Date = new DateTime(2026, 6, 4, 21, 30, 0, DateTimeKind.Utc),
+                },
+            },
+        };
+
+        var html = ActDocumentTemplateEngine.RenderHtml(
+            act,
+            [
+                new ActLineItem
+                {
+                    Name = "Юридические услуги",
+                    Quantity = 1m,
+                    Unit = "услуга",
+                    Price = 15_000m,
+                },
+            ],
+            mainCompany: null,
+            includeSignatureAndSeal: false);
+
+        var normalizedHtml = html.Replace("&nbsp;", " ").Replace("\u00A0", " ");
+        Assert.Contains("Акт № LOCAL-ACT от 8 июня 2026 г.", normalizedHtml);
+        Assert.Contains("Счет № INV-ACT-LOCAL от 04.06.2026", normalizedHtml);
+        Assert.Contains("Паспорт 4321 № 098765, выдан 05.06.2026", normalizedHtml);
+        Assert.DoesNotContain("T00:00:00", normalizedHtml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Z", normalizedHtml, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ActDocumentTemplateEngine_RendersExtendedBuyerBlock_LikeInvoice()
     {
         var invoiceClient = new Client
