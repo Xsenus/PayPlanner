@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TaskJournal } from './TaskJournal';
 import type { Client, ClientCase, LegalEntitySummary } from '../../types';
-import { fromTimeZoneDateTimeInput, toTimeZoneDateKey } from '../../utils/timeZoneDate';
+import { fromTimeZoneDateTimeInput, getZonedParts, toTimeZoneDateKey } from '../../utils/timeZoneDate';
 import type { TaskJournalAssignee, TaskJournalItem } from '../../utils/taskJournalStore';
 
 const apiMock = vi.hoisted(() => ({
@@ -1954,6 +1954,46 @@ describe('TaskJournal', () => {
     expect(apiMock.updateTaskJournalItem.mock.calls[0][1].dueAt).not.toEqual(createTask().dueAt);
   });
 
+  it('keeps the local task time when calendar drag-and-drop uses the profile time zone', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-06-03T13:30:00.000Z'));
+    window.localStorage.setItem('pp.task_journal.filters.v1.user:7', JSON.stringify({
+      quickFilter: 'all',
+      viewMode: 'calendar',
+      periodMode: 'week',
+    }));
+    apiMock.getUserSetting.mockImplementation(async (key: string) => (
+      key === 'profile.timeZoneId'
+        ? { key, value: 'Asia/Kamchatka' }
+        : null
+    ));
+    const dueAt = fromTimeZoneDateTimeInput('2026-06-04T23:30', 'Asia/Kamchatka');
+
+    await renderJournal([
+      createTask({
+        dueAt,
+      }),
+    ], { initialView: 'calendar', waitForTitle: null });
+
+    const targetDay = await screen.findByTestId('task-calendar-day-2026-06-05');
+    const dataTransfer = createDataTransfer();
+
+    fireEvent.dragStart(screen.getByTestId('task-calendar-task-101'), { dataTransfer });
+    fireEvent.dragOver(targetDay, { dataTransfer });
+    fireEvent.drop(targetDay, { dataTransfer });
+
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
+    const [, payload] = apiMock.updateTaskJournalItem.mock.calls[0];
+    expect(payload.dueAt).toBe(fromTimeZoneDateTimeInput('2026-06-05T23:30', 'Asia/Kamchatka'));
+    expect(getZonedParts(payload.dueAt, 'Asia/Kamchatka')).toMatchObject({
+      year: 2026,
+      month: 6,
+      day: 5,
+      hour: 23,
+      minute: 30,
+    });
+  });
+
   it('groups calendar tasks by the user profile time zone', async () => {
     apiMock.getUserSetting.mockImplementation(async (key: string) => (
       key === 'profile.timeZoneId'
@@ -2002,12 +2042,20 @@ describe('TaskJournal', () => {
   });
 
   it('updates task duration from the calendar load panel', async () => {
-    await renderJournal([createTask({ plannedDurationMinutes: 60 })], { initialView: 'calendar' });
+    const dueAt = fromTimeZoneDateTimeInput('2026-06-04T11:00', 'Asia/Kamchatka');
+    apiMock.getUserSetting.mockImplementation(async (key: string) => (
+      key === 'profile.timeZoneId'
+        ? { key, value: 'Asia/Kamchatka' }
+        : null
+    ));
+
+    await renderJournal([createTask({ dueAt, plannedDurationMinutes: 60 })], { initialView: 'calendar' });
 
     fireEvent.click(screen.getByRole('button', { name: '+15 мин' }));
 
     await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
     expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({
+      dueAt,
       plannedDurationMinutes: 75,
     }));
   });
@@ -2175,6 +2223,53 @@ describe('TaskJournal', () => {
     const movedDueAt = new Date(payload.dueAt);
     expect(movedDueAt.getHours()).toBe(8);
     expect(movedDueAt.getMinutes()).toBe(0);
+  });
+
+  it('moves a timeline task to the selected local slot in the profile time zone', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-06-03T13:30:00.000Z'));
+    apiMock.getUserSetting.mockImplementation(async (key: string) => (
+      key === 'profile.timeZoneId'
+        ? { key, value: 'Asia/Kamchatka' }
+        : null
+    ));
+    const dueAt = fromTimeZoneDateTimeInput('2026-06-04T11:00', 'Asia/Kamchatka');
+
+    await renderJournal([
+      createTask({
+        dueAt,
+        plannedDurationMinutes: 60,
+      }),
+    ], { initialView: 'timeline' });
+
+    const targetDay = await screen.findByTestId('task-timeline-day-2026-06-04');
+    targetDay.getBoundingClientRect = vi.fn(() => ({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      bottom: 832,
+      right: 180,
+      width: 180,
+      height: 832,
+      toJSON: () => ({}),
+    }));
+    const dataTransfer = createDataTransfer();
+
+    fireEvent.dragStart(screen.getByTestId('task-timeline-task-101'), { dataTransfer });
+    fireEvent.dragOver(targetDay, { dataTransfer, clientY: 96 });
+    fireEvent.drop(targetDay, { dataTransfer, clientY: 96 });
+
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
+    const [, payload] = apiMock.updateTaskJournalItem.mock.calls[0];
+    expect(payload.dueAt).toBe(fromTimeZoneDateTimeInput('2026-06-04T08:00', 'Asia/Kamchatka'));
+    expect(getZonedParts(payload.dueAt, 'Asia/Kamchatka')).toMatchObject({
+      year: 2026,
+      month: 6,
+      day: 4,
+      hour: 8,
+      minute: 0,
+    });
   });
 
   it('loads task history and adds a comment from the edit form', async () => {

@@ -629,6 +629,11 @@ function getCurrentCalendarDate(now = new Date()) {
   return key ? dateKeyToCalendarDate(key) : new Date(now);
 }
 
+function getCalendarDateForTaskValue(value: string | Date) {
+  const key = getTaskDateKey(value);
+  return key ? dateKeyToCalendarDate(key) : (value instanceof Date ? new Date(value) : new Date(value));
+}
+
 function isSameTaskDay(value: string | Date, day: Date) {
   return getTaskDateKey(value) === toLocalDateKey(day);
 }
@@ -2470,7 +2475,7 @@ export function TaskJournal({
     setCalendarMovingTaskId(task.id);
     try {
       await apiService.updateTaskJournalItem(task.id, taskToPayload(task, { dueAt: targetDueAt.toISOString() }));
-      setCalendarSelectedDate(targetDueAt);
+      setCalendarSelectedDate(getCalendarDateForTaskValue(targetDueAt));
       toast.success(
         scheduleConflict
           ? `Задача перенесена, но пересекается с "${scheduleConflict.title}".`
