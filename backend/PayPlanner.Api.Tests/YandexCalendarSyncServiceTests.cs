@@ -176,6 +176,36 @@ public class YandexCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncNowAsync_UsesAssigneeTimeZoneForAdminCalendarNearMidnight()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateUserAsync(db, "admin-yandex-timezone@example.com", "admin");
+        var assignee = await CreateUserAsync(db, "assignee-yandex-timezone@example.com", "user");
+        await SetUserTimeZoneAsync(db, admin.Id, "Europe/Moscow");
+        await SetUserTimeZoneAsync(db, assignee.Id, "Asia/Kamchatka");
+        var connection = await CreateConnectionAsync(db, admin.Id, calendarMode: "adminByAssignee");
+        var task = await CreateTaskAsync(
+            db,
+            assignee.Id,
+            "Near midnight in assignee timezone",
+            new DateTime(2026, 6, 4, 11, 30, 0, DateTimeKind.Utc));
+        var handler = new RecordingYandexHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        var result = await service.SyncNowAsync(admin.Id, CreateHttpRequest(admin.Id, "admin"), CancellationToken.None);
+
+        Assert.Equal(1, result.ProcessedTasks);
+        Assert.Equal(0, result.ErrorCount);
+        var calendar = await db.YandexCalendarSyncCalendars.SingleAsync(item => item.ConnectionId == connection.Id);
+        Assert.Equal(assignee.Id, calendar.OwnerUserId);
+        var putRequest = handler.Requests.Single(request => request.Method == HttpMethod.Put);
+        var body = await putRequest.Content!.ReadAsStringAsync();
+        Assert.Contains("DTSTART:20260604T113000Z", body);
+        Assert.Contains("DTEND:20260604T123000Z", body);
+        Assert.Contains("X-PAYPLANNER-TIMEZONE:Asia/Kamchatka", body);
+    }
+
+    [Fact]
     public async Task SyncTaskForConnectedUsersAsync_DeletesCompletedTaskEventWhenHideModeEnabled()
     {
         await using var db = await CreateContextAsync();
@@ -317,7 +347,11 @@ public class YandexCalendarSyncServiceTests
         await db.SaveChangesAsync();
     }
 
-    private static async Task<YandexCalendarConnection> CreateConnectionAsync(PaymentContext db, int userId, DateTime? syncFromDate = null)
+    private static async Task<YandexCalendarConnection> CreateConnectionAsync(
+        PaymentContext db,
+        int userId,
+        DateTime? syncFromDate = null,
+        string calendarMode = "personal")
     {
         var protector = TestDataProtectionProvider.CreateProtector("PayPlanner.YandexCalendar.Tokens.v1");
         var connection = new YandexCalendarConnection
@@ -329,7 +363,7 @@ public class YandexCalendarSyncServiceTests
             RefreshTokenProtected = protector.Protect("refresh-token"),
             AccessTokenExpiresAt = DateTime.UtcNow.AddHours(1),
             Scope = "login:email calendar:all",
-            CalendarMode = "personal",
+            CalendarMode = calendarMode,
             ConflictResolutionMode = "latestWins",
             SyncFromDate = syncFromDate,
             IsEnabled = true,
@@ -445,6 +479,14 @@ public class YandexCalendarSyncServiceTests
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Requests.Add(CloneRequest(request));
+
+            if (string.Equals(request.Method.Method, "MKCALENDAR", StringComparison.Ordinal))
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Created)
+                {
+                    Content = new StringContent(string.Empty, Encoding.UTF8, "text/plain"),
+                });
+            }
 
             if (request.Method == HttpMethod.Put)
             {

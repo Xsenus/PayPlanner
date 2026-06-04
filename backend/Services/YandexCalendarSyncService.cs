@@ -1498,6 +1498,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             $"DESCRIPTION:{EscapeIcs(BuildEventDescription(task))}",
             $"X-PAYPLANNER-TASK-ID:{task.Id.ToString(CultureInfo.InvariantCulture)}",
             $"X-PAYPLANNER-CONNECTION-ID:{connection.Id.ToString(CultureInfo.InvariantCulture)}",
+            $"X-PAYPLANNER-TIMEZONE:{EscapeIcs(CalendarTimeZoneHelper.ResolveIanaTimeZoneId(timeZone))}",
             $"X-PAYPLANNER-HASH:{crmHash}",
             "END:VEVENT",
             "END:VCALENDAR",

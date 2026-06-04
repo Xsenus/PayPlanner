@@ -1529,6 +1529,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
                     ["payPlannerTaskId"] = task.Id.ToString(CultureInfo.InvariantCulture),
                     ["payPlannerConnectionId"] = connection.Id.ToString(CultureInfo.InvariantCulture),
                     ["payPlannerHash"] = crmHash,
+                    ["payPlannerTimeZone"] = timeZoneId,
                 },
             },
         };

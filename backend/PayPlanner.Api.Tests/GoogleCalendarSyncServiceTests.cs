@@ -181,6 +181,54 @@ public class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncNowAsync_UsesAssigneeTimeZoneForAdminCalendarNearMidnight()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateUserAsync(db, "admin-google-timezone@example.com", "admin", "Admin");
+        var assignee = await CreateUserAsync(db, "assignee-google-timezone@example.com", "user", "Kamchatka User");
+        await EnableGoogleSettingsAsync(db);
+        await SetUserTimeZoneAsync(db, admin.Id, "Europe/Moscow");
+        await SetUserTimeZoneAsync(db, assignee.Id, "Asia/Kamchatka");
+        await CreateConnectionAsync(db, admin.Id, calendarMode: "adminByAssignee");
+        await CreateTaskAsync(
+            db,
+            assignee.Id,
+            "Near midnight in assignee timezone",
+            assignee.FullName,
+            dueAt: new DateTime(2026, 6, 4, 11, 30, 0, DateTimeKind.Utc));
+        var handler = new RecordingGoogleHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        var result = await service.SyncNowAsync(admin.Id, CreateHttpRequest(admin.Id, "admin"), CancellationToken.None);
+
+        Assert.Equal(1, result.ProcessedTasks);
+        Assert.Equal(0, result.ErrorCount);
+        var createCalendarRequest = handler.Requests.Single(request =>
+            request.Method == HttpMethod.Post &&
+            request.RequestUri!.AbsolutePath.EndsWith("/calendars", StringComparison.Ordinal));
+        var createCalendarBody = await createCalendarRequest.Content!.ReadAsStringAsync();
+        using var calendarDocument = JsonDocument.Parse(createCalendarBody);
+        Assert.Equal("Asia/Kamchatka", calendarDocument.RootElement.GetProperty("timeZone").GetString());
+
+        var createEventRequest = handler.Requests.Single(request =>
+            request.Method == HttpMethod.Post &&
+            request.RequestUri!.AbsolutePath.Contains("/events", StringComparison.Ordinal));
+        var body = await createEventRequest.Content!.ReadAsStringAsync();
+        using var document = JsonDocument.Parse(body);
+        Assert.Equal("2026-06-04T23:30:00+12:00", document.RootElement.GetProperty("start").GetProperty("dateTime").GetString());
+        Assert.Equal("Asia/Kamchatka", document.RootElement.GetProperty("start").GetProperty("timeZone").GetString());
+        Assert.Equal("2026-06-05T00:30:00+12:00", document.RootElement.GetProperty("end").GetProperty("dateTime").GetString());
+        Assert.Equal("Asia/Kamchatka", document.RootElement.GetProperty("end").GetProperty("timeZone").GetString());
+        Assert.Equal(
+            "Asia/Kamchatka",
+            document.RootElement
+                .GetProperty("extendedProperties")
+                .GetProperty("private")
+                .GetProperty("payPlannerTimeZone")
+                .GetString());
+    }
+
+    [Fact]
     public async Task SyncNowAsync_UsesGoogleColorForCompletedTasksWhenColorModeEnabled()
     {
         await using var db = await CreateContextAsync();
