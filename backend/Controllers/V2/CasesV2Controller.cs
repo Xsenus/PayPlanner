@@ -3226,8 +3226,9 @@ public class CasesV2Controller : ControllerBase
             return NotFound();
         }
 
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
         var timeline = SplitCaseHistory(clientCase.EventHistory)
-            .Select((line, index) => MapTimelineEntry(clientCase.Id, line, index))
+            .Select((line, index) => MapTimelineEntry(clientCase.Id, line, index, timeZone))
             .OrderByDescending(item => item.OccurredAt ?? DateTime.MinValue)
             .ThenByDescending(item => item.Id)
             .ToList();
@@ -3258,7 +3259,8 @@ public class CasesV2Controller : ControllerBase
             return NotFound();
         }
 
-        return Ok(MapCaseConversation(clientCase.Id, clientCase.EventHistory));
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        return Ok(MapCaseConversation(clientCase.Id, clientCase.EventHistory, timeZone));
     }
 
     [HttpGet("{id:int}/summary")]
@@ -4840,7 +4842,8 @@ public class CasesV2Controller : ControllerBase
 
         await _db.SaveChangesAsync(ct);
 
-        return Ok(MapCaseConversation(clientCase.Id, clientCase.EventHistory));
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        return Ok(MapCaseConversation(clientCase.Id, clientCase.EventHistory, timeZone));
     }
 
     [HttpGet("{id:int}/related-parties")]
@@ -5832,9 +5835,10 @@ public class CasesV2Controller : ControllerBase
             return NotFound();
         }
 
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
         var logs = SplitCaseHistory(clientCase.EventHistory)
             .Where(IsCourtSyncHistoryLine)
-            .Select((line, index) => MapCourtSyncLog(clientCase.Id, line, index))
+            .Select((line, index) => MapCourtSyncLog(clientCase.Id, line, index, timeZone))
             .OrderByDescending(item => item.OccurredAt ?? DateTime.MinValue)
             .ThenByDescending(item => item.Id)
             .ToList();
@@ -5885,11 +5889,12 @@ public class CasesV2Controller : ControllerBase
                 item.EventHistory))
             .ToListAsync(ct);
 
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
         var entries = caseRows
             .SelectMany(row => SplitCaseHistory(row.EventHistory)
                 .Select((line, index) => new { row, line, index })
                 .Where(item => IsCourtSyncHistoryLine(item.line))
-                .Select(item => MapCourtSyncJournalEntry(item.row, item.line, item.index)))
+                .Select(item => MapCourtSyncJournalEntry(item.row, item.line, item.index, timeZone)))
             .Where(item => string.IsNullOrWhiteSpace(statusFilter) || string.Equals(item.Status, statusFilter, StringComparison.OrdinalIgnoreCase))
             .Where(item => string.IsNullOrWhiteSpace(searchFilter) || CourtSyncJournalEntryMatches(item, searchFilter))
             .OrderByDescending(item => item.OccurredAt ?? DateTime.MinValue)
@@ -10092,9 +10097,9 @@ public class CasesV2Controller : ControllerBase
             || line.Contains("судебный источник", StringComparison.OrdinalIgnoreCase)
             || line.Contains("судебного источника", StringComparison.OrdinalIgnoreCase);
 
-    private static ClientCaseTimelineEntryDto MapTimelineEntry(int clientCaseId, string line, int index)
+    private static ClientCaseTimelineEntryDto MapTimelineEntry(int clientCaseId, string line, int index, TimeZoneInfo timeZone)
     {
-        var occurredAt = TryParseCaseHistoryTimestamp(line, out var parsed)
+        var occurredAt = TryParseCaseHistoryTimestamp(line, timeZone, out var parsed)
             ? parsed
             : (DateTime?)null;
         var text = line.Length > 18 && line[16] == ':' && line[17] == ' '
@@ -10110,18 +10115,18 @@ public class CasesV2Controller : ControllerBase
         };
     }
 
-    private static IReadOnlyList<ClientCaseConversationEntryDto> MapCaseConversation(int clientCaseId, string? eventHistory)
+    private static IReadOnlyList<ClientCaseConversationEntryDto> MapCaseConversation(int clientCaseId, string? eventHistory, TimeZoneInfo timeZone)
         => SplitCaseHistory(eventHistory)
-            .Select((line, index) => MapConversationEntry(clientCaseId, line, index))
+            .Select((line, index) => MapConversationEntry(clientCaseId, line, index, timeZone))
             .Where(static entry => entry is not null)
             .Select(static entry => entry!)
             .OrderByDescending(item => item.OccurredAt ?? DateTime.MinValue)
             .ThenByDescending(item => item.Id)
             .ToList();
 
-    private static ClientCaseConversationEntryDto? MapConversationEntry(int clientCaseId, string line, int index)
+    private static ClientCaseConversationEntryDto? MapConversationEntry(int clientCaseId, string line, int index, TimeZoneInfo timeZone)
     {
-        var timelineEntry = MapTimelineEntry(clientCaseId, line, index);
+        var timelineEntry = MapTimelineEntry(clientCaseId, line, index, timeZone);
         var text = timelineEntry.Text.Trim();
         var kind = "message";
         if (text.StartsWith(CaseConversationPrefix, StringComparison.OrdinalIgnoreCase))
@@ -10162,9 +10167,9 @@ public class CasesV2Controller : ControllerBase
         };
     }
 
-    private static ClientCaseCourtSyncLogDto MapCourtSyncLog(int clientCaseId, string line, int index)
+    private static ClientCaseCourtSyncLogDto MapCourtSyncLog(int clientCaseId, string line, int index, TimeZoneInfo timeZone)
     {
-        var occurredAt = TryParseCaseHistoryTimestamp(line, out var parsed)
+        var occurredAt = TryParseCaseHistoryTimestamp(line, timeZone, out var parsed)
             ? parsed
             : (DateTime?)null;
         var message = line.Length > 18 && line[16] == ':' && line[17] == ' '
@@ -10194,9 +10199,9 @@ public class CasesV2Controller : ControllerBase
         };
     }
 
-    private static ClientCaseCourtSyncJournalEntryDto MapCourtSyncJournalEntry(CourtSyncJournalCaseRow row, string line, int index)
+    private static ClientCaseCourtSyncJournalEntryDto MapCourtSyncJournalEntry(CourtSyncJournalCaseRow row, string line, int index, TimeZoneInfo timeZone)
     {
-        var log = MapCourtSyncLog(row.ClientCaseId, line, index);
+        var log = MapCourtSyncLog(row.ClientCaseId, line, index, timeZone);
         return new ClientCaseCourtSyncJournalEntryDto
         {
             Id = $"{row.ClientCaseId}-{log.Id}",
@@ -10233,16 +10238,22 @@ public class CasesV2Controller : ControllerBase
         return values.Any(value => value.Contains(search, StringComparison.OrdinalIgnoreCase));
     }
 
-    private static bool TryParseCaseHistoryTimestamp(string line, out DateTime timestamp)
+    private static bool TryParseCaseHistoryTimestamp(string line, TimeZoneInfo timeZone, out DateTime timestamp)
     {
         timestamp = default;
-        return line.Length >= 16
-            && DateTime.TryParseExact(
+        if (line.Length < 16 ||
+            !DateTime.TryParseExact(
                 line[..16],
                 "dd.MM.yyyy HH:mm",
                 CultureInfo.InvariantCulture,
-                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
-                out timestamp);
+                DateTimeStyles.None,
+                out var localTimestamp))
+        {
+            return false;
+        }
+
+        timestamp = CalendarTimeZoneHelper.FromUserLocalToUtc(localTimestamp, timeZone);
+        return true;
     }
 
     private static string? ExtractCaseHistoryMarker(string message, string marker)

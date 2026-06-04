@@ -4195,6 +4195,46 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task GetTimeline_ParsesHistoryTimestampAsUserLocalTime()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "timezone-timeline@example.com", "Владелец");
+        var client = new Client
+        {
+            Name = "Клиент таймлайна",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело с таймлайном",
+            Status = ClientCaseStatus.Open,
+            EventHistory = "05.06.2026 16:00: Комментарий по делу: Суд назначен на 16:00. Автор: Владелец.",
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = owner.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Europe/Samara",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var result = await controller.GetTimeline(clientCase.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var entries = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.ClientCaseTimelineEntryDto>>(ok.Value);
+        var entry = Assert.Single(entries);
+        Assert.Equal(new DateTime(2026, 6, 5, 12, 0, 0, DateTimeKind.Utc), entry.OccurredAt);
+        Assert.Contains("Суд назначен на 16:00", entry.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task MarkActivity_DoesNotResetLastViewForNonResponsibleViewer()
     {
         await using var db = await CreateContextAsync();
@@ -4775,6 +4815,14 @@ public class CasesV2ControllerTests
         };
         db.Clients.Add(client);
         db.ClientCases.Add(clientCase);
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = owner.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Europe/Samara",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
         await db.SaveChangesAsync();
         var controller = CreateController(db, owner);
 
@@ -4787,7 +4835,7 @@ public class CasesV2ControllerTests
         Assert.Equal("manual-check-recorded", log.Status);
         Assert.Equal("Владелец", log.ActorName);
         Assert.Contains("Ручная проверка судебного источника зафиксирована", log.Message, StringComparison.Ordinal);
-        Assert.Equal(new DateTime(2026, 5, 18, 10, 30, 0, DateTimeKind.Utc), log.OccurredAt);
+        Assert.Equal(new DateTime(2026, 5, 18, 6, 30, 0, DateTimeKind.Utc), log.OccurredAt);
     }
 
     [Fact]
@@ -5996,6 +6044,14 @@ public class CasesV2ControllerTests
         };
         db.Clients.Add(client);
         db.ClientCases.Add(clientCase);
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = owner.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Europe/Samara",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
         await db.SaveChangesAsync();
         var controller = CreateController(db, owner);
 
@@ -6017,6 +6073,8 @@ public class CasesV2ControllerTests
         var getItems = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.ClientCaseConversationEntryDto>>(getOk.Value);
         Assert.Equal(2, getItems.Count);
         Assert.DoesNotContain(getItems, item => item.Text.Contains("Статус дела", StringComparison.Ordinal));
+        var existingComment = Assert.Single(getItems, item => item.Kind == "comment");
+        Assert.Equal(new DateTime(2026, 5, 18, 5, 10, 0, DateTimeKind.Utc), existingComment.OccurredAt);
     }
 
     private static IReadOnlyList<ClientCase> GetAnonymousItems(object? value)
