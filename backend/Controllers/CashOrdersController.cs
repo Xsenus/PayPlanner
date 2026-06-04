@@ -6,6 +6,7 @@ using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Invoices;
 
 namespace PayPlanner.Api.Controllers;
@@ -53,7 +54,8 @@ public class CashOrdersController : ControllerBase
         [FromQuery] DateTime? date,
         CancellationToken ct)
     {
-        var effectiveDate = (date ?? DateTime.Today).Date;
+        var today = await ResolveCashOrderTodayAsync(ct);
+        var effectiveDate = (date ?? today).Date;
         var number = await GenerateNumberAsync(type, effectiveDate, ct);
         return Ok(new
         {
@@ -276,7 +278,8 @@ public class CashOrdersController : ControllerBase
             return BadRequest("Фактический остаток кассы не может быть отрицательным.");
         }
 
-        var date = request.Date == default ? DateTime.Today : request.Date.Date;
+        var today = await ResolveCashOrderTodayAsync(ct);
+        var date = request.Date == default ? today : request.Date.Date;
         var accountingBalance = await CalculateCashBalanceAsync(date, accountName, ct);
         var difference = request.ActualBalance - accountingBalance;
 
@@ -446,8 +449,10 @@ public class CashOrdersController : ControllerBase
             return BadRequest("Сумма кассового ордера должна быть больше нуля.");
         }
 
+        var today = await ResolveCashOrderTodayAsync(ct);
+        model.Date = model.Date == default ? today : model.Date.Date;
         model.Number = string.IsNullOrWhiteSpace(model.Number)
-            ? await GenerateNumberAsync(model.Type, model.Date == default ? DateTime.Today : model.Date, ct)
+            ? await GenerateNumberAsync(model.Type, model.Date, ct)
             : model.Number.Trim();
         model.Currency = string.IsNullOrWhiteSpace(model.Currency) ? "RUB" : model.Currency.Trim();
         model.Account = Normalize(model.Account);
@@ -587,12 +592,13 @@ public class CashOrdersController : ControllerBase
             return NotFound();
         }
 
+        var today = await ResolveCashOrderTodayAsync(ct);
         var order = new CashOrder
         {
-            Number = await GenerateNumberAsync(source.Type, DateTime.Today, ct),
+            Number = await GenerateNumberAsync(source.Type, today, ct),
             Type = source.Type,
             Status = CashOrderStatus.Posted,
-            Date = DateTime.Today,
+            Date = today,
             Amount = source.Amount,
             Currency = string.IsNullOrWhiteSpace(source.Currency) ? "RUB" : source.Currency,
             ClientId = source.ClientId,
@@ -663,9 +669,16 @@ public class CashOrdersController : ControllerBase
            (operation.Direction == MoneyOperationDirection.Income ||
             operation.Direction == MoneyOperationDirection.Expense);
 
+    private async Task<DateTime> ResolveCashOrderTodayAsync(CancellationToken ct)
+    {
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        return CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date;
+    }
+
     private async Task<CashBookResponseDto> BuildCashBookAsync(DateTime? from, DateTime? to, string? accountName, CancellationToken ct)
     {
-        var fromDate = (from ?? DateTime.Today).Date;
+        var today = await ResolveCashOrderTodayAsync(ct);
+        var fromDate = (from ?? today).Date;
         var toDate = (to ?? fromDate).Date;
         if (toDate < fromDate)
         {
