@@ -4132,6 +4132,14 @@ public class CasesV2ControllerTests
         };
         db.Clients.Add(client);
         db.ClientCases.Add(clientCase);
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = owner.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "UTC",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
         await db.SaveChangesAsync();
         var controller = CreateController(db, owner);
 

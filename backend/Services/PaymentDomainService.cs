@@ -40,12 +40,12 @@ public static class PaymentDomainService
             payment.ExpenseLegalEntityId = null;
         }
 
-        payment.Date = payment.Date.Date;
-        payment.PlannedDate = (payment.PlannedDate == default ? payment.Date : payment.PlannedDate).Date;
-        if (payment.AccountDate.HasValue) payment.AccountDate = payment.AccountDate.Value.Date;
-        if (payment.LastPaymentDate.HasValue) payment.LastPaymentDate = payment.LastPaymentDate.Value.Date;
-        if (payment.PaidDate.HasValue) payment.PaidDate = payment.PaidDate.Value.Date;
-        if (payment.PaymentDocumentDate.HasValue) payment.PaymentDocumentDate = payment.PaymentDocumentDate.Value.Date;
+        payment.Date = NormalizeLocalDate(payment.Date);
+        payment.PlannedDate = NormalizeLocalDate(payment.PlannedDate == default ? payment.Date : payment.PlannedDate);
+        payment.AccountDate = NormalizeLocalDate(payment.AccountDate);
+        payment.LastPaymentDate = NormalizeLocalDate(payment.LastPaymentDate);
+        payment.PaidDate = NormalizeLocalDate(payment.PaidDate);
+        payment.PaymentDocumentDate = NormalizeLocalDate(payment.PaymentDocumentDate);
     }
 
     /// <summary>
@@ -55,6 +55,11 @@ public static class PaymentDomainService
     {
         ArgumentNullException.ThrowIfNull(payment);
 
+        payment.Date = NormalizeLocalDate(payment.Date);
+        payment.PlannedDate = NormalizeLocalDate(payment.PlannedDate == default ? payment.Date : payment.PlannedDate);
+        payment.LastPaymentDate = NormalizeLocalDate(payment.LastPaymentDate);
+        payment.PaidDate = NormalizeLocalDate(payment.PaidDate);
+
         var today = utcNow.Date;
         var fullyPaid = payment.PaidAmount >= payment.Amount - AmountEpsilon;
 
@@ -63,11 +68,11 @@ public static class PaymentDomainService
             payment.PaidAmount = payment.Amount;
             payment.IsPaid = true;
             payment.Status = PaymentStatus.Completed;
-            payment.PaidDate ??= payment.LastPaymentDate ?? payment.Date;
-            payment.LastPaymentDate ??= payment.PaidDate;
+            payment.PaidDate = NormalizeLocalDate(payment.PaidDate ?? payment.LastPaymentDate ?? payment.Date);
+            payment.LastPaymentDate = NormalizeLocalDate(payment.LastPaymentDate ?? payment.PaidDate);
             if (payment.LastPaymentDate.HasValue)
             {
-                payment.Date = payment.LastPaymentDate.Value.Date;
+                payment.Date = NormalizeLocalDate(payment.LastPaymentDate.Value);
             }
         }
         else
@@ -135,4 +140,10 @@ public static class PaymentDomainService
 
     private static decimal NormalizeAmount(decimal value)
         => Math.Round(value, 2, MidpointRounding.AwayFromZero);
+
+    private static DateTime NormalizeLocalDate(DateTime value)
+        => DateTime.SpecifyKind(value.Date, DateTimeKind.Unspecified);
+
+    private static DateTime? NormalizeLocalDate(DateTime? value)
+        => value.HasValue ? NormalizeLocalDate(value.Value) : null;
 }
