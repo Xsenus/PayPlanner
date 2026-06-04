@@ -145,9 +145,15 @@ public static class PaymentDomainService
     private static decimal NormalizeAmount(decimal value)
         => Math.Round(value, 2, MidpointRounding.AwayFromZero);
 
-    private static DateTime NormalizeLocalDate(DateTime value)
+    public static DateTime NormalizeLocalDate(DateTime value)
         => DateTime.SpecifyKind(value.Date, DateTimeKind.Unspecified);
 
-    private static DateTime? NormalizeLocalDate(DateTime? value)
+    public static DateTime? NormalizeLocalDate(DateTime? value)
         => value.HasValue ? NormalizeLocalDate(value.Value) : null;
+
+    public static DateTime NormalizeUtcInstant(DateTime value)
+        => CalendarTimeZoneHelper.NormalizeUtcInstant(value);
+
+    public static DateTime? NormalizeUtcInstant(DateTime? value)
+        => value.HasValue ? NormalizeUtcInstant(value.Value) : null;
 }

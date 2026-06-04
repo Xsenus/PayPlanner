@@ -935,10 +935,11 @@ public class InvoicesController : ControllerBase
             return BadRequest("Invoice number is required.");
         }
 
-        number = await ResolveInvoiceNumberForSaveAsync(number, request.Date.Date, null, request.AllowDuplicateNumberOnImport, ct);
+        var invoiceDate = PaymentDomainService.NormalizeLocalDate(request.Date);
+        number = await ResolveInvoiceNumberForSaveAsync(number, invoiceDate, null, request.AllowDuplicateNumberOnImport, ct);
         if (string.IsNullOrEmpty(number))
         {
-            var duplicateNumberError = await EnsureInvoiceNumberIsUniqueAsync(Normalize(request.Number) ?? string.Empty, request.Date.Date, null, ct);
+            var duplicateNumberError = await EnsureInvoiceNumberIsUniqueAsync(Normalize(request.Number) ?? string.Empty, invoiceDate, null, ct);
             return duplicateNumberError ?? BadRequest("Invoice number is required.");
         }
 
@@ -973,7 +974,7 @@ public class InvoicesController : ControllerBase
         var invoice = new Invoice
         {
             Number = number,
-            Date = request.Date.Date,
+            Date = invoiceDate,
             CreatedAt = DateTime.UtcNow,
         };
 
@@ -983,7 +984,7 @@ public class InvoicesController : ControllerBase
         {
             Account = number,
             DocumentKind = DocumentKind.Invoice,
-            AccountDate = request.Date.Date,
+            AccountDate = invoiceDate,
             Invoice = invoice,
             Date = resolvedDueDate,
             Amount = request.Amount,
@@ -1104,10 +1105,11 @@ public class InvoicesController : ControllerBase
             return BadRequest("Invoice number is required.");
         }
 
-        number = await ResolveInvoiceNumberForSaveAsync(number, request.Date.Date, id, request.AllowDuplicateNumberOnImport, ct);
+        var invoiceDate = PaymentDomainService.NormalizeLocalDate(request.Date);
+        number = await ResolveInvoiceNumberForSaveAsync(number, invoiceDate, id, request.AllowDuplicateNumberOnImport, ct);
         if (string.IsNullOrEmpty(number))
         {
-            var duplicateNumberError = await EnsureInvoiceNumberIsUniqueAsync(Normalize(request.Number) ?? string.Empty, request.Date.Date, id, ct);
+            var duplicateNumberError = await EnsureInvoiceNumberIsUniqueAsync(Normalize(request.Number) ?? string.Empty, invoiceDate, id, ct);
             return duplicateNumberError ?? BadRequest("Invoice number is required.");
         }
 
@@ -1153,7 +1155,7 @@ public class InvoicesController : ControllerBase
         if (await ShouldForkProtectedRepresentativeInvoicePaymentAsync(
                 payment,
                 number,
-                request.Date.Date,
+                invoiceDate,
                 resolvedDueDate,
                 request,
                 resolvedExpenseClientId,
@@ -1193,15 +1195,15 @@ public class InvoicesController : ControllerBase
 
         payment.Account = number;
         payment.DocumentKind = DocumentKind.Invoice;
-        payment.AccountDate = request.Date.Date;
+        payment.AccountDate = invoiceDate;
         payment.Invoice ??= new Invoice
         {
             Number = number,
-            Date = request.Date.Date,
+            Date = invoiceDate,
             CreatedAt = now,
         };
         payment.Invoice.Number = number;
-        payment.Invoice.Date = request.Date.Date;
+        payment.Invoice.Date = invoiceDate;
         payment.Invoice.UpdatedAt = now;
         payment.InvoiceId = payment.Invoice.Id == 0 ? null : payment.Invoice.Id;
         payment.Date = resolvedDueDate;
@@ -3038,7 +3040,8 @@ public class InvoicesController : ControllerBase
 
     private static void ApplyPaidFlags(Payment payment, DateTime? paidDate, DateTime today)
     {
-        var effectiveDate = (paidDate ?? payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date).Date;
+        var effectiveDate = PaymentDomainService.NormalizeLocalDate(
+            paidDate ?? payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date);
 
         if (payment.Status == PaymentStatus.Completed)
         {
@@ -3618,21 +3621,21 @@ public class InvoicesController : ControllerBase
             Id = raw.Id,
             InvoiceEntityId = raw.InvoiceEntityId,
             Number = raw.Number,
-            Date = raw.Date,
-            DueDate = raw.DueDate,
+            Date = PaymentDomainService.NormalizeLocalDate(raw.Date),
+            DueDate = PaymentDomainService.NormalizeLocalDate(raw.DueDate),
             Amount = raw.Amount,
             PaidAmount = ResolvePaidAmount(raw.Amount, raw.PaidAmount, raw.Status),
             OutstandingAmount = ResolveOutstandingAmount(raw.Amount, raw.PaidAmount, raw.Status),
             Type = raw.Type,
             Status = raw.Status,
             WorkflowStatus = raw.WorkflowStatus,
-            SentForSigningAt = raw.SentForSigningAt,
-            SignedAt = raw.SignedAt,
-            CancelledAt = raw.CancelledAt,
+            SentForSigningAt = PaymentDomainService.NormalizeUtcInstant(raw.SentForSigningAt),
+            SignedAt = PaymentDomainService.NormalizeUtcInstant(raw.SignedAt),
+            CancelledAt = PaymentDomainService.NormalizeUtcInstant(raw.CancelledAt),
             CancelledByUserId = raw.CancelledByUserId,
             CancelledReason = raw.CancelledReason,
             IsPaid = raw.IsPaid,
-            PaidDate = raw.PaidDate,
+            PaidDate = PaymentDomainService.NormalizeLocalDate(raw.PaidDate),
             ClientId = raw.ClientId,
             LegalEntityId = raw.LegalEntityId,
             ExpenseClientId = raw.ExpenseClientId,
@@ -3668,14 +3671,14 @@ public class InvoicesController : ControllerBase
             ServiceId = raw.ServiceId,
             ServiceName = raw.ServiceName,
             PaymentStatusName = raw.PaymentStatusName,
-            CreatedAt = raw.CreatedAt,
+            CreatedAt = PaymentDomainService.NormalizeUtcInstant(raw.CreatedAt),
             AuditCreatedByUserId = raw.AuditCreatedByUserId,
             AuditCreatedByUserName = raw.AuditCreatedByUserName,
-            AuditUpdatedAt = raw.AuditUpdatedAt,
+            AuditUpdatedAt = PaymentDomainService.NormalizeUtcInstant(raw.AuditUpdatedAt),
             AuditUpdatedByUserId = raw.AuditUpdatedByUserId,
             AuditUpdatedByUserName = raw.AuditUpdatedByUserName,
             AuditIsDeleted = raw.AuditIsDeleted,
-            AuditDeletedAt = raw.AuditDeletedAt,
+            AuditDeletedAt = PaymentDomainService.NormalizeUtcInstant(raw.AuditDeletedAt),
             AuditDeletedByUserId = raw.AuditDeletedByUserId,
             AuditDeletedByUserName = raw.AuditDeletedByUserName,
             DocumentKind = raw.DocumentKind,
@@ -3699,13 +3702,13 @@ public class InvoicesController : ControllerBase
     {
         dto.Status = payment.Status;
         dto.WorkflowStatus = payment.InvoiceWorkflowStatus;
-        dto.SentForSigningAt = payment.InvoiceSentForSigningAt;
-        dto.SignedAt = payment.InvoiceSignedAt;
-        dto.CancelledAt = payment.InvoiceCancelledAt;
+        dto.SentForSigningAt = PaymentDomainService.NormalizeUtcInstant(payment.InvoiceSentForSigningAt);
+        dto.SignedAt = PaymentDomainService.NormalizeUtcInstant(payment.InvoiceSignedAt);
+        dto.CancelledAt = PaymentDomainService.NormalizeUtcInstant(payment.InvoiceCancelledAt);
         dto.CancelledByUserId = payment.InvoiceCancelledByUserId;
         dto.CancelledReason = payment.InvoiceCancelledReason;
         dto.IsPaid = payment.IsPaid;
-        dto.PaidDate = payment.PaidDate;
+        dto.PaidDate = PaymentDomainService.NormalizeLocalDate(payment.PaidDate);
         dto.PaidAmount = ResolvePaidAmount(payment);
         dto.OutstandingAmount = ResolveOutstandingAmount(payment);
     }
@@ -4646,7 +4649,7 @@ public class InvoicesController : ControllerBase
     {
         var installmentDueDate = request.InstallmentPlan?.Items?
             .Where(item => item is not null)
-            .Select(item => (DateTime?)item.Date.Date)
+            .Select(item => (DateTime?)PaymentDomainService.NormalizeLocalDate(item.Date))
             .Max();
 
         if (installmentDueDate.HasValue && installmentDueDate.Value != default)
@@ -4654,7 +4657,7 @@ public class InvoicesController : ControllerBase
             return installmentDueDate.Value;
         }
 
-        return (request.DueDate ?? request.Date).Date;
+        return PaymentDomainService.NormalizeLocalDate(request.DueDate ?? request.Date);
     }
 
     private void ApplyInstallmentPayment(
@@ -4670,8 +4673,9 @@ public class InvoicesController : ControllerBase
         payment.Account = invoicePayment.Account;
         payment.AccountDate = invoicePayment.AccountDate;
         payment.DocumentKind = DocumentKind.Payment;
-        payment.Date = item.Date.Date;
-        payment.PlannedDate = item.Date.Date;
+        var installmentDate = PaymentDomainService.NormalizeLocalDate(item.Date);
+        payment.Date = installmentDate;
+        payment.PlannedDate = installmentDate;
         payment.Amount = Math.Max(item.Payment, 0);
         payment.Type = invoicePayment.Type;
         payment.Status = PaymentStatus.Pending;

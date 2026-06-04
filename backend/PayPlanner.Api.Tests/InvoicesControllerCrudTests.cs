@@ -260,6 +260,51 @@ public class InvoicesControllerCrudTests
     }
 
     [Fact]
+    public async Task Create_NormalizesInvoiceCalendarDatesWithoutUtcMarker()
+    {
+        await using var db = await CreateContextAsync();
+        await ConfigureInvoiceRulesAsync(db, maxClientCases: 2, maxActs: 2);
+
+        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Client Local Dates");
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+
+        var request = CreateRequest(
+            "INV-DATE-KIND",
+            clientId,
+            new DateTime(2026, 6, 4, 23, 30, 0, DateTimeKind.Utc),
+            12_000m);
+        request.DueDate = new DateTime(2026, 6, 10, 22, 15, 0, DateTimeKind.Utc);
+        request.Status = PaymentStatus.Completed;
+        request.PaidDate = new DateTime(2026, 6, 7, 21, 45, 0, DateTimeKind.Utc);
+
+        var action = await controller.Create(request, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(action.Result);
+        var dto = Assert.IsType<InvoiceDto>(created.Value);
+
+        AssertLocalDate(new DateTime(2026, 6, 4), dto.Date);
+        AssertLocalDate(new DateTime(2026, 6, 10), dto.DueDate);
+        AssertLocalDate(new DateTime(2026, 6, 7), dto.PaidDate);
+
+        var json = JsonSerializer.Serialize(new { dto.Date, dto.DueDate, dto.PaidDate });
+        Assert.DoesNotContain("Z", json, StringComparison.Ordinal);
+
+        db.ChangeTracker.Clear();
+        var stored = await db.Payments
+            .AsNoTracking()
+            .Include(payment => payment.Invoice)
+            .SingleAsync(payment => payment.Id == dto.Id);
+
+        AssertLocalDate(new DateTime(2026, 6, 4), stored.AccountDate);
+        AssertLocalDate(new DateTime(2026, 6, 10), stored.Date);
+        AssertLocalDate(new DateTime(2026, 6, 7), stored.PaidDate);
+        AssertLocalDate(new DateTime(2026, 6, 7), stored.LastPaymentDate);
+        Assert.NotNull(stored.Invoice);
+        AssertLocalDate(new DateTime(2026, 6, 4), stored.Invoice!.Date);
+    }
+
+    [Fact]
     public async Task SigningWorkflowActions_UpdateStatusAndTimestamps()
     {
         await using var db = await CreateContextAsync();
@@ -281,6 +326,7 @@ public class InvoicesControllerCrudTests
         var sentDto = Assert.IsType<InvoiceDto>(sendOk.Value);
         Assert.Equal(InvoiceWorkflowStatus.OnSigning, sentDto.WorkflowStatus);
         Assert.NotNull(sentDto.SentForSigningAt);
+        Assert.Equal(DateTimeKind.Utc, sentDto.SentForSigningAt.Value.Kind);
         Assert.Null(sentDto.SignedAt);
 
         var signAction = await controller.MarkSigned(createdDto.Id, CancellationToken.None);
@@ -290,6 +336,9 @@ public class InvoicesControllerCrudTests
         Assert.Equal(InvoiceWorkflowStatus.SignedByClient, signedDto.WorkflowStatus);
         Assert.NotNull(signedDto.SentForSigningAt);
         Assert.NotNull(signedDto.SignedAt);
+        Assert.Equal(DateTimeKind.Utc, signedDto.SentForSigningAt.Value.Kind);
+        Assert.Equal(DateTimeKind.Utc, signedDto.SignedAt.Value.Kind);
+        Assert.Contains("Z", JsonSerializer.Serialize(new { signedDto.SentForSigningAt, signedDto.SignedAt }), StringComparison.Ordinal);
 
         db.ChangeTracker.Clear();
         var stored = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);
@@ -2556,6 +2605,18 @@ public class InvoicesControllerCrudTests
         var property = source!.GetType().GetProperty(name);
         Assert.NotNull(property);
         return Assert.IsType<T>(property!.GetValue(source));
+    }
+
+    private static void AssertLocalDate(DateTime expected, DateTime actual)
+    {
+        Assert.Equal(DateTime.SpecifyKind(expected.Date, DateTimeKind.Unspecified), actual);
+        Assert.Equal(DateTimeKind.Unspecified, actual.Kind);
+    }
+
+    private static void AssertLocalDate(DateTime expected, DateTime? actual)
+    {
+        Assert.NotNull(actual);
+        AssertLocalDate(expected, actual.Value);
     }
 
     private static async Task<int> CreateClientAsync(PaymentContext db, string name)
