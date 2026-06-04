@@ -315,12 +315,14 @@ public partial class AuthService
 
         if (request.DateOfBirth.HasValue)
         {
-            if (request.DateOfBirth > DateTime.UtcNow.Date)
+            var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_context, user.Id, cancellationToken);
+            var today = CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date;
+            if (request.DateOfBirth.Value.Date > today)
             {
                 throw new ArgumentException("DateOfBirth cannot be in the future.");
             }
 
-            user.DateOfBirth = request.DateOfBirth;
+            user.DateOfBirth = request.DateOfBirth.Value.Date;
         }
 
         if (allowAdministrativeFields)

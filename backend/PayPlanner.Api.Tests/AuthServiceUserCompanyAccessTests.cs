@@ -185,6 +185,57 @@ public class AuthServiceUserCompanyAccessTests
         Assert.Null(storedUser.Department);
     }
 
+    [Fact]
+    public async Task UpdateUserAsync_UsesUserTimeZoneForDateOfBirthFutureValidation()
+    {
+        await using var db = await CreateContextAsync();
+        var service = CreateService(db);
+        var roleId = await CreateRoleAsync(db, "timezone-user");
+        var user = await CreateUserAsync(db, roleId, "timezone-birth@example.com");
+        var selectedZone = ResolveTimeZoneWithDifferentLocalDate();
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = user.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = selectedZone.TimeZoneId,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        if (selectedZone.ProfileToday > selectedZone.UtcToday)
+        {
+            var result = await service.UpdateUserAsync(
+                user.Id,
+                new UpdateUserRequest
+                {
+                    DateOfBirth = selectedZone.ProfileToday,
+                },
+                actorUserId: user.Id);
+
+            Assert.NotNull(result);
+            Assert.Equal(selectedZone.ProfileToday, result!.DateOfBirth);
+
+            var storedUser = await db.Users.AsNoTracking().FirstAsync(item => item.Id == user.Id);
+            Assert.Equal(selectedZone.ProfileToday, storedUser.DateOfBirth);
+        }
+        else
+        {
+            var error = await Assert.ThrowsAsync<ArgumentException>(() => service.UpdateUserAsync(
+                user.Id,
+                new UpdateUserRequest
+                {
+                    DateOfBirth = selectedZone.UtcToday,
+                },
+                actorUserId: user.Id));
+
+            Assert.Equal("DateOfBirth cannot be in the future.", error.Message);
+
+            var storedUser = await db.Users.AsNoTracking().FirstAsync(item => item.Id == user.Id);
+            Assert.Null(storedUser.DateOfBirth);
+        }
+    }
+
     private static AuthService CreateService(PaymentContext db)
     {
         var configuration = new ConfigurationBuilder()
@@ -242,6 +293,29 @@ public class AuthServiceUserCompanyAccessTests
         db.Users.Add(user);
         await db.SaveChangesAsync();
         return user;
+    }
+
+    private static (string TimeZoneId, DateTime UtcToday, DateTime ProfileToday) ResolveTimeZoneWithDifferentLocalDate()
+    {
+        var nowUtc = DateTime.UtcNow;
+        var utcToday = nowUtc.Date;
+        foreach (var timeZoneId in new[]
+        {
+            "Pacific/Kiritimati",
+            "Line Islands Standard Time",
+            "Pacific/Pago_Pago",
+            "Samoa Standard Time",
+        })
+        {
+            var timeZone = CalendarTimeZoneHelper.ResolveTimeZone(timeZoneId);
+            var profileToday = CalendarTimeZoneHelper.ToUserLocal(nowUtc, timeZone).Date;
+            if (profileToday != utcToday)
+            {
+                return (timeZone.Id, utcToday, profileToday);
+            }
+        }
+
+        throw new InvalidOperationException("No test timezone with a local date different from UTC date was found.");
     }
 
     private static async Task<int> CreateLegalEntityAsync(PaymentContext db, string shortName)
