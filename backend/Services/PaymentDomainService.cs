@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using PayPlanner.Api.Models;
 
@@ -93,13 +94,18 @@ public static class PaymentDomainService
         Payment payment,
         string message,
         DateTime utcNow,
-        string? userDisplayName = null)
+        string? userDisplayName = null,
+        TimeZoneInfo? timeZone = null)
     {
         ArgumentNullException.ThrowIfNull(payment);
         if (string.IsNullOrWhiteSpace(message)) return;
 
-        var localStamp = utcNow.ToLocalTime();
-        var formattedTimestamp = $"{localStamp:dd.MM.yyyy} ({localStamp:HH:mm:ss})";
+        var noteTimeZone = timeZone ?? TimeZoneInfo.Local;
+        var formattedTimestamp = CalendarTimeZoneHelper.FormatUserDateTime(
+            utcNow,
+            noteTimeZone,
+            "dd.MM.yyyy (HH:mm:ss)",
+            CultureInfo.GetCultureInfo("ru-RU"));
         var author = string.IsNullOrWhiteSpace(userDisplayName)
             ? "Система"
             : userDisplayName!.Trim();

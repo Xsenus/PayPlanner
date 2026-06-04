@@ -8,6 +8,7 @@ using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Invoices;
 using Xunit;
 
@@ -311,6 +312,81 @@ public class ReportsControllerTests
         Assert.Equal("application/pdf", pdf.ContentType);
         Assert.Equal([0x25, 0x50, 0x44, 0x46], pdf.FileContents);
         Assert.Contains("Статистика успешности дел", pdfService.LastHtml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LegalWorkPdf_UsesProfileTimeZoneForGeneratedAt()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "reports-exporter", Description = "Reports exporter" };
+        var user = new User
+        {
+            Email = "reports-exporter@example.test",
+            FullName = "Reports Exporter",
+            IsActive = true,
+            Role = role,
+        };
+        db.Roles.Add(role);
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Reports,
+                CanView = true,
+                CanExport = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Cases,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Tasks,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Accounts,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            });
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = user.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Europe/Samara",
+        });
+        await db.SaveChangesAsync();
+
+        var pdfService = new FakeInvoiceDocumentPdfService([0x25, 0x50, 0x44, 0x46]);
+        var controller = CreateController(db, CreateUserPrincipal(user.Id), pdfService);
+        var expectedTimeZone = CalendarTimeZoneHelper.ResolveTimeZone("Europe/Samara");
+        var before = CalendarTimeZoneHelper.FormatUserDateTime(
+            DateTime.UtcNow,
+            expectedTimeZone,
+            culture: System.Globalization.CultureInfo.GetCultureInfo("ru-RU"));
+
+        var action = await controller.ExportLegalWorkPdf(null, null, null, null, null, CancellationToken.None);
+
+        var after = CalendarTimeZoneHelper.FormatUserDateTime(
+            DateTime.UtcNow,
+            expectedTimeZone,
+            culture: System.Globalization.CultureInfo.GetCultureInfo("ru-RU"));
+        Assert.IsType<FileContentResult>(action);
+        Assert.True(
+            pdfService.LastHtml.Contains(before, StringComparison.Ordinal) ||
+            pdfService.LastHtml.Contains(after, StringComparison.Ordinal),
+            $"PDF HTML must contain generated time in Europe/Samara. Expected {before} or {after}. HTML: {pdfService.LastHtml}");
     }
 
     [Fact]

@@ -55,6 +55,13 @@ public static class CalendarTimeZoneHelper
     public static DateTime FromUserLocalToUtc(DateTime value, TimeZoneInfo timeZone)
         => ConvertUserLocalToUtc(value, timeZone);
 
+    public static string FormatUserDateTime(
+        DateTime value,
+        TimeZoneInfo timeZone,
+        string format = "dd.MM.yyyy HH:mm",
+        CultureInfo? culture = null)
+        => ToUserLocal(value, timeZone).ToString(format, culture ?? CultureInfo.InvariantCulture);
+
     public static string FormatOffsetDateTime(DateTime value, TimeZoneInfo timeZone)
     {
         var local = ToUserLocal(value, timeZone);

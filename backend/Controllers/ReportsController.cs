@@ -194,7 +194,8 @@ public class ReportsController : ControllerBase
             return error;
         }
 
-        var pdf = await _pdfService.RenderAsync(BuildLegalWorkPrintHtml(report!, DateTime.UtcNow), ct);
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        var pdf = await _pdfService.RenderAsync(BuildLegalWorkPrintHtml(report!, DateTime.UtcNow, timeZone), ct);
         return File(pdf, "application/pdf", $"legal-work-report-{DateTime.UtcNow:yyyyMMdd-HHmm}.pdf");
     }
 
@@ -287,7 +288,8 @@ public class ReportsController : ControllerBase
             return error;
         }
 
-        var pdf = await _pdfService.RenderAsync(BuildReportExportPrintHtml(document!, DateTime.UtcNow), ct);
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        var pdf = await _pdfService.RenderAsync(BuildReportExportPrintHtml(document!, DateTime.UtcNow, timeZone), ct);
         return File(pdf, "application/pdf", $"{document!.Slug}-{DateTime.UtcNow:yyyyMMdd-HHmm}.pdf");
     }
 
@@ -2085,7 +2087,10 @@ public class ReportsController : ControllerBase
         return builder.ToString();
     }
 
-    private static string BuildReportExportPrintHtml(ReportExportDocument document, DateTime generatedAtUtc)
+    private static string BuildReportExportPrintHtml(
+        ReportExportDocument document,
+        DateTime generatedAtUtc,
+        TimeZoneInfo timeZone)
     {
         var builder = new StringBuilder();
         builder.AppendLine("""
@@ -2113,7 +2118,7 @@ public class ReportsController : ControllerBase
         builder.Append("<div class=\"muted\">")
             .Append(Html(document.Subtitle))
             .Append(" · Сформировано: ")
-            .Append(Html(generatedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm", CultureInfo.GetCultureInfo("ru-RU"))))
+            .Append(Html(CalendarTimeZoneHelper.FormatUserDateTime(generatedAtUtc, timeZone, culture: CultureInfo.GetCultureInfo("ru-RU"))))
             .AppendLine("</div>");
 
         builder.AppendLine("<div class=\"summary\">");
@@ -2380,7 +2385,10 @@ public class ReportsController : ControllerBase
         return builder.ToString();
     }
 
-    private static string BuildLegalWorkPrintHtml(LegalWorkReportDto report, DateTime generatedAtUtc)
+    private static string BuildLegalWorkPrintHtml(
+        LegalWorkReportDto report,
+        DateTime generatedAtUtc,
+        TimeZoneInfo timeZone)
     {
         var builder = new StringBuilder();
         builder.AppendLine("""
@@ -2409,7 +2417,7 @@ public class ReportsController : ControllerBase
         builder.Append("<div class=\"muted\">Период: ")
             .Append(Html($"{report.From:dd.MM.yyyy} - {report.To:dd.MM.yyyy}"))
             .Append(" · Сформировано: ")
-            .Append(Html(generatedAtUtc.ToLocalTime().ToString("dd.MM.yyyy HH:mm", CultureInfo.GetCultureInfo("ru-RU"))))
+            .Append(Html(CalendarTimeZoneHelper.FormatUserDateTime(generatedAtUtc, timeZone, culture: CultureInfo.GetCultureInfo("ru-RU"))))
             .AppendLine("</div>");
 
         builder.AppendLine("<div class=\"summary\">");
