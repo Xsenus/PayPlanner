@@ -87,6 +87,7 @@ public class TaskJournalAssigneeDto
     public string Name { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
     public bool IsExternalContractor { get; set; }
+    public string? TimeZoneId { get; set; }
 }
 
 public class TaskJournalCaseAutomationCandidateDto

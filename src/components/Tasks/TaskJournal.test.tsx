@@ -2041,6 +2041,102 @@ describe('TaskJournal', () => {
     })));
   });
 
+  it('uses the selected assignee profile time zone when an admin views the task calendar', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-06-03T13:30:00.000Z'));
+    window.localStorage.setItem('pp.task_journal.filters.v1.user:7', JSON.stringify({
+      quickFilter: 'all',
+      viewMode: 'calendar',
+      periodMode: 'day',
+      assigneeFilter: '8',
+    }));
+    apiMock.getUserSetting.mockImplementation(async (key: string) => (
+      key === 'profile.timeZoneId'
+        ? { key, value: 'Europe/Moscow' }
+        : null
+    ));
+    const assigneeDateKey = toTimeZoneDateKey(new Date(), 'Asia/Kamchatka');
+    const dueAt = fromTimeZoneDateTimeInput(`${assigneeDateKey}T10:00`, 'Asia/Kamchatka');
+
+    await renderJournal([
+      createTask({
+        assigneeUserId: 8,
+        assigneeName: 'Исполнитель Камчатка',
+        dueAt,
+        participants: [
+          { userId: 8, role: 'assignee', displayName: 'Исполнитель Камчатка', approvalStatus: 'pending' },
+        ],
+      }),
+    ], {
+      initialView: 'calendar',
+      assignees: [
+        { id: 7, name: 'Администратор', email: 'admin@example.com', timeZoneId: 'Europe/Moscow' },
+        { id: 8, name: 'Исполнитель Камчатка', email: 'kamchatka@example.com', timeZoneId: 'Asia/Kamchatka' },
+      ],
+      waitForTitle: null,
+    });
+
+    const assigneeDay = await screen.findByTestId(`task-calendar-day-${assigneeDateKey}`);
+    expect(assigneeDay.className).toContain('border-blue-300');
+    expect(within(assigneeDay).getByTestId('task-calendar-task-101')).toBeTruthy();
+    await waitFor(() => expect(apiMock.getCaseCalendarEvents).toHaveBeenCalledWith(expect.objectContaining({
+      from: assigneeDateKey,
+      to: assigneeDateKey,
+      responsibleUserId: 8,
+    })));
+  });
+
+  it('hides completed tasks from the task calendar when the calendar setting says to hide them', async () => {
+    window.localStorage.setItem('pp.task_journal.filters.v1.user:7', JSON.stringify({
+      quickFilter: 'all',
+      viewMode: 'calendar',
+      periodMode: 'week',
+      statusFilter: 'all',
+    }));
+    apiMock.getCalendarSyncSettings.mockResolvedValueOnce({
+      externalCalendarSyncEnabled: false,
+      googleCalendarSyncEnabled: false,
+      yandexCalendarSyncEnabled: false,
+      googleSyncIntervalMinutes: 10,
+      yandexSyncIntervalMinutes: 10,
+      manualFullSyncCooldownMinutes: 10,
+      completedTaskCalendarAction: 'hide',
+      completedTaskGoogleColorId: '8',
+      syncMode: 'notConfigured',
+      conflictResolutionMode: 'manualConfirmation',
+      userControlMode: 'userManaged',
+      defaultSyncFromDate: null,
+      inactiveUserAction: 'cleanupExternalData',
+      requireManualConfirmation: true,
+      dryRunConfirmed: false,
+      notes: '',
+      updatedAt: null,
+    });
+
+    await renderJournal([
+      createTask({ status: 'done', result: 'Готово', dueAt: todayAt(11) }),
+    ], { initialView: 'calendar', waitForTitle: null });
+
+    await waitFor(() => expect(screen.queryByTestId('task-calendar-task-101')).toBeNull());
+  });
+
+  it('colors completed tasks in the task calendar when the calendar setting says to color them', async () => {
+    window.localStorage.setItem('pp.task_journal.filters.v1.user:7', JSON.stringify({
+      quickFilter: 'all',
+      viewMode: 'calendar',
+      periodMode: 'week',
+      statusFilter: 'all',
+    }));
+
+    await renderJournal([
+      createTask({ status: 'done', result: 'Готово', dueAt: todayAt(11) }),
+    ], { initialView: 'calendar', waitForTitle: null });
+
+    const taskCard = await screen.findByTestId('task-calendar-task-101');
+    expect(taskCard.className).toContain('border-slate-300');
+    expect(taskCard.className).toContain('bg-slate-200');
+  });
+
   it('updates task duration from the calendar load panel', async () => {
     const dueAt = fromTimeZoneDateTimeInput('2026-06-04T11:00', 'Asia/Kamchatka');
     apiMock.getUserSetting.mockImplementation(async (key: string) => (

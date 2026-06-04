@@ -40,6 +40,29 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task GetAssignees_ReturnsProfileTimeZone()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateAdminUserAsync(db, "admin-assignees@example.com", "Администратор");
+        var assignee = await CreateAdminUserAsync(db, "kamchatka-assignee@example.com", "Исполнитель Камчатка");
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = assignee.Id,
+            Key = "profile.timeZoneId",
+            Value = "Asia/Kamchatka",
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), admin);
+
+        var result = await controller.GetAssignees(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var items = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalAssigneeDto>>(ok.Value);
+        var dto = Assert.Single(items, item => item.Id == assignee.Id);
+        Assert.Equal("Asia/Kamchatka", dto.TimeZoneId);
+    }
+
+    [Fact]
     public async Task UpdateSettings_PersistsCaseInactivityAutomationSettings()
     {
         await using var db = await CreateContextAsync();

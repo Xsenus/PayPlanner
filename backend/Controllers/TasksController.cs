@@ -78,6 +78,7 @@ public class TasksController : ControllerBase
     private const string CaseInactivityAutomationEscalationUserSettingKey = "tasks.automation.caseControl.escalationUserId";
     private const string ContractorPaymentMarker = "[PayPlanner:TaskContractorPayment]";
     private const string CalendarSyncSettingsKey = "calendarSync.settings";
+    private const string ProfileTimeZoneSettingKey = "profile.timeZoneId";
 
     private readonly PaymentContext _db;
     private readonly INotificationService _notificationService;
@@ -254,6 +255,20 @@ public class TasksController : ControllerBase
                 IsExternalContractor = user.IsExternalContractor,
             })
             .ToListAsync(ct);
+
+        var userIds = users.Select(user => user.Id).ToArray();
+        var timeZones = await _db.UserSettings
+            .AsNoTracking()
+            .Where(setting => userIds.Contains(setting.UserId) && setting.Key == ProfileTimeZoneSettingKey)
+            .ToDictionaryAsync(setting => setting.UserId, setting => setting.Value, ct);
+
+        foreach (var user in users)
+        {
+            if (timeZones.TryGetValue(user.Id, out var timeZoneId) && !string.IsNullOrWhiteSpace(timeZoneId))
+            {
+                user.TimeZoneId = timeZoneId;
+            }
+        }
 
         return Ok(users);
     }

@@ -116,6 +116,7 @@ export interface TaskJournalAssignee {
   name: string;
   email: string;
   isExternalContractor?: boolean;
+  timeZoneId?: string | null;
 }
 
 export interface TaskJournalCaseAutomationCandidate {

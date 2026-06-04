@@ -1508,7 +1508,6 @@ export function TaskJournal({
   const currentUserName = user?.fullName || user?.email || 'Текущий пользователь';
   const currentUserId = user?.id ?? null;
   const [currentTimeZoneId, setCurrentTimeZoneId] = useState(() => normalizeUserTimeZoneId());
-  setActiveTaskJournalTimeZoneId(currentTimeZoneId);
   const isAdminUser = isAdmin();
   const permissions = useRolePermissions(user?.role?.id);
   const canExportTasks = isAdminUser || permissions.tasks.canExport;
@@ -1535,9 +1534,6 @@ export function TaskJournal({
   const [loading, setLoading] = useState(true);
   const [filterOwnerKey, setFilterOwnerKey] = useState(() => getTaskJournalFilterStorageKey(currentUserId, mode));
 
-  useEffect(() => {
-    setActiveTaskJournalTimeZoneId(currentTimeZoneId);
-  }, [currentTimeZoneId]);
   const [quickFilter, setQuickFilter] = useState<QuickFilter>(initialPreferences.quickFilter);
   const [metricFilter, setMetricFilter] = useState<MetricFilter>(initialPreferences.metricFilter);
   const [search, setSearch] = useState(initialPreferences.search);
@@ -1584,19 +1580,6 @@ export function TaskJournal({
     previousInitialViewRef.current = initialView;
     setViewMode(initialView);
   }, [initialView]);
-
-  useEffect(() => {
-    const previousTimeZoneId = previousCalendarTimeZoneRef.current;
-    if (previousTimeZoneId === currentTimeZoneId) {
-      return;
-    }
-
-    const previousTodayKey = toTimeZoneDateKey(new Date(), previousTimeZoneId);
-    const nextToday = getCurrentCalendarDate();
-    setCalendarAnchorDate((current) => (toLocalDateKey(current) === previousTodayKey ? nextToday : current));
-    setCalendarSelectedDate((current) => (toLocalDateKey(current) === previousTodayKey ? nextToday : current));
-    previousCalendarTimeZoneRef.current = currentTimeZoneId;
-  }, [currentTimeZoneId]);
 
   useEffect(() => {
     const nextOwnerKey = getTaskJournalFilterStorageKey(currentUserId, mode);
@@ -1734,6 +1717,39 @@ export function TaskJournal({
     return () => window.removeEventListener(TASK_JOURNAL_EVENT, refresh);
   }, [refreshTasks]);
 
+  const assigneeOptions = useMemo(() => {
+    const byId = new Map<number, TaskJournalAssignee>();
+    assignees.forEach((assignee) => byId.set(assignee.id, assignee));
+    return Array.from(byId.values());
+  }, [assignees]);
+
+  const selectedAssigneeTimeZoneId = useMemo(() => {
+    if (!isAdminUser || assigneeFilter === 'all' || !/^\d+$/.test(assigneeFilter)) {
+      return null;
+    }
+
+    return assigneeOptions.find((assignee) => String(assignee.id) === assigneeFilter)?.timeZoneId ?? null;
+  }, [assigneeFilter, assigneeOptions, isAdminUser]);
+  const effectiveTaskJournalTimeZoneId = normalizeUserTimeZoneId(selectedAssigneeTimeZoneId ?? currentTimeZoneId);
+  setActiveTaskJournalTimeZoneId(effectiveTaskJournalTimeZoneId);
+
+  useEffect(() => {
+    setActiveTaskJournalTimeZoneId(effectiveTaskJournalTimeZoneId);
+  }, [effectiveTaskJournalTimeZoneId]);
+
+  useEffect(() => {
+    const previousTimeZoneId = previousCalendarTimeZoneRef.current;
+    if (previousTimeZoneId === effectiveTaskJournalTimeZoneId) {
+      return;
+    }
+
+    const previousTodayKey = toTimeZoneDateKey(new Date(), previousTimeZoneId);
+    const nextToday = getCurrentCalendarDate();
+    setCalendarAnchorDate((current) => (toLocalDateKey(current) === previousTodayKey ? nextToday : current));
+    setCalendarSelectedDate((current) => (toLocalDateKey(current) === previousTodayKey ? nextToday : current));
+    previousCalendarTimeZoneRef.current = effectiveTaskJournalTimeZoneId;
+  }, [effectiveTaskJournalTimeZoneId]);
+
   const refreshCaseCalendarEvents = useCallback(async () => {
     if (viewMode !== 'calendar' && viewMode !== 'timeline') {
       return;
@@ -1764,7 +1780,7 @@ export function TaskJournal({
     } finally {
       setCaseCalendarLoading(false);
     }
-  }, [assigneeFilter, calendarAnchorDate, currentTimeZoneId, periodMode, toast, viewMode]);
+  }, [assigneeFilter, calendarAnchorDate, effectiveTaskJournalTimeZoneId, periodMode, toast, viewMode]);
 
   const buildCaseCalendarParams = useCallback(() => {
     const range = getCaseCalendarRange(calendarAnchorDate, viewMode === 'timeline' ? 'week' : periodMode);
@@ -1778,7 +1794,7 @@ export function TaskJournal({
       responsibleUserId,
       includeTasks: false,
     };
-  }, [assigneeFilter, calendarAnchorDate, currentTimeZoneId, periodMode, viewMode]);
+  }, [assigneeFilter, calendarAnchorDate, effectiveTaskJournalTimeZoneId, periodMode, viewMode]);
 
   useEffect(() => {
     void refreshCaseCalendarEvents();
@@ -1865,12 +1881,6 @@ export function TaskJournal({
     })();
   }, [onRouteTaskChange, openTaskEditor, routeTaskId, tasks, toast]);
 
-  const assigneeOptions = useMemo(() => {
-    const byId = new Map<number, TaskJournalAssignee>();
-    assignees.forEach((assignee) => byId.set(assignee.id, assignee));
-    return Array.from(byId.values());
-  }, [assignees]);
-
   const counterpartyOptions = useMemo<LookupSelectOption[]>(
     () =>
       clients
@@ -1910,7 +1920,7 @@ export function TaskJournal({
     [clients, legalEntities],
   );
 
-  const dateRangeBounds = useMemo(() => getTaskDateRangeBounds(dateFromFilter, dateToFilter), [currentTimeZoneId, dateFromFilter, dateToFilter]);
+  const dateRangeBounds = useMemo(() => getTaskDateRangeBounds(dateFromFilter, dateToFilter), [effectiveTaskJournalTimeZoneId, dateFromFilter, dateToFilter]);
 
   const scopeFilteredTasks = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -1968,12 +1978,12 @@ export function TaskJournal({
         return statusOk && periodOk;
       })
       .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime());
-  }, [currentTimeZoneId, dateFromFilter, dateToFilter, metricFilter, periodMode, scopeFilteredTasks, statusFilter, viewMode]);
+  }, [effectiveTaskJournalTimeZoneId, dateFromFilter, dateToFilter, metricFilter, periodMode, scopeFilteredTasks, statusFilter, viewMode]);
 
   const filteredTasks = useMemo(() => {
     const nowDate = getCurrentCalendarDate();
     return statusAndPeriodFilteredTasks.filter((task) => matchesMetricFilter(task, metricFilter, nowDate));
-  }, [currentTimeZoneId, metricFilter, statusAndPeriodFilteredTasks]);
+  }, [effectiveTaskJournalTimeZoneId, metricFilter, statusAndPeriodFilteredTasks]);
 
   const calendarTasks = useMemo(
     () => completedTaskCalendarAction === 'hide'
@@ -2037,7 +2047,7 @@ export function TaskJournal({
     const today = active.filter((task) => isSameTaskDay(task.dueAt, getCurrentCalendarDate()));
     const high = active.filter((task) => task.priority === 'high' || task.priority === 'urgent');
     return { active: active.length, overdue: overdue.length, today: today.length, high: high.length };
-  }, [currentTimeZoneId, statusAndPeriodFilteredTasks]);
+  }, [effectiveTaskJournalTimeZoneId, statusAndPeriodFilteredTasks]);
 
   const boardColumns = useMemo(() => {
     const nowDate = getCurrentCalendarDate();
@@ -2073,7 +2083,7 @@ export function TaskJournal({
         }),
       },
     ];
-  }, [currentTimeZoneId, filteredTasks, periodMode]);
+  }, [effectiveTaskJournalTimeZoneId, filteredTasks, periodMode]);
 
   const handleQuickFilterChange = (nextFilter: QuickFilter) => {
     setQuickFilter(nextFilter);
@@ -2661,7 +2671,7 @@ export function TaskJournal({
             presentation="page"
             state={routeTaskState}
             tasks={tasks}
-            timeZoneId={currentTimeZoneId}
+            timeZoneId={effectiveTaskJournalTimeZoneId}
             assignees={assignees}
             clients={clients}
             legalEntities={legalEntities}
@@ -3136,7 +3146,7 @@ export function TaskJournal({
             <TaskCalendar
               tasks={calendarTasks}
               mode={periodMode}
-              timeZoneId={currentTimeZoneId}
+              timeZoneId={effectiveTaskJournalTimeZoneId}
               colorMode={calendarColorMode}
               completedTaskCalendarAction={completedTaskCalendarAction}
               loadWarningMode={calendarLoadWarningMode}
@@ -3175,7 +3185,7 @@ export function TaskJournal({
             />
             <TaskTimelineCalendar
               tasks={calendarTasks}
-              timeZoneId={currentTimeZoneId}
+              timeZoneId={effectiveTaskJournalTimeZoneId}
               colorMode={calendarColorMode}
               completedTaskCalendarAction={completedTaskCalendarAction}
               anchorDate={calendarAnchorDate}
@@ -3205,7 +3215,7 @@ export function TaskJournal({
           presentation="modal"
           state={modal}
           tasks={tasks}
-          timeZoneId={currentTimeZoneId}
+          timeZoneId={effectiveTaskJournalTimeZoneId}
           assignees={assignees}
           clients={clients}
           legalEntities={legalEntities}
