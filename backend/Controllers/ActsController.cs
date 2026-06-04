@@ -595,7 +595,7 @@ public class ActsController : ControllerBase
         {
             Number = request.Number.Trim(),
             Title = Normalize(request.Title),
-            Date = request.Date.Date,
+            Date = ActDomainService.NormalizeLocalDate(request.Date),
             Amount = resolvedLineItems.Amount,
             CreationMode = resolvedLineItems.CreationMode,
             InvoiceNumber = Normalize(request.InvoiceNumber) ?? invoice?.Account,
@@ -675,7 +675,7 @@ public class ActsController : ControllerBase
 
         act.Number = request.Number.Trim();
         act.Title = Normalize(request.Title);
-        act.Date = request.Date.Date;
+        act.Date = ActDomainService.NormalizeLocalDate(request.Date);
         act.Amount = resolvedLineItems.Amount;
         act.CreationMode = resolvedLineItems.CreationMode;
         act.InvoiceNumber = Normalize(request.InvoiceNumber) ?? invoice?.Account;

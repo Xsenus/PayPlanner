@@ -88,7 +88,7 @@ public sealed partial class SpreadsheetImportService
                 Key = sourceKey,
                 ExternalId = NormalizeOneCExternalId(draft.ExternalId),
                 Number = NormalizeText(draft.Number),
-                Date = draft.Date?.Date,
+                Date = draft.Date.HasValue ? ActDomainService.NormalizeLocalDate(draft.Date.Value) : null,
                 Amount = draft.Amount ?? 0m,
                 CounterpartyName = NormalizeText(draft.CounterpartyName),
                 CounterpartyInn = NormalizeInn(draft.CounterpartyInn),

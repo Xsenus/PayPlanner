@@ -135,7 +135,7 @@ public sealed partial class SpreadsheetImportService
             ActId = act.Id,
             ExternalId = ExtractOneCExternalId(act.Comment),
             Number = NormalizeText(act.Number),
-            Date = act.Date.Date,
+            Date = ActDomainService.NormalizeLocalDate(act.Date),
             Amount = act.Amount,
             CounterpartyName = NormalizeText(act.CounterpartyName),
             CounterpartyInn = NormalizeInn(act.CounterpartyInn),

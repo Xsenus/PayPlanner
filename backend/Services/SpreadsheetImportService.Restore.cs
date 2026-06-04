@@ -149,7 +149,7 @@ public sealed partial class SpreadsheetImportService
     {
         act.Number = snapshot.Act.Number;
         act.Title = snapshot.Act.Title;
-        act.Date = snapshot.Act.Date;
+        act.Date = ActDomainService.NormalizeLocalDate(snapshot.Act.Date);
         act.Amount = snapshot.Act.Amount;
         act.CreationMode = snapshot.Act.CreationMode;
         act.InvoiceNumber = snapshot.Act.InvoiceNumber;

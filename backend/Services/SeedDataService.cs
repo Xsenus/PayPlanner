@@ -1040,7 +1040,7 @@ namespace PayPlanner.Api.Services
                 {
                     Number = act.Number,
                     Title = act.Title,
-                    Date = act.Date,
+                    Date = ActDomainService.NormalizeLocalDate(act.Date),
                     Amount = act.Amount,
                     InvoiceNumber = act.Invoice,
                     CounterpartyInn = act.Inn,

@@ -58,7 +58,7 @@ public sealed partial class SpreadsheetImportService
     {
         act.Number = Truncate(draft.Number, 100);
         act.Title = Truncate(BuildActTitle(draft.Number, draft.Date), 200);
-        act.Date = (draft.Date ?? draft.PaymentDate ?? DateTime.UtcNow).Date;
+        act.Date = ActDomainService.NormalizeLocalDate(draft.Date ?? draft.PaymentDate ?? DateTime.UtcNow);
         act.Amount = Math.Max(0m, draft.Amount ?? 0m);
         act.CreationMode = ActCreationMode.Manual;
         act.InvoiceNumber = Truncate(draft.InvoiceNumber ?? invoicePayment?.Account ?? invoicePayment?.Invoice?.Number, 100);

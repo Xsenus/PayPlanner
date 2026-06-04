@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -89,6 +90,37 @@ public class ActsControllerTests
                 File.Delete(dbPath);
             }
         }
+    }
+
+    [Fact]
+    public async Task Create_NormalizesActDateAsLocalDateWithoutUtcMarker()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var controller = new ActsController(db, new NoopFormRequirementsService());
+
+        var action = await controller.Create(
+            new UpsertActRequest
+            {
+                Number = "ACT-LOCAL-DATE",
+                Date = new DateTime(2026, 6, 5, 21, 30, 0, DateTimeKind.Utc),
+                Amount = 12_000m,
+                CreationMode = ActCreationMode.Manual,
+                ClientId = client.Id,
+                Status = ActStatus.Created,
+            },
+            CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(action.Result);
+        var dto = Assert.IsType<ActDto>(created.Value);
+        AssertLocalDate(dto.Date, 2026, 6, 5);
+
+        var stored = await db.Acts.SingleAsync(item => item.Id == dto.Id);
+        AssertLocalDate(stored.Date, 2026, 6, 5);
+
+        var json = JsonSerializer.Serialize(new { dto.Date });
+        Assert.Contains("\"Date\":\"2026-06-05T00:00:00\"", json);
+        Assert.DoesNotContain("Z", json);
     }
 
     [Fact]
@@ -2784,6 +2816,12 @@ public class ActsControllerTests
 
         public Task<byte[]> RenderAsync(string html, CancellationToken ct = default)
             => Task.FromResult(_bytes);
+    }
+
+    private static void AssertLocalDate(DateTime actual, int year, int month, int day)
+    {
+        Assert.Equal(new DateTime(year, month, day), actual);
+        Assert.Equal(DateTimeKind.Unspecified, actual.Kind);
     }
 
     private sealed class RecordingEmailService : IEmailService
