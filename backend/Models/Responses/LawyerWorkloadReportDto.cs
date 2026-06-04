@@ -36,4 +36,5 @@ public sealed class LawyerWorkloadItemDto
     public string RiskLabel { get; init; } = string.Empty;
     public DateTime? NearestTaskDueAt { get; init; }
     public DateTime? NearestDeadlineAt { get; init; }
+    public bool NearestDeadlineAllDay { get; init; }
 }

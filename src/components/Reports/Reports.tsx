@@ -183,6 +183,10 @@ function formatDateTime(value: string, timeZoneId?: string | null) {
   return formatDateTimeInTimeZone(value, timeZoneId);
 }
 
+function formatDeadlineDate(value: string, allDay?: boolean, timeZoneId?: string | null) {
+  return allDay === false ? formatDateTime(value, timeZoneId) : formatDate(value);
+}
+
 function csvCell(value: unknown) {
   const text = value === null || value === undefined ? '' : String(value);
   return `"${text.replace(/"/g, '""')}"`;
@@ -249,7 +253,7 @@ function exportCaseSuccessReport(report: CaseSuccessReport) {
   downloadCsv('case-success-report.csv', rows);
 }
 
-function exportCaseActivityReport(report: CaseActivityReport) {
+function exportCaseActivityReport(report: CaseActivityReport, timeZoneId?: string | null) {
   const rows: unknown[][] = [
     ['Раздел', 'Клиент / юрлицо', 'Дело', 'Ответственный', 'Статус активности', 'Дней без активности', 'Последняя активность', 'Активные задачи', 'Завершенные задачи', 'Причина'],
     ['Сводка', 'Всего дел', '', '', '', '', '', report.activeCaseCount, report.finishedCaseCount, `Неактивные: ${report.inactiveCaseCount}; эскалации: ${report.escalatedCaseCount}; автоконтроль выключен: ${report.disabledCaseCount}`],
@@ -263,7 +267,7 @@ function exportCaseActivityReport(report: CaseActivityReport) {
       item.responsibleName,
       item.isInactive ? 'Неактивно' : 'Активно',
       item.daysWithoutActivity,
-      item.lastActivityAt,
+      formatDateTime(item.lastActivityAt, timeZoneId),
       item.activeTaskCount,
       item.completedTaskCount,
       item.reason,
@@ -273,7 +277,7 @@ function exportCaseActivityReport(report: CaseActivityReport) {
   downloadCsv('case-activity-report.csv', rows);
 }
 
-function exportCurrentCasesReport(report: CurrentCasesReport) {
+function exportCurrentCasesReport(report: CurrentCasesReport, timeZoneId?: string | null) {
   const rows: unknown[][] = [
     ['Дело', 'Клиент / юрлицо', 'Ответственный', 'Тип', 'Статус', 'Срок дела', 'Дней в работе', 'Задачи', 'Сроки', 'Последняя активность'],
   ];
@@ -289,7 +293,7 @@ function exportCurrentCasesReport(report: CurrentCasesReport) {
       item.daysInWork,
       `${item.openTaskCount} открытых; ${item.overdueTaskCount} просроченных`,
       `${item.activeDeadlineCount} активных; ${item.overdueDeadlineCount} просроченных`,
-      formatDate(item.lastActivityAt),
+      formatDateTime(item.lastActivityAt, timeZoneId),
     ]);
   });
 
@@ -316,14 +320,14 @@ function exportLawyerWorkloadReport(report: LawyerWorkloadReport, timeZoneId?: s
       item.workloadScore,
       item.riskLabel,
       item.nearestTaskDueAt ? formatDateTime(item.nearestTaskDueAt, timeZoneId) : '',
-      item.nearestDeadlineAt ? formatDate(item.nearestDeadlineAt) : '',
+      item.nearestDeadlineAt ? formatDeadlineDate(item.nearestDeadlineAt, item.nearestDeadlineAllDay, timeZoneId) : '',
     ]);
   });
 
   downloadCsv('lawyer-workload-report.csv', rows);
 }
 
-function exportOverdueProceduralDeadlinesReport(report: OverdueProceduralDeadlinesReport) {
+function exportOverdueProceduralDeadlinesReport(report: OverdueProceduralDeadlinesReport, timeZoneId?: string | null) {
   const rows: unknown[][] = [
     ['Дело', 'Клиент / юрлицо', 'Ответственный', 'Тип срока', 'Срок', 'Дата', 'Дней просрочки', 'Статус', 'Задача', 'Документ'],
   ];
@@ -335,7 +339,7 @@ function exportOverdueProceduralDeadlinesReport(report: OverdueProceduralDeadlin
       item.responsibleName,
       item.deadlineTypeLabel,
       item.title,
-      formatDate(item.dueAt),
+      formatDeadlineDate(item.dueAt, item.allDay, timeZoneId),
       item.daysOverdue,
       item.statusLabel,
       item.taskTitle || (item.taskJournalItemId ? `Задача #${item.taskJournalItemId}` : ''),
@@ -1474,6 +1478,7 @@ function LegalWorkReportSection({
   onReload,
   onOpenCase,
   onOpenCaseSection,
+  profileTimeZoneId,
 }: {
   report: LegalWorkReport | null;
   loading: boolean;
@@ -1482,6 +1487,7 @@ function LegalWorkReportSection({
   onReload: () => void;
   onOpenCase?: (caseId: number) => void;
   onOpenCaseSection?: (caseId: number, section: ReportCaseSection) => void;
+  profileTimeZoneId?: string | null;
 }) {
   const [exporting, setExporting] = useState<LegalWorkExportFormat | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -2507,6 +2513,7 @@ function CurrentCasesReportSection({
   onReload,
   onOpenCase,
   onOpenCaseSection,
+  profileTimeZoneId,
 }: {
   report: CurrentCasesReport | null;
   loading: boolean;
@@ -2515,6 +2522,7 @@ function CurrentCasesReportSection({
   onReload: () => void;
   onOpenCase?: (caseId: number) => void;
   onOpenCaseSection?: (caseId: number, section: ReportCaseSection) => void;
+  profileTimeZoneId?: string | null;
 }) {
   const rows = report?.items ?? [];
   const statusRows = report?.byStatus ?? [];
@@ -2536,7 +2544,7 @@ function CurrentCasesReportSection({
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => report && exportCurrentCasesReport(report)}
+            onClick={() => report && exportCurrentCasesReport(report, profileTimeZoneId)}
             disabled={!report}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -2892,7 +2900,7 @@ function LawyerWorkloadReportSection({
                           {row.nearestTaskDueAt ? `Задача: ${formatDateTime(row.nearestTaskDueAt, profileTimeZoneId)}` : 'Ближайшая задача не указана'}
                         </div>
                         {row.nearestDeadlineAt ? (
-                          <div className="mt-1 text-xs text-slate-500">Срок: {formatDate(row.nearestDeadlineAt)}</div>
+                          <div className="mt-1 text-xs text-slate-500">Срок: {formatDeadlineDate(row.nearestDeadlineAt, row.nearestDeadlineAllDay, profileTimeZoneId)}</div>
                         ) : null}
                       </td>
                     </tr>
@@ -2922,6 +2930,7 @@ function OverdueProceduralDeadlinesReportSection({
   onOpenCase,
   onOpenCaseSection,
   onOpenTask,
+  profileTimeZoneId,
 }: {
   report: OverdueProceduralDeadlinesReport | null;
   loading: boolean;
@@ -2931,6 +2940,7 @@ function OverdueProceduralDeadlinesReportSection({
   onOpenCase?: (caseId: number) => void;
   onOpenCaseSection?: (caseId: number, section: ReportCaseSection) => void;
   onOpenTask?: (taskId: number) => void;
+  profileTimeZoneId?: string | null;
 }) {
   const rows = report?.items ?? [];
   const typeRows = report?.byType ?? [];
@@ -2952,7 +2962,7 @@ function OverdueProceduralDeadlinesReportSection({
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => report && exportOverdueProceduralDeadlinesReport(report)}
+            onClick={() => report && exportOverdueProceduralDeadlinesReport(report, profileTimeZoneId)}
             disabled={!report}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -3071,7 +3081,7 @@ function OverdueProceduralDeadlinesReportSection({
                         <div className="text-xs font-semibold uppercase tracking-wide text-rose-600">{row.deadlineTypeLabel}</div>
                         <div className="mt-1 font-semibold text-slate-950">{row.title}</div>
                         <div className="mt-1 text-xs text-slate-500">
-                          {formatDate(row.dueAt)} · {row.statusLabel}
+                          {formatDeadlineDate(row.dueAt, row.allDay, profileTimeZoneId)} · {row.statusLabel}
                           {row.taskTitle ? ` · ${row.taskTitle}` : ''}
                           {row.documentName ? ` · ${row.documentName}` : ''}
                         </div>
@@ -3163,7 +3173,7 @@ function CaseActivityReportSection({
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => report && exportCaseActivityReport(report)}
+            onClick={() => report && exportCaseActivityReport(report, profileTimeZoneId)}
             disabled={!report}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -3262,7 +3272,7 @@ function CaseActivityReportSection({
                     <td className="px-4 py-3 text-slate-600">{row.responsibleName}</td>
                     <td className="px-4 py-3 text-slate-600">
                       <div>{row.daysWithoutActivity} дн. без активности</div>
-                      <div className="mt-1 text-xs text-slate-500">Последняя: {formatDate(row.lastActivityAt)}</div>
+                      <div className="mt-1 text-xs text-slate-500">Последняя: {formatDateTime(row.lastActivityAt, profileTimeZoneId)}</div>
                     </td>
                     <td className="px-4 py-3 text-slate-600">
                       <div>{row.activeTaskCount} активных</div>
@@ -6380,6 +6390,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               onReload={reloadCurrentCasesReport}
               onOpenCase={onOpenCase}
               onOpenCaseSection={onOpenCaseSection}
+              profileTimeZoneId={profileTimeZoneId}
             />
 
             <LawyerWorkloadReportSection
@@ -6400,6 +6411,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               onOpenCase={onOpenCase}
               onOpenCaseSection={onOpenCaseSection}
               onOpenTask={onOpenTask}
+              profileTimeZoneId={profileTimeZoneId}
             />
 
             <CaseActivityReportSection
@@ -6410,6 +6422,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               onReload={reloadCaseActivityReport}
               onOpenCase={onOpenCase}
               onOpenCaseSection={onOpenCaseSection}
+              profileTimeZoneId={profileTimeZoneId}
             />
               </>
             ) : null}

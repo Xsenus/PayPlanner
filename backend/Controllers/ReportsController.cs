@@ -107,8 +107,21 @@ public class ReportsController : ControllerBase
         return CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date;
     }
 
+    private async Task<(DateTime Utc, DateTime Local, TimeZoneInfo TimeZone)> ResolveReportNowAsync(CancellationToken ct)
+    {
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        var nowUtc = NormalizeReportInstant(DateTime.UtcNow);
+        return (nowUtc, CalendarTimeZoneHelper.ToUserLocal(nowUtc, timeZone), timeZone);
+    }
+
     private async Task<(DateTime Start, DateTime End)> ResolveReportPeriodAsync(DateTime? from, DateTime? to, CancellationToken ct)
         => ResolveReportPeriod(from, to, await ResolveReportTodayAsync(ct));
+
+    private static DateTime NormalizeReportInstant(DateTime value)
+        => CalendarTimeZoneHelper.NormalizeUtcInstant(value);
+
+    private static DateTime? NormalizeReportInstant(DateTime? value)
+        => value.HasValue ? NormalizeReportInstant(value.Value) : null;
 
     [HttpGet("legal-work")]
     public async Task<ActionResult<LegalWorkReportDto>> LegalWork(
@@ -177,7 +190,8 @@ public class ReportsController : ControllerBase
             return error;
         }
 
-        var fileName = $"legal-work-report-{DateTime.UtcNow:yyyyMMdd-HHmm}.xls";
+        var now = await ResolveReportNowAsync(ct);
+        var fileName = $"legal-work-report-{now.Local:yyyyMMdd-HHmm}.xls";
         return File(
             Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(BuildLegalWorkExcelXml(report!))).ToArray(),
             "application/vnd.ms-excel; charset=utf-8",
@@ -204,9 +218,9 @@ public class ReportsController : ControllerBase
             return error;
         }
 
-        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
-        var pdf = await _pdfService.RenderAsync(BuildLegalWorkPrintHtml(report!, DateTime.UtcNow, timeZone), ct);
-        return File(pdf, "application/pdf", $"legal-work-report-{DateTime.UtcNow:yyyyMMdd-HHmm}.pdf");
+        var now = await ResolveReportNowAsync(ct);
+        var pdf = await _pdfService.RenderAsync(BuildLegalWorkPrintHtml(report!, now.Utc, now.TimeZone), ct);
+        return File(pdf, "application/pdf", $"legal-work-report-{now.Local:yyyyMMdd-HHmm}.pdf");
     }
 
     [HttpGet("management.xls")]
@@ -248,10 +262,11 @@ public class ReportsController : ControllerBase
             return error;
         }
 
+        var now = await ResolveReportNowAsync(ct);
         return File(
             Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(BuildReportExportExcelXml(document!))).ToArray(),
             "application/vnd.ms-excel; charset=utf-8",
-            $"{document!.Slug}-{DateTime.UtcNow:yyyyMMdd-HHmm}.xls");
+            $"{document!.Slug}-{now.Local:yyyyMMdd-HHmm}.xls");
     }
 
     [HttpGet("management.pdf")]
@@ -298,9 +313,9 @@ public class ReportsController : ControllerBase
             return error;
         }
 
-        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
-        var pdf = await _pdfService.RenderAsync(BuildReportExportPrintHtml(document!, DateTime.UtcNow, timeZone), ct);
-        return File(pdf, "application/pdf", $"{document!.Slug}-{DateTime.UtcNow:yyyyMMdd-HHmm}.pdf");
+        var now = await ResolveReportNowAsync(ct);
+        var pdf = await _pdfService.RenderAsync(BuildReportExportPrintHtml(document!, now.Utc, now.TimeZone), ct);
+        return File(pdf, "application/pdf", $"{document!.Slug}-{now.Local:yyyyMMdd-HHmm}.pdf");
     }
 
     [HttpGet("case-finance")]
@@ -427,6 +442,7 @@ public class ReportsController : ControllerBase
 
         var normalizedReport = (NormalizeOptional(report) ?? string.Empty).ToLowerInvariant();
         var reportToday = await ResolveReportTodayAsync(ct);
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
         var effectiveAsOf = asOf?.Date ?? reportToday;
         var effectiveLimit = Math.Clamp(limit ?? 100, 1, 500);
 
@@ -498,7 +514,7 @@ public class ReportsController : ControllerBase
                     cancellationToken => BuildLawyerWorkloadReportAsync(effectiveAsOf, effectiveHorizonDays, lawyerUserId, effectiveLimit, casesVisibility, tasksVisibility, cancellationToken),
                     _logger,
                     ct);
-                return (BuildLawyerWorkloadExportDocument(reportDto), null);
+                return (BuildLawyerWorkloadExportDocument(reportDto, timeZone), null);
             }
 
             case "overdue-deadlines":
@@ -513,7 +529,7 @@ public class ReportsController : ControllerBase
                     cancellationToken => BuildOverdueProceduralDeadlinesReportAsync(effectiveAsOf, NormalizeOptional(deadlineType), responsibleUserId, effectiveLimit, casesVisibility, cancellationToken),
                     _logger,
                     ct);
-                return (BuildOverdueDeadlinesExportDocument(reportDto), null);
+                return (BuildOverdueDeadlinesExportDocument(reportDto, timeZone), null);
             }
 
             case "case-activity":
@@ -533,7 +549,7 @@ public class ReportsController : ControllerBase
                     cancellationToken => BuildCaseActivityReportAsync(effectiveInactiveDays, effectiveEscalationDays, normalizedActivity, effectiveActivityLimit, casesVisibility, cancellationToken),
                     _logger,
                     ct);
-                return (BuildCaseActivityExportDocument(reportDto), null);
+                return (BuildCaseActivityExportDocument(reportDto, timeZone), null);
             }
 
             default:
@@ -1370,7 +1386,7 @@ public class ReportsController : ControllerBase
 
         return new CaseFinanceReportDto
         {
-            GeneratedAt = DateTime.UtcNow,
+            GeneratedAt = NormalizeReportInstant(DateTime.UtcNow),
             From = start,
             To = end,
             StatusFilter = filters.Status ?? string.Empty,
@@ -1481,7 +1497,7 @@ public class ReportsController : ControllerBase
 
         return new CaseSuccessReportDto
         {
-            GeneratedAt = DateTime.UtcNow,
+            GeneratedAt = NormalizeReportInstant(DateTime.UtcNow),
             From = start,
             To = end,
             StatusFilter = filters.Status ?? string.Empty,
@@ -1580,7 +1596,7 @@ public class ReportsController : ControllerBase
             OutcomeLabel = outcomeLabel,
             ResponsibleUserId = clientCase.ResponsibleUserId,
             ResponsibleName = ResolveCaseResponsibleName(clientCase),
-            CreatedAt = clientCase.CreatedAt,
+            CreatedAt = NormalizeReportInstant(clientCase.CreatedAt),
             StartDate = clientCase.StartDate,
             DueDate = clientCase.DueDate,
             DaysInWork = daysInWork,
@@ -1615,7 +1631,7 @@ public class ReportsController : ControllerBase
             StatusLabel = FormatCaseStatus(clientCase.Status),
             ResponsibleUserId = clientCase.ResponsibleUserId,
             ResponsibleName = ResolveCaseResponsibleName(clientCase),
-            CreatedAt = clientCase.CreatedAt,
+            CreatedAt = NormalizeReportInstant(clientCase.CreatedAt),
             StartDate = clientCase.StartDate,
             DueDate = clientCase.DueDate,
             FeeAmount = fee,
@@ -1675,7 +1691,7 @@ public class ReportsController : ControllerBase
                     StatusLabel = FormatCaseStatus(clientCase.Status),
                     ResponsibleUserId = clientCase.ResponsibleUserId,
                     ResponsibleName = ResolveCaseResponsibleName(clientCase),
-                    CreatedAt = clientCase.CreatedAt,
+                    CreatedAt = NormalizeReportInstant(clientCase.CreatedAt),
                     StartDate = clientCase.StartDate,
                     DueDate = clientCase.DueDate,
                     FeeAmount = clientCase.FeeAmount,
@@ -1822,7 +1838,7 @@ public class ReportsController : ControllerBase
                 ])).ToList()),
             ]);
 
-    private static ReportExportDocument BuildLawyerWorkloadExportDocument(LawyerWorkloadReportDto report)
+    private static ReportExportDocument BuildLawyerWorkloadExportDocument(LawyerWorkloadReportDto report, TimeZoneInfo timeZone)
         => new(
             "lawyer-workload-report",
             "Отчет по загрузке юристов",
@@ -1850,12 +1866,14 @@ public class ReportsController : ControllerBase
                     item.PlannedHours.ToString("0.##", CultureInfo.InvariantCulture),
                     item.WorkloadScore.ToString(CultureInfo.InvariantCulture),
                     item.RiskLabel,
-                    DateTimeCell(item.NearestTaskDueAt),
-                    DateCell(item.NearestDeadlineAt),
+                    DateTimeCell(item.NearestTaskDueAt, timeZone),
+                    item.NearestDeadlineAllDay
+                        ? DateCell(item.NearestDeadlineAt)
+                        : DateTimeCell(item.NearestDeadlineAt, timeZone),
                 ])).ToList()),
             ]);
 
-    private static ReportExportDocument BuildOverdueDeadlinesExportDocument(OverdueProceduralDeadlinesReportDto report)
+    private static ReportExportDocument BuildOverdueDeadlinesExportDocument(OverdueProceduralDeadlinesReportDto report, TimeZoneInfo timeZone)
         => new(
             "overdue-deadlines-report",
             "Отчет по просроченным процессуальным срокам",
@@ -1872,7 +1890,9 @@ public class ReportsController : ControllerBase
                     item.ResponsibleName,
                     item.DeadlineTypeLabel,
                     item.Title,
-                    DateCell(item.DueAt),
+                    item.AllDay
+                        ? DateCell(item.DueAt)
+                        : DateTimeCell(item.DueAt, timeZone),
                     item.DaysOverdue.ToString(CultureInfo.InvariantCulture),
                     item.StatusLabel,
                     item.TaskTitle,
@@ -1890,7 +1910,7 @@ public class ReportsController : ControllerBase
                 ])).ToList()),
             ]);
 
-    private static ReportExportDocument BuildCaseActivityExportDocument(CaseActivityReportDto report)
+    private static ReportExportDocument BuildCaseActivityExportDocument(CaseActivityReportDto report, TimeZoneInfo timeZone)
         => new(
             "case-activity-report",
             "Отчет по активности дел",
@@ -1912,7 +1932,7 @@ public class ReportsController : ControllerBase
                     item.ResponsibleName,
                     item.CaseType,
                     item.StatusLabel,
-                    DateTimeCell(item.LastActivityAt),
+                    DateTimeCell(item.LastActivityAt, timeZone),
                     item.DaysWithoutActivity.ToString(CultureInfo.InvariantCulture),
                     item.ActiveTaskCount.ToString(CultureInfo.InvariantCulture),
                     item.CompletedTaskCount.ToString(CultureInfo.InvariantCulture),
@@ -2371,9 +2391,12 @@ public class ReportsController : ControllerBase
             ? value.Value.ToString("dd.MM.yyyy", CultureInfo.GetCultureInfo("ru-RU"))
             : string.Empty;
 
-    private static string DateTimeCell(DateTime? value)
+    private static string DateTimeCell(DateTime? value, TimeZoneInfo? timeZone = null)
         => value.HasValue
-            ? value.Value.ToString("dd.MM.yyyy HH:mm", CultureInfo.GetCultureInfo("ru-RU"))
+            ? (timeZone is null
+                ? value.Value
+                : CalendarTimeZoneHelper.ToUserLocal(value.Value, timeZone))
+                .ToString("dd.MM.yyyy HH:mm", CultureInfo.GetCultureInfo("ru-RU"))
             : string.Empty;
 
     private static string FormatLegalWorkDeadlineOffset(int days)
@@ -2604,11 +2627,11 @@ public class ReportsController : ControllerBase
                     OwnerName = owner.OwnerName,
                     ResponsibleUserId = clientCase.ResponsibleUserId,
                     ResponsibleName = ResolveCaseResponsibleName(clientCase),
-                    CreatedAt = clientCase.CreatedAt,
-                    LastActivityAt = lastActivityAt,
-                    LastTaskAt = lastTaskAt,
-                    LastViewedAt = clientCase.LastViewedAt,
-                    ActivityConfirmedAt = clientCase.ActivityConfirmedAt,
+                    CreatedAt = NormalizeReportInstant(clientCase.CreatedAt),
+                    LastActivityAt = NormalizeReportInstant(lastActivityAt),
+                    LastTaskAt = NormalizeReportInstant(lastTaskAt),
+                    LastViewedAt = NormalizeReportInstant(clientCase.LastViewedAt),
+                    ActivityConfirmedAt = NormalizeReportInstant(clientCase.ActivityConfirmedAt),
                     DaysWithoutActivity = daysWithoutActivity,
                     ActiveTaskCount = activeTaskCount,
                     CompletedTaskCount = completedTaskCount,
@@ -2631,7 +2654,7 @@ public class ReportsController : ControllerBase
 
         return new CaseActivityReportDto
         {
-            GeneratedAt = now,
+            GeneratedAt = NormalizeReportInstant(now),
             InactivityDays = inactivityDays,
             EscalationDays = escalationDays,
             Activity = activity,
@@ -2698,7 +2721,7 @@ public class ReportsController : ControllerBase
 
         return new OverdueProceduralDeadlinesReportDto
         {
-            GeneratedAt = DateTime.UtcNow,
+            GeneratedAt = NormalizeReportInstant(DateTime.UtcNow),
             AsOf = asOf,
             DeadlineTypeFilter = deadlineType ?? string.Empty,
             ResponsibleUserIdFilter = responsibleUserId,
@@ -2750,7 +2773,8 @@ public class ReportsController : ControllerBase
             DeadlineTypeLabel = ResolveProceduralDeadlineTypeLabel(item.DeadlineType),
             Title = NormalizeReportText(item.Title, ResolveProceduralDeadlineTypeLabel(item.DeadlineType)),
             Description = item.Description,
-            DueAt = item.DueAt,
+            DueAt = item.AllDay ? item.DueAt : NormalizeReportInstant(item.DueAt),
+            AllDay = item.AllDay,
             DaysOverdue = Math.Max(0, (asOf.Date - item.DueAt.Date).Days),
             Status = item.Status,
             StatusLabel = ResolveProceduralDeadlineStatusLabel(item.Status),
@@ -2822,7 +2846,8 @@ public class ReportsController : ControllerBase
                     item.ClientCaseId,
                     item.DeadlineType,
                     item.Title,
-                    item.DueAt))
+                    item.DueAt,
+                    item.AllDay))
                 .ToListAsync(ct);
 
         var tasksByCase = taskRows
@@ -2851,7 +2876,7 @@ public class ReportsController : ControllerBase
 
         return new CurrentCasesReportDto
         {
-            GeneratedAt = DateTime.UtcNow,
+            GeneratedAt = NormalizeReportInstant(DateTime.UtcNow),
             AsOf = asOf,
             StatusFilter = filters.Status ?? string.Empty,
             ResponsibleUserIdFilter = filters.ResponsibleUserId,
@@ -2926,10 +2951,10 @@ public class ReportsController : ControllerBase
             StatusLabel = FormatCaseStatus(clientCase.Status),
             ResponsibleUserId = clientCase.ResponsibleUserId,
             ResponsibleName = ResolveCaseResponsibleName(clientCase),
-            CreatedAt = clientCase.CreatedAt,
+            CreatedAt = NormalizeReportInstant(clientCase.CreatedAt),
             StartDate = clientCase.StartDate,
             DueDate = clientCase.DueDate,
-            NextHearingAt = clientCase.NextHearingAt,
+            NextHearingAt = NormalizeReportInstant(clientCase.NextHearingAt),
             DaysInWork = Math.Max(0, (asOf.Date - (clientCase.StartDate ?? clientCase.CreatedAt).Date).Days),
             DaysUntilDue = clientCase.DueDate.HasValue
                 ? (clientCase.DueDate.Value.Date - asOf.Date).Days
@@ -2940,11 +2965,14 @@ public class ReportsController : ControllerBase
             OnApprovalTaskCount = onApprovalTasks.Count,
             ActiveDeadlineCount = deadlines.Count,
             OverdueDeadlineCount = overdueDeadlines.Count,
-            NextDeadlineAt = nextDeadline?.DueAt,
+            NextDeadlineAt = nextDeadline is null
+                ? null
+                : nextDeadline.AllDay ? nextDeadline.DueAt : NormalizeReportInstant(nextDeadline.DueAt),
+            NextDeadlineAllDay = nextDeadline?.AllDay ?? true,
             NextDeadlineLabel = nextDeadline is null
                 ? string.Empty
                 : NormalizeReportText(nextDeadline.Title, ResolveProceduralDeadlineTypeLabel(nextDeadline.DeadlineType)),
-            LastActivityAt = lastActivityAt,
+            LastActivityAt = NormalizeReportInstant(lastActivityAt),
         };
     }
 
@@ -2996,7 +3024,7 @@ public class ReportsController : ControllerBase
 
         return new TaskReportDto
         {
-            GeneratedAt = DateTime.UtcNow,
+            GeneratedAt = NormalizeReportInstant(DateTime.UtcNow),
             AsOf = asOf,
             Scope = scope,
             AssigneeUserIdFilter = assigneeUserId,
@@ -3041,7 +3069,7 @@ public class ReportsController : ControllerBase
                     NearestDueAt = group
                         .Where(item => !item.IsClosed)
                         .OrderBy(item => item.DueAt)
-                        .Select(item => (DateTime?)item.DueAt)
+                        .Select(item => (DateTime?)NormalizeReportInstant(item.DueAt))
                         .FirstOrDefault(),
                 })
                 .ToList(),
@@ -3071,7 +3099,7 @@ public class ReportsController : ControllerBase
             AssigneeUserId = task.AssigneeUserId,
             AssigneeName = NormalizeReportText(ResolveTaskAssigneeName(task), "Без исполнителя"),
             AuthorName = task.AuthorName ?? string.Empty,
-            DueAt = task.DueAt,
+            DueAt = NormalizeReportInstant(task.DueAt),
             PlannedDurationMinutes = task.PlannedDurationMinutes,
             Type = task.Type,
             TypeLabel = FormatTaskType(task.Type),
@@ -3083,8 +3111,8 @@ public class ReportsController : ControllerBase
             IsClosed = isClosed,
             IsOverdue = isOverdue,
             DaysOverdue = isOverdue ? Math.Max(0, (asOf.Date - task.DueAt.Date).Days) : null,
-            CreatedAt = task.CreatedAt,
-            UpdatedAt = task.UpdatedAt,
+            CreatedAt = NormalizeReportInstant(task.CreatedAt),
+            UpdatedAt = NormalizeReportInstant(task.UpdatedAt),
         };
     }
 
@@ -3134,7 +3162,8 @@ public class ReportsController : ControllerBase
                     item.ClientCaseId,
                     item.DeadlineType,
                     item.Title,
-                    item.DueAt))
+                    item.DueAt,
+                    item.AllDay))
                 .ToListAsync(ct);
 
         static int workloadKey(int? userId) => userId ?? int.MinValue;
@@ -3190,7 +3219,7 @@ public class ReportsController : ControllerBase
 
         return new LawyerWorkloadReportDto
         {
-            GeneratedAt = DateTime.UtcNow,
+            GeneratedAt = NormalizeReportInstant(DateTime.UtcNow),
             AsOf = asOf,
             HorizonDays = horizonDays,
             LawyerUserIdFilter = lawyerUserId,
@@ -3215,6 +3244,9 @@ public class ReportsController : ControllerBase
         DateTime asOf,
         DateTime horizonEnd)
     {
+        var nearestDeadline = deadlines
+            .OrderBy(item => item.DueAt)
+            .FirstOrDefault();
         var overdueTasks = tasks.Where(item => item.DueAt.Date < asOf.Date).ToList();
         var onApprovalTasks = tasks
             .Where(item => string.Equals(item.Status, "onApproval", StringComparison.OrdinalIgnoreCase)
@@ -3258,8 +3290,11 @@ public class ReportsController : ControllerBase
             WorkloadScore = workloadScore,
             IsOverloaded = isOverloaded,
             RiskLabel = ResolveLawyerWorkloadRiskLabel(isOverloaded, overdueTasks.Count, overdueDeadlines.Count, plannedHours, tasks.Count),
-            NearestTaskDueAt = tasks.Count == 0 ? null : tasks.Min(item => item.DueAt),
-            NearestDeadlineAt = deadlines.Count == 0 ? null : deadlines.Min(item => item.DueAt),
+            NearestTaskDueAt = tasks.Count == 0 ? null : NormalizeReportInstant(tasks.Min(item => item.DueAt)),
+            NearestDeadlineAt = nearestDeadline is null
+                ? null
+                : nearestDeadline.AllDay ? nearestDeadline.DueAt : NormalizeReportInstant(nearestDeadline.DueAt),
+            NearestDeadlineAllDay = nearestDeadline?.AllDay ?? true,
         };
     }
 
@@ -5951,7 +5986,8 @@ public class ReportsController : ControllerBase
         int ClientCaseId,
         string DeadlineType,
         string Title,
-        DateTime DueAt);
+        DateTime DueAt,
+        bool AllDay);
 
     private sealed record DeadlineSourceRow(
         string Type,

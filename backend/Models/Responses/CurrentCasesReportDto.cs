@@ -65,6 +65,7 @@ public sealed class CurrentCaseReportItemDto
     public int ActiveDeadlineCount { get; init; }
     public int OverdueDeadlineCount { get; init; }
     public DateTime? NextDeadlineAt { get; init; }
+    public bool NextDeadlineAllDay { get; init; }
     public string NextDeadlineLabel { get; init; } = string.Empty;
     public DateTime LastActivityAt { get; init; }
 }

@@ -45,6 +45,7 @@ public sealed class OverdueProceduralDeadlineItemDto
     public string Title { get; init; } = string.Empty;
     public string Description { get; init; } = string.Empty;
     public DateTime DueAt { get; init; }
+    public bool AllDay { get; init; }
     public int DaysOverdue { get; init; }
     public string Status { get; init; } = string.Empty;
     public string StatusLabel { get; init; } = string.Empty;

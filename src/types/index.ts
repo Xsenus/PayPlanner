@@ -1965,6 +1965,7 @@ export interface CurrentCaseReportItem {
   activeDeadlineCount: number;
   overdueDeadlineCount: number;
   nextDeadlineAt?: string | null;
+  nextDeadlineAllDay?: boolean;
   nextDeadlineLabel: string;
   lastActivityAt: string;
 }
@@ -2007,6 +2008,7 @@ export interface LawyerWorkloadItem {
   riskLabel: string;
   nearestTaskDueAt?: string | null;
   nearestDeadlineAt?: string | null;
+  nearestDeadlineAllDay?: boolean;
 }
 
 export interface LawyerWorkloadReport {
@@ -2052,6 +2054,7 @@ export interface OverdueProceduralDeadlineItem {
   title: string;
   description: string;
   dueAt: string;
+  allDay?: boolean;
   daysOverdue: number;
   status: string;
   statusLabel: string;

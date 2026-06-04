@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
@@ -375,6 +376,7 @@ public class ReportsControllerTests
             DateTime.UtcNow,
             expectedTimeZone,
             culture: System.Globalization.CultureInfo.GetCultureInfo("ru-RU"));
+        var beforeFileStamp = CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, expectedTimeZone).ToString("yyyyMMdd-HHmm");
 
         var action = await controller.ExportLegalWorkPdf(null, null, null, null, null, CancellationToken.None);
 
@@ -382,11 +384,16 @@ public class ReportsControllerTests
             DateTime.UtcNow,
             expectedTimeZone,
             culture: System.Globalization.CultureInfo.GetCultureInfo("ru-RU"));
-        Assert.IsType<FileContentResult>(action);
+        var file = Assert.IsType<FileContentResult>(action);
+        var afterFileStamp = CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, expectedTimeZone).ToString("yyyyMMdd-HHmm");
         Assert.True(
             pdfService.LastHtml.Contains(before, StringComparison.Ordinal) ||
             pdfService.LastHtml.Contains(after, StringComparison.Ordinal),
             $"PDF HTML must contain generated time in Europe/Samara. Expected {before} or {after}. HTML: {pdfService.LastHtml}");
+        Assert.True(
+            file.FileDownloadName == $"legal-work-report-{beforeFileStamp}.pdf" ||
+            file.FileDownloadName == $"legal-work-report-{afterFileStamp}.pdf",
+            $"PDF file name must use Europe/Samara local time. Expected {beforeFileStamp} or {afterFileStamp}. Actual: {file.FileDownloadName}");
     }
 
     [Fact]
@@ -544,6 +551,10 @@ public class ReportsControllerTests
         Assert.True(row.IsEscalated);
         Assert.Equal(0, row.ActiveTaskCount);
         Assert.Equal(1, row.CompletedTaskCount);
+        Assert.Equal(DateTimeKind.Utc, report.GeneratedAt.Kind);
+        Assert.Equal(DateTimeKind.Utc, row.CreatedAt.Kind);
+        Assert.Equal(DateTimeKind.Utc, row.LastActivityAt.Kind);
+        Assert.Equal(DateTimeKind.Utc, row.LastTaskAt?.Kind);
         Assert.Contains("Нет активных задач", row.Reason, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -686,6 +697,7 @@ public class ReportsControllerTests
             CreatedAt = asOf.AddDays(-20),
             StartDate = asOf.AddDays(-15),
             DueDate = asOf.AddDays(-1),
+            NextHearingAt = new DateTime(2026, 5, 26, 12, 0, 0),
         };
         var onHoldCase = new ClientCase
         {
@@ -758,6 +770,16 @@ public class ReportsControllerTests
             Status = "active",
             CreatedAt = asOf.AddDays(-10),
         });
+        db.ClientCaseProceduralDeadlines.Add(new ClientCaseProceduralDeadline
+        {
+            ClientCaseId = visibleCase.Id,
+            DeadlineType = "motion",
+            Title = "Timed procedural deadline",
+            DueAt = new DateTime(2026, 5, 27, 16, 0, 0),
+            AllDay = false,
+            Status = "active",
+            CreatedAt = asOf.AddDays(-10),
+        });
         await db.SaveChangesAsync();
 
         var controller = CreateController(db, CreateUserPrincipal(visibleUser.Id));
@@ -779,9 +801,16 @@ public class ReportsControllerTests
         Assert.True(visibleRow.IsOverdue);
         Assert.Equal(1, visibleRow.OpenTaskCount);
         Assert.Equal(1, visibleRow.OverdueTaskCount);
-        Assert.Equal(1, visibleRow.ActiveDeadlineCount);
+        Assert.Equal(2, visibleRow.ActiveDeadlineCount);
         Assert.Equal(1, visibleRow.OverdueDeadlineCount);
         Assert.Equal(15, visibleRow.DaysInWork);
+        Assert.Equal(DateTimeKind.Utc, report.GeneratedAt.Kind);
+        Assert.Equal(DateTimeKind.Utc, visibleRow.CreatedAt.Kind);
+        Assert.Equal(DateTimeKind.Utc, visibleRow.LastActivityAt.Kind);
+        Assert.Equal(DateTimeKind.Utc, visibleRow.NextHearingAt?.Kind);
+        Assert.Equal(DateTimeKind.Utc, visibleRow.NextDeadlineAt?.Kind);
+        Assert.False(visibleRow.NextDeadlineAllDay);
+        Assert.Contains("\"NextHearingAt\":\"2026-05-26T12:00:00Z\"", JsonSerializer.Serialize(visibleRow));
 
         var filteredAction = await controller.CurrentCases(asOf, nameof(ClientCaseStatus.OnHold), visibleUser.Id, "Наслед", 10, CancellationToken.None);
         var filteredReport = Assert.IsType<CurrentCasesReportDto>(Assert.IsType<OkObjectResult>(filteredAction.Result).Value);
@@ -894,7 +923,11 @@ public class ReportsControllerTests
         Assert.Equal(2, openReport.ClosedTaskCount);
         Assert.Equal(1, openReport.OverdueTaskCount);
         Assert.Equal("open", openReport.Scope);
-        Assert.Equal("Open overdue task", Assert.Single(openReport.Items).Title);
+        var openRow = Assert.Single(openReport.Items);
+        Assert.Equal("Open overdue task", openRow.Title);
+        Assert.Equal(DateTimeKind.Utc, openReport.GeneratedAt.Kind);
+        Assert.Equal(DateTimeKind.Utc, openRow.DueAt.Kind);
+        Assert.Equal(DateTimeKind.Utc, openRow.CreatedAt.Kind);
         Assert.DoesNotContain(openReport.Items, item => item.Title == "Hidden task");
         Assert.Contains(openReport.ByStatus, item => item.Status == "done" && item.Count == 1);
         Assert.Contains(openReport.ByResponsible, item => item.AssigneeUserId == visibleUser.Id && item.TotalTasks == 3);
@@ -1149,6 +1182,10 @@ public class ReportsControllerTests
         Assert.Equal(1, row.OverdueDeadlineCount);
         Assert.Equal(300, row.PlannedMinutes);
         Assert.Equal(5m, row.PlannedHours);
+        Assert.Equal(DateTimeKind.Utc, report.GeneratedAt.Kind);
+        Assert.Equal(DateTimeKind.Utc, row.NearestTaskDueAt?.Kind);
+        Assert.True(row.NearestDeadlineAllDay);
+        Assert.Equal(DateTimeKind.Unspecified, row.NearestDeadlineAt?.Kind);
         Assert.Contains("срок", row.RiskLabel, StringComparison.OrdinalIgnoreCase);
 
         var filteredAction = await controller.LawyerWorkload(asOf, 7, visibleUser.Id, 10, CancellationToken.None);
@@ -1282,6 +1319,9 @@ public class ReportsControllerTests
         Assert.Equal("Активен", row.StatusLabel);
         Assert.Equal(8, row.DaysOverdue);
         Assert.Equal(visibleUser.Id, row.ResponsibleUserId);
+        Assert.Equal(DateTimeKind.Utc, report.GeneratedAt.Kind);
+        Assert.True(row.AllDay);
+        Assert.Equal(DateTimeKind.Unspecified, row.DueAt.Kind);
 
         var type = Assert.Single(report.ByType);
         Assert.Equal("appeal", type.DeadlineType);
