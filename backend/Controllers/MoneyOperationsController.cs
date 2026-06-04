@@ -2034,7 +2034,9 @@ public class MoneyOperationsController : ControllerBase
         var currency = string.IsNullOrWhiteSpace(request.Currency)
             ? sourceAccount.Currency
             : request.Currency.Trim();
-        var date = request.Date == default ? DateTime.Today : request.Date;
+        var date = request.Date == default
+            ? await ResolveMoneyOperationTodayAsync(ct)
+            : request.Date.Date;
         var purpose = string.IsNullOrWhiteSpace(request.Purpose)
             ? $"Перевод со счёта {sourceAccount.Name} на счёт {targetAccount.Name}"
             : request.Purpose.Trim();
@@ -2107,6 +2109,12 @@ public class MoneyOperationsController : ControllerBase
                 SourceOperation = sourceOperation,
                 TargetOperation = targetOperation,
             });
+    }
+
+    private async Task<DateTime> ResolveMoneyOperationTodayAsync(CancellationToken ct)
+    {
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        return CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date;
     }
 
     [HttpPost("bank-statement/import")]

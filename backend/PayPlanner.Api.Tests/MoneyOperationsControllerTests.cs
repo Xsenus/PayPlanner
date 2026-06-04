@@ -82,6 +82,62 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task CreateTransfer_UsesProfileTimeZoneForDefaultDate()
+    {
+        await using var db = await CreateContextAsync();
+        var selectedZone = ResolveTimeZoneWithDifferentLocalDate();
+        var user = await CreateUserAsync(db, "transfer-timezone@example.test", "Transfer Timezone User");
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = user.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = selectedZone.TimeZoneId,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+
+        var bankAccount = new MoneyAccount
+        {
+            Name = "Bank account",
+            Source = MoneyOperationSource.Bank,
+            Currency = "RUB",
+            IsActive = true,
+        };
+        var cashAccount = new MoneyAccount
+        {
+            Name = "Cash account",
+            Source = MoneyOperationSource.Cash,
+            Currency = "RUB",
+            IsActive = true,
+        };
+        db.MoneyAccounts.AddRange(bankAccount, cashAccount);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, user.Id);
+
+        var action = await controller.CreateTransfer(new MoneyOperationTransferRequest
+        {
+            SourceMoneyAccountId = bankAccount.Id,
+            TargetMoneyAccountId = cashAccount.Id,
+            Amount = 3_500m,
+            Date = default,
+        }, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(action.Result);
+        var response = Assert.IsType<MoneyOperationTransferResponse>(created.Value);
+
+        Assert.Equal(selectedZone.ProfileToday, response.SourceOperation.Date);
+        Assert.Equal(selectedZone.ProfileToday, response.TargetOperation.Date);
+
+        var operations = await db.MoneyOperations.OrderBy(item => item.Id).ToListAsync();
+        Assert.Equal([selectedZone.ProfileToday, selectedZone.ProfileToday], operations.Select(item => item.Date).ToArray());
+
+        var cashOrder = Assert.Single(await db.CashOrders.ToListAsync());
+        Assert.Equal(selectedZone.ProfileToday, cashOrder.Date);
+        Assert.Equal(response.TargetOperation.Id, cashOrder.MoneyOperationId);
+    }
+
+    [Fact]
     public async Task CreateUpdateDeleteMoneyOperation_RoundTripsSuccessfully()
     {
         await using var db = await CreateContextAsync();
@@ -5176,6 +5232,29 @@ public class MoneyOperationsControllerTests
         }
 
         return controller;
+    }
+
+    private static (string TimeZoneId, DateTime ProfileToday) ResolveTimeZoneWithDifferentLocalDate()
+    {
+        var nowUtc = DateTime.UtcNow;
+        var utcToday = nowUtc.Date;
+        foreach (var timeZoneId in new[]
+        {
+            "Pacific/Kiritimati",
+            "Line Islands Standard Time",
+            "Pacific/Pago_Pago",
+            "Samoa Standard Time",
+        })
+        {
+            var timeZone = CalendarTimeZoneHelper.ResolveTimeZone(timeZoneId);
+            var profileToday = CalendarTimeZoneHelper.ToUserLocal(nowUtc, timeZone).Date;
+            if (profileToday != utcToday)
+            {
+                return (timeZone.Id, profileToday);
+            }
+        }
+
+        throw new InvalidOperationException("No test timezone with a local date different from UTC was found.");
     }
 
     private static async Task<MoneyOperationsPageResponse> GetMoneyPageAsync(
