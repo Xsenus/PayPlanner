@@ -856,6 +856,68 @@ describe('CaseDetailPage', () => {
     });
   });
 
+  it('shows and saves case hearing times with the profile time zone', async () => {
+    vi.mocked(apiService.getUserSetting).mockResolvedValue({ key: 'profile.timeZoneId', value: 'Europe/Samara' });
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
+      nextHearingAt: '2026-06-05T12:00:00Z',
+    }));
+    vi.mocked(apiService.getCaseCourtEvents).mockResolvedValue([
+      {
+        id: 41,
+        clientCaseId: 15,
+        eventType: 'hearing',
+        eventTypeLabel: 'Заседание',
+        title: 'Судебное заседание',
+        scheduledAt: '2026-06-05T12:00:00Z',
+        allDay: false,
+        courtInstance: 'first',
+        courtInstanceLabel: 'Первая инстанция',
+        courtName: 'Арбитражный суд Самарской области',
+        courtCaseNumber: 'А55-12345/2026',
+        movementStatus: 'scheduled',
+        movementStatusLabel: 'Назначено',
+        sourceType: 'sudrf',
+        createdAt: '2026-05-21T00:00:00Z',
+        isOverdue: false,
+      },
+    ]);
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    await waitFor(() => {
+      expect(screen.getAllByText((_text, element) => {
+        const value = element?.textContent ?? '';
+        return value.includes('Заседание') && value.includes('05.06.2026') && value.includes('16:00');
+      }).length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
+    expect(await screen.findByText('Судебное заседание')).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getAllByText((_text, element) => {
+        const value = element?.textContent ?? '';
+        return value.includes('05.06.2026') && value.includes('16:00') && value.includes('Первая инстанция');
+      }).length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
+    const hearingInput = await screen.findByLabelText('Заседание') as HTMLInputElement;
+    expect(hearingInput.value).toBe('2026-06-05T16:00');
+
+    fireEvent.change(hearingInput, { target: { value: '2026-06-05T17:30' } });
+    fireEvent.click(screen.getAllByRole('button', { name: /Сохранить дело/u }).at(-1) as HTMLElement);
+
+    await waitFor(() => {
+      expect(apiService.updateCaseV2).toHaveBeenCalledWith(
+        15,
+        expect.objectContaining({
+          nextHearingAt: '2026-06-05T13:30:00.000Z',
+        }),
+      );
+    });
+  });
+
   it('opens full case editing from the detail header and saves changes', async () => {
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
 
