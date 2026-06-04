@@ -2045,12 +2045,20 @@ describe('TaskJournal', () => {
   });
 
   it('groups calendar tasks by the user profile time zone', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-06-03T13:30:00.000Z'));
+    window.localStorage.setItem('pp.task_journal.filters.v1.user:7', JSON.stringify({
+      quickFilter: 'all',
+      viewMode: 'calendar',
+      periodMode: 'week',
+      statusFilter: 'all',
+    }));
     apiMock.getUserSetting.mockImplementation(async (key: string) => (
       key === 'profile.timeZoneId'
         ? { key, value: 'Europe/Moscow' }
         : null
     ));
-    const profileDateKey = dateKey(new Date());
+    const profileDateKey = toTimeZoneDateKey(new Date(), 'Europe/Moscow');
     const dueAt = fromTimeZoneDateTimeInput(`${profileDateKey}T23:30`, 'Europe/Moscow');
 
     await renderJournal([
@@ -2058,10 +2066,10 @@ describe('TaskJournal', () => {
         title: 'Поздняя задача профиля',
         dueAt,
       }),
-    ], { initialView: 'calendar' });
+    ], { initialView: 'calendar', waitForTitle: null });
 
     const profileDay = await screen.findByTestId(`task-calendar-day-${profileDateKey}`);
-    expect(within(profileDay).getByTestId('task-calendar-task-101')).toBeTruthy();
+    await waitFor(() => expect(within(profileDay).getByTestId('task-calendar-task-101')).toBeTruthy());
   });
 
   it('opens the task calendar on today from the user profile time zone', async () => {
@@ -2188,6 +2196,8 @@ describe('TaskJournal', () => {
   });
 
   it('updates task duration from the calendar load panel', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-06-03T13:30:00.000Z'));
     const dueAt = fromTimeZoneDateTimeInput('2026-06-04T11:00', 'Asia/Kamchatka');
     apiMock.getUserSetting.mockImplementation(async (key: string) => (
       key === 'profile.timeZoneId'
@@ -2207,6 +2217,8 @@ describe('TaskJournal', () => {
   });
 
   it('highlights overlapping tasks in the task calendar', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-06-04T04:00:00.000Z'));
     await renderJournal([
       createTask({ dueAt: todayAt(11), plannedDurationMinutes: 60, assigneeUserId: 7, assigneeName: 'Администратор' }),
       createTask({ id: 102, title: 'Вторая задача', dueAt: todayAt(11, 30), plannedDurationMinutes: 60, assigneeUserId: 7, assigneeName: 'Администратор' }),

@@ -66,7 +66,7 @@ describe('CourtSyncSchedulerSettings', () => {
     render(<CourtSyncSchedulerSettings />);
 
     expect(await screen.findByText('Автосинхронизация судов')).toBeTruthy();
-    expect((screen.getByRole('checkbox', { name: /Включить фоновую проверку/i }) as HTMLInputElement).checked).toBe(true);
+    await waitFor(() => expect((screen.getByRole('checkbox', { name: /Включить фоновую проверку/i }) as HTMLInputElement).checked).toBe(true));
     expect((screen.getByLabelText('Интервал, минут') as HTMLInputElement).value).toBe('120');
     expect((screen.getByLabelText('Дел за запуск') as HTMLInputElement).value).toBe('15');
     expect(screen.getByText('ГАС Правосудие / sudrf.ru')).toBeTruthy();

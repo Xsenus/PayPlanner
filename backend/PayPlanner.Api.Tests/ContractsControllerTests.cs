@@ -10,6 +10,7 @@ using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
@@ -37,6 +38,47 @@ public class ContractsControllerTests
         var badRequest = Assert.IsType<ObjectResult>(actionResult.Result);
         var details = Assert.IsType<ValidationProblemDetails>(badRequest.Value);
         Assert.Contains(nameof(request.Amount), details.Errors.Keys);
+    }
+
+    [Fact]
+    public async Task Create_NormalizesContractDatesAsLocalDatesWithoutUtcMarker()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var controller = new ContractsController(db, new NoopFormRequirementsService());
+
+        var actionResult = await controller.Create(new UpsertContractRequest
+        {
+            Number = "CT-LOCAL-DATE",
+            Date = new DateTime(2026, 6, 5, 21, 30, 0, DateTimeKind.Utc),
+            StartDate = new DateTime(2026, 6, 6, 20, 15, 0, DateTimeKind.Utc),
+            ValidUntil = new DateTime(2026, 12, 31, 23, 45, 0, DateTimeKind.Utc),
+            BillingMode = ContractBillingMode.Fixed,
+            Amount = 20_000m,
+            Clients = [new UpsertContractClientRequest { ClientId = client.Id }],
+        }, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(actionResult.Result);
+        var dto = Assert.IsType<ContractDto>(created.Value);
+        AssertLocalDate(dto.Date, 2026, 6, 5);
+        AssertLocalDate(dto.StartDate, 2026, 6, 6);
+        AssertLocalDate(dto.ValidUntil, 2026, 12, 31);
+
+        var stored = await db.Contracts.AsNoTracking().SingleAsync(item => item.Id == dto.Id);
+        AssertLocalDate(stored.Date, 2026, 6, 5);
+        AssertLocalDate(stored.StartDate, 2026, 6, 6);
+        AssertLocalDate(stored.ValidUntil, 2026, 12, 31);
+
+        var json = JsonSerializer.Serialize(new
+        {
+            dto.Date,
+            dto.StartDate,
+            dto.ValidUntil
+        });
+        Assert.Contains("\"Date\":\"2026-06-05T00:00:00\"", json);
+        Assert.Contains("\"StartDate\":\"2026-06-06T00:00:00\"", json);
+        Assert.Contains("\"ValidUntil\":\"2026-12-31T00:00:00\"", json);
+        Assert.DoesNotContain("Z", json);
     }
 
     [Fact]
@@ -1690,6 +1732,18 @@ public class ContractsControllerTests
 
         public Task<List<string>> GetMissingFieldsAsync(string section, object model, CancellationToken ct = default)
             => Task.FromResult(new List<string>());
+    }
+
+    private static void AssertLocalDate(DateTime? actual, int year, int month, int day)
+    {
+        Assert.True(actual.HasValue);
+        AssertLocalDate(actual.Value, year, month, day);
+    }
+
+    private static void AssertLocalDate(DateTime actual, int year, int month, int day)
+    {
+        Assert.Equal(new DateTime(year, month, day), actual);
+        Assert.Equal(DateTimeKind.Unspecified, actual.Kind);
     }
 
     private sealed class CapturingEmailService : IEmailService

@@ -707,7 +707,7 @@ public class ContractsController : ControllerBase
         if (date == default) return ValidationError("date", "Дата договора обязательна.");
         var numbering = await GetContractNumberingSettingsAsync(ct);
         var rules = await GetContractRulesSettingsAsync(ct);
-        var number = await GenerateNextContractNumberAsync(date.Date, excludeId, ct, numbering);
+        var number = await GenerateNextContractNumberAsync(ContractDomainService.NormalizeLocalDate(date), excludeId, ct, numbering);
         return Ok(new NextContractNumberDto
         {
             Number = number,
@@ -741,8 +741,8 @@ public class ContractsController : ControllerBase
             Status = status,
             IsOpenEnded = normalized.IsOpenEnded,
             Amount = normalized.Amount,
-            Date = request.Date.Date,
-            StartDate = request.StartDate?.Date,
+            Date = ContractDomainService.NormalizeLocalDate(request.Date),
+            StartDate = ContractDomainService.NormalizeLocalDate(request.StartDate),
             ValidUntil = normalized.ValidUntil,
             TerminationDate = request.TerminationDate?.Date,
             TerminationReason = Normalize(request.TerminationReason),
@@ -798,8 +798,8 @@ public class ContractsController : ControllerBase
         contract.Status = status;
         contract.IsOpenEnded = normalized.IsOpenEnded;
         contract.Amount = normalized.Amount;
-        contract.Date = request.Date.Date;
-        contract.StartDate = request.StartDate?.Date;
+        contract.Date = ContractDomainService.NormalizeLocalDate(request.Date);
+        contract.StartDate = ContractDomainService.NormalizeLocalDate(request.StartDate);
         contract.ValidUntil = normalized.ValidUntil;
         contract.TerminationDate = request.TerminationDate?.Date;
         contract.TerminationReason = Normalize(request.TerminationReason);
@@ -1414,7 +1414,7 @@ public class ContractsController : ControllerBase
         var billingMode = ContractBillingMode.Normalize(request.BillingMode);
         var isOpenEnded = request.IsOpenEnded;
         var normalizedAmount = billingMode == ContractBillingMode.Fixed ? request.Amount : null;
-        var normalizedValidUntil = isOpenEnded ? null : request.ValidUntil?.Date;
+        var normalizedValidUntil = isOpenEnded ? null : ContractDomainService.NormalizeLocalDate(request.ValidUntil);
         if (billingMode == ContractBillingMode.Fixed && normalizedAmount is null)
         {
             return (ValidationError(nameof(request.Amount), "Для договора с фиксированной суммой нужно указать сумму."), null, null, false, null, null, [], [], [], [], []);
@@ -1432,12 +1432,12 @@ public class ContractsController : ControllerBase
             }
             if (string.IsNullOrEmpty(number) && rules.AutoGenerateWhenEmpty)
             {
-                number = await GenerateNextContractNumberAsync(request.Date.Date, contractId, ct);
+                number = await GenerateNextContractNumberAsync(ContractDomainService.NormalizeLocalDate(request.Date), contractId, ct);
             }
         }
         if (string.IsNullOrEmpty(number) && rules.AutoGenerateWhenEmpty)
         {
-            number = await GenerateNextContractNumberAsync(request.Date.Date, contractId, ct);
+            number = await GenerateNextContractNumberAsync(ContractDomainService.NormalizeLocalDate(request.Date), contractId, ct);
         }
         if (string.IsNullOrEmpty(number))
         {
