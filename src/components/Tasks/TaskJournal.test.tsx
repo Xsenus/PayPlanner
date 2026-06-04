@@ -600,6 +600,56 @@ describe('TaskJournal', () => {
     expect(calendarParams?.to).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
+  it('formats case calendar timed events with the profile time zone', async () => {
+    apiMock.getUserSetting.mockImplementation(async (key: string) => (
+      key === 'profile.timeZoneId'
+        ? { key, value: 'Europe/Samara' }
+        : null
+    ));
+    apiMock.getCaseCalendarSummary.mockResolvedValue({
+      from: '2026-06-05T00:00:00Z',
+      to: '2026-06-05T23:59:59Z',
+      totalEventCount: 1,
+      overdueCount: 0,
+      warningCount: 0,
+      courtEventCount: 1,
+      proceduralDeadlineCount: 0,
+      caseDeadlineCount: 0,
+      taskCount: 0,
+      nearestEvent: null,
+    });
+    apiMock.getCaseCalendarEvents.mockResolvedValue([
+      {
+        id: 'court:hearing:100',
+        kind: 'court',
+        sourceType: 'hearing',
+        sourceId: null,
+        title: 'Судебное заседание',
+        startAt: '2026-06-05T12:00:00Z',
+        endAt: '2026-06-05T13:00:00Z',
+        allDay: false,
+        clientCaseId: 100,
+        caseTitle: 'Чудайкин - С/З',
+        clientName: 'Иванов Иван Иванович',
+        legalEntityName: null,
+        responsibleUserId: 7,
+        responsibleName: 'Администратор',
+        status: 'Open',
+        priority: 'normal',
+        deadlineType: 'hearing',
+        isOverdue: false,
+        isWarning: false,
+        courtName: 'Арбитражный суд',
+        courtCaseNumber: 'А55-100/2026',
+      },
+    ]);
+
+    await renderJournal([createTask()], { initialView: 'calendar' });
+
+    expect(await screen.findByText('Судебное заседание')).toBeTruthy();
+    expect(screen.getByText((content) => content.includes('05 июня 2026') && content.includes('16:00'))).toBeTruthy();
+  });
+
   it('exports case calendar events to ICS with current calendar filters', async () => {
     await renderJournal([createTask()], { initialView: 'calendar' });
 

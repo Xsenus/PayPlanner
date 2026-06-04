@@ -642,8 +642,8 @@ function getCurrentTaskDayKey(now = new Date()) {
   return getTaskDateKey(now);
 }
 
-function getTaskTimeLabel(value: string | Date) {
-  const parts = getZonedParts(value, activeTaskJournalTimeZoneId);
+function getTaskTimeLabel(value: string | Date, timeZoneId = activeTaskJournalTimeZoneId) {
+  const parts = getZonedParts(value, timeZoneId);
   if (!parts) {
     return '';
   }
@@ -651,8 +651,8 @@ function getTaskTimeLabel(value: string | Date) {
   return `${String(parts.hour).padStart(2, '0')}:${String(parts.minute).padStart(2, '0')}`;
 }
 
-function getTaskDateLabel(value: string | Date) {
-  const parts = getZonedParts(value, activeTaskJournalTimeZoneId);
+function getTaskDateLabel(value: string | Date, timeZoneId = activeTaskJournalTimeZoneId) {
+  const parts = getZonedParts(value, timeZoneId);
   if (!parts) {
     return '';
   }
@@ -1098,8 +1098,8 @@ function getTaskCalendarLoadWarningThresholds(mode: TaskCalendarLoadWarningMode)
   }
 }
 
-function formatTimeOnly(value: Date | string) {
-  const label = getTaskTimeLabel(value);
+function formatTimeOnly(value: Date | string, timeZoneId = activeTaskJournalTimeZoneId) {
+  const label = getTaskTimeLabel(value, timeZoneId);
   if (label) {
     return label;
   }
@@ -3136,6 +3136,7 @@ export function TaskJournal({
             <CaseCalendarEventsPanel
               events={caseCalendarEvents}
               summary={caseCalendarSummary}
+              timeZoneId={effectiveTaskJournalTimeZoneId}
               loading={caseCalendarLoading}
               canExport={canExportCases}
               exporting={caseCalendarExporting}
@@ -3176,6 +3177,7 @@ export function TaskJournal({
             <CaseCalendarEventsPanel
               events={caseCalendarEvents}
               summary={caseCalendarSummary}
+              timeZoneId={effectiveTaskJournalTimeZoneId}
               loading={caseCalendarLoading}
               canExport={canExportCases}
               exporting={caseCalendarExporting}
@@ -3798,6 +3800,7 @@ function TaskBoard({
 function CaseCalendarEventsPanel({
   events,
   summary,
+  timeZoneId,
   loading,
   canExport,
   exporting,
@@ -3807,6 +3810,7 @@ function CaseCalendarEventsPanel({
 }: {
   events: CaseCalendarEvent[];
   summary: CaseCalendarSummary | null;
+  timeZoneId: string;
   loading: boolean;
   canExport: boolean;
   exporting: boolean;
@@ -3884,7 +3888,7 @@ function CaseCalendarEventsPanel({
                   <div className="mt-1 truncate text-xs opacity-80">{event.caseTitle}</div>
                 </div>
                 <span className="shrink-0 rounded-full bg-white/80 px-2 py-1 text-xs font-semibold text-slate-700">
-                  {formatCaseCalendarEventDate(event)}
+                  {formatCaseCalendarEventDate(event, timeZoneId)}
                 </span>
               </div>
               <div className="mt-2 flex flex-wrap gap-1.5 text-xs font-semibold">
@@ -3929,17 +3933,17 @@ function getCaseCalendarEventTone(event: CaseCalendarEvent) {
   return 'border-slate-200 bg-slate-50 text-slate-900';
 }
 
-function formatCaseCalendarEventDate(event: CaseCalendarEvent) {
+function formatCaseCalendarEventDate(event: CaseCalendarEvent, timeZoneId: string) {
   const start = new Date(event.startAt);
   if (Number.isNaN(start.getTime())) {
     return 'Дата не задана';
   }
 
   if (event.allDay) {
-    return getTaskDateLabel(start) || start.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' });
+    return getTaskDateLabel(start, timeZoneId) || start.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' });
   }
 
-  return `${getTaskDateLabel(start) || start.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' })} ${formatTimeOnly(start)}`;
+  return `${getTaskDateLabel(start, timeZoneId) || start.toLocaleDateString('ru-RU', { day: '2-digit', month: 'short' })} ${formatTimeOnly(start, timeZoneId)}`;
 }
 
 function TaskTimelineCalendar({

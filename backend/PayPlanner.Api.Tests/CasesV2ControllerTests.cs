@@ -1668,13 +1668,14 @@ public class CasesV2ControllerTests
             ResponsibleUserId = owner.Id,
         };
         var eventAtUtc = new DateTime(2026, 5, 19, 20, 30, 0, DateTimeKind.Utc);
+        var storedEventAt = DateTime.SpecifyKind(eventAtUtc, DateTimeKind.Unspecified);
         var clientCase = new ClientCase
         {
             Client = client,
             Title = "Boundary case",
             Status = ClientCaseStatus.Open,
             ResponsibleUserId = owner.Id,
-            NextHearingAt = eventAtUtc,
+            NextHearingAt = storedEventAt,
         };
         db.Clients.Add(client);
         db.ClientCases.Add(clientCase);
@@ -1687,12 +1688,43 @@ public class CasesV2ControllerTests
             UpdatedAt = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
+        db.ClientCaseCourtEvents.Add(new ClientCaseCourtEvent
+        {
+            ClientCaseId = clientCase.Id,
+            EventType = "hearing",
+            Title = "Boundary court event",
+            ScheduledAt = storedEventAt,
+            AllDay = false,
+            MovementStatus = "scheduled",
+            CreatedAt = eventAtUtc,
+            CreatedByUserId = owner.Id,
+            CreatedByUserName = owner.FullName,
+            UpdatedAt = eventAtUtc,
+            UpdatedByUserId = owner.Id,
+            UpdatedByUserName = owner.FullName,
+        });
+        db.ClientCaseProceduralDeadlines.Add(new ClientCaseProceduralDeadline
+        {
+            ClientCaseId = clientCase.Id,
+            DeadlineType = "motion",
+            Title = "Boundary timed deadline",
+            DueAt = storedEventAt,
+            AllDay = false,
+            Status = "active",
+            WarningDaysBefore = 7,
+            CreatedAt = eventAtUtc,
+            CreatedByUserId = owner.Id,
+            CreatedByUserName = owner.FullName,
+            UpdatedAt = eventAtUtc,
+            UpdatedByUserId = owner.Id,
+            UpdatedByUserName = owner.FullName,
+        });
         db.TaskJournalItems.Add(new TaskJournalItem
         {
             ClientCaseId = clientCase.Id,
             ObjectName = clientCase.Title,
             Title = "Boundary task",
-            DueAt = eventAtUtc,
+            DueAt = storedEventAt,
             PlannedDurationMinutes = 60,
             Type = "task",
             Priority = "normal",
@@ -1727,7 +1759,90 @@ public class CasesV2ControllerTests
         var localDayOk = Assert.IsType<OkObjectResult>(localDayResult.Result);
         var localDayEvents = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.CaseCalendarEventDto>>(localDayOk.Value);
         Assert.Contains(localDayEvents, item => item.Kind == "court" && item.SourceType == "hearing" && item.StartAt == eventAtUtc);
+        Assert.Contains(localDayEvents, item => item.Kind == "court" && item.Title == "Boundary court event" && item.StartAt == eventAtUtc);
+        Assert.Contains(localDayEvents, item => item.Kind == "procedural-deadline" && item.Title == "Boundary timed deadline" && item.StartAt == eventAtUtc);
         Assert.Contains(localDayEvents, item => item.Kind == "task" && item.Title == "Boundary task" && item.StartAt == eventAtUtc);
+        Assert.All(localDayEvents.Where(item => !item.AllDay), item =>
+        {
+            Assert.Equal(DateTimeKind.Utc, item.StartAt.Kind);
+            Assert.EndsWith("Z\"", JsonSerializer.Serialize(item.StartAt), StringComparison.Ordinal);
+        });
+
+        var exportResult = await controller.ExportCaseCalendarIcs(
+            new DateTime(2026, 5, 20, 0, 0, 0, DateTimeKind.Unspecified),
+            new DateTime(2026, 5, 20, 0, 0, 0, DateTimeKind.Unspecified),
+            clientCaseId: null,
+            responsibleUserId: null,
+            includeTasks: true,
+            reminderMinutes: "30",
+            ct: CancellationToken.None);
+        var file = Assert.IsType<FileContentResult>(exportResult);
+        var ics = Encoding.UTF8.GetString(file.FileContents);
+        Assert.Contains("DTSTART:20260519T203000Z", ics, StringComparison.Ordinal);
+        Assert.DoesNotContain("DTSTART:20260520T003000Z", ics, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CaseCalendarEvents_PreserveFourPmCourtHearingForUserTimeZone()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "case-calendar-samara-16@example.com", "Calendar Owner");
+        var client = new Client
+        {
+            Name = "Samara hearing client",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var hearingAtUtc = new DateTime(2026, 6, 5, 12, 0, 0, DateTimeKind.Utc);
+        var storedHearingAt = DateTime.SpecifyKind(hearingAtUtc, DateTimeKind.Unspecified);
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Чудайкин - С/З",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+            NextHearingAt = storedHearingAt,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = owner.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Europe/Samara",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var result = await controller.GetCaseCalendarEvents(
+            new DateTime(2026, 6, 5, 0, 0, 0, DateTimeKind.Unspecified),
+            new DateTime(2026, 6, 5, 0, 0, 0, DateTimeKind.Unspecified),
+            clientCaseId: null,
+            responsibleUserId: null,
+            includeTasks: false,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var events = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.CaseCalendarEventDto>>(ok.Value);
+        var hearing = Assert.Single(events, item => item.Kind == "court" && item.SourceType == "hearing");
+        Assert.Equal(hearingAtUtc, hearing.StartAt);
+        Assert.Equal(DateTimeKind.Utc, hearing.StartAt.Kind);
+        Assert.Equal("\"2026-06-05T12:00:00Z\"", JsonSerializer.Serialize(hearing.StartAt));
+
+        var exportResult = await controller.ExportCaseCalendarIcs(
+            new DateTime(2026, 6, 5, 0, 0, 0, DateTimeKind.Unspecified),
+            new DateTime(2026, 6, 5, 0, 0, 0, DateTimeKind.Unspecified),
+            clientCaseId: null,
+            responsibleUserId: null,
+            includeTasks: false,
+            reminderMinutes: "30",
+            ct: CancellationToken.None);
+        var file = Assert.IsType<FileContentResult>(exportResult);
+        var ics = Encoding.UTF8.GetString(file.FileContents);
+        Assert.Contains("DTSTART:20260605T120000Z", ics, StringComparison.Ordinal);
+        Assert.DoesNotContain("DTSTART:20260605T160000Z", ics, StringComparison.Ordinal);
     }
 
     [Fact]

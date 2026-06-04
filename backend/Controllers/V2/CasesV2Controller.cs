@@ -4509,7 +4509,7 @@ public class CasesV2Controller : ControllerBase
             .OrderBy(item => item.DueAt)
             .ThenBy(item => item.Id))
         {
-            var normalizedStart = deadline.AllDay ? deadline.DueAt.Date : deadline.DueAt;
+            var normalizedStart = NormalizeCaseCalendarStart(deadline.DueAt, deadline.AllDay);
             events.Add(new CaseCalendarEventDto
             {
                 Id = $"procedural-deadline:{deadline.Id}",
@@ -4550,7 +4550,7 @@ public class CasesV2Controller : ControllerBase
             .OrderBy(item => item.ScheduledAt)
             .ThenBy(item => item.Id))
         {
-            var normalizedStart = courtEvent.AllDay ? courtEvent.ScheduledAt.Date : courtEvent.ScheduledAt;
+            var normalizedStart = NormalizeCaseCalendarStart(courtEvent.ScheduledAt, courtEvent.AllDay);
             events.Add(new CaseCalendarEventDto
             {
                 Id = $"court-event:{courtEvent.Id}",
@@ -4595,7 +4595,7 @@ public class CasesV2Controller : ControllerBase
             return;
         }
 
-        var normalizedStart = allDay ? startAt.Value.Date : startAt.Value;
+        var normalizedStart = NormalizeCaseCalendarStart(startAt.Value, allDay);
         events.Add(new CaseCalendarEventDto
         {
             Id = $"{kind}:{sourceType}:{clientCase.Id}",
@@ -4624,6 +4624,7 @@ public class CasesV2Controller : ControllerBase
     private static CaseCalendarEventDto MapTaskCalendarEvent(ClientCase clientCase, TaskJournalItem task, CaseCalendarDateRange range)
     {
         var durationMinutes = task.PlannedDurationMinutes > 0 ? task.PlannedDurationMinutes : 60;
+        var normalizedStart = NormalizeCaseCalendarStart(task.DueAt, allDay: false);
         return new CaseCalendarEventDto
         {
             Id = $"task:{task.Id}",
@@ -4631,8 +4632,8 @@ public class CasesV2Controller : ControllerBase
             SourceType = task.Type,
             SourceId = task.Id,
             Title = task.Title,
-            StartAt = task.DueAt,
-            EndAt = task.DueAt.AddMinutes(durationMinutes),
+            StartAt = normalizedStart,
+            EndAt = normalizedStart.AddMinutes(durationMinutes),
             AllDay = false,
             ClientCaseId = clientCase.Id,
             CaseTitle = clientCase.Title,
@@ -4643,14 +4644,19 @@ public class CasesV2Controller : ControllerBase
             Status = task.Status,
             Priority = task.Priority,
             DeadlineType = null,
-            IsOverdue = task.DueAt < range.NowInstantUtc
+            IsOverdue = normalizedStart < range.NowInstantUtc
                 && !string.Equals(task.Status, "done", StringComparison.OrdinalIgnoreCase)
                 && !string.Equals(task.Status, "cancelled", StringComparison.OrdinalIgnoreCase),
-            IsWarning = task.DueAt >= range.NowInstantUtc && task.DueAt <= range.NowInstantUtc.AddDays(7),
+            IsWarning = normalizedStart >= range.NowInstantUtc && normalizedStart <= range.NowInstantUtc.AddDays(7),
             CourtName = NormalizeOptional(clientCase.CourtName),
             CourtCaseNumber = NormalizeOptional(clientCase.CourtCaseNumber),
         };
     }
+
+    private static DateTime NormalizeCaseCalendarStart(DateTime value, bool allDay)
+        => allDay
+            ? value.Date
+            : CalendarTimeZoneHelper.NormalizeUtcInstant(value);
 
     private static bool IsCalendarEventOverdue(DateTime startAt, bool allDay, CaseCalendarDateRange range)
         => allDay
