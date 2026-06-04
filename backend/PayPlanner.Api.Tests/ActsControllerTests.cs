@@ -195,6 +195,9 @@ public class ActsControllerTests
         Assert.Equal(ActStatus.Transferred, sentDto.Status);
         Assert.Equal(ActWorkflowStatus.OnSigning, sentDto.WorkflowStatus);
         Assert.NotNull(sentDto.SentForSigningAt);
+        AssertUtcInstantKind(sentDto.SentForSigningAt);
+        AssertUtcInstantKind(sentDto.CreatedAt);
+        AssertUtcInstantKind(sentDto.UpdatedAt);
         Assert.Null(sentDto.SignedAt);
 
         var signAction = await controller.MarkSigned(createdDto.Id, CancellationToken.None);
@@ -205,6 +208,10 @@ public class ActsControllerTests
         Assert.Equal(ActWorkflowStatus.Signed, signedDto.WorkflowStatus);
         Assert.NotNull(signedDto.SentForSigningAt);
         Assert.NotNull(signedDto.SignedAt);
+        AssertUtcInstantKind(signedDto.SentForSigningAt);
+        AssertUtcInstantKind(signedDto.SignedAt);
+        AssertUtcInstantKind(signedDto.CreatedAt);
+        AssertUtcInstantKind(signedDto.UpdatedAt);
 
         db.ChangeTracker.Clear();
         var stored = await db.Acts.AsNoTracking().SingleAsync(act => act.Id == createdDto.Id);
@@ -310,6 +317,9 @@ public class ActsControllerTests
         Assert.Equal(ActStatus.Terminated, dto.Status);
         Assert.Equal(ActWorkflowStatus.Cancelled, dto.WorkflowStatus);
         Assert.NotNull(dto.CancelledAt);
+        AssertUtcInstantKind(dto.CancelledAt);
+        AssertUtcInstantKind(dto.CreatedAt);
+        AssertUtcInstantKind(dto.UpdatedAt);
         Assert.Equal(actor.Id, dto.CancelledByUserId);
         Assert.Equal("Клиент отказался подписывать акт", dto.CancelledReason);
         Assert.Contains("Клиент отказался подписывать акт", dto.Comment, StringComparison.Ordinal);
@@ -1652,6 +1662,12 @@ public class ActsControllerTests
         await using var db = await CreateContextAsync();
         var client = await CreateClientAsync(db);
         var act = await CreateManualActAsync(db, client.Id, "ACT-304", 7_500m, ActStatus.Transferred);
+        act.Date = new DateTime(2026, 4, 21, 23, 30, 0, DateTimeKind.Utc);
+        act.SentForSigningAt = new DateTime(2026, 4, 22, 7, 30, 0, DateTimeKind.Utc);
+        act.SignedAt = new DateTime(2026, 4, 23, 8, 45, 0, DateTimeKind.Utc);
+        act.UpdatedAt = new DateTime(2026, 4, 23, 9, 15, 0, DateTimeKind.Utc);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
 
         var controller = new ActsController(db, new NoopFormRequirementsService());
 
@@ -1664,6 +1680,12 @@ public class ActsControllerTests
         Assert.Equal(client.Id, dto.ClientId);
         Assert.Equal(7_500m, dto.Amount);
         Assert.Equal(ActStatus.Transferred, dto.Status);
+        AssertLocalDate(dto.Date, 2026, 4, 21);
+        AssertUtcInstantKind(dto.SentForSigningAt);
+        AssertUtcInstantKind(dto.SignedAt);
+        AssertUtcInstantKind(dto.CreatedAt);
+        AssertUtcInstantKind(dto.UpdatedAt);
+        AssertUtcInstantKind(dto.AuditUpdatedAt);
     }
 
     [Fact]
@@ -2885,6 +2907,12 @@ public class ActsControllerTests
     {
         Assert.Equal(new DateTime(year, month, day), actual);
         Assert.Equal(DateTimeKind.Unspecified, actual.Kind);
+    }
+
+    private static void AssertUtcInstantKind(DateTime? actual)
+    {
+        Assert.True(actual.HasValue);
+        Assert.Equal(DateTimeKind.Utc, actual.Value.Kind);
     }
 
     private sealed class RecordingEmailService : IEmailService
