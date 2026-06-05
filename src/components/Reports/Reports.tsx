@@ -62,6 +62,7 @@ import { apiService } from '../../services/api';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatReportDate, formatReportDateTime, formatReportDeadlineDate } from '../../utils/reportDateFormatting';
+import { currentReportMonthInTimeZone } from '../../utils/reportPeriod';
 import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CaseFinanceReport, CaseSuccessReport, CashBookSummary, CashFlowReport, CashOrderReport, ContractStatusReport, CounterpartyReport, CurrencyReport, CurrentCasesReport, DirectionReport, InvoiceStatusReport, JournalStatusReport, LawyerWorkloadReport, LegalWorkReport, MatchStatusReport, MoneyCategoryReport, MoneyOperationSource, OverdueProceduralDeadlinesReport, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, TaskReport, VatReport } from '../../types';
 
 const ruMonthFormatter = new Intl.DateTimeFormat('ru-RU', {
@@ -5724,8 +5725,7 @@ interface ReportsProps {
 
 export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsProps = {}) {
   const profileTimeZoneId = useUserTimeZone();
-  const now = new Date();
-  const ymNow = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}` as const;
+  const ymNow = currentReportMonthInTimeZone(profileTimeZoneId);
   const [range, setRange] = useState<MonthRange>({ from: ymNow, to: ymNow });
   const [activeGroup, setActiveGroup] = useState<ReportGroupId>('payments');
   const [taskReportScope, setTaskReportScope] = useState<TaskReportScope>('open');

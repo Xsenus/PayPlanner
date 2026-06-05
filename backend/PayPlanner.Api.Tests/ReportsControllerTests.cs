@@ -3389,7 +3389,7 @@ public class ReportsControllerTests
             BankStatementImportBatch("may-errors.txt", BankStatementImportBatchStatus.AppliedWithErrors, 12, 7, 2, 3, 0, new DateTime(2026, 5, 2, 11, 0, 0)),
             BankStatementImportBatch("may-rolled.txt", BankStatementImportBatchStatus.RolledBack, 5, 5, 0, 0, 5, new DateTime(2026, 5, 3, 12, 0, 0)),
             BankStatementImportBatch("may-blocked.txt", BankStatementImportBatchStatus.RollbackBlocked, 4, 3, 0, 1, 0, new DateTime(2026, 5, 4, 13, 0, 0)),
-            BankStatementImportBatch("old.txt", BankStatementImportBatchStatus.Applied, 99, 99, 0, 0, 0, new DateTime(2026, 4, 30, 23, 59, 59)));
+            BankStatementImportBatch("old.txt", BankStatementImportBatchStatus.Applied, 99, 99, 0, 0, 0, new DateTime(2026, 4, 30, 10, 0, 0, DateTimeKind.Utc)));
         await db.SaveChangesAsync();
         var controller = CreateController(db);
 
@@ -3447,6 +3447,35 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task BankStatementImports_FiltersCreatedAtByProfileLocalDay()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateReportsUserWithTimeZoneAsync(db, "Europe/Samara");
+        db.BankStatementImportBatches.AddRange(
+            BankStatementImportBatch("local-may-first.txt", BankStatementImportBatchStatus.Applied, 10, 8, 2, 0, 0, new DateTime(2026, 4, 30, 21, 30, 0, DateTimeKind.Utc)),
+            BankStatementImportBatch("local-may-second.txt", BankStatementImportBatchStatus.AppliedWithErrors, 20, 10, 5, 5, 0, new DateTime(2026, 5, 1, 20, 30, 0, DateTimeKind.Utc)));
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, CreateUserPrincipal(user.Id));
+
+        var action = await controller.BankStatementImports(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 1),
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<BankStatementImportReportDto>(ok.Value);
+        Assert.Equal(1, report.BatchCount);
+        Assert.Equal(10, report.RowsReadTotal);
+        Assert.Equal(8, report.CreatedRowsTotal);
+        Assert.Equal(0, report.ErrorRowsTotal);
+        Assert.Collection(report.Statuses, item =>
+        {
+            Assert.Equal(BankStatementImportBatchStatus.Applied, item.Status);
+            Assert.Equal(10, item.RowsRead);
+        });
+    }
+
+    [Fact]
     public async Task SpreadsheetImports_GroupsBatchesByStatus()
     {
         await using var db = await CreateContextAsync();
@@ -3455,7 +3484,7 @@ public class ReportsControllerTests
             SpreadsheetImportBatch("May Errors", SpreadsheetImportBatchStatus.AppliedWithErrors, 1, 12, 5, 2, 2, 3, 0, new DateTime(2026, 5, 2, 11, 0, 0)),
             SpreadsheetImportBatch("May Rolled", SpreadsheetImportBatchStatus.RolledBack, 1, 8, 4, 1, 2, 1, 4, new DateTime(2026, 5, 3, 12, 0, 0)),
             SpreadsheetImportBatch("May Conflicts", SpreadsheetImportBatchStatus.RolledBackWithConflicts, 3, 6, 2, 1, 1, 2, 2, new DateTime(2026, 5, 4, 13, 0, 0)),
-            SpreadsheetImportBatch("Old", SpreadsheetImportBatchStatus.Applied, 5, 99, 99, 0, 0, 0, 0, new DateTime(2026, 4, 30, 23, 59, 59)));
+            SpreadsheetImportBatch("Old", SpreadsheetImportBatchStatus.Applied, 5, 99, 99, 0, 0, 0, 0, new DateTime(2026, 4, 30, 10, 0, 0, DateTimeKind.Utc)));
         await db.SaveChangesAsync();
         var controller = CreateController(db);
 
@@ -3515,6 +3544,36 @@ public class ReportsControllerTests
                 Assert.Equal(4, item.RollbackRows);
                 Assert.Equal(25m, item.Share);
             });
+    }
+
+    [Fact]
+    public async Task SpreadsheetImports_FiltersCreatedAtByProfileLocalDay()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateReportsUserWithTimeZoneAsync(db, "Europe/Samara");
+        db.SpreadsheetImportBatches.AddRange(
+            SpreadsheetImportBatch("Local May First", SpreadsheetImportBatchStatus.Applied, 1, 10, 8, 1, 1, 0, 0, new DateTime(2026, 4, 30, 21, 30, 0, DateTimeKind.Utc)),
+            SpreadsheetImportBatch("Local May Second", SpreadsheetImportBatchStatus.AppliedWithErrors, 1, 20, 10, 2, 3, 5, 0, new DateTime(2026, 5, 1, 20, 30, 0, DateTimeKind.Utc)));
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, CreateUserPrincipal(user.Id));
+
+        var action = await controller.SpreadsheetImports(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 1),
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<SpreadsheetImportReportDto>(ok.Value);
+        Assert.Equal(1, report.BatchCount);
+        Assert.Equal(1, report.FileCount);
+        Assert.Equal(10, report.TotalRows);
+        Assert.Equal(8, report.CreatedRows);
+        Assert.Equal(0, report.ErrorRows);
+        Assert.Collection(report.Statuses, item =>
+        {
+            Assert.Equal(SpreadsheetImportBatchStatus.Applied, item.Status);
+            Assert.Equal(10, item.TotalRows);
+        });
     }
 
     private static MoneyOperation Operation(
@@ -3746,6 +3805,42 @@ public class ReportsControllerTests
         => new(new ClaimsIdentity(
             [new Claim(ClaimTypes.NameIdentifier, userId.ToString())],
             authenticationType: "Test"));
+
+    private static async Task<User> CreateReportsUserWithTimeZoneAsync(PaymentContext db, string timeZoneId)
+    {
+        var role = new Role
+        {
+            Name = $"reports-timezone-{Guid.NewGuid():N}",
+            Description = "Reports timezone test role",
+        };
+        var user = new User
+        {
+            Email = $"reports-timezone-{Guid.NewGuid():N}@example.test",
+            FullName = "Reports Timezone User",
+            IsActive = true,
+            Role = role,
+        };
+
+        db.Roles.Add(role);
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = role.Id,
+            Section = RolePermissionCatalog.Reports,
+            CanView = true,
+            ViewScope = DataVisibilityScope.All,
+        });
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = user.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = timeZoneId,
+        });
+        await db.SaveChangesAsync();
+        return user;
+    }
 
     private static (string TimeZoneId, DateTime UtcToday, DateTime ProfileToday) ResolveTimeZoneWithDifferentLocalDate()
     {

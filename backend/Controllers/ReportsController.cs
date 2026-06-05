@@ -1105,7 +1105,11 @@ public class ReportsController : ControllerBase
         }
 
         var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildBankStatementImportReportAsync(start, end, cancellationToken),
+            async cancellationToken =>
+            {
+                var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), cancellationToken);
+                return await BuildBankStatementImportReportAsync(start, end, timeZone, cancellationToken);
+            },
             _logger,
             ct);
 
@@ -1126,7 +1130,11 @@ public class ReportsController : ControllerBase
         }
 
         var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildSpreadsheetImportReportAsync(start, end, cancellationToken),
+            async cancellationToken =>
+            {
+                var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), cancellationToken);
+                return await BuildSpreadsheetImportReportAsync(start, end, timeZone, cancellationToken);
+            },
             _logger,
             ct);
 
@@ -5769,12 +5777,16 @@ public class ReportsController : ControllerBase
     private async Task<BankStatementImportReportDto> BuildBankStatementImportReportAsync(
         DateTime from,
         DateTime to,
+        TimeZoneInfo timeZone,
         CancellationToken ct)
     {
-        var endExclusive = to.AddDays(1);
+        var localStart = from.Date;
+        var localEnd = to.Date;
+        var startUtc = CalendarTimeZoneHelper.FromUserLocalToUtc(localStart, timeZone);
+        var endUtc = CalendarTimeZoneHelper.FromUserLocalToUtc(localEnd.AddDays(1), timeZone);
         var rows = await _db.BankStatementImportBatches
             .AsNoTracking()
-            .Where(item => item.CreatedAt >= from && item.CreatedAt < endExclusive)
+            .Where(item => item.CreatedAt >= startUtc && item.CreatedAt < endUtc)
             .Select(item => new
             {
                 item.Status,
@@ -5783,8 +5795,17 @@ public class ReportsController : ControllerBase
                 item.SkippedRows,
                 item.ErrorRows,
                 item.RollbackRows,
+                item.CreatedAt,
             })
             .ToListAsync(ct);
+
+        rows = rows
+            .Where(item =>
+            {
+                var localDate = CalendarTimeZoneHelper.ToUserLocal(item.CreatedAt, timeZone).Date;
+                return localDate >= localStart && localDate <= localEnd;
+            })
+            .ToList();
 
         var statuses = rows
             .GroupBy(item => item.Status)
@@ -5848,12 +5869,16 @@ public class ReportsController : ControllerBase
     private async Task<SpreadsheetImportReportDto> BuildSpreadsheetImportReportAsync(
         DateTime from,
         DateTime to,
+        TimeZoneInfo timeZone,
         CancellationToken ct)
     {
-        var endExclusive = to.AddDays(1);
+        var localStart = from.Date;
+        var localEnd = to.Date;
+        var startUtc = CalendarTimeZoneHelper.FromUserLocalToUtc(localStart, timeZone);
+        var endUtc = CalendarTimeZoneHelper.FromUserLocalToUtc(localEnd.AddDays(1), timeZone);
         var rows = await _db.SpreadsheetImportBatches
             .AsNoTracking()
-            .Where(item => item.CreatedAt >= from && item.CreatedAt < endExclusive)
+            .Where(item => item.CreatedAt >= startUtc && item.CreatedAt < endUtc)
             .Select(item => new
             {
                 item.Status,
@@ -5864,8 +5889,17 @@ public class ReportsController : ControllerBase
                 item.SkippedRows,
                 item.ErrorRows,
                 item.RollbackRows,
+                item.CreatedAt,
             })
             .ToListAsync(ct);
+
+        rows = rows
+            .Where(item =>
+            {
+                var localDate = CalendarTimeZoneHelper.ToUserLocal(item.CreatedAt, timeZone).Date;
+                return localDate >= localStart && localDate <= localEnd;
+            })
+            .ToList();
 
         var statuses = rows
             .GroupBy(item => item.Status)
