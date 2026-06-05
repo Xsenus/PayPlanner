@@ -263,7 +263,7 @@
 - [x] Frontend unit-тесты.
 - [x] Frontend integration-тесты: покрыты существующими integration-тестами финансов/дел/договоров и полным unit/integration-aware vitest набором.
 - [x] `npm run build`.
-- [x] Проверка локальной БД: backend-тесты проходят на локальной SQLite/InMemory базе, диагностический SQL подготовлен для PostgreSQL.
+- [x] Проверка локальной БД: backend-тесты проходят на локальной SQLite/InMemory базе, `docs/date-time-data-diagnostics.sqlite.sql` выполнен на `backend/payplanner.db`.
 - [ ] Проверка на серверной копии.
 - [x] Проверка кодировки.
 - [x] `git diff --check`.
