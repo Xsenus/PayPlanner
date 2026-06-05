@@ -134,7 +134,7 @@ public class PaymentsController : ControllerBase
         if (createValidationError is not null) return createValidationError;
         var rawPaidAmount = model.PaidAmount;
         PaymentDomainService.Normalize(model);
-        PaymentDomainService.ApplyStatusRules(model, now);
+        PaymentDomainService.ApplyStatusRules(model, now, paymentTimeZone);
         var overpaymentValidationError = await ValidatePaymentOverpaymentHandlingAsync(model, rawPaidAmount, ct);
         if (overpaymentValidationError is not null) return overpaymentValidationError;
 
@@ -254,7 +254,7 @@ public class PaymentsController : ControllerBase
             e.LastPaymentDate = (model.LastPaymentDate ?? model.PaidDate)?.Date;
         }
 
-        PaymentDomainService.ApplyStatusRules(e, now);
+        PaymentDomainService.ApplyStatusRules(e, now, paymentTimeZone);
 
         var rescheduleCount = originalRescheduleCount;
         var plannedDateChanged = model.PlannedDate != default && originalPlannedDate != e.PlannedDate.Date;
@@ -537,7 +537,7 @@ public class PaymentsController : ControllerBase
             e.LastPaymentDate = (model.LastPaymentDate ?? model.PaidDate)?.Date;
         }
 
-        PaymentDomainService.ApplyStatusRules(e, now);
+        PaymentDomainService.ApplyStatusRules(e, now, paymentTimeZone);
 
         var rescheduleCount = originalRescheduleCount;
         var plannedDateChanged = model.PlannedDate != default && originalPlannedDate != e.PlannedDate.Date;
@@ -623,7 +623,8 @@ public class PaymentsController : ControllerBase
         pageSize = Math.Clamp(pageSize, 1, 200);
 
         var now = DateTime.UtcNow;
-        var today = now.Date;
+        var paymentTimeZone = await ResolvePaymentTimeZoneAsync(ct);
+        var today = PaymentDomainService.ResolveLocalToday(now, paymentTimeZone);
         var sourceIdsWithRemainders = await GetPartialRemainderSourceIdsAsync(ct);
         var visibility = await ResolvePaymentsVisibilityAsync(ct);
         if (visibility is null)
@@ -930,7 +931,7 @@ public class PaymentsController : ControllerBase
         var sourceValidationError = await ValidatePaymentAttributionAsync(source, ct);
         if (sourceValidationError is not null) return sourceValidationError;
         PaymentDomainService.Normalize(source);
-        PaymentDomainService.ApplyStatusRules(source, now);
+        PaymentDomainService.ApplyStatusRules(source, now, paymentTimeZone);
 
         AppendSourceRemainderAuditNotes(
             source,
@@ -1002,12 +1003,13 @@ public class PaymentsController : ControllerBase
             paidAmount,
             remainderAmount,
             request.RemainderDate.Date,
-            now);
+            now,
+            paymentTimeZone);
         await CopyPaymentResponsiblesAsync(remainderPayment, source.Responsibles.Select(item => item.UserId), ct);
         CopyPaymentInvoiceClientCases(remainderPayment, source.InvoiceClientCases.Select(item => item.ClientCaseId));
 
         PaymentDomainService.Normalize(remainderPayment);
-        PaymentDomainService.ApplyStatusRules(remainderPayment, now);
+        PaymentDomainService.ApplyStatusRules(remainderPayment, now, paymentTimeZone);
 
         var remainderValidationError = await ValidatePaymentAttributionAsync(remainderPayment, ct);
         if (remainderValidationError is not null) return remainderValidationError;
@@ -1083,7 +1085,7 @@ public class PaymentsController : ControllerBase
             actor,
             paymentTimeZone);
         PaymentDomainService.Normalize(source);
-        PaymentDomainService.ApplyStatusRules(source, now);
+        PaymentDomainService.ApplyStatusRules(source, now, paymentTimeZone);
 
         await RemovePartialRemainderTransferAsync(source.Id, remainder.Id, ct);
         _db.Payments.Remove(remainder);
@@ -1183,7 +1185,8 @@ public class PaymentsController : ControllerBase
         remainder.LastPaymentDate = null;
         remainder.Date = remainderDate;
         remainder.PlannedDate = remainderDate;
-        remainder.Status = remainderDate < now.Date ? PaymentStatus.Overdue : PaymentStatus.Pending;
+        var localToday = PaymentDomainService.ResolveLocalToday(now, paymentTimeZone);
+        remainder.Status = remainderDate < localToday ? PaymentStatus.Overdue : PaymentStatus.Pending;
         remainder.SystemNotes = ReplaceTechnicalMarkerLine(
             remainder.SystemNotes,
             PaymentRemainderTransferRules.PartialRemainderMarker,
@@ -1201,9 +1204,9 @@ public class PaymentsController : ControllerBase
             paymentTimeZone);
 
         PaymentDomainService.Normalize(source);
-        PaymentDomainService.ApplyStatusRules(source, now);
+        PaymentDomainService.ApplyStatusRules(source, now, paymentTimeZone);
         PaymentDomainService.Normalize(remainder);
-        PaymentDomainService.ApplyStatusRules(remainder, now);
+        PaymentDomainService.ApplyStatusRules(remainder, now, paymentTimeZone);
 
         var sourceValidationError = await ValidatePaymentAttributionAsync(source, ct);
         if (sourceValidationError is not null) return sourceValidationError;
@@ -1466,7 +1469,7 @@ public class PaymentsController : ControllerBase
             nextInstallment.Status = PaymentStatus.Processing;
         }
 
-        PaymentDomainService.ApplyStatusRules(nextInstallment, now);
+        PaymentDomainService.ApplyStatusRules(nextInstallment, now, paymentTimeZone);
 
         AppendOverpaymentDecisionNote(
             payment,
@@ -2330,7 +2333,8 @@ public class PaymentsController : ControllerBase
         decimal paidAmount,
         decimal remainderAmount,
         DateTime remainderDate,
-        DateTime now)
+        DateTime now,
+        TimeZoneInfo paymentTimeZone)
     {
         var culture = CultureInfo.GetCultureInfo("ru-RU");
         var description = string.IsNullOrWhiteSpace(source.Description)
@@ -2342,6 +2346,8 @@ public class PaymentsController : ControllerBase
             paidAmount,
             remainderAmount,
             remainderDate);
+
+        var localToday = PaymentDomainService.ResolveLocalToday(now, paymentTimeZone);
 
         return new Payment
         {
@@ -2381,7 +2387,7 @@ public class PaymentsController : ControllerBase
             PaymentSourceId = source.PaymentSourceId,
             ServiceId = source.ServiceId,
             PaymentStatusId = source.PaymentStatusId,
-            Status = remainderDate.Date < now.Date ? PaymentStatus.Overdue : PaymentStatus.Pending,
+            Status = remainderDate.Date < localToday ? PaymentStatus.Overdue : PaymentStatus.Pending,
             Type = source.Type,
         };
     }

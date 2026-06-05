@@ -53,6 +53,9 @@ public static class PaymentDomainService
     /// Применяет автоматические правила установки статуса и вспомогательных полей.
     /// </summary>
     public static void ApplyStatusRules(Payment payment, DateTime utcNow)
+        => ApplyStatusRules(payment, utcNow, null);
+
+    public static void ApplyStatusRules(Payment payment, DateTime utcNow, TimeZoneInfo? timeZone)
     {
         ArgumentNullException.ThrowIfNull(payment);
 
@@ -64,7 +67,7 @@ public static class PaymentDomainService
         payment.PaidDate = NormalizeLocalDate(payment.PaidDate);
         payment.PaymentDocumentDate = NormalizeLocalDate(payment.PaymentDocumentDate);
 
-        var today = utcNow.Date;
+        var today = ResolveLocalToday(utcNow, timeZone);
         var fullyPaid = payment.PaidAmount >= payment.Amount - AmountEpsilon;
 
         if (fullyPaid)
@@ -95,6 +98,11 @@ public static class PaymentDomainService
                 : PaymentStatus.Pending;
         }
     }
+
+    public static DateTime ResolveLocalToday(DateTime utcNow, TimeZoneInfo? timeZone)
+        => timeZone is null
+            ? CalendarTimeZoneHelper.NormalizeUtcInstant(utcNow).Date
+            : CalendarTimeZoneHelper.ToUserLocal(utcNow, timeZone).Date;
 
     /// <summary>
     /// Добавляет строку в системные заметки, ограничивая их длину.

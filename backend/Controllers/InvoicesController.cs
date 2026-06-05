@@ -4111,6 +4111,7 @@ public class InvoicesController : ControllerBase
         {
             return null;
         }
+        var invoiceTimeZone = await ResolveInvoiceTimeZoneAsync(ct);
 
         var existingPaymentRows = await _db.Payments
             .Include(payment => payment.Responsibles)
@@ -4219,7 +4220,8 @@ public class InvoicesController : ControllerBase
                     request,
                     request.InstallmentPlan,
                     item,
-                    responsibleIds);
+                    responsibleIds,
+                    invoiceTimeZone);
                 continue;
             }
 
@@ -4240,7 +4242,8 @@ public class InvoicesController : ControllerBase
                     request,
                     request.InstallmentPlan,
                     item,
-                    responsibleIds);
+                    responsibleIds,
+                    invoiceTimeZone);
                 continue;
             }
 
@@ -4255,7 +4258,8 @@ public class InvoicesController : ControllerBase
                 request,
                 request.InstallmentPlan,
                 item,
-                responsibleIds);
+                responsibleIds,
+                invoiceTimeZone);
 
             _db.Payments.Add(generatedPayment);
         }
@@ -4666,7 +4670,8 @@ public class InvoicesController : ControllerBase
         UpsertInvoiceRequest request,
         InvoiceInstallmentPlanRequest plan,
         InvoiceInstallmentPlanItemRequest item,
-        IReadOnlyCollection<int> responsibleIds)
+        IReadOnlyCollection<int> responsibleIds,
+        TimeZoneInfo invoiceTimeZone)
     {
         var invoiceEntityId = invoicePayment.InvoiceId ?? invoicePayment.Invoice?.Id;
         payment.InvoiceId = invoiceEntityId;
@@ -4706,7 +4711,7 @@ public class InvoicesController : ControllerBase
 
         SyncPaymentResponsibles(payment, responsibleIds);
         PaymentDomainService.Normalize(payment);
-        PaymentDomainService.ApplyStatusRules(payment, DateTime.UtcNow);
+        PaymentDomainService.ApplyStatusRules(payment, DateTime.UtcNow, invoiceTimeZone);
     }
 
     private static void SyncPaymentResponsibles(Payment payment, IReadOnlyCollection<int> responsibleIds)

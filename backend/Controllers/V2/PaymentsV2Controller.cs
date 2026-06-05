@@ -206,6 +206,7 @@ public class PaymentsV2Controller : ControllerBase
         }
 
         var now = DateTime.UtcNow;
+        var paymentTimeZone = await ResolvePaymentTimeZoneAsync(ct);
         model.SystemNotes = model.SystemNotes ?? string.Empty;
         model.RescheduleCount = Math.Max(0, model.RescheduleCount);
         if (model.LastPaymentDate is null && model.PaidDate.HasValue)
@@ -216,7 +217,7 @@ public class PaymentsV2Controller : ControllerBase
         var createValidationError = await ValidatePaymentAttributionAsync(model, ct);
         if (createValidationError is not null) return createValidationError;
         PaymentDomainService.Normalize(model);
-        PaymentDomainService.ApplyStatusRules(model, now);
+        PaymentDomainService.ApplyStatusRules(model, now, paymentTimeZone);
 
         _db.Payments.Add(model);
         await _db.SaveChangesAsync(ct);
@@ -301,7 +302,7 @@ public class PaymentsV2Controller : ControllerBase
             entity.LastPaymentDate = (model.LastPaymentDate ?? model.PaidDate)?.Date;
         }
 
-        PaymentDomainService.ApplyStatusRules(entity, now);
+        PaymentDomainService.ApplyStatusRules(entity, now, paymentTimeZone);
 
         var rescheduleCount = originalRescheduleCount;
         var plannedDateChanged = model.PlannedDate != default && originalPlannedDate != entity.PlannedDate.Date;

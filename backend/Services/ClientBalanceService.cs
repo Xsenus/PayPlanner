@@ -165,13 +165,15 @@ public static class ClientBalanceService
             return (false, "Nothing to apply.", 0m);
         }
 
-        payment.PaidAmount = NormalizeAmount(payment.PaidAmount + applied);
-        payment.LastPaymentDate ??= utcNow.Date;
-        PaymentDomainService.ApplyStatusRules(payment, utcNow);
-
         var actor = httpContext?.User.GetDisplayName();
         var actorUserId = httpContext?.User.GetUserId();
         var actorTimeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(db, actorUserId, ct);
+        var actorToday = PaymentDomainService.ResolveLocalToday(utcNow, actorTimeZone);
+
+        payment.PaidAmount = NormalizeAmount(payment.PaidAmount + applied);
+        payment.LastPaymentDate ??= actorToday;
+        PaymentDomainService.ApplyStatusRules(payment, utcNow, actorTimeZone);
+
         db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
         {
             ClientId = clientId,

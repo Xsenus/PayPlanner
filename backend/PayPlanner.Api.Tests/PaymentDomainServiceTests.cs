@@ -106,6 +106,52 @@ public class PaymentDomainServiceTests
         Assert.Null(payment.LastPaymentDate);
     }
 
+    [Fact]
+    public void ApplyStatusRules_UsesProfileTimeZoneForOverdueLocalDay()
+    {
+        var payment = new Payment
+        {
+            Date = new DateTime(2026, 6, 4),
+            PlannedDate = new DateTime(2026, 6, 4),
+            Amount = 5_000m,
+            PaidAmount = 0m,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Description = "Timezone overdue payment"
+        };
+        var samara = CalendarTimeZoneHelper.ResolveTimeZone("Europe/Samara");
+
+        PaymentDomainService.ApplyStatusRules(
+            payment,
+            new DateTime(2026, 6, 4, 20, 30, 0, DateTimeKind.Utc),
+            samara);
+
+        Assert.Equal(PaymentStatus.Overdue, payment.Status);
+        AssertLocalDate(payment.Date, 2026, 6, 4);
+        AssertLocalDate(payment.PlannedDate, 2026, 6, 4);
+    }
+
+    [Fact]
+    public void ApplyStatusRules_WithoutTimeZoneKeepsUtcDayCompatibility()
+    {
+        var payment = new Payment
+        {
+            Date = new DateTime(2026, 6, 4),
+            PlannedDate = new DateTime(2026, 6, 4),
+            Amount = 5_000m,
+            PaidAmount = 0m,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Description = "UTC compatible overdue payment"
+        };
+
+        PaymentDomainService.ApplyStatusRules(payment, new DateTime(2026, 6, 4, 20, 30, 0, DateTimeKind.Utc));
+
+        Assert.Equal(PaymentStatus.Pending, payment.Status);
+        AssertLocalDate(payment.Date, 2026, 6, 4);
+        AssertLocalDate(payment.PlannedDate, 2026, 6, 4);
+    }
+
     private static void AssertLocalDate(DateTime? actual, int year, int month, int day)
     {
         Assert.True(actual.HasValue);
