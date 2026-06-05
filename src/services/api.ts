@@ -1654,6 +1654,27 @@ export interface SimpleDictionaryMergeResult {
 }
 
 type SortDir = 'asc' | 'desc';
+type PaymentsExportParams = {
+  from?: string;
+  to?: string;
+  clientId?: number;
+  legalEntityId?: number;
+  caseId?: number;
+  contractId?: number;
+  invoiceId?: number;
+  actId?: number;
+  clientIds?: string;
+  clientRole?: ClientRole;
+  excludeInvoiceDocuments?: boolean;
+  categoryTokens?: string;
+  type?: PaymentKind;
+  status?: PaymentStatus;
+  minAmount?: number;
+  maxAmount?: number;
+  search?: string;
+  sortBy?: 'date' | 'amount' | 'createdAt';
+  sortDir?: SortDir;
+};
 type CasesRegistryExportParams = {
   clientId?: number;
   legalEntityId?: number;
@@ -3814,6 +3835,52 @@ export class ApiService {
       pageSize: params?.pageSize ?? 50,
     });
     return this.request<PagedResult<Payment> & { summary: PaymentsListSummary }>(`/v2/payments${q}`);
+  }
+
+  async exportPaymentsCsv(params?: PaymentsExportParams) {
+    const q = buildQuery(params ?? {});
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/v2/payments/export.csv${q}`, {
+      method: 'GET',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    if (!response.ok) {
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(
+        `HTTP ${response.status} ${response.statusText} at ${API_BASE_URL}/v2/payments/export.csv ${text ? `- ${text}` : ''}`,
+      );
+    }
+
+    return {
+      blob: await response.blob(),
+      fileName:
+        parseContentDispositionFileName(response.headers.get('content-disposition')) ??
+        'payments-export.csv',
+    };
+  }
+
+  async exportPaymentsExcel(params?: PaymentsExportParams) {
+    const q = buildQuery(params ?? {});
+    const token = getAuthToken();
+    const response = await fetch(`${API_BASE_URL}/v2/payments/export.xls${q}`, {
+      method: 'GET',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+
+    if (!response.ok) {
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(
+        `HTTP ${response.status} ${response.statusText} at ${API_BASE_URL}/v2/payments/export.xls ${text ? `- ${text}` : ''}`,
+      );
+    }
+
+    return {
+      blob: await response.blob(),
+      fileName:
+        parseContentDispositionFileName(response.headers.get('content-disposition')) ??
+        'payments-export.xls',
+    };
   }
 
   // ===== Clients =====

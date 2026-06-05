@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Net;
+using System.Text;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -15,6 +17,8 @@ namespace PayPlanner.Api.Controllers.V2;
 [Authorize]
 public class PaymentsV2Controller : ControllerBase
 {
+    private const int MaxPaymentsExportRows = 5000;
+
     private readonly PaymentContext _db;
 
     public PaymentsV2Controller(PaymentContext db) => _db = db;
@@ -24,6 +28,23 @@ public class PaymentsV2Controller : ControllerBase
 
     private Task<TimeZoneInfo> ResolvePaymentTimeZoneAsync(CancellationToken ct)
         => CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+
+    private async Task<bool> CanExportPaymentsAsync(CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return User?.IsInRole("admin") == true || User?.Identity?.IsAuthenticated != true;
+        }
+
+        if (User.IsInRole("admin") || await _db.IsUserAdminAsync(userId.Value, ct))
+        {
+            return true;
+        }
+
+        var permission = await _db.GetUserSectionPermissionAsync(userId.Value, RolePermissionCatalog.Payments, ct);
+        return permission?.CanExport == true;
+    }
 
     [HttpGet]
     public async Task<ActionResult<PaymentsPageResponse>> Get(
@@ -56,93 +77,28 @@ public class PaymentsV2Controller : ControllerBase
         var visibility = await ResolvePaymentsVisibilityAsync(ct);
         if (visibility is null) return Unauthorized();
 
-        var query = _db.Payments.AsQueryable()
-            .WithPaymentIncludes()
-            .ApplyPaymentVisibility(visibility)
-            .ExcludeInstallmentParentInvoices(_db, excludeInstallmentParents)
-            .ApplyPaymentFilters(from, to, clientId, caseId, search, clientRole, legalEntityId);
-
-        if (contractId.HasValue)
-        {
-            query = query.Where(payment =>
-                payment.ContractId == contractId.Value
-                || _db.ContractPayments.Any(link => link.ContractId == contractId.Value && link.PaymentId == payment.Id)
-                || _db.ContractInvoices.Any(link => link.ContractId == contractId.Value && link.InvoiceId == payment.Id)
-                || (payment.InvoiceId.HasValue && _db.Payments.Any(invoicePayment =>
-                    invoicePayment.InvoiceId == payment.InvoiceId.Value
-                    && invoicePayment.DocumentKind == DocumentKind.Invoice
-                    && (invoicePayment.ContractId == contractId.Value
-                        || _db.ContractInvoices.Any(link => link.ContractId == contractId.Value && link.InvoiceId == invoicePayment.Id)))));
-        }
-
-        if (invoiceId.HasValue)
-        {
-            query = query.Where(payment =>
-                payment.Id == invoiceId.Value
-                || _db.Payments.Any(invoice =>
-                    invoice.Id == invoiceId.Value
-                    && invoice.InvoiceId.HasValue
-                    && payment.InvoiceId == invoice.InvoiceId.Value));
-        }
-
-        if (actId.HasValue)
-        {
-            query = query.Where(payment =>
-                _db.Acts.Any(act =>
-                    act.Id == actId.Value
-                    && (
-                        (act.InvoiceId.HasValue
-                            && (payment.Id == act.InvoiceId.Value
-                                || _db.Payments.Any(invoice =>
-                                    invoice.Id == act.InvoiceId.Value
-                                    && invoice.InvoiceId.HasValue
-                                    && payment.InvoiceId == invoice.InvoiceId.Value)))
-                        || (!act.InvoiceId.HasValue
-                            && act.InvoiceNumber != null
-                            && payment.Account == act.InvoiceNumber))));
-        }
-
-        if (excludeInvoiceDocuments)
-        {
-            query = query.Where(payment => payment.DocumentKind != DocumentKind.Invoice);
-        }
-
-        var clientIdList = ParseIntList(clientIds);
-        if (clientIdList.Count > 0)
-        {
-            var normalizedClientRole = QueryExtensions.NormalizeClientRole(clientRole);
-            query = normalizedClientRole switch
-            {
-                "counterparty" => query.Where(payment => payment.ClientId.HasValue && clientIdList.Contains(payment.ClientId.Value)),
-                "expenseClient" => query.Where(payment => payment.ExpenseClientId.HasValue && clientIdList.Contains(payment.ExpenseClientId.Value)),
-                _ => query.Where(payment =>
-                    (payment.ClientId.HasValue && clientIdList.Contains(payment.ClientId.Value))
-                    || (payment.ExpenseClientId.HasValue && clientIdList.Contains(payment.ExpenseClientId.Value))),
-            };
-        }
-
-        if (type.HasValue)
-        {
-            query = query.Where(payment => payment.Type == type.Value);
-        }
-
-        if (status.HasValue)
-        {
-            query = query.Where(payment => payment.Status == status.Value);
-        }
-
-        if (minAmount.HasValue)
-        {
-            query = query.Where(payment => payment.Amount >= minAmount.Value);
-        }
-
-        if (maxAmount.HasValue)
-        {
-            query = query.Where(payment => payment.Amount <= maxAmount.Value);
-        }
-
-        query = ApplyCategoryFilters(query, categoryTokens);
-        query = query.ApplyPaymentSort(sortBy, sortDir);
+        var query = BuildPaymentsQuery(
+            visibility,
+            from,
+            to,
+            clientId,
+            caseId,
+            legalEntityId,
+            contractId,
+            invoiceId,
+            actId,
+            excludeInstallmentParents,
+            excludeInvoiceDocuments,
+            clientIds,
+            clientRole,
+            categoryTokens,
+            type,
+            status,
+            minAmount,
+            maxAmount,
+            search,
+            sortBy,
+            sortDir);
 
         var total = await query.CountAsync(ct);
         var items = await query
@@ -174,6 +130,126 @@ public class PaymentsV2Controller : ControllerBase
             PageSize = pageSize,
             Summary = summary,
         });
+    }
+
+    [HttpGet("export.csv")]
+    public async Task<IActionResult> ExportCsv(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] int? clientId,
+        [FromQuery] int? caseId,
+        [FromQuery] int? legalEntityId = null,
+        [FromQuery] int? contractId = null,
+        [FromQuery] int? invoiceId = null,
+        [FromQuery] int? actId = null,
+        [FromQuery] bool excludeInstallmentParents = true,
+        [FromQuery] bool excludeInvoiceDocuments = false,
+        [FromQuery] string? clientIds = null,
+        [FromQuery] string? clientRole = null,
+        [FromQuery] string? categoryTokens = null,
+        [FromQuery] PaymentType? type = null,
+        [FromQuery] PaymentStatus? status = null,
+        [FromQuery] decimal? minAmount = null,
+        [FromQuery] decimal? maxAmount = null,
+        [FromQuery] string? search = null,
+        [FromQuery] string? sortBy = null,
+        [FromQuery] string? sortDir = null,
+        CancellationToken ct = default)
+    {
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null) return Unauthorized();
+        if (!await CanExportPaymentsAsync(ct)) return Forbid();
+
+        var timeZone = await ResolvePaymentTimeZoneAsync(ct);
+        var nowLocal = CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone);
+        var items = await LoadPaymentExportItemsAsync(
+            visibility,
+            from,
+            to,
+            clientId,
+            caseId,
+            legalEntityId,
+            contractId,
+            invoiceId,
+            actId,
+            excludeInstallmentParents,
+            excludeInvoiceDocuments,
+            clientIds,
+            clientRole,
+            categoryTokens,
+            type,
+            status,
+            minAmount,
+            maxAmount,
+            search,
+            sortBy,
+            sortDir,
+            ct);
+
+        return File(
+            BuildPaymentsCsv(items, nowLocal, timeZone),
+            "text/csv; charset=utf-8",
+            $"payments-{FormatExportTimestamp(nowLocal)}.csv");
+    }
+
+    [HttpGet("export.xls")]
+    public async Task<IActionResult> ExportExcel(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] int? clientId,
+        [FromQuery] int? caseId,
+        [FromQuery] int? legalEntityId = null,
+        [FromQuery] int? contractId = null,
+        [FromQuery] int? invoiceId = null,
+        [FromQuery] int? actId = null,
+        [FromQuery] bool excludeInstallmentParents = true,
+        [FromQuery] bool excludeInvoiceDocuments = false,
+        [FromQuery] string? clientIds = null,
+        [FromQuery] string? clientRole = null,
+        [FromQuery] string? categoryTokens = null,
+        [FromQuery] PaymentType? type = null,
+        [FromQuery] PaymentStatus? status = null,
+        [FromQuery] decimal? minAmount = null,
+        [FromQuery] decimal? maxAmount = null,
+        [FromQuery] string? search = null,
+        [FromQuery] string? sortBy = null,
+        [FromQuery] string? sortDir = null,
+        CancellationToken ct = default)
+    {
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null) return Unauthorized();
+        if (!await CanExportPaymentsAsync(ct)) return Forbid();
+
+        var timeZone = await ResolvePaymentTimeZoneAsync(ct);
+        var nowLocal = CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone);
+        var items = await LoadPaymentExportItemsAsync(
+            visibility,
+            from,
+            to,
+            clientId,
+            caseId,
+            legalEntityId,
+            contractId,
+            invoiceId,
+            actId,
+            excludeInstallmentParents,
+            excludeInvoiceDocuments,
+            clientIds,
+            clientRole,
+            categoryTokens,
+            type,
+            status,
+            minAmount,
+            maxAmount,
+            search,
+            sortBy,
+            sortDir,
+            ct);
+
+        return File(
+            BuildPaymentsExcel(items, nowLocal, timeZone),
+            "application/vnd.ms-excel; charset=utf-8",
+            $"payments-{FormatExportTimestamp(nowLocal)}.xls");
     }
 
     [HttpGet("{id:int}")]
@@ -396,6 +472,312 @@ public class PaymentsV2Controller : ControllerBase
         }
 
         return NoContent();
+    }
+
+    private IQueryable<Payment> BuildPaymentsQuery(
+        DataVisibilityAccess visibility,
+        DateTime? from,
+        DateTime? to,
+        int? clientId,
+        int? caseId,
+        int? legalEntityId,
+        int? contractId,
+        int? invoiceId,
+        int? actId,
+        bool excludeInstallmentParents,
+        bool excludeInvoiceDocuments,
+        string? clientIds,
+        string? clientRole,
+        string? categoryTokens,
+        PaymentType? type,
+        PaymentStatus? status,
+        decimal? minAmount,
+        decimal? maxAmount,
+        string? search,
+        string? sortBy,
+        string? sortDir)
+    {
+        var query = _db.Payments.AsQueryable()
+            .WithPaymentIncludes()
+            .ApplyPaymentVisibility(visibility)
+            .ExcludeInstallmentParentInvoices(_db, excludeInstallmentParents)
+            .ApplyPaymentFilters(from, to, clientId, caseId, search, clientRole, legalEntityId);
+
+        if (contractId.HasValue)
+        {
+            query = query.Where(payment =>
+                payment.ContractId == contractId.Value
+                || _db.ContractPayments.Any(link => link.ContractId == contractId.Value && link.PaymentId == payment.Id)
+                || _db.ContractInvoices.Any(link => link.ContractId == contractId.Value && link.InvoiceId == payment.Id)
+                || (payment.InvoiceId.HasValue && _db.Payments.Any(invoicePayment =>
+                    invoicePayment.InvoiceId == payment.InvoiceId.Value
+                    && invoicePayment.DocumentKind == DocumentKind.Invoice
+                    && (invoicePayment.ContractId == contractId.Value
+                        || _db.ContractInvoices.Any(link => link.ContractId == contractId.Value && link.InvoiceId == invoicePayment.Id)))));
+        }
+
+        if (invoiceId.HasValue)
+        {
+            query = query.Where(payment =>
+                payment.Id == invoiceId.Value
+                || _db.Payments.Any(invoice =>
+                    invoice.Id == invoiceId.Value
+                    && invoice.InvoiceId.HasValue
+                    && payment.InvoiceId == invoice.InvoiceId.Value));
+        }
+
+        if (actId.HasValue)
+        {
+            query = query.Where(payment =>
+                _db.Acts.Any(act =>
+                    act.Id == actId.Value
+                    && (
+                        (act.InvoiceId.HasValue
+                            && (payment.Id == act.InvoiceId.Value
+                                || _db.Payments.Any(invoice =>
+                                    invoice.Id == act.InvoiceId.Value
+                                    && invoice.InvoiceId.HasValue
+                                    && payment.InvoiceId == invoice.InvoiceId.Value)))
+                        || (!act.InvoiceId.HasValue
+                            && act.InvoiceNumber != null
+                            && payment.Account == act.InvoiceNumber))));
+        }
+
+        if (excludeInvoiceDocuments)
+        {
+            query = query.Where(payment => payment.DocumentKind != DocumentKind.Invoice);
+        }
+
+        var clientIdList = ParseIntList(clientIds);
+        if (clientIdList.Count > 0)
+        {
+            var normalizedClientRole = QueryExtensions.NormalizeClientRole(clientRole);
+            query = normalizedClientRole switch
+            {
+                "counterparty" => query.Where(payment => payment.ClientId.HasValue && clientIdList.Contains(payment.ClientId.Value)),
+                "expenseClient" => query.Where(payment => payment.ExpenseClientId.HasValue && clientIdList.Contains(payment.ExpenseClientId.Value)),
+                _ => query.Where(payment =>
+                    (payment.ClientId.HasValue && clientIdList.Contains(payment.ClientId.Value))
+                    || (payment.ExpenseClientId.HasValue && clientIdList.Contains(payment.ExpenseClientId.Value))),
+            };
+        }
+
+        if (type.HasValue)
+        {
+            query = query.Where(payment => payment.Type == type.Value);
+        }
+
+        if (status.HasValue)
+        {
+            query = query.Where(payment => payment.Status == status.Value);
+        }
+
+        if (minAmount.HasValue)
+        {
+            query = query.Where(payment => payment.Amount >= minAmount.Value);
+        }
+
+        if (maxAmount.HasValue)
+        {
+            query = query.Where(payment => payment.Amount <= maxAmount.Value);
+        }
+
+        return ApplyCategoryFilters(query, categoryTokens).ApplyPaymentSort(sortBy, sortDir);
+    }
+
+    private Task<List<Payment>> LoadPaymentExportItemsAsync(
+        DataVisibilityAccess visibility,
+        DateTime? from,
+        DateTime? to,
+        int? clientId,
+        int? caseId,
+        int? legalEntityId,
+        int? contractId,
+        int? invoiceId,
+        int? actId,
+        bool excludeInstallmentParents,
+        bool excludeInvoiceDocuments,
+        string? clientIds,
+        string? clientRole,
+        string? categoryTokens,
+        PaymentType? type,
+        PaymentStatus? status,
+        decimal? minAmount,
+        decimal? maxAmount,
+        string? search,
+        string? sortBy,
+        string? sortDir,
+        CancellationToken ct)
+        => BuildPaymentsQuery(
+                visibility,
+                from,
+                to,
+                clientId,
+                caseId,
+                legalEntityId,
+                contractId,
+                invoiceId,
+                actId,
+                excludeInstallmentParents,
+                excludeInvoiceDocuments,
+                clientIds,
+                clientRole,
+                categoryTokens,
+                type,
+                status,
+                minAmount,
+                maxAmount,
+                search,
+                sortBy,
+                sortDir)
+            .Take(MaxPaymentsExportRows)
+            .AsNoTracking()
+            .ToListAsync(ct);
+
+    private static byte[] BuildPaymentsCsv(IReadOnlyCollection<Payment> payments, DateTime generatedAtLocal, TimeZoneInfo timeZone)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine(string.Join(';', PaymentExportHeaders.Select(CsvCell)));
+        foreach (var payment in payments)
+        {
+            builder.AppendLine(string.Join(';', GetPaymentExportCells(payment, timeZone).Select(CsvCell)));
+        }
+
+        builder.AppendLine();
+        builder.AppendLine($"{CsvCell("Сформировано")};{CsvCell(FormatExportDateTime(generatedAtLocal))}");
+        builder.AppendLine($"{CsvCell("Часовой пояс")};{CsvCell(timeZone.Id)}");
+        if (payments.Count >= MaxPaymentsExportRows)
+        {
+            builder.AppendLine($"{CsvCell("Ограничение выгрузки")};{CsvCell($"Показаны первые {MaxPaymentsExportRows.ToString("N0", RuCulture)} записей")}");
+        }
+
+        return Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(builder.ToString())).ToArray();
+    }
+
+    private static byte[] BuildPaymentsExcel(IReadOnlyCollection<Payment> payments, DateTime generatedAtLocal, TimeZoneInfo timeZone)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
+        builder.AppendLine("<?mso-application progid=\"Excel.Sheet\"?>");
+        builder.AppendLine("<Workbook xmlns=\"urn:schemas-microsoft-com:office:spreadsheet\" xmlns:ss=\"urn:schemas-microsoft-com:office:spreadsheet\">");
+        builder.AppendLine("  <Worksheet ss:Name=\"Платежи\">");
+        builder.AppendLine("    <Table>");
+        AppendExcelRow(builder, PaymentExportHeaders);
+        foreach (var payment in payments)
+        {
+            AppendExcelRow(builder, GetPaymentExportCells(payment, timeZone));
+        }
+
+        AppendExcelRow(builder, Array.Empty<string>());
+        AppendExcelRow(builder, ["Сформировано", FormatExportDateTime(generatedAtLocal)]);
+        AppendExcelRow(builder, ["Часовой пояс", timeZone.Id]);
+        if (payments.Count >= MaxPaymentsExportRows)
+        {
+            AppendExcelRow(builder, ["Ограничение выгрузки", $"Показаны первые {MaxPaymentsExportRows.ToString("N0", RuCulture)} записей"]);
+        }
+
+        builder.AppendLine("    </Table>");
+        builder.AppendLine("  </Worksheet>");
+        builder.AppendLine("</Workbook>");
+        return Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(builder.ToString())).ToArray();
+    }
+
+    private static readonly CultureInfo RuCulture = CultureInfo.GetCultureInfo("ru-RU");
+
+    private static readonly string[] PaymentExportHeaders =
+    [
+        "ID",
+        "Дата платежа",
+        "Плановая дата",
+        "Дата оплаты",
+        "Тип",
+        "Статус",
+        "Контрагент",
+        "Клиент расхода",
+        "Дело",
+        "Описание",
+        "Категория",
+        "Источник",
+        "Сумма",
+        "Оплачено",
+        "Остаток",
+        "Счет",
+        "Дата счета",
+        "Платежный документ",
+        "Дата платежного документа",
+        "Создано",
+    ];
+
+    private static string[] GetPaymentExportCells(Payment payment, TimeZoneInfo timeZone)
+        =>
+        [
+            payment.Id.ToString(RuCulture),
+            FormatExportDate(payment.Date),
+            FormatExportDate(payment.PlannedDate),
+            FormatExportDate(payment.PaidDate),
+            payment.Type == PaymentType.Expense ? "Расход" : "Доход",
+            payment.Status.ToDisplayString(),
+            GetCounterpartyName(payment),
+            GetExpenseClientName(payment),
+            payment.ClientCase?.Title ?? string.Empty,
+            payment.Description ?? string.Empty,
+            payment.DealType?.Name ?? payment.IncomeType?.Name ?? payment.Service?.Name ?? string.Empty,
+            payment.PaymentSource?.Name ?? string.Empty,
+            FormatExportMoney(payment.Amount),
+            FormatExportMoney(payment.PaidAmount),
+            FormatExportMoney(payment.OutstandingAmount),
+            payment.Account ?? string.Empty,
+            FormatExportDate(payment.AccountDate),
+            payment.PaymentOrderNumber ?? string.Empty,
+            FormatExportDate(payment.PaymentDocumentDate),
+            FormatExportDateTime(CalendarTimeZoneHelper.ToUserLocal(payment.CreatedAt, timeZone)),
+        ];
+
+    private static string GetCounterpartyName(Payment payment)
+        => payment.Client?.Name
+            ?? payment.LegalEntity?.ShortName
+            ?? payment.LegalEntity?.FullName
+            ?? payment.CounterpartyName
+            ?? string.Empty;
+
+    private static string GetExpenseClientName(Payment payment)
+        => payment.ExpenseClient?.Name
+            ?? payment.ExpenseLegalEntity?.ShortName
+            ?? payment.ExpenseLegalEntity?.FullName
+            ?? string.Empty;
+
+    private static string FormatExportTimestamp(DateTime localDateTime)
+        => localDateTime.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
+
+    private static string FormatExportDate(DateTime date)
+        => date == default ? string.Empty : date.ToString("dd.MM.yyyy", RuCulture);
+
+    private static string FormatExportDate(DateTime? date)
+        => date.HasValue ? FormatExportDate(date.Value) : string.Empty;
+
+    private static string FormatExportDateTime(DateTime localDateTime)
+        => localDateTime.ToString("dd.MM.yyyy HH:mm", RuCulture);
+
+    private static string FormatExportMoney(decimal amount)
+        => amount.ToString("N2", RuCulture);
+
+    private static string CsvCell(string? value)
+    {
+        var normalized = (value ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n');
+        return $"\"{normalized.Replace("\"", "\"\"")}\"";
+    }
+
+    private static void AppendExcelRow(StringBuilder builder, IEnumerable<string?> cells)
+    {
+        builder.AppendLine("      <Row>");
+        foreach (var cell in cells)
+        {
+            builder.Append("        <Cell><Data ss:Type=\"String\">");
+            builder.Append(WebUtility.HtmlEncode(cell ?? string.Empty));
+            builder.AppendLine("</Data></Cell>");
+        }
+
+        builder.AppendLine("      </Row>");
     }
 
     private static IQueryable<Payment> ApplyCategoryFilters(IQueryable<Payment> query, string? categoryTokens)

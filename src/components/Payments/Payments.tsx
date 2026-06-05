@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { JSX } from 'react';
-import { AlertTriangle, Ban, CalendarPlus, ChevronDown, Loader2, Lock, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, Trash2, X } from 'lucide-react';
+import { AlertTriangle, Ban, CalendarPlus, ChevronDown, Download, Loader2, Lock, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, Trash2, X } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
@@ -267,6 +267,17 @@ function formatCountLabel(template: string, count: number) {
   return template.replace('{{count}}', count.toLocaleString('ru-RU'));
 }
 
+function downloadBlob(fileName: string, blob: Blob) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 export function Payments({
   onOpenClient,
   routePaymentId,
@@ -299,6 +310,8 @@ export function Payments({
   const [minAmount, setMinAmount] = useState('');
   const [maxAmount, setMaxAmount] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [paymentsCsvExporting, setPaymentsCsvExporting] = useState(false);
+  const [paymentsExcelExporting, setPaymentsExcelExporting] = useState(false);
 
   const [typeFilter, setTypeFilter] = useState<TypeFilter>(defaultType ?? 'all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -412,6 +425,35 @@ export function Payments({
     page,
     pageSize,
   });
+
+  const paymentExportParams = useMemo(
+    () => ({
+      from: fromInputToApiDate(fromDate),
+      to: fromInputToApiDate(toDate),
+      clientIds: selectedClientIds.join(',') || undefined,
+      clientRole: clientRoleFilter === 'all' ? undefined : clientRoleFilter,
+      categoryTokens: selectedCategories.join(',') || undefined,
+      type: appliedTypeFilter === 'all' ? undefined : appliedTypeFilter,
+      status: statusFilter === 'all' ? undefined : statusFilter,
+      minAmount: minAmountValue ?? undefined,
+      maxAmount: maxAmountValue ?? undefined,
+      search: debouncedSearch || undefined,
+      sortBy: 'date' as const,
+      sortDir: 'desc' as const,
+    }),
+    [
+      appliedTypeFilter,
+      clientRoleFilter,
+      debouncedSearch,
+      fromDate,
+      maxAmountValue,
+      minAmountValue,
+      selectedCategories,
+      selectedClientIds,
+      statusFilter,
+      toDate,
+    ],
+  );
 
   const clientLookupOptions = useMemo<LookupSelectOption[]>(
     () =>
@@ -1210,6 +1252,48 @@ export function Payments({
     await refresh();
   }, [refresh]);
 
+  const exportPaymentsCsv = useCallback(async () => {
+    if (!paymentsPermissions.canExport) {
+      showPermissionNotice('У роли нет права на выгрузку платежей.');
+      return;
+    }
+
+    setPaymentsCsvExporting(true);
+    try {
+      const { blob, fileName } = await apiService.exportPaymentsCsv(paymentExportParams);
+      downloadBlob(fileName || 'payments-export.csv', blob);
+      toast.success('Платежи выгружены в CSV.', 'Платежи');
+    } catch (error) {
+      toast.error(
+        extractDisplayErrorMessage(error, 'Не удалось выгрузить платежи в CSV.'),
+        'Платежи',
+      );
+    } finally {
+      setPaymentsCsvExporting(false);
+    }
+  }, [paymentExportParams, paymentsPermissions.canExport, showPermissionNotice, toast]);
+
+  const exportPaymentsExcel = useCallback(async () => {
+    if (!paymentsPermissions.canExport) {
+      showPermissionNotice('У роли нет права на выгрузку платежей.');
+      return;
+    }
+
+    setPaymentsExcelExporting(true);
+    try {
+      const { blob, fileName } = await apiService.exportPaymentsExcel(paymentExportParams);
+      downloadBlob(fileName || 'payments-export.xls', blob);
+      toast.success('Платежи выгружены в Excel.', 'Платежи');
+    } catch (error) {
+      toast.error(
+        extractDisplayErrorMessage(error, 'Не удалось выгрузить платежи в Excel.'),
+        'Платежи',
+      );
+    } finally {
+      setPaymentsExcelExporting(false);
+    }
+  }, [paymentExportParams, paymentsPermissions.canExport, showPermissionNotice, toast]);
+
   const lastUpdatedText = useMemo(() => {
     if (!lastUpdated) {
       return null;
@@ -1485,6 +1569,26 @@ export function Payments({
                     void handleRefresh();
                   }}
                 />
+                {paymentsPermissions.canExport ? (
+                  <>
+                    <ToolbarIconButton
+                      label="Выгрузить платежи в CSV"
+                      icon={paymentsCsvExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                      disabled={paymentsCsvExporting}
+                      onClick={() => {
+                        void exportPaymentsCsv();
+                      }}
+                    />
+                    <ToolbarIconButton
+                      label="Выгрузить платежи в Excel"
+                      icon={paymentsExcelExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                      disabled={paymentsExcelExporting}
+                      onClick={() => {
+                        void exportPaymentsExcel();
+                      }}
+                    />
+                  </>
+                ) : null}
                 <ToolbarIconButton
                   label="Частичные без остатка"
                   icon={

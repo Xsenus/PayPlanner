@@ -78,6 +78,7 @@ vi.mock('../../hooks/useRolePermissions', () => ({
       canCreate: true,
       canEdit: true,
       canDelete: true,
+      canExport: true,
     },
   }),
 }));
@@ -192,6 +193,8 @@ vi.mock('../../services/api', () => ({
     updateInvoiceManagedPayment: vi.fn(),
     updatePaymentStatus: vi.fn(),
     deletePayment: vi.fn(),
+    exportPaymentsCsv: vi.fn(),
+    exportPaymentsExcel: vi.fn(),
     getClientBalance: vi.fn(),
     applyClientBalance: vi.fn(),
     getPartialPaymentRemainderCandidates: vi.fn(),
@@ -210,9 +213,19 @@ describe('Payments integration', () => {
     vi.mocked(apiService.updateInvoiceManagedPayment).mockReset();
     vi.mocked(apiService.updatePaymentStatus).mockReset();
     vi.mocked(apiService.deletePayment).mockReset();
+    vi.mocked(apiService.exportPaymentsCsv).mockReset();
+    vi.mocked(apiService.exportPaymentsExcel).mockReset();
     vi.mocked(apiService.getClientBalance).mockReset();
     vi.mocked(apiService.applyClientBalance).mockReset();
     vi.mocked(apiService.getPartialPaymentRemainderCandidates).mockReset();
+    vi.mocked(apiService.exportPaymentsCsv).mockResolvedValue({
+      blob: new Blob(['csv'], { type: 'text/csv' }),
+      fileName: 'payments-export.csv',
+    });
+    vi.mocked(apiService.exportPaymentsExcel).mockResolvedValue({
+      blob: new Blob(['xls'], { type: 'application/vnd.ms-excel' }),
+      fileName: 'payments-export.xls',
+    });
     vi.mocked(apiService.getClientBalance).mockResolvedValue({ clientId: 1, balance: 0 });
     vi.mocked(apiService.applyClientBalance).mockResolvedValue({ appliedAmount: 0, balance: 0 });
     vi.mocked(apiService.getPartialPaymentRemainderCandidates).mockResolvedValue({
@@ -248,6 +261,42 @@ describe('Payments integration', () => {
       from: '2026-06-01',
       to: '2026-06-05',
     });
+  });
+
+  it('exports payments with the current filtered query', async () => {
+    const createObjectUrl = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:payments-export');
+    const revokeObjectUrl = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+
+    render(<Payments />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Выгрузить платежи в CSV' }));
+
+    await waitFor(() => {
+      expect(apiService.exportPaymentsCsv).toHaveBeenCalledWith(expect.objectContaining({
+        from: '2026-06-01',
+        to: '2026-06-05',
+        sortBy: 'date',
+        sortDir: 'desc',
+      }));
+    });
+    expect(createObjectUrl).toHaveBeenCalled();
+    expect(anchorClick).toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Выгрузить платежи в Excel' }));
+
+    await waitFor(() => {
+      expect(apiService.exportPaymentsExcel).toHaveBeenCalledWith(expect.objectContaining({
+        from: '2026-06-01',
+        to: '2026-06-05',
+        sortBy: 'date',
+        sortDir: 'desc',
+      }));
+    });
+
+    createObjectUrl.mockRestore();
+    revokeObjectUrl.mockRestore();
+    anchorClick.mockRestore();
   });
 
   it('uses the profile time zone for the paid date when completing a payment', async () => {

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -707,6 +708,113 @@ public class PaymentsControllerTests
         var expenseClientOk = Assert.IsType<OkObjectResult>(expenseClientResult.Result);
         var expenseClientResponse = Assert.IsType<PaymentsPageResponse>(expenseClientOk.Value);
         Assert.Collection(expenseClientResponse.Items, payment => Assert.Equal(expenseClientPayment.Id, payment.Id));
+    }
+
+    [Fact]
+    public async Task PaymentsV2_ExportCsv_ReturnsFilteredRowsWithProfileTimeZone()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreatePaymentsUserAsync(db, canExport: true);
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = user.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Europe/Samara",
+        });
+
+        var client = new Client { Name = "Экспортный клиент", CreatedAt = DateTime.UtcNow };
+        var clientCase = new ClientCase { Title = "Экспортное дело", Client = client };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var exported = CreatePayment(new DateTime(2026, 4, 15), 12_345.67m, "Экспортируемый платеж");
+        exported.ClientId = client.Id;
+        exported.ClientCaseId = clientCase.Id;
+        exported.PaidAmount = 345.67m;
+        exported.CreatedAt = new DateTime(2026, 6, 4, 20, 30, 0, DateTimeKind.Utc);
+
+        var hidden = CreatePayment(new DateTime(2026, 4, 16), 9_000m, "Другой платеж");
+        hidden.Status = PaymentStatus.Completed;
+        db.Payments.AddRange(exported, hidden);
+        await db.SaveChangesAsync();
+
+        var controller = CreatePaymentsV2Controller(db, user.Id);
+
+        var result = await controller.ExportCsv(
+            from: new DateTime(2026, 4, 1),
+            to: new DateTime(2026, 4, 30),
+            clientId: null,
+            caseId: null,
+            status: PaymentStatus.Pending,
+            sortBy: "date",
+            sortDir: "asc",
+            ct: CancellationToken.None);
+
+        var file = Assert.IsType<FileContentResult>(result);
+        Assert.Equal("text/csv; charset=utf-8", file.ContentType);
+        Assert.StartsWith("payments-", file.FileDownloadName);
+        Assert.EndsWith(".csv", file.FileDownloadName);
+
+        var csv = Encoding.UTF8.GetString(file.FileContents).TrimStart('\uFEFF');
+        Assert.Contains("Экспортируемый платеж", csv);
+        Assert.Contains("Экспортный клиент", csv);
+        Assert.Contains("Экспортное дело", csv);
+        Assert.Contains("15.04.2026", csv);
+        Assert.Contains("05.06.2026 00:30", csv);
+        Assert.Contains("Europe/Samara", csv);
+        Assert.DoesNotContain("Другой платеж", csv);
+    }
+
+    [Fact]
+    public async Task PaymentsV2_ExportExcel_ReturnsWorkbookWithFilteredRows()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreatePaymentsUserAsync(db, canExport: true);
+
+        var exported = CreatePayment(new DateTime(2026, 5, 1), 1_000m, "Excel export payment");
+        var hidden = CreatePayment(new DateTime(2026, 5, 2), 2_000m, "Hidden Excel payment");
+        hidden.Status = PaymentStatus.Completed;
+        db.Payments.AddRange(exported, hidden);
+        await db.SaveChangesAsync();
+
+        var controller = CreatePaymentsV2Controller(db, user.Id);
+
+        var result = await controller.ExportExcel(
+            from: new DateTime(2026, 5, 1),
+            to: new DateTime(2026, 5, 31),
+            clientId: null,
+            caseId: null,
+            status: PaymentStatus.Pending,
+            sortBy: "date",
+            sortDir: "asc",
+            ct: CancellationToken.None);
+
+        var file = Assert.IsType<FileContentResult>(result);
+        Assert.Equal("application/vnd.ms-excel; charset=utf-8", file.ContentType);
+        Assert.EndsWith(".xls", file.FileDownloadName);
+
+        var workbook = Encoding.UTF8.GetString(file.FileContents).TrimStart('\uFEFF');
+        Assert.Contains("<Workbook", workbook);
+        Assert.Contains("Excel export payment", workbook);
+        Assert.DoesNotContain("Hidden Excel payment", workbook);
+    }
+
+    [Fact]
+    public async Task PaymentsV2_ExportCsv_ForbidsUserWithoutExportPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreatePaymentsUserAsync(db, canExport: false);
+        var controller = CreatePaymentsV2Controller(db, user.Id);
+
+        var result = await controller.ExportCsv(
+            from: null,
+            to: null,
+            clientId: null,
+            caseId: null,
+            ct: CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result);
     }
 
     [Fact]
@@ -3607,6 +3715,42 @@ public class PaymentsControllerTests
                 },
             },
         };
+    }
+
+    private static async Task<User> CreatePaymentsUserAsync(PaymentContext db, bool canExport)
+    {
+        var role = new Role
+        {
+            Name = $"payments-export-{Guid.NewGuid():N}",
+            Description = "Payments export test role",
+        };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = role.Id,
+            Section = RolePermissionCatalog.Payments,
+            CanView = true,
+            CanExport = canExport,
+            ViewScope = DataVisibilityScope.All,
+        });
+
+        var user = new User
+        {
+            Email = $"payments-export-{Guid.NewGuid():N}@example.com",
+            PasswordHash = "hash",
+            FullName = "Payments Export User",
+            RoleId = role.Id,
+            IsActive = true,
+            IsApproved = true,
+            IsEmployee = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        return user;
     }
 
     private static Payment CreatePayment(DateTime date, decimal amount, string description)
