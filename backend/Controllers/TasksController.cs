@@ -564,8 +564,15 @@ public class TasksController : ControllerBase
             .Take(5000)
             .ToListAsync(ct);
 
-        var html = BuildTaskPlanningReportHtml(tasks, BuildTaskPlanningReportFilterText(status, type, priority, from, to), DateTime.UtcNow);
-        var fileStamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmm", CultureInfo.InvariantCulture);
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        var generatedAtUtc = NormalizeUtcInstant(DateTime.UtcNow);
+        var generatedAtLocal = CalendarTimeZoneHelper.ToUserLocal(generatedAtUtc, timeZone);
+        var html = BuildTaskPlanningReportHtml(
+            tasks,
+            BuildTaskPlanningReportFilterText(status, type, priority, from, to),
+            generatedAtUtc,
+            timeZone);
+        var fileStamp = generatedAtLocal.ToString("yyyyMMdd-HHmm", CultureInfo.InvariantCulture);
 
         if (normalizedFormat == "pdf")
         {
@@ -2424,7 +2431,8 @@ public class TasksController : ControllerBase
     private static string BuildTaskPlanningReportHtml(
         IReadOnlyList<TaskJournalItem> tasks,
         string filterText,
-        DateTime generatedAtUtc)
+        DateTime generatedAtUtc,
+        TimeZoneInfo timeZone)
     {
         var html = new StringBuilder();
         html.AppendLine("<!doctype html>");
@@ -2456,7 +2464,7 @@ public class TasksController : ControllerBase
         html.AppendLine("</head>");
         html.AppendLine("<body>");
         html.AppendLine("<h1>ПЛАНИНГ ПО КЛИЕНТАМ</h1>");
-        html.AppendLine($"<p class=\"meta\">Сформировано: {Html(FormatPlanningDate(generatedAtUtc))}. Фильтр: {Html(filterText)}. Задач: {tasks.Count}.</p>");
+        html.AppendLine($"<p class=\"meta\">Сформировано: {Html(FormatPlanningDate(generatedAtUtc, timeZone))}. Фильтр: {Html(filterText)}. Задач: {tasks.Count}.</p>");
         html.AppendLine("<table>");
 
         if (tasks.Count == 0)
@@ -2492,7 +2500,7 @@ public class TasksController : ControllerBase
                         html.AppendLine($"<td class=\"num\">{rowNumber}</td>");
                         html.AppendLine($"<td class=\"kind\">{Html(TaskTypeLabel(task.Type))}</td>");
                         html.AppendLine($"<td class=\"task\">{description}</td>");
-                        html.AppendLine($"<td class=\"due\">{Html(FormatPlanningDate(task.DueAt))}</td>");
+                        html.AppendLine($"<td class=\"due\">{Html(FormatPlanningDate(task.DueAt, timeZone))}</td>");
                         var statusHtml = Html(TaskStatusLabel(ResolveTaskStatus(task)));
                         if (IsTaskDueOverdue(task, generatedAtUtc))
                         {
@@ -2582,12 +2590,14 @@ public class TasksController : ControllerBase
         return distinct.Count == 0 ? "—" : string.Join(", ", distinct);
     }
 
-    private static string FormatPlanningDate(DateTime value)
+    private static string FormatPlanningDate(DateTime value, TimeZoneInfo? timeZone = null)
     {
-        var utcValue = DateTime.SpecifyKind(value, DateTimeKind.Utc);
-        return utcValue.TimeOfDay == TimeSpan.Zero
-            ? utcValue.ToString("dd.MM.yyyy", CultureInfo.GetCultureInfo("ru-RU"))
-            : utcValue.ToString("dd.MM.yyyy HH:mm", CultureInfo.GetCultureInfo("ru-RU"));
+        var localValue = timeZone is null
+            ? value
+            : CalendarTimeZoneHelper.ToUserLocal(NormalizeUtcInstant(value), timeZone);
+        return localValue.TimeOfDay == TimeSpan.Zero
+            ? localValue.ToString("dd.MM.yyyy", CultureInfo.GetCultureInfo("ru-RU"))
+            : localValue.ToString("dd.MM.yyyy HH:mm", CultureInfo.GetCultureInfo("ru-RU"));
     }
 
     private static string Html(string? value)

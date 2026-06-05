@@ -62,7 +62,7 @@ import { apiService } from '../../services/api';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatReportDate, formatReportDateTime, formatReportDeadlineDate } from '../../utils/reportDateFormatting';
-import { currentReportMonthInTimeZone } from '../../utils/reportPeriod';
+import { buildReportMonthPresetRange, currentReportMonthInTimeZone, type ReportMonthPreset } from '../../utils/reportPeriod';
 import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CaseFinanceReport, CaseSuccessReport, CashBookSummary, CashFlowReport, CashOrderReport, ContractStatusReport, CounterpartyReport, CurrencyReport, CurrentCasesReport, DirectionReport, InvoiceStatusReport, JournalStatusReport, LawyerWorkloadReport, LegalWorkReport, MatchStatusReport, MoneyCategoryReport, MoneyOperationSource, OverdueProceduralDeadlinesReport, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, TaskReport, VatReport } from '../../types';
 
 const ruMonthFormatter = new Intl.DateTimeFormat('ru-RU', {
@@ -6027,36 +6027,8 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     [statusBreakdown],
   );
 
-  function applyPreset(preset: 'this' | 'prev' | 'q' | 'y') {
-    const d = new Date();
-    const ym = (year: number, month: number) => `${year}-${String(month).padStart(2, '0')}` as const;
-
-    if (preset === 'this') {
-      const current = ym(d.getFullYear(), d.getMonth() + 1);
-      setRange({ from: current, to: current });
-      return;
-    }
-
-    if (preset === 'prev') {
-      d.setMonth(d.getMonth() - 1);
-      const previous = ym(d.getFullYear(), d.getMonth() + 1);
-      setRange({ from: previous, to: previous });
-      return;
-    }
-
-    if (preset === 'q') {
-      const end = new Date();
-      const start = new Date();
-      start.setMonth(start.getMonth() - 2);
-      setRange({
-        from: ym(start.getFullYear(), start.getMonth() + 1),
-        to: ym(end.getFullYear(), end.getMonth() + 1),
-      });
-      return;
-    }
-
-    const year = new Date().getFullYear();
-    setRange({ from: `${year}-01`, to: `${year}-12` });
+  function applyPreset(preset: ReportMonthPreset) {
+    setRange(buildReportMonthPresetRange(preset, profileTimeZoneId));
   }
 
   return (
@@ -6077,7 +6049,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
                 выполнено берётся по фактически оплаченной сумме, ожидание и просрочка по остаткам.
               </p>
               <div className="mt-5 flex flex-wrap gap-2">
-                {(['this', 'prev', 'q', 'y'] as const).map((preset) => {
+                {(['this', 'prev', 'q', 'y'] as const satisfies readonly ReportMonthPreset[]).map((preset) => {
                   const label =
                     preset === 'this'
                       ? 'Этот месяц'

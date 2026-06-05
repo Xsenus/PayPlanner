@@ -1707,6 +1707,61 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task ExportPlanningReport_UsesProfileTimeZoneForDatesAndFileName()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "planning-timezone@example.com", "Автор");
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = author.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Europe/Samara",
+        });
+        var client = await CreateClientAsync(db, "Самарский клиент");
+        var dueAtUtc = DateTime.SpecifyKind(new DateTime(2026, 6, 4, 22, 30, 0), DateTimeKind.Utc);
+        var task = await CreateTaskAsync(db, author.Id, client.Id);
+        task.Title = "Проверить срок по часовому поясу";
+        task.DueAt = dueAtUtc;
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+        var timeZone = CalendarTimeZoneHelper.ResolveTimeZone("Europe/Samara");
+        var culture = System.Globalization.CultureInfo.GetCultureInfo("ru-RU");
+        var expectedDueAt = CalendarTimeZoneHelper.ToUserLocal(dueAtUtc, timeZone).ToString("dd.MM.yyyy HH:mm", culture);
+        var beforeGeneratedAt = CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).ToString("dd.MM.yyyy HH:mm", culture);
+        var beforeFileStamp = CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).ToString("yyyyMMdd-HHmm");
+
+        var result = await controller.ExportPlanningReport(
+            format: "html",
+            search: null,
+            status: "active",
+            type: null,
+            assigneeUserId: null,
+            from: null,
+            to: null,
+            clientCaseId: null,
+            clientId: null,
+            legalEntityId: null,
+            priority: null,
+            ct: CancellationToken.None);
+
+        var afterGeneratedAt = CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).ToString("dd.MM.yyyy HH:mm", culture);
+        var afterFileStamp = CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).ToString("yyyyMMdd-HHmm");
+        var file = Assert.IsType<FileContentResult>(result);
+        var content = Encoding.UTF8.GetString(file.FileContents);
+
+        Assert.Contains(expectedDueAt, content);
+        Assert.True(
+            content.Contains(beforeGeneratedAt, StringComparison.Ordinal) ||
+            content.Contains(afterGeneratedAt, StringComparison.Ordinal),
+            $"Planning report must contain generated time in Europe/Samara. Expected {beforeGeneratedAt} or {afterGeneratedAt}. Content: {content}");
+        Assert.True(
+            file.FileDownloadName == $"task-planning-report-{beforeFileStamp}.html" ||
+            file.FileDownloadName == $"task-planning-report-{afterFileStamp}.html",
+            $"Planning report file name must use Europe/Samara local time. Expected {beforeFileStamp} or {afterFileStamp}. Actual: {file.FileDownloadName}");
+    }
+
+    [Fact]
     public async Task ExportPlanningReport_ReturnsWordFile()
     {
         await using var db = await CreateContextAsync();
