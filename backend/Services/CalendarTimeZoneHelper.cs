@@ -7,6 +7,7 @@ namespace PayPlanner.Api.Services;
 public static class CalendarTimeZoneHelper
 {
     public const string UserTimeZoneSettingKey = "profile.timeZoneId";
+    public const string DefaultTimeZoneId = "Europe/Moscow";
 
     public static async Task<TimeZoneInfo> ResolveUserTimeZoneAsync(
         PaymentContext db,
@@ -35,7 +36,9 @@ public static class CalendarTimeZoneHelper
             return timeZone;
         }
 
-        return TimeZoneInfo.Local;
+        return TryFindSystemTimeZone(DefaultTimeZoneId, out var defaultTimeZone)
+            ? defaultTimeZone
+            : TimeZoneInfo.Utc;
     }
 
     public static DateTime NormalizeUtcInstant(DateTime value)
@@ -106,34 +109,45 @@ public static class CalendarTimeZoneHelper
     {
         if (!string.IsNullOrWhiteSpace(timeZoneId))
         {
-            try
+            if (TryFindById(timeZoneId, out timeZone))
             {
-                timeZone = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
                 return true;
-            }
-            catch (TimeZoneNotFoundException)
-            {
-            }
-            catch (InvalidTimeZoneException)
-            {
             }
 
             if (!IsWindowsTimeZoneId(timeZoneId) &&
                 TimeZoneInfo.TryConvertIanaIdToWindowsId(timeZoneId, out var windowsId) &&
-                TryFindSystemTimeZone(windowsId, out timeZone))
+                TryFindById(windowsId, out timeZone))
             {
                 return true;
             }
 
             if (IsWindowsTimeZoneId(timeZoneId) &&
                 TimeZoneInfo.TryConvertWindowsIdToIanaId(timeZoneId, out var ianaId) &&
-                TryFindSystemTimeZone(ianaId, out timeZone))
+                TryFindById(ianaId, out timeZone))
             {
                 return true;
             }
         }
 
-        timeZone = TimeZoneInfo.Local;
+        timeZone = TimeZoneInfo.Utc;
+        return false;
+    }
+
+    private static bool TryFindById(string timeZoneId, out TimeZoneInfo timeZone)
+    {
+        try
+        {
+            timeZone = TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+            return true;
+        }
+        catch (TimeZoneNotFoundException)
+        {
+        }
+        catch (InvalidTimeZoneException)
+        {
+        }
+
+        timeZone = TimeZoneInfo.Utc;
         return false;
     }
 

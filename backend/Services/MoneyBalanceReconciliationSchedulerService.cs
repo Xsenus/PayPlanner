@@ -130,7 +130,7 @@ public sealed class MoneyBalanceReconciliationSchedulerService : BackgroundServi
 
     public static DateTime ResolveReconciliationTargetDate(DateTime nowUtc, TimeZoneInfo? timeZone = null)
     {
-        var effectiveTimeZone = timeZone ?? TimeZoneInfo.Local;
+        var effectiveTimeZone = timeZone ?? CalendarTimeZoneHelper.ResolveTimeZone(null);
         return CalendarTimeZoneHelper.ToUserLocal(nowUtc, effectiveTimeZone).Date.AddDays(-1);
     }
 }

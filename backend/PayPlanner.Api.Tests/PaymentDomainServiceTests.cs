@@ -132,7 +132,7 @@ public class PaymentDomainServiceTests
     }
 
     [Fact]
-    public void ApplyStatusRules_WithoutTimeZoneKeepsUtcDayCompatibility()
+    public void ApplyStatusRules_WithoutTimeZoneUsesDefaultTimeZoneForLocalDay()
     {
         var payment = new Payment
         {
@@ -142,12 +142,12 @@ public class PaymentDomainServiceTests
             PaidAmount = 0m,
             Type = PaymentType.Income,
             Status = PaymentStatus.Pending,
-            Description = "UTC compatible overdue payment"
+            Description = "Default timezone overdue payment"
         };
 
-        PaymentDomainService.ApplyStatusRules(payment, new DateTime(2026, 6, 4, 20, 30, 0, DateTimeKind.Utc));
+        PaymentDomainService.ApplyStatusRules(payment, new DateTime(2026, 6, 4, 21, 30, 0, DateTimeKind.Utc));
 
-        Assert.Equal(PaymentStatus.Pending, payment.Status);
+        Assert.Equal(PaymentStatus.Overdue, payment.Status);
         AssertLocalDate(payment.Date, 2026, 6, 4);
         AssertLocalDate(payment.PlannedDate, 2026, 6, 4);
     }

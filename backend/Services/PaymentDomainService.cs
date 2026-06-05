@@ -100,9 +100,10 @@ public static class PaymentDomainService
     }
 
     public static DateTime ResolveLocalToday(DateTime utcNow, TimeZoneInfo? timeZone)
-        => timeZone is null
-            ? CalendarTimeZoneHelper.NormalizeUtcInstant(utcNow).Date
-            : CalendarTimeZoneHelper.ToUserLocal(utcNow, timeZone).Date;
+    {
+        var effectiveTimeZone = timeZone ?? CalendarTimeZoneHelper.ResolveTimeZone(null);
+        return CalendarTimeZoneHelper.ToUserLocal(utcNow, effectiveTimeZone).Date;
+    }
 
     /// <summary>
     /// Добавляет строку в системные заметки, ограничивая их длину.
@@ -117,7 +118,7 @@ public static class PaymentDomainService
         ArgumentNullException.ThrowIfNull(payment);
         if (string.IsNullOrWhiteSpace(message)) return;
 
-        var noteTimeZone = timeZone ?? TimeZoneInfo.Local;
+        var noteTimeZone = timeZone ?? CalendarTimeZoneHelper.ResolveTimeZone(null);
         var formattedTimestamp = CalendarTimeZoneHelper.FormatUserDateTime(
             utcNow,
             noteTimeZone,

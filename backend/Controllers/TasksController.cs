@@ -3519,7 +3519,7 @@ public class TasksController : ControllerBase
     {
         var now = DateTime.UtcNow;
         var reminders = reminderMinutes is { Count: > 0 } ? reminderMinutes : IcsReminderOptions.DefaultReminderMinutes;
-        var calendarTimeZone = timeZone ?? TimeZoneInfo.Local;
+        var calendarTimeZone = timeZone ?? CalendarTimeZoneHelper.ResolveTimeZone(null);
         var builder = new StringBuilder();
         builder.AppendLine("BEGIN:VCALENDAR");
         builder.AppendLine("VERSION:2.0");

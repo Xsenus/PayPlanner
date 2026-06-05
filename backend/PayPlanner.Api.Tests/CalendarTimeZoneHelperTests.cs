@@ -11,7 +11,7 @@ namespace PayPlanner.Api.Tests;
 public sealed class CalendarTimeZoneHelperTests
 {
     [Fact]
-    public async Task ResolveUserTimeZoneAsync_UsesProfileSettingAndFallsBackToLocal()
+    public async Task ResolveUserTimeZoneAsync_UsesProfileSettingAndFallsBackToDefault()
     {
         await using var db = await CreateContextAsync();
         var role = new Role { Name = "timezone-role", Description = "Timezone role" };
@@ -45,8 +45,19 @@ public sealed class CalendarTimeZoneHelperTests
         var anonymous = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(db, null);
 
         Assert.Equal(CalendarTimeZoneHelper.ResolveTimeZone("Europe/Samara").Id, configured.Id);
-        Assert.Equal(TimeZoneInfo.Local.Id, fallback.Id);
-        Assert.Equal(TimeZoneInfo.Local.Id, anonymous.Id);
+        var defaultTimeZone = CalendarTimeZoneHelper.ResolveTimeZone(CalendarTimeZoneHelper.DefaultTimeZoneId);
+        Assert.Equal(defaultTimeZone.Id, fallback.Id);
+        Assert.Equal(defaultTimeZone.Id, anonymous.Id);
+    }
+
+    [Fact]
+    public void ResolveTimeZone_FallsBackToDefaultForEmptyOrInvalidValue()
+    {
+        var defaultTimeZone = CalendarTimeZoneHelper.ResolveTimeZone(CalendarTimeZoneHelper.DefaultTimeZoneId);
+
+        Assert.Equal(defaultTimeZone.Id, CalendarTimeZoneHelper.ResolveTimeZone(null).Id);
+        Assert.Equal(defaultTimeZone.Id, CalendarTimeZoneHelper.ResolveTimeZone("  ").Id);
+        Assert.Equal(defaultTimeZone.Id, CalendarTimeZoneHelper.ResolveTimeZone("Unknown/Timezone").Id);
     }
 
     [Fact]
