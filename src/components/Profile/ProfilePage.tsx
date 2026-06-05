@@ -57,6 +57,11 @@ type PendingPhotoCropState = {
   mimeType: string;
 };
 
+type TimeZoneSettingLoadResult = {
+  value?: string | null;
+  missing: boolean;
+};
+
 const EMPTY_PUBLIC_SETTINGS: AuthProviderPublicSettings = {
   googleEnabled: false,
   vkEnabled: false,
@@ -173,6 +178,19 @@ function readFileAsDataUrl(file: File) {
   });
 }
 
+function isMissingUserSettingError(error: unknown) {
+  return error instanceof Error && error.message.includes('HTTP 404');
+}
+
+async function loadTimeZoneSetting(): Promise<TimeZoneSettingLoadResult> {
+  try {
+    const response = await apiService.getUserSetting(USER_TIME_ZONE_SETTING_KEY);
+    return { value: response?.value, missing: false };
+  } catch (error) {
+    return { value: null, missing: isMissingUserSettingError(error) };
+  }
+}
+
 export function ProfilePage() {
   const { refreshUser } = useAuth();
   const { confirm } = useDialog();
@@ -210,7 +228,7 @@ export function ProfilePage() {
       authService.getProfile(),
       authService.getAuthProviders(),
       apiService.getUserSetting(TASK_NOTIFICATION_DEFAULTS_SETTING_KEY).catch(() => null),
-      apiService.getUserSetting(USER_TIME_ZONE_SETTING_KEY).catch(() => null),
+      loadTimeZoneSetting(),
       authService.getContractorBalance().catch(() => EMPTY_CONTRACTOR_BALANCE),
     ]);
 
@@ -218,7 +236,11 @@ export function ProfilePage() {
     setForm(buildFormState(nextProfile));
     setPublicSettings(nextProviders);
     setTaskNotificationDefaults(parseTaskNotificationDefaults(nextTaskNotificationDefaults?.value));
-    setTimeZoneId(normalizeUserTimeZoneId(nextTimeZone?.value));
+    const nextTimeZoneId = normalizeUserTimeZoneId(nextTimeZone.value);
+    setTimeZoneId(nextTimeZoneId);
+    if (nextTimeZone.missing) {
+      void apiService.upsertUserSetting(USER_TIME_ZONE_SETTING_KEY, nextTimeZoneId).catch(() => undefined);
+    }
     setContractorBalance(nextContractorBalance);
     return nextProfile;
   }, []);

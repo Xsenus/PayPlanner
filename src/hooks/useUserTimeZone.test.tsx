@@ -7,6 +7,7 @@ import { useUserTimeZone } from './useUserTimeZone';
 vi.mock('../services/api', () => ({
   apiService: {
     getUserSetting: vi.fn(),
+    upsertUserSetting: vi.fn(),
   },
 }));
 
@@ -28,16 +29,40 @@ describe('useUserTimeZone', () => {
     await waitFor(() => {
       expect(screen.getByTestId('time-zone').textContent).toBe('Europe/Samara');
     });
+    expect(apiService.upsertUserSetting).not.toHaveBeenCalled();
   });
 
-  it('keeps a normalized fallback when the setting cannot be loaded', async () => {
-    vi.mocked(apiService.getUserSetting).mockRejectedValue(new Error('not found'));
+  it('saves the detected time zone when the profile setting is missing', async () => {
+    vi.mocked(apiService.getUserSetting).mockRejectedValue(new Error('HTTP 404 Not Found'));
+    vi.mocked(apiService.upsertUserSetting).mockResolvedValue({
+      key: 'profile.timeZoneId',
+      value: 'Europe/Samara',
+      updatedAt: '2026-06-05T10:00:00Z',
+    });
 
     render(<TimeZoneProbe />);
 
     await waitFor(() => {
       expect(apiService.getUserSetting).toHaveBeenCalledWith('profile.timeZoneId');
     });
+    await waitFor(() => {
+      expect(apiService.upsertUserSetting).toHaveBeenCalledWith(
+        'profile.timeZoneId',
+        screen.getByTestId('time-zone').textContent,
+      );
+    });
+    expect(screen.getByTestId('time-zone').textContent).toBeTruthy();
+  });
+
+  it('keeps a normalized fallback without saving when the setting cannot be loaded for another reason', async () => {
+    vi.mocked(apiService.getUserSetting).mockRejectedValue(new Error('HTTP 500 Server Error'));
+
+    render(<TimeZoneProbe />);
+
+    await waitFor(() => {
+      expect(apiService.getUserSetting).toHaveBeenCalledWith('profile.timeZoneId');
+    });
+    expect(apiService.upsertUserSetting).not.toHaveBeenCalled();
     expect(screen.getByTestId('time-zone').textContent).toBeTruthy();
   });
 });
