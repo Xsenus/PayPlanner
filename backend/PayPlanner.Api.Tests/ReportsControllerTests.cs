@@ -1894,6 +1894,96 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task ClientCaseReports_UseProfileTimeZoneForPeriodsAndKeepCaseDatesDateOnly()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateReportsUserWithTimeZoneAsync(db, "America/New_York");
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                RoleId = user.RoleId,
+                Section = RolePermissionCatalog.Cases,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = user.RoleId,
+                Section = RolePermissionCatalog.Tasks,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = user.RoleId,
+                Section = RolePermissionCatalog.Accounts,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            });
+
+        var client = new Client { Name = "Timezone Client", ResponsibleUserId = user.Id };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var createdAtUtc = new DateTime(2026, 6, 6, 2, 30, 0, DateTimeKind.Utc);
+        var dueDateWithUtcKind = new DateTime(2026, 6, 10, 0, 0, 0, DateTimeKind.Utc);
+        var clientCase = new ClientCase
+        {
+            ClientId = client.Id,
+            CaseNumber = "TZ-CLIENT",
+            Title = "Timezone client case",
+            CaseType = "Timezone",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = user.Id,
+            CreatedAt = createdAtUtc,
+            StartDate = null,
+            DueDate = dueDateWithUtcKind,
+            FeeAmount = 10_000m,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateUserPrincipal(user.Id));
+        var localReportDay = new DateTime(2026, 6, 5);
+        var dueDate = new DateTime(2026, 6, 10);
+
+        var legalWork = Assert.IsType<LegalWorkReportDto>(
+            Assert.IsType<OkObjectResult>((await controller.LegalWork(localReportDay, localReportDay, null, null, null, CancellationToken.None)).Result).Value);
+        var legalWorkCase = Assert.Single(legalWork.Cases);
+        Assert.Equal(clientCase.Id, legalWorkCase.CaseId);
+        Assert.Equal(DateTimeKind.Unspecified, legalWork.From.Kind);
+        Assert.Equal(DateTimeKind.Unspecified, legalWork.To.Kind);
+        Assert.Equal(dueDate, legalWorkCase.DueDate);
+        Assert.Equal(DateTimeKind.Unspecified, legalWorkCase.DueDate!.Value.Kind);
+
+        var caseFinance = Assert.IsType<CaseFinanceReportDto>(
+            Assert.IsType<OkObjectResult>((await controller.CaseFinance(localReportDay, localReportDay, null, null, null, 10, CancellationToken.None)).Result).Value);
+        var financeItem = Assert.Single(caseFinance.Items);
+        Assert.Equal(clientCase.Id, financeItem.CaseId);
+        Assert.Equal(dueDate, financeItem.DueDate);
+        Assert.Equal(DateTimeKind.Unspecified, financeItem.DueDate!.Value.Kind);
+
+        var caseSuccess = Assert.IsType<CaseSuccessReportDto>(
+            Assert.IsType<OkObjectResult>((await controller.CaseSuccess(localReportDay, localReportDay, null, null, null, 10, CancellationToken.None)).Result).Value);
+        var successItem = Assert.Single(caseSuccess.Items);
+        var expectedProfileToday = CalendarTimeZoneHelper.ToUserLocal(
+            DateTime.UtcNow,
+            CalendarTimeZoneHelper.ResolveTimeZone("America/New_York")).Date;
+        Assert.Equal(clientCase.Id, successItem.CaseId);
+        Assert.Equal(dueDate, successItem.DueDate);
+        Assert.Equal(DateTimeKind.Unspecified, successItem.DueDate!.Value.Kind);
+        Assert.Equal(Math.Max(0, (expectedProfileToday - localReportDay).Days), successItem.DaysInWork);
+
+        var currentCases = Assert.IsType<CurrentCasesReportDto>(
+            Assert.IsType<OkObjectResult>((await controller.CurrentCases(new DateTime(2026, 6, 7), null, null, null, 10, CancellationToken.None)).Result).Value);
+        var currentCase = Assert.Single(currentCases.Items);
+        Assert.Equal(clientCase.Id, currentCase.CaseId);
+        Assert.Equal(dueDate, currentCase.DueDate);
+        Assert.Equal(DateTimeKind.Unspecified, currentCase.DueDate!.Value.Kind);
+        Assert.Equal(2, currentCase.DaysInWork);
+    }
+
+    [Fact]
     public async Task CashFlow_UsesPaymentVisibilityForLinkedOperations()
     {
         await using var db = await CreateContextAsync();

@@ -123,6 +123,15 @@ public class ReportsController : ControllerBase
     private static DateTime? NormalizeReportInstant(DateTime? value)
         => value.HasValue ? NormalizeReportInstant(value.Value) : null;
 
+    private static DateTime NormalizeReportDate(DateTime value)
+        => DateTime.SpecifyKind(value.Date, DateTimeKind.Unspecified);
+
+    private static DateTime? NormalizeReportDate(DateTime? value)
+        => value.HasValue ? NormalizeReportDate(value.Value) : null;
+
+    private static DateTime ResolveReportLocalDate(DateTime value, TimeZoneInfo timeZone)
+        => NormalizeReportDate(CalendarTimeZoneHelper.ToUserLocal(value, timeZone));
+
     [HttpGet("legal-work")]
     public async Task<ActionResult<LegalWorkReportDto>> LegalWork(
         [FromQuery] DateTime? from,
@@ -132,7 +141,8 @@ public class ReportsController : ControllerBase
         [FromQuery] string? caseType,
         CancellationToken ct)
     {
-        var reportToday = await ResolveReportTodayAsync(ct);
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        var reportToday = CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date;
         var (start, end) = ResolveReportPeriod(from, to, reportToday);
 
         if (!await CanViewReportsAsync(ct))
@@ -150,7 +160,7 @@ public class ReportsController : ControllerBase
 
         var filters = new LegalWorkReportFilters(NormalizeOptional(status), responsibleUserId, NormalizeOptional(caseType));
         var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildLegalWorkReportAsync(start, end, reportToday, filters, casesVisibility, tasksVisibility, accountsVisibility, cancellationToken),
+            cancellationToken => BuildLegalWorkReportAsync(start, end, reportToday, timeZone, filters, casesVisibility, tasksVisibility, accountsVisibility, cancellationToken),
             _logger,
             ct);
 
@@ -344,12 +354,13 @@ public class ReportsController : ControllerBase
             return Unauthorized();
         }
 
-        var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        var (start, end) = ResolveReportPeriod(from, to, CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date);
         var filters = new LegalWorkReportFilters(NormalizeOptional(status), responsibleUserId, NormalizeOptional(caseType));
         var effectiveLimit = Math.Clamp(limit ?? 100, 1, 500);
 
         var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildCaseFinanceReportAsync(start, end, filters, effectiveLimit, casesVisibility, accountsVisibility, cancellationToken),
+            cancellationToken => BuildCaseFinanceReportAsync(start, end, timeZone, filters, effectiveLimit, casesVisibility, accountsVisibility, cancellationToken),
             _logger,
             ct);
 
@@ -377,13 +388,14 @@ public class ReportsController : ControllerBase
             return Unauthorized();
         }
 
-        var reportToday = await ResolveReportTodayAsync(ct);
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        var reportToday = CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date;
         var (start, end) = ResolveReportPeriod(from, to, reportToday);
         var filters = new LegalWorkReportFilters(NormalizeOptional(status), responsibleUserId, NormalizeOptional(caseType));
         var effectiveLimit = Math.Clamp(limit ?? 100, 1, 500);
 
         var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildCaseSuccessReportAsync(start, end, reportToday, filters, effectiveLimit, casesVisibility, cancellationToken),
+            cancellationToken => BuildCaseSuccessReportAsync(start, end, reportToday, timeZone, filters, effectiveLimit, casesVisibility, cancellationToken),
             _logger,
             ct);
 
@@ -411,11 +423,12 @@ public class ReportsController : ControllerBase
             return (null, Unauthorized());
         }
 
-        var reportToday = await ResolveReportTodayAsync(ct);
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        var reportToday = CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date;
         var (start, end) = ResolveReportPeriod(from, to, reportToday);
         var filters = new LegalWorkReportFilters(NormalizeOptional(status), responsibleUserId, NormalizeOptional(caseType));
         var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildLegalWorkReportAsync(start, end, reportToday, filters, casesVisibility, tasksVisibility, accountsVisibility, cancellationToken),
+            cancellationToken => BuildLegalWorkReportAsync(start, end, reportToday, timeZone, filters, casesVisibility, tasksVisibility, accountsVisibility, cancellationToken),
             _logger,
             ct);
 
@@ -464,7 +477,7 @@ public class ReportsController : ControllerBase
                 var (start, end) = ResolveReportPeriod(from, to, reportToday);
                 var filters = new LegalWorkReportFilters(NormalizeOptional(status), responsibleUserId, NormalizeOptional(caseType));
                 var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                    cancellationToken => BuildCaseFinanceReportAsync(start, end, filters, effectiveLimit, casesVisibility, accountsVisibility, cancellationToken),
+                    cancellationToken => BuildCaseFinanceReportAsync(start, end, timeZone, filters, effectiveLimit, casesVisibility, accountsVisibility, cancellationToken),
                     _logger,
                     ct);
                 return (BuildCaseFinanceExportDocument(reportDto), null);
@@ -481,7 +494,7 @@ public class ReportsController : ControllerBase
                 var (start, end) = ResolveReportPeriod(from, to, reportToday);
                 var filters = new LegalWorkReportFilters(NormalizeOptional(status), responsibleUserId, NormalizeOptional(caseType));
                 var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                    cancellationToken => BuildCaseSuccessReportAsync(start, end, reportToday, filters, effectiveLimit, casesVisibility, cancellationToken),
+                    cancellationToken => BuildCaseSuccessReportAsync(start, end, reportToday, timeZone, filters, effectiveLimit, casesVisibility, cancellationToken),
                     _logger,
                     ct);
                 return (BuildCaseSuccessExportDocument(reportDto), null);
@@ -498,7 +511,7 @@ public class ReportsController : ControllerBase
 
                 var filters = new CurrentCasesReportFilters(NormalizeOptional(status), responsibleUserId, NormalizeOptional(caseType));
                 var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                    cancellationToken => BuildCurrentCasesReportAsync(effectiveAsOf, filters, effectiveLimit, casesVisibility, tasksVisibility, cancellationToken),
+                    cancellationToken => BuildCurrentCasesReportAsync(effectiveAsOf, timeZone, filters, effectiveLimit, casesVisibility, tasksVisibility, cancellationToken),
                     _logger,
                     ct);
                 return (BuildCurrentCasesExportDocument(reportDto), null);
@@ -628,7 +641,8 @@ public class ReportsController : ControllerBase
             return Unauthorized();
         }
 
-        var effectiveAsOf = asOf?.Date ?? await ResolveReportTodayAsync(ct);
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        var effectiveAsOf = asOf?.Date ?? CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date;
         var effectiveLimit = Math.Clamp(limit ?? 100, 1, 500);
         var filters = new CurrentCasesReportFilters(
             NormalizeOptional(status),
@@ -638,6 +652,7 @@ public class ReportsController : ControllerBase
         var report = await SqliteRetryHelper.ExecuteAsync(
             cancellationToken => BuildCurrentCasesReportAsync(
                 effectiveAsOf,
+                timeZone,
                 filters,
                 effectiveLimit,
                 casesVisibility,
@@ -1145,19 +1160,20 @@ public class ReportsController : ControllerBase
         DateTime start,
         DateTime end,
         DateTime today,
+        TimeZoneInfo timeZone,
         LegalWorkReportFilters filters,
         DataVisibilityAccess casesVisibility,
         DataVisibilityAccess tasksVisibility,
         DataVisibilityAccess accountsVisibility,
         CancellationToken ct)
     {
-        var endInclusive = end.Date.AddDays(1).AddTicks(-1);
+        var endExclusiveUtc = CalendarTimeZoneHelper.FromUserLocalToUtc(end.Date.AddDays(1), timeZone);
 
         var caseQuery = _db.ClientCases
             .AsNoTracking()
             .WithCaseIncludes()
             .ApplyClientCaseVisibility(casesVisibility)
-            .Where(item => item.CreatedAt <= endInclusive
+            .Where(item => item.CreatedAt < endExclusiveUtc
                 && (item.Status != ClientCaseStatus.Closed && item.Status != ClientCaseStatus.Lost
                     || (item.StartDate.HasValue && item.StartDate.Value >= start.Date)
                     || (item.DueDate.HasValue && item.DueDate.Value >= start.Date)));
@@ -1262,8 +1278,8 @@ public class ReportsController : ControllerBase
 
         return new LegalWorkReportDto
         {
-            From = start,
-            To = end,
+            From = NormalizeReportDate(start),
+            To = NormalizeReportDate(end),
             StatusFilter = filters.Status ?? string.Empty,
             ResponsibleUserIdFilter = filters.ResponsibleUserId,
             CaseTypeFilter = filters.CaseType ?? string.Empty,
@@ -1345,18 +1361,19 @@ public class ReportsController : ControllerBase
     private async Task<CaseFinanceReportDto> BuildCaseFinanceReportAsync(
         DateTime start,
         DateTime end,
+        TimeZoneInfo timeZone,
         LegalWorkReportFilters filters,
         int limit,
         DataVisibilityAccess casesVisibility,
         DataVisibilityAccess accountsVisibility,
         CancellationToken ct)
     {
-        var endInclusive = end.Date.AddDays(1).AddTicks(-1);
+        var endExclusiveUtc = CalendarTimeZoneHelper.FromUserLocalToUtc(end.Date.AddDays(1), timeZone);
         var caseQuery = _db.ClientCases
             .AsNoTracking()
             .WithCaseIncludes()
             .ApplyClientCaseVisibility(casesVisibility)
-            .Where(item => item.CreatedAt <= endInclusive
+            .Where(item => item.CreatedAt < endExclusiveUtc
                 && (item.Status != ClientCaseStatus.Closed && item.Status != ClientCaseStatus.Lost
                     || (item.StartDate.HasValue && item.StartDate.Value >= start.Date)
                     || (item.DueDate.HasValue && item.DueDate.Value >= start.Date)));
@@ -1399,8 +1416,8 @@ public class ReportsController : ControllerBase
         return new CaseFinanceReportDto
         {
             GeneratedAt = NormalizeReportInstant(DateTime.UtcNow),
-            From = start,
-            To = end,
+            From = NormalizeReportDate(start),
+            To = NormalizeReportDate(end),
             StatusFilter = filters.Status ?? string.Empty,
             ResponsibleUserIdFilter = filters.ResponsibleUserId,
             CaseTypeFilter = filters.CaseType ?? string.Empty,
@@ -1464,17 +1481,18 @@ public class ReportsController : ControllerBase
         DateTime start,
         DateTime end,
         DateTime asOf,
+        TimeZoneInfo timeZone,
         LegalWorkReportFilters filters,
         int limit,
         DataVisibilityAccess casesVisibility,
         CancellationToken ct)
     {
-        var endInclusive = end.Date.AddDays(1).AddTicks(-1);
+        var endExclusiveUtc = CalendarTimeZoneHelper.FromUserLocalToUtc(end.Date.AddDays(1), timeZone);
         var caseQuery = _db.ClientCases
             .AsNoTracking()
             .WithCaseIncludes()
             .ApplyClientCaseVisibility(casesVisibility)
-            .Where(item => item.CreatedAt <= endInclusive
+            .Where(item => item.CreatedAt < endExclusiveUtc
                 && (item.Status != ClientCaseStatus.Closed && item.Status != ClientCaseStatus.Lost
                     || (item.StartDate.HasValue && item.StartDate.Value >= start.Date)
                     || (item.DueDate.HasValue && item.DueDate.Value >= start.Date)));
@@ -1495,7 +1513,7 @@ public class ReportsController : ControllerBase
         }
 
         var rows = (await caseQuery.ToListAsync(ct))
-            .Select(item => BuildCaseSuccessItem(item, asOf))
+            .Select(item => BuildCaseSuccessItem(item, asOf, timeZone))
             .OrderByDescending(item => item.IsFinished)
             .ThenBy(item => item.Status)
             .ThenBy(item => item.CaseTitle)
@@ -1510,8 +1528,8 @@ public class ReportsController : ControllerBase
         return new CaseSuccessReportDto
         {
             GeneratedAt = NormalizeReportInstant(DateTime.UtcNow),
-            From = start,
-            To = end,
+            From = NormalizeReportDate(start),
+            To = NormalizeReportDate(end),
             StatusFilter = filters.Status ?? string.Empty,
             ResponsibleUserIdFilter = filters.ResponsibleUserId,
             CaseTypeFilter = filters.CaseType ?? string.Empty,
@@ -1586,12 +1604,14 @@ public class ReportsController : ControllerBase
         };
     }
 
-    private static CaseSuccessItemDto BuildCaseSuccessItem(ClientCase clientCase, DateTime asOf)
+    private static CaseSuccessItemDto BuildCaseSuccessItem(ClientCase clientCase, DateTime asOf, TimeZoneInfo timeZone)
     {
         var (outcomeCategory, outcomeLabel) = ResolveCaseSuccessOutcome(clientCase.Status);
-        var start = clientCase.StartDate ?? clientCase.CreatedAt;
+        var start = clientCase.StartDate.HasValue
+            ? NormalizeReportDate(clientCase.StartDate.Value)
+            : ResolveReportLocalDate(clientCase.CreatedAt, timeZone);
         var finishAnchor = clientCase.Status is ClientCaseStatus.Closed or ClientCaseStatus.Lost
-            ? clientCase.DueDate ?? asOf
+            ? NormalizeReportDate(clientCase.DueDate) ?? NormalizeReportDate(asOf)
             : asOf;
         var daysInWork = Math.Max(0, (finishAnchor.Date - start.Date).Days);
 
@@ -1609,8 +1629,8 @@ public class ReportsController : ControllerBase
             ResponsibleUserId = clientCase.ResponsibleUserId,
             ResponsibleName = ResolveCaseResponsibleName(clientCase),
             CreatedAt = NormalizeReportInstant(clientCase.CreatedAt),
-            StartDate = clientCase.StartDate,
-            DueDate = clientCase.DueDate,
+            StartDate = NormalizeReportDate(clientCase.StartDate),
+            DueDate = NormalizeReportDate(clientCase.DueDate),
             DaysInWork = daysInWork,
             IsFinished = clientCase.Status is ClientCaseStatus.Closed or ClientCaseStatus.Lost,
         };
@@ -1644,8 +1664,8 @@ public class ReportsController : ControllerBase
             ResponsibleUserId = clientCase.ResponsibleUserId,
             ResponsibleName = ResolveCaseResponsibleName(clientCase),
             CreatedAt = NormalizeReportInstant(clientCase.CreatedAt),
-            StartDate = clientCase.StartDate,
-            DueDate = clientCase.DueDate,
+            StartDate = NormalizeReportDate(clientCase.StartDate),
+            DueDate = NormalizeReportDate(clientCase.DueDate),
             FeeAmount = fee,
             PaidTotal = paid,
             OutstandingTotal = outstanding,
@@ -1704,8 +1724,8 @@ public class ReportsController : ControllerBase
                     ResponsibleUserId = clientCase.ResponsibleUserId,
                     ResponsibleName = ResolveCaseResponsibleName(clientCase),
                     CreatedAt = NormalizeReportInstant(clientCase.CreatedAt),
-                    StartDate = clientCase.StartDate,
-                    DueDate = clientCase.DueDate,
+                    StartDate = NormalizeReportDate(clientCase.StartDate),
+                    DueDate = NormalizeReportDate(clientCase.DueDate),
                     FeeAmount = clientCase.FeeAmount,
                     PaidTotal = paid,
                     OutstandingTotal = Math.Max(0m, clientCase.FeeAmount - paid),
@@ -2742,7 +2762,7 @@ public class ReportsController : ControllerBase
         return new OverdueProceduralDeadlinesReportDto
         {
             GeneratedAt = NormalizeReportInstant(DateTime.UtcNow),
-            AsOf = asOf,
+            AsOf = NormalizeReportDate(asOf),
             DeadlineTypeFilter = deadlineType ?? string.Empty,
             ResponsibleUserIdFilter = responsibleUserId,
             Limit = limit,
@@ -2808,6 +2828,7 @@ public class ReportsController : ControllerBase
 
     private async Task<CurrentCasesReportDto> BuildCurrentCasesReportAsync(
         DateTime asOf,
+        TimeZoneInfo timeZone,
         CurrentCasesReportFilters filters,
         int limit,
         DataVisibilityAccess casesVisibility,
@@ -2883,7 +2904,8 @@ public class ReportsController : ControllerBase
                 clientCase,
                 tasksByCase.GetValueOrDefault(clientCase.Id) ?? [],
                 deadlinesByCase.GetValueOrDefault(clientCase.Id) ?? [],
-                asOf))
+                asOf,
+                timeZone))
             .ToList();
 
         var orderedRows = rows
@@ -2897,7 +2919,7 @@ public class ReportsController : ControllerBase
         return new CurrentCasesReportDto
         {
             GeneratedAt = NormalizeReportInstant(DateTime.UtcNow),
-            AsOf = asOf,
+            AsOf = NormalizeReportDate(asOf),
             StatusFilter = filters.Status ?? string.Empty,
             ResponsibleUserIdFilter = filters.ResponsibleUserId,
             CaseTypeFilter = filters.CaseType ?? string.Empty,
@@ -2945,8 +2967,12 @@ public class ReportsController : ControllerBase
         ClientCase clientCase,
         IReadOnlyCollection<LegalWorkTaskRow> tasks,
         IReadOnlyCollection<CurrentCaseDeadlineRow> deadlines,
-        DateTime asOf)
+        DateTime asOf,
+        TimeZoneInfo timeZone)
     {
+        var startDate = clientCase.StartDate.HasValue
+            ? NormalizeReportDate(clientCase.StartDate.Value)
+            : ResolveReportLocalDate(clientCase.CreatedAt, timeZone);
         var openTasks = tasks.Where(item => IsOpenTaskStatus(item.Status)).ToList();
         var overdueTasks = openTasks.Where(item => item.DueAt.Date < asOf.Date).ToList();
         var onApprovalTasks = openTasks
@@ -2972,10 +2998,10 @@ public class ReportsController : ControllerBase
             ResponsibleUserId = clientCase.ResponsibleUserId,
             ResponsibleName = ResolveCaseResponsibleName(clientCase),
             CreatedAt = NormalizeReportInstant(clientCase.CreatedAt),
-            StartDate = clientCase.StartDate,
-            DueDate = clientCase.DueDate,
+            StartDate = NormalizeReportDate(clientCase.StartDate),
+            DueDate = NormalizeReportDate(clientCase.DueDate),
             NextHearingAt = NormalizeReportInstant(clientCase.NextHearingAt),
-            DaysInWork = Math.Max(0, (asOf.Date - (clientCase.StartDate ?? clientCase.CreatedAt).Date).Days),
+            DaysInWork = Math.Max(0, (asOf.Date - startDate.Date).Days),
             DaysUntilDue = clientCase.DueDate.HasValue
                 ? (clientCase.DueDate.Value.Date - asOf.Date).Days
                 : null,
@@ -3045,7 +3071,7 @@ public class ReportsController : ControllerBase
         return new TaskReportDto
         {
             GeneratedAt = NormalizeReportInstant(DateTime.UtcNow),
-            AsOf = asOf,
+            AsOf = NormalizeReportDate(asOf),
             Scope = scope,
             AssigneeUserIdFilter = assigneeUserId,
             Limit = limit,
@@ -3240,7 +3266,7 @@ public class ReportsController : ControllerBase
         return new LawyerWorkloadReportDto
         {
             GeneratedAt = NormalizeReportInstant(DateTime.UtcNow),
-            AsOf = asOf,
+            AsOf = NormalizeReportDate(asOf),
             HorizonDays = horizonDays,
             LawyerUserIdFilter = lawyerUserId,
             Limit = limit,
