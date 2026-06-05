@@ -317,6 +317,104 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task ManagementReportExcel_UsesProfileTimeZoneForGeneratedAt()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "management-exporter-timezone", Description = "Management exporter timezone" };
+        var user = new User
+        {
+            Email = "management-exporter-timezone@example.test",
+            FullName = "Management Exporter Timezone",
+            IsActive = true,
+            Role = role,
+        };
+        var client = new Client
+        {
+            Name = "Management Timezone Client",
+            ResponsibleUser = user,
+        };
+        db.Roles.Add(role);
+        db.Users.Add(user);
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Reports,
+                CanView = true,
+                CanExport = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Cases,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            });
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = user.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Europe/Samara",
+        });
+
+        var today = DateTime.UtcNow.Date;
+        db.ClientCases.Add(new ClientCase
+        {
+            ClientId = client.Id,
+            CaseNumber = "MNG-TZ",
+            Title = "Management timezone case",
+            CaseType = "Суд",
+            Status = ClientCaseStatus.Closed,
+            ResponsibleUserId = user.Id,
+            CreatedAt = today.AddDays(-3),
+            StartDate = today.AddDays(-3),
+            DueDate = today,
+            FeeAmount = 12_000m,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateUserPrincipal(user.Id));
+        var expectedTimeZone = CalendarTimeZoneHelper.ResolveTimeZone("Europe/Samara");
+        var before = CalendarTimeZoneHelper.FormatUserDateTime(
+            DateTime.UtcNow,
+            expectedTimeZone,
+            culture: System.Globalization.CultureInfo.GetCultureInfo("ru-RU"));
+
+        var excelAction = await controller.ExportManagementReportExcel(
+            "case-success",
+            today.AddDays(-30),
+            today.AddDays(30),
+            today,
+            null,
+            null,
+            null,
+            null,
+            7,
+            null,
+            "all",
+            null,
+            null,
+            50,
+            CancellationToken.None);
+
+        var after = CalendarTimeZoneHelper.FormatUserDateTime(
+            DateTime.UtcNow,
+            expectedTimeZone,
+            culture: System.Globalization.CultureInfo.GetCultureInfo("ru-RU"));
+        var excel = Assert.IsType<FileContentResult>(excelAction);
+        var excelText = System.Text.Encoding.UTF8.GetString(excel.FileContents);
+        Assert.Contains("Сформировано", excelText, StringComparison.Ordinal);
+        Assert.True(
+            excelText.Contains(before, StringComparison.Ordinal) ||
+            excelText.Contains(after, StringComparison.Ordinal),
+            $"Excel export must contain generated time in Europe/Samara. Expected {before} or {after}. Content: {excelText}");
+    }
+
+    [Fact]
     public async Task LegalWorkPdf_UsesProfileTimeZoneForGeneratedAt()
     {
         await using var db = await CreateContextAsync();
@@ -476,20 +574,47 @@ public class ReportsControllerTests
         var controller = CreateController(db, CreateUserPrincipal(user.Id), pdfService);
         var from = instantUtc.Date.AddDays(-1);
         var to = instantUtc.Date.AddDays(2);
+        var expectedTimeZone = CalendarTimeZoneHelper.ResolveTimeZone("Europe/Samara");
         var expectedDate = CalendarTimeZoneHelper
-            .ToUserLocal(instantUtc, CalendarTimeZoneHelper.ResolveTimeZone("Europe/Samara"))
+            .ToUserLocal(instantUtc, expectedTimeZone)
             .ToString("dd.MM.yyyy", System.Globalization.CultureInfo.GetCultureInfo("ru-RU"));
+        var beforeCsvGeneratedAt = CalendarTimeZoneHelper.FormatUserDateTime(
+            DateTime.UtcNow,
+            expectedTimeZone,
+            culture: System.Globalization.CultureInfo.GetCultureInfo("ru-RU"));
 
         var csv = Assert.IsType<FileContentResult>(
             await controller.ExportLegalWorkCsv(from, to, null, null, null, CancellationToken.None));
+        var afterCsvGeneratedAt = CalendarTimeZoneHelper.FormatUserDateTime(
+            DateTime.UtcNow,
+            expectedTimeZone,
+            culture: System.Globalization.CultureInfo.GetCultureInfo("ru-RU"));
         var csvText = System.Text.Encoding.UTF8.GetString(csv.FileContents);
         Assert.Matches(@"^legal-work-report-\d{8}-\d{4}\.csv$", csv.FileDownloadName);
         Assert.Contains(expectedDate, csvText, StringComparison.Ordinal);
+        Assert.Contains("Сформировано", csvText, StringComparison.Ordinal);
+        Assert.True(
+            csvText.Contains(beforeCsvGeneratedAt, StringComparison.Ordinal) ||
+            csvText.Contains(afterCsvGeneratedAt, StringComparison.Ordinal),
+            $"CSV export must contain generated time in Europe/Samara. Expected {beforeCsvGeneratedAt} or {afterCsvGeneratedAt}. Content: {csvText}");
 
+        var beforeExcelGeneratedAt = CalendarTimeZoneHelper.FormatUserDateTime(
+            DateTime.UtcNow,
+            expectedTimeZone,
+            culture: System.Globalization.CultureInfo.GetCultureInfo("ru-RU"));
         var excel = Assert.IsType<FileContentResult>(
             await controller.ExportLegalWorkExcel(from, to, null, null, null, CancellationToken.None));
+        var afterExcelGeneratedAt = CalendarTimeZoneHelper.FormatUserDateTime(
+            DateTime.UtcNow,
+            expectedTimeZone,
+            culture: System.Globalization.CultureInfo.GetCultureInfo("ru-RU"));
         var excelText = System.Text.Encoding.UTF8.GetString(excel.FileContents);
         Assert.Contains(expectedDate, excelText, StringComparison.Ordinal);
+        Assert.Contains("Сформировано", excelText, StringComparison.Ordinal);
+        Assert.True(
+            excelText.Contains(beforeExcelGeneratedAt, StringComparison.Ordinal) ||
+            excelText.Contains(afterExcelGeneratedAt, StringComparison.Ordinal),
+            $"Excel export must contain generated time in Europe/Samara. Expected {beforeExcelGeneratedAt} or {afterExcelGeneratedAt}. Content: {excelText}");
 
         var pdf = Assert.IsType<FileContentResult>(
             await controller.ExportLegalWorkPdf(from, to, null, null, null, CancellationToken.None));

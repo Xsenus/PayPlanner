@@ -184,7 +184,7 @@ public class ReportsController : ControllerBase
 
         var now = await ResolveReportNowAsync(ct);
         return File(
-            BuildLegalWorkCsv(report!, now.TimeZone),
+            BuildLegalWorkCsv(report!, now.Utc, now.TimeZone),
             "text/csv; charset=utf-8",
             $"legal-work-report-{now.Local:yyyyMMdd-HHmm}.csv");
     }
@@ -207,7 +207,7 @@ public class ReportsController : ControllerBase
         var now = await ResolveReportNowAsync(ct);
         var fileName = $"legal-work-report-{now.Local:yyyyMMdd-HHmm}.xls";
         return File(
-            Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(BuildLegalWorkExcelXml(report!, now.TimeZone))).ToArray(),
+            Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(BuildLegalWorkExcelXml(report!, now.Utc, now.TimeZone))).ToArray(),
             "application/vnd.ms-excel; charset=utf-8",
             fileName);
     }
@@ -278,7 +278,7 @@ public class ReportsController : ControllerBase
 
         var now = await ResolveReportNowAsync(ct);
         return File(
-            Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(BuildReportExportExcelXml(document!))).ToArray(),
+            Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(BuildReportExportExcelXml(document!, now.Utc, now.TimeZone))).ToArray(),
             "application/vnd.ms-excel; charset=utf-8",
             $"{document!.Slug}-{now.Local:yyyyMMdd-HHmm}.xls");
     }
@@ -1974,7 +1974,10 @@ public class ReportsController : ControllerBase
                 ])).ToList()),
             ]);
 
-    private static string BuildReportExportExcelXml(ReportExportDocument document)
+    private static string BuildReportExportExcelXml(
+        ReportExportDocument document,
+        DateTime generatedAtUtc,
+        TimeZoneInfo timeZone)
     {
         var builder = new StringBuilder();
         builder.AppendLine("""<?xml version="1.0" encoding="utf-8"?>""");
@@ -1988,6 +1991,7 @@ public class ReportsController : ControllerBase
 
         AppendLegalWorkExcelRow(builder, [document.Title], header: true);
         AppendLegalWorkExcelRow(builder, [document.Subtitle]);
+        AppendLegalWorkExcelRow(builder, ["Сформировано", GeneratedAtCell(generatedAtUtc, timeZone)]);
         AppendLegalWorkExcelRow(builder, []);
         foreach (var metric in document.Metrics)
         {
@@ -2044,7 +2048,7 @@ public class ReportsController : ControllerBase
         builder.Append("<div class=\"muted\">")
             .Append(Html(document.Subtitle))
             .Append(" · Сформировано: ")
-            .Append(Html(CalendarTimeZoneHelper.FormatUserDateTime(generatedAtUtc, timeZone, culture: CultureInfo.GetCultureInfo("ru-RU"))))
+            .Append(Html(GeneratedAtCell(generatedAtUtc, timeZone)))
             .AppendLine("</div>");
 
         builder.AppendLine("<div class=\"summary\">");
@@ -2081,7 +2085,10 @@ public class ReportsController : ControllerBase
         return builder.ToString();
     }
 
-    private static byte[] BuildLegalWorkCsv(LegalWorkReportDto report, TimeZoneInfo timeZone)
+    private static byte[] BuildLegalWorkCsv(
+        LegalWorkReportDto report,
+        DateTime generatedAtUtc,
+        TimeZoneInfo timeZone)
     {
         var builder = new StringBuilder();
         AppendCsvRow(builder, [
@@ -2099,6 +2106,23 @@ public class ReportsController : ControllerBase
             "Просроченные задачи",
             "Просроченные сроки",
             "Ближайшие сроки"
+        ]);
+
+        AppendCsvRow(builder, [
+            "Сформировано",
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            GeneratedAtCell(generatedAtUtc, timeZone),
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty,
+            string.Empty
         ]);
 
         AppendCsvRow(builder, [
@@ -2181,7 +2205,10 @@ public class ReportsController : ControllerBase
         return Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(builder.ToString())).ToArray();
     }
 
-    private static string BuildLegalWorkExcelXml(LegalWorkReportDto report, TimeZoneInfo timeZone)
+    private static string BuildLegalWorkExcelXml(
+        LegalWorkReportDto report,
+        DateTime generatedAtUtc,
+        TimeZoneInfo timeZone)
     {
         var builder = new StringBuilder();
         builder.AppendLine("""<?xml version="1.0" encoding="utf-8"?>""");
@@ -2195,6 +2222,7 @@ public class ReportsController : ControllerBase
 
         AppendLegalWorkExcelRow(builder, ["Отчет по юридической работе"], header: true);
         AppendLegalWorkExcelRow(builder, ["Период", $"{report.From:dd.MM.yyyy} - {report.To:dd.MM.yyyy}"]);
+        AppendLegalWorkExcelRow(builder, ["Сформировано", GeneratedAtCell(generatedAtUtc, timeZone)]);
         AppendLegalWorkExcelRow(builder, ["Всего дел", report.TotalCases.ToString(CultureInfo.InvariantCulture)]);
         AppendLegalWorkExcelRow(builder, ["Дел в работе", report.ActiveCases.ToString(CultureInfo.InvariantCulture)]);
         AppendLegalWorkExcelRow(builder, ["Закрыто", report.ClosedCases.ToString(CultureInfo.InvariantCulture)]);
@@ -2343,7 +2371,7 @@ public class ReportsController : ControllerBase
         builder.Append("<div class=\"muted\">Период: ")
             .Append(Html($"{report.From:dd.MM.yyyy} - {report.To:dd.MM.yyyy}"))
             .Append(" · Сформировано: ")
-            .Append(Html(CalendarTimeZoneHelper.FormatUserDateTime(generatedAtUtc, timeZone, culture: CultureInfo.GetCultureInfo("ru-RU"))))
+            .Append(Html(GeneratedAtCell(generatedAtUtc, timeZone)))
             .AppendLine("</div>");
 
         builder.AppendLine("<div class=\"summary\">");
@@ -2417,6 +2445,9 @@ public class ReportsController : ControllerBase
 
     private static string PercentCell(decimal value)
         => $"{value.ToString("0.##", CultureInfo.InvariantCulture)}%";
+
+    private static string GeneratedAtCell(DateTime generatedAtUtc, TimeZoneInfo timeZone)
+        => CalendarTimeZoneHelper.FormatUserDateTime(generatedAtUtc, timeZone, culture: CultureInfo.GetCultureInfo("ru-RU"));
 
     private static string DateCell(DateTime? value, TimeZoneInfo? timeZone = null)
         => value.HasValue
