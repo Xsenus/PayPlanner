@@ -43,6 +43,12 @@ public class ClientsController : ControllerBase
     private Task<DataVisibilityAccess?> GetCurrentAccessAsync(CancellationToken ct)
         => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Clients, ct);
 
+    private async Task<DateTime> ResolveClientStatsTodayAsync(CancellationToken ct)
+    {
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        return CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date;
+    }
+
     private static string? FormatResponsibleUserName(User? user)
     {
         if (user is null) return null;
@@ -233,7 +239,11 @@ public class ClientsController : ControllerBase
         var outstandingExpenses = visiblePayments.Where(p => p.Type == PaymentType.Expense).Sum(p => p.OutstandingAmount);
         var paidPayments = visiblePayments.Count(p => p.Status == PaymentStatus.Completed);
         var pendingPayments = visiblePayments.Count(p => p.Status != PaymentStatus.Completed && p.OutstandingAmount > 0m);
-        var overduePayments = visiblePayments.Count(p => p.Status == PaymentStatus.Overdue && p.OutstandingAmount > 0m);
+        var today = await ResolveClientStatsTodayAsync(ct);
+        var overduePayments = visiblePayments.Count(p =>
+            p.OutstandingAmount > 0m &&
+            p.Status is not PaymentStatus.Completed and not PaymentStatus.Cancelled &&
+            (p.Status == PaymentStatus.Overdue || (p.PlannedDate == default ? p.Date : p.PlannedDate).Date < today));
         var lastPaymentDate = visiblePayments
             .Where(p => p.LastPaymentDate.HasValue)
             .OrderByDescending(p => p.LastPaymentDate)

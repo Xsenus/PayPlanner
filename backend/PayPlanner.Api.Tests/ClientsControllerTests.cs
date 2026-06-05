@@ -445,10 +445,63 @@ public class ClientsControllerTests
         Assert.Equal(1, stats.TotalPayments);
         Assert.Equal(0, stats.PaidPayments);
         Assert.Equal(1, stats.PendingPayments);
-        Assert.Equal(0, stats.OverduePayments);
+        Assert.Equal(1, stats.OverduePayments);
         Assert.Collection(
             stats.RecentPayments,
             payment => Assert.Equal(linkedPayment.Id, payment.Id));
+    }
+
+    [Fact]
+    public async Task GetStats_CountsPendingDebtAsOverdueByProfileTimeZone()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db, roleName: "admin");
+        var (timeZoneId, profileToday) = ResolveTimeZoneWithDifferentLocalDate();
+
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = userId,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = timeZoneId,
+        });
+
+        var client = new Client
+        {
+            Name = "Timezone Debt Client",
+            ResponsibleUserId = userId,
+            IsActive = true,
+        };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var dueDate = profileToday.AddDays(-1);
+        db.Payments.Add(new Payment
+        {
+            Amount = 12_000m,
+            PaidAmount = 0m,
+            CounterpartyName = client.Name,
+            Date = dueDate,
+            PlannedDate = dueDate,
+            Description = "Pending debt before profile today",
+            DocumentKind = DocumentKind.Payment,
+            Status = PaymentStatus.Pending,
+            IsPaid = false,
+            Type = PaymentType.Income,
+            ClientId = client.Id,
+            Notes = string.Empty,
+            SystemNotes = string.Empty,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, userId);
+        var action = await controller.GetStats(client.Id, null, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action);
+        var stats = Assert.IsType<ClientStats>(ok.Value);
+
+        Assert.Equal(12_000m, stats.OutstandingIncome);
+        Assert.Equal(1, stats.PendingPayments);
+        Assert.Equal(1, stats.OverduePayments);
     }
 
     [Fact]
@@ -1363,6 +1416,29 @@ public class ClientsControllerTests
         var db = new PaymentContext(options);
         await db.Database.EnsureCreatedAsync();
         return db;
+    }
+
+    private static (string TimeZoneId, DateTime ProfileToday) ResolveTimeZoneWithDifferentLocalDate()
+    {
+        var nowUtc = DateTime.UtcNow;
+        var utcToday = nowUtc.Date;
+        foreach (var timeZoneId in new[]
+        {
+            "Pacific/Kiritimati",
+            "Line Islands Standard Time",
+            "Pacific/Pago_Pago",
+            "Samoa Standard Time",
+        })
+        {
+            var timeZone = CalendarTimeZoneHelper.ResolveTimeZone(timeZoneId);
+            var profileToday = CalendarTimeZoneHelper.ToUserLocal(nowUtc, timeZone).Date;
+            if (profileToday != utcToday)
+            {
+                return (timeZoneId, profileToday);
+            }
+        }
+
+        throw new InvalidOperationException("No test timezone with a local date different from UTC was found.");
     }
 
     private sealed class NoopFormRequirementsService : IFormRequirementsService
