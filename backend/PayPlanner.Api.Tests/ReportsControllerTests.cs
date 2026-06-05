@@ -3050,6 +3050,55 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task ActStatuses_TreatActDatesAsLocalDates()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateReportsUserWithTimeZoneAsync(db, "America/New_York");
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = user.RoleId,
+            Section = RolePermissionCatalog.Acts,
+            CanView = true,
+            ViewScope = DataVisibilityScope.All,
+        });
+
+        db.Acts.AddRange(
+            Act(
+                "ACT-TZ",
+                ActStatus.Signed,
+                ActWorkflowStatus.Signed,
+                8_000m,
+                new DateTime(2026, 5, 31, 18, 30, 0, DateTimeKind.Utc)),
+            Act(
+                "ACT-JUNE",
+                ActStatus.Created,
+                ActWorkflowStatus.Draft,
+                6_000m,
+                new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc)));
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateUserPrincipal(user.Id));
+
+        var action = await controller.ActStatuses(
+            new DateTime(2026, 5, 31),
+            new DateTime(2026, 5, 31),
+            CancellationToken.None);
+
+        var report = Assert.IsType<ActStatusReportDto>(Assert.IsType<OkObjectResult>(action.Result).Value);
+        Assert.Equal(new DateTime(2026, 5, 31), report.From);
+        Assert.Equal(DateTimeKind.Unspecified, report.From.Kind);
+        Assert.Equal(new DateTime(2026, 5, 31), report.To);
+        Assert.Equal(DateTimeKind.Unspecified, report.To.Kind);
+        Assert.Equal(1, report.ActCount);
+        Assert.Equal(8_000m, report.TotalAmount);
+        Assert.Equal(8_000m, report.SignedAmount);
+
+        var status = Assert.Single(report.Statuses);
+        Assert.Equal(ActWorkflowStatus.Signed, status.WorkflowStatus);
+        Assert.Equal(1, status.SignedCount);
+    }
+
+    [Fact]
     public async Task ContractStatuses_GroupsContractsByStatus()
     {
         await using var db = await CreateContextAsync();

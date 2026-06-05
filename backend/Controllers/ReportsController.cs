@@ -5020,10 +5020,14 @@ public class ReportsController : ControllerBase
         DataVisibilityAccess actsVisibility,
         CancellationToken ct)
     {
+        var periodStart = NormalizeReportDate(from);
+        var periodEnd = NormalizeReportDate(to);
+        var periodEndExclusive = periodEnd.AddDays(1);
+
         var rows = await _db.Acts
             .AsNoTracking()
             .ApplyActVisibility(actsVisibility)
-            .Where(item => item.Date >= from && item.Date <= to)
+            .Where(item => item.Date >= periodStart && item.Date < periodEndExclusive)
             .Select(item => new
             {
                 item.Status,
@@ -5078,8 +5082,8 @@ public class ReportsController : ControllerBase
 
         return new ActStatusReportDto
         {
-            From = from,
-            To = to,
+            From = periodStart,
+            To = periodEnd,
             ActCount = enriched.Count,
             CreatedCount = enriched.Count(item => item.Status == ActStatus.Created),
             TransferredCount = enriched.Count(item => item.Status == ActStatus.Transferred),
