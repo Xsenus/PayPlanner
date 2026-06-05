@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.RegularExpressions;
+using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.LegalIntegrations.Models;
 
 namespace PayPlanner.Api.Services.LegalIntegrations;
@@ -188,7 +189,7 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
         return ResolveEncoding(response.Content.Headers.ContentType?.CharSet, bytes).GetString(bytes);
     }
 
-    public static SudrfCourtCaseData ParseCaseHtml(string html, Uri sourceUri)
+    public static SudrfCourtCaseData ParseCaseHtml(string html, Uri sourceUri, DateTime? nowUtc = null)
     {
         var labelValues = ExtractLabelValues(html, "cont1")
             .Concat(ExtractLabelValues(html, "cont2"))
@@ -196,7 +197,7 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
         var movements = ExtractMovementEvents(html);
         var participants = ExtractParticipants(html);
         var courtActs = ExtractCourtActs(movements, sourceUri);
-        var nextHearing = ResolveNextHearing(movements);
+        var nextHearing = ResolveNextHearing(movements, nowUtc ?? DateTime.UtcNow);
         var caseNumber = FirstNotEmpty(
             GetValue(labelValues, "номер дела"),
             ExtractCaseNumber(html));
@@ -676,7 +677,7 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
                 || second.Contains("имя", StringComparison.OrdinalIgnoreCase));
     }
 
-    private static SudrfCourtMovementEvent? ResolveNextHearing(IReadOnlyList<SudrfCourtMovementEvent> movements)
+    private static SudrfCourtMovementEvent? ResolveNextHearing(IReadOnlyList<SudrfCourtMovementEvent> movements, DateTime nowUtc)
     {
         var hearings = movements
             .Where(static item => item.ScheduledAt.HasValue && item.Title.Contains("судебное заседание", StringComparison.OrdinalIgnoreCase))
@@ -687,8 +688,8 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
             return null;
         }
 
-        var now = DateTime.Now;
-        return hearings.FirstOrDefault(item => item.ScheduledAt!.Value >= now.Date) ?? hearings[^1];
+        var todayUtc = CalendarTimeZoneHelper.NormalizeUtcInstant(nowUtc).Date;
+        return hearings.FirstOrDefault(item => item.ScheduledAt!.Value >= todayUtc) ?? hearings[^1];
     }
 
     private static DateTime? ParseDate(string? value)

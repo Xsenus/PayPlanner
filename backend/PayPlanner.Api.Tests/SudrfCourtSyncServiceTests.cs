@@ -28,6 +28,25 @@ public class SudrfCourtSyncServiceTests
     }
 
     [Fact]
+    public void ParseCaseHtml_ResolvesNextHearingFromProvidedUtcDate()
+    {
+        var html = BuildCourtHtml().Replace(
+            "<tr><td>Судебное заседание</td><td>27.05.2026</td><td>15:00</td><td>зал 12</td><td></td><td></td><td>21.04.2026</td></tr>",
+            """
+               <tr><td>Судебное заседание</td><td>27.05.2026</td><td>15:00</td><td>зал 12</td><td></td><td></td><td>21.04.2026</td></tr>
+               <tr><td>Судебное заседание</td><td>28.05.2026</td><td>09:30</td><td>зал 9</td><td></td><td></td><td>21.04.2026</td></tr>
+            """);
+
+        var data = SudrfCourtSyncService.ParseCaseHtml(
+            html,
+            new Uri("https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&srv_num=1&name_op=case&case_id=43326936&case_uid=30d46dc6-6d6c-4514-8aa6-591c3bc63a1a&delo_id=42"),
+            new DateTime(2026, 5, 27, 23, 30, 0, DateTimeKind.Utc));
+
+        Assert.Equal(new DateTime(2026, 5, 27, 15, 0, 0), data.NextHearingAt);
+        Assert.Equal("зал 12", data.NextHearingPlace);
+    }
+
+    [Fact]
     public void ParseCaseHtml_ExtractsLiveSudrfIdBlocks()
     {
         var data = SudrfCourtSyncService.ParseCaseHtml(

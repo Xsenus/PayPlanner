@@ -4,18 +4,29 @@ import {
   formatDateTimeInTimeZone,
   formatDateTimeWithSecondsInTimeZone,
   fromTimeZoneDateTimeInput,
+  toTimeZoneDateKey,
   toTimeZoneDateTimeInput,
 } from './timeZoneDate';
 
 describe('timeZoneDate', () => {
   it('formats UTC instants in the selected user time zone', () => {
+    expect(toTimeZoneDateTimeInput('2026-06-05T12:00:00Z', 'Europe/Moscow')).toBe('2026-06-05T15:00');
     expect(toTimeZoneDateTimeInput('2026-06-05T12:00:00Z', 'Europe/Samara')).toBe('2026-06-05T16:00');
     expect(toTimeZoneDateTimeInput('2026-06-05T12:00:00Z', 'Asia/Novosibirsk')).toBe('2026-06-05T19:00');
   });
 
   it('converts datetime-local values from the selected user time zone to UTC', () => {
+    expect(fromTimeZoneDateTimeInput('2026-06-05T15:00', 'Europe/Moscow')).toBe('2026-06-05T12:00:00.000Z');
     expect(fromTimeZoneDateTimeInput('2026-06-05T16:00', 'Europe/Samara')).toBe('2026-06-05T12:00:00.000Z');
     expect(fromTimeZoneDateTimeInput('2026-06-05T19:00', 'Asia/Novosibirsk')).toBe('2026-06-05T12:00:00.000Z');
+  });
+
+  it('builds calendar day keys in the selected user time zone around midnight', () => {
+    const instant = '2026-06-04T20:30:00Z';
+
+    expect(toTimeZoneDateKey(instant, 'Europe/Moscow')).toBe('2026-06-04');
+    expect(toTimeZoneDateKey(instant, 'Europe/Samara')).toBe('2026-06-05');
+    expect(toTimeZoneDateKey(instant, 'Asia/Novosibirsk')).toBe('2026-06-05');
   });
 
   it('uses the selected time zone for display text', () => {
