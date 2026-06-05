@@ -5136,10 +5136,14 @@ public class ReportsController : ControllerBase
         DataVisibilityAccess contractsVisibility,
         CancellationToken ct)
     {
+        var periodStart = NormalizeReportDate(from);
+        var periodEnd = NormalizeReportDate(to);
+        var periodEndExclusive = periodEnd.AddDays(1);
+
         var rows = await _db.Contracts
             .AsNoTracking()
             .ApplyContractVisibility(contractsVisibility)
-            .Where(item => item.Date >= from && item.Date <= to)
+            .Where(item => item.Date >= periodStart && item.Date < periodEndExclusive)
             .Select(item => new
             {
                 item.Status,
@@ -5175,8 +5179,8 @@ public class ReportsController : ControllerBase
                     ExpiringCount = group.Count(item =>
                         !item.IsOpenEnded &&
                         item.ValidUntil.HasValue &&
-                        item.ValidUntil.Value.Date >= from &&
-                        item.ValidUntil.Value.Date <= to),
+                        item.ValidUntil.Value >= periodStart &&
+                        item.ValidUntil.Value < periodEndExclusive),
                     TotalAmount = statusTotal,
                     Share = totalAmount > 0m
                         ? Math.Round(statusTotal / totalAmount * 100m, 1, MidpointRounding.AwayFromZero)
@@ -5201,8 +5205,8 @@ public class ReportsController : ControllerBase
 
         return new ContractStatusReportDto
         {
-            From = from,
-            To = to,
+            From = periodStart,
+            To = periodEnd,
             ContractCount = normalizedRows.Count,
             DraftCount = normalizedRows.Count(item => item.Status == ContractStatus.Draft),
             NotSignedCount = normalizedRows.Count(item => item.Status == ContractStatus.NotSigned),

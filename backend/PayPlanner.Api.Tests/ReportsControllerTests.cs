@@ -3135,6 +3135,56 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task ContractStatuses_TreatContractDatesAsLocalDates()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateReportsUserWithTimeZoneAsync(db, "America/New_York");
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = user.RoleId,
+            Section = RolePermissionCatalog.Contracts,
+            CanView = true,
+            ViewScope = DataVisibilityScope.All,
+        });
+
+        db.Contracts.AddRange(
+            Contract(
+                "C-TZ",
+                ContractStatus.Concluded,
+                7_000m,
+                new DateTime(2026, 5, 31, 18, 30, 0, DateTimeKind.Utc),
+                false,
+                new DateTime(2026, 5, 31, 23, 30, 0, DateTimeKind.Utc)),
+            Contract(
+                "C-JUNE",
+                ContractStatus.Draft,
+                5_000m,
+                new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc),
+                false,
+                null));
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateUserPrincipal(user.Id));
+
+        var action = await controller.ContractStatuses(
+            new DateTime(2026, 5, 31),
+            new DateTime(2026, 5, 31),
+            CancellationToken.None);
+
+        var report = Assert.IsType<ContractStatusReportDto>(Assert.IsType<OkObjectResult>(action.Result).Value);
+        Assert.Equal(new DateTime(2026, 5, 31), report.From);
+        Assert.Equal(DateTimeKind.Unspecified, report.From.Kind);
+        Assert.Equal(new DateTime(2026, 5, 31), report.To);
+        Assert.Equal(DateTimeKind.Unspecified, report.To.Kind);
+        Assert.Equal(1, report.ContractCount);
+        Assert.Equal(7_000m, report.TotalAmount);
+
+        var status = Assert.Single(report.Statuses);
+        Assert.Equal(ContractStatus.Concluded, status.Status);
+        Assert.Equal(1, status.ExpiringCount);
+    }
+
+    [Fact]
     public async Task PaymentOrders_GroupsFactOperationsByPaymentOrderNumber()
     {
         await using var db = await CreateContextAsync();
