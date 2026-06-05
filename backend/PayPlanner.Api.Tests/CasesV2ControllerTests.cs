@@ -1211,6 +1211,79 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task GetFinance_UsesProfileTimeZoneForExpensePaymentStatuses()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "finance-expense-timezone@example.com", "Finance Expense Owner", DataVisibilityScope.All);
+        var (timeZoneId, profileToday) = ResolveTimeZoneWithDifferentLocalDate();
+
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = owner.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = timeZoneId,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+
+        var supplier = new Client
+        {
+            Name = "Finance Expense Supplier",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var client = new Client
+        {
+            Name = "Finance Expense Client",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            ResponsibleUserId = owner.Id,
+            Title = "Finance expense timezone case",
+            Status = ClientCaseStatus.Open,
+        };
+        db.Clients.AddRange(supplier, client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var plannedDate = profileToday.AddDays(-1);
+        db.Payments.Add(new Payment
+        {
+            Client = supplier,
+            ExpenseClient = client,
+            ClientCase = clientCase,
+            DocumentKind = DocumentKind.Invoice,
+            Type = PaymentType.Expense,
+            Status = PaymentStatus.Pending,
+            Account = "EXP-TZ",
+            Amount = 8_000m,
+            PaidAmount = 0m,
+            Date = plannedDate,
+            PlannedDate = plannedDate,
+            AccountDate = plannedDate,
+            Description = "Timezone expense invoice",
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var result = await controller.GetFinance(clientCase.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<CasesV2Controller.ClientCaseFinanceDetailDto>(ok.Value);
+        var payment = Assert.Single(dto.Payments);
+        var invoice = Assert.Single(dto.Invoices);
+
+        Assert.Equal(PaymentStatus.Overdue.ToString(), payment.Status);
+        Assert.Equal(PaymentStatus.Overdue.ToString(), invoice.Status);
+        Assert.Equal(1, dto.Calendar.OverdueCount);
+        Assert.Equal(8_000m, dto.Calendar.OverdueTotal);
+        Assert.Equal(8_000m, dto.Totals.ExpenseOutstanding);
+    }
+
+    [Fact]
     public async Task GetById_AndDelete_HideCasesFromOtherResponsibles()
     {
         await using var db = await CreateContextAsync();
@@ -6144,6 +6217,29 @@ public class CasesV2ControllerTests
         var property = value.GetType().GetProperty(propertyName);
         Assert.NotNull(property);
         return Assert.IsType<int>(property.GetValue(value));
+    }
+
+    private static (string TimeZoneId, DateTime ProfileToday) ResolveTimeZoneWithDifferentLocalDate()
+    {
+        var nowUtc = DateTime.UtcNow;
+        var utcToday = nowUtc.Date;
+        foreach (var timeZoneId in new[]
+        {
+            "Pacific/Kiritimati",
+            "Line Islands Standard Time",
+            "Pacific/Pago_Pago",
+            "Samoa Standard Time",
+        })
+        {
+            var timeZone = CalendarTimeZoneHelper.ResolveTimeZone(timeZoneId);
+            var profileToday = CalendarTimeZoneHelper.ToUserLocal(nowUtc, timeZone).Date;
+            if (profileToday != utcToday)
+            {
+                return (timeZoneId, profileToday);
+            }
+        }
+
+        throw new InvalidOperationException("No test timezone with a local date different from UTC was found.");
     }
 
     private static CasesV2Controller CreateController(

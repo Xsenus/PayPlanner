@@ -3358,8 +3358,8 @@ public class CasesV2Controller : ControllerBase
             OwnerName = ResolveCaseOwnerName(clientCase),
             Totals = BuildFinanceTotals(clientCase, visiblePayments),
             Calendar = BuildFinanceCalendar(visiblePayments, statusClock.TodayDate),
-            Invoices = BuildFinanceInvoices(visiblePayments, linkedContracts),
-            Payments = visiblePayments.Select(MapFinancePayment).ToList(),
+            Invoices = BuildFinanceInvoices(visiblePayments, linkedContracts, statusClock.TodayDate),
+            Payments = visiblePayments.Select(payment => MapFinancePayment(payment, statusClock.TodayDate)).ToList(),
             Contracts = linkedContracts.Values
                 .OrderByDescending(contract => contract.Date)
                 .ThenBy(contract => contract.Number)
@@ -8469,12 +8469,13 @@ public class CasesV2Controller : ControllerBase
 
     private static IReadOnlyList<ClientCaseFinanceInvoiceDto> BuildFinanceInvoices(
         IReadOnlyCollection<Payment> payments,
-        IReadOnlyDictionary<int, Contract> contractsById)
+        IReadOnlyDictionary<int, Contract> contractsById,
+        DateTime today)
     {
         return payments
             .Where(IsFinanceInvoiceCandidate)
             .GroupBy(BuildFinanceInvoiceKey, StringComparer.OrdinalIgnoreCase)
-            .Select(group => MapFinanceInvoice(group.ToList(), contractsById))
+            .Select(group => MapFinanceInvoice(group.ToList(), contractsById, today))
             .OrderByDescending(invoice => invoice.Date ?? DateTime.MinValue)
             .ThenBy(invoice => invoice.Number)
             .ToList();
@@ -8499,7 +8500,8 @@ public class CasesV2Controller : ControllerBase
 
     private static ClientCaseFinanceInvoiceDto MapFinanceInvoice(
         IReadOnlyCollection<Payment> group,
-        IReadOnlyDictionary<int, Contract> contractsById)
+        IReadOnlyDictionary<int, Contract> contractsById,
+        DateTime today)
     {
         var representative = group
             .OrderByDescending(payment => payment.DocumentKind == DocumentKind.Invoice)
@@ -8521,7 +8523,7 @@ public class CasesV2Controller : ControllerBase
             Amount = amount,
             PaidAmount = paidAmount,
             OutstandingAmount = outstandingAmount,
-            Status = ResolveFinanceGroupStatus(group),
+            Status = ResolveFinanceGroupStatus(group, today),
             WorkflowStatus = representative.InvoiceWorkflowStatus,
             ContractId = contract?.Id ?? representative.ContractId,
             ContractNumber = contract?.Number ?? representative.Contract?.Number,
@@ -8536,14 +8538,14 @@ public class CasesV2Controller : ControllerBase
             : $"#{payment.Id}";
     }
 
-    private static string ResolveFinanceGroupStatus(IReadOnlyCollection<Payment> payments)
+    private static string ResolveFinanceGroupStatus(IReadOnlyCollection<Payment> payments, DateTime today)
     {
-        if (payments.Any(payment => payment.Status == PaymentStatus.Overdue))
+        if (payments.Any(payment => ResolveFinancePaymentDisplayStatus(payment, today) == PaymentStatus.Overdue))
         {
             return PaymentStatus.Overdue.ToString();
         }
 
-        if (payments.All(payment => payment.Status == PaymentStatus.Completed))
+        if (payments.All(payment => ResolveFinancePaymentDisplayStatus(payment, today) == PaymentStatus.Completed))
         {
             return PaymentStatus.Completed.ToString();
         }
@@ -8556,7 +8558,7 @@ public class CasesV2Controller : ControllerBase
         return payments.First().Status.ToString();
     }
 
-    private static ClientCaseFinancePaymentDto MapFinancePayment(Payment payment)
+    private static ClientCaseFinancePaymentDto MapFinancePayment(Payment payment, DateTime today)
         => new()
         {
             Id = payment.Id,
@@ -8565,7 +8567,7 @@ public class CasesV2Controller : ControllerBase
             Amount = payment.Amount,
             PaidAmount = payment.PaidAmount,
             OutstandingAmount = ResolveFinancePaymentOutstanding(payment),
-            Status = payment.Status.ToString(),
+            Status = ResolveFinancePaymentDisplayStatus(payment, today).ToString(),
             Date = payment.Date,
             PlannedDate = payment.PlannedDate,
             PaidDate = payment.PaidDate,
@@ -8579,6 +8581,24 @@ public class CasesV2Controller : ControllerBase
             PaymentDocumentDate = payment.PaymentDocumentDate,
             Description = payment.Description,
         };
+
+    private static PaymentStatus ResolveFinancePaymentDisplayStatus(Payment payment, DateTime today)
+    {
+        if (payment.Status is PaymentStatus.Completed or PaymentStatus.Cancelled)
+        {
+            return payment.Status;
+        }
+
+        if (ResolveFinancePaymentOutstanding(payment) <= 0m)
+        {
+            return PaymentStatus.Completed;
+        }
+
+        var plannedDate = ResolveFinancePaymentCalendarDate(payment).Date;
+        return payment.Status == PaymentStatus.Overdue || plannedDate < today
+            ? PaymentStatus.Overdue
+            : payment.Status;
+    }
 
     private static ClientCaseFinanceContractDto MapFinanceContract(Contract contract)
         => new()

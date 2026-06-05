@@ -242,8 +242,7 @@ public class ClientsController : ControllerBase
         var today = await ResolveClientStatsTodayAsync(ct);
         var overduePayments = visiblePayments.Count(p =>
             p.OutstandingAmount > 0m &&
-            p.Status is not PaymentStatus.Completed and not PaymentStatus.Cancelled &&
-            (p.Status == PaymentStatus.Overdue || (p.PlannedDate == default ? p.Date : p.PlannedDate).Date < today));
+            ResolvePaymentDisplayStatus(p, today) == PaymentStatus.Overdue);
         var lastPaymentDate = visiblePayments
             .Where(p => p.LastPaymentDate.HasValue)
             .OrderByDescending(p => p.LastPaymentDate)
@@ -457,6 +456,7 @@ public class ClientsController : ControllerBase
 
         var visiblePayments = InvoiceManagedPaymentRules.FilterVisiblePayments(payments);
         var rows = new List<ClientCaseExpenseDetailDto>();
+        var today = await ResolveClientStatsTodayAsync(ct);
 
         foreach (var payment in visiblePayments)
         {
@@ -475,13 +475,13 @@ public class ClientsController : ControllerBase
             {
                 if (lineItems.Count == 0)
                 {
-                    rows.Add(BuildExpenseDetailRow(payment, linkedCase, null));
+                    rows.Add(BuildExpenseDetailRow(payment, linkedCase, null, today));
                     continue;
                 }
 
                 foreach (var lineItem in lineItems)
                 {
-                    rows.Add(BuildExpenseDetailRow(payment, linkedCase, lineItem));
+                    rows.Add(BuildExpenseDetailRow(payment, linkedCase, lineItem, today));
                 }
             }
         }
@@ -576,7 +576,8 @@ public class ClientsController : ControllerBase
     private static ClientCaseExpenseDetailDto BuildExpenseDetailRow(
         Payment payment,
         ClientCase clientCase,
-        InvoiceLineItem? lineItem)
+        InvoiceLineItem? lineItem,
+        DateTime today)
     {
         var rowAmount = lineItem is null
             ? payment.Amount
@@ -610,11 +611,33 @@ public class ClientsController : ControllerBase
             Amount = rowAmount,
             PaidAmount = paidAmount,
             OutstandingAmount = outstandingAmount,
-            Status = payment.Status,
+            Status = ResolvePaymentDisplayStatus(payment, today, outstandingAmount),
             PaymentOrderNumber = payment.PaymentOrderNumber,
             PaymentDocumentDate = payment.PaymentDocumentDate,
             Description = payment.Description,
         };
+    }
+
+    private static PaymentStatus ResolvePaymentDisplayStatus(
+        Payment payment,
+        DateTime today,
+        decimal? outstandingAmount = null)
+    {
+        if (payment.Status is PaymentStatus.Completed or PaymentStatus.Cancelled)
+        {
+            return payment.Status;
+        }
+
+        var outstanding = outstandingAmount ?? payment.OutstandingAmount;
+        if (outstanding <= 0m)
+        {
+            return PaymentStatus.Completed;
+        }
+
+        var plannedDate = (payment.PlannedDate == default ? payment.Date : payment.PlannedDate).Date;
+        return payment.Status == PaymentStatus.Overdue || plannedDate < today
+            ? PaymentStatus.Overdue
+            : payment.Status;
     }
 
     private static decimal CalculateAllocatedPaidAmount(Payment payment, decimal rowAmount)

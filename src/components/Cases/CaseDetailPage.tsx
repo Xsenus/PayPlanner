@@ -483,15 +483,6 @@ function getPaymentCalendarState(payment: CaseFinancePayment): PaymentCalendarSt
     return 'overdue';
   }
 
-  const planned = Date.parse(getPaymentCalendarDate(payment));
-  if (Number.isFinite(planned)) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    if (planned < today.getTime()) {
-      return 'overdue';
-    }
-  }
-
   return 'planned';
 }
 

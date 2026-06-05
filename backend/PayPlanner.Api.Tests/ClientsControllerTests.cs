@@ -944,6 +944,68 @@ public class ClientsControllerTests
     }
 
     [Fact]
+    public async Task GetCaseExpenseDetails_UsesProfileTimeZoneForExpenseStatus()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db, roleName: "admin");
+        var (timeZoneId, profileToday) = ResolveTimeZoneWithDifferentLocalDate();
+
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = userId,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = timeZoneId,
+        });
+
+        var supplier = new Client { Name = "Timezone Supplier", ResponsibleUserId = userId, IsActive = true };
+        var client = new Client { Name = "Timezone Matter Client", ResponsibleUserId = userId, IsActive = true };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Timezone expense matter",
+            Status = ClientCaseStatus.Open,
+        };
+
+        db.Clients.AddRange(supplier, client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var plannedDate = profileToday.AddDays(-1);
+        db.Payments.Add(new Payment
+        {
+            Amount = 4_000m,
+            PaidAmount = 0m,
+            CounterpartyName = supplier.Name,
+            Date = plannedDate,
+            PlannedDate = plannedDate,
+            Description = "Expense before profile today",
+            DocumentKind = DocumentKind.Payment,
+            Status = PaymentStatus.Pending,
+            Type = PaymentType.Expense,
+            ClientId = supplier.Id,
+            ExpenseClientId = client.Id,
+            ClientCaseId = clientCase.Id,
+            Notes = string.Empty,
+            SystemNotes = string.Empty,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, userId);
+        var action = await controller.GetCaseExpenseDetails(
+            client.Id,
+            caseId: clientCase.Id,
+            clientRole: "expenseClient",
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action);
+        var rows = Assert.IsAssignableFrom<List<ClientCaseExpenseDetailDto>>(ok.Value);
+        var row = Assert.Single(rows);
+
+        Assert.Equal(4_000m, row.OutstandingAmount);
+        Assert.Equal(PaymentStatus.Overdue, row.Status);
+    }
+
+    [Fact]
     public async Task Create_Update_Delete_RoundTripsStructuredProfile_AndCleansChildrenOnDelete()
     {
         await using var db = await CreateContextAsync();
