@@ -647,7 +647,7 @@ describe('TaskJournal', () => {
     await renderJournal([createTask()], { initialView: 'calendar' });
 
     expect(await screen.findByText('Судебное заседание')).toBeTruthy();
-    expect(screen.getByText((content) => content.includes('05 июня 2026') && content.includes('16:00'))).toBeTruthy();
+    expect(screen.getByText('05 июня 2026 г. 16:00')).toBeTruthy();
   });
 
   it('exports case calendar events to ICS with current calendar filters', async () => {
