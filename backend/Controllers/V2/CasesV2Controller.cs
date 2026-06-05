@@ -784,7 +784,6 @@ public class CasesV2Controller : ControllerBase
         var title = isCreated
             ? $"Новое судебное событие: {BuildCaseNotificationTitle(clientCase)}"
             : $"Обновлено судебное событие: {BuildCaseNotificationTitle(clientCase)}";
-        var body = BuildCourtEventNotificationBody(clientCase, courtEvent, isCreated, actorName);
         var eventVersionTicks = (courtEvent.UpdatedAt ?? courtEvent.CreatedAt).Ticks;
         var eventKey = $"case:{clientCase.Id}:court-event:{courtEvent.Id}:{action}:{eventVersionTicks}";
         var metadata = new
@@ -804,6 +803,8 @@ public class CasesV2Controller : ControllerBase
 
         foreach (var recipientUserId in recipientUserIds.OrderBy(static id => id))
         {
+            var recipientTimeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, recipientUserId, ct);
+            var body = BuildCourtEventNotificationBody(clientCase, courtEvent, isCreated, actorName, recipientTimeZone);
             await AddCaseUserNotificationAsync(
                 recipientUserId,
                 UserNotificationTypes.CaseCourtEvent,
@@ -821,7 +822,8 @@ public class CasesV2Controller : ControllerBase
         ClientCase clientCase,
         ClientCaseCourtEvent courtEvent,
         bool isCreated,
-        string actorName)
+        string actorName,
+        TimeZoneInfo recipientTimeZone)
     {
         var builder = new StringBuilder()
             .Append(isCreated ? "Добавлено судебное событие." : "Обновлено судебное событие.")
@@ -833,7 +835,7 @@ public class CasesV2Controller : ControllerBase
             .Append(courtEvent.Title)
             .AppendLine()
             .Append("Дата: ")
-            .Append(courtEvent.ScheduledAt.ToString(courtEvent.AllDay ? "dd.MM.yyyy" : "dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture))
+            .Append(FormatCaseNotificationDate(courtEvent.ScheduledAt, courtEvent.AllDay, recipientTimeZone))
             .AppendLine()
             .Append("Автор: ")
             .Append(actorName);
@@ -889,7 +891,6 @@ public class CasesV2Controller : ControllerBase
             "closed" => $"Закрыт процессуальный срок: {BuildCaseNotificationTitle(clientCase)}",
             _ => $"Обновлен процессуальный срок: {BuildCaseNotificationTitle(clientCase)}",
         };
-        var body = BuildProceduralDeadlineNotificationBody(clientCase, deadline, action, actorName);
         var eventVersionTicks = (deadline.UpdatedAt ?? deadline.CreatedAt).Ticks;
         var eventKey = $"case:{clientCase.Id}:procedural-deadline:{deadline.Id}:{action}:{eventVersionTicks}";
         var metadata = new
@@ -910,6 +911,8 @@ public class CasesV2Controller : ControllerBase
 
         foreach (var recipientUserId in recipientUserIds.OrderBy(static id => id))
         {
+            var recipientTimeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, recipientUserId, ct);
+            var body = BuildProceduralDeadlineNotificationBody(clientCase, deadline, action, actorName, recipientTimeZone);
             await AddCaseUserNotificationAsync(
                 recipientUserId,
                 UserNotificationTypes.CaseProceduralDeadline,
@@ -927,7 +930,8 @@ public class CasesV2Controller : ControllerBase
         ClientCase clientCase,
         ClientCaseProceduralDeadline deadline,
         string action,
-        string actorName)
+        string actorName,
+        TimeZoneInfo recipientTimeZone)
     {
         var actionText = action switch
         {
@@ -945,7 +949,7 @@ public class CasesV2Controller : ControllerBase
             .Append(deadline.Title)
             .AppendLine()
             .Append("Дата: ")
-            .Append(deadline.DueAt.ToString(deadline.AllDay ? "dd.MM.yyyy" : "dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture))
+            .Append(FormatCaseNotificationDate(deadline.DueAt, deadline.AllDay, recipientTimeZone))
             .AppendLine()
             .Append("Статус: ")
             .Append(deadline.Status)
@@ -972,6 +976,19 @@ public class CasesV2Controller : ControllerBase
         }
 
         return builder.ToString();
+    }
+
+    private static string FormatCaseNotificationDate(DateTime value, bool allDay, TimeZoneInfo recipientTimeZone)
+    {
+        var culture = CultureInfo.GetCultureInfo("ru-RU");
+        if (allDay)
+        {
+            return DateTime.SpecifyKind(value.Date, DateTimeKind.Unspecified).ToString("dd.MM.yyyy", culture);
+        }
+
+        return CalendarTimeZoneHelper
+            .ToUserLocal(CalendarTimeZoneHelper.NormalizeUtcInstant(value), recipientTimeZone)
+            .ToString("dd.MM.yyyy HH:mm", culture);
     }
 
     private async Task AddCaseDocumentUserNotificationsAsync(

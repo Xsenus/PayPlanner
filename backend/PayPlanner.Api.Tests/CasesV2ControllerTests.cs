@@ -2127,6 +2127,12 @@ public class CasesV2ControllerTests
     {
         await using var db = await CreateContextAsync();
         var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = owner.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Europe/Samara",
+        });
         var client = new Client
         {
             Name = "Клиент со сроками",
@@ -2153,7 +2159,8 @@ public class CasesV2ControllerTests
             {
                 DeadlineType = "appeal",
                 Title = "Апелляционная жалоба",
-                DueAt = new DateTime(2026, 6, 25, 0, 0, 0, DateTimeKind.Utc),
+                DueAt = new DateTime(2026, 6, 24, 22, 30, 0, DateTimeKind.Utc),
+                AllDay = false,
                 WarningDaysBefore = 5,
             },
             CancellationToken.None);
@@ -2174,6 +2181,7 @@ public class CasesV2ControllerTests
         Assert.Equal("case", createdNotification.ObjectType);
         Assert.Equal(clientCase.Id, createdNotification.ObjectId);
         Assert.Contains("Процессуальный срок", createdNotification.Title, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("25.06.2026 02:30", createdNotification.BodyPreview, StringComparison.Ordinal);
 
         var calendarResult = await controller.GetCaseCalendarEvents(
             new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc),
@@ -2211,6 +2219,12 @@ public class CasesV2ControllerTests
     {
         await using var db = await CreateContextAsync();
         var owner = await CreateUserAsync(db, "court-owner@example.com", "Владелец");
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = owner.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Europe/Samara",
+        });
         var client = new Client
         {
             Name = "Клиент с заседанием",
@@ -2269,7 +2283,8 @@ public class CasesV2ControllerTests
             {
                 EventType = "hearing",
                 Title = "Предварительное заседание",
-                ScheduledAt = new DateTime(2026, 7, 10, 9, 30, 0, DateTimeKind.Utc),
+                ScheduledAt = new DateTime(2026, 7, 9, 22, 30, 0, DateTimeKind.Utc),
+                AllDay = false,
                 CourtInstance = "first",
                 MovementStatus = "scheduled",
                 ClientCaseDocumentId = document.Id,
@@ -2327,6 +2342,7 @@ public class CasesV2ControllerTests
         Assert.Equal(clientCase.Id, notification.ObjectId);
         Assert.Contains("Судебное событие", notification.Title, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Предварительное заседание", notification.BodyPreview, StringComparison.Ordinal);
+        Assert.Contains("10.07.2026 02:30", notification.BodyPreview, StringComparison.Ordinal);
         Assert.Contains($"\"courtEventId\":{created.Id}", notification.MetadataJson, StringComparison.Ordinal);
     }
 
