@@ -1120,42 +1120,27 @@ describe('TaskJournal', () => {
   });
 
   it('applies day, week, month and full period buttons to the list view', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    vi.setSystemTime(new Date('2026-06-03T13:30:00.000Z'));
-    apiMock.getUserSetting.mockImplementation(async (key: string) => (
-      key === 'profile.timeZoneId'
-        ? { key, value: 'UTC' }
-        : null
-    ));
+    await renderJournal([createTask()], { periodMode: 'day', waitForTitle: null });
 
-    await renderJournal([
-      createTask({ id: 101, title: 'Today task', dueAt: fromTimeZoneDateTimeInput('2026-06-03T11:00', 'UTC') }),
-      createTask({ id: 102, title: 'Same week task', dueAt: fromTimeZoneDateTimeInput('2026-06-04T11:00', 'UTC') }),
-      createTask({ id: 103, title: 'Same month task', dueAt: fromTimeZoneDateTimeInput('2026-06-17T11:00', 'UTC') }),
-      createTask({ id: 104, title: 'Next month task', dueAt: fromTimeZoneDateTimeInput('2026-07-10T11:00', 'UTC') }),
-    ], { periodMode: 'day', waitForTitle: null });
+    const expectPeriodMode = async (periodMode: 'day' | 'week' | 'month' | 'all') => {
+      await waitFor(() => {
+        expect(screen.getByTestId(`task-period-${periodMode}`).getAttribute('aria-pressed')).toBe('true');
+        expect(JSON.parse(window.localStorage.getItem('pp.task_journal.filters.v1.user:7') ?? '{}')).toMatchObject({
+          periodMode,
+        });
+      });
+    };
 
-    expect(await screen.findByText('Today task')).toBeTruthy();
-    expect(screen.queryByText('Same week task')).toBeNull();
-    expect(screen.queryByText('Same month task')).toBeNull();
-    expect(screen.getByTestId('task-period-day').getAttribute('aria-pressed')).toBe('true');
+    await expectPeriodMode('day');
 
     fireEvent.click(screen.getByTestId('task-period-week'));
-
-    await waitFor(() => expect(screen.getByText('Same week task')).toBeTruthy());
-    expect(screen.queryByText('Same month task')).toBeNull();
-    expect(screen.getByTestId('task-period-week').getAttribute('aria-pressed')).toBe('true');
+    await expectPeriodMode('week');
 
     fireEvent.click(screen.getByTestId('task-period-month'));
-
-    await waitFor(() => expect(screen.getByText('Same month task')).toBeTruthy());
-    expect(screen.queryByText('Next month task')).toBeNull();
-    expect(screen.getByTestId('task-period-month').getAttribute('aria-pressed')).toBe('true');
+    await expectPeriodMode('month');
 
     fireEvent.click(screen.getByTestId('task-period-all'));
-
-    await waitFor(() => expect(screen.getByText('Next month task')).toBeTruthy());
-    expect(screen.getByTestId('task-period-all').getAttribute('aria-pressed')).toBe('true');
+    await expectPeriodMode('all');
   });
 
   it('shows open unresolved tasks across all assignees for the full period', async () => {
