@@ -710,6 +710,22 @@ describe('ClientDetail integration', () => {
   it('opens balance journal and audit from compact header actions', async () => {
     const user = userEvent.setup();
     vi.mocked(apiService.getClientBalance).mockResolvedValue({ clientId: 1, balance: 750 });
+    vi.mocked(apiService.getClientCaseFinanceSummaries).mockResolvedValue([
+      {
+        caseId: 22,
+        incomeTotal: 5_000,
+        incomePaid: 3_750,
+        incomeOutstanding: 1_250,
+        incomeCount: 1,
+        expenseTotal: 0,
+        expensePaid: 0,
+        expenseOutstanding: 0,
+        expenseCount: 0,
+        plannedMargin: 5_000,
+        paidMargin: 3_750,
+        outstandingBalance: 1_250,
+      },
+    ]);
     vi.mocked(apiService.getClientBalanceTransactions).mockResolvedValue([
       {
         id: 11,
@@ -729,7 +745,11 @@ describe('ClientDetail integration', () => {
 
     const balanceButton = await screen.findByRole('button', { name: /История баланса/ });
     await waitFor(() => {
-      expect(balanceButton.textContent).toContain('750');
+      expect(within(balanceButton).getByText('Долг')).toBeTruthy();
+      expect(within(balanceButton).getByText('Аванс')).toBeTruthy();
+      const normalizedText = balanceButton.textContent?.replace(/\s/g, '') ?? '';
+      expect(normalizedText).toContain('1250');
+      expect(normalizedText).toContain('750');
     });
 
     await user.click(balanceButton);

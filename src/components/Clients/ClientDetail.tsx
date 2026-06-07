@@ -487,6 +487,12 @@ function uniqById<T extends { id: number }>(items: T[]): T[] {
   return [...new Map(items.map((item) => [item.id, item])).values()];
 }
 
+function normalizeMoneyAmount(value: number | null | undefined): number {
+  const numeric = Number(value ?? 0);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.max(0, Math.round(numeric * 100) / 100);
+}
+
 function ClientSectionFilterPanel({
   children,
   footer,
@@ -3115,24 +3121,7 @@ export function ClientDetail({
 
   const [statsReloadToken, setStatsReloadToken] = useState(0);
   const bumpStats = () => setStatsReloadToken((x) => x + 1);
-  const caseIdsKey = useMemo(
-    () => cases.map((item) => item.id).join(","),
-    [cases],
-  );
-
   useEffect(() => {
-    const needsSupplierCaseFilters =
-      isSupplierCard && activeSection === "payments";
-    if (activeSection !== "cases" && !needsSupplierCaseFilters) {
-      return;
-    }
-
-    if (!caseIdsKey && !isSupplierCard) {
-      setCaseFinanceSummaries({});
-      setCaseFinanceError(null);
-      return;
-    }
-
     let alive = true;
     setCaseFinanceLoading(true);
     setCaseFinanceError(null);
@@ -3165,7 +3154,7 @@ export function ClientDetail({
     return () => {
       alive = false;
     };
-  }, [activeSection, caseIdsKey, clientId, isSupplierCard, statsReloadToken]);
+  }, [clientId, isSupplierCard, statsReloadToken]);
 
   const showPermissionWarning = useCallback(
     (message: string) => {
@@ -3414,6 +3403,30 @@ export function ClientDetail({
         }),
     [caseFinanceSummaries],
   );
+  const clientDebtAmount = useMemo(
+    () =>
+      normalizeMoneyAmount(
+        Object.values(caseFinanceSummaries).reduce(
+          (sum, item) =>
+            sum +
+            (isSupplierCard
+              ? normalizeMoneyAmount(item.expenseOutstanding)
+              : normalizeMoneyAmount(item.incomeOutstanding)),
+          0,
+        ),
+      ),
+    [caseFinanceSummaries, isSupplierCard],
+  );
+  const clientAdvanceAmount = useMemo(
+    () => normalizeMoneyAmount(clientBalance?.balance),
+    [clientBalance?.balance],
+  );
+  const clientDebtLabel = clientBalanceLoading || caseFinanceLoading
+    ? "..."
+    : formatCurrencySmart(clientDebtAmount).full;
+  const clientAdvanceLabel = clientBalanceLoading
+    ? "..."
+    : formatCurrencySmart(clientAdvanceAmount).full;
   const filteredSupplierCaseSummaries = useMemo(() => {
     const query = caseSearch.trim().toLowerCase();
     return supplierCaseSummaries.filter((item) => {
@@ -5941,11 +5954,27 @@ export function ClientDetail({
             <button
               type="button"
               onClick={() => setClientBalanceExpanded(true)}
-              className="inline-flex h-10 items-center rounded-lg border border-blue-200 bg-white px-3 text-sm font-semibold text-blue-800 shadow-sm transition-colors hover:bg-blue-50"
+              className="inline-flex min-h-10 items-center gap-3 rounded-lg border border-blue-200 bg-white px-3 py-1 text-sm font-semibold text-blue-800 shadow-sm transition-colors hover:bg-blue-50"
               title="История баланса"
               aria-label="История баланса"
             >
-              Баланс: {clientBalanceLoading ? "..." : formatCurrencySmart(clientBalance?.balance ?? 0).full}
+              <span className="flex flex-col leading-tight">
+                <span className="text-[11px] font-bold uppercase text-rose-500">
+                  Долг
+                </span>
+                <span className="text-sm font-semibold text-rose-700">
+                  {clientDebtLabel}
+                </span>
+              </span>
+              <span className="h-6 w-px bg-blue-100" aria-hidden="true" />
+              <span className="flex flex-col leading-tight">
+                <span className="text-[11px] font-bold uppercase text-emerald-500">
+                  Аванс
+                </span>
+                <span className="text-sm font-semibold text-emerald-700">
+                  {clientAdvanceLabel}
+                </span>
+              </span>
             </button>
             <button
               type="button"
@@ -10570,9 +10599,24 @@ export function ClientDetail({
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                     Баланс клиента
                   </p>
-                  <h2 className="mt-1 text-2xl font-semibold text-slate-900">
-                    {formatCurrencySmart(clientBalance?.balance ?? 0).full}
-                  </h2>
+                  <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl border border-rose-100 bg-rose-50 px-4 py-3">
+                      <p className="text-xs font-semibold uppercase text-rose-500">
+                        Долг
+                      </p>
+                      <p className="mt-1 text-xl font-semibold text-rose-700">
+                        {clientDebtLabel}
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+                      <p className="text-xs font-semibold uppercase text-emerald-500">
+                        Аванс
+                      </p>
+                      <p className="mt-1 text-xl font-semibold text-emerald-700">
+                        {clientAdvanceLabel}
+                      </p>
+                    </div>
+                  </div>
                 </div>
                 <button
                   type="button"
