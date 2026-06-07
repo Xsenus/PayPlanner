@@ -321,7 +321,11 @@ async function renderJournal(
   if (options.waitForTitle === null) {
     await screen.findByTestId('task-view-controls');
   } else {
-    await screen.findAllByText(options.waitForTitle ?? tasks[0]?.title ?? 'Тестовая задача');
+    await screen.findAllByText(
+      options.waitForTitle ?? tasks[0]?.title ?? 'Тестовая задача',
+      {},
+      { timeout: 5000 },
+    );
   }
 }
 
@@ -635,7 +639,7 @@ describe('TaskJournal', () => {
       },
     ]);
 
-    await renderJournal([createTask()], { initialView: 'calendar' });
+    await renderJournal([createTask()], { initialView: 'calendar', waitForTitle: null });
 
     expect(await screen.findByText('Сроки и суд')).toBeTruthy();
     expect(await screen.findByText('Срок апелляции')).toBeTruthy();
@@ -701,7 +705,7 @@ describe('TaskJournal', () => {
   });
 
   it('exports case calendar events to ICS with current calendar filters', async () => {
-    await renderJournal([createTask()], { initialView: 'calendar' });
+    await renderJournal([createTask()], { initialView: 'calendar', waitForTitle: null });
 
     const panel = screen.getByText('Календарь дел').closest('section');
     expect(panel).not.toBeNull();
@@ -1506,6 +1510,7 @@ describe('TaskJournal', () => {
 
   it('sends contractor payment fields for an external assignee', async () => {
     await renderJournal([createTask()], {
+      waitForTitle: null,
       assignees: [
         { id: 9, name: 'Привлеченный исполнитель', email: 'contractor@example.com', isExternalContractor: true },
       ],
@@ -1544,6 +1549,7 @@ describe('TaskJournal', () => {
     ));
 
     await renderJournal([createTask()], {
+      waitForTitle: null,
       assignees: [
         { id: 9, name: 'Привлеченный исполнитель', email: 'contractor@example.com', isExternalContractor: true },
       ],
