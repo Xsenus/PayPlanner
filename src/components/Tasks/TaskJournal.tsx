@@ -403,7 +403,8 @@ function writeTaskJournalFilterPreferences(userId: number | null, preferences: T
 }
 
 const INTERNAL_TASK_OBJECT_NAME = 'Внутренняя задача';
-const DEFAULT_TASK_COMPLETION_RESULT = 'Задача выполнена.';
+const TASK_COMPLETION_RESULT_HINT = 'Опишите подробно, что было сделано и какой результат был достигнут.';
+const TASK_COMPLETION_RESULT_REQUIRED_MESSAGE = 'Добавьте результат по задаче перед завершением.';
 let activeTaskJournalTimeZoneId = normalizeUserTimeZoneId();
 
 function setActiveTaskJournalTimeZoneId(value?: string | null) {
@@ -1586,6 +1587,10 @@ export function TaskJournal({
   const [typeFilter, setTypeFilter] = useState<TaskJournalType | 'all'>(initialPreferences.typeFilter);
   const [priorityFilter, setPriorityFilter] = useState<TaskJournalPriority | 'all'>(initialPreferences.priorityFilter);
   const [modal, setModal] = useState<ModalState>(null);
+  const [completionPromptTask, setCompletionPromptTask] = useState<TaskJournalItem | null>(null);
+  const [completionPromptResult, setCompletionPromptResult] = useState('');
+  const [completionPromptError, setCompletionPromptError] = useState<string | null>(null);
+  const [completionPromptSaving, setCompletionPromptSaving] = useState(false);
   const [highlightedTaskId, setHighlightedTaskId] = useState<number | null>(routeTaskId);
   const [calendarAnchorDate, setCalendarAnchorDate] = useState(() => getCurrentCalendarDate());
   const [calendarSelectedDate, setCalendarSelectedDate] = useState(() => getCurrentCalendarDate());
@@ -2301,9 +2306,7 @@ export function TaskJournal({
       objectName: form.isInternal ? INTERNAL_TASK_OBJECT_NAME : form.objectName.trim(),
       title: form.title.trim(),
       description: form.description.trim(),
-      result: form.status === 'done' && !form.result.trim()
-        ? DEFAULT_TASK_COMPLETION_RESULT
-        : form.result.trim(),
+      result: form.result.trim(),
       changeComment: form.changeComment?.trim() || null,
       dueAt: fromLocalInputValue(form.dueAt),
       approvalDueAt: form.approvalDueAt ? fromLocalInputValue(form.approvalDueAt) : null,
@@ -2346,9 +2349,11 @@ export function TaskJournal({
   };
 
   const handleResultSave = async (task: TaskJournalItem, status: TaskJournalStatus, result: string) => {
-    const normalizedResult = status === 'done' && !result.trim()
-      ? DEFAULT_TASK_COMPLETION_RESULT
-      : result.trim();
+    const normalizedResult = result.trim();
+    if (status === 'done' && !normalizedResult) {
+      toast.error(TASK_COMPLETION_RESULT_REQUIRED_MESSAGE, 'Журнал задач');
+      return;
+    }
 
     try {
       await apiService.updateTaskJournalStatus(task.id, status, normalizedResult);
@@ -2358,6 +2363,44 @@ export function TaskJournal({
       emitTaskChange();
     } catch (error) {
       toast.error(extractDisplayErrorMessage(error, 'Не удалось сохранить результат по задаче.'), 'Журнал задач');
+    }
+  };
+
+  const closeCompletionPrompt = () => {
+    if (completionPromptSaving) return;
+    setCompletionPromptTask(null);
+    setCompletionPromptResult('');
+    setCompletionPromptError(null);
+  };
+
+  const openCompletionPrompt = (task: TaskJournalItem) => {
+    setCompletionPromptTask(task);
+    setCompletionPromptResult(task.result.trim());
+    setCompletionPromptError(null);
+  };
+
+  const submitCompletionPrompt = async () => {
+    if (!completionPromptTask || completionPromptSaving) return;
+
+    const normalizedResult = completionPromptResult.trim();
+    if (!normalizedResult) {
+      setCompletionPromptError(TASK_COMPLETION_RESULT_REQUIRED_MESSAGE);
+      return;
+    }
+
+    setCompletionPromptSaving(true);
+    try {
+      await apiService.updateTaskJournalStatus(completionPromptTask.id, 'done', normalizedResult);
+      toast.success('Задача завершена, результат сохранен.', 'Журнал задач');
+      setCompletionPromptTask(null);
+      setCompletionPromptResult('');
+      setCompletionPromptError(null);
+      await refreshTasks();
+      emitTaskChange();
+    } catch (error) {
+      setCompletionPromptError(extractDisplayErrorMessage(error, 'Не удалось завершить задачу.'));
+    } finally {
+      setCompletionPromptSaving(false);
     }
   };
 
@@ -2421,11 +2464,13 @@ export function TaskJournal({
       return;
     }
 
+    if (status === 'done' && !task.result.trim()) {
+      openCompletionPrompt(task);
+      return;
+    }
+
     try {
-      const result = status === 'done' && !task.result.trim()
-        ? DEFAULT_TASK_COMPLETION_RESULT
-        : undefined;
-      await apiService.updateTaskJournalStatus(task.id, status, result);
+      await apiService.updateTaskJournalStatus(task.id, status, undefined);
       await refreshTasks();
       emitTaskChange();
     } catch (error) {
@@ -3287,6 +3332,97 @@ export function TaskJournal({
           onDuplicate={handleDuplicateTask}
         />
       ) : null}
+      {completionPromptTask ? (
+        <TaskCompletionResultPrompt
+          task={completionPromptTask}
+          result={completionPromptResult}
+          error={completionPromptError}
+          saving={completionPromptSaving}
+          onResultChange={(value) => {
+            setCompletionPromptResult(value);
+            if (completionPromptError) {
+              setCompletionPromptError(null);
+            }
+          }}
+          onSubmit={() => void submitCompletionPrompt()}
+          onClose={closeCompletionPrompt}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function TaskCompletionResultPrompt({
+  task,
+  result,
+  error,
+  saving,
+  onResultChange,
+  onSubmit,
+  onClose,
+}: {
+  task: TaskJournalItem;
+  result: string;
+  error: string | null;
+  saving: boolean;
+  onResultChange: (value: string) => void;
+  onSubmit: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/40 px-4 py-6 backdrop-blur-sm">
+      <div className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-600">Завершение задачи</p>
+            <h2 className="mt-2 text-xl font-semibold text-slate-900">Добавить результат по задаче</h2>
+            <p className="mt-2 line-clamp-2 text-sm text-slate-500">{task.title}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={saving}
+            className="rounded-full border border-slate-200 p-2 text-slate-500 transition hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60"
+            aria-label="Закрыть окно результата"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <label className="mt-5 block text-sm font-semibold text-slate-700" htmlFor="task-completion-result">
+          Результат
+        </label>
+        <textarea
+          id="task-completion-result"
+          value={result}
+          onChange={(event) => onResultChange(event.target.value)}
+          className="form-textarea mt-2 min-h-[160px] resize-y"
+          rows={7}
+          placeholder={TASK_COMPLETION_RESULT_HINT}
+          autoFocus
+        />
+        <p className="mt-2 text-sm text-slate-500">{TASK_COMPLETION_RESULT_HINT}</p>
+        {error ? <p className="mt-2 text-sm font-semibold text-rose-600">{error}</p> : null}
+
+        <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={saving}
+            className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60"
+          >
+            Отмена
+          </button>
+          <button
+            type="button"
+            onClick={onSubmit}
+            disabled={saving}
+            className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60"
+          >
+            {saving ? 'Сохраняем...' : 'Завершить задачу'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -5207,6 +5343,7 @@ function TaskModal({
     };
     return withDefaults;
   });
+  const [resultError, setResultError] = useState<string | null>(null);
   const [tagText, setTagText] = useState(() => form.tags.join(', '));
   const [comments, setComments] = useState<TaskJournalComment[]>([]);
   const [commentsLoading, setCommentsLoading] = useState(false);
@@ -5299,6 +5436,9 @@ function TaskModal({
 
   const update = <K extends keyof TaskForm>(key: K, value: TaskForm[K]) => {
     if (isReadOnly && key !== 'result') return;
+    if (key === 'result' && resultError) {
+      setResultError(null);
+    }
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
@@ -5457,9 +5597,12 @@ function TaskModal({
     }
 
     if (status === 'done' && !nextForm.result.trim()) {
-      nextForm = { ...nextForm, result: DEFAULT_TASK_COMPLETION_RESULT };
+      setForm(nextForm);
+      setResultError(TASK_COMPLETION_RESULT_REQUIRED_MESSAGE);
+      return;
     }
 
+    setResultError(null);
     setForm(nextForm);
     if (isReadOnly && task) {
       await onResultSave(task, status, nextForm.result);
@@ -5473,6 +5616,18 @@ function TaskModal({
     ...nextForm,
     changeComment: changeComment.trim() || null,
   });
+
+  const handleSaveForm = async () => {
+    const nextForm = withChangeComment();
+    if (nextForm.status === 'done' && !nextForm.result.trim()) {
+      setForm(nextForm);
+      setResultError(TASK_COMPLETION_RESULT_REQUIRED_MESSAGE);
+      return;
+    }
+
+    setResultError(null);
+    await onSave(nextForm, state?.task?.id);
+  };
 
   const handleCompletionAction = async () => {
     const nextStatus: TaskJournalStatus = approverParticipants.some((participant) => participant.approvalStatus !== 'approved')
@@ -6207,7 +6362,9 @@ function TaskModal({
               <textarea value={form.description} onChange={(event) => update('description', event.target.value)} disabled={isReadOnly} data-testid="task-description-field" className="form-textarea min-h-[140px] resize-y" rows={6} placeholder="Контекст, телефоны, комментарии, откуда пришла задача" />
             </Field>
             <Field label="Результат">
-              <textarea value={form.result} onChange={(event) => update('result', event.target.value)} data-testid="task-result-field" className="form-textarea min-h-[120px] resize-y" rows={5} placeholder="Итог выполнения или причина ожидания" />
+              <textarea value={form.result} onChange={(event) => update('result', event.target.value)} data-testid="task-result-field" className="form-textarea min-h-[120px] resize-y" rows={5} placeholder={TASK_COMPLETION_RESULT_HINT} />
+              <p className="mt-1 text-xs text-slate-500">{TASK_COMPLETION_RESULT_HINT}</p>
+              {resultError ? <p className="mt-1 text-xs font-semibold text-rose-600">{resultError}</p> : null}
             </Field>
           </div>
 
@@ -6546,7 +6703,7 @@ function TaskModal({
               Сохранить результат
             </button>
           ) : (
-            <button type="button" onClick={() => void onSave(withChangeComment(), state?.task?.id)} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
+            <button type="button" onClick={() => void handleSaveForm()} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
               {state?.mode === 'edit' ? 'Сохранить' : 'Создать задачу'}
             </button>
           )}

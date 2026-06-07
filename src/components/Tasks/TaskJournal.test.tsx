@@ -778,6 +778,31 @@ describe('TaskJournal', () => {
     expect(toastMock.success).toHaveBeenCalledWith(expect.stringContaining('Обновлено задач: 1'), 'Журнал задач');
   });
 
+  it('asks for task result before quick completion', async () => {
+    const task = createTask({ id: 101, title: 'Закрыть с результатом', result: '' });
+
+    await renderJournal([task], { waitForTitle: 'Закрыть с результатом' });
+
+    fireEvent.click(screen.getByTitle('Завершить'));
+
+    expect(await screen.findByRole('heading', { name: 'Добавить результат по задаче' })).toBeTruthy();
+    expect(apiMock.updateTaskJournalStatus).not.toHaveBeenCalled();
+
+    const resultInput = screen.getByPlaceholderText('Опишите подробно, что было сделано и какой результат был достигнут.') as HTMLTextAreaElement;
+    fireEvent.click(screen.getByRole('button', { name: 'Завершить задачу' }));
+    expect(screen.getByText('Добавьте результат по задаче перед завершением.')).toBeTruthy();
+    expect(apiMock.updateTaskJournalStatus).not.toHaveBeenCalled();
+
+    fireEvent.change(resultInput, { target: { value: 'Связались со следователем, документы переданы клиенту.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Завершить задачу' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(
+      101,
+      'done',
+      'Связались со следователем, документы переданы клиенту.',
+    ));
+  });
+
   it('shows a neutral skipped count after bulk actions', async () => {
     apiMock.bulkUpdateTaskJournalItems.mockResolvedValueOnce({ requested: 2, updated: 1, skipped: 1 });
     const firstTask = createTask({ id: 101, title: 'Обновить одну' });
@@ -1712,14 +1737,14 @@ describe('TaskJournal', () => {
     expect(toastMock.success).toHaveBeenCalledWith('Создано контрольных задач: 1.', 'Автоконтроль дел');
   });
 
-  it('completes an active task with a default result from the quick action', async () => {
-    await renderJournal([createTask({ result: '' })]);
+  it('completes an active task with an existing result from the quick action', async () => {
+    await renderJournal([createTask({ result: 'Результат уже заполнен.' })]);
 
     fireEvent.click(screen.getAllByTitle('Завершить')[0]);
 
     await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledTimes(1));
-    expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(101, 'done', 'Задача выполнена.');
-    expect(toastMock.error).not.toHaveBeenCalledWith('Перед завершением задачи заполните результат.', 'Журнал задач');
+    expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(101, 'done', undefined);
+    expect(toastMock.error).not.toHaveBeenCalledWith('Добавьте результат по задаче перед завершением.', 'Журнал задач');
   });
 
   it('sends an edited task to approval when approvers are configured', async () => {
@@ -1751,7 +1776,7 @@ describe('TaskJournal', () => {
     }));
   });
 
-  it('completes an approved task from the editor with a default result when executor left it empty', async () => {
+  it('requires a result when completing an approved task from the editor', async () => {
     await renderJournal([
       createTask({
         status: 'approved',
@@ -1779,14 +1804,22 @@ describe('TaskJournal', () => {
     const completeButtons = screen.getAllByRole('button', { name: 'Завершить' });
     fireEvent.click(completeButtons[completeButtons.length - 1]);
 
+    expect(screen.getByText('Добавьте результат по задаче перед завершением.')).toBeTruthy();
+    expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByPlaceholderText('Опишите подробно, что было сделано и какой результат был достигнут.'), {
+      target: { value: 'Согласованная задача выполнена, результат передан клиенту.' },
+    });
+    fireEvent.click(completeButtons[completeButtons.length - 1]);
+
     await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
     expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({
       status: 'done',
-      result: 'Задача выполнена.',
+      result: 'Согласованная задача выполнена, результат передан клиенту.',
     }));
   });
 
-  it('saves a task as done with a default result when the status is changed manually', async () => {
+  it('requires a result when a task is saved as done manually', async () => {
     await renderJournal([createTask({ status: 'approved', result: '' })], { waitForTitle: null });
     fireEvent.click(screen.getByTestId('task-quick-filter-all'));
     fireEvent.change(screen.getByLabelText('Статус'), { target: { value: 'all' } });
@@ -1797,12 +1830,19 @@ describe('TaskJournal', () => {
     fireEvent.change(screen.getByTestId('task-editor-status-select'), { target: { value: 'done' } });
     fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
 
+    expect(screen.getByText('Добавьте результат по задаче перед завершением.')).toBeTruthy();
+    expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByPlaceholderText('Опишите подробно, что было сделано и какой результат был достигнут.'), {
+      target: { value: 'Задача закрыта после проверки документов.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
     await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
     expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({
       status: 'done',
-      result: 'Задача выполнена.',
+      result: 'Задача закрыта после проверки документов.',
     }));
-    expect(toastMock.error).not.toHaveBeenCalledWith('Перед завершением задачи заполните результат.', 'Журнал задач');
   });
 
   it('shows and saves approval due date in the task editor', async () => {
@@ -1935,7 +1975,7 @@ describe('TaskJournal', () => {
     const titleInput = screen.getByDisplayValue('Тестовая задача') as HTMLInputElement;
     expect(titleInput.disabled).toBe(true);
 
-    const resultInput = screen.getByPlaceholderText('Итог выполнения или причина ожидания') as HTMLTextAreaElement;
+    const resultInput = screen.getByPlaceholderText('Опишите подробно, что было сделано и какой результат был достигнут.') as HTMLTextAreaElement;
     expect(resultInput.disabled).toBe(false);
     fireEvent.change(resultInput, { target: { value: 'Результат исполнителя' } });
     fireEvent.click(screen.getByRole('button', { name: 'Сохранить результат' }));

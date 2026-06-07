@@ -24,7 +24,6 @@ public class TasksController : ControllerBase
 {
     private const long MaxTaskFileBytes = 25L * 1024L * 1024L;
     private const string InternalTaskObjectName = "Внутренняя задача";
-    private const string DefaultTaskCompletionResult = "Задача выполнена.";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HashSet<string> AllowedStatuses = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -3172,13 +3171,7 @@ public class TasksController : ControllerBase
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private static string? NormalizeCompletionResult(string status, string? result)
-    {
-        var normalized = NormalizeOptional(result);
-        return string.Equals(status, "done", StringComparison.OrdinalIgnoreCase)
-            && normalized is null
-                ? DefaultTaskCompletionResult
-                : normalized;
-    }
+        => NormalizeOptional(result);
 
     private static DateTime NormalizeUtcInstant(DateTime value)
         => CalendarTimeZoneHelper.NormalizeUtcInstant(value);

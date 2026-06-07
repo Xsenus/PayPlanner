@@ -325,7 +325,7 @@ public class TasksControllerTests
     }
 
     [Fact]
-    public async Task UpdateStatus_DoneWithoutResultUsesDefaultResult()
+    public async Task UpdateStatus_DoneWithoutResultRequiresResult()
     {
         await using var db = await CreateContextAsync();
         var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
@@ -338,15 +338,16 @@ public class TasksControllerTests
             Status = "done",
         }, CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(result.Result);
-        var dto = Assert.IsType<TaskJournalItemDto>(ok.Value);
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.Contains("результат", badRequest.Value?.ToString(), StringComparison.OrdinalIgnoreCase);
 
-        Assert.Equal("done", dto.Status);
-        Assert.Equal("Задача выполнена.", dto.Result);
+        var stored = await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id);
+        Assert.Equal("new", stored.Status);
+        Assert.Null(stored.Result);
     }
 
     [Fact]
-    public async Task UpdateTask_DoneWithoutResultUsesDefaultResult()
+    public async Task UpdateTask_DoneWithoutResultRequiresResult()
     {
         await using var db = await CreateContextAsync();
         var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
@@ -362,11 +363,12 @@ public class TasksControllerTests
             Status = "done",
         }, CancellationToken.None);
 
-        var ok = Assert.IsType<OkObjectResult>(result.Result);
-        var dto = Assert.IsType<TaskJournalItemDto>(ok.Value);
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.Contains("результат", badRequest.Value?.ToString(), StringComparison.OrdinalIgnoreCase);
 
-        Assert.Equal("done", dto.Status);
-        Assert.Equal("Задача выполнена.", dto.Result);
+        var stored = await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id);
+        Assert.Equal("new", stored.Status);
+        Assert.Null(stored.Result);
     }
 
     [Fact]
@@ -2636,7 +2638,7 @@ public class TasksControllerTests
     }
 
     [Fact]
-    public async Task BulkUpdateTasks_DoneWithoutResultUsesDefaultResult()
+    public async Task BulkUpdateTasks_DoneWithoutResultSkipsTask()
     {
         await using var db = await CreateContextAsync();
         var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
@@ -2652,13 +2654,13 @@ public class TasksControllerTests
         }, CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
-        Assert.Equal(1, GetAnonymousInt(ok.Value, "updated"));
-        Assert.Equal(0, GetAnonymousInt(ok.Value, "skipped"));
+        Assert.Equal(0, GetAnonymousInt(ok.Value, "updated"));
+        Assert.Equal(1, GetAnonymousInt(ok.Value, "skipped"));
 
         var stored = await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id);
-        Assert.Equal("done", stored.Status);
-        Assert.Equal("Задача выполнена.", stored.Result);
-        Assert.Single(notificationService.CompletedTaskIds, task.Id);
+        Assert.Equal("new", stored.Status);
+        Assert.Null(stored.Result);
+        Assert.Empty(notificationService.CompletedTaskIds);
     }
 
     [Fact]
