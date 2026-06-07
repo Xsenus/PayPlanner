@@ -11,7 +11,7 @@
     "audit:dates:test": "node scripts/audit-date-time.mjs --self-test",
     "test": "npm run test:unit",
     "test:all": "vitest run",
-    "test:unit": "vitest run --exclude \"**/*.integration.test.*\"",
+    "test:unit": "vitest run --exclude \"**/*.integration.test.*\" --no-file-parallelism",
     "test:integration": "node scripts/run-integration-tests.mjs",
     "test:legal-e2e": "node scripts/run-legal-e2e-smoke.mjs",
     "test:legal-e2e:frontend": "node scripts/run-legal-e2e-smoke.mjs --public-only --scenarios=frontend-shell",
