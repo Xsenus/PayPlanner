@@ -304,7 +304,12 @@ describe("ClientReconciliationAct", () => {
     fireEvent.click(screen.getByRole("button", { name: /Excel/i }));
 
     expect(createObjectUrl).toHaveBeenCalled();
-    const blob = createObjectUrl.mock.calls[0][0] as Blob;
+    const blob = createObjectUrl.mock.calls
+      .map(([value]) => value)
+      .find((value): value is Blob => value instanceof Blob && value.type === "application/vnd.ms-excel;charset=utf-8");
+    if (!blob) {
+      throw new Error("Excel export blob was not created");
+    }
     expect(blob.type).toBe("application/vnd.ms-excel;charset=utf-8");
     const html = await blob.text();
     expect(html).toContain("По данным ООО ЭлитПраво");

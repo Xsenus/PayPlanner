@@ -1120,6 +1120,8 @@ describe('TaskJournal', () => {
   });
 
   it('applies day, week, month and full period buttons to the list view', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-06-03T13:30:00.000Z'));
     const now = new Date();
     const sameWeekDate = getSameWeekDateOutsideTodayForTest(now);
     const sameMonthDate = getSameMonthDateOutsideCurrentWeekForTest(now);
@@ -1527,6 +1529,7 @@ describe('TaskJournal', () => {
         { id: 9, name: 'Привлеченный исполнитель', email: 'contractor@example.com', isExternalContractor: true },
       ],
     });
+    await waitFor(() => expect(apiMock.getUserSetting).toHaveBeenCalledWith('profile.timeZoneId'));
 
     fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
     await screen.findByRole('heading', { name: 'Новая задача' });
@@ -1585,7 +1588,7 @@ describe('TaskJournal', () => {
       assigneeUserId: 9,
       contractorPaymentEnabled: true,
       contractorPaymentAmount: 7500,
-      contractorPaymentDueDate: '2026-05-25T20:00:00.000Z',
+      contractorPaymentDueDate: fromTimeZoneDateTimeInput('2026-05-26T00:00', 'Europe/Samara'),
       contractorPaymentOnResult: false,
       contractorPaymentResultDelayDays: null,
     }));
@@ -2007,7 +2010,7 @@ describe('TaskJournal', () => {
     authState.user = { id: 7, fullName: 'Observer', email: 'observer@example.com' };
     permissionsState.taskCanEdit = true;
     permissionsState.taskViewScope = 'own';
-    window.localStorage.setItem('pp.task_journal.filters.v1.user:7', JSON.stringify({ quickFilter: 'all' }));
+    window.localStorage.setItem('pp.task_journal.filters.v1.user:7', JSON.stringify({ quickFilter: 'all', periodMode: 'all' }));
     await renderJournal([
       createTask({
         assigneeUserId: 9,
@@ -2313,7 +2316,7 @@ describe('TaskJournal', () => {
         : null
     ));
 
-    await renderJournal([createTask({ dueAt, plannedDurationMinutes: 60 })], { initialView: 'calendar' });
+    await renderJournal([createTask({ dueAt, plannedDurationMinutes: 60 })], { initialView: 'calendar', periodMode: 'day' });
 
     fireEvent.click(screen.getByRole('button', { name: '+15 мин' }));
 
