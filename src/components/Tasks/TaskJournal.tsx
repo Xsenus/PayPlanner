@@ -89,11 +89,24 @@ type TaskCalendarConflictPolicy = 'warn' | 'block';
 type TaskCalendarLoadWarningMode = 'strict' | 'standard' | 'relaxed';
 type IcsReminderPreset = 'default' | 'hour' | 'twoHours' | 'day';
 type TaskPlanningReportFormat = 'html' | 'word' | 'pdf';
-type ModalState = { mode: 'create' | 'edit' | 'view'; task?: TaskJournalItem; dueAt?: string } | null;
+type TaskJournalContextFilter = {
+  clientId?: number | null;
+  legalEntityId?: number | null;
+  objectName?: string | null;
+  title?: string | null;
+};
+type ModalState = {
+  mode: 'create' | 'edit' | 'view';
+  task?: TaskJournalItem;
+  dueAt?: string;
+  defaults?: Partial<TaskJournalUpsertPayload>;
+} | null;
 type TaskJournalMode = 'journal' | 'approvals';
 type TaskJournalProps = {
   initialView?: ViewMode;
   mode?: TaskJournalMode;
+  embedded?: boolean;
+  contextFilter?: TaskJournalContextFilter;
   routeTaskId?: number | null;
   onRouteTaskChange?: (taskId: number | null) => void;
   onOpenClient?: (clientId: number, caseId?: number | null) => void | Promise<void>;
@@ -543,14 +556,19 @@ function downloadBlob(fileName: string, blob: Blob) {
   URL.revokeObjectURL(url);
 }
 
-async function loadAllTaskJournalItems() {
+async function loadAllTaskJournalItems(contextFilter?: TaskJournalContextFilter) {
   const pageSize = 200;
   let page = 1;
   let total = Number.POSITIVE_INFINITY;
   const items: TaskJournalItem[] = [];
 
   while (items.length < total) {
-    const response = await apiService.getTaskJournalItems({ page, pageSize });
+    const response = await apiService.getTaskJournalItems({
+      page,
+      pageSize,
+      clientId: contextFilter?.clientId ?? undefined,
+      legalEntityId: contextFilter?.legalEntityId ?? undefined,
+    });
     items.push(...response.items);
     total = response.total;
 
@@ -1495,6 +1513,8 @@ const TIMELINE_TASK_LANE_GAP = 8;
 export function TaskJournal({
   initialView = 'list',
   mode = 'journal',
+  embedded = false,
+  contextFilter,
   routeTaskId = null,
   onRouteTaskChange,
   onOpenClient,
@@ -1513,6 +1533,22 @@ export function TaskJournal({
   const canExportTasks = isAdminUser || permissions.tasks.canExport;
   const canExportCases = isAdminUser || permissions.cases.canExport;
   const isApprovalsMode = mode === 'approvals';
+  const taskContextDefaults = useMemo<Partial<TaskJournalUpsertPayload>>(() => {
+    if (!contextFilter) {
+      return {};
+    }
+
+    const clientId = contextFilter.clientId ?? null;
+    const legalEntityId = contextFilter.legalEntityId ?? null;
+    const objectName = contextFilter.objectName?.trim() || contextFilter.title?.trim() || '';
+    return {
+      isInternal: false,
+      clientId,
+      legalEntityId,
+      clientCaseId: null,
+      objectName,
+    };
+  }, [contextFilter]);
   const initialPreferencesRef = useRef<TaskJournalFilterPreferences | null>(null);
   if (initialPreferencesRef.current === null) {
     initialPreferencesRef.current = readTaskJournalFilterPreferences(currentUserId, mode, initialView);
@@ -1649,10 +1685,10 @@ export function TaskJournal({
   );
 
   const openTaskCreate = useCallback(() => {
-    setModal({ mode: 'create' });
+    setModal({ mode: 'create', defaults: taskContextDefaults });
     setHighlightedTaskId(null);
     onRouteTaskChange?.(null);
-  }, [onRouteTaskChange]);
+  }, [onRouteTaskChange, taskContextDefaults]);
 
   const openTaskCreateForDate = useCallback((date: Date) => {
     if (isApprovalsMode) {
@@ -1660,10 +1696,10 @@ export function TaskJournal({
     }
 
     setCalendarSelectedDate(date);
-    setModal({ mode: 'create', dueAt: buildDefaultDueAtForDate(date) });
+    setModal({ mode: 'create', dueAt: buildDefaultDueAtForDate(date), defaults: taskContextDefaults });
     setHighlightedTaskId(null);
     onRouteTaskChange?.(null);
-  }, [isApprovalsMode, onRouteTaskChange]);
+  }, [isApprovalsMode, onRouteTaskChange, taskContextDefaults]);
 
   const closeTaskModal = useCallback(() => {
     setModal(null);
@@ -1679,7 +1715,7 @@ export function TaskJournal({
     try {
       const settingsPromise = apiService.getTaskJournalSettings();
       const automationPromise = settingsPromise.then((settingsResponse) => (
-        settingsResponse.caseInactivityAutomationEnabled
+        !embedded && settingsResponse.caseInactivityAutomationEnabled
           ? apiService.getTaskJournalCaseAutomationCandidates({
             inactiveDays: settingsResponse.caseInactivityDays,
             limit: Math.min(settingsResponse.caseInactivityLimit, 20),
@@ -1688,7 +1724,7 @@ export function TaskJournal({
           : []
       ));
       const [taskItems, assigneeResponse, settingsResponse, notificationDefaultsResponse, timeZoneResponse, calendarSyncSettingsResponse, automationResponse] = await Promise.all([
-        loadAllTaskJournalItems(),
+        loadAllTaskJournalItems(contextFilter),
         apiService.getTaskJournalAssignees(),
         settingsPromise,
         apiService.getUserSetting(TASK_NOTIFICATION_DEFAULTS_SETTING_KEY).catch(() => null),
@@ -1708,7 +1744,7 @@ export function TaskJournal({
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [contextFilter, embedded, toast]);
 
   useEffect(() => {
     void refreshTasks();
@@ -2564,7 +2600,11 @@ export function TaskJournal({
     }
 
     try {
-      const response = await apiService.downloadTaskJournalCalendar({ reminderMinutes: icsReminderMinutes });
+      const response = await apiService.downloadTaskJournalCalendar({
+        clientId: contextFilter?.clientId ?? undefined,
+        legalEntityId: contextFilter?.legalEntityId ?? undefined,
+        reminderMinutes: icsReminderMinutes,
+      });
       downloadBlob(response.fileName, response.blob);
       toast.success('Календарь задач выгружен в ICS.', 'Календарь задач');
     } catch (error) {
@@ -2634,6 +2674,8 @@ export function TaskJournal({
       type: typeFilter === 'all' ? undefined : typeFilter,
       priority: reportPriority,
       assigneeUserId: reportAssigneeUserId,
+      clientId: contextFilter?.clientId ?? undefined,
+      legalEntityId: contextFilter?.legalEntityId ?? undefined,
       from,
       to,
     };
@@ -2655,9 +2697,12 @@ export function TaskJournal({
     }
   };
 
-  const pageTitle = isApprovalsMode ? 'Согласования' : 'Журнал задач';
+  const contextTitle = contextFilter?.title?.trim();
+  const pageTitle = isApprovalsMode ? 'Согласования' : contextTitle ? `Задачи: ${contextTitle}` : 'Журнал задач';
   const pageDescription = isApprovalsMode
     ? 'Задачи, которые находятся на согласовании и требуют решения текущего согласующего. Они остаются в общем журнале задач.'
+    : contextTitle
+      ? 'Задачи, связанные с этим клиентом: исполнитель, срок, результат и напоминания в одном списке.'
     : 'Задачи по контрагентам, делам, платежам, звонкам и документам: исполнитель, срок, результат и напоминания в одном рабочем журнале.';
   const isRouteTaskPage = !isApprovalsMode && Boolean(routeTaskId && routeTaskId > 0);
   const routeTaskState = isRouteTaskPage && modal?.task?.id === routeTaskId ? modal : null;
@@ -2702,12 +2747,14 @@ export function TaskJournal({
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <div className="mx-auto max-w-[1720px] p-4 sm:p-6 lg:p-8">
+    <div className={embedded ? 'bg-transparent' : 'min-h-screen bg-slate-50'}>
+      <div className={embedded ? 'mx-auto max-w-[1720px]' : 'mx-auto max-w-[1720px] p-4 sm:p-6 lg:p-8'}>
         <section className="mb-6">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
             <div>
-              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Рабочий контроль</div>
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                {contextTitle ? 'Задачи клиента' : 'Рабочий контроль'}
+              </div>
               <h1 className="mt-2 text-3xl font-semibold text-slate-900">{pageTitle}</h1>
               <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
                 {pageDescription}
@@ -3088,7 +3135,7 @@ export function TaskJournal({
           />
         ) : null}
 
-        {!isApprovalsMode && automationCandidates.length > 0 ? (
+        {!embedded && !isApprovalsMode && automationCandidates.length > 0 ? (
           <TaskAutomationPanel
             candidates={automationCandidates}
             creatingCaseId={creatingAutomationCaseId}
@@ -3133,6 +3180,7 @@ export function TaskJournal({
           />
         ) : viewMode === 'calendar' ? (
           <>
+            {!embedded ? (
             <CaseCalendarEventsPanel
               events={caseCalendarEvents}
               summary={caseCalendarSummary}
@@ -3144,6 +3192,7 @@ export function TaskJournal({
               onReminderPresetChange={setIcsReminderPreset}
               onExport={() => void handleCaseCalendarExport()}
             />
+            ) : null}
             <TaskCalendar
               tasks={calendarTasks}
               mode={periodMode}
@@ -3174,6 +3223,7 @@ export function TaskJournal({
           </>
         ) : (
           <>
+            {!embedded ? (
             <CaseCalendarEventsPanel
               events={caseCalendarEvents}
               summary={caseCalendarSummary}
@@ -3185,6 +3235,7 @@ export function TaskJournal({
               onReminderPresetChange={setIcsReminderPreset}
               onExport={() => void handleCaseCalendarExport()}
             />
+            ) : null}
             <TaskTimelineCalendar
               tasks={calendarTasks}
               timeZoneId={effectiveTaskJournalTimeZoneId}
@@ -5144,7 +5195,17 @@ function TaskModal({
       };
     }
     const next = emptyForm(currentUserName, currentUserId, notificationDefaults);
-    return state?.dueAt ? { ...next, dueAt: toLocalInputValue(state.dueAt) } : next;
+    const withDefaults = {
+      ...next,
+      ...state?.defaults,
+      isInternal: state?.defaults?.isInternal ?? next.isInternal,
+      reminders: next.reminders,
+      channels: next.channels,
+      participants: next.participants,
+      dueAt: state?.dueAt ? toLocalInputValue(state.dueAt) : next.dueAt,
+      approvalDueAt: next.approvalDueAt,
+    };
+    return withDefaults;
   });
   const [tagText, setTagText] = useState(() => form.tags.join(', '));
   const [comments, setComments] = useState<TaskJournalComment[]>([]);

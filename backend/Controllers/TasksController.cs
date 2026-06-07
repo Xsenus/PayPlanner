@@ -441,6 +441,8 @@ public class TasksController : ControllerBase
     public async Task<IActionResult> ExportCalendar(
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
+        [FromQuery] int? clientId,
+        [FromQuery] int? legalEntityId,
         [FromQuery] string? reminderMinutes,
         CancellationToken ct)
     {
@@ -472,6 +474,16 @@ public class TasksController : ControllerBase
         if (to.HasValue)
         {
             query = query.Where(task => task.DueAt <= to.Value);
+        }
+
+        if (clientId.HasValue)
+        {
+            query = query.Where(task => task.ClientId == clientId.Value);
+        }
+
+        if (legalEntityId.HasValue)
+        {
+            query = query.Where(task => task.LegalEntityId == legalEntityId.Value);
         }
 
         var calendarSyncSettings = await LoadCalendarSyncSettingsAsync(ct);

@@ -24,6 +24,7 @@ const {
   toastWarningMock,
   actModalPropsSpy,
   paymentModalPropsSpy,
+  taskJournalPropsSpy,
   twoTypeStatsMock,
   useActsMock,
   useClientCasesMock,
@@ -89,6 +90,7 @@ const {
   toastWarningMock: vi.fn(),
   actModalPropsSpy: vi.fn(),
   paymentModalPropsSpy: vi.fn(),
+  taskJournalPropsSpy: vi.fn(),
   twoTypeStatsMock: vi.fn(),
   useActsMock: vi.fn(),
   useClientCasesMock: vi.fn(),
@@ -103,6 +105,7 @@ function createPermissions() {
     accounts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     acts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     contracts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+    tasks: { canView: true, canCreate: false, canEdit: false, canDelete: false, canExport: false },
   };
 }
 
@@ -399,6 +402,13 @@ vi.mock('../Contracts/ContractModal', () => ({
   ContractModal: () => null,
 }));
 
+vi.mock('../Tasks/TaskJournal', () => ({
+  TaskJournal: (props: unknown) => {
+    taskJournalPropsSpy(props);
+    return <div data-testid="client-task-journal">Задачи клиента</div>;
+  },
+}));
+
 vi.mock('./CaseModal', () => ({
   CaseModal: () => null,
 }));
@@ -544,6 +554,7 @@ describe('ClientDetail integration', () => {
     Object.assign(permissionsResult.accounts, createPermissions().accounts);
     Object.assign(permissionsResult.acts, createPermissions().acts);
     Object.assign(permissionsResult.contracts, createPermissions().contracts);
+    Object.assign(permissionsResult.tasks, createPermissions().tasks);
     confirmMock.mockReset();
     confirmMock.mockResolvedValue(true);
     toastInfoMock.mockReset();
@@ -552,6 +563,7 @@ describe('ClientDetail integration', () => {
     toastWarningMock.mockReset();
     actModalPropsSpy.mockReset();
     paymentModalPropsSpy.mockReset();
+    taskJournalPropsSpy.mockReset();
     twoTypeStatsMock.mockReset();
     useClientCasesMock.mockReset();
     useActsMock.mockReset();
@@ -631,6 +643,26 @@ describe('ClientDetail integration', () => {
       expect(apiService.getActResponsibles).toHaveBeenCalledTimes(1);
     });
     expect(apiService.getClients).not.toHaveBeenCalled();
+  });
+
+  it('opens the client tasks tab with a client-scoped task journal', async () => {
+    const user = userEvent.setup();
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+
+    await screen.findByRole('heading', { name: 'Карточка клиента' });
+    await user.click(screen.getByRole('button', { name: 'Задачи' }));
+
+    expect(await screen.findByTestId('client-task-journal')).toBeTruthy();
+    expect(taskJournalPropsSpy).toHaveBeenLastCalledWith(expect.objectContaining({
+      embedded: true,
+      initialView: 'list',
+      contextFilter: expect.objectContaining({
+        clientId: 1,
+        objectName: 'Иванов Иван Иванович',
+        title: 'Иванов Иван Иванович',
+      }),
+    }));
   });
 
   it('opens balance journal and audit from compact header actions', async () => {

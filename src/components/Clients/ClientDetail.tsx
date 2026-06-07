@@ -18,6 +18,7 @@ import {
   Search,
   Settings2,
   WalletCards,
+  ClipboardList,
   CheckCircle2,
   Send,
   FileCheck2,
@@ -97,6 +98,7 @@ import { LookupSelect } from "../ui/LookupSelect";
 import { TableColumnSettings } from "../ui/TableColumnSettings";
 import { TablePagination } from "../ui/TablePagination";
 import { ObjectAuditModal } from "../ui/ObjectAuditModal";
+import { TaskJournal } from "../Tasks/TaskJournal";
 import { isInvoiceManagedPayment, isPartialRemainderSourcePayment, isTransferredRemainderPayment } from "../../utils/invoicePayments";
 import { useClientStatuses } from "../../hooks/useClientStatuses";
 import { ClientStatusBadge } from "./ClientStatusBadge";
@@ -168,6 +170,7 @@ type PaymentViewMode = "default" | "expenseClient" | "supplier";
 type ClientDetailSection =
   | "profile"
   | "cases"
+  | "tasks"
   | "payments"
   | "accounts"
   | "acts"
@@ -257,6 +260,7 @@ type ContractTableColumnKey =
 const SECTION_ORDER: ClientDetailSection[] = [
   "profile",
   "cases",
+  "tasks",
   "payments",
   "accounts",
   "acts",
@@ -404,6 +408,11 @@ const SECTION_META: Record<
       "Здесь отображаются все дела, связанные с этим клиентом.",
     icon: FileCheck2,
   },
+  tasks: {
+    label: "Задачи",
+    actionLabel: "Добавить задачу",
+    icon: ClipboardList,
+  },
   payments: {
     label: "Платежи",
     actionLabel: "Добавить платёж",
@@ -444,6 +453,7 @@ const SECTION_META: Record<
 const SECTION_PERMISSION_MAP: Record<ClientDetailSection, MenuSectionKey> = {
   profile: "clients",
   cases: "clients",
+  tasks: "tasks",
   payments: "clients",
   accounts: "accounts",
   acts: "acts",
@@ -1383,6 +1393,17 @@ export function ClientDetail({
   const { statuses: clientStatuses } = useClientStatuses();
   const [clientName, setClientName] = useState<string>("...");
   const [clientData, setClientData] = useState<Client | null>(null);
+  const taskJournalContext = useMemo(
+    () => {
+      const title = clientName && clientName !== "..." ? clientName : clientData?.name ?? `Клиент #${clientId}`;
+      return {
+        clientId,
+        objectName: title,
+        title,
+      };
+    },
+    [clientData?.name, clientId, clientName],
+  );
   const [clientBalance, setClientBalance] = useState<ClientBalanceSummary | null>(null);
   const [clientBalanceTransactions, setClientBalanceTransactions] = useState<ClientBalanceTransaction[]>([]);
   const [clientBalanceLoading, setClientBalanceLoading] = useState(false);
@@ -7898,7 +7919,22 @@ export function ClientDetail({
                   {relatedDocumentLookupError}
                 </div>
               ) : null}
-              {activeSection === "cases" ? (
+              {activeSection === "tasks" ? (
+                <TaskJournal
+                  embedded
+                  initialView="list"
+                  contextFilter={taskJournalContext}
+                  onOpenClient={(targetClientId, targetCaseId) => {
+                    if (
+                      targetClientId === clientId &&
+                      targetCaseId &&
+                      onOpenCasePage
+                    ) {
+                      onOpenCasePage(targetCaseId, targetClientId);
+                    }
+                  }}
+                />
+              ) : activeSection === "cases" ? (
                 <div className="space-y-4">
                   {!caseCardsAvailable ? (
                     <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center">

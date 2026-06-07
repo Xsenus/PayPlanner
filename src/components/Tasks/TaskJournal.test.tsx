@@ -259,6 +259,13 @@ async function renderJournal(
     assignees?: TaskJournalAssignee[];
     withRoute?: boolean;
     waitForTitle?: string | null;
+    embedded?: boolean;
+    contextFilter?: {
+      clientId?: number | null;
+      legalEntityId?: number | null;
+      objectName?: string | null;
+      title?: string | null;
+    };
     onOpenClient?: (clientId: number, caseId?: number | null) => void;
     onOpenLegalEntity?: (legalEntityId: number) => void;
   } = {},
@@ -289,6 +296,8 @@ async function renderJournal(
       <TaskJournal
         initialView={options.initialView}
         mode={options.mode}
+        embedded={options.embedded}
+        contextFilter={options.contextFilter}
         routeTaskId={routeTaskId}
         onRouteTaskChange={setRouteTaskId}
         onOpenClient={options.onOpenClient}
@@ -303,6 +312,8 @@ async function renderJournal(
     <TaskJournal
       initialView={options.initialView}
       mode={options.mode}
+      embedded={options.embedded}
+      contextFilter={options.contextFilter}
       onOpenClient={options.onOpenClient}
       onOpenLegalEntity={options.onOpenLegalEntity}
     />
@@ -446,6 +457,38 @@ describe('TaskJournal', () => {
     expect(screen.getByText('БАНКРОТСТВО')).toBeTruthy();
   });
 
+  it('loads and creates tasks inside a client context', async () => {
+    await renderJournal([createTask({ clientId: 10, clientCaseId: null })], {
+      embedded: true,
+      contextFilter: {
+        clientId: 10,
+        objectName: 'Иванов Иван Иванович',
+        title: 'Иванов Иван Иванович',
+      },
+    });
+
+    expect(apiMock.getTaskJournalItems).toHaveBeenCalledWith(expect.objectContaining({
+      clientId: 10,
+      page: 1,
+      pageSize: 200,
+    }));
+    expect(screen.getByText('Задачи: Иванов Иван Иванович')).toBeTruthy();
+    expect(screen.queryByText('Проверка дел без задач')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
+    await screen.findByRole('heading', { name: 'Новая задача' });
+    fireEvent.change(screen.getByTestId('task-title-input'), { target: { value: 'Связаться с клиентом' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Создать задачу' }).at(-1)!);
+
+    await waitFor(() => expect(apiMock.createTaskJournalItem).toHaveBeenCalledTimes(1));
+    expect(apiMock.createTaskJournalItem).toHaveBeenCalledWith(expect.objectContaining({
+      clientId: 10,
+      legalEntityId: null,
+      objectName: 'Иванов Иван Иванович',
+      title: 'Связаться с клиентом',
+    }));
+  });
+
   it('shows court hearing and meeting types in filters and the task form', async () => {
     await renderJournal([
       createTask({ title: 'Заседание по делу', type: 'courtHearing' }),
@@ -535,13 +578,20 @@ describe('TaskJournal', () => {
   });
 
   it('exports client planning report in Word format', async () => {
-    await renderJournal();
+    await renderJournal(undefined, {
+      contextFilter: {
+        clientId: 10,
+        objectName: 'Иванов Иван Иванович',
+        title: 'Иванов Иван Иванович',
+      },
+    });
 
     fireEvent.click(screen.getByRole('button', { name: 'Word' }));
 
     await waitFor(() => expect(apiMock.downloadTaskPlanningReport).toHaveBeenCalledWith(expect.objectContaining({
       format: 'word',
       status: 'active',
+      clientId: 10,
     })));
     expect(toastMock.success).toHaveBeenCalledWith('Отчет по задачам выгружен в Word.', 'Отчет по задачам');
   });

@@ -1010,6 +1010,34 @@ describe('apiService auth handling', () => {
 });
 
 describe('apiService case calendar', () => {
+  it('downloads task calendar ICS with client filters', async () => {
+    const fetchMock = vi.fn(async () => new Response('task-calendar', {
+      headers: {
+        'content-disposition': 'attachment; filename="task-calendar.ics"',
+      },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.downloadTaskJournalCalendar({
+      from: '2026-06-01',
+      to: '2026-06-30',
+      clientId: 15,
+      legalEntityId: 22,
+      reminderMinutes: [60, 15],
+    });
+
+    expect(result.fileName).toBe('task-calendar.ics');
+    expect(await result.blob.text()).toBe('task-calendar');
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/tasks/calendar.ics?');
+    expect(String(url)).toContain('from=2026-06-01');
+    expect(String(url)).toContain('to=2026-06-30');
+    expect(String(url)).toContain('clientId=15');
+    expect(String(url)).toContain('legalEntityId=22');
+    expect(String(url)).toContain('reminderMinutes=60');
+    expect(String(url)).toContain('reminderMinutes=15');
+  });
+
   it('downloads case calendar ICS with filters', async () => {
     const fetchMock = vi.fn(async () => new Response('case-calendar', {
       headers: {

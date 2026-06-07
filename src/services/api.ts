@@ -3425,10 +3425,18 @@ export class ApiService {
     });
   }
 
-  async downloadTaskJournalCalendar(params?: { from?: string; to?: string; reminderMinutes?: number[] }) {
+  async downloadTaskJournalCalendar(params?: {
+    from?: string;
+    to?: string;
+    clientId?: number;
+    legalEntityId?: number;
+    reminderMinutes?: number[];
+  }) {
     const q = buildQuery({
       from: params?.from,
       to: params?.to,
+      clientId: params?.clientId,
+      legalEntityId: params?.legalEntityId,
       reminderMinutes: params?.reminderMinutes,
     });
     const token = getAuthToken();

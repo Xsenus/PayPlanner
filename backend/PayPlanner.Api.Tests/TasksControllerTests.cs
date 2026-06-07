@@ -1595,7 +1595,13 @@ public class TasksControllerTests
         await db.SaveChangesAsync();
         var controller = CreateController(db, new RecordingNotificationService(), author);
 
-        var result = await controller.ExportCalendar(from: null, to: null, reminderMinutes: null, ct: CancellationToken.None);
+        var result = await controller.ExportCalendar(
+            from: null,
+            to: null,
+            clientId: null,
+            legalEntityId: null,
+            reminderMinutes: null,
+            ct: CancellationToken.None);
 
         var file = Assert.IsType<FileContentResult>(result);
         var content = Encoding.UTF8.GetString(file.FileContents);
@@ -1622,6 +1628,41 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task ExportCalendar_FiltersTasksByClient()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author-client-ics@example.com", "Автор");
+        var firstClient = await CreateClientAsync(db, "Клиент календаря");
+        var secondClient = await CreateClientAsync(db, "Другой клиент календаря");
+        var firstTask = await CreateTaskAsync(db, author.Id, firstClient.Id);
+        firstTask.Title = "Задача выбранного клиента";
+        firstTask.DueAt = new DateTime(2026, 5, 10, 9, 0, 0, DateTimeKind.Utc);
+        var secondTask = await CreateTaskAsync(db, author.Id, secondClient.Id);
+        secondTask.Title = "Задача другого клиента";
+        secondTask.DueAt = new DateTime(2026, 5, 11, 9, 0, 0, DateTimeKind.Utc);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.ExportCalendar(
+            from: null,
+            to: null,
+            clientId: firstClient.Id,
+            legalEntityId: null,
+            reminderMinutes: null,
+            ct: CancellationToken.None);
+
+        var file = Assert.IsType<FileContentResult>(result);
+        var content = Encoding.UTF8.GetString(file.FileContents);
+
+        Assert.Contains("SUMMARY:Задача выбранного клиента", content);
+        Assert.DoesNotContain("SUMMARY:Задача другого клиента", content);
+
+        var auditEvent = await db.ObjectAuditEvents.SingleAsync(item => item.ObjectType == CalendarExportAudit.ObjectType);
+        using var metadata = JsonDocument.Parse(auditEvent.MetadataJson!);
+        Assert.Equal(1, metadata.RootElement.GetProperty("exportedEventCount").GetInt32());
+    }
+
+    [Fact]
     public async Task ExportCalendar_UsesCustomReminderMinutes()
     {
         await using var db = await CreateContextAsync();
@@ -1636,6 +1677,8 @@ public class TasksControllerTests
         var result = await controller.ExportCalendar(
             from: null,
             to: null,
+            clientId: null,
+            legalEntityId: null,
             reminderMinutes: "120,30,0,abc,120",
             ct: CancellationToken.None);
 
@@ -1660,7 +1703,13 @@ public class TasksControllerTests
             canExport: false);
         var controller = CreateController(db, new RecordingNotificationService(), user);
 
-        var result = await controller.ExportCalendar(from: null, to: null, reminderMinutes: null, ct: CancellationToken.None);
+        var result = await controller.ExportCalendar(
+            from: null,
+            to: null,
+            clientId: null,
+            legalEntityId: null,
+            reminderMinutes: null,
+            ct: CancellationToken.None);
 
         Assert.IsType<ForbidResult>(result);
     }
