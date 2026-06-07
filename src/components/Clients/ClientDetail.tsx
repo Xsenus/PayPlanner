@@ -1409,6 +1409,7 @@ export function ClientDetail({
   const [clientBalanceLoading, setClientBalanceLoading] = useState(false);
   const [clientBalanceExpanded, setClientBalanceExpanded] = useState(false);
   const [clientAuditOpen, setClientAuditOpen] = useState(false);
+  const [clientProfileEditing, setClientProfileEditing] = useState(false);
   const [selectedCaseId, setSelectedCaseId] = useState<number | "all">(
     initialCaseId ?? "all",
   );
@@ -1508,6 +1509,7 @@ export function ClientDetail({
     clientStatusId: "",
     isClientAndSupplier: false,
   });
+  const clientFormBaselineRef = useRef<typeof clientFormState | null>(null);
   const [legalEntityOptions, setLegalEntityOptions] = useState<LegalEntitySummary[]>([]);
   const [legalEntityLookupSearch, setLegalEntityLookupSearch] = useState("");
   const debouncedLegalEntityLookupSearch = useDebouncedValue(
@@ -3227,7 +3229,7 @@ export function ClientDetail({
   useEffect(() => {
     if (!clientData) return;
     const profile = parseClientExtendedProfile(clientData);
-    setClientFormState({
+    const nextClientFormState = {
       kind: profile.kind,
       lastName: profile.lastName,
       firstName: profile.firstName,
@@ -3311,7 +3313,10 @@ export function ClientDetail({
         ? String(clientData.clientStatusId)
         : "",
       isClientAndSupplier: Boolean(clientData.isClientAndSupplier),
-    });
+    };
+    clientFormBaselineRef.current = nextClientFormState;
+    setClientFormState(nextClientFormState);
+    setClientProfileEditing(false);
     // setProfileDocuments({
     //   passport: profile.passports[0] ?? '',
     //   birthCertificate: profile.birthCertificates[0] ?? '',
@@ -4446,6 +4451,9 @@ export function ClientDetail({
   }, [clientFormState.clientStatusId, sortedClientStatuses]);
 
   const canManageClientResponsible = userIsAdmin && clientPermissions.canEdit;
+  const canEditClientProfile = clientPermissions.canEdit && clientProfileEditing;
+  const canManageClientResponsibleInProfile =
+    canManageClientResponsible && clientProfileEditing;
 
   const clientResponsibleOptions = useMemo(() => {
     const options = [...actResponsibles];
@@ -5110,6 +5118,13 @@ export function ClientDetail({
     }));
   };
 
+  const cancelClientProfileEditing = () => {
+    if (clientFormBaselineRef.current) {
+      setClientFormState(clientFormBaselineRef.current);
+    }
+    setClientProfileEditing(false);
+  };
+
   const updateListField = (
     field: "phones" | "emails" | "addresses" | ClientDocumentKey,
     index: number,
@@ -5703,7 +5718,7 @@ export function ClientDetail({
     event: React.FormEvent<HTMLFormElement>,
   ) => {
     event.preventDefault();
-    if (!clientPermissions.canEdit) {
+    if (!canEditClientProfile) {
       showPermissionWarning("Недостаточно прав для редактирования клиента.");
       return;
     }
@@ -5865,6 +5880,7 @@ export function ClientDetail({
           "Изменения карточки клиента сохранены.",
           "Клиент обновлен",
         );
+        setClientProfileEditing(false);
       } catch {
         return;
       }
@@ -5966,59 +5982,84 @@ export function ClientDetail({
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {clientPermissions.canCreate && (
-              <button
-                type="button"
-                onClick={openAddCase}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-600 text-white shadow-sm transition-colors hover:bg-emerald-700"
-                title={addCaseLabel}
-                aria-label={addCaseLabel}
-              >
-                <FileCheck2 size={18} />
-              </button>
+              <div className="flex flex-col items-center gap-1">
+                <button
+                  type="button"
+                  onClick={openAddCase}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-600 text-white shadow-sm transition-colors hover:bg-emerald-700"
+                  title={addCaseLabel}
+                  aria-label={addCaseLabel}
+                >
+                  <FileCheck2 size={18} />
+                </button>
+                <span className="text-[11px] font-bold leading-none text-slate-700">
+                  {SECTION_META.cases.label}
+                </span>
+              </div>
             )}
             {clientPermissions.canCreate && (
-              <button
-                type="button"
-                onClick={openAddPayment}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white shadow-sm transition-colors hover:bg-blue-700"
-                title={SECTION_META.payments.actionLabel}
-                aria-label={SECTION_META.payments.actionLabel}
-              >
-                <WalletCards size={18} />
-              </button>
+              <div className="flex flex-col items-center gap-1">
+                <button
+                  type="button"
+                  onClick={openAddPayment}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white shadow-sm transition-colors hover:bg-blue-700"
+                  title={SECTION_META.payments.actionLabel}
+                  aria-label={SECTION_META.payments.actionLabel}
+                >
+                  <WalletCards size={18} />
+                </button>
+                <span className="text-[11px] font-bold leading-none text-slate-700">
+                  {SECTION_META.payments.label}
+                </span>
+              </div>
             )}
             {accountPermissions.canCreate && (
-              <button
-                type="button"
-                onClick={openInvoiceCreate}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-teal-600 text-white shadow-sm transition-colors hover:bg-teal-700"
-                title={SECTION_META.accounts.actionLabel}
-                aria-label={SECTION_META.accounts.actionLabel}
-              >
-                <Send size={18} />
-              </button>
+              <div className="flex flex-col items-center gap-1">
+                <button
+                  type="button"
+                  onClick={openInvoiceCreate}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-teal-600 text-white shadow-sm transition-colors hover:bg-teal-700"
+                  title={SECTION_META.accounts.actionLabel}
+                  aria-label={SECTION_META.accounts.actionLabel}
+                >
+                  <Send size={18} />
+                </button>
+                <span className="text-[11px] font-bold leading-none text-slate-700">
+                  {SECTION_META.accounts.label}
+                </span>
+              </div>
             )}
             {actPermissions.canCreate && (
-              <button
-                type="button"
-                onClick={openAddAct}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-amber-600 text-white shadow-sm transition-colors hover:bg-amber-700"
-                title={SECTION_META.acts.actionLabel}
-                aria-label={SECTION_META.acts.actionLabel}
-              >
-                <FileSignature size={18} />
-              </button>
+              <div className="flex flex-col items-center gap-1">
+                <button
+                  type="button"
+                  onClick={openAddAct}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-amber-600 text-white shadow-sm transition-colors hover:bg-amber-700"
+                  title={SECTION_META.acts.actionLabel}
+                  aria-label={SECTION_META.acts.actionLabel}
+                >
+                  <FileSignature size={18} />
+                </button>
+                <span className="text-[11px] font-bold leading-none text-slate-700">
+                  {SECTION_META.acts.label}
+                </span>
+              </div>
             )}
             {contractPermissions.canCreate && (
-              <button
-                type="button"
-                onClick={openContractCreate}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-sm transition-colors hover:bg-indigo-700"
-                title={SECTION_META.contracts.actionLabel}
-                aria-label={SECTION_META.contracts.actionLabel}
-              >
-                <Calculator size={18} />
-              </button>
+              <div className="flex flex-col items-center gap-1">
+                <button
+                  type="button"
+                  onClick={openContractCreate}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-sm transition-colors hover:bg-indigo-700"
+                  title={SECTION_META.contracts.actionLabel}
+                  aria-label={SECTION_META.contracts.actionLabel}
+                >
+                  <Calculator size={18} />
+                </button>
+                <span className="text-[11px] font-bold leading-none text-slate-700">
+                  {SECTION_META.contracts.label}
+                </span>
+              </div>
             )}
           </div>
         </div>
@@ -6033,6 +6074,30 @@ export function ClientDetail({
                 <p className="text-sm text-gray-500">
                   Обновляйте контактные данные клиента и юридическую информацию.
                 </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {clientPermissions.canEdit ? (
+                  clientProfileEditing ? (
+                    <button
+                      type="button"
+                      onClick={cancelClientProfileEditing}
+                      disabled={clientFormSaving}
+                      className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:opacity-60"
+                    >
+                      <X className="h-4 w-4" />
+                      Отмена
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setClientProfileEditing(true)}
+                      className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700"
+                    >
+                      <Edit className="h-4 w-4" />
+                      Редактировать
+                    </button>
+                  )
+                ) : null}
               </div>
               <div className="w-full max-w-2xl grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div>
@@ -6050,7 +6115,7 @@ export function ClientDetail({
                     title="Выбор ответственного"
                     searchPlaceholder="Поиск ответственного"
                     emptyOptionLabel="Не указан"
-                    disabled={!canManageClientResponsible}
+                    disabled={!canManageClientResponsibleInProfile}
                     buttonClassName={`disabled:bg-gray-100 ${requiredInputClass("ResponsibleUserId", clientFormState.responsibleUserId)}`}
                     helperText={
                       canManageClientResponsible
@@ -6068,7 +6133,7 @@ export function ClientDetail({
                     name="clientStatusId"
                     value={clientFormState.clientStatusId}
                     onChange={handleClientFormChange}
-                    disabled={!clientPermissions.canEdit}
+                    disabled={!canEditClientProfile}
                     className={`w-full px-3 py-2 border rounded-lg focus:ring-2 disabled:bg-gray-100 ${requiredInputClass("ClientStatusId", clientFormState.clientStatusId)}`}
                   >
                     <option value="">
@@ -6092,7 +6157,7 @@ export function ClientDetail({
                     name="isClientAndSupplier"
                     checked={clientFormState.isClientAndSupplier}
                     onChange={handleClientFormChange}
-                    disabled={!clientPermissions.canEdit}
+                    disabled={!canEditClientProfile}
                     className="mt-1 h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 disabled:opacity-60"
                   />
                   <span>
@@ -6130,7 +6195,7 @@ export function ClientDetail({
                         legalEntityId: "",
                       }))
                     }
-                    disabled={!clientPermissions.canEdit}
+                    disabled={!canEditClientProfile}
                     className={`rounded-lg border px-3 py-2 text-sm ${clientFormState.kind === "individual" ? "border-emerald-500 bg-emerald-50 text-emerald-700" : "border-gray-300 bg-white text-gray-700"} disabled:bg-gray-100`}
                   >
                     Физическое лицо
@@ -6140,7 +6205,7 @@ export function ClientDetail({
                     onClick={() =>
                       setClientFormState((prev) => ({ ...prev, kind: "legal" }))
                     }
-                    disabled={!clientPermissions.canEdit}
+                    disabled={!canEditClientProfile}
                     className={`rounded-lg border px-3 py-2 text-sm ${clientFormState.kind === "legal" ? "border-emerald-500 bg-emerald-50 text-emerald-700" : "border-gray-300 bg-white text-gray-700"} disabled:bg-gray-100`}
                   >
                     Юридическое лицо
@@ -6161,7 +6226,7 @@ export function ClientDetail({
                         value={clientFormState.lastName}
                         onChange={handleClientFormChange}
                         required
-                        disabled={!clientPermissions.canEdit}
+                        disabled={!canEditClientProfile}
                         className={`w-full px-3 py-2 border rounded-lg focus:ring-2 disabled:bg-gray-100 ${requiredInputClass("LastName", clientFormState.lastName)}`}
                       />
                     </div>
@@ -6175,7 +6240,7 @@ export function ClientDetail({
                         value={clientFormState.firstName}
                         onChange={handleClientFormChange}
                         required
-                        disabled={!clientPermissions.canEdit}
+                        disabled={!canEditClientProfile}
                         className={`w-full px-3 py-2 border rounded-lg focus:ring-2 disabled:bg-gray-100 ${requiredInputClass("FirstName", clientFormState.firstName)}`}
                       />
                     </div>
@@ -6188,7 +6253,7 @@ export function ClientDetail({
                         name="middleName"
                         value={clientFormState.middleName}
                         onChange={handleClientFormChange}
-                        disabled={!clientPermissions.canEdit}
+                        disabled={!canEditClientProfile}
                         className={`w-full px-3 py-2 border rounded-lg focus:ring-2 disabled:bg-gray-100 ${requiredInputClass("MiddleName", clientFormState.middleName)}`}
                       />
                     </div>
@@ -6200,7 +6265,7 @@ export function ClientDetail({
                         name="gender"
                         value={clientFormState.gender}
                         onChange={handleClientFormChange}
-                        disabled={!clientPermissions.canEdit}
+                        disabled={!canEditClientProfile}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
                       >
                         <option value="">Не указан</option>
@@ -6220,7 +6285,7 @@ export function ClientDetail({
                         name="inn"
                         value={clientFormState.inn}
                         onChange={handleClientFormChange}
-                        disabled={!clientPermissions.canEdit}
+                        disabled={!canEditClientProfile}
                         className={`w-full px-3 py-2 border rounded-lg focus:ring-2 disabled:bg-gray-100 ${requiredInputClass("Inn", clientFormState.inn)}`}
                       />
                     </div>
@@ -6233,7 +6298,7 @@ export function ClientDetail({
                         name="snils"
                         value={clientFormState.snils}
                         onChange={handleClientFormChange}
-                        disabled={!clientPermissions.canEdit}
+                        disabled={!canEditClientProfile}
                         className={`w-full px-3 py-2 border rounded-lg focus:ring-2 disabled:bg-gray-100 ${requiredInputClass("Snils", clientFormState.snils)}`}
                       />
                     </div>
@@ -6246,7 +6311,7 @@ export function ClientDetail({
                         name="birthDate"
                         value={clientFormState.birthDate}
                         onChange={handleClientFormChange}
-                        disabled={!clientPermissions.canEdit}
+                        disabled={!canEditClientProfile}
                         className={DATE_INPUT_CLASS}
                       />
                     </div>
@@ -6258,7 +6323,7 @@ export function ClientDetail({
                         name="maritalStatus"
                         value={clientFormState.maritalStatus}
                         onChange={handleClientFormChange}
-                        disabled={!clientPermissions.canEdit}
+                        disabled={!canEditClientProfile}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
                       >
                         <option value="">Не указано</option>
@@ -6379,7 +6444,7 @@ export function ClientDetail({
                     <button
                       type="button"
                       onClick={openLegalEntityCreateModal}
-                      disabled={!clientPermissions.canEdit}
+                      disabled={!canEditClientProfile}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       <Plus className="h-4 w-4" />
@@ -6388,7 +6453,7 @@ export function ClientDetail({
                     <button
                       type="button"
                       onClick={() => void openLegalEntityEditModal()}
-                      disabled={!clientPermissions.canEdit || !selectedLegalEntity}
+                      disabled={!canEditClientProfile || !selectedLegalEntity}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       <Edit className="h-4 w-4" />
@@ -6404,7 +6469,7 @@ export function ClientDetail({
                     onChange={(event) =>
                       setLegalEntityLookupSearch(event.target.value)
                     }
-                    disabled={!clientPermissions.canEdit}
+                    disabled={!canEditClientProfile}
                     placeholder="Поиск по названию, ИНН, КПП или ОГРН"
                     aria-label="Поиск юридического лица клиента"
                     className="mb-2 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
@@ -6413,7 +6478,7 @@ export function ClientDetail({
                     name="legalEntityId"
                     value={clientFormState.legalEntityId}
                     onChange={handleClientFormChange}
-                    disabled={!clientPermissions.canEdit}
+                    disabled={!canEditClientProfile}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
                   >
                     <option value="">Выберите юридическое лицо</option>
@@ -6437,7 +6502,7 @@ export function ClientDetail({
                         setLegalEntityDraft({ shortName: "", inn: "" });
                         setLegalEntityPromptOpen(true);
                       }}
-                      disabled={!clientPermissions.canEdit}
+                      disabled={!canEditClientProfile}
                       className="inline-flex items-center justify-center rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       Быстрое создание
@@ -6462,7 +6527,7 @@ export function ClientDetail({
                 activeProfileGroup === "passports" && (
                   <ClientPassportEntriesForm
                     entries={clientFormState.passportEntries}
-                    canEdit={clientPermissions.canEdit}
+                    canEdit={canEditClientProfile}
                     dateInputClassName={DATE_INPUT_CLASS}
                     onUpdateEntry={updatePassportEntry}
                     onRemoveEntry={removePassportEntry}
@@ -6474,7 +6539,7 @@ export function ClientDetail({
                 activeProfileGroup === "addresses" && (
                   <ClientAddressEntriesForm
                     entries={clientFormState.addressEntries}
-                    canEdit={clientPermissions.canEdit}
+                    canEdit={canEditClientProfile}
                     addressTypeOptions={ADDRESS_TYPE_OPTIONS}
                     suggestionsByIndex={addressSuggestionsByIndex}
                     onUpdateEntry={updateAddressFormEntry}
@@ -6514,7 +6579,7 @@ export function ClientDetail({
                                     event.target.value,
                                   )
                                 }
-                                disabled={!clientPermissions.canEdit}
+                                disabled={!canEditClientProfile}
                                 className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
                               />
                               <button
@@ -6522,7 +6587,7 @@ export function ClientDetail({
                                 onClick={() => {
                                   void removeListFieldRow(field, index);
                                 }}
-                                disabled={!clientPermissions.canEdit}
+                                disabled={!canEditClientProfile}
                                 className={PROFILE_DELETE_ICON_BUTTON_CLASS}
                                 title={
                                   field === "phones"
@@ -6542,7 +6607,7 @@ export function ClientDetail({
                           <button
                             type="button"
                             onClick={() => addListFieldRow(field)}
-                            disabled={!clientPermissions.canEdit}
+                            disabled={!canEditClientProfile}
                             className="text-sm text-emerald-600"
                           >
                             + Добавить
@@ -6576,7 +6641,7 @@ export function ClientDetail({
                                 )
                               }
                               placeholder="Учебное заведение"
-                              disabled={!clientPermissions.canEdit}
+                              disabled={!canEditClientProfile}
                               className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4"
                             />
                             <input
@@ -6589,7 +6654,7 @@ export function ClientDetail({
                                 )
                               }
                               placeholder="Специальность"
-                              disabled={!clientPermissions.canEdit}
+                              disabled={!canEditClientProfile}
                               className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3"
                             />
                             <input
@@ -6602,7 +6667,7 @@ export function ClientDetail({
                                 )
                               }
                               placeholder="№ диплома"
-                              disabled={!clientPermissions.canEdit}
+                              disabled={!canEditClientProfile}
                               className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-2"
                             />
                             <input
@@ -6616,7 +6681,7 @@ export function ClientDetail({
                               }
                               placeholder="Код ОКСО"
                               list="okso-codes"
-                              disabled={!clientPermissions.canEdit}
+                              disabled={!canEditClientProfile}
                               className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-2"
                             />
                             <div className="flex items-center justify-end md:col-span-1">
@@ -6625,7 +6690,7 @@ export function ClientDetail({
                                 onClick={() => {
                                   void removeEducation(index);
                                 }}
-                                disabled={!clientPermissions.canEdit}
+                                disabled={!canEditClientProfile}
                                 className={PROFILE_DELETE_ICON_BUTTON_CLASS}
                                 title="Удалить образование"
                                 aria-label="Удалить образование"
@@ -6647,7 +6712,7 @@ export function ClientDetail({
                             ],
                           }))
                         }
-                        disabled={!clientPermissions.canEdit}
+                        disabled={!canEditClientProfile}
                         className="text-sm text-emerald-600"
                       >
                         + Добавить образование
@@ -6694,7 +6759,7 @@ export function ClientDetail({
                                 )
                               }
                               placeholder="Профессия"
-                              disabled={!clientPermissions.canEdit}
+                              disabled={!canEditClientProfile}
                               className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-7"
                             />
                             <input
@@ -6708,7 +6773,7 @@ export function ClientDetail({
                               }
                               placeholder="Код ОКПДТР"
                               list="okpdtr-codes"
-                              disabled={!clientPermissions.canEdit}
+                              disabled={!canEditClientProfile}
                               className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4"
                             />
                             <div className="flex items-center justify-end md:col-span-1">
@@ -6717,7 +6782,7 @@ export function ClientDetail({
                                 onClick={() => {
                                   void removeProfession(index);
                                 }}
-                                disabled={!clientPermissions.canEdit}
+                                disabled={!canEditClientProfile}
                                 className={PROFILE_DELETE_ICON_BUTTON_CLASS}
                                 title="Удалить профессию"
                                 aria-label="Удалить профессию"
@@ -6739,7 +6804,7 @@ export function ClientDetail({
                             ],
                           }))
                         }
-                        disabled={!clientPermissions.canEdit}
+                        disabled={!canEditClientProfile}
                         className="text-sm text-emerald-600"
                       >
                         + Добавить профессию
@@ -6771,7 +6836,7 @@ export function ClientDetail({
                                 )
                               }
                               placeholder="Организация"
-                              disabled={!clientPermissions.canEdit}
+                              disabled={!canEditClientProfile}
                               className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4"
                             />
                             <input
@@ -6784,7 +6849,7 @@ export function ClientDetail({
                                 )
                               }
                               placeholder="Должность"
-                              disabled={!clientPermissions.canEdit}
+                              disabled={!canEditClientProfile}
                               className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3"
                             />
                             <div className="md:col-span-2">
@@ -6798,7 +6863,7 @@ export function ClientDetail({
                                     e.target.value,
                                   )
                                 }
-                                disabled={!clientPermissions.canEdit}
+                                disabled={!canEditClientProfile}
                                 className={DATE_INPUT_CLASS}
                               />
                             </div>
@@ -6813,7 +6878,7 @@ export function ClientDetail({
                                     e.target.value,
                                   )
                                 }
-                                disabled={!clientPermissions.canEdit}
+                                disabled={!canEditClientProfile}
                                 className={DATE_INPUT_CLASS}
                               />
                             </div>
@@ -6823,7 +6888,7 @@ export function ClientDetail({
                                 onClick={() => {
                                   void removeWorkplace(index);
                                 }}
-                                disabled={!clientPermissions.canEdit}
+                                disabled={!canEditClientProfile}
                                 className={PROFILE_DELETE_ICON_BUTTON_CLASS}
                                 title="Удалить место работы"
                                 aria-label="Удалить место работы"
@@ -6845,14 +6910,14 @@ export function ClientDetail({
                             ],
                           }))
                         }
-                        disabled={!clientPermissions.canEdit}
+                        disabled={!canEditClientProfile}
                         className="text-sm text-emerald-600"
                       >
                         + Добавить место работы
                       </button>
                       <button
                         type="button"
-                        disabled={!clientPermissions.canEdit}
+                        disabled={!canEditClientProfile}
                         onClick={() => {
                           setLegalEntityPromptError(null);
                           setLegalEntityDraft({ shortName: "", inn: "" });
@@ -6889,7 +6954,7 @@ export function ClientDetail({
                                 )
                               }
                               placeholder="Степень родства"
-                              disabled={!clientPermissions.canEdit}
+                              disabled={!canEditClientProfile}
                               className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-2"
                             />
                             <input
@@ -6902,7 +6967,7 @@ export function ClientDetail({
                                 )
                               }
                               placeholder="ФИО"
-                              disabled={!clientPermissions.canEdit}
+                              disabled={!canEditClientProfile}
                               className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4"
                             />
                             <input
@@ -6915,7 +6980,7 @@ export function ClientDetail({
                                 )
                               }
                               placeholder="Год рождения"
-                              disabled={!clientPermissions.canEdit}
+                              disabled={!canEditClientProfile}
                               className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-2"
                             />
                             <input
@@ -6924,7 +6989,7 @@ export function ClientDetail({
                                 updateRelative(index, "phone", e.target.value)
                               }
                               placeholder="Номер телефона"
-                              disabled={!clientPermissions.canEdit}
+                              disabled={!canEditClientProfile}
                               inputMode="tel"
                               className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3"
                             />
@@ -6934,7 +6999,7 @@ export function ClientDetail({
                                 onClick={() => {
                                   void removeRelative(index);
                                 }}
-                                disabled={!clientPermissions.canEdit}
+                                disabled={!canEditClientProfile}
                                 className={PROFILE_DELETE_ICON_BUTTON_CLASS}
                                 title="Удалить родственника"
                                 aria-label="Удалить родственника"
@@ -6956,7 +7021,7 @@ export function ClientDetail({
                             ],
                           }))
                         }
-                        disabled={!clientPermissions.canEdit}
+                        disabled={!canEditClientProfile}
                         className="text-sm text-emerald-600"
                       >
                         + Добавить родственника
@@ -6976,7 +7041,7 @@ export function ClientDetail({
                         <button
                           type="button"
                           onClick={addBirthCertificateEntry}
-                          disabled={!clientPermissions.canEdit}
+                          disabled={!canEditClientProfile}
                           className="text-sm text-emerald-600"
                         >
                           + Добавить свидетельство
@@ -7000,7 +7065,7 @@ export function ClientDetail({
                                     )
                                   }
                                   placeholder="Серия"
-                                  disabled={!clientPermissions.canEdit}
+                                  disabled={!canEditClientProfile}
                                   className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3"
                                 />
                                 <input
@@ -7013,7 +7078,7 @@ export function ClientDetail({
                                     )
                                   }
                                   placeholder="Номер"
-                                  disabled={!clientPermissions.canEdit}
+                                  disabled={!canEditClientProfile}
                                   className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3"
                                 />
                                 <div className="md:col-span-5">
@@ -7027,7 +7092,7 @@ export function ClientDetail({
                                         e.target.value,
                                       )
                                     }
-                                    disabled={!clientPermissions.canEdit}
+                                    disabled={!canEditClientProfile}
                                     className={DATE_INPUT_CLASS}
                                   />
                                 </div>
@@ -7037,7 +7102,7 @@ export function ClientDetail({
                                     onClick={() => {
                                       void removeBirthCertificateEntry(index);
                                     }}
-                                    disabled={!clientPermissions.canEdit}
+                                    disabled={!canEditClientProfile}
                                     className={PROFILE_DELETE_ICON_BUTTON_CLASS}
                                     title="Удалить свидетельство о рождении"
                                     aria-label="Удалить свидетельство о рождении"
@@ -7055,7 +7120,7 @@ export function ClientDetail({
                                     )
                                   }
                                   placeholder="№ актовой записи"
-                                  disabled={!clientPermissions.canEdit}
+                                  disabled={!canEditClientProfile}
                                   className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4"
                                 />
                                 <input
@@ -7068,7 +7133,7 @@ export function ClientDetail({
                                     )
                                   }
                                   placeholder="ФИО ребенка"
-                                  disabled={!clientPermissions.canEdit}
+                                  disabled={!canEditClientProfile}
                                   className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-8"
                                 />
                                 <input
@@ -7081,7 +7146,7 @@ export function ClientDetail({
                                     )
                                   }
                                   placeholder="Кем выдано"
-                                  disabled={!clientPermissions.canEdit}
+                                  disabled={!canEditClientProfile}
                                   className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-12"
                                 />
                               </div>
@@ -7104,7 +7169,7 @@ export function ClientDetail({
                         <button
                           type="button"
                           onClick={addMilitaryIdEntry}
-                          disabled={!clientPermissions.canEdit}
+                          disabled={!canEditClientProfile}
                           className="text-sm text-emerald-600"
                         >
                           + Добавить военный билет
@@ -7127,7 +7192,7 @@ export function ClientDetail({
                                   )
                                 }
                                 placeholder="Серия"
-                                disabled={!clientPermissions.canEdit}
+                                disabled={!canEditClientProfile}
                                 className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3"
                               />
                               <input
@@ -7140,7 +7205,7 @@ export function ClientDetail({
                                   )
                                 }
                                 placeholder="Номер"
-                                disabled={!clientPermissions.canEdit}
+                                disabled={!canEditClientProfile}
                                 className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3"
                               />
                               <div className="md:col-span-5">
@@ -7154,7 +7219,7 @@ export function ClientDetail({
                                       e.target.value,
                                     )
                                   }
-                                  disabled={!clientPermissions.canEdit}
+                                  disabled={!canEditClientProfile}
                                   className={DATE_INPUT_CLASS}
                                 />
                               </div>
@@ -7164,7 +7229,7 @@ export function ClientDetail({
                                   onClick={() => {
                                     void removeMilitaryIdEntry(index);
                                   }}
-                                  disabled={!clientPermissions.canEdit}
+                                  disabled={!canEditClientProfile}
                                   className={PROFILE_DELETE_ICON_BUTTON_CLASS}
                                   title="Удалить военный билет"
                                   aria-label="Удалить военный билет"
@@ -7182,7 +7247,7 @@ export function ClientDetail({
                                   )
                                 }
                                 placeholder="Воинское звание"
-                                disabled={!clientPermissions.canEdit}
+                                disabled={!canEditClientProfile}
                                 className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4"
                               />
                               <input
@@ -7195,7 +7260,7 @@ export function ClientDetail({
                                   )
                                 }
                                 placeholder="Категория запаса"
-                                disabled={!clientPermissions.canEdit}
+                                disabled={!canEditClientProfile}
                                 className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4"
                               />
                               <input
@@ -7208,7 +7273,7 @@ export function ClientDetail({
                                   )
                                 }
                                 placeholder="Категория годности"
-                                disabled={!clientPermissions.canEdit}
+                                disabled={!canEditClientProfile}
                                 className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-4"
                               />
                               <input
@@ -7221,7 +7286,7 @@ export function ClientDetail({
                                   )
                                 }
                                 placeholder="Код ВУС"
-                                disabled={!clientPermissions.canEdit}
+                                disabled={!canEditClientProfile}
                                 className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-12"
                               />
                               <input
@@ -7234,7 +7299,7 @@ export function ClientDetail({
                                   )
                                 }
                                 placeholder="Кем выдан"
-                                disabled={!clientPermissions.canEdit}
+                                disabled={!canEditClientProfile}
                                 className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-12"
                               />
                               <input
@@ -7247,7 +7312,7 @@ export function ClientDetail({
                                   )
                                 }
                                 placeholder="Военный комиссариат"
-                                disabled={!clientPermissions.canEdit}
+                                disabled={!canEditClientProfile}
                                 className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-12"
                               />
                             </div>
@@ -7267,7 +7332,7 @@ export function ClientDetail({
                       </label>
                       <button
                         type="button"
-                        disabled={!clientPermissions.canEdit}
+                        disabled={!canEditClientProfile}
                         onClick={openCreatePoaPrompt}
                         className="text-sm text-emerald-600"
                       >
@@ -7308,7 +7373,7 @@ export function ClientDetail({
                                   <button
                                     type="button"
                                     onClick={() => openEditPoaPrompt(poa)}
-                                    disabled={!clientPermissions.canEdit}
+                                    disabled={!canEditClientProfile}
                                     className={
                                       PROFILE_SECONDARY_ICON_BUTTON_CLASS
                                     }
@@ -7322,7 +7387,7 @@ export function ClientDetail({
                                     onClick={() =>
                                       void deletePowerOfAttorney(poa)
                                     }
-                                    disabled={!clientPermissions.canEdit}
+                                    disabled={!canEditClientProfile}
                                     className={PROFILE_DELETE_ICON_BUTTON_CLASS}
                                     title="Удалить доверенность"
                                     aria-label="Удалить доверенность"
@@ -7350,7 +7415,7 @@ export function ClientDetail({
                     value={clientFormState.comment}
                     onChange={handleClientFormChange}
                     rows={3}
-                    disabled={!clientPermissions.canEdit}
+                    disabled={!canEditClientProfile}
                     className={`w-full px-3 py-2 border rounded-lg focus:ring-2 disabled:bg-gray-100 ${requiredInputClass("Comment", clientFormState.comment)}`}
                     placeholder={t("additionalInfo")}
                   />
@@ -7364,7 +7429,7 @@ export function ClientDetail({
                     value={clientFormState.legacyNotes}
                     onChange={handleClientFormChange}
                     rows={3}
-                    disabled={!clientPermissions.canEdit}
+                    disabled={!canEditClientProfile}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
                     placeholder={t("notes") || "Заметки"}
                   />
@@ -7376,7 +7441,7 @@ export function ClientDetail({
                   name="isActive"
                   checked={clientFormState.isActive}
                   onChange={handleClientFormChange}
-                  disabled={!clientPermissions.canEdit}
+                  disabled={!canEditClientProfile}
                   className="h-4 w-4 text-emerald-600 focus:ring-emerald-500 border-gray-300 rounded"
                   id="client-detail-is-active"
                 />
@@ -7387,10 +7452,11 @@ export function ClientDetail({
                   {t("activeClient")}
                 </label>
               </div>
-              <div className="md:col-span-2 flex flex-wrap items-center gap-3">
+              {clientProfileEditing ? (
+                <div className="md:col-span-2 flex flex-wrap items-center gap-3">
                 <button
                   type="submit"
-                  disabled={!clientPermissions.canEdit || clientFormSaving}
+                  disabled={!canEditClientProfile || clientFormSaving}
                   className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:opacity-60"
                 >
                   {clientFormSaving
@@ -7405,7 +7471,8 @@ export function ClientDetail({
                 >
                   {t("delete") ?? "Удалить"}
                 </button>
-              </div>
+                </div>
+              ) : null}
             </form>
           </div>
         ) : activeSection === "payments" ? (

@@ -665,6 +665,48 @@ describe('ClientDetail integration', () => {
     }));
   });
 
+  it('opens the client profile in readonly mode until editing is requested', async () => {
+    const user = userEvent.setup();
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+
+    const lastNameInput = await screen.findByDisplayValue('Иванов');
+    expect((lastNameInput as HTMLInputElement).disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Сохранить' })).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Редактировать' }));
+
+    expect((lastNameInput as HTMLInputElement).disabled).toBe(false);
+    await user.clear(lastNameInput);
+    await user.type(lastNameInput, 'Петров');
+    expect(screen.getByDisplayValue('Петров')).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: 'Отмена' }));
+
+    await waitFor(() => {
+      expect((screen.getByDisplayValue('Иванов') as HTMLInputElement).disabled).toBe(true);
+    });
+    expect(screen.queryByDisplayValue('Петров')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Сохранить' })).toBeNull();
+  });
+
+  it('shows compact labels under client quick action buttons', async () => {
+    Object.assign(permissionsResult.clients, { canCreate: true });
+    Object.assign(permissionsResult.accounts, { canCreate: true });
+    Object.assign(permissionsResult.acts, { canCreate: true });
+    Object.assign(permissionsResult.contracts, { canCreate: true });
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+
+    await screen.findByRole('heading', { name: 'Карточка клиента' });
+
+    expect(screen.getByRole('button', { name: 'Добавить дело' }).parentElement?.textContent).toContain('Дела');
+    expect(screen.getByRole('button', { name: 'Добавить платёж' }).parentElement?.textContent).toContain('Платежи');
+    expect(screen.getByRole('button', { name: 'Добавить счёт' }).parentElement?.textContent).toContain('Счета');
+    expect(screen.getByRole('button', { name: 'Добавить акт' }).parentElement?.textContent).toContain('Акты');
+    expect(screen.getByRole('button', { name: 'Добавить договор' }).parentElement?.textContent).toContain('Договоры');
+  });
+
   it('opens balance journal and audit from compact header actions', async () => {
     const user = userEvent.setup();
     vi.mocked(apiService.getClientBalance).mockResolvedValue({ clientId: 1, balance: 750 });
@@ -770,6 +812,7 @@ describe('ClientDetail integration', () => {
     });
     expect(screen.getByText(/ООО Ромашка/)).toBeTruthy();
 
+    await user.click(screen.getByRole('button', { name: 'Редактировать' }));
     await user.type(screen.getByLabelText('Поиск юридического лица клиента'), 'ром');
 
     await waitFor(() => {
@@ -787,6 +830,7 @@ describe('ClientDetail integration', () => {
     render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
 
     await screen.findByDisplayValue('Иванов');
+    await user.click(screen.getByRole('button', { name: 'Редактировать' }));
 
     expect(await screen.findByRole('button', { name: 'Удалить телефон' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Удалить email' })).toBeTruthy();
@@ -854,6 +898,7 @@ describe('ClientDetail integration', () => {
     render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
 
     await screen.findByDisplayValue('Иванов');
+    await user.click(screen.getByRole('button', { name: 'Редактировать' }));
     await user.click(screen.getByRole('button', { name: 'Доверенности' }));
 
     expect(await screen.findByText('Кем выдана: Старый нотариус')).toBeTruthy();
@@ -933,6 +978,7 @@ describe('ClientDetail integration', () => {
     render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
 
     await screen.findByDisplayValue('Иванов');
+    await user.click(screen.getByRole('button', { name: 'Редактировать' }));
     await user.click(screen.getByRole('button', { name: 'Паспорта' }));
     await user.click(screen.getByRole('button', { name: 'Сохранить' }));
 
