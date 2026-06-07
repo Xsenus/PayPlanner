@@ -259,6 +259,7 @@ async function renderJournal(
     assignees?: TaskJournalAssignee[];
     withRoute?: boolean;
     waitForTitle?: string | null;
+    periodMode?: 'day' | 'week' | 'month' | 'all';
     embedded?: boolean;
     contextFilter?: {
       clientId?: number | null;
@@ -289,6 +290,17 @@ async function renderJournal(
     caseInactivityEscalationDays: 30,
     caseInactivityEscalationUserId: null,
   });
+  const filterStorageKey = options.mode === 'approvals'
+    ? 'pp.task_journal.filters.v1.approvals.user:7'
+    : 'pp.task_journal.filters.v1.user:7';
+  if (!window.localStorage.getItem(filterStorageKey)) {
+    window.localStorage.setItem(filterStorageKey, JSON.stringify({
+      quickFilter: 'all',
+      viewMode: options.initialView ?? 'list',
+      periodMode: options.periodMode ?? 'all',
+      statusFilter: 'active',
+    }));
+  }
 
   function RoutedJournal() {
     const [routeTaskId, setRouteTaskId] = useState<number | null>(null);
@@ -1118,7 +1130,7 @@ describe('TaskJournal', () => {
       createTask({ id: 102, title: 'Same week task', dueAt: dateAt(sameWeekDate) }),
       createTask({ id: 103, title: 'Same month task', dueAt: dateAt(sameMonthDate) }),
       createTask({ id: 104, title: 'Next month task', dueAt: dateAt(nextMonthDate) }),
-    ]);
+    ], { periodMode: 'day' });
 
     expect(screen.getByText('Today task')).toBeTruthy();
     expect(screen.queryByText('Same week task')).toBeNull();
@@ -2184,7 +2196,7 @@ describe('TaskJournal', () => {
         title: 'Profile timezone task',
         dueAt,
       }),
-    ], { initialView: 'calendar' });
+    ], { initialView: 'calendar', periodMode: 'day' });
 
     const profileDay = await screen.findByTestId(`task-calendar-day-${profileDateKey}`);
     expect(profileDay.className).toContain('border-blue-300');
