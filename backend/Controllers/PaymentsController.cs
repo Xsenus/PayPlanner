@@ -465,6 +465,8 @@ public class PaymentsController : ControllerBase
         var originalStatus = e.Status;
         var originalRescheduleCount = Math.Max(0, e.RescheduleCount);
         var originalSystemNotes = e.SystemNotes ?? string.Empty;
+        var originalDescription = e.Description;
+        var originalNotes = e.Notes;
 
         if (e.PlannedDate == default)
         {
@@ -525,6 +527,11 @@ public class PaymentsController : ControllerBase
         e.LegacyAccountNumber = immutableLegacyAccountNumber;
         e.LegacyAccountDate = immutableLegacyAccountDate;
         e.Type = immutableType;
+        if (e.DocumentKind == DocumentKind.Invoice)
+        {
+            e.Description = originalDescription;
+            e.Notes = originalNotes;
+        }
 
         await SyncInvoiceManagedPaymentBindingsAsync(e, ct);
         await PopulateMissingExpenseAttributionFromCaseAsync(e, ct);
@@ -869,6 +876,8 @@ public class PaymentsController : ControllerBase
         var originalRescheduleCount = Math.Max(0, source.RescheduleCount);
         var originalSystemNotes = source.SystemNotes ?? string.Empty;
         var originalInvoiceId = source.InvoiceId;
+        var originalDescription = source.Description;
+        var originalNotes = source.Notes;
 
         if (source.PlannedDate == default)
         {
@@ -921,6 +930,12 @@ public class PaymentsController : ControllerBase
             source.LegacyAccountNumber = immutableLegacyAccountNumber;
             source.LegacyAccountDate = immutableLegacyAccountDate;
             source.Type = immutableType;
+            if (source.DocumentKind == DocumentKind.Invoice)
+            {
+                source.Description = originalDescription;
+                source.Notes = originalNotes;
+            }
+
             await SyncInvoiceManagedPaymentBindingsAsync(source, ct);
         }
         else

@@ -1384,7 +1384,7 @@ public class PaymentsControllerTests
     }
 
     [Fact]
-    public async Task UpdateInvoiceManaged_UpdatesRepresentativeInvoicePayment_AndPreservesDocumentKind()
+    public async Task UpdateInvoiceManaged_UpdatesRepresentativeInvoicePayment_AndPreservesInvoiceComment()
     {
         await using var db = await CreateContextAsync();
         var invoice = await CreateInvoiceAggregateAsync(db);
@@ -1393,7 +1393,11 @@ public class PaymentsControllerTests
 
         var controller = new PaymentsController(db, new NoopFormRequirementsService());
         var paidDate = new DateTime(2026, 4, 15);
-        var model = CreatePayment(parentPayment!.Date, parentPayment.Amount, "Updated representative payment");
+        parentPayment!.Description = "Комментарий для клиента в счете";
+        parentPayment.Notes = "Акт №67 от 21.05.2026";
+        await db.SaveChangesAsync();
+
+        var model = CreatePayment(parentPayment.Date, parentPayment.Amount, "Комментарий по платежке");
         model.PlannedDate = parentPayment.PlannedDate;
         model.PaidAmount = parentPayment.Amount;
         model.PaidDate = paidDate;
@@ -1415,10 +1419,16 @@ public class PaymentsControllerTests
         Assert.Equal(DocumentKind.Invoice, updated.DocumentKind);
         Assert.Equal(invoice.InvoiceEntityId, updated.InvoiceId);
         Assert.Equal("30", updated.Account);
-        Assert.Equal("Updated representative payment", updated.Description);
+        Assert.Equal("Комментарий для клиента в счете", updated.Description);
+        Assert.Equal("Акт №67 от 21.05.2026", updated.Notes);
         Assert.Equal(PaymentStatus.Completed, updated.Status);
         Assert.True(updated.IsPaid);
         Assert.Equal(paidDate, updated.PaidDate);
+
+        db.ChangeTracker.Clear();
+        var stored = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == parentPayment.Id);
+        Assert.Equal("Комментарий для клиента в счете", stored.Description);
+        Assert.Equal("Акт №67 от 21.05.2026", stored.Notes);
     }
 
     [Fact]
