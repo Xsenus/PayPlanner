@@ -1122,16 +1122,17 @@ describe('TaskJournal', () => {
   it('applies day, week, month and full period buttons to the list view', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date('2026-06-03T13:30:00.000Z'));
-    const now = new Date();
-    const sameWeekDate = getSameWeekDateOutsideTodayForTest(now);
-    const sameMonthDate = getSameMonthDateOutsideCurrentWeekForTest(now);
-    const nextMonthDate = new Date(now.getFullYear(), now.getMonth() + 1, 10, 11, 0, 0, 0);
+    apiMock.getUserSetting.mockImplementation(async (key: string) => (
+      key === 'profile.timeZoneId'
+        ? { key, value: 'UTC' }
+        : null
+    ));
 
     await renderJournal([
-      createTask({ id: 101, title: 'Today task', dueAt: dateAt(now) }),
-      createTask({ id: 102, title: 'Same week task', dueAt: dateAt(sameWeekDate) }),
-      createTask({ id: 103, title: 'Same month task', dueAt: dateAt(sameMonthDate) }),
-      createTask({ id: 104, title: 'Next month task', dueAt: dateAt(nextMonthDate) }),
+      createTask({ id: 101, title: 'Today task', dueAt: fromTimeZoneDateTimeInput('2026-06-03T11:00', 'UTC') }),
+      createTask({ id: 102, title: 'Same week task', dueAt: fromTimeZoneDateTimeInput('2026-06-04T11:00', 'UTC') }),
+      createTask({ id: 103, title: 'Same month task', dueAt: fromTimeZoneDateTimeInput('2026-06-17T11:00', 'UTC') }),
+      createTask({ id: 104, title: 'Next month task', dueAt: fromTimeZoneDateTimeInput('2026-07-10T11:00', 'UTC') }),
     ], { periodMode: 'day', waitForTitle: null });
 
     expect(await screen.findByText('Today task')).toBeTruthy();
