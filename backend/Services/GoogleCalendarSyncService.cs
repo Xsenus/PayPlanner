@@ -40,6 +40,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
     private readonly IDataProtector _tokenProtector;
     private readonly IExternalCalendarSyncCoordinator? _externalCalendarSyncCoordinator;
     private readonly ILogger<GoogleCalendarSyncService> _logger;
+    private readonly HashSet<string> _calendarTimeZoneEnsured = [];
 
     public GoogleCalendarSyncService(
         PaymentContext db,
@@ -942,12 +943,13 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             : "PayPlanner задачи";
 
         var calendar = connection.Calendars.FirstOrDefault(item => item.OwnerUserId == ownerUserId);
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, ownerUserId ?? connection.UserId, cancellationToken);
         if (calendar is not null)
         {
+            await EnsureGoogleCalendarTimeZoneAsync(accessToken, calendar, timeZone, cancellationToken);
             return calendar;
         }
 
-        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, ownerUserId ?? connection.UserId, cancellationToken);
         var created = await CreateGoogleCalendarAsync(accessToken, name, timeZone, cancellationToken);
         calendar = new GoogleCalendarSyncCalendar
         {
@@ -988,6 +990,28 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             .OrderBy(item => item.DueAt)
             .Take(500)
             .ToListAsync(cancellationToken);
+    }
+
+    private async Task EnsureGoogleCalendarTimeZoneAsync(
+        string accessToken,
+        GoogleCalendarSyncCalendar calendar,
+        TimeZoneInfo timeZone,
+        CancellationToken cancellationToken)
+    {
+        var ianaTimeZoneId = CalendarTimeZoneHelper.ResolveIanaTimeZoneId(timeZone);
+        var ensureKey = $"{calendar.GoogleCalendarId}|{ianaTimeZoneId}";
+        if (!_calendarTimeZoneEnsured.Add(ensureKey))
+        {
+            return;
+        }
+
+        var payload = JsonSerializer.Serialize(new { timeZone = ianaTimeZoneId }, JsonOptions);
+        using var request = BuildGoogleRequest(
+            HttpMethod.Patch,
+            $"{GoogleApiBaseUrl}/calendars/{Uri.EscapeDataString(calendar.GoogleCalendarId)}",
+            accessToken,
+            payload);
+        await SendGoogleJsonAsync(request, cancellationToken);
     }
 
     private async Task<TimeZoneInfo> ResolveTaskTimeZoneAsync(

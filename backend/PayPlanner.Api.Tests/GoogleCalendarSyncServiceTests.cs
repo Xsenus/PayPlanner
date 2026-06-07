@@ -229,6 +229,35 @@ public class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncNowAsync_UpdatesExistingGoogleCalendarTimeZoneFromProfile()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-google-existing-timezone@example.com", "user");
+        await EnableGoogleSettingsAsync(db);
+        await SetUserTimeZoneAsync(db, user.Id, "Asia/Krasnoyarsk");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        await CreateCalendarAsync(db, connection.Id, "google-existing-timezone-calendar", "PayPlanner tasks");
+        await CreateTaskAsync(
+            db,
+            user.Id,
+            "Existing calendar should receive profile timezone",
+            dueAt: new DateTime(2026, 6, 4, 8, 30, 0, DateTimeKind.Utc));
+        var handler = new RecordingGoogleHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        var result = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+
+        Assert.Equal(1, result.ProcessedTasks);
+        Assert.Equal(0, result.ErrorCount);
+        var patchCalendarRequest = handler.Requests.Single(request =>
+            request.Method == HttpMethod.Patch &&
+            request.RequestUri!.AbsolutePath.EndsWith("/calendars/google-existing-timezone-calendar", StringComparison.Ordinal));
+        var patchBody = await patchCalendarRequest.Content!.ReadAsStringAsync();
+        using var document = JsonDocument.Parse(patchBody);
+        Assert.Equal("Asia/Krasnoyarsk", document.RootElement.GetProperty("timeZone").GetString());
+    }
+
+    [Fact]
     public async Task SyncNowAsync_UsesGoogleColorForCompletedTasksWhenColorModeEnabled()
     {
         await using var db = await CreateContextAsync();
@@ -929,6 +958,11 @@ public class GoogleCalendarSyncServiceTests
             if (path.EndsWith("/calendars", StringComparison.Ordinal) && request.Method == HttpMethod.Post)
             {
                 return Task.FromResult(Json(new { id = $"calendar-{Requests.Count}" }));
+            }
+
+            if (request.Method == HttpMethod.Patch && path.Contains("/calendar/v3/calendars", StringComparison.Ordinal))
+            {
+                return Task.FromResult(Json(new { id = path.Split('/').Last(), timeZone = "updated" }));
             }
 
             if (path.Contains("/events", StringComparison.Ordinal) && request.Method == HttpMethod.Get)

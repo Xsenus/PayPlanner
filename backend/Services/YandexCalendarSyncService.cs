@@ -39,6 +39,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
     private readonly IDataProtector _tokenProtector;
     private readonly IExternalCalendarSyncCoordinator? _externalCalendarSyncCoordinator;
     private readonly ILogger<YandexCalendarSyncService> _logger;
+    private readonly HashSet<string> _calendarTimeZoneEnsured = [];
 
     public YandexCalendarSyncService(
         PaymentContext db,
@@ -888,12 +889,14 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             : "PayPlanner задачи";
 
         var calendar = connection.Calendars.FirstOrDefault(item => item.OwnerUserId == ownerUserId);
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, ownerUserId ?? connection.UserId, cancellationToken);
         if (calendar is not null)
         {
+            await EnsureYandexCalendarTimeZoneAsync(accessToken, calendar, timeZone, cancellationToken);
             return calendar;
         }
 
-        var created = await CreateYandexCalendarAsync(accessToken, connection, name, ownerUserId, cancellationToken);
+        var created = await CreateYandexCalendarAsync(accessToken, connection, name, ownerUserId, timeZone, cancellationToken);
         calendar = new YandexCalendarSyncCalendar
         {
             ConnectionId = connection.Id,
@@ -934,6 +937,35 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             .OrderBy(item => item.DueAt)
             .Take(500)
             .ToListAsync(cancellationToken);
+    }
+
+    private async Task EnsureYandexCalendarTimeZoneAsync(
+        string accessToken,
+        YandexCalendarSyncCalendar calendar,
+        TimeZoneInfo timeZone,
+        CancellationToken cancellationToken)
+    {
+        var ianaTimeZoneId = CalendarTimeZoneHelper.ResolveIanaTimeZoneId(timeZone);
+        var ensureKey = $"{calendar.CalendarUrl}|{ianaTimeZoneId}";
+        if (!_calendarTimeZoneEnsured.Add(ensureKey))
+        {
+            return;
+        }
+
+        var body = BuildYandexCalendarTimeZonePropertyBody(timeZone);
+        var request = BuildYandexRequest(new HttpMethod("PROPPATCH"), calendar.CalendarUrl, accessToken, body, "application/xml; charset=utf-8");
+        var client = _httpClientFactory.CreateClient();
+        using var response = await client.SendAsync(request, cancellationToken);
+        if (response.StatusCode is HttpStatusCode.OK or HttpStatusCode.NoContent or (HttpStatusCode)207)
+        {
+            return;
+        }
+
+        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(ReadProviderError(payload, response.ReasonPhrase) ?? "Яндекс.Календарь не обновил часовой пояс календаря.");
+        }
     }
 
     private async Task<TimeZoneInfo> ResolveTaskTimeZoneAsync(
@@ -1303,12 +1335,14 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         YandexCalendarConnection connection,
         string name,
         int? ownerUserId,
+        TimeZoneInfo timeZone,
         CancellationToken cancellationToken)
     {
         var email = NormalizeOptional(connection.YandexEmail)
             ?? throw new InvalidOperationException("Для Яндекс.Календаря не определён email пользователя.");
         var slug = $"payplanner-{(ownerUserId.HasValue ? $"user-{ownerUserId.Value}" : "tasks")}";
         var url = $"{CalDavBaseUrl}/calendars/{Uri.EscapeDataString(email)}/{slug}/";
+        var calendarTimeZone = BuildCalendarTimeZoneIcs(timeZone);
         var body = $"""
 <?xml version="1.0" encoding="utf-8" ?>
 <C:mkcalendar xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
@@ -1316,6 +1350,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
     <D:prop>
       <D:displayname>{WebUtility.HtmlEncode(name)}</D:displayname>
       <C:calendar-description>{WebUtility.HtmlEncode("PayPlanner CRM")}</C:calendar-description>
+      <C:calendar-timezone>{WebUtility.HtmlEncode(calendarTimeZone)}</C:calendar-timezone>
     </D:prop>
   </D:set>
 </C:mkcalendar>
@@ -1504,6 +1539,55 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             "END:VCALENDAR",
             string.Empty,
         ]);
+    }
+
+    private static string BuildYandexCalendarTimeZonePropertyBody(TimeZoneInfo timeZone)
+    {
+        var calendarTimeZone = BuildCalendarTimeZoneIcs(timeZone);
+        return $"""
+<?xml version="1.0" encoding="utf-8" ?>
+<D:propertyupdate xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:set>
+    <D:prop>
+      <C:calendar-timezone>{WebUtility.HtmlEncode(calendarTimeZone)}</C:calendar-timezone>
+    </D:prop>
+  </D:set>
+</D:propertyupdate>
+""";
+    }
+
+    private static string BuildCalendarTimeZoneIcs(TimeZoneInfo timeZone)
+    {
+        var timeZoneId = CalendarTimeZoneHelper.ResolveIanaTimeZoneId(timeZone);
+        var utcNow = DateTime.UtcNow;
+        var localNow = CalendarTimeZoneHelper.ToUserLocal(utcNow, timeZone);
+        var offset = timeZone.GetUtcOffset(localNow);
+        var offsetText = FormatIcsUtcOffset(offset);
+        return string.Join("\r\n", [
+            "BEGIN:VCALENDAR",
+            "VERSION:2.0",
+            "PRODID:-//PayPlanner//CRM Calendar Sync//RU",
+            "BEGIN:VTIMEZONE",
+            $"TZID:{EscapeIcs(timeZoneId)}",
+            "BEGIN:STANDARD",
+            "DTSTART:19700101T000000",
+            $"TZOFFSETFROM:{offsetText}",
+            $"TZOFFSETTO:{offsetText}",
+            $"TZNAME:{EscapeIcs(timeZoneId)}",
+            "END:STANDARD",
+            "END:VTIMEZONE",
+            "END:VCALENDAR",
+            string.Empty,
+        ]);
+    }
+
+    private static string FormatIcsUtcOffset(TimeSpan offset)
+    {
+        var sign = offset < TimeSpan.Zero ? "-" : "+";
+        var absolute = offset.Duration();
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"{sign}{absolute.Hours:00}{absolute.Minutes:00}");
     }
 
     private static string BuildEventUrl(string calendarUrl, string eventId)

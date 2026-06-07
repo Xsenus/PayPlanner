@@ -198,6 +198,11 @@ public class YandexCalendarSyncServiceTests
         Assert.Equal(0, result.ErrorCount);
         var calendar = await db.YandexCalendarSyncCalendars.SingleAsync(item => item.ConnectionId == connection.Id);
         Assert.Equal(assignee.Id, calendar.OwnerUserId);
+        var createCalendarRequest = handler.Requests.Single(request =>
+            string.Equals(request.Method.Method, "MKCALENDAR", StringComparison.Ordinal));
+        var createCalendarBody = await createCalendarRequest.Content!.ReadAsStringAsync();
+        Assert.Contains("<C:calendar-timezone>", createCalendarBody);
+        Assert.Contains("TZID:Asia/Kamchatka", WebUtility.HtmlDecode(createCalendarBody));
         var putRequest = handler.Requests.Single(request => request.Method == HttpMethod.Put);
         var body = await putRequest.Content!.ReadAsStringAsync();
         Assert.Contains("DTSTART:20260604T113000Z", body);
@@ -614,6 +619,14 @@ END:VCALENDAR
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Created)
                 {
                     Content = new StringContent(string.Empty, Encoding.UTF8, "text/plain"),
+                });
+            }
+
+            if (string.Equals(request.Method.Method, "PROPPATCH", StringComparison.Ordinal))
+            {
+                return Task.FromResult(new HttpResponseMessage((HttpStatusCode)207)
+                {
+                    Content = new StringContent(string.Empty, Encoding.UTF8, "application/xml"),
                 });
             }
 
