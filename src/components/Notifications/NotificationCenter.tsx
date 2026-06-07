@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
   Bell,
@@ -134,10 +134,12 @@ export function NotificationCenter({ onOpenTask, onOpenCase }: NotificationCente
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [preferences, setPreferences] = useState<UserNotificationTypePreferences>(DEFAULT_USER_NOTIFICATION_TYPE_PREFERENCES);
   const [preferencesLoading, setPreferencesLoading] = useState(false);
   const [preferencesSaving, setPreferencesSaving] = useState(false);
+  const pageSelectionRef = useRef<HTMLInputElement | null>(null);
 
   const totalPages = Math.max(1, Math.ceil(itemsPage.total / itemsPage.pageSize));
   const unreadCount = useMemo(
@@ -152,6 +154,10 @@ export function NotificationCenter({ onOpenTask, onOpenCase }: NotificationCente
   const selectedEmployeeId = employeeId === 'all' ? undefined : Number(employeeId);
   const selectedClientId = clientId === 'all' ? undefined : Number(clientId);
   const selectedTaskRole = taskRole === 'all' ? undefined : taskRole;
+  const currentPageIds = useMemo(() => itemsPage.items.map((item) => item.id), [itemsPage.items]);
+  const selectedCount = selectedIds.size;
+  const allPageSelected = currentPageIds.length > 0 && currentPageIds.every((id) => selectedIds.has(id));
+  const somePageSelected = currentPageIds.some((id) => selectedIds.has(id));
   const hasCustomFilters = Boolean(
     searchInput
       || search
@@ -301,6 +307,24 @@ export function NotificationCenter({ onOpenTask, onOpenCase }: NotificationCente
 
   useEffect(() => refresh(), [refresh]);
 
+  useEffect(() => {
+    if (pageSelectionRef.current) {
+      pageSelectionRef.current.indeterminate = somePageSelected && !allPageSelected;
+    }
+  }, [allPageSelected, somePageSelected]);
+
+  useEffect(() => {
+    setSelectedIds((previous) => {
+      if (previous.size === 0) {
+        return previous;
+      }
+
+      const pageIdSet = new Set(currentPageIds);
+      const next = new Set([...previous].filter((id) => pageIdSet.has(id)));
+      return next.size === previous.size ? previous : next;
+    });
+  }, [currentPageIds]);
+
   const updateItem = (nextItem: UserNotificationDto) => {
     setItemsPage((previous) => ({
       ...previous,
@@ -315,7 +339,42 @@ export function NotificationCenter({ onOpenTask, onOpenCase }: NotificationCente
       items: previous.items.filter((item) => item.id !== id),
       total: Math.max(0, previous.total - 1),
     }));
+    setSelectedIds((previous) => {
+      if (!previous.has(id)) {
+        return previous;
+      }
+
+      const next = new Set(previous);
+      next.delete(id);
+      return next;
+    });
     emitUserNotificationsChanged();
+  };
+
+  const toggleSelection = (id: number, checked: boolean) => {
+    setSelectedIds((previous) => {
+      const next = new Set(previous);
+      if (checked) {
+        next.add(id);
+      } else {
+        next.delete(id);
+      }
+      return next;
+    });
+  };
+
+  const togglePageSelection = (checked: boolean) => {
+    setSelectedIds((previous) => {
+      const next = new Set(previous);
+      currentPageIds.forEach((id) => {
+        if (checked) {
+          next.add(id);
+        } else {
+          next.delete(id);
+        }
+      });
+      return next;
+    });
   };
 
   const markRead = async (item: UserNotificationDto) => {
@@ -431,6 +490,50 @@ export function NotificationCenter({ onOpenTask, onOpenCase }: NotificationCente
     }
   };
 
+  const handleBulkArchive = async () => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+
+    try {
+      setBulkBusy(true);
+      const result = await apiService.archiveUserNotifications(ids);
+      setSelectedIds(new Set());
+      emitUserNotificationsChanged();
+      refresh();
+      toast.success(
+        result.updatedCount > 0
+          ? `Отправлено в архив: ${result.updatedCount}.`
+          : 'Выбранные уведомления уже недоступны для архивации.',
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось архивировать выбранные уведомления.');
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+
+    try {
+      setBulkBusy(true);
+      const result = await apiService.deleteUserNotifications(ids);
+      setSelectedIds(new Set());
+      emitUserNotificationsChanged();
+      refresh();
+      toast.success(
+        result.updatedCount > 0
+          ? `Удалено уведомлений: ${result.updatedCount}.`
+          : 'Выбранные уведомления уже удалены или недоступны.',
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось удалить выбранные уведомления.');
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   const handleSavePreferences = async () => {
     try {
       setPreferencesSaving(true);
@@ -460,6 +563,7 @@ export function NotificationCenter({ onOpenTask, onOpenCase }: NotificationCente
     setClientId('all');
     setTaskRole('all');
     setPage(1);
+    setSelectedIds(new Set());
   };
 
   return (
@@ -482,6 +586,28 @@ export function NotificationCenter({ onOpenTask, onOpenCase }: NotificationCente
           >
             <CheckCheck className="h-4 w-4" />
             Прочитать все
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleBulkArchive()}
+            disabled={loading || bulkBusy || selectedCount === 0}
+            aria-label={`В архив выбранные уведомления: ${selectedCount}`}
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700 shadow-sm transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Archive className="h-4 w-4" />
+            В архив
+            {selectedCount > 0 ? <span className="rounded-full bg-white px-2 py-0.5 text-xs">{selectedCount}</span> : null}
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleBulkDelete()}
+            disabled={loading || bulkBusy || selectedCount === 0}
+            aria-label={`Удалить выбранные уведомления: ${selectedCount}`}
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 shadow-sm transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Trash2 className="h-4 w-4" />
+            Удалить
+            {selectedCount > 0 ? <span className="rounded-full bg-white px-2 py-0.5 text-xs">{selectedCount}</span> : null}
           </button>
           <button
             type="button"
@@ -756,7 +882,31 @@ export function NotificationCenter({ onOpenTask, onOpenCase }: NotificationCente
       ) : null}
 
       <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-        <div className="grid grid-cols-[minmax(0,1fr)_12rem_16rem] border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 max-xl:hidden">
+        <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 xl:hidden">
+          <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+            <input
+              type="checkbox"
+              checked={allPageSelected}
+              disabled={loading || currentPageIds.length === 0}
+              onChange={(event) => togglePageSelection(event.target.checked)}
+              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
+            />
+            Выбрать все на странице
+          </label>
+          {selectedCount > 0 ? <span className="text-xs font-semibold text-blue-700">Выбрано: {selectedCount}</span> : null}
+        </div>
+        <div className="grid grid-cols-[3rem_minmax(0,1fr)_12rem_16rem] border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 max-xl:hidden">
+          <div>
+            <input
+              ref={pageSelectionRef}
+              type="checkbox"
+              checked={allPageSelected}
+              disabled={loading || currentPageIds.length === 0}
+              onChange={(event) => togglePageSelection(event.target.checked)}
+              aria-label="Выбрать все уведомления на странице"
+              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
+            />
+          </div>
           <div>Уведомление</div>
           <div>Тип</div>
           <div className="text-right">Действия</div>
@@ -785,10 +935,20 @@ export function NotificationCenter({ onOpenTask, onOpenCase }: NotificationCente
                       void markRead(item);
                     }
                   }}
-                  className={`grid gap-3 px-4 py-4 transition hover:bg-slate-50 max-xl:grid-cols-1 xl:grid-cols-[minmax(0,1fr)_12rem_16rem] ${
+                  className={`grid gap-3 px-4 py-4 transition hover:bg-slate-50 max-xl:grid-cols-1 xl:grid-cols-[3rem_minmax(0,1fr)_12rem_16rem] ${
                     item.isRead ? 'bg-white' : 'bg-blue-50/40'
                   }`}
                 >
+                  <div className="flex items-start xl:pt-1">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(item.id)}
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={(event) => toggleSelection(item.id, event.target.checked)}
+                      aria-label={`Выбрать уведомление ${item.title}`}
+                      className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                  </div>
                   <div className="min-w-0">
                     <div className="flex items-start gap-3">
                       <span className={`mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${toneClasses(item.tone, item.isRead)}`}>

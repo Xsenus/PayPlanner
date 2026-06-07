@@ -914,6 +914,32 @@ describe('apiService auth handling', () => {
     expect(init?.method).toBe('POST');
   });
 
+  it('sends selected inbox notifications to archive and delete endpoints', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      updatedCount: 2,
+    }), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const archiveResult = await apiService.archiveUserNotifications([10, 11]);
+    const deleteResult = await apiService.deleteUserNotifications([12, 13]);
+
+    expect(archiveResult.updatedCount).toBe(2);
+    expect(deleteResult.updatedCount).toBe(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const [archiveUrl, archiveInit] = fetchMock.mock.calls[0];
+    expect(String(archiveUrl)).toContain('/notifications/inbox/bulk/archive');
+    expect(archiveInit?.method).toBe('POST');
+    expect(archiveInit?.body).toBe(JSON.stringify({ ids: [10, 11] }));
+
+    const [deleteUrl, deleteInit] = fetchMock.mock.calls[1];
+    expect(String(deleteUrl)).toContain('/notifications/inbox/bulk/delete');
+    expect(deleteInit?.method).toBe('POST');
+    expect(deleteInit?.body).toBe(JSON.stringify({ ids: [12, 13] }));
+  });
+
   it('loads and updates notification role preferences', async () => {
     const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => new Response(JSON.stringify(
       init?.method === 'PUT'

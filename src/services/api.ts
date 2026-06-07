@@ -3561,9 +3561,23 @@ export class ApiService {
     });
   }
 
+  async archiveUserNotifications(ids: number[]) {
+    return this.request<UserNotificationBulkActionResultDto>('/notifications/inbox/bulk/archive', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    });
+  }
+
   async deleteUserNotification(id: number) {
     return this.request<void>(`/notifications/inbox/${id}`, {
       method: 'DELETE',
+    });
+  }
+
+  async deleteUserNotifications(ids: number[]) {
+    return this.request<UserNotificationBulkActionResultDto>('/notifications/inbox/bulk/delete', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
     });
   }
 

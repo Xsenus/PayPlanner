@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Notifications;
@@ -152,6 +153,57 @@ public class NotificationInboxController : ControllerBase
         return Ok(new UserNotificationBulkActionResultDto { UpdatedCount = items.Count });
     }
 
+    [HttpPost("bulk/archive")]
+    public async Task<ActionResult<UserNotificationBulkActionResultDto>> ArchiveSelected([FromBody] BulkIdsRequest request, CancellationToken ct)
+    {
+        var items = await FindOwnedNotificationsAsync(request?.Ids, ct);
+        if (items is null)
+        {
+            return Unauthorized();
+        }
+
+        var now = DateTime.UtcNow;
+        foreach (var item in items)
+        {
+            MarkAsRead(item);
+            if (!item.IsArchived)
+            {
+                item.IsArchived = true;
+                item.ArchivedAt = now;
+            }
+        }
+
+        if (items.Count > 0)
+        {
+            await _context.SaveChangesAsync(ct);
+        }
+
+        return Ok(new UserNotificationBulkActionResultDto { UpdatedCount = items.Count });
+    }
+
+    [HttpPost("bulk/delete")]
+    public async Task<ActionResult<UserNotificationBulkActionResultDto>> DeleteSelected([FromBody] BulkIdsRequest request, CancellationToken ct)
+    {
+        var items = await FindOwnedNotificationsAsync(request?.Ids, ct);
+        if (items is null)
+        {
+            return Unauthorized();
+        }
+
+        var now = DateTime.UtcNow;
+        foreach (var item in items)
+        {
+            item.DeletedAt ??= now;
+        }
+
+        if (items.Count > 0)
+        {
+            await _context.SaveChangesAsync(ct);
+        }
+
+        return Ok(new UserNotificationBulkActionResultDto { UpdatedCount = items.Count });
+    }
+
     [HttpPatch("{id:int}/read")]
     public async Task<ActionResult<UserNotificationDto>> MarkRead(int id, CancellationToken ct)
     {
@@ -234,6 +286,37 @@ public class NotificationInboxController : ControllerBase
         query = WhereNotificationTargetVisible(query, _context, visibility);
         return await query
             .FirstOrDefaultAsync(ct);
+    }
+
+    private async Task<List<UserNotification>?> FindOwnedNotificationsAsync(IEnumerable<int>? ids, CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return null;
+        }
+
+        var normalizedIds = ids?
+            .Where(id => id > 0)
+            .Distinct()
+            .Take(100)
+            .ToArray() ?? [];
+        if (normalizedIds.Length == 0)
+        {
+            return [];
+        }
+
+        var visibility = await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
+        var disabledTypes = await LoadDisabledNotificationTypesAsync(userId.Value, ct);
+        var query = _context.UserNotifications
+            .Where(item =>
+                normalizedIds.Contains(item.Id)
+                && item.RecipientUserId == userId.Value
+                && item.DeletedAt == null);
+
+        query = ApplyDisabledTypeFilter(query, disabledTypes);
+        query = WhereNotificationTargetVisible(query, _context, visibility);
+        return await query.ToListAsync(ct);
     }
 
     private async Task<IReadOnlyList<string>> LoadDisabledNotificationTypesAsync(int userId, CancellationToken ct)

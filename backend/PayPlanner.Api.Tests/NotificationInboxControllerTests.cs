@@ -298,6 +298,51 @@ public class NotificationInboxControllerTests
         Assert.False(otherUserNotification.IsRead);
     }
 
+    [Fact]
+    public async Task BulkArchiveAndDelete_UpdateOnlySelectedCurrentUserNotifications()
+    {
+        await using var db = await CreateContextAsync();
+        var currentUser = await CreateUserAsync(db, "current-selected-bulk@example.com");
+        var otherUser = await CreateUserAsync(db, "other-selected-bulk@example.com");
+        var first = CreateNotification(currentUser.Id, "task:1:changed");
+        var second = CreateNotification(currentUser.Id, "task:2:changed");
+        var third = CreateNotification(currentUser.Id, "task:3:changed");
+        var otherUserNotification = CreateNotification(otherUser.Id, "task:4:changed");
+        db.UserNotifications.AddRange(first, second, third, otherUserNotification);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, currentUser.Id);
+
+        var archiveResult = await controller.ArchiveSelected(new PayPlanner.Api.Models.Requests.BulkIdsRequest
+        {
+            Ids = [first.Id, otherUserNotification.Id, 0, first.Id],
+        }, CancellationToken.None);
+
+        var archiveDto = Assert.IsType<UserNotificationBulkActionResultDto>(Assert.IsType<OkObjectResult>(archiveResult.Result).Value);
+        Assert.Equal(1, archiveDto.UpdatedCount);
+
+        await db.Entry(first).ReloadAsync();
+        await db.Entry(otherUserNotification).ReloadAsync();
+        Assert.True(first.IsArchived);
+        Assert.True(first.IsRead);
+        Assert.False(otherUserNotification.IsArchived);
+
+        var deleteResult = await controller.DeleteSelected(new PayPlanner.Api.Models.Requests.BulkIdsRequest
+        {
+            Ids = [second.Id, third.Id, otherUserNotification.Id],
+        }, CancellationToken.None);
+
+        var deleteDto = Assert.IsType<UserNotificationBulkActionResultDto>(Assert.IsType<OkObjectResult>(deleteResult.Result).Value);
+        Assert.Equal(2, deleteDto.UpdatedCount);
+
+        await db.Entry(second).ReloadAsync();
+        await db.Entry(third).ReloadAsync();
+        await db.Entry(otherUserNotification).ReloadAsync();
+        Assert.NotNull(second.DeletedAt);
+        Assert.NotNull(third.DeletedAt);
+        Assert.Null(otherUserNotification.DeletedAt);
+    }
+
     private static UserNotification CreateNotification(
         int userId,
         string eventKey,
