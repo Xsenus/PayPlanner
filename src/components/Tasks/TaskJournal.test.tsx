@@ -1132,9 +1132,9 @@ describe('TaskJournal', () => {
       createTask({ id: 102, title: 'Same week task', dueAt: dateAt(sameWeekDate) }),
       createTask({ id: 103, title: 'Same month task', dueAt: dateAt(sameMonthDate) }),
       createTask({ id: 104, title: 'Next month task', dueAt: dateAt(nextMonthDate) }),
-    ], { periodMode: 'day' });
+    ], { periodMode: 'day', waitForTitle: null });
 
-    expect(screen.getByText('Today task')).toBeTruthy();
+    expect(await screen.findByText('Today task')).toBeTruthy();
     expect(screen.queryByText('Same week task')).toBeNull();
     expect(screen.queryByText('Same month task')).toBeNull();
     expect(screen.getByTestId('task-period-day').getAttribute('aria-pressed')).toBe('true');
