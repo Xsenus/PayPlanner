@@ -268,6 +268,7 @@ using (var scope = app.Services.CreateScope())
         await SeedDataService.SeedAsync(ctx, seedClients);
         await AppReleaseSeedService.SyncAsync(ctx, app.Environment.ContentRootPath);
         await PaymentRemainderTransferBackfillService.EnsureLegacyLinksAsync(ctx);
+        await TaskContractorPaymentBackfillService.EnsureGeneratedPaymentDetailsAsync(ctx);
     }
     else
     {
@@ -277,6 +278,7 @@ using (var scope = app.Services.CreateScope())
         await SeedDataService.SeedAsync(pgContext, seedClients);
         await AppReleaseSeedService.SyncAsync(pgContext, app.Environment.ContentRootPath);
         await PaymentRemainderTransferBackfillService.EnsureLegacyLinksAsync(pgContext);
+        await TaskContractorPaymentBackfillService.EnsureGeneratedPaymentDetailsAsync(pgContext);
     }
 }
 
