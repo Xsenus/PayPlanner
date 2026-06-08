@@ -3401,7 +3401,7 @@ function TaskCompletionResultPrompt({
           id="task-completion-result"
           value={result}
           onChange={(event) => onResultChange(event.target.value)}
-          className="form-textarea mt-2 max-h-[40vh] min-h-[120px] resize-y sm:min-h-[160px]"
+          className="mt-2 block w-full max-h-[40vh] min-h-[120px] resize-y rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm leading-6 text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:cursor-wait disabled:bg-slate-50 sm:min-h-[160px]"
           rows={7}
           placeholder={TASK_COMPLETION_RESULT_HINT}
           autoFocus

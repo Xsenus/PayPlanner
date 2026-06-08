@@ -809,6 +809,8 @@ describe('TaskJournal', () => {
     expect(apiMock.updateTaskJournalStatus).not.toHaveBeenCalled();
 
     const resultInput = screen.getByPlaceholderText('Опишите подробно, что было сделано и какой результат был достигнут.') as HTMLTextAreaElement;
+    expect(resultInput.className).toContain('w-full');
+    expect(resultInput.className).toContain('min-h-[120px]');
     fireEvent.click(screen.getByRole('button', { name: 'Завершить задачу' }));
     expect(screen.getByText('Добавьте результат по задаче перед завершением.')).toBeTruthy();
     expect(apiMock.updateTaskJournalStatus).not.toHaveBeenCalled();
