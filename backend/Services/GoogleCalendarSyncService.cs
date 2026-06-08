@@ -895,24 +895,54 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         }
 
         var payload = BuildGoogleEventPayload(connection, task, settings, crmHash, timeZone);
+        var previousGoogleCalendarId = link?.GoogleCalendarId;
+        var previousGoogleEventId = link?.GoogleEventId;
+        var createNewEvent = link is null ||
+            string.IsNullOrWhiteSpace(link.GoogleEventId) ||
+            link.GoogleCalendarId != calendar.GoogleCalendarId ||
+            link.SyncStatus == "detached";
+
         GoogleEventWriteResult result;
-        if (link is null || string.IsNullOrWhiteSpace(link.GoogleEventId) || link.GoogleCalendarId != calendar.GoogleCalendarId || link.SyncStatus == "detached")
+        if (createNewEvent)
         {
             result = await CreateGoogleEventAsync(accessToken, calendar.GoogleCalendarId, payload, cancellationToken);
-            link = new GoogleCalendarTaskLink
+            if (link is null)
             {
-                ConnectionId = connection.Id,
-                CalendarSyncCalendarId = calendar.Id,
-                TaskJournalItemId = task.Id,
-                GoogleCalendarId = calendar.GoogleCalendarId,
-                GoogleEventId = result.Id,
-                CreatedAt = DateTime.UtcNow,
-            };
-            _db.GoogleCalendarTaskLinks.Add(link);
+                link = new GoogleCalendarTaskLink
+                {
+                    ConnectionId = connection.Id,
+                    CalendarSyncCalendarId = calendar.Id,
+                    TaskJournalItemId = task.Id,
+                    GoogleCalendarId = calendar.GoogleCalendarId,
+                    GoogleEventId = result.Id,
+                    CreatedAt = DateTime.UtcNow,
+                };
+                _db.GoogleCalendarTaskLinks.Add(link);
+            }
+            else if (!string.IsNullOrWhiteSpace(previousGoogleCalendarId) &&
+                     !string.IsNullOrWhiteSpace(previousGoogleEventId) &&
+                     !string.Equals(previousGoogleCalendarId, calendar.GoogleCalendarId, StringComparison.Ordinal) &&
+                     !string.Equals(link.SyncStatus, "detached", StringComparison.Ordinal))
+            {
+                try
+                {
+                    await DeleteGoogleEventAsync(accessToken, previousGoogleCalendarId, previousGoogleEventId, cancellationToken);
+                    await AddLogAsync(connection.Id, calendar.Id, task.Id, "crm-to-google", "delete-event", "success", "Старое событие Google Calendar удалено после переноса задачи в другой календарь.", BuildTaskSnapshotDetails(task, timeZone), cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    await AddLogAsync(connection.Id, calendar.Id, task.Id, "crm-to-google", "delete-event", "error", "Не удалось удалить старое событие Google Calendar после переноса задачи в другой календарь.", ex.Message, cancellationToken);
+                }
+            }
             await AddLogAsync(connection.Id, calendar.Id, task.Id, "crm-to-google", "create-event", "success", "Задача создана в Google Calendar.", BuildTaskSnapshotDetails(task, timeZone), cancellationToken);
         }
         else
         {
+            if (link is null)
+            {
+                throw new InvalidOperationException("GoogleCalendarTaskLinkMissing");
+            }
+
             result = await UpdateGoogleEventAsync(accessToken, link.GoogleCalendarId, link.GoogleEventId, payload, cancellationToken);
             await AddLogAsync(connection.Id, calendar.Id, task.Id, "crm-to-google", "update-event", "success", "Задача обновлена в Google Calendar.", BuildTaskSnapshotDetails(task, timeZone), cancellationToken);
         }

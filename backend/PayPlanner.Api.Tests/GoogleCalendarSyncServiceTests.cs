@@ -317,6 +317,53 @@ public class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncTaskForConnectedUsersAsync_ReusesLinkAndDeletesOldEventWhenCalendarChanges()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateUserAsync(db, "admin-google-calendar-move@example.com", "admin", "Admin");
+        var assignee = await CreateUserAsync(db, "assignee-google-calendar-move@example.com", "user", "Assignee");
+        await EnableGoogleSettingsAsync(db);
+        var connection = await CreateConnectionAsync(db, admin.Id, calendarMode: "adminByAssignee");
+        var oldCalendar = await CreateCalendarAsync(db, connection.Id, "old-calendar", "Old calendar", admin.Id);
+        var assigneeCalendar = await CreateCalendarAsync(db, connection.Id, "assignee-calendar", "Assignee calendar", assignee.Id);
+        var task = await CreateTaskAsync(
+            db,
+            assignee.Id,
+            "Task moved to assignee calendar",
+            assignee.FullName ?? "Assignee",
+            new DateTime(2026, 6, 12, 3, 20, 0, DateTimeKind.Utc));
+        db.GoogleCalendarTaskLinks.Add(new GoogleCalendarTaskLink
+        {
+            ConnectionId = connection.Id,
+            CalendarSyncCalendarId = oldCalendar.Id,
+            TaskJournalItemId = task.Id,
+            GoogleCalendarId = oldCalendar.GoogleCalendarId,
+            GoogleEventId = "old-event",
+            SyncStatus = "active",
+            LastCrmHash = "old-crm-hash",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var handler = new RecordingGoogleHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+
+        Assert.Single(await db.GoogleCalendarTaskLinks.Where(item => item.ConnectionId == connection.Id && item.TaskJournalItemId == task.Id).ToListAsync());
+        var link = await db.GoogleCalendarTaskLinks.SingleAsync(item => item.ConnectionId == connection.Id && item.TaskJournalItemId == task.Id);
+        Assert.Equal(assigneeCalendar.Id, link.CalendarSyncCalendarId);
+        Assert.Equal(assigneeCalendar.GoogleCalendarId, link.GoogleCalendarId);
+        Assert.Equal("event-1", link.GoogleEventId);
+        Assert.Contains(handler.Requests, request =>
+            request.Method == HttpMethod.Post &&
+            request.RequestUri!.AbsolutePath.Contains($"/calendars/{Uri.EscapeDataString(assigneeCalendar.GoogleCalendarId)}/events", StringComparison.Ordinal));
+        Assert.Contains(handler.Requests, request =>
+            request.Method == HttpMethod.Delete &&
+            request.RequestUri!.AbsolutePath.Contains($"/calendars/{Uri.EscapeDataString(oldCalendar.GoogleCalendarId)}/events/old-event", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task SyncNowAsync_AppliesGoogleMoveWithoutPushingTaskBackOnNextCycle()
     {
         await using var db = await CreateContextAsync();
