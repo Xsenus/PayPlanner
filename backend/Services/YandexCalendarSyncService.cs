@@ -1623,9 +1623,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             var href = NormalizeOptional(response.Element(dav + "href")?.Value);
             var displayName = NormalizeOptional(response.Descendants(dav + "displayname").FirstOrDefault()?.Value);
             var isCalendar = response.Descendants(caldav + "calendar").Any();
-            var supportsEvents = response.Descendants(caldav + "comp")
-                .Any(item => string.Equals((string?)item.Attribute("name"), "VEVENT", StringComparison.OrdinalIgnoreCase));
-            if (href is null || displayName is null || !isCalendar || !supportsEvents)
+            if (href is null || displayName is null || !isCalendar)
             {
                 continue;
             }

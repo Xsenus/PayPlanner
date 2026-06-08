@@ -261,6 +261,31 @@ public class YandexCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncNowAsync_ReusesExistingYandexCalendarWhenComponentSetIsMissing()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "admin-yandex-calendar-no-components@example.com", "admin");
+        var assignee = await CreateUserAsync(db, "assignee-yandex-calendar-no-components@example.com", "user");
+        var connection = await CreateConnectionAsync(db, user.Id, calendarMode: "adminByAssignee");
+        await CreateTaskAsync(db, assignee.Id, "Reuse existing Yandex calendar without component set");
+        var handler = new RecordingYandexHandler(calendarHomeResponse: BuildYandexCalendarHomeResponse(
+            "/calendars/yandex%40example.com/events-987654/",
+            "PayPlanner - User",
+            includeSupportedComponents: false));
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        var result = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id, "admin"), CancellationToken.None);
+
+        Assert.Equal(1, result.ProcessedTasks);
+        Assert.Equal(0, result.ErrorCount);
+        Assert.DoesNotContain(handler.Requests, request =>
+            string.Equals(request.Method.Method, "MKCALENDAR", StringComparison.Ordinal));
+        var calendar = await db.YandexCalendarSyncCalendars.SingleAsync(item => item.ConnectionId == connection.Id);
+        Assert.Equal("events-987654", calendar.YandexCalendarId);
+        Assert.Equal("https://caldav.yandex.ru/calendars/yandex%40example.com/events-987654/", calendar.CalendarUrl);
+    }
+
+    [Fact]
     public async Task SyncTaskForConnectedUsersAsync_RefreshesStoredYandexCalendarUrl()
     {
         await using var db = await CreateContextAsync();
@@ -644,8 +669,15 @@ END:VCALENDAR
 """;
     }
 
-    private static string BuildYandexCalendarHomeResponse(string calendarHref, string displayName)
+    private static string BuildYandexCalendarHomeResponse(string calendarHref, string displayName, bool includeSupportedComponents = true)
     {
+        var componentSet = includeSupportedComponents
+            ? """
+        <C:supported-calendar-component-set>
+          <C:comp name="VEVENT" />
+        </C:supported-calendar-component-set>
+"""
+            : string.Empty;
         return $"""
 <?xml version="1.0" encoding="utf-8"?>
 <D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
@@ -658,9 +690,7 @@ END:VCALENDAR
           <D:collection />
           <C:calendar />
         </D:resourcetype>
-        <C:supported-calendar-component-set>
-          <C:comp name="VEVENT" />
-        </C:supported-calendar-component-set>
+{componentSet}
       </D:prop>
       <D:status>HTTP/1.1 200 OK</D:status>
     </D:propstat>
