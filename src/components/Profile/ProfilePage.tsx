@@ -57,6 +57,8 @@ type PendingPhotoCropState = {
   mimeType: string;
 };
 
+type ProfileSectionTab = 'profile' | 'tasks' | 'calendars' | 'security' | 'audit';
+
 type TimeZoneSettingLoadResult = {
   value?: string | null;
   missing: boolean;
@@ -100,6 +102,34 @@ const EMPTY_CONTRACTOR_BALANCE: ContractorBalance = {
   queue: [],
   paid: [],
 };
+
+const PROFILE_SECTION_TABS: Array<{ id: ProfileSectionTab; label: string; description: string }> = [
+  {
+    id: 'profile',
+    label: 'Профиль',
+    description: 'Контакты, фото и часовой пояс',
+  },
+  {
+    id: 'tasks',
+    label: 'Задачи',
+    description: 'Напоминания и расчеты',
+  },
+  {
+    id: 'calendars',
+    label: 'Календари',
+    description: 'Google и Яндекс',
+  },
+  {
+    id: 'security',
+    label: 'Вход и безопасность',
+    description: 'Способы входа и пароль',
+  },
+  {
+    id: 'audit',
+    label: 'Аудит',
+    description: 'История изменений',
+  },
+];
 
 const PROVIDER_META: Record<ProviderId, { label: string; accent: string; description: string }> = {
   google: {
@@ -213,6 +243,7 @@ export function ProfilePage() {
   const [pendingLink, setPendingLink] = useState<{ provider: ProviderId; state: string } | null>(null);
   const [pendingPhotoCrop, setPendingPhotoCrop] = useState<PendingPhotoCropState | null>(null);
   const [profilePhotoFailed, setProfilePhotoFailed] = useState(false);
+  const [activeSectionTab, setActiveSectionTab] = useState<ProfileSectionTab>('profile');
 
   const popupRef = useRef<Window | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -549,6 +580,8 @@ export function ProfilePage() {
     );
   }
 
+  const showContractorBalance = Boolean(profile?.isExternalContractor || contractorBalance.queue.length > 0 || contractorBalance.paid.length > 0);
+
   return (
     <div className="p-6 lg:p-8">
       <div className="space-y-6">
@@ -569,7 +602,32 @@ export function ProfilePage() {
           </div>
         </div>
 
-        {profile?.isExternalContractor || contractorBalance.queue.length > 0 || contractorBalance.paid.length > 0 ? (
+        <div className="rounded-3xl border border-slate-200 bg-white p-2 shadow-sm">
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5" role="tablist" aria-label="Разделы профиля пользователя">
+            {PROFILE_SECTION_TABS.map((tab) => {
+              const isActive = activeSectionTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  onClick={() => setActiveSectionTab(tab.id)}
+                  className={`rounded-2xl px-4 py-3 text-left transition ${
+                    isActive
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                  }`}
+                >
+                  <span className="block text-sm font-semibold">{tab.label}</span>
+                  <span className={`mt-1 block text-xs ${isActive ? 'text-blue-100' : 'text-slate-400'}`}>{tab.description}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {activeSectionTab === 'tasks' && showContractorBalance ? (
           <div className="rounded-3xl border border-emerald-100 bg-white p-6 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
@@ -603,8 +661,8 @@ export function ProfilePage() {
           </div>
         ) : null}
 
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.92fr)]">
-          <div className="space-y-6">
+        {activeSectionTab === 'profile' ? (
+          <div className="space-y-6" role="tabpanel" aria-label="Профиль пользователя">
             <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="mb-6 flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
                 <div>
@@ -794,8 +852,10 @@ export function ProfilePage() {
               </div>
             </div>
           </div>
+        ) : null}
 
-          <div className="space-y-6">
+        {activeSectionTab === 'tasks' ? (
+          <div className="space-y-6" role="tabpanel" aria-label="Настройки задач профиля">
             <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
@@ -822,10 +882,18 @@ export function ProfilePage() {
                 />
               </div>
             </div>
+          </div>
+        ) : null}
 
+        {activeSectionTab === 'calendars' ? (
+          <div className="grid gap-6 xl:grid-cols-2" role="tabpanel" aria-label="Календари профиля">
             <GoogleCalendarPanel isAdmin={profile?.role?.name === 'admin'} />
             <YandexCalendarPanel isAdmin={profile?.role?.name === 'admin'} />
+          </div>
+        ) : null}
 
+        {activeSectionTab === 'security' ? (
+          <div className="space-y-6" role="tabpanel" aria-label="Вход и безопасность профиля">
             <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="flex items-center gap-3">
                 <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
@@ -974,7 +1042,11 @@ export function ProfilePage() {
               </div>
             </div>
 
-            {profile ? (
+          </div>
+        ) : null}
+
+        {activeSectionTab === 'audit' && profile ? (
+          <div className="space-y-6" role="tabpanel" aria-label="Аудит профиля">
               <ObjectAuditLauncher
                 objectType="user"
                 objectId={profile.id}
@@ -986,9 +1058,8 @@ export function ProfilePage() {
                 triggerDescription="Паспорт профиля и история изменений открываются в отдельном окне."
                 title="История профиля"
               />
-            ) : null}
           </div>
-        </div>
+        ) : null}
       </div>
 
       <ProfilePhotoCropModal
