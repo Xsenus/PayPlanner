@@ -136,6 +136,7 @@ type TaskJournalFilterPreferences = {
 const DEFAULT_TASK_JOURNAL_SETTINGS: TaskJournalSettingsDto = {
   restrictExecutorEditing: true,
   allowExecutorDeadlineChangeRequests: true,
+  requireCompletionResult: true,
   caseInactivityAutomationEnabled: true,
   caseInactivityDays: 14,
   caseInactivityLimit: 25,
@@ -1562,6 +1563,7 @@ export function TaskJournal({
   const [caseCalendarLoading, setCaseCalendarLoading] = useState(false);
   const [caseCalendarExporting, setCaseCalendarExporting] = useState(false);
   const [taskSettings, setTaskSettings] = useState<TaskJournalSettingsDto>(DEFAULT_TASK_JOURNAL_SETTINGS);
+  const requireCompletionResult = taskSettings.requireCompletionResult !== false;
   const [completedTaskCalendarAction, setCompletedTaskCalendarAction] = useState<'color' | 'hide'>('color');
   const [taskNotificationDefaults, setTaskNotificationDefaults] = useState<TaskNotificationDefaults>(DEFAULT_TASK_NOTIFICATION_DEFAULTS);
   const [assignees, setAssignees] = useState<TaskJournalAssignee[]>([]);
@@ -2350,7 +2352,7 @@ export function TaskJournal({
 
   const handleResultSave = async (task: TaskJournalItem, status: TaskJournalStatus, result: string) => {
     const normalizedResult = result.trim();
-    if (status === 'done' && !normalizedResult) {
+    if (status === 'done' && requireCompletionResult && !normalizedResult) {
       toast.error(TASK_COMPLETION_RESULT_REQUIRED_MESSAGE, 'Журнал задач');
       return;
     }
@@ -2383,14 +2385,14 @@ export function TaskJournal({
     if (!completionPromptTask || completionPromptSaving) return;
 
     const normalizedResult = completionPromptResult.trim();
-    if (!normalizedResult) {
+    if (requireCompletionResult && !normalizedResult) {
       setCompletionPromptError(TASK_COMPLETION_RESULT_REQUIRED_MESSAGE);
       return;
     }
 
     setCompletionPromptSaving(true);
     try {
-      await apiService.updateTaskJournalStatus(completionPromptTask.id, 'done', normalizedResult);
+      await apiService.updateTaskJournalStatus(completionPromptTask.id, 'done', normalizedResult || undefined);
       toast.success('Задача завершена, результат сохранен.', 'Журнал задач');
       setCompletionPromptTask(null);
       setCompletionPromptResult('');
@@ -2464,7 +2466,7 @@ export function TaskJournal({
       return;
     }
 
-    if (status === 'done' && !task.result.trim()) {
+    if (status === 'done' && requireCompletionResult && !task.result.trim()) {
       openCompletionPrompt(task);
       return;
     }
@@ -3344,6 +3346,7 @@ export function TaskJournal({
               setCompletionPromptError(null);
             }
           }}
+          requireCompletionResult={requireCompletionResult}
           onSubmit={() => void submitCompletionPrompt()}
           onClose={closeCompletionPrompt}
         />
@@ -3357,6 +3360,7 @@ function TaskCompletionResultPrompt({
   result,
   error,
   saving,
+  requireCompletionResult,
   onResultChange,
   onSubmit,
   onClose,
@@ -3365,13 +3369,14 @@ function TaskCompletionResultPrompt({
   result: string;
   error: string | null;
   saving: boolean;
+  requireCompletionResult: boolean;
   onResultChange: (value: string) => void;
   onSubmit: () => void;
   onClose: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/40 px-4 py-6 backdrop-blur-sm">
-      <div className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl">
+    <div className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-slate-900/40 px-3 py-4 backdrop-blur-sm sm:items-center sm:px-4 sm:py-6">
+      <div className="max-h-[calc(100vh-2rem)] w-full max-w-[min(42rem,calc(100vw-1.5rem))] overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl sm:p-6">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-600">Завершение задачи</p>
@@ -3396,12 +3401,14 @@ function TaskCompletionResultPrompt({
           id="task-completion-result"
           value={result}
           onChange={(event) => onResultChange(event.target.value)}
-          className="form-textarea mt-2 min-h-[160px] resize-y"
+          className="form-textarea mt-2 max-h-[40vh] min-h-[120px] resize-y sm:min-h-[160px]"
           rows={7}
           placeholder={TASK_COMPLETION_RESULT_HINT}
           autoFocus
         />
-        <p className="mt-2 text-sm text-slate-500">{TASK_COMPLETION_RESULT_HINT}</p>
+        <p className="mt-2 text-sm text-slate-500">
+          {requireCompletionResult ? TASK_COMPLETION_RESULT_HINT : 'Можно оставить пустым, если результат не требуется.'}
+        </p>
         {error ? <p className="mt-2 text-sm font-semibold text-rose-600">{error}</p> : null}
 
         <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
@@ -3409,7 +3416,7 @@ function TaskCompletionResultPrompt({
             type="button"
             onClick={onClose}
             disabled={saving}
-            className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60"
+            className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60 sm:w-auto"
           >
             Отмена
           </button>
@@ -3417,7 +3424,7 @@ function TaskCompletionResultPrompt({
             type="button"
             onClick={onSubmit}
             disabled={saving}
-            className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60"
+            className="w-full rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60 sm:w-auto"
           >
             {saving ? 'Сохраняем...' : 'Завершить задачу'}
           </button>
@@ -5289,6 +5296,7 @@ function TaskModal({
   const { confirm } = useDialog();
   const isPage = presentation === 'page';
   const taskId = state?.task?.id ?? null;
+  const requireCompletionResult = taskSettings.requireCompletionResult !== false;
   const titleInputRef = useRef<HTMLInputElement | null>(null);
   const newFileInputRef = useRef<HTMLInputElement | null>(null);
   const versionInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
@@ -5596,7 +5604,7 @@ function TaskModal({
       nextForm = { ...nextForm, approvalDueAt: nextForm.dueAt };
     }
 
-    if (status === 'done' && !nextForm.result.trim()) {
+    if (status === 'done' && requireCompletionResult && !nextForm.result.trim()) {
       setForm(nextForm);
       setResultError(TASK_COMPLETION_RESULT_REQUIRED_MESSAGE);
       return;
@@ -5619,7 +5627,7 @@ function TaskModal({
 
   const handleSaveForm = async () => {
     const nextForm = withChangeComment();
-    if (nextForm.status === 'done' && !nextForm.result.trim()) {
+    if (nextForm.status === 'done' && requireCompletionResult && !nextForm.result.trim()) {
       setForm(nextForm);
       setResultError(TASK_COMPLETION_RESULT_REQUIRED_MESSAGE);
       return;

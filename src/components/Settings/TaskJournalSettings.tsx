@@ -8,6 +8,7 @@ import type { TaskJournalAssignee } from '../../utils/taskJournalStore';
 const DEFAULT_SETTINGS: TaskJournalSettingsDto = {
   restrictExecutorEditing: true,
   allowExecutorDeadlineChangeRequests: true,
+  requireCompletionResult: true,
   caseInactivityAutomationEnabled: true,
   caseInactivityDays: 14,
   caseInactivityLimit: 25,
@@ -136,6 +137,20 @@ export function TaskJournalSettings() {
           <span>
             <span className="block font-semibold text-gray-900">Разрешить запрос переноса срока</span>
             <span className="mt-1 block text-gray-500">Запрос фиксируется в истории задачи для постановщика без прямого изменения срока.</span>
+          </span>
+        </label>
+
+        <label className="flex items-start gap-3 rounded-2xl border border-gray-200 bg-white p-4 text-sm text-gray-700">
+          <input
+            type="checkbox"
+            checked={settings.requireCompletionResult}
+            onChange={(event) => setSettings((prev) => ({ ...prev, requireCompletionResult: event.target.checked }))}
+            disabled={loading || saving}
+            className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+          />
+          <span>
+            <span className="block font-semibold text-gray-900">Требовать результат при завершении задачи</span>
+            <span className="mt-1 block text-gray-500">Если выключено, задачу можно закрыть без описания результата. Право закрытия по ролям сохраняется без изменений.</span>
           </span>
         </label>
       </div>

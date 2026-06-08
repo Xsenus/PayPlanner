@@ -69,6 +69,7 @@ public class TasksController : ControllerBase
     ];
     private const string RestrictExecutorEditingSettingKey = "tasks.restrictExecutorEditing";
     private const string AllowExecutorDeadlineChangeRequestsSettingKey = "tasks.allowExecutorDeadlineChangeRequests";
+    private const string RequireCompletionResultSettingKey = "tasks.requireCompletionResult";
     private const string CaseInactivityAutomationEnabledSettingKey = "tasks.automation.caseControl.enabled";
     private const string CaseInactivityAutomationDaysSettingKey = "tasks.automation.caseControl.inactiveDays";
     private const string CaseInactivityAutomationLimitSettingKey = "tasks.automation.caseControl.limit";
@@ -320,6 +321,7 @@ public class TasksController : ControllerBase
 
         await UpsertSystemSettingAsync(RestrictExecutorEditingSettingKey, request.RestrictExecutorEditing ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(AllowExecutorDeadlineChangeRequestsSettingKey, request.AllowExecutorDeadlineChangeRequests ? "true" : "false", now, ct);
+        await UpsertSystemSettingAsync(RequireCompletionResultSettingKey, request.RequireCompletionResult ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(CaseInactivityAutomationEnabledSettingKey, request.CaseInactivityAutomationEnabled ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(CaseInactivityAutomationDaysSettingKey, inactivityDays.ToString(), now, ct);
         await UpsertSystemSettingAsync(CaseInactivityAutomationLimitSettingKey, inactivityLimit.ToString(), now, ct);
@@ -1454,7 +1456,8 @@ public class TasksController : ControllerBase
 
         var nextStatus = NormalizeEnumValue(request.Status, AllowedStatuses, "new");
         var nextResult = NormalizeCompletionResult(nextStatus, request.Result);
-        var statusValidation = ValidateStatusRules(nextStatus, nextResult, participants.Items);
+        var settings = await GetTaskJournalSettingsAsync(ct);
+        var statusValidation = ValidateStatusRules(nextStatus, nextResult, participants.Items, settings.RequireCompletionResult);
         if (statusValidation is not null)
         {
             return BadRequest(new { message = statusValidation });
@@ -1557,7 +1560,7 @@ public class TasksController : ControllerBase
         var approvalQueueRestarted = ShouldRestartApprovalQueue(previousStatus, nextStatus);
         participants = ResetApprovalQueueIfStartingApproval(previousStatus, nextStatus, participants);
         var nextResult = NormalizeCompletionResult(nextStatus, request.Result);
-        var statusValidation = ValidateStatusRules(nextStatus, nextResult, participants.Items);
+        var statusValidation = ValidateStatusRules(nextStatus, nextResult, participants.Items, settings.RequireCompletionResult);
         if (statusValidation is not null)
         {
             return BadRequest(new { message = statusValidation });
@@ -1673,7 +1676,7 @@ public class TasksController : ControllerBase
         var requestedResult = NormalizeOptional(request.Result);
         var nextResult = NormalizeCompletionResult(nextStatus, requestedResult ?? entity.Result);
 
-        var statusValidation = ValidateStatusRules(nextStatus, nextResult, entity.Participants);
+        var statusValidation = ValidateStatusRules(nextStatus, nextResult, entity.Participants, settings.RequireCompletionResult);
         if (statusValidation is not null)
         {
             return BadRequest(new { message = statusValidation });
@@ -1863,7 +1866,7 @@ public class TasksController : ControllerBase
                 var oldResult = entity.Result;
                 var requestedResult = NormalizeOptional(request.Result);
                 var nextResult = NormalizeCompletionResult(nextStatus, requestedResult ?? entity.Result);
-                var statusValidation = ValidateStatusRules(nextStatus, nextResult, entity.Participants);
+                var statusValidation = ValidateStatusRules(nextStatus, nextResult, entity.Participants, settings.RequireCompletionResult);
                 if (statusValidation is not null)
                 {
                     continue;
@@ -2654,6 +2657,7 @@ public class TasksController : ControllerBase
             .Where(item =>
                 item.Key == RestrictExecutorEditingSettingKey ||
                 item.Key == AllowExecutorDeadlineChangeRequestsSettingKey ||
+                item.Key == RequireCompletionResultSettingKey ||
                 item.Key == CaseInactivityAutomationEnabledSettingKey ||
                 item.Key == CaseInactivityAutomationDaysSettingKey ||
                 item.Key == CaseInactivityAutomationLimitSettingKey ||
@@ -2669,6 +2673,7 @@ public class TasksController : ControllerBase
         {
             RestrictExecutorEditing = ParseBoolSetting(settings.GetValueOrDefault(RestrictExecutorEditingSettingKey), true),
             AllowExecutorDeadlineChangeRequests = ParseBoolSetting(settings.GetValueOrDefault(AllowExecutorDeadlineChangeRequestsSettingKey), true),
+            RequireCompletionResult = ParseBoolSetting(settings.GetValueOrDefault(RequireCompletionResultSettingKey), true),
             CaseInactivityAutomationEnabled = ParseBoolSetting(settings.GetValueOrDefault(CaseInactivityAutomationEnabledSettingKey), true),
             CaseInactivityDays = inactivityDays,
             CaseInactivityLimit = Math.Clamp(ParseIntSetting(settings.GetValueOrDefault(CaseInactivityAutomationLimitSettingKey), 25), 1, 100),
@@ -3786,7 +3791,8 @@ public class TasksController : ControllerBase
     private static string? ValidateStatusRules(
         string status,
         string? result,
-        IEnumerable<TaskParticipantDraft> participants)
+        IEnumerable<TaskParticipantDraft> participants,
+        bool requireCompletionResult)
     {
         var approvers = participants
             .Where(participant => string.Equals(participant.Role, "approver", StringComparison.OrdinalIgnoreCase))
@@ -3797,7 +3803,8 @@ public class TasksController : ControllerBase
             result,
             approvers.Count,
             approvers.Count == 0 || approvers.All(participant =>
-            string.Equals(participant.ApprovalStatus, "approved", StringComparison.OrdinalIgnoreCase)));
+            string.Equals(participant.ApprovalStatus, "approved", StringComparison.OrdinalIgnoreCase)),
+            requireCompletionResult);
     }
 
     private static TaskParticipantsResolution ResetApprovalQueueIfStartingApproval(
@@ -3863,7 +3870,8 @@ public class TasksController : ControllerBase
     private static string? ValidateStatusRules(
         string status,
         string? result,
-        IEnumerable<TaskJournalParticipant> participants)
+        IEnumerable<TaskJournalParticipant> participants,
+        bool requireCompletionResult)
     {
         var approvers = participants
             .Where(participant => string.Equals(participant.Role, "approver", StringComparison.OrdinalIgnoreCase))
@@ -3874,12 +3882,14 @@ public class TasksController : ControllerBase
             result,
             approvers.Count,
             approvers.Count == 0 || approvers.All(participant =>
-                string.Equals(participant.ApprovalStatus, "approved", StringComparison.OrdinalIgnoreCase)));
+                string.Equals(participant.ApprovalStatus, "approved", StringComparison.OrdinalIgnoreCase)),
+            requireCompletionResult);
     }
 
-    private static string? ValidateStatusRules(string status, string? result, int approverCount, bool allApproversApproved)
+    private static string? ValidateStatusRules(string status, string? result, int approverCount, bool allApproversApproved, bool requireCompletionResult)
     {
         if (string.Equals(status, "done", StringComparison.OrdinalIgnoreCase)
+            && requireCompletionResult
             && string.IsNullOrWhiteSpace(result))
         {
             return "Перед завершением задачи заполните результат.";

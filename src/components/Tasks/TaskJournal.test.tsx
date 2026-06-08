@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { TaskJournal } from './TaskJournal';
+import type { TaskJournalSettingsDto } from '../../services/api';
 import type { Client, ClientCase, LegalEntitySummary } from '../../types';
 import { fromTimeZoneDateTimeInput, getZonedParts, toTimeZoneDateKey } from '../../utils/timeZoneDate';
 import type { TaskJournalAssignee, TaskJournalItem } from '../../utils/taskJournalStore';
@@ -269,6 +270,7 @@ async function renderJournal(
     };
     onOpenClient?: (clientId: number, caseId?: number | null) => void;
     onOpenLegalEntity?: (legalEntityId: number) => void;
+    settings?: Partial<TaskJournalSettingsDto>;
   } = {},
 ) {
   apiMock.getTaskJournalItems.mockResolvedValue({
@@ -283,12 +285,14 @@ async function renderJournal(
   apiMock.getTaskJournalSettings.mockResolvedValue({
     restrictExecutorEditing: true,
     allowExecutorDeadlineChangeRequests: true,
+    requireCompletionResult: true,
     caseInactivityAutomationEnabled: true,
     caseInactivityDays: 14,
     caseInactivityLimit: 25,
     caseInactivityDefaultAssigneeUserId: null,
     caseInactivityEscalationDays: 30,
     caseInactivityEscalationUserId: null,
+    ...options.settings,
   });
   const filterStorageKey = options.mode === 'approvals'
     ? 'pp.task_journal.filters.v1.approvals.user:7'
@@ -817,6 +821,20 @@ describe('TaskJournal', () => {
       'done',
       'Связались со следователем, документы переданы клиенту.',
     ));
+  });
+
+  it('completes a task without result when completion result is optional', async () => {
+    const task = createTask({ id: 101, title: 'Закрыть без результата', result: '' });
+
+    await renderJournal([task], {
+      waitForTitle: 'Закрыть без результата',
+      settings: { requireCompletionResult: false },
+    });
+
+    fireEvent.click(screen.getByTitle('Завершить'));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(101, 'done', undefined));
+    expect(screen.queryByRole('heading', { name: 'Добавить результат по задаче' })).toBeNull();
   });
 
   it('shows a neutral skipped count after bulk actions', async () => {

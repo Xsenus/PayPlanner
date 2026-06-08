@@ -74,6 +74,7 @@ public class TasksControllerTests
         {
             RestrictExecutorEditing = false,
             AllowExecutorDeadlineChangeRequests = false,
+            RequireCompletionResult = false,
             CaseInactivityAutomationEnabled = false,
             CaseInactivityDays = 400,
             CaseInactivityLimit = 0,
@@ -87,6 +88,7 @@ public class TasksControllerTests
 
         Assert.False(dto.RestrictExecutorEditing);
         Assert.False(dto.AllowExecutorDeadlineChangeRequests);
+        Assert.False(dto.RequireCompletionResult);
         Assert.False(dto.CaseInactivityAutomationEnabled);
         Assert.Equal(365, dto.CaseInactivityDays);
         Assert.Equal(1, dto.CaseInactivityLimit);
@@ -105,6 +107,11 @@ public class TasksControllerTests
         Assert.Equal(fallbackAssignee.Id.ToString(), stored["tasks.automation.caseControl.defaultAssigneeUserId"]);
         Assert.Equal("365", stored["tasks.automation.caseControl.escalationDays"]);
         Assert.Equal(fallbackAssignee.Id.ToString(), stored["tasks.automation.caseControl.escalationUserId"]);
+
+        var requireCompletionResult = await db.SystemSettings
+            .AsNoTracking()
+            .SingleAsync(item => item.Key == "tasks.requireCompletionResult");
+        Assert.Equal("false", requireCompletionResult.Value);
     }
 
     [Fact]
@@ -2444,6 +2451,54 @@ public class TasksControllerTests
         }, CancellationToken.None);
 
         Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task UpdateStatus_DoneRequiresResultByDefault()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author-result-default@example.com", "РђРІС‚РѕСЂ");
+        var client = await CreateClientAsync(db, "РРІР°РЅРѕРІ РРІР°РЅ РРІР°РЅРѕРІРёС‡");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id, result: null);
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "done",
+            Result = null,
+        }, CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task UpdateStatus_DoneAllowsEmptyResultWhenSettingDisabled()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author-result-disabled@example.com", "РђРІС‚РѕСЂ");
+        var client = await CreateClientAsync(db, "РРІР°РЅРѕРІ РРІР°РЅ РРІР°РЅРѕРІРёС‡");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id, result: null);
+        var now = DateTime.UtcNow;
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "tasks.requireCompletionResult",
+            Value = "false",
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "done",
+            Result = null,
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(ok.Value);
+        Assert.Equal("done", dto.Status);
+        Assert.Equal(string.Empty, dto.Result);
     }
 
     [Fact]

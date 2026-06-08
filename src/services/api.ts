@@ -1364,6 +1364,7 @@ export interface InvoiceDocumentTemplateSettingsDto {
 export interface TaskJournalSettingsDto {
   restrictExecutorEditing: boolean;
   allowExecutorDeadlineChangeRequests: boolean;
+  requireCompletionResult: boolean;
   caseInactivityAutomationEnabled: boolean;
   caseInactivityDays: number;
   caseInactivityLimit: number;
@@ -1391,6 +1392,7 @@ export interface TaskJournalAutomationDiagnosticsDto {
 export interface UpdateTaskJournalSettingsRequest {
   restrictExecutorEditing: boolean;
   allowExecutorDeadlineChangeRequests: boolean;
+  requireCompletionResult: boolean;
   caseInactivityAutomationEnabled: boolean;
   caseInactivityDays: number;
   caseInactivityLimit: number;
