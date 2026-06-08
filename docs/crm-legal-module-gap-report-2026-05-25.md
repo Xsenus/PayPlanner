@@ -6,8 +6,7 @@
 
 Проверенные материалы проекта:
 
-- `docs/crm-legal-module-roadmap-status.md`
-- `docs/crm-legal-module-implementation-plan.md`
+- `docs/remaining-roadmap.md`
 - `docs/crm-legal-module-acceptance-checklist.md`
 - `docs/crm-legal-module-user-guide.md`
 - `backend/AppReleases/releases.json`
@@ -381,7 +380,7 @@
 2. Зафиксировать финальную матрицу ролей и видимости.
 3. Закрыть UX персональных данных в карточке дела.
 4. Провести мобильную и нагрузочную приемку внутреннего календаря после добавления пользовательских настроек.
-5. Обновлять roadmap-status после каждого крупного среза, чтобы документ не расходился с фактическим кодом.
+5. Обновлять единый roadmap `docs/remaining-roadmap.md` после каждого крупного среза, чтобы документ не расходился с фактическим кодом.
 6. После каждого пользовательского изменения добавлять release note и прогонять релевантные тесты.
 
 ## 8. Итоговая оценка готовности

@@ -2044,11 +2044,6 @@ Google/Yandex/ICS синхронизация, где надо хранить UTC
 | `backend/Services/YandexCalendarSyncService.cs` | 1686 | `calendarId` | .Where(item => item.Id == calendarId.Value) |
 | `docs/crm-legal-module-gap-report-2026-05-25.md` | 118 | `Google Calendar` | - диагностика календарных провайдеров в настройках интеграций: ICS активен, Google Calendar и Яндекс Календарь явно показывают статус feature flag/OAuth до запуска двусторонней синхронизации; |
 | `docs/crm-legal-module-gap-report-2026-05-25.md` | 130 | `Google Calendar` | - Google Calendar и Яндекс Календарь; |
-| `docs/crm-legal-module-implementation-plan.md` | 2957 | `Google Calendar` | - Google Calendar; |
-| `docs/crm-legal-module-implementation-plan.md` | 3015 | `Google Calendar` | ### 9.8. Синхронизация Google Calendar |
-| `docs/crm-legal-module-implementation-plan.md` | 3017 | `Google Calendar` | - [ ] Реализовать отдельный provider-адаптер Google Calendar. |
-| `docs/crm-legal-module-implementation-plan.md` | 4062 | `Google Calendar` | - [~] Добавить OAuth/ключи и настройки подключения: добавлена диагностика провайдеров и чек-лист готовности в настройках интеграций; ICS активен, Google Calendar и Яндекс Календарь показывают статус feature flag/OAuth, с |
-| `docs/crm-legal-module-roadmap-status.md` | 74 | `Google Calendar` | - [ ] Добавить синхронизацию с Google Calendar. |
 | `docs/google-calendar-sync-guide.md` | 1 | `Google Calendar` | # Google Calendar: подключение и синхронизация задач |
 | `docs/google-calendar-sync-guide.md` | 5 | `Google Calendar` | Подключение Google Calendar добавлено в профиль пользователя, а не в общие настройки CRM. |
 | `docs/google-calendar-sync-guide.md` | 7 | `Google Calendar` | Путь для пользователя: профиль пользователя -> блок "Google Calendar". |
