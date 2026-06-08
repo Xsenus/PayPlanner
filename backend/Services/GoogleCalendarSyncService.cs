@@ -739,7 +739,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
 
             foreach (var googleEvent in response.Events)
             {
-                if (await ApplyGoogleEventAsync(connection, calendar, googleEvent, cancellationToken))
+                if (await ApplyGoogleEventAsync(connection, calendar, googleEvent, accessToken, cancellationToken))
                 {
                     imported++;
                 }
@@ -758,6 +758,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         GoogleCalendarConnection connection,
         GoogleCalendarSyncCalendar calendar,
         GoogleEventItem googleEvent,
+        string accessToken,
         CancellationToken cancellationToken)
     {
         var taskId = googleEvent.PayPlannerTaskId;
@@ -767,6 +768,46 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             link = await _db.GoogleCalendarTaskLinks
                 .Include(item => item.TaskJournalItem)
                 .FirstOrDefaultAsync(item => item.ConnectionId == connection.Id && item.TaskJournalItemId == taskId.Value, cancellationToken);
+
+            if (link is not null && !IsLinkedGoogleEvent(link, calendar.GoogleCalendarId, googleEvent.Id))
+            {
+                if (string.Equals(googleEvent.Status, "cancelled", StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+
+                try
+                {
+                    var deleted = await DeleteGoogleEventAsync(accessToken, calendar.GoogleCalendarId, googleEvent.Id, cancellationToken);
+                    await AddLogAsync(
+                        connection.Id,
+                        calendar.Id,
+                        link.TaskJournalItemId,
+                        "google-to-crm",
+                        "delete-stale-event",
+                        deleted ? "success" : "skip",
+                        deleted
+                            ? "Устаревший дубль события Google Calendar удален, задача CRM оставлена без изменений."
+                            : "Устаревший дубль события Google Calendar уже отсутствует, задача CRM оставлена без изменений.",
+                        googleEvent.Summary,
+                        cancellationToken);
+                    return deleted;
+                }
+                catch (Exception ex)
+                {
+                    await AddLogAsync(
+                        connection.Id,
+                        calendar.Id,
+                        link.TaskJournalItemId,
+                        "google-to-crm",
+                        "delete-stale-event",
+                        "error",
+                        "Не удалось удалить устаревший дубль события Google Calendar, задача CRM оставлена без изменений.",
+                        ex.Message,
+                        cancellationToken);
+                    return false;
+                }
+            }
         }
 
         link ??= await _db.GoogleCalendarTaskLinks
@@ -1638,6 +1679,10 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
     private static bool ShouldHideCompletedTask(CalendarSyncSettingsDto settings, TaskJournalItem task)
         => string.Equals(settings.CompletedTaskCalendarAction, "hide", StringComparison.Ordinal) &&
            string.Equals(task.Status, "done", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsLinkedGoogleEvent(GoogleCalendarTaskLink link, string googleCalendarId, string googleEventId)
+        => string.Equals(link.GoogleCalendarId, googleCalendarId, StringComparison.Ordinal) &&
+           string.Equals(link.GoogleEventId, googleEventId, StringComparison.Ordinal);
 
     private static string? ResolveCompletedTaskGoogleColorId(TaskJournalItem task, CalendarSyncSettingsDto settings)
         => string.Equals(settings.CompletedTaskCalendarAction, "color", StringComparison.Ordinal) &&

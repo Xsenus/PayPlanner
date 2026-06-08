@@ -431,6 +431,70 @@ public class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncNowAsync_DeletesStaleGoogleDuplicateWithoutMovingTask()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-google-stale-duplicate@example.com", "user");
+        await EnableGoogleSettingsAsync(db);
+        await SetUserTimeZoneAsync(db, user.Id, "Europe/Samara");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        var calendar = await CreateCalendarAsync(db, connection.Id, "calendar-stale-duplicate", "PayPlanner задачи");
+        var taskDueAt = new DateTime(2026, 6, 12, 6, 52, 0, DateTimeKind.Utc);
+        var task = await CreateTaskAsync(db, user.Id, "Актуальная задача", dueAt: taskDueAt);
+        db.GoogleCalendarTaskLinks.Add(new GoogleCalendarTaskLink
+        {
+            ConnectionId = connection.Id,
+            CalendarSyncCalendarId = calendar.Id,
+            TaskJournalItemId = task.Id,
+            GoogleCalendarId = calendar.GoogleCalendarId,
+            GoogleEventId = "current-event",
+            SyncStatus = "active",
+            LastCrmHash = "old-crm-hash",
+            LastGoogleHash = "old-google-hash",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var googleEvents = new object[]
+        {
+            new
+            {
+                id = "stale-event",
+                etag = "\"etag-stale\"",
+                status = "confirmed",
+                summary = "[Новая] Устаревший дубль",
+                start = new { dateTime = "2026-06-12T10:20:00+04:00" },
+                end = new { dateTime = "2026-06-12T11:20:00+04:00" },
+                extendedProperties = new
+                {
+                    @private = new Dictionary<string, string>
+                    {
+                        ["payPlannerTaskId"] = task.Id.ToString(),
+                    },
+                },
+            },
+        };
+        var handler = new RecordingGoogleHandler(eventItems: googleEvents);
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        var result = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+
+        Assert.Equal(0, result.ErrorCount);
+        var unchangedTask = await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id);
+        Assert.Equal(taskDueAt, unchangedTask.DueAt);
+        Assert.DoesNotContain(await db.GoogleCalendarSyncLogs.ToListAsync(), item =>
+            item.TaskJournalItemId == task.Id &&
+            item.Operation == "update-task");
+        Assert.Contains(await db.GoogleCalendarSyncLogs.ToListAsync(), item =>
+            item.TaskJournalItemId == task.Id &&
+            item.Operation == "delete-stale-event" &&
+            item.Status == "success");
+        Assert.Contains(handler.Requests, request =>
+            request.Method == HttpMethod.Delete &&
+            request.RequestUri!.AbsolutePath.EndsWith("/calendars/calendar-stale-duplicate/events/stale-event", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task SyncNowAsync_WhenManualFullSyncCooldownActiveRejectsRepeatedRun()
     {
         await using var db = await CreateContextAsync();
