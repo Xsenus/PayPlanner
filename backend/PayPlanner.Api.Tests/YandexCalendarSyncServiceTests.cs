@@ -2,6 +2,7 @@ using System.Net;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using System.Xml.Linq;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
@@ -208,6 +209,79 @@ public class YandexCalendarSyncServiceTests
         Assert.Contains("DTSTART:20260604T113000Z", body);
         Assert.Contains("DTEND:20260604T123000Z", body);
         Assert.Contains("X-PAYPLANNER-TIMEZONE:Asia/Kamchatka", body);
+    }
+
+    [Fact]
+    public async Task SyncNowAsync_UsesDiscoveredYandexCalendarUrlAfterCreate()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "admin-yandex-discovered-url@example.com", "admin");
+        var assignee = await CreateUserAsync(db, "assignee-yandex-discovered-url@example.com", "user");
+        var connection = await CreateConnectionAsync(db, user.Id, calendarMode: "adminByAssignee");
+        var task = await CreateTaskAsync(db, assignee.Id, "Use discovered Yandex calendar URL");
+        var handler = new RecordingYandexHandler(calendarHomeResponse: BuildYandexCalendarHomeResponse(
+            "/calendars/yandex%40example.com/events-123456/",
+            "PayPlanner - User"));
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        var result = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id, "admin"), CancellationToken.None);
+
+        Assert.Equal(1, result.ProcessedTasks);
+        Assert.Equal(0, result.ErrorCount);
+        var calendar = await db.YandexCalendarSyncCalendars.SingleAsync(item => item.ConnectionId == connection.Id);
+        Assert.Equal("events-123456", calendar.YandexCalendarId);
+        Assert.Equal("https://caldav.yandex.ru/calendars/yandex%40example.com/events-123456/", calendar.CalendarUrl);
+        var putRequest = handler.Requests.Single(request => request.Method == HttpMethod.Put);
+        Assert.StartsWith(
+            "https://caldav.yandex.ru/calendars/yandex%40example.com/events-123456/payplanner-task-",
+            putRequest.RequestUri!.AbsoluteUri,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SyncNowAsync_ReusesExistingYandexCalendarByName()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "admin-yandex-reuse-calendar@example.com", "admin");
+        var assignee = await CreateUserAsync(db, "assignee-yandex-reuse-calendar@example.com", "user");
+        var connection = await CreateConnectionAsync(db, user.Id, calendarMode: "adminByAssignee");
+        await CreateTaskAsync(db, assignee.Id, "Reuse existing Yandex calendar");
+        var handler = new RecordingYandexHandler(calendarHomeResponse: BuildYandexCalendarHomeResponse(
+            "/calendars/yandex%40example.com/events-654321/",
+            "PayPlanner - User"));
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id, "admin"), CancellationToken.None);
+
+        Assert.DoesNotContain(handler.Requests, request =>
+            string.Equals(request.Method.Method, "MKCALENDAR", StringComparison.Ordinal));
+        var calendar = await db.YandexCalendarSyncCalendars.SingleAsync(item => item.ConnectionId == connection.Id);
+        Assert.Equal("events-654321", calendar.YandexCalendarId);
+        Assert.Equal("https://caldav.yandex.ru/calendars/yandex%40example.com/events-654321/", calendar.CalendarUrl);
+    }
+
+    [Fact]
+    public async Task SyncTaskForConnectedUsersAsync_RefreshesStoredYandexCalendarUrl()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-yandex-refresh-url@example.com", "user");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        var calendar = await CreateCalendarAsync(db, connection.Id, "payplanner-tasks", "PayPlanner Р·Р°РґР°С‡Рё");
+        var task = await CreateTaskAsync(db, user.Id, "Refresh stored Yandex calendar URL");
+        var handler = new RecordingYandexHandler(calendarHomeResponse: BuildYandexCalendarHomeResponse(
+            "/calendars/yandex%40example.com/events-777/",
+            calendar.Name));
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+
+        Assert.Equal("events-777", calendar.YandexCalendarId);
+        Assert.Equal("https://caldav.yandex.ru/calendars/yandex%40example.com/events-777/", calendar.CalendarUrl);
+        var putRequest = handler.Requests.Single(request => request.Method == HttpMethod.Put);
+        Assert.StartsWith(
+            "https://caldav.yandex.ru/calendars/yandex%40example.com/events-777/payplanner-task-",
+            putRequest.RequestUri!.AbsoluteUri,
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -570,6 +644,31 @@ END:VCALENDAR
 """;
     }
 
+    private static string BuildYandexCalendarHomeResponse(string calendarHref, string displayName)
+    {
+        return $"""
+<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:response>
+    <D:href>{calendarHref}</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:displayname>{WebUtility.HtmlEncode(displayName)}</D:displayname>
+        <D:resourcetype>
+          <D:collection />
+          <C:calendar />
+        </D:resourcetype>
+        <C:supported-calendar-component-set>
+          <C:comp name="VEVENT" />
+        </C:supported-calendar-component-set>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+</D:multistatus>
+""";
+    }
+
     private static HttpRequest CreateHttpRequest(int userId, string role = "user")
     {
         var context = new DefaultHttpContext();
@@ -599,13 +698,17 @@ END:VCALENDAR
     {
         private readonly HttpStatusCode _deleteStatusCode;
         private readonly string? _reportResponse;
+        private readonly string? _calendarHomeResponse;
+        private readonly List<(string Href, string DisplayName)> _createdCalendars = [];
 
         public RecordingYandexHandler(
             HttpStatusCode deleteStatusCode = HttpStatusCode.NoContent,
-            string? reportResponse = null)
+            string? reportResponse = null,
+            string? calendarHomeResponse = null)
         {
             _deleteStatusCode = deleteStatusCode;
             _reportResponse = reportResponse;
+            _calendarHomeResponse = calendarHomeResponse;
         }
 
         public List<HttpRequestMessage> Requests { get; } = [];
@@ -616,6 +719,9 @@ END:VCALENDAR
 
             if (string.Equals(request.Method.Method, "MKCALENDAR", StringComparison.Ordinal))
             {
+                var displayName = ReadMkCalendarDisplayName(request);
+                var href = request.RequestUri!.AbsolutePath;
+                _createdCalendars.Add((href, displayName));
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Created)
                 {
                     Content = new StringContent(string.Empty, Encoding.UTF8, "text/plain"),
@@ -627,6 +733,14 @@ END:VCALENDAR
                 return Task.FromResult(new HttpResponseMessage((HttpStatusCode)207)
                 {
                     Content = new StringContent(string.Empty, Encoding.UTF8, "application/xml"),
+                });
+            }
+
+            if (string.Equals(request.Method.Method, "PROPFIND", StringComparison.Ordinal))
+            {
+                return Task.FromResult(new HttpResponseMessage((HttpStatusCode)207)
+                {
+                    Content = new StringContent(_calendarHomeResponse ?? BuildYandexCalendarHomeResponse(_createdCalendars), Encoding.UTF8, "application/xml"),
                 });
             }
 
@@ -670,6 +784,54 @@ END:VCALENDAR
             }
 
             return clone;
+        }
+
+        private static string ReadMkCalendarDisplayName(HttpRequestMessage request)
+        {
+            if (request.Content is null)
+            {
+                return "PayPlanner Р·Р°РґР°С‡Рё";
+            }
+
+            var body = request.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+            try
+            {
+                var document = XDocument.Parse(body);
+                XNamespace dav = "DAV:";
+                return document.Descendants(dav + "displayname").FirstOrDefault()?.Value ?? "PayPlanner Р·Р°РґР°С‡Рё";
+            }
+            catch
+            {
+                return "PayPlanner Р·Р°РґР°С‡Рё";
+            }
+        }
+
+        private static string BuildYandexCalendarHomeResponse(IReadOnlyList<(string Href, string DisplayName)> calendars)
+        {
+            var items = calendars.Select(item => $"""
+  <D:response>
+    <D:href>{item.Href}</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:displayname>{WebUtility.HtmlEncode(item.DisplayName)}</D:displayname>
+        <D:resourcetype>
+          <D:collection />
+          <C:calendar />
+        </D:resourcetype>
+        <C:supported-calendar-component-set>
+          <C:comp name="VEVENT" />
+        </C:supported-calendar-component-set>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+""");
+            return $"""
+<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+{string.Join(Environment.NewLine, items)}
+</D:multistatus>
+""";
         }
     }
 }

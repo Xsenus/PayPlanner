@@ -892,6 +892,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, ownerUserId ?? connection.UserId, cancellationToken);
         if (calendar is not null)
         {
+            await RefreshYandexCalendarUrlAsync(accessToken, connection, calendar, cancellationToken);
             await EnsureYandexCalendarTimeZoneAsync(accessToken, calendar, timeZone, cancellationToken);
             return calendar;
         }
@@ -914,6 +915,30 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         await _db.SaveChangesAsync(cancellationToken);
         await AddLogAsync(connection.Id, calendar.Id, null, "system", "create-calendar", "success", $"В Яндекс.Календаре создан календарь «{name}».", null, cancellationToken);
         return calendar;
+    }
+
+    private async Task RefreshYandexCalendarUrlAsync(
+        string accessToken,
+        YandexCalendarConnection connection,
+        YandexCalendarSyncCalendar calendar,
+        CancellationToken cancellationToken)
+    {
+        var email = NormalizeOptional(connection.YandexEmail);
+        if (email is null)
+        {
+            return;
+        }
+
+        var homeUrl = $"{CalDavBaseUrl}/calendars/{Uri.EscapeDataString(email)}/";
+        var discovered = await ResolveYandexCalendarByNameAsync(accessToken, homeUrl, calendar.Name, cancellationToken);
+        if (discovered is null || string.Equals(calendar.CalendarUrl, discovered.Url, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        calendar.YandexCalendarId = discovered.Id;
+        calendar.CalendarUrl = discovered.Url;
+        calendar.UpdatedAt = DateTime.UtcNow;
     }
 
     private async Task<IReadOnlyList<TaskJournalItem>> LoadTasksForConnectionAsync(YandexCalendarConnection connection, CancellationToken cancellationToken)
@@ -1341,7 +1366,14 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         var email = NormalizeOptional(connection.YandexEmail)
             ?? throw new InvalidOperationException("Для Яндекс.Календаря не определён email пользователя.");
         var slug = $"payplanner-{(ownerUserId.HasValue ? $"user-{ownerUserId.Value}" : "tasks")}";
-        var url = $"{CalDavBaseUrl}/calendars/{Uri.EscapeDataString(email)}/{slug}/";
+        var homeUrl = $"{CalDavBaseUrl}/calendars/{Uri.EscapeDataString(email)}/";
+        var existing = await ResolveYandexCalendarByNameAsync(accessToken, homeUrl, name, cancellationToken);
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        var url = $"{homeUrl}{slug}/";
         var calendarTimeZone = BuildCalendarTimeZoneIcs(timeZone);
         var body = $"""
 <?xml version="1.0" encoding="utf-8" ?>
@@ -1368,7 +1400,67 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             }
         }
 
-        return new YandexCalendarCreateResult(slug, url);
+        var discovered = await ResolveYandexCalendarByNameAsync(accessToken, homeUrl, name, cancellationToken);
+        if (discovered is not null)
+        {
+            return discovered;
+        }
+
+        throw new InvalidOperationException("Яндекс.Календарь создан, но CRM не смогла определить его фактический адрес для синхронизации событий.");
+    }
+
+    private async Task<YandexCalendarCreateResult?> ResolveYandexCalendarByNameAsync(
+        string accessToken,
+        string calendarHomeUrl,
+        string name,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            if (attempt > 0)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(400), cancellationToken);
+            }
+
+            var result = await TryResolveYandexCalendarByNameAsync(accessToken, calendarHomeUrl, name, cancellationToken);
+            if (result is not null)
+            {
+                return result;
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<YandexCalendarCreateResult?> TryResolveYandexCalendarByNameAsync(
+        string accessToken,
+        string calendarHomeUrl,
+        string name,
+        CancellationToken cancellationToken)
+    {
+        var body = """
+<?xml version="1.0" encoding="utf-8" ?>
+<D:propfind xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+  <D:prop>
+    <D:displayname />
+    <D:resourcetype />
+    <C:supported-calendar-component-set />
+  </D:prop>
+</D:propfind>
+""";
+
+        using var request = BuildYandexRequest(new HttpMethod("PROPFIND"), calendarHomeUrl, accessToken, body, "application/xml; charset=utf-8");
+        request.Headers.Add("Depth", "1");
+        var client = _httpClientFactory.CreateClient();
+        using var response = await client.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+        return ParseYandexCalendarHome(payload, calendarHomeUrl)
+            .FirstOrDefault(item => string.Equals(item.Name, name, StringComparison.Ordinal));
     }
 
     private async Task<bool> DeleteYandexCalendarAsync(string accessToken, string calendarUrl, CancellationToken cancellationToken)
@@ -1510,6 +1602,42 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
                 ReadIcsDate(properties.GetValueOrDefault("DTEND")),
                 ReadPayPlannerTaskId(properties),
                 properties.GetValueOrDefault("X-PAYPLANNER-HASH")));
+        }
+
+        return result;
+    }
+
+    private static IReadOnlyList<YandexCalendarCreateResult> ParseYandexCalendarHome(string xml, string calendarHomeUrl)
+    {
+        var result = new List<YandexCalendarCreateResult>();
+        if (string.IsNullOrWhiteSpace(xml))
+        {
+            return result;
+        }
+
+        var document = XDocument.Parse(xml);
+        XNamespace dav = "DAV:";
+        XNamespace caldav = "urn:ietf:params:xml:ns:caldav";
+        foreach (var response in document.Descendants(dav + "response"))
+        {
+            var href = NormalizeOptional(response.Element(dav + "href")?.Value);
+            var displayName = NormalizeOptional(response.Descendants(dav + "displayname").FirstOrDefault()?.Value);
+            var isCalendar = response.Descendants(caldav + "calendar").Any();
+            var supportsEvents = response.Descendants(caldav + "comp")
+                .Any(item => string.Equals((string?)item.Attribute("name"), "VEVENT", StringComparison.OrdinalIgnoreCase));
+            if (href is null || displayName is null || !isCalendar || !supportsEvents)
+            {
+                continue;
+            }
+
+            var absoluteUrl = href.StartsWith("http", StringComparison.OrdinalIgnoreCase)
+                ? href
+                : $"{CalDavBaseUrl}{href}";
+            var id = absoluteUrl.TrimEnd('/').Split('/').LastOrDefault() ?? displayName;
+            result.Add(new YandexCalendarCreateResult(
+                id,
+                absoluteUrl.EndsWith("/", StringComparison.Ordinal) ? absoluteUrl : absoluteUrl + "/",
+                displayName));
         }
 
         return result;
@@ -2261,7 +2389,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
 
     private sealed record YandexTokenResponse(string AccessToken, string? RefreshToken, string? Scope, int? ExpiresInSeconds);
     private sealed record YandexProfile(string Id, string? Email, string? DisplayName);
-    private sealed record YandexCalendarCreateResult(string Id, string Url);
+    private sealed record YandexCalendarCreateResult(string Id, string Url, string Name = "");
     private sealed record YandexEventWriteResult(string? Etag);
     private sealed record YandexEventItem(string Id, string EventUrl, string? Etag, bool Deleted, string? Summary, DateTime? StartAt, DateTime? EndAt, int? PayPlannerTaskId, string? PayPlannerHash);
     private sealed record ConnectionSyncResult(int ProcessedTasks, int ImportedEvents, int ErrorCount);
