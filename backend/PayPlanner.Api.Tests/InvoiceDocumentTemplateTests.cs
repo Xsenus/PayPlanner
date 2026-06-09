@@ -90,6 +90,18 @@ public class InvoiceDocumentTemplateTests
                 Phone = "+79990000000",
                 Email = "client@example.com",
             },
+            LegalEntity = new LegalEntity
+            {
+                ShortName = "ИП Завгородняя Ирина Александровна",
+                FullName = "Индивидуальный предприниматель Завгородняя Ирина Александровна",
+                Inn = "633003961003",
+                Ogrn = "321631200095369",
+                Address = "446200, Самарская обл, г Новокуйбышевск, ул. Южная, дом 49",
+                TreasuryBankName = "ПОВОЛЖСКИЙ БАНК ПАО СБЕРБАНК",
+                TreasuryBankBik = "043601607",
+                TreasuryAccountNumber = "40802810754400070904",
+                TreasuryCorrAccountNumber = "30101810200000000607",
+            },
         };
 
         var html = InvoiceDocumentTemplateEngine.RenderHtml(
@@ -125,6 +137,9 @@ public class InvoiceDocumentTemplateTests
         Assert.Contains("Предмет договора:", html);
         Assert.Contains("Договор публичной оферты об оказании юридических услуг", html);
         Assert.Contains("ОГРН/ОГРНИП № 317631300153603", html);
+        Assert.Contains("Индивидуальный предприниматель Завгородняя Ирина Александровна", html);
+        Assert.Contains("ИНН 633003961003", html);
+        Assert.Contains("ПОВОЛЖСКИЙ БАНК ПАО СБЕРБАНК", html);
         Assert.Contains("Адреса и реквизиты сторон:", html);
         Assert.Contains("Предприниматель", html);
         Assert.Contains("Юридические услуги", html);

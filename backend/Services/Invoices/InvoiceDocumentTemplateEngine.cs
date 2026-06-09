@@ -514,7 +514,7 @@ public static class InvoiceDocumentTemplateEngine
             directLegalEntity = mainCompany;
         }
 
-        if (directClient is null && directLegalEntity is not null)
+        if (directLegalEntity is not null)
         {
             var legalName = FirstNotEmpty(directLegalEntity.FullName, directLegalEntity.ShortName, payment.CounterpartyName, "Контрагент");
             var legalAddress = LegalEntityAddressResolver.ResolvePreferredAddress(directLegalEntity);
@@ -535,6 +535,18 @@ public static class InvoiceDocumentTemplateEngine
             if (!string.IsNullOrWhiteSpace(legalAddress))
             {
                 legalRequisitesLines.Add(legalAddress);
+            }
+
+            var bankRequisites = string.Join(", ", new[]
+            {
+                string.IsNullOrWhiteSpace(directLegalEntity.TreasuryAccountNumber) ? null : $"р/с {directLegalEntity.TreasuryAccountNumber}",
+                string.IsNullOrWhiteSpace(directLegalEntity.TreasuryBankName) ? null : $"в банке {directLegalEntity.TreasuryBankName}",
+                string.IsNullOrWhiteSpace(directLegalEntity.TreasuryBankBik) ? null : $"БИК {directLegalEntity.TreasuryBankBik}",
+                string.IsNullOrWhiteSpace(directLegalEntity.TreasuryCorrAccountNumber) ? null : $"к/с {directLegalEntity.TreasuryCorrAccountNumber}",
+            }.Where(static part => !string.IsNullOrWhiteSpace(part)));
+            if (!string.IsNullOrWhiteSpace(bankRequisites))
+            {
+                legalRequisitesLines.Add(bankRequisites);
             }
 
             return new BuyerInfo
@@ -1916,14 +1928,19 @@ public static class InvoiceDocumentTemplateEngine
     }
     .offer-contract-subject {
       margin-top: 8px;
+      font-size: 14px !important;
       line-height: 1.18;
     }
     .offer-subject-label {
       font-weight: 700;
     }
+    .offer-template .invoice-meta {
+      display: none;
+    }
     .offer-section {
       margin-top: 0;
-      line-height: 1.16;
+      font-size: 14px !important;
+      line-height: 1.18;
     }
     .offer-title {
       margin: 0;
@@ -1935,35 +1952,40 @@ public static class InvoiceDocumentTemplateEngine
     .offer-clause {
       margin-top: 1px;
     }
+    .offer-page-break-before {
+      page-break-before: always;
+    }
     .offer-requisites-heading {
-      margin-top: 12px;
+      page-break-before: always;
+      margin-top: 0;
       font-weight: 700;
     }
     .offer-requisites-table {
-      margin-top: 6px;
-      border: 1px solid #000000;
+      margin-top: 14px;
+      border: 0;
     }
     .offer-requisites-table th,
     .offer-requisites-table td {
-      border: 1px solid #000000;
-      padding: 4px 6px;
+      border: 0;
+      padding: 0 4px 4px 4px;
       vertical-align: top;
-      line-height: 1.16;
+      line-height: 1.18;
     }
     .offer-requisites-table th {
       text-align: left;
       font-weight: 700;
+      padding-bottom: 8px;
     }
     .offer-signatures {
-      margin-top: 26px;
+      margin-top: 34px;
     }
     .offer-signatures td {
       padding: 0;
       vertical-align: bottom;
     }
     .offer-signature-role {
-      padding-bottom: 38px !important;
-      font-weight: 700;
+      padding-bottom: 62px !important;
+      font-weight: 400;
     }
     .offer-signature-name {
       border-bottom: 1px solid #000000;
@@ -2009,7 +2031,7 @@ public static class InvoiceDocumentTemplateEngine
         <div class="offer-clause">1.4. Настоящий Счет-договор действителен в течение 10 (десяти) календарных дней от даты его составления включительно. При отсутствии оплаты в указанный срок настоящий Счет-договор признается недействительным.</div>
         <div class="offer-clause">1.5. В связи с вышеизложенным, внимательно прочитайте текст данной публичной Оферты. Если Вы не согласны с каким-либо пунктом настоящей Оферты, Исполнитель предлагает Вам отказаться от ее акцепта и заключить с Исполнителем отдельный договор.</div>
 
-        <div class="offer-heading">2. Термины и определения</div>
+        <div class="offer-heading offer-page-break-before">2. Термины и определения</div>
         <div class="offer-clause">2.1. Оферта - настоящий документ «Договор публичной оферты по оказанию юридических услуг».</div>
         <div class="offer-clause">2.2. Акцепт Оферты - полное и безоговорочное принятие Оферты Заказчиком путем обращения к Исполнителю за оказанием предоставляемых им услуг. Акцепт Оферты создает Договор Оферты.</div>
         <div class="offer-clause">2.3. Тарифы - действующий систематизированный перечень услуг Исполнителя с ценами.</div>
@@ -2045,7 +2067,7 @@ public static class InvoiceDocumentTemplateEngine
         <div class="offer-heading">5. Оплата услуг</div>
         <div class="offer-clause">5.1. Стоимость Услуг не включает НДС (НДС не облагается) исполнитель применяет УСН.</div>
         <div class="offer-clause">5.2. Стоимость Услуги определяется исходя из задания Заказчика, согласно стоимости по каждой услуге, определенной Исполнителем.</div>
-        <div class="offer-clause">5.3. Оплата услуг осуществляется в рублях путем перечисления соответствующих денежных средств на расчетный счет Исполнителя.</div>
+        <div class="offer-clause offer-page-break-before">5.3. Оплата услуг осуществляется в рублях путем перечисления соответствующих денежных средств на расчетный счет Исполнителя.</div>
         <div class="offer-clause">5.4. При оплате ссылка на номер и дату Счета-договора обязательны.</div>
         <div class="offer-clause">5.5. Оплата Счета-договора третьими лицами (сторонами), а также неполная (частичная) оплата Счета-договора не допускается. Заказчик не имеет права производить выборочную оплату позиций счета и требовать оказания услуг по выбранным позициям.</div>
 
