@@ -2608,6 +2608,49 @@ describe('InvoiceModal integration', () => {
     });
   });
 
+  it('downloads invoice offer with the offer template', async () => {
+    const downloadMock = vi.mocked(apiService.downloadInvoiceDocument);
+    downloadMock.mockClear();
+
+    const invoice = {
+      id: 553,
+      invoiceEntityId: 553,
+      number: '553',
+      date: '2026-04-08',
+      dueDate: '2026-05-07',
+      amount: 18000,
+      type: 'Income',
+      status: 'Pending',
+      lineItems: [{ name: 'Юридические услуги', quantity: 1, unit: 'шт', price: 18000 }],
+    } as unknown as Invoice;
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[]}
+        responsibles={[]}
+        lookupsLoading={false}
+        presentation="page"
+        relatedPayments={[]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Скачать/i }));
+    fireEvent.click(screen.getByRole('button', { name: /PDF счет-оферта/i }));
+
+    await waitFor(() => {
+      expect(downloadMock).toHaveBeenCalledWith(553, 'pdf', {
+        includeSignatureAndSeal: false,
+        templateKey: 'invoice-offer',
+      });
+    });
+  });
+
   it('shows the calculated line item amount and keeps invoice total in sync', async () => {
     render(
       <InvoiceModal

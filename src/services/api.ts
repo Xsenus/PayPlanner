@@ -3211,11 +3211,12 @@ export class ApiService {
   async downloadInvoiceDocument(
     id: number,
     format: 'word' | 'pdf' | 'html' = 'word',
-    options?: { includeSignatureAndSeal?: boolean },
+    options?: { includeSignatureAndSeal?: boolean; templateKey?: string },
   ) {
     const token = getAuthToken();
     const query = buildQuery({
       format,
+      templateKey: options?.templateKey,
       includeSignatureAndSeal: options?.includeSignatureAndSeal,
     });
     const response = await fetch(`${API_BASE_URL}/invoices/${id}/document${query}`, {

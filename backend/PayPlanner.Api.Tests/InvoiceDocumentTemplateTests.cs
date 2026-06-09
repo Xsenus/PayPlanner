@@ -41,7 +41,91 @@ public class InvoiceDocumentTemplateTests
         Assert.Contains("<td class=\"sum\">{{total}}</td>", dto.DefaultTemplateHtml);
         Assert.Contains(".counterparty-line", dto.DefaultTemplateHtml);
         Assert.Contains("overflow-wrap: anywhere;", dto.DefaultTemplateHtml);
+        Assert.Contains(dto.Templates, template => template.Key == InvoiceDocumentTemplateEngine.OfferTemplateKey);
         Assert.DoesNotContain("class=\"brand-column\" rowspan=\"2\"", dto.DefaultTemplateHtml);
+    }
+
+    [Fact]
+    public void CreateResponse_AddsSystemOfferTemplate_ToExistingSettings()
+    {
+        var settings = InvoiceDocumentTemplateEngine.CreateResponse(new InvoiceDocumentTemplateEngine.InvoiceDocumentTemplateSettingsStorage
+        {
+            ActiveTemplateKey = InvoiceDocumentTemplateEngine.DefaultTemplateKey,
+            Templates =
+            [
+                new InvoiceDocumentTemplateEngine.InvoiceDocumentTemplateStorageItem
+                {
+                    Key = InvoiceDocumentTemplateEngine.DefaultTemplateKey,
+                    Name = "Стандартный счет",
+                    Html = InvoiceDocumentTemplateEngine.DefaultTemplateHtml,
+                },
+            ],
+        });
+
+        var offerTemplate = Assert.Single(settings.Templates, template => template.Key == InvoiceDocumentTemplateEngine.OfferTemplateKey);
+        Assert.Equal("Счет-оферта", offerTemplate.Name);
+        Assert.Contains("Договор публичной оферты об оказании юридических услуг", offerTemplate.Html);
+        Assert.Equal(InvoiceDocumentTemplateEngine.DefaultTemplateKey, settings.ActiveTemplateKey);
+    }
+
+    [Fact]
+    public void RenderHtml_RendersOfferTemplate_WithInvoiceAndOfferText()
+    {
+        var payment = new Payment
+        {
+            Account = "32",
+            AccountDate = new DateTime(2026, 6, 9),
+            Date = new DateTime(2026, 6, 19),
+            Amount = 7_000m,
+            Description = "АДМ/ Ознакомление с материалами дела",
+            Type = PaymentType.Income,
+            Invoice = new Invoice
+            {
+                Number = "32",
+                Date = new DateTime(2026, 6, 9),
+            },
+            Client = new Client
+            {
+                Name = "Завгородняя Ирина Александровна",
+                Phone = "+79990000000",
+                Email = "client@example.com",
+            },
+        };
+
+        var html = InvoiceDocumentTemplateEngine.RenderHtml(
+            InvoiceDocumentTemplateEngine.OfferTemplateHtml,
+            payment,
+            [
+                new InvoiceLineItemDto
+                {
+                    Name = "Юридические услуги",
+                    Quantity = 1,
+                    Unit = "усл.ед.",
+                    Price = 7_000m,
+                },
+            ],
+            new LegalEntity
+            {
+                ShortName = "ИП Кожеваткин А. В.",
+                FullName = "Индивидуальный предприниматель Кожеваткин Андрей Владимирович",
+                Inn = "633009620345",
+                Ogrn = "317631300153603",
+                TaxSystem = "УСН",
+                Okved = "69.10",
+                Phone = "8 999 333 16 47",
+                Email = "info@elitpravo.com",
+                TreasuryBankName = "ООО Банк Точка",
+                TreasuryBankBik = "044525104",
+                TreasuryAccountNumber = "40802810414500006073",
+                TreasuryCorrAccountNumber = "30101810745374525104",
+            },
+            includeSignatureAndSeal: false);
+
+        Assert.Contains("Счет № 32 от 9 июня 2026 г.", html);
+        Assert.Contains("Счет-оферта", html);
+        Assert.Contains("Договор публичной оферты об оказании юридических услуг", html);
+        Assert.Contains("ОГРН/ОГРНИП № 317631300153603", html);
+        Assert.Contains("Юридические услуги", html);
     }
 
     [Fact]
@@ -58,6 +142,27 @@ public class InvoiceDocumentTemplateTests
         Assert.Contains("<th class=\"sum\">Сумма</th>", content.Content);
         Assert.Matches(new Regex("<td class=\"sum\">\\s*[^<]+\\s*</td>", RegexOptions.Singleline), content.Content);
         Assert.Matches(new Regex("на сумму\\s*[^<]+\\s*руб\\.", RegexOptions.Singleline), content.Content);
+    }
+
+    [Fact]
+    public async Task GetDocument_RendersOfferTemplate_WhenRequested()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        var controller = CreateController(db, isAdmin: true);
+
+        var result = await controller.GetDocument(
+            paymentId,
+            "html",
+            InvoiceDocumentTemplateEngine.OfferTemplateKey,
+            null,
+            CancellationToken.None);
+
+        var content = Assert.IsType<ContentResult>(result);
+        Assert.NotNull(content.Content);
+        Assert.Contains("Счет-оферта", content.Content);
+        Assert.Contains("Договор публичной оферты об оказании юридических услуг", content.Content);
+        Assert.Contains("<th class=\"sum\">Сумма</th>", content.Content);
     }
 
     [Fact]

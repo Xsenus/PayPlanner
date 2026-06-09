@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Ban, Check, ChevronDown, Copy, Download, Link2, List, Loader2, Pencil, Plus, Printer, Send, Trash2, UploadCloud, UserRoundSearch, X } from 'lucide-react';
+import { ArrowLeft, Ban, Check, ChevronDown, Copy, Download, FileText, Link2, List, Loader2, Pencil, Plus, Printer, Send, Trash2, UploadCloud, UserRoundSearch, X } from 'lucide-react';
 import type {
   Act,
   ActInput,
@@ -112,6 +112,8 @@ const DEFAULT_INVOICE_WORKFLOW_STATUS_LABELS: Record<InvoiceWorkflowStatus, stri
   Overdue: 'Просрочен',
   Cancelled: 'Аннулирован',
 };
+
+const INVOICE_OFFER_TEMPLATE_KEY = 'invoice-offer';
 
 const INVOICE_WORKFLOW_STATUS_CLASSES: Record<InvoiceWorkflowStatus, string> = {
   Draft: 'bg-slate-100 text-slate-700 border border-slate-200',
@@ -3104,7 +3106,7 @@ export function InvoiceModal({
     return message;
   }, []);
 
-  const handlePrintDocument = async () => {
+  const handlePrintDocument = async (templateKey?: string) => {
     if (!invoice?.id) {
       toast.error('Сначала сохраните счёт, затем можно печатать документ.');
       return;
@@ -3113,9 +3115,13 @@ export function InvoiceModal({
     let previewWindow: Window | null | undefined;
     try {
       previewWindow = openPendingDocumentWindow();
-      const blob = await apiService.downloadInvoiceDocument(invoice.id, 'pdf', {
-        includeSignatureAndSeal: false,
-      });
+      const blob = await apiService.downloadInvoiceDocument(
+        invoice.id,
+        'pdf',
+        templateKey
+          ? { includeSignatureAndSeal: false, templateKey }
+          : { includeSignatureAndSeal: false },
+      );
       openBlobInWindow(blob, previewWindow, { autoPrint: true });
     } catch (err) {
       if (previewWindow && !previewWindow.closed) {
@@ -3128,6 +3134,7 @@ export function InvoiceModal({
   const handleDownloadDocument = async (
     format: 'word' | 'pdf',
     includeSignatureAndSeal: boolean,
+    templateKey?: string,
   ) => {
     if (!invoice?.id) {
       toast.error('Сначала сохраните счёт, затем можно скачать документ.');
@@ -3135,11 +3142,16 @@ export function InvoiceModal({
     }
 
     try {
-      const blob = await apiService.downloadInvoiceDocument(invoice.id, format, {
-        includeSignatureAndSeal,
-      });
+      const blob = await apiService.downloadInvoiceDocument(
+        invoice.id,
+        format,
+        templateKey
+          ? { includeSignatureAndSeal, templateKey }
+          : { includeSignatureAndSeal },
+      );
       const extension = format === 'pdf' ? 'pdf' : 'doc';
-      downloadBlob(`invoice-${form.number || 'export'}.${extension}`, blob);
+      const filePrefix = templateKey === INVOICE_OFFER_TEMPLATE_KEY ? 'invoice-offer' : 'invoice';
+      downloadBlob(`${filePrefix}-${form.number || 'export'}.${extension}`, blob);
       setDownloadMenuOpen(false);
     } catch (err) {
       toast.error(getDocumentActionErrorMessage(err, 'Не удалось скачать документ.'));
@@ -4181,9 +4193,10 @@ export function InvoiceModal({
             </aside>
           </div>
 
-          <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-300 bg-white p-2 md:grid-cols-4 xl:grid-cols-11">
+          <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-300 bg-white p-2 md:grid-cols-4 xl:grid-cols-12">
             <button type="button" onClick={() => void handlePageAction('send')} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Send className="h-4 w-4" />Отправить</button>
             <button type="button" onClick={() => void handlePrintDocument()} className="inline-flex items-center justify-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm"><Printer className="h-4 w-4" />Печать</button>
+            <button type="button" onClick={() => void handlePrintDocument(INVOICE_OFFER_TEMPLATE_KEY)} className="inline-flex items-center justify-center gap-2 rounded border border-emerald-200 px-3 py-2 text-sm text-emerald-700"><FileText className="h-4 w-4" />Оферта</button>
             <button
               type="button"
               onClick={() => void handleUploadDocumentToYandexDisk()}
@@ -4222,6 +4235,14 @@ export function InvoiceModal({
                     <span>PDF с подписью и печатью</span>
                     <span className="text-xs text-slate-400">.pdf</span>
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleDownloadDocument('pdf', false, INVOICE_OFFER_TEMPLATE_KEY)}
+                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-emerald-700 hover:bg-emerald-50"
+                  >
+                    <span>PDF счет-оферта</span>
+                    <span className="text-xs text-slate-400">.pdf</span>
+                  </button>
                   <div className="my-1 border-t border-slate-100" />
                   <button
                     type="button"
@@ -4237,6 +4258,14 @@ export function InvoiceModal({
                     className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
                   >
                     <span>Word с подписью и печатью</span>
+                    <span className="text-xs text-slate-400">.doc</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleDownloadDocument('word', false, INVOICE_OFFER_TEMPLATE_KEY)}
+                    className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm text-emerald-700 hover:bg-emerald-50"
+                  >
+                    <span>Word счет-оферта</span>
                     <span className="text-xs text-slate-400">.doc</span>
                   </button>
                 </div>

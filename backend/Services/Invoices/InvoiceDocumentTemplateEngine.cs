@@ -15,6 +15,7 @@ namespace PayPlanner.Api.Services.Invoices;
 public static class InvoiceDocumentTemplateEngine
 {
     public const string DefaultTemplateKey = "invoice-standard";
+    public const string OfferTemplateKey = "invoice-offer";
     private const string ClientProfileNotesPrefix = "__PP_CLIENT_PROFILE_V2__:";
     private static readonly HashSet<string> LegacyManagedStandardTemplateFingerprints = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -49,6 +50,7 @@ public static class InvoiceDocumentTemplateEngine
                     Description = "Базовый печатный шаблон счета с реквизитами, позициями и подписью.",
                     Html = DefaultTemplateHtml,
                 },
+                CreateOfferTemplateStorageItem(),
             ],
         });
     }
@@ -174,7 +176,12 @@ public static class InvoiceDocumentTemplateEngine
             new() { Key = "seller.inn", Category = "Продавец", Description = "ИНН продавца", IsRepeating = false },
             new() { Key = "seller.kpp", Category = "Продавец", Description = "КПП продавца", IsRepeating = false },
             new() { Key = "seller.kppOrDash", Category = "Продавец", Description = "КПП или дефис, если значение не заполнено", IsRepeating = false },
+            new() { Key = "seller.ogrn", Category = "Продавец", Description = "ОГРН или ОГРНИП продавца", IsRepeating = false },
             new() { Key = "seller.address", Category = "Продавец", Description = "Адрес продавца", IsRepeating = false },
+            new() { Key = "seller.phone", Category = "Продавец", Description = "Телефон продавца", IsRepeating = false },
+            new() { Key = "seller.email", Category = "Продавец", Description = "Email продавца", IsRepeating = false },
+            new() { Key = "seller.taxSystem", Category = "Продавец", Description = "Система налогообложения продавца", IsRepeating = false },
+            new() { Key = "seller.okved", Category = "Продавец", Description = "ОКВЭД продавца", IsRepeating = false },
             new() { Key = "seller.bankName", Category = "Продавец", Description = "Банк продавца", IsRepeating = false },
             new() { Key = "seller.bik", Category = "Продавец", Description = "БИК продавца", IsRepeating = false },
             new() { Key = "seller.accountNumber", Category = "Продавец", Description = "Расчетный счет продавца", IsRepeating = false },
@@ -193,6 +200,9 @@ public static class InvoiceDocumentTemplateEngine
             new() { Key = "buyer.address", Category = "Покупатель", Description = "Адрес покупателя", IsRepeating = false },
             new() { Key = "buyer.passport", Category = "Покупатель", Description = "Паспортные данные покупателя", IsRepeating = false },
             new() { Key = "buyer.inn", Category = "Покупатель", Description = "ИНН покупателя", IsRepeating = false },
+            new() { Key = "buyer.kpp", Category = "Покупатель", Description = "КПП покупателя", IsRepeating = false },
+            new() { Key = "buyer.kppOrDash", Category = "Покупатель", Description = "КПП покупателя или пустое значение", IsRepeating = false },
+            new() { Key = "buyer.ogrn", Category = "Покупатель", Description = "ОГРН или ОГРНИП покупателя", IsRepeating = false },
             new() { Key = "buyer.snils", Category = "Покупатель", Description = "СНИЛС покупателя", IsRepeating = false },
             new() { Key = "buyer.phone", Category = "Покупатель", Description = "Телефон покупателя", IsRepeating = false },
             new() { Key = "buyer.email", Category = "Покупатель", Description = "Email покупателя", IsRepeating = false },
@@ -289,7 +299,12 @@ public static class InvoiceDocumentTemplateEngine
                 ["seller.inn"] = Encode(seller.Inn),
                 ["seller.kpp"] = Encode(seller.Kpp),
                 ["seller.kppOrDash"] = Encode(string.IsNullOrWhiteSpace(seller.Kpp) ? "-" : seller.Kpp),
+                ["seller.ogrn"] = Encode(seller.Ogrn),
                 ["seller.address"] = Encode(seller.Address),
+                ["seller.phone"] = Encode(seller.Phone),
+                ["seller.email"] = Encode(seller.Email),
+                ["seller.taxSystem"] = Encode(seller.TaxSystem),
+                ["seller.okved"] = Encode(seller.Okved),
                 ["seller.bankName"] = Encode(seller.BankName),
                 ["seller.bik"] = Encode(seller.Bik),
                 ["seller.accountNumber"] = Encode(seller.AccountNumber),
@@ -312,6 +327,9 @@ public static class InvoiceDocumentTemplateEngine
                 ["buyer.address"] = Encode(buyer.Address),
                 ["buyer.passport"] = Encode(buyer.Passport),
                 ["buyer.inn"] = Encode(buyer.Inn),
+                ["buyer.kpp"] = Encode(buyer.Kpp),
+                ["buyer.kppOrDash"] = Encode(string.IsNullOrWhiteSpace(buyer.Kpp) ? string.Empty : buyer.Kpp),
+                ["buyer.ogrn"] = Encode(buyer.Ogrn),
                 ["buyer.snils"] = Encode(buyer.Snils),
                 ["buyer.phone"] = Encode(buyer.Phone),
                 ["buyer.email"] = Encode(buyer.Email),
@@ -401,7 +419,12 @@ public static class InvoiceDocumentTemplateEngine
             FullName = name,
             Inn = inn,
             Kpp = string.Empty,
+            Ogrn = string.Empty,
             Address = address,
+            Phone = client.Phone ?? string.Empty,
+            Email = client.Email ?? string.Empty,
+            TaxSystem = string.Empty,
+            Okved = string.Empty,
             BankName = string.Empty,
             Bik = string.Empty,
             AccountNumber = string.Empty,
@@ -467,7 +490,12 @@ public static class InvoiceDocumentTemplateEngine
             FullName = fullName,
             Inn = mainCompany?.Inn ?? string.Empty,
             Kpp = mainCompany?.Kpp ?? string.Empty,
+            Ogrn = mainCompany?.Ogrn ?? string.Empty,
             Address = address,
+            Phone = mainCompany?.Phone ?? string.Empty,
+            Email = mainCompany?.Email ?? string.Empty,
+            TaxSystem = mainCompany?.TaxSystem ?? string.Empty,
+            Okved = mainCompany?.Okved ?? string.Empty,
             BankName = bankName,
             Bik = bik,
             AccountNumber = accountNumber,
@@ -515,6 +543,8 @@ public static class InvoiceDocumentTemplateEngine
                 Address = legalAddress,
                 Passport = string.Empty,
                 Inn = directLegalEntity.Inn ?? string.Empty,
+                Kpp = directLegalEntity.Kpp ?? string.Empty,
+                Ogrn = directLegalEntity.Ogrn ?? string.Empty,
                 Snils = string.Empty,
                 Phone = directLegalEntity.Phone ?? string.Empty,
                 Email = directLegalEntity.Email ?? string.Empty,
@@ -590,6 +620,8 @@ public static class InvoiceDocumentTemplateEngine
             Address = address,
             Passport = passport,
             Inn = inn,
+            Kpp = string.Empty,
+            Ogrn = string.Empty,
             Snils = snils,
             Phone = phone,
             Email = email,
@@ -1141,27 +1173,71 @@ public static class InvoiceDocumentTemplateEngine
         if (standardTemplate is null)
         {
             normalized.StandardTemplateFingerprint = null;
-            return normalized;
         }
-
-        var managedFingerprint = ResolveManagedStandardTemplateFingerprint(
-            standardTemplate.Html,
-            normalized.StandardTemplateFingerprint);
-
-        if (string.IsNullOrWhiteSpace(managedFingerprint))
+        else
         {
-            normalized.StandardTemplateFingerprint = null;
-            return normalized;
+            var managedFingerprint = ResolveManagedStandardTemplateFingerprint(
+                standardTemplate.Html,
+                normalized.StandardTemplateFingerprint);
+
+            if (string.IsNullOrWhiteSpace(managedFingerprint))
+            {
+                normalized.StandardTemplateFingerprint = null;
+            }
+            else
+            {
+                if (!string.Equals(managedFingerprint, CurrentDefaultTemplateFingerprint, StringComparison.OrdinalIgnoreCase))
+                {
+                    standardTemplate.Html = DefaultTemplateHtml;
+                }
+
+                normalized.StandardTemplateFingerprint = CurrentDefaultTemplateFingerprint;
+            }
         }
 
-        if (!string.Equals(managedFingerprint, CurrentDefaultTemplateFingerprint, StringComparison.OrdinalIgnoreCase))
+        if (normalized.Templates.Count > 0)
         {
-            standardTemplate.Html = DefaultTemplateHtml;
+            EnsureOfferTemplate(normalized.Templates);
         }
 
-        normalized.StandardTemplateFingerprint = CurrentDefaultTemplateFingerprint;
         return normalized;
     }
+
+    private static void EnsureOfferTemplate(List<InvoiceDocumentTemplateStorageItem> templates)
+    {
+        var existing = templates.FirstOrDefault(item =>
+            string.Equals(item.Key, OfferTemplateKey, StringComparison.OrdinalIgnoreCase));
+
+        if (existing is null)
+        {
+            templates.Add(CreateOfferTemplateStorageItem());
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(existing.Name))
+        {
+            existing.Name = "Счет-оферта";
+        }
+
+        if (string.IsNullOrWhiteSpace(existing.Description))
+        {
+            existing.Description = "Счет с теми же реквизитами и позициями, дополненный текстом публичной оферты для удаленных клиентов.";
+        }
+
+        if (string.IsNullOrWhiteSpace(existing.Html))
+        {
+            existing.Html = OfferTemplateHtml;
+        }
+    }
+
+    private static InvoiceDocumentTemplateStorageItem CreateOfferTemplateStorageItem()
+        => new()
+        {
+            Key = OfferTemplateKey,
+            Name = "Счет-оферта",
+            Description = "Счет с теми же реквизитами и позициями, дополненный текстом публичной оферты для удаленных клиентов.",
+            Html = OfferTemplateHtml,
+        };
 
     private static string? ResolveManagedStandardTemplateFingerprint(string? templateHtml, string? currentFingerprint)
     {
@@ -1249,7 +1325,12 @@ public static class InvoiceDocumentTemplateEngine
         public string FullName { get; init; } = string.Empty;
         public string Inn { get; init; } = string.Empty;
         public string Kpp { get; init; } = string.Empty;
+        public string Ogrn { get; init; } = string.Empty;
         public string Address { get; init; } = string.Empty;
+        public string Phone { get; init; } = string.Empty;
+        public string Email { get; init; } = string.Empty;
+        public string TaxSystem { get; init; } = string.Empty;
+        public string Okved { get; init; } = string.Empty;
         public string BankName { get; init; } = string.Empty;
         public string Bik { get; init; } = string.Empty;
         public string AccountNumber { get; init; } = string.Empty;
@@ -1263,6 +1344,8 @@ public static class InvoiceDocumentTemplateEngine
         public string Address { get; init; } = string.Empty;
         public string Passport { get; init; } = string.Empty;
         public string Inn { get; init; } = string.Empty;
+        public string Kpp { get; init; } = string.Empty;
+        public string Ogrn { get; init; } = string.Empty;
         public string Snils { get; init; } = string.Empty;
         public string Phone { get; init; } = string.Empty;
         public string Email { get; init; } = string.Empty;
@@ -1810,4 +1893,181 @@ public static class InvoiceDocumentTemplateEngine
 </body>
 </html>
 """;
+
+    public static readonly string OfferTemplateHtml = DefaultTemplateHtml
+        .Replace(
+            """
+    .signature-table {
+      margin-top: 12px;
+    }
+""",
+            """
+    .offer-marker {
+      margin-top: 8px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .offer-section {
+      margin-top: 6px;
+      line-height: 1.18;
+    }
+    .offer-title {
+      margin: 4px 0 6px;
+      font-weight: 700;
+    }
+    .offer-heading {
+      margin-top: 5px;
+      font-weight: 700;
+    }
+    .offer-clause {
+      margin-top: 2px;
+    }
+    .offer-requisites-table {
+      margin-top: 8px;
+      border: 1px solid #000000;
+    }
+    .offer-requisites-table th,
+    .offer-requisites-table td {
+      border: 1px solid #000000;
+      padding: 4px 6px;
+      vertical-align: top;
+      line-height: 1.18;
+    }
+    .signature-table {
+      margin-top: 12px;
+    }
+""",
+            StringComparison.Ordinal)
+        .Replace(
+            """
+      <div class="color-line" style="margin: 6px 0;"></div>
+
+      <table class="signature-table">
+""",
+            """
+      <div class="offer-marker">Счет-оферта</div>
+
+      <div class="offer-section">
+        <div class="offer-title">Договор публичной оферты об оказании юридических услуг</div>
+        <div class="offer-heading">1. Общие положения</div>
+        <div class="offer-clause">1.1. Данный документ является официальным предложением (публичной Офертой) {{seller.fullName}} ОГРН/ОГРНИП № {{seller.ogrn}}, именуемого в дальнейшем «Исполнитель», и содержит все существенные условия по оказанию юридических услуг (далее по тексту - «Услуги»).</div>
+        <div class="offer-clause">1.2. В соответствии с пунктом 2 статьи 437 Гражданского Кодекса Российской Федерации (ГК РФ) в случае принятия изложенных ниже условий и оплаты услуг, юридическое или физическое лицо, производящее акцепт этой Оферты, становится Заказчиком (в соответствии с пунктом 3 статьи 438 ГК РФ акцепт Оферты равносилен заключению договора на условиях, изложенных в Оферте), а Исполнитель и Заказчик совместно именуются Сторонами договора Оферты.</div>
+        <div class="offer-clause">1.3. Акцепт оферты осуществляется путем оплаты Заказчиком Счета-оферты и означает полное и безоговорочное согласие Заказчика с условиями оказания услуг, определенных Счетом-офертой.</div>
+        <div class="offer-clause">1.4. Настоящий Счет-оферта действителен в течение 10 (десяти) календарных дней от даты его составления включительно. При отсутствии оплаты в указанный срок настоящий Счет-оферта признается недействительным.</div>
+        <div class="offer-clause">1.5. В связи с вышеизложенным, внимательно прочитайте текст данной публичной Оферты. Если Вы не согласны с каким-либо пунктом настоящей Оферты, Исполнитель предлагает Вам отказаться от ее акцепта и заключить с Исполнителем отдельный договор.</div>
+
+        <div class="offer-heading">2. Термины и определения</div>
+        <div class="offer-clause">2.1. Оферта - настоящий документ «Договор публичной оферты по оказанию юридических услуг».</div>
+        <div class="offer-clause">2.2. Акцепт Оферты - полное и безоговорочное принятие Оферты Заказчиком путем обращения к Исполнителю за оказанием предоставляемых им услуг. Акцепт Оферты создает Договор Оферты.</div>
+        <div class="offer-clause">2.3. Тарифы - действующий систематизированный перечень услуг Исполнителя с ценами.</div>
+        <div class="offer-clause">2.4. Заказчик - лицо, осуществившее акцепт оферты, и являющееся таким образом Заказчиком услуг Исполнителя по заключенному договору оферты.</div>
+        <div class="offer-clause">2.5. Исполнитель - {{seller.fullName}}.</div>
+        <div class="offer-clause">2.6. Договор оферты - договор между Исполнителем и Заказчиком на оказание юридических услуг, который заключается посредством акцепта оферты.</div>
+        <div class="offer-clause">2.7. Услуга - проведение работ юридического характера в интересах Заказчика с последующей передачей результатов указанных работ, предоставляемая Исполнителем Заказчику.</div>
+        <div class="offer-clause">2.8. Веб-сайт - информационный ресурс Исполнителя в сети Интернет, находящийся по адресу: https://elitpravo.com/</div>
+        <div class="offer-clause">2.9. Техническое задание - поручение Заказчика, выраженное в виде документа в письменной и (или) электронной форме, содержащий акцепт публичной оферты, содержащий достоверные сведения, на основании предъявленных документов и информации, необходимых для оказания юридических Услуг Исполнителем.</div>
+        <div class="offer-clause">2.10. Условия - настоящие условия, описанные в данном документе.</div>
+
+        <div class="offer-heading">3. Предмет оферты</div>
+        <div class="offer-clause">3.1. Исполнитель обязуется по Техническому заданию Заказчика в соответствии с условиями настоящей Оферты и текущими Тарифами оказать Заказчику Услуги, а Заказчик обязуется принять их и оплатить.</div>
+        <div class="offer-clause">3.2. Исполнитель имеет право в любой момент изменять Прейскурант и условия настоящей публичной Оферты в одностороннем порядке без предварительного согласования с Заказчиком, обеспечивая при этом публикацию измененных условий.</div>
+        <div class="offer-clause">3.3. Договор действует до момента полного оказания услуги в соответствии с Техническим заданием Заказчика.</div>
+        <div class="offer-clause">3.4. В случае невозможности выполнения Исполнителем Технического задания ввиду недостаточности в нем сведений, необходимых для оказания Услуг в полном объеме, Исполнитель обращается к Заказчику с требованием предоставить дополнительные сведения, материалы и (или) документы. При этом Исполнитель вправе не приступать к исполнению услуг до момента предоставления Заказчиком дополнительных сведений (материалов, документов), а срок оказания услуг продлевается на время предоставления Заказчиком дополнительной необходимой Исполнителю информации (документов, сведений).</div>
+
+        <div class="offer-heading">4. Права и обязанности Сторон</div>
+        <div class="offer-clause">4.1. Исполнитель обязуется:</div>
+        <div class="offer-clause">4.1.1. С момента выполнения Услуги уведомить Заказчика о выполненной услуге путем смс, e-mail, WhatsApp, Viber, VK, Одноклассники либо иным доступным способом.</div>
+        <div class="offer-clause">4.1.2. Вместе с тем уведомление о выполнении услуги либо одной из услуг могут поступать с автоматизированной системы управления учета задачами и проектами.</div>
+        <div class="offer-clause">4.2. Исполнитель имеет право:</div>
+        <div class="offer-clause">4.2.1. Привлекать к исполнению настоящей Оферты сторонних консультантов, специалистов и экспертов.</div>
+        <div class="offer-clause">4.2.2. Исполнитель вправе не выполнять услуги до зачисления оплаты на расчетный счет.</div>
+        <div class="offer-clause">4.3. Заказчик обязуется:</div>
+        <div class="offer-clause">4.3.1. Предоставлять Исполнителю все документы и достоверную информацию, необходимые для правильного и своевременного выполнения Исполнителем юридических услуг для заказчика, а также оказывать Исполнителю иное необходимое содействие.</div>
+        <div class="offer-clause">4.3.2. Предоставить Исполнителю информацию и документы, содержащие все необходимые сведения в офисе Исполнителя, либо посредством электронной почты направить копии документов по адресу info@elitpravo.com, или иным доступным Заказчику способом по согласованию с Исполнителем.</div>
+        <div class="offer-clause">4.3.3. Оформить доверенности для представления интересов Заказчика либо лиц, указанных им (при необходимости).</div>
+        <div class="offer-clause">4.3.4. С момента получения уведомления о выполнении услуги либо комплекса услуг Заказчик обязан принять эти услуги либо дать мотивированный отзыв по выполненным услугам в течение 2 дней.</div>
+        <div class="offer-clause">4.3.5. Если Заказчик не принимает либо не реагирует на выполненную услугу или на уведомление об оказанной услуге, то услуга считается принятой Заказчиком по истечении трех дней с даты направления уведомления в соответствии с пунктом 4.1.1. и 4.1.2.</div>
+        <div class="offer-clause">4.3.6. Произвести своевременную и полную оплату услуг Исполнителя в течение 10 календарных дней с даты формирования Счета-оферты.</div>
+
+        <div class="offer-heading">5. Оплата услуг</div>
+        <div class="offer-clause">5.1. Стоимость Услуг не включает НДС (НДС не облагается) исполнитель применяет УСН.</div>
+        <div class="offer-clause">5.2. Стоимость Услуги определяется исходя из задания Заказчика, согласно стоимости по каждой услуге, определенной Исполнителем.</div>
+        <div class="offer-clause">5.3. Оплата услуг осуществляется в рублях путем перечисления соответствующих денежных средств на расчетный счет Исполнителя.</div>
+        <div class="offer-clause">5.4. При оплате ссылка на номер и дату Счета-оферты обязательны.</div>
+        <div class="offer-clause">5.5. Оплата Счета-оферты третьими лицами (сторонами), а также неполная (частичная) оплата Счета-оферты не допускается. Заказчик не имеет права производить выборочную оплату позиций счета и требовать оказания услуг по выбранным позициям.</div>
+
+        <div class="offer-heading">6. Ответственность сторон</div>
+        <div class="offer-clause">6.1. За невыполнение или ненадлежащее исполнение обязательств по настоящему Договору Стороны несут ответственность в соответствии с действующим законодательством Российской Федерации.</div>
+        <div class="offer-clause">6.2. Исполнитель не несет ответственности за нарушение условий договора оферты, если такое нарушение вызвано действием обстоятельств непреодолимой силы (форс-мажор), включая: действия органов государственной власти, пожар, наводнение, землетрясение, другие стихийные действия, отсутствие электроэнергии и/или сбои работы компьютерной сети, забастовки, гражданские волнения, беспорядки, любые иные обстоятельства, не ограничиваясь перечисленным, которые могут повлиять на выполнение Исполнителем условий настоящей публичной оферты и неподконтрольные Исполнителю.</div>
+        <div class="offer-clause">6.3. Исполнитель не несет ответственность за несоответствие сведений, представленных Заказчиком, действительным данным, а также за отказ в совершении регистрационных действий на основании представления в регистрирующий орган недостоверных сведений.</div>
+        <div class="offer-clause">6.4. Заказчик единолично несет ответственность за достоверность представляемых исходных данных, включая сведения о месте его нахождения.</div>
+        <div class="offer-clause">6.5. Исполнитель не несет ответственность за предъявление требований к Заказчику со стороны государственных органов в связи оказанием Услуг.</div>
+
+        <div class="offer-heading">7. Заключительные положения</div>
+        <div class="offer-clause">7.1. Заказчик соглашается на обработку персональных данных (фамилия, имя, отчество, год, дата и месяц рождения, адрес места жительства), в том числе на использование данных сведений в документах, связанных с осуществлением необходимых действий, для оказания Услуг, их хранение и передачу.</div>
+        <div class="offer-clause">7.2. Стороны принимают все необходимые меры для разрешения разногласий, возникших в процессе исполнения условий Оферты, путем переговоров.</div>
+        <div class="offer-clause">7.3. При невозможности урегулирования спора или разногласия в ходе переговоров заинтересованная сторона должна направить другой стороне письменную претензию с описанием существа допущенного нарушения и разумного срока для его устранения.</div>
+        <div class="offer-clause">7.4. Нарушившая сторона должна устранить допущенное нарушение в течение срока, указанного в претензии, или направить отправителю претензии письменный мотивированный отказ в ее удовлетворении в течение 10 (десяти) дней с момента получения претензии.</div>
+        <div class="offer-clause">7.5. В случае неудовлетворения претензии или неполучения ответа на претензию в течение срока, предусмотренного настоящим пунктом (с учетом срока доставки почтовой корреспонденции), заинтересованная сторона вправе обратиться в суд. Все споры касающиеся судебных тяжб будут рассматриваться в Новокуйбышевском городском суде Самарской области в порядке искового производства, в порядке договорной подсудности.</div>
+        <div class="offer-clause">7.6. Настоящая публичная оферта действует на всей территории, где осуществляет деятельность {{seller.fullName}} при выполнении оказании любых услуг, поименованных в настоящем документе, если на их выполнение не заключен отдельный договор.</div>
+
+        <div class="offer-heading">8. Реквизиты Исполнителя</div>
+        <div class="offer-clause">{{seller.fullName}}</div>
+        <div class="offer-clause">Система налогообложения: {{seller.taxSystem}}</div>
+        <div class="offer-clause">Адрес: {{seller.address}}</div>
+        <div class="offer-clause">ОГРН/ОГРНИП: {{seller.ogrn}}</div>
+        <div class="offer-clause">ИНН: {{seller.inn}}</div>
+        <div class="offer-clause">ОКВЭД: {{seller.okved}}</div>
+        <div class="offer-clause">Счет №: {{seller.accountNumber}}</div>
+        <div class="offer-clause">Банк: {{seller.bankName}}</div>
+        <div class="offer-clause">Корреспондентский счет: {{seller.corrAccountNumber}}</div>
+        <div class="offer-clause">БИК: {{seller.bik}}</div>
+        <div class="offer-clause">Телефон: {{seller.phone}}</div>
+        <div class="offer-clause">Email: {{seller.email}}</div>
+
+        <table class="offer-requisites-table">
+          <thead>
+            <tr>
+              <th>Исполнитель</th>
+              <th>Заказчик</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>{{seller.fullName}}</td>
+              <td>{{buyer.name}}</td>
+            </tr>
+            <tr>
+              <td>ИНН {{seller.inn}}</td>
+              <td>ИНН {{buyer.inn}}</td>
+            </tr>
+            <tr>
+              <td>КПП {{seller.kppOrDash}}</td>
+              <td>КПП {{buyer.kppOrDash}}</td>
+            </tr>
+            <tr>
+              <td>ОГРН/ОГРНИП {{seller.ogrn}}</td>
+              <td>ОГРН/ОГРНИП {{buyer.ogrn}}</td>
+            </tr>
+            <tr>
+              <td>{{seller.address}}</td>
+              <td>{{buyer.address}}</td>
+            </tr>
+            <tr>
+              <td>Р/сч {{seller.accountNumber}}<br/>в {{seller.bankName}}</td>
+              <td>{{buyer.requisitesHtml}}</td>
+            </tr>
+            <tr>
+              <td>Кор.счет {{seller.corrAccountNumber}}<br/>БИК {{seller.bik}}</td>
+              <td></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="color-line" style="margin: 6px 0;"></div>
+
+      <table class="signature-table">
+""",
+            StringComparison.Ordinal);
 }
