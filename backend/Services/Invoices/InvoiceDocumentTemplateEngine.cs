@@ -1896,34 +1896,51 @@ public static class InvoiceDocumentTemplateEngine
 
     public static readonly string OfferTemplateHtml = DefaultTemplateHtml
         .Replace(
+            "<div class=\"document-template invoice-template\">",
+            "<div class=\"document-template invoice-template offer-template\">",
+            StringComparison.Ordinal)
+        .Replace(
+            "Счет № {{invoice.number}} от {{invoice.dateLong}}",
+            "Счет-договор № {{invoice.number}} от {{invoice.dateLong}}",
+            StringComparison.Ordinal)
+        .Replace(
             """
     .signature-table {
       margin-top: 12px;
     }
 """,
             """
-    .offer-marker {
-      margin-top: 8px;
-      font-weight: 700;
-      text-transform: uppercase;
+    .offer-template .doc-main-title {
+      margin: 8px 0 9px;
+      font-size: 18px !important;
     }
-    .offer-section {
-      margin-top: 6px;
+    .offer-contract-subject {
+      margin-top: 8px;
       line-height: 1.18;
     }
-    .offer-title {
-      margin: 4px 0 6px;
+    .offer-subject-label {
       font-weight: 700;
     }
+    .offer-section {
+      margin-top: 0;
+      line-height: 1.16;
+    }
+    .offer-title {
+      margin: 0;
+    }
     .offer-heading {
-      margin-top: 5px;
+      margin-top: 4px;
       font-weight: 700;
     }
     .offer-clause {
-      margin-top: 2px;
+      margin-top: 1px;
+    }
+    .offer-requisites-heading {
+      margin-top: 12px;
+      font-weight: 700;
     }
     .offer-requisites-table {
-      margin-top: 8px;
+      margin-top: 6px;
       border: 1px solid #000000;
     }
     .offer-requisites-table th,
@@ -1931,7 +1948,39 @@ public static class InvoiceDocumentTemplateEngine
       border: 1px solid #000000;
       padding: 4px 6px;
       vertical-align: top;
-      line-height: 1.18;
+      line-height: 1.16;
+    }
+    .offer-requisites-table th {
+      text-align: left;
+      font-weight: 700;
+    }
+    .offer-signatures {
+      margin-top: 26px;
+    }
+    .offer-signatures td {
+      padding: 0;
+      vertical-align: bottom;
+    }
+    .offer-signature-role {
+      padding-bottom: 38px !important;
+      font-weight: 700;
+    }
+    .offer-signature-name {
+      border-bottom: 1px solid #000000;
+      text-align: center;
+      height: 48px;
+      vertical-align: bottom !important;
+    }
+    .offer-signature-caption {
+      text-align: center;
+      font-size: 11px !important;
+      line-height: 1.1;
+    }
+    .offer-signature-spacer {
+      width: 10%;
+    }
+    .offer-signature-table {
+      display: none;
     }
     .signature-table {
       margin-top: 12px;
@@ -1945,15 +1994,19 @@ public static class InvoiceDocumentTemplateEngine
       <table class="signature-table">
 """,
             """
-      <div class="offer-marker">Счет-оферта</div>
+      <div class="offer-contract-subject">
+        <div class="offer-subject-label">Предмет договора:</div>
+        <div>Предмет договора:</div>
+        <div>Предмет договора:</div>
+      </div>
 
       <div class="offer-section">
         <div class="offer-title">Договор публичной оферты об оказании юридических услуг</div>
         <div class="offer-heading">1. Общие положения</div>
         <div class="offer-clause">1.1. Данный документ является официальным предложением (публичной Офертой) {{seller.fullName}} ОГРН/ОГРНИП № {{seller.ogrn}}, именуемого в дальнейшем «Исполнитель», и содержит все существенные условия по оказанию юридических услуг (далее по тексту - «Услуги»).</div>
         <div class="offer-clause">1.2. В соответствии с пунктом 2 статьи 437 Гражданского Кодекса Российской Федерации (ГК РФ) в случае принятия изложенных ниже условий и оплаты услуг, юридическое или физическое лицо, производящее акцепт этой Оферты, становится Заказчиком (в соответствии с пунктом 3 статьи 438 ГК РФ акцепт Оферты равносилен заключению договора на условиях, изложенных в Оферте), а Исполнитель и Заказчик совместно именуются Сторонами договора Оферты.</div>
-        <div class="offer-clause">1.3. Акцепт оферты осуществляется путем оплаты Заказчиком Счета-оферты и означает полное и безоговорочное согласие Заказчика с условиями оказания услуг, определенных Счетом-офертой.</div>
-        <div class="offer-clause">1.4. Настоящий Счет-оферта действителен в течение 10 (десяти) календарных дней от даты его составления включительно. При отсутствии оплаты в указанный срок настоящий Счет-оферта признается недействительным.</div>
+        <div class="offer-clause">1.3. Акцепт оферты осуществляется путем оплаты Заказчиком Счета-договора и означает полное и безоговорочное согласие Заказчика с условиями оказания услуг, определенных Счетом-договором.</div>
+        <div class="offer-clause">1.4. Настоящий Счет-договор действителен в течение 10 (десяти) календарных дней от даты его составления включительно. При отсутствии оплаты в указанный срок настоящий Счет-договор признается недействительным.</div>
         <div class="offer-clause">1.5. В связи с вышеизложенным, внимательно прочитайте текст данной публичной Оферты. Если Вы не согласны с каким-либо пунктом настоящей Оферты, Исполнитель предлагает Вам отказаться от ее акцепта и заключить с Исполнителем отдельный договор.</div>
 
         <div class="offer-heading">2. Термины и определения</div>
@@ -1987,14 +2040,14 @@ public static class InvoiceDocumentTemplateEngine
         <div class="offer-clause">4.3.3. Оформить доверенности для представления интересов Заказчика либо лиц, указанных им (при необходимости).</div>
         <div class="offer-clause">4.3.4. С момента получения уведомления о выполнении услуги либо комплекса услуг Заказчик обязан принять эти услуги либо дать мотивированный отзыв по выполненным услугам в течение 2 дней.</div>
         <div class="offer-clause">4.3.5. Если Заказчик не принимает либо не реагирует на выполненную услугу или на уведомление об оказанной услуге, то услуга считается принятой Заказчиком по истечении трех дней с даты направления уведомления в соответствии с пунктом 4.1.1. и 4.1.2.</div>
-        <div class="offer-clause">4.3.6. Произвести своевременную и полную оплату услуг Исполнителя в течение 10 календарных дней с даты формирования Счета-оферты.</div>
+        <div class="offer-clause">4.3.6. Произвести своевременную и полную оплату услуг Исполнителя в течение 10 календарных дней с даты формирования Счета-договора.</div>
 
         <div class="offer-heading">5. Оплата услуг</div>
         <div class="offer-clause">5.1. Стоимость Услуг не включает НДС (НДС не облагается) исполнитель применяет УСН.</div>
         <div class="offer-clause">5.2. Стоимость Услуги определяется исходя из задания Заказчика, согласно стоимости по каждой услуге, определенной Исполнителем.</div>
         <div class="offer-clause">5.3. Оплата услуг осуществляется в рублях путем перечисления соответствующих денежных средств на расчетный счет Исполнителя.</div>
-        <div class="offer-clause">5.4. При оплате ссылка на номер и дату Счета-оферты обязательны.</div>
-        <div class="offer-clause">5.5. Оплата Счета-оферты третьими лицами (сторонами), а также неполная (частичная) оплата Счета-оферты не допускается. Заказчик не имеет права производить выборочную оплату позиций счета и требовать оказания услуг по выбранным позициям.</div>
+        <div class="offer-clause">5.4. При оплате ссылка на номер и дату Счета-договора обязательны.</div>
+        <div class="offer-clause">5.5. Оплата Счета-договора третьими лицами (сторонами), а также неполная (частичная) оплата Счета-договора не допускается. Заказчик не имеет права производить выборочную оплату позиций счета и требовать оказания услуг по выбранным позициям.</div>
 
         <div class="offer-heading">6. Ответственность сторон</div>
         <div class="offer-clause">6.1. За невыполнение или ненадлежащее исполнение обязательств по настоящему Договору Стороны несут ответственность в соответствии с действующим законодательством Российской Федерации.</div>
@@ -2014,7 +2067,7 @@ public static class InvoiceDocumentTemplateEngine
         <div class="offer-heading">8. Реквизиты Исполнителя</div>
         <div class="offer-clause">{{seller.fullName}}</div>
         <div class="offer-clause">Система налогообложения: {{seller.taxSystem}}</div>
-        <div class="offer-clause">Адрес: {{seller.address}}</div>
+        <div class="offer-clause">Юридический адрес: {{seller.address}}</div>
         <div class="offer-clause">ОГРН/ОГРНИП: {{seller.ogrn}}</div>
         <div class="offer-clause">ИНН: {{seller.inn}}</div>
         <div class="offer-clause">ОКВЭД: {{seller.okved}}</div>
@@ -2025,6 +2078,7 @@ public static class InvoiceDocumentTemplateEngine
         <div class="offer-clause">Телефон: {{seller.phone}}</div>
         <div class="offer-clause">Email: {{seller.email}}</div>
 
+        <div class="offer-requisites-heading">Адреса и реквизиты сторон:</div>
         <table class="offer-requisites-table">
           <thead>
             <tr>
@@ -2050,8 +2104,8 @@ public static class InvoiceDocumentTemplateEngine
               <td>ОГРН/ОГРНИП {{buyer.ogrn}}</td>
             </tr>
             <tr>
-              <td>{{seller.address}}</td>
-              <td>{{buyer.address}}</td>
+              <td>Юридический адрес {{seller.address}}</td>
+              <td>Юридический адрес {{buyer.address}}</td>
             </tr>
             <tr>
               <td>Р/сч {{seller.accountNumber}}<br/>в {{seller.bankName}}</td>
@@ -2063,11 +2117,29 @@ public static class InvoiceDocumentTemplateEngine
             </tr>
           </tbody>
         </table>
+
+        <table class="offer-signatures">
+          <tbody>
+            <tr>
+              <td class="offer-signature-role" style="width: 45%;">Предприниматель</td>
+              <td class="offer-signature-spacer"></td>
+              <td class="offer-signature-role" style="width: 45%;">Предприниматель</td>
+            </tr>
+            <tr>
+              <td class="offer-signature-name">{{seller.documentDirectorShortName}}</td>
+              <td></td>
+              <td class="offer-signature-name"></td>
+            </tr>
+            <tr>
+              <td class="offer-signature-caption">подпись&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;расшифровка<br/>подписи</td>
+              <td></td>
+              <td class="offer-signature-caption">подпись&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;расшифровка<br/>подписи</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
-      <div class="color-line" style="margin: 6px 0;"></div>
-
-      <table class="signature-table">
+      <table class="signature-table offer-signature-table">
 """,
             StringComparison.Ordinal);
 }

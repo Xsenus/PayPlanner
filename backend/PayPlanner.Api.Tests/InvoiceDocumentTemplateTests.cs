@@ -121,11 +121,14 @@ public class InvoiceDocumentTemplateTests
             },
             includeSignatureAndSeal: false);
 
-        Assert.Contains("Счет № 32 от 9 июня 2026 г.", html);
-        Assert.Contains("Счет-оферта", html);
+        Assert.Contains("Счет-договор № 32 от 9 июня 2026 г.", html);
+        Assert.Contains("Предмет договора:", html);
         Assert.Contains("Договор публичной оферты об оказании юридических услуг", html);
         Assert.Contains("ОГРН/ОГРНИП № 317631300153603", html);
+        Assert.Contains("Адреса и реквизиты сторон:", html);
+        Assert.Contains("Предприниматель", html);
         Assert.Contains("Юридические услуги", html);
+        Assert.Contains("offer-signature-table", html);
     }
 
     [Fact]
@@ -160,7 +163,8 @@ public class InvoiceDocumentTemplateTests
 
         var content = Assert.IsType<ContentResult>(result);
         Assert.NotNull(content.Content);
-        Assert.Contains("Счет-оферта", content.Content);
+        Assert.Contains("Счет-договор", content.Content);
+        Assert.Contains("Предмет договора:", content.Content);
         Assert.Contains("Договор публичной оферты об оказании юридических услуг", content.Content);
         Assert.Contains("<th class=\"sum\">Сумма</th>", content.Content);
     }
