@@ -767,13 +767,20 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
     <div className="p-6 lg:p-8">
       <div className="w-full">
         <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6">
-          <aside className="h-fit rounded-3xl border border-gray-200 bg-white p-5 shadow-sm lg:sticky lg:top-6">
+          <aside
+            data-testid="settings-sidebar"
+            className="flex flex-col rounded-3xl border border-gray-200 bg-white p-5 shadow-sm lg:sticky lg:top-6 lg:max-h-[calc(100vh-12rem)] lg:self-start lg:overflow-hidden"
+          >
             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Панель настроек</div>
               <h2 className="mt-2 text-xl font-semibold text-slate-900">Структура разделов</h2>
             </div>
 
-            <nav aria-label="Разделы настроек" className="mt-4 space-y-3">
+            <nav
+              aria-label="Разделы настроек"
+              data-testid="settings-sidebar-scroll"
+              className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-1"
+            >
               {!restrictedSettingsMode && (
               <div className="rounded-2xl border border-sky-200 bg-gradient-to-br from-sky-50 to-white p-3 shadow-sm">
                 <div className="flex items-center gap-3 rounded-xl border border-sky-100 bg-white/90 px-3 py-3 shadow-sm">
