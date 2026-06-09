@@ -1605,7 +1605,7 @@ describe('InvoiceModal integration', () => {
       invoiceEntityId: 573,
       number: '573',
       date: '2026-04-29',
-      dueDate: '2026-06-08',
+      dueDate: '2026-06-18',
       amount: 2500,
       paidAmount: 0,
       outstandingAmount: 2500,

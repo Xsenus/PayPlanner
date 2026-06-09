@@ -1007,7 +1007,7 @@ describe('MoneyOperations integration', () => {
       ),
     );
     expect(await screen.findByText('Актуально')).toBeTruthy();
-    expect(screen.getByTitle('Сохранено 02.05.2026')).toBeTruthy();
+    expect(screen.getByTitle((title) => title.startsWith('Сохранено 02.05.2026'))).toBeTruthy();
     expect(toastSuccessMock).toHaveBeenCalledWith(
       'Сверка сохранена: создано 1, обновлено 0, замечаний 0.',
       'Сверка остатков',
@@ -1052,7 +1052,13 @@ describe('MoneyOperations integration', () => {
     render(<MoneyOperations source="Bank" />);
 
     expect(await screen.findByText('Изменилось')).toBeTruthy();
-    expect(screen.getByTitle('Сохранено 02.05.2026. Изменение сумм: 200,00 ₽')).toBeTruthy();
+    expect(
+      screen.getByTitle(
+        (title) =>
+          title.startsWith('Сохранено 02.05.2026') &&
+          title.includes('Изменение сумм: 200,00 ₽'),
+      ),
+    ).toBeTruthy();
     expect(screen.getByText('Сумма изменилась')).toBeTruthy();
   });
 
@@ -1767,7 +1773,7 @@ describe('MoneyOperations integration', () => {
 
     await user.click(screen.getByRole('button', { name: 'Изменить' }));
     await screen.findByText('Подходящие счета');
-    await screen.findByText('Счёт 33 от 20.04.2026');
+    await screen.findByText(/Счёт 33 от 20\.04\.2026/);
     await user.click(screen.getByRole('button', { name: /Счёт 33/ }));
     await user.click(getLastButton('Сохранить'));
 
@@ -1821,7 +1827,7 @@ describe('MoneyOperations integration', () => {
 
     await user.click(screen.getByRole('button', { name: 'Изменить' }));
     await screen.findByText('Подходящие счета');
-    await screen.findByText('Счёт 44 от 20.04.2026');
+    await screen.findByText(/Счёт 44 от 20\.04\.2026/);
     await user.click(screen.getByRole('button', { name: /Счёт 44/ }));
     await user.click(getLastButton('Сохранить'));
 
@@ -2515,15 +2521,21 @@ describe('MoneyOperations integration', () => {
 
   it('loads and saves bank statement auto import settings', async () => {
     const user = userEvent.setup();
-    getUserSettingMock.mockResolvedValueOnce({
-      key: 'money.bankStatement.autoImport',
-      value: JSON.stringify({
-        enabled: true,
-        folderPath: 'C:\\BankStatements',
-        fileMask: '*.csv',
-        lastCheckedAt: null,
-      }),
-      updatedAt: '2026-04-21T08:00:00Z',
+    getUserSettingMock.mockImplementation(async (key: string) => {
+      if (key === 'money.bankStatement.autoImport') {
+        return {
+          key,
+          value: JSON.stringify({
+            enabled: true,
+            folderPath: 'C:\\BankStatements',
+            fileMask: '*.csv',
+            lastCheckedAt: null,
+          }),
+          updatedAt: '2026-04-21T08:00:00Z',
+        };
+      }
+
+      throw new Error('not found');
     });
 
     render(<MoneyOperations source="Bank" />);

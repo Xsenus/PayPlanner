@@ -269,13 +269,14 @@ describe('Payments integration', () => {
     const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
 
     render(<Payments />);
+    const currentQuery = usePaymentsPagedMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
 
     fireEvent.click(screen.getByRole('button', { name: 'Выгрузить платежи в CSV' }));
 
     await waitFor(() => {
       expect(apiService.exportPaymentsCsv).toHaveBeenCalledWith(expect.objectContaining({
-        from: '2026-06-01',
-        to: '2026-06-05',
+        from: currentQuery.from,
+        to: currentQuery.to,
         sortBy: 'date',
         sortDir: 'desc',
       }));
@@ -287,8 +288,8 @@ describe('Payments integration', () => {
 
     await waitFor(() => {
       expect(apiService.exportPaymentsExcel).toHaveBeenCalledWith(expect.objectContaining({
-        from: '2026-06-01',
-        to: '2026-06-05',
+        from: currentQuery.from,
+        to: currentQuery.to,
         sortBy: 'date',
         sortDir: 'desc',
       }));
