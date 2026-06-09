@@ -896,13 +896,10 @@ export const Dictionaries = () => {
   }
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-6">
       <div className="max-w-[calc(100vw-2rem)] mx-auto">
-        <div className="mb-8">
+        <div className="mb-4">
           <h1 className="text-3xl font-bold text-slate-900">Справочники</h1>
-          <p className="text-slate-600 mt-2">
-            {canEdit ? 'Управляйте справочниками системы' : 'Просмотр справочников системы'}
-          </p>
 
           {!canEdit && (
             <div className="mt-3 flex items-center gap-2 text-xs text-slate-600">
@@ -918,12 +915,18 @@ export const Dictionaries = () => {
           </div>
         )}
 
-        <div className={`grid grid-cols-1 gap-4 lg:grid-cols-[280px_minmax(0,1fr)] ${busy ? 'pointer-events-none opacity-70' : ''}`}>
-          <aside className="rounded-2xl border bg-white p-2 lg:sticky lg:top-6 h-fit">
+        <div
+          data-testid="dictionaries-layout"
+          className={`grid grid-cols-1 items-start gap-4 lg:grid-cols-[280px_minmax(0,1fr)] ${busy ? 'pointer-events-none opacity-70' : ''}`}
+        >
+          <aside
+            data-testid="dictionaries-nav"
+            className="flex max-h-[calc(100vh-12rem)] flex-col overflow-hidden rounded-2xl border bg-white p-2 lg:sticky lg:top-4"
+          >
             <div className="mb-2 px-3 pt-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
               Наименования
             </div>
-            <div className="space-y-1">
+            <div data-testid="dictionaries-nav-scroll" className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
               {TABS.map((t) => {
                 const isActive = activeTab === t.value;
                 const rows = data[t.value] ?? [];
@@ -952,8 +955,8 @@ export const Dictionaries = () => {
             </div>
           </aside>
 
-          <section className="rounded-2xl border bg-white p-4 sm:p-6">
-            <div className="mb-4 flex items-center justify-between gap-3">
+          <section className="flex max-h-[calc(100vh-12rem)] min-h-0 flex-col overflow-hidden rounded-2xl border bg-white p-4 sm:p-6">
+            <div className="mb-4 flex shrink-0 items-center justify-between gap-3">
               <div>
                 <div className="text-base font-semibold text-slate-900">
                   {TABS.find((t) => t.value === activeTab)?.label}
@@ -971,7 +974,7 @@ export const Dictionaries = () => {
               )}
             </div>
 
-            <div className="space-y-3">
+            <div data-testid="dictionaries-items-scroll" className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
               {(data[activeTab] ?? []).map((row, idx) => {
                 const key = row._key;
                 if (row.mode === 'view') {
