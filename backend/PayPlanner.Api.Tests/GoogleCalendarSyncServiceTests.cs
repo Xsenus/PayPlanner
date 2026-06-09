@@ -552,6 +552,25 @@ public class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncNowAsync_AdminConnectionCreatesCalendarForActiveApprovedUserWithoutTasks()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateUserAsync(db, "admin-google-empty-calendar@example.com", "admin", "Администратор");
+        var assignee = await CreateUserAsync(db, "lawyer-google-empty-calendar@example.com", "user", "Кузьминова Наталья Игоревна");
+        await EnableGoogleSettingsAsync(db);
+        await CreateConnectionAsync(db, admin.Id, calendarMode: "adminByAssignee");
+        var service = CreateService(db, new FakeHttpClientFactory(new RecordingGoogleHandler()));
+
+        var result = await service.SyncNowAsync(admin.Id, CreateHttpRequest(admin.Id, "admin"), CancellationToken.None);
+
+        Assert.Equal(0, result.ProcessedTasks);
+        Assert.Equal(0, result.ErrorCount);
+        Assert.Contains(await db.GoogleCalendarSyncCalendars.ToListAsync(), item =>
+            item.OwnerUserId == assignee.Id &&
+            item.Name.Contains("Кузьминова Наталья Игоревна", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task DeleteTaskForConnectedUsersAsync_RemovesLinkedGoogleEventAndWritesLog()
     {
         await using var db = await CreateContextAsync();

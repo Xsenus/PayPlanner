@@ -239,6 +239,27 @@ public class YandexCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncNowAsync_AdminConnectionCreatesCalendarForActiveApprovedUserWithoutTasks()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateUserAsync(db, "admin-yandex-empty-calendar@example.com", "admin");
+        admin.FullName = "Администратор";
+        var assignee = await CreateUserAsync(db, "lawyer-yandex-empty-calendar@example.com", "user");
+        assignee.FullName = "Кузьминова Наталья Игоревна";
+        await db.SaveChangesAsync();
+        await CreateConnectionAsync(db, admin.Id, calendarMode: "adminByAssignee");
+        var service = CreateService(db, new FakeHttpClientFactory(new RecordingYandexHandler()));
+
+        var result = await service.SyncNowAsync(admin.Id, CreateHttpRequest(admin.Id, "admin"), CancellationToken.None);
+
+        Assert.Equal(0, result.ProcessedTasks);
+        Assert.Equal(0, result.ErrorCount);
+        Assert.Contains(await db.YandexCalendarSyncCalendars.ToListAsync(), item =>
+            item.OwnerUserId == assignee.Id &&
+            item.Name.Contains("Кузьминова Наталья Игоревна", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task SyncNowAsync_ReusesExistingYandexCalendarByName()
     {
         await using var db = await CreateContextAsync();

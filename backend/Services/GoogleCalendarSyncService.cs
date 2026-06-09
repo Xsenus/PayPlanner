@@ -555,6 +555,16 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
 
         var settings = await LoadCalendarSyncSettingsAsync(cancellationToken);
         errors += await DeleteLinksOutsideSyncWindowAsync(connection, cancellationToken);
+        try
+        {
+            await EnsureAdminAssigneeCalendarsAsync(connection, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            errors++;
+            connection.LastError = Trim(ex.Message, 2000);
+            await AddLogAsync(connection.Id, null, null, "system", "ensure-calendars", "error", "Не удалось подготовить календари сотрудников в Google Calendar.", ex.Message, cancellationToken);
+        }
 
         var tasks = await LoadTasksForConnectionAsync(connection, cancellationToken);
         var processedTasks = 0;
@@ -1001,6 +1011,34 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         link.UpdatedAt = DateTime.UtcNow;
     }
 
+    private async Task EnsureAdminAssigneeCalendarsAsync(
+        GoogleCalendarConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var isAdmin = await IsAdminConnectionAsync(connection.UserId, cancellationToken);
+        if (!isAdmin || !string.Equals(connection.CalendarMode, "adminByAssignee", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var accessToken = await ResolveAccessTokenAsync(connection, cancellationToken);
+        var owners = await _db.Users
+            .AsNoTracking()
+            .Include(item => item.Role)
+            .Where(item =>
+                item.IsActive &&
+                item.IsApproved &&
+                (item.IsEmployee || (item.Role != null && item.Role.Name.ToLower() != "admin")))
+            .OrderBy(item => item.FullName)
+            .Select(item => new { item.Id, item.FullName })
+            .ToListAsync(cancellationToken);
+
+        foreach (var owner in owners)
+        {
+            await EnsureCalendarForOwnerAsync(connection, owner.Id, owner.FullName, accessToken, cancellationToken);
+        }
+    }
+
     private async Task<GoogleCalendarSyncCalendar> EnsureCalendarForTaskAsync(
         GoogleCalendarConnection connection,
         TaskJournalItem task,
@@ -1009,8 +1047,20 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
     {
         var isAdmin = await IsAdminConnectionAsync(connection.UserId, cancellationToken);
         var ownerUserId = isAdmin && connection.CalendarMode == "adminByAssignee" ? task.AssigneeUserId : null;
+        var ownerName = ownerUserId.HasValue ? NormalizeOptional(task.AssigneeName) : null;
+
+        return await EnsureCalendarForOwnerAsync(connection, ownerUserId, ownerName, accessToken, cancellationToken);
+    }
+
+    private async Task<GoogleCalendarSyncCalendar> EnsureCalendarForOwnerAsync(
+        GoogleCalendarConnection connection,
+        int? ownerUserId,
+        string? ownerName,
+        string accessToken,
+        CancellationToken cancellationToken)
+    {
         var name = ownerUserId.HasValue
-            ? $"PayPlanner - {NormalizeOptional(task.AssigneeName) ?? $"сотрудник #{ownerUserId.Value}"}"
+            ? $"PayPlanner - {NormalizeOptional(ownerName) ?? $"сотрудник #{ownerUserId.Value}"}"
             : "PayPlanner задачи";
 
         var calendar = connection.Calendars.FirstOrDefault(item => item.OwnerUserId == ownerUserId);
