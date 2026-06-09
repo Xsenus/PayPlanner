@@ -1333,7 +1333,8 @@ public class InvoicesControllerInternalCoverageTests
         var settings = Assert.IsType<InvoiceDocumentTemplateSettingsDto>(ok.Value);
         Assert.Equal("custom-template", settings.ActiveTemplateKey);
         Assert.True(settings.PrintWithSignatureAndSealByDefault);
-        Assert.Single(settings.Templates);
+        Assert.Contains(settings.Templates, template => template.Key == "custom-template");
+        Assert.Contains(settings.Templates, template => template.Key == InvoiceDocumentTemplateEngine.OfferTemplateKey);
     }
 
     [Fact]
