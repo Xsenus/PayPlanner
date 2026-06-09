@@ -167,17 +167,17 @@ export function UserOnlineSettings() {
   );
 
   return (
-    <div className="space-y-6">
-      <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <div data-testid="user-online-settings" className="space-y-3">
+      <div data-testid="user-online-summary-card" className="rounded-2xl border border-gray-200 bg-white p-3 shadow-sm">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
+            <div className="flex items-center gap-2">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
                 <Users className="h-5 w-5" />
               </div>
               <div>
                 <h4 className="text-base font-semibold text-gray-900">Пользователи онлайн</h4>
-                <p className="mt-1 text-sm text-gray-600">
+                <p className="mt-0.5 text-sm text-gray-600">
                   Пользователь считается онлайн, если за последние {data?.onlineThresholdMinutes ?? 5} минут была активность и последним действием не был выход.
                 </p>
               </div>
@@ -187,57 +187,57 @@ export function UserOnlineSettings() {
             type="button"
             onClick={() => void load(true)}
             disabled={loading || refreshing}
-            className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
             <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
             Обновить
           </button>
         </div>
 
-        <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <div className="flex min-h-[112px] flex-col items-center justify-center rounded-xl border border-emerald-100 bg-emerald-50 p-4 text-center">
+        <div data-testid="user-online-summary-grid" className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+          <div className="flex min-h-[76px] flex-col items-center justify-center rounded-xl border border-emerald-100 bg-emerald-50 p-2 text-center">
             <div className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Сейчас онлайн</div>
-            <div className="mt-2 text-2xl font-semibold text-emerald-800">{data?.onlineUsers ?? 0}</div>
+            <div className="mt-1 text-2xl font-semibold text-emerald-800">{data?.onlineUsers ?? 0}</div>
           </div>
-          <div className="flex min-h-[112px] flex-col items-center justify-center rounded-xl border border-gray-200 bg-gray-50 p-4 text-center">
+          <div className="flex min-h-[76px] flex-col items-center justify-center rounded-xl border border-gray-200 bg-gray-50 p-2 text-center">
             <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Всего пользователей</div>
-            <div className="mt-2 text-2xl font-semibold text-gray-900">{data?.totalUsers ?? 0}</div>
+            <div className="mt-1 text-2xl font-semibold text-gray-900">{data?.totalUsers ?? 0}</div>
           </div>
-          <div className="flex min-h-[112px] flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-4 text-center">
+          <div className="flex min-h-[76px] flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-2 text-center">
             <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Отключены / не одобрены</div>
-            <div className="mt-2 text-2xl font-semibold text-slate-800">{inactiveCount}</div>
+            <div className="mt-1 text-2xl font-semibold text-slate-800">{inactiveCount}</div>
           </div>
-          <div className="flex min-h-[112px] flex-col items-center justify-center rounded-xl border border-blue-100 bg-blue-50 p-4 text-center">
+          <div className="flex min-h-[76px] flex-col items-center justify-center rounded-xl border border-blue-100 bg-blue-50 p-2 text-center">
             <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">Обновлено</div>
-            <div className="mt-2 text-lg font-semibold text-blue-900">{formatDate(data?.generatedAt, timeZoneId)}</div>
+            <div className="mt-1 text-lg font-semibold text-blue-900">{formatDate(data?.generatedAt, timeZoneId)}</div>
             <div className="mt-1 text-sm font-medium text-blue-700">{formatTime(data?.generatedAt, timeZoneId)}</div>
           </div>
         </div>
       </div>
 
       {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
         </div>
       )}
 
-      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+      <div data-testid="user-online-table-card" className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
         <div className={`overflow-x-auto transition-opacity duration-300 ${refreshing ? 'opacity-70' : 'opacity-100'}`}>
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Пользователь</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Статус</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Последняя активность</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Последний вход</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Раздел / действие</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">IP</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Пользователь</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Статус</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Последняя активность</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Последний вход</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Раздел / действие</th>
+                <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">IP</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 bg-white">
               {loading && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-500">
+                  <td colSpan={6} className="px-3 py-4 text-center text-sm text-gray-500">
                     Загружаем данные...
                   </td>
                 </tr>
@@ -245,7 +245,7 @@ export function UserOnlineSettings() {
 
               {!loading && users.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-500">
+                  <td colSpan={6} className="px-3 py-4 text-center text-sm text-gray-500">
                     Пользователи не найдены.
                   </td>
                 </tr>
@@ -253,28 +253,28 @@ export function UserOnlineSettings() {
 
               {!loading && users.map((user) => (
                 <tr key={user.userId} className={user.isOnline ? 'bg-emerald-50/30' : undefined}>
-                  <td className="px-4 py-3 text-sm">
+                  <td className="px-3 py-2 text-sm">
                     <div className="font-semibold text-gray-900">{user.fullName || user.email}</div>
                     <div className="mt-1 text-xs text-gray-500">{user.email}</div>
                     <div className="mt-1 text-xs text-gray-500">
                       {[user.roleName, user.department].filter(Boolean).join(' · ') || 'Роль не указана'}
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-sm">
+                  <td className="px-3 py-2 text-sm">
                     <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${getUserStatusClass(user)}`}>
                       {getUserStatusLabel(user)}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-700">
+                  <td className="px-3 py-2 text-sm text-gray-700">
                     <div>{formatRelativeActivity(user.lastActivityAt)}</div>
                     <div className="mt-1 text-xs text-gray-500">{formatDateTime(user.lastActivityAt, timeZoneId)}</div>
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-700">{formatDateTime(user.lastLoginAt, timeZoneId)}</td>
-                  <td className="px-4 py-3 text-sm text-gray-700">
+                  <td className="px-3 py-2 text-sm text-gray-700">{formatDateTime(user.lastLoginAt, timeZoneId)}</td>
+                  <td className="px-3 py-2 text-sm text-gray-700">
                     <div>{translateValue(user.lastSection, sectionLabels)}</div>
                     <div className="mt-1 text-xs text-gray-500">{translateValue(user.lastAction, actionLabels)}</div>
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-700">{user.lastIpAddress || '—'}</td>
+                  <td className="px-3 py-2 text-sm text-gray-700">{user.lastIpAddress || '—'}</td>
                 </tr>
               ))}
             </tbody>

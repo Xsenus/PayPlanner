@@ -85,6 +85,10 @@ describe('UserOnlineSettings', () => {
     expect(screen.getByText('25.05.2026')).toBeTruthy();
     expect(await screen.findByText('12:00')).toBeTruthy();
     expect(screen.getByText('127.0.0.1')).toBeTruthy();
+    expect(screen.getByTestId('user-online-settings').className).toContain('space-y-3');
+    expect(screen.getByTestId('user-online-summary-card').className).toContain('p-3');
+    expect(screen.getByTestId('user-online-summary-grid').className).toContain('gap-2');
+    expect(screen.getByTestId('user-online-table-card')).toBeTruthy();
 
     await waitFor(() => {
       expect(apiService.getUsersOnline).toHaveBeenCalledTimes(1);

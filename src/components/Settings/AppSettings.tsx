@@ -764,14 +764,14 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
   }, [activeDatabaseOperationsSubsection, activeSection, loadDatabaseStatus, loadDuplicates, mergeKind]);
 
   return (
-    <div className="p-6 lg:p-8">
+    <div className="p-3 lg:p-4">
       <div className="w-full">
-        <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[280px_1fr]">
           <aside
             data-testid="settings-sidebar"
-            className="flex flex-col rounded-3xl border border-gray-200 bg-white p-5 shadow-sm lg:sticky lg:top-6 lg:max-h-[calc(100vh-12rem)] lg:self-start lg:overflow-hidden"
+            className="flex flex-col rounded-3xl border border-gray-200 bg-white p-3 shadow-sm lg:sticky lg:top-4 lg:max-h-[calc(100vh-8rem)] lg:self-start lg:overflow-hidden"
           >
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
               <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Панель настроек</div>
               <h2 className="mt-2 text-xl font-semibold text-slate-900">Структура разделов</h2>
             </div>
@@ -779,7 +779,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
             <nav
               aria-label="Разделы настроек"
               data-testid="settings-sidebar-scroll"
-              className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain pr-1"
+              className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1"
             >
               {!restrictedSettingsMode && (
               <div className="rounded-2xl border border-sky-200 bg-gradient-to-br from-sky-50 to-white p-3 shadow-sm">
@@ -1021,8 +1021,8 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
             </nav>
           </aside>
 
-          <section className="space-y-6">
-            <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
+          <section data-testid="settings-content" className="space-y-3">
+            <div className="rounded-3xl border border-gray-200 bg-white p-3 shadow-sm">
               <h3 className="text-2xl font-semibold text-gray-900">{activeSectionTitle}</h3>
             </div>
 

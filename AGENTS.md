@@ -26,3 +26,9 @@ If a release note cannot be added directly, include the proposed text in the fin
 Before adding a new mechanism, look for existing modules for notifications, modals, permissions, storage, and API patterns. Reuse existing UI and backend approaches where possible.
 
 Keep changes scoped to the requested behavior. Do not rewrite unrelated release notes, permissions, migrations, or configuration unless the task explicitly requires it.
+
+## UI Density
+
+For internal working sections of the CRM, keep spacing compact and consistent. Prefer page paddings around `p-3 lg:p-4`, section gaps around `gap-3` / `space-y-3`, and card paddings around `p-3` unless a form, table, or modal clearly needs more room for readability.
+
+Avoid large decorative whitespace in operational screens. Tables, filters, settings panels, and status cards should start close to the page header and use compact vertical rhythm so users can see more working data without extra scrolling. When updating an existing section, align new blocks to the compact spacing style instead of introducing larger `p-6`, `gap-6`, or `space-y-6` layouts by default.
