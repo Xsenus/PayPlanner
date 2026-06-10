@@ -467,10 +467,11 @@ npm audit --audit-level=moderate
   - DoD: ошибки видны в логах, долгие операции понятны, rollback procedure описана.
   - Выполнено: startup операции обернуты в `RunStartupStepAsync` с логами start/success/failure и duration; добавлены `StartupDataMaintenanceObservabilityTests` и `docs/startup-data-maintenance-observability-2026-06-10.md` с rollback notes.
 
-- [ ] Проверить provider-specific SQL.
+- [x] Проверить provider-specific SQL.
   - Приоритет: P1.
   - Найдено: `FOR UPDATE` в `InvoicesController.cs`.
   - DoD: SQLite/PostgreSQL behavior покрыт тестом или код разделен по provider.
+  - Выполнено: добавлены `ProviderSpecificSqlTests` и `docs/provider-specific-sql-2026-06-10.md`; зафиксировано, что `FOR UPDATE` используется только в `LockInvoiceAggregateAsync` и защищен `_db.Database.IsNpgsql()`, SQLite выходит без raw SQL.
 
 - [ ] Документировать batch operations, которые обходят audit hooks.
   - Приоритет: P2.
