@@ -322,11 +322,12 @@ npm audit --audit-level=moderate
   - DoD: API возвращает ожидаемые 200/201/204/400/401/403/404 для каждой роли.
   - Выполнено: добавлен `BackendPermissionMatrixTests` для ключевых sections (`payments`, `accounts`, `acts`, `contracts`, `cases`, `tasks`, `reports`, `roles`, `audit`, `yandexDisk`, `s3Storage`) и data-scoped resources. Проверки: targeted matrix 49/49, полный backend suite 1191/1191, `dotnet format ... --verify-no-changes`.
 
-- [ ] Унифицировать ручные `User.IsInRole("admin")` checks.
+- [x] Унифицировать ручные `User.IsInRole("admin")` checks.
   - Приоритет: P2.
   - Не делать до появления permission tests.
   - Рекомендуемый путь: policy/permission service/helper.
   - DoD: поведение для admin не изменилось, tests проходят.
+  - Выполнено: добавлен `ClaimsPrincipalExtensions.HasAdminRole()` и заменены оставшиеся ручные `User.IsInRole("admin")` checks в `ContractsController` и `MoneyOperationsController`. Добавлены `ClaimsPrincipalExtensionsTests`; targeted permission/helper tests 52/52.
 
 ## Milestone 5. Файлы, загрузки, скачивания
 

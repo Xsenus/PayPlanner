@@ -672,7 +672,7 @@ public class ContractsController : ControllerBase
     [HttpPut("numbering-settings")]
     public async Task<ActionResult<ContractNumberingSettingsDto>> UpsertNumberingSettings([FromBody] ContractNumberingSettingsRequest request, CancellationToken ct)
     {
-        if (!User.IsInRole("admin")) return Forbid();
+        if (!User.HasAdminRole()) return Forbid();
         if (request.StartNumber < 1) return BadRequest("Стартовый номер договора должен быть больше 0.");
         var template = NormalizeContractTemplate(request.Template);
         if (!TryExtractSequenceToken(template, out _)) return BadRequest("Шаблон номера договора должен содержать один маркер номера: {N}, {NN}, {NNN} или {NNNN}.");
@@ -692,7 +692,7 @@ public class ContractsController : ControllerBase
     [HttpPut("rules-settings")]
     public async Task<ActionResult<ContractRulesSettingsDto>> UpsertRulesSettings([FromBody] ContractRulesSettingsRequest request, CancellationToken ct)
     {
-        if (!User.IsInRole("admin")) return Forbid();
+        if (!User.HasAdminRole()) return Forbid();
         if (!request.AutoGenerateWhenEmpty && !request.AllowManualNumberEdit) return BadRequest("Нужно оставить хотя бы один способ заполнения номера договора: автогенерацию или ручной ввод.");
         var now = DateTime.UtcNow;
         await UpsertSystemSettingAsync(ContractAutoGenerateNumberSettingKey, request.AutoGenerateWhenEmpty.ToString().ToLowerInvariant(), now, ct);
