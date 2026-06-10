@@ -558,7 +558,7 @@ npm audit --audit-level=moderate
 
 Цель: уменьшать сложность только там, где есть тестовая страховка.
 
-- [ ] Убрать type-level cycle в Roles.
+- [x] Убрать type-level cycle в Roles.
   - Приоритет: P1.
   - Найдено: `Roles.tsx -> RoleModal.tsx/RolePermissionsModal.tsx` импортируют `type Role` из screen component.
   - Решение: вынести `Role` type в отдельный `types` файл.
@@ -568,6 +568,7 @@ npm audit --audit-level=moderate
     npx tsc -p tsconfig.app.json --noEmit
     ```
   - DoD: type cycle исчез, behavior не изменен.
+  - Выполнено: `Role` вынесен в `src/components/Roles/types.ts`, модалки больше не импортируют тип из screen component; добавлен guard test `src/components/Roles/roleTypeImports.test.ts`.
 
 - [ ] Проверить кандидаты на unused frontend files.
   - Приоритет: P2.

@@ -22,7 +22,7 @@ import {
   X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { Role } from './Roles';
+import type { Role } from './types';
 import {
   getRolePermissions,
   refreshRolePermissions,

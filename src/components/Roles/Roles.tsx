@@ -10,7 +10,7 @@ import {
   Trash2,
   UsersRound,
 } from 'lucide-react';
-import { authService, type Role as AuthRole } from '../../services/authService';
+import { authService } from '../../services/authService';
 import { useAuth } from '../../contexts/AuthContext';
 import { RoleModal } from './RoleModal';
 import { RolePermissionsModal } from './RolePermissionsModal';
@@ -27,6 +27,7 @@ import { MENU_SECTION_KEYS } from '../../types/permissions';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 import { getObjectAuditActorLabel } from '../../utils/objectAudit';
 import { formatDateInTimeZone, formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
+import type { Role } from './types';
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
 
@@ -40,7 +41,6 @@ const ROLE_COLUMNS = [
 ] as const;
 
 type RoleColumnKey = (typeof ROLE_COLUMNS)[number]['key'];
-export type Role = AuthRole;
 
 type RoleDialogState =
   | { mode: 'create'; role: null; sourceRole: null }

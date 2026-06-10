@@ -3,7 +3,7 @@ import { Copy, Pencil, ShieldPlus, X } from 'lucide-react';
 import { authService } from '../../services/authService';
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
-import type { Role } from './Roles';
+import type { Role } from './types';
 
 interface RoleModalProps {
   role: Role | null;
