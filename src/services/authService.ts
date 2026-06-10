@@ -405,7 +405,7 @@ class AuthApiService {
   }
 
   public async getCurrentUser(): Promise<User> {
-    return this.request<User>('/auth/me');
+    return this.request<User>('/profile');
   }
 
   /** login: сохраняем токен и сразу пытаемся получить профиль */

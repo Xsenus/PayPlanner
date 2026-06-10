@@ -41,6 +41,7 @@ builder.Services.AddSwaggerGen();
 
 void ConfigureSqlite(DbContextOptionsBuilder options) => options
     .UseSqlite(databaseProvider.ConnectionString)
+    .UsePayPlannerSqliteMigrations()
     .ConfigureWarnings(warnings => warnings.Ignore(RelationalEventId.PendingModelChangesWarning));
 void ConfigurePostgreSql(DbContextOptionsBuilder options) => options
     .UseNpgsql(databaseProvider.ConnectionString)

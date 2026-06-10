@@ -49,18 +49,24 @@ namespace PayPlanner.Api.Migrations
             migrationBuilder.CreateIndex("IX_ClientCaseCourts_Name", "ClientCaseCourts", "Name");
             migrationBuilder.CreateIndex("IX_ClientCaseCourtEvents_CourtId", "ClientCaseCourtEvents", "CourtId");
 
-            migrationBuilder.AddForeignKey(
-                name: "FK_ClientCaseCourtEvents_ClientCaseCourts_CourtId",
-                table: "ClientCaseCourtEvents",
-                column: "CourtId",
-                principalTable: "ClientCaseCourts",
-                principalColumn: "Id",
-                onDelete: ReferentialAction.SetNull);
+            if (ActiveProvider != "Microsoft.EntityFrameworkCore.Sqlite")
+            {
+                migrationBuilder.AddForeignKey(
+                    name: "FK_ClientCaseCourtEvents_ClientCaseCourts_CourtId",
+                    table: "ClientCaseCourtEvents",
+                    column: "CourtId",
+                    principalTable: "ClientCaseCourts",
+                    principalColumn: "Id",
+                    onDelete: ReferentialAction.SetNull);
+            }
         }
 
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropForeignKey("FK_ClientCaseCourtEvents_ClientCaseCourts_CourtId", "ClientCaseCourtEvents");
+            if (ActiveProvider != "Microsoft.EntityFrameworkCore.Sqlite")
+            {
+                migrationBuilder.DropForeignKey("FK_ClientCaseCourtEvents_ClientCaseCourts_CourtId", "ClientCaseCourtEvents");
+            }
             migrationBuilder.DropIndex("IX_ClientCaseCourtEvents_CourtId", "ClientCaseCourtEvents");
             migrationBuilder.DropColumn("CourtId", "ClientCaseCourtEvents");
             migrationBuilder.DropTable(name: "ClientCaseCourts");

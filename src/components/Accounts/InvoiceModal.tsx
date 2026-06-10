@@ -58,6 +58,8 @@ import {
 } from '../../utils/invoiceAmountReconciliation';
 import { getAppliedClientBalanceAmount } from '../../utils/systemNotes';
 
+const EMPTY_RELATED_PAYMENTS: Payment[] = [];
+
 type FormState = {
   number: string;
   date: string;
@@ -904,7 +906,7 @@ export function InvoiceModal({
   defaultType,
   lockType = false,
   presentation = 'modal',
-  relatedPayments = [],
+  relatedPayments = EMPTY_RELATED_PAYMENTS,
   paymentsLoading = false,
   onRefreshRequested,
   onAddRelatedPayment,
@@ -1824,7 +1826,12 @@ export function InvoiceModal({
   }, [open, relatedInstallmentPlan, installmentPlanTouched, resumeDraft?.installmentPlan]);
 
   useEffect(() => {
-    setDisplayPayments(visibleRelatedPayments);
+    setDisplayPayments((prev) => (
+      prev.length === visibleRelatedPayments.length
+        && prev.every((payment, index) => payment === visibleRelatedPayments[index])
+        ? prev
+        : visibleRelatedPayments
+    ));
   }, [visibleRelatedPayments]);
 
   useEffect(() => {
@@ -2047,7 +2054,15 @@ export function InvoiceModal({
 
   useEffect(() => {
     if (!unitOptions.length) return;
-    setLineItems((prev) => prev.map((item) => (item.unit.trim() ? item : { ...item, unit: unitOptions[0] })));
+    setLineItems((prev) => {
+      let changed = false;
+      const next = prev.map((item) => {
+        if (item.unit.trim()) return item;
+        changed = true;
+        return { ...item, unit: unitOptions[0] };
+      });
+      return changed ? next : prev;
+    });
   }, [unitOptions]);
 
   useEffect(() => {

@@ -16,6 +16,7 @@ public sealed class PaymentContextDesignTimeFactory : IDesignTimeDbContextFactor
         var connectionString = DatabaseProviderResolver.NormalizeSqliteConnection(rawConnectionString);
         var options = new DbContextOptionsBuilder<PaymentContext>()
             .UseSqlite(connectionString)
+            .UsePayPlannerSqliteMigrations()
             .Options;
 
         return new PaymentContext(options);

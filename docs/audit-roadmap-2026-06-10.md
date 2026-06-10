@@ -655,7 +655,7 @@ npm audit --audit-level=moderate
 
 Цель: закрыть roadmap без скрытых регрессий.
 
-- [ ] Прогнать полный release gate.
+- [x] Прогнать полный release gate.
   - Команды:
     ```powershell
     npm run lint
@@ -670,6 +670,7 @@ npm audit --audit-level=moderate
     npm audit --audit-level=moderate
     ```
   - DoD: все команды проходят.
+  - Выполнено: `npm ci`, `npm run lint`, `npx tsc -p tsconfig.app.json --noEmit`, `npm run test:unit`, `npm run test:integration`, `npm run audit:dates:test`, `npm run build`, `dotnet test backend\PayPlanner.Api.sln --no-restore -c Debug`, `dotnet format backend\PayPlanner.Api.sln --verify-no-changes --no-restore --verbosity minimal`, `dotnet list backend\PayPlanner.Api.sln package --vulnerable --include-transitive`, `npm audit --audit-level=moderate`.
 
 - [ ] Прогнать visual smoke на desktop/tablet/mobile.
   - Минимум:
@@ -683,29 +684,34 @@ npm audit --audit-level=moderate
     - acts/contracts;
     - settings/admin pages.
   - DoD: нет горизонтального overflow, критичных console errors и broken layout.
+  - Частично выполнено: task routes, invoices, payments, acts и contracts прошли на desktop/tablet/mobile; smoke-скрипт закрывает стартовую модалку релизов и печатает подробные failures.
+  - Осталось: desktop `/` имеет horizontal overflow 55px, tablet `/clients` имеет horizontal overflow 295px, на части страниц есть 404 для optional user-settings (`money.bankStatement.autoImport`, `money.bankStatement.categoryRules`, `notifications.typePreferences.v1`).
 
-- [ ] Проверить API auth smoke.
+- [x] Проверить API auth smoke.
   - Сценарии:
     - public endpoints return expected 200/400;
     - protected endpoints без токена return 401;
     - forbidden role return 403;
     - missing object return 404.
   - DoD: API behavior predictable.
+  - Выполнено: public health `200`, bad login `401`, protected endpoint without token `401`, forbidden role `403`, missing object `404`.
 
-- [ ] Проверить, что не осталось лишних локальных процессов.
+- [x] Проверить, что не осталось лишних локальных процессов.
   - Команда:
     ```powershell
     Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'PayPlanner|vite|dotnet run|npm run dev' }
     ```
   - DoD: нет случайно запущенного backend/frontend dev server.
+  - Выполнено: лишних процессов `vite`, `npm run dev` и `dotnet run` для workspace не осталось.
 
-- [ ] Закрыть roadmap summary.
+- [x] Закрыть roadmap summary.
   - Что указать:
     - выполненные задачи;
     - оставшиеся риски;
     - команды, которые прошли;
     - release notes, если были user-facing changes.
   - DoD: следующий агент или человек может быстро понять итог.
+  - Выполнено: итог вынесен в `docs/final-acceptance-2026-06-10.md`.
 
 ## Быстрые приоритеты, если времени мало
 

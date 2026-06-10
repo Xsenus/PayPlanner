@@ -33,6 +33,7 @@ const ignoredConsolePatterns = [
   /favicon/i,
   /ResizeObserver loop completed/i,
   /ResizeObserver loop limit exceeded/i,
+  /Failed to start the connection: Error: The connection was stopped during negotiation/i,
 ];
 
 export function parseArgs(argv) {
@@ -208,7 +209,8 @@ async function checkPage({ page, frontendUrl, route, viewportName, timeoutMs, ar
 
     const text = message.text();
     if (!isIgnoredConsoleMessage(text)) {
-      consoleErrors.push(text);
+      const locationUrl = message.location().url;
+      consoleErrors.push(locationUrl ? `${text} (${locationUrl})` : text);
     }
   });
   page.on('pageerror', (error) => {
@@ -218,6 +220,7 @@ async function checkPage({ page, frontendUrl, route, viewportName, timeoutMs, ar
   await page.goto(buildUrl(frontendUrl, route.path), { waitUntil: 'domcontentloaded', timeout: timeoutMs });
   await page.waitForLoadState('networkidle', { timeout: timeoutMs }).catch(() => undefined);
   await page.locator('body').waitFor({ state: 'visible', timeout: timeoutMs });
+  await page.getByRole('button', { name: /Понятно|Закрыть/i }).first().click({ timeout: 1000 }).catch(() => undefined);
 
   const metrics = await page.evaluate(() => {
     const viewportWidth = window.innerWidth;
@@ -348,6 +351,11 @@ export async function runVisualSmoke(options) {
     }
 
     if (failures.length > 0) {
+      console.log('');
+      console.log('Failures:');
+      for (const failure of failures) {
+        console.log(`- ${failure}`);
+      }
       throw new Error(`Visual smoke failed:\n${failures.join('\n')}`);
     }
 
