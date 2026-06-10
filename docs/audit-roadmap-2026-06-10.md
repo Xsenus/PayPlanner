@@ -373,10 +373,11 @@ npm audit --audit-level=moderate
   - DoD: 401/403/404/400 разделены и предсказуемы.
   - Выполнено: расширены `TasksControllerTests` для пустого файла, слишком большого declared length, traversal/backslash/encoded slash в имени файла, missing physical file и file-from-another-task download. Исправлена sanitization encoded filenames в `TasksController`. Targeted tests: 8/8.
 
-- [ ] Добавить real-browser smoke для download/print/new-tab.
+- [x] Добавить real-browser smoke для download/print/new-tab.
   - Приоритет: P1.
   - Причина: Vitest глобально мокает `window.open`, anchor download и blob click.
   - DoD: хотя бы один browser smoke доказывает, что download/print flow работает вне jsdom.
+  - Выполнено: добавлен `npm run test:browser-downloads`, который через Playwright в реальном Chromium/Edge проверяет blob download, `target="_blank"` popup с `noopener/noreferrer` и print-render через PDF.
 
 ## Milestone 6. Background/hosted services
 

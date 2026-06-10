@@ -27,6 +27,7 @@
     "test:legal-roles:assigned": "node scripts/run-legal-readiness-report.mjs --skip-e2e --skip-load --skip-database-summary --require-assigned-expected-roles",
     "test:legal-roles:strict": "node scripts/run-legal-readiness-report.mjs --skip-e2e --skip-load --skip-database-summary --fail-on-broad-scopes --allowed-broad-scope-roles=admin",
     "test:guard": "vitest run src/App.routing.test.ts src/components/Navigation/Navigation.test.tsx",
+    "test:browser-downloads": "node scripts/run-browser-download-smoke.mjs",
     "test:ci": "npm run test:guard && npm run test:unit",
     "preview": "vite preview"
   },
@@ -40,6 +41,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.9.1",
+    "@playwright/test": "^1.60.0",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
     "@types/react": "^18.3.5",
