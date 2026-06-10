@@ -1202,15 +1202,16 @@ public class TasksController : ControllerBase
             return Forbid();
         }
 
-        if (file is null || file.Length <= 0)
+        var uploadError = UploadValidationHelper.ValidateRequiredFile(
+            file,
+            "Выберите файл для загрузки.",
+            MaxTaskFileBytes,
+            "Файл не должен превышать 25 МБ.");
+        if (uploadError is not null)
         {
-            return BadRequest(new { message = "Выберите файл для загрузки." });
+            return BadRequest(new { message = uploadError.Message });
         }
-
-        if (file.Length > MaxTaskFileBytes)
-        {
-            return BadRequest(new { message = "Файл не должен превышать 25 МБ." });
-        }
+        var uploadFile = file!;
 
         var normalizedDocumentKey = NormalizeDocumentKey(documentKey);
         if (documentKey is not null && normalizedDocumentKey is null)
@@ -1236,7 +1237,7 @@ public class TasksController : ControllerBase
         }
 
         var version = latestVersion + 1;
-        var safeFileName = SanitizeFileName(file.FileName);
+        var safeFileName = SanitizeFileName(uploadFile.FileName);
         var storedFileName = BuildStoredFileName(normalizedDocumentKey!, version, safeFileName);
         var relativePath = Path.Combine(id.ToString(), storedFileName);
         var fullPath = ResolveTaskFilePath(relativePath);
@@ -1247,7 +1248,7 @@ public class TasksController : ControllerBase
         {
             await using (var stream = new FileStream(fullPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
-                await file.CopyToAsync(stream, ct);
+                await uploadFile.CopyToAsync(stream, ct);
             }
 
             var taskFile = new TaskJournalFile
@@ -1258,8 +1259,8 @@ public class TasksController : ControllerBase
                 OriginalFileName = safeFileName,
                 StoredFileName = storedFileName,
                 StoragePath = relativePath,
-                ContentType = string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType,
-                SizeBytes = file.Length,
+                ContentType = string.IsNullOrWhiteSpace(uploadFile.ContentType) ? "application/octet-stream" : uploadFile.ContentType,
+                SizeBytes = uploadFile.Length,
                 UploadedByUserId = access.UserId,
                 UploadedByName = access.DisplayName,
                 UploadedAt = DateTime.UtcNow,
@@ -1275,7 +1276,7 @@ public class TasksController : ControllerBase
                 var caseDocumentVersion = latestCaseVersion + 1;
                 var caseStoredFileName = BuildStoredFileName(caseDocumentKey, caseDocumentVersion, safeFileName);
                 caseDocumentStoragePath = _caseDocumentStorage.BuildRelativePath(entity.ClientCaseId.Value, caseStoredFileName);
-                await using (var caseStream = file.OpenReadStream())
+                await using (var caseStream = uploadFile.OpenReadStream())
                 {
                     await _caseDocumentStorage.SaveAsync(caseDocumentStoragePath, caseStream, ct);
                 }

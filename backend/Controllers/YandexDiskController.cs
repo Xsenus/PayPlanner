@@ -439,17 +439,19 @@ public sealed class YandexDiskController : ControllerBase
         var forbidden = await RequirePermissionAsync(permission => permission.CanCreate, ct);
         if (forbidden is not null) return forbidden;
 
-        if (file is null || file.Length == 0)
+        var uploadError = UploadValidationHelper.ValidateRequiredFile(file, "Выберите файл для загрузки.");
+        if (uploadError is not null)
         {
-            return BadRequest("Выберите файл для загрузки.");
+            return BadRequest(uploadError.Message);
         }
+        var uploadFile = file!;
 
-        await using var stream = file.OpenReadStream();
+        await using var stream = uploadFile.OpenReadStream();
         return await ExecuteAndAuditAsync(
-            () => _service.UploadAsync(path, stream, file.ContentType, overwrite, ct),
+            () => _service.UploadAsync(path, stream, uploadFile.ContentType, overwrite, ct),
             "Uploaded",
             "Файл загружен на Яндекс.Диск.",
-            new { Path = path, file.FileName, file.Length, file.ContentType, Overwrite = overwrite },
+            new { Path = path, uploadFile.FileName, uploadFile.Length, uploadFile.ContentType, Overwrite = overwrite },
             null,
             ct);
     }
@@ -466,17 +468,19 @@ public sealed class YandexDiskController : ControllerBase
         var forbidden = await RequirePermissionAsync(permission => permission.CanCreate, ct);
         if (forbidden is not null) return forbidden;
 
-        if (file is null || file.Length == 0)
+        var uploadError = UploadValidationHelper.ValidateRequiredFile(file, "Выберите файл для загрузки.");
+        if (uploadError is not null)
         {
-            return BadRequest("Выберите файл для загрузки.");
+            return BadRequest(uploadError.Message);
         }
+        var uploadFile = file!;
 
-        await using var stream = file.OpenReadStream();
+        await using var stream = uploadFile.OpenReadStream();
         return await ExecuteAndAuditAsync(
-            () => _service.UploadAsync(id, path, stream, file.ContentType, overwrite, ct),
+            () => _service.UploadAsync(id, path, stream, uploadFile.ContentType, overwrite, ct),
             "Uploaded",
             "Файл загружен на Я.Диск.",
-            new { Id = id, Path = path, file.FileName, file.Length, file.ContentType, Overwrite = overwrite },
+            new { Id = id, Path = path, uploadFile.FileName, uploadFile.Length, uploadFile.ContentType, Overwrite = overwrite },
             null,
             ct);
     }

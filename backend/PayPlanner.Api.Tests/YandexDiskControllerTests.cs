@@ -287,6 +287,22 @@ public sealed class YandexDiskControllerTests
     }
 
     [Fact]
+    public async Task Upload_RejectsMissingFile()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var user = await SeedUserAsync(scope.Db, permission => permission with { CanView = true, CanCreate = true });
+        var service = new FakeYandexDiskService();
+        var controller = CreateController(scope.Db, service, CreateUserPrincipal(user.Id));
+
+        var response = await controller.Upload(null, "/Docs/report.txt", overwrite: true, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(response.Result);
+        Assert.Equal("Выберите файл для загрузки.", badRequest.Value);
+        Assert.False(service.UploadCalled);
+        Assert.Empty(scope.Db.ObjectAuditEvents);
+    }
+
+    [Fact]
     public async Task Upload_ForbidsUserWithoutCreatePermission()
     {
         await using var scope = await CreateDbScopeAsync();

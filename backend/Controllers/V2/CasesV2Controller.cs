@@ -3905,15 +3905,16 @@ public class CasesV2Controller : ControllerBase
         bool requireExistingDocument,
         CancellationToken ct)
     {
-        if (file is null || file.Length <= 0)
+        var uploadError = UploadValidationHelper.ValidateRequiredFile(
+            file,
+            "Выберите файл для загрузки.",
+            MaxCaseDocumentBytes,
+            "Файл не должен превышать 25 МБ.");
+        if (uploadError is not null)
         {
-            return BadRequest(new { message = "Выберите файл для загрузки." });
+            return BadRequest(new { message = uploadError.Message });
         }
-
-        if (file.Length > MaxCaseDocumentBytes)
-        {
-            return BadRequest(new { message = "Файл не должен превышать 25 МБ." });
-        }
+        var uploadFile = file!;
 
         var normalizedDocumentKey = NormalizeDocumentKey(documentKey);
         if (documentKey is not null && normalizedDocumentKey is null)
@@ -3944,13 +3945,13 @@ public class CasesV2Controller : ControllerBase
         }
 
         var version = latestVersion + 1;
-        var safeFileName = SanitizeFileName(file.FileName);
+        var safeFileName = SanitizeFileName(uploadFile.FileName);
         var storedFileName = BuildStoredFileName(normalizedDocumentKey!, version, safeFileName);
         var relativePath = _caseDocumentStorage.BuildRelativePath(clientCase.Id, storedFileName);
 
         try
         {
-            await using var stream = file.OpenReadStream();
+            await using var stream = uploadFile.OpenReadStream();
             await _caseDocumentStorage.SaveAsync(relativePath, stream, ct);
 
             var document = new ClientCaseDocument
@@ -3963,8 +3964,8 @@ public class CasesV2Controller : ControllerBase
                 OriginalFileName = safeFileName,
                 StoredFileName = storedFileName,
                 StoragePath = relativePath,
-                ContentType = string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType,
-                SizeBytes = file.Length,
+                ContentType = string.IsNullOrWhiteSpace(uploadFile.ContentType) ? "application/octet-stream" : uploadFile.ContentType,
+                SizeBytes = uploadFile.Length,
                 UploadedByUserId = User.GetUserId(),
                 UploadedByName = User.GetDisplayName(),
                 UploadedAt = DateTime.UtcNow,

@@ -346,10 +346,11 @@ npm audit --audit-level=moderate
   - DoD: для каждого типа есть max size, allowed extensions/content type, error message.
   - Выполнено: добавлена таблица `docs/file-upload-limits-2026-06-10.md` с текущими лимитами, allowlist/отсутствием allowlist и пользовательскими сообщениями; добавлен тест полноты документации.
 
-- [ ] Добавить shared upload validation helper.
+- [x] Добавить shared upload validation helper.
   - Приоритет: P1.
   - Не менять UX сообщений без тестов.
   - DoD: контроллеры используют единый helper там, где правила одинаковые.
+  - Выполнено: добавлен `UploadValidationHelper` для required/max-size проверок, сохранены прежние сообщения в task/case/S3/Я.Диск upload, добавлены unit-тесты helper и guard-тесты пустой загрузки для S3/Я.Диска.
 
 - [x] Добавить file endpoint security tests.
   - Приоритет: P0.

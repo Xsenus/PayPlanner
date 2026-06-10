@@ -145,23 +145,25 @@ public sealed class S3StorageController : ControllerBase
         var forbidden = await RequirePermissionAsync(permission => permission.CanCreate, ct);
         if (forbidden is not null) return forbidden;
 
-        if (file is null || file.Length == 0)
+        var uploadError = UploadValidationHelper.ValidateRequiredFile(file, "Выберите файл для загрузки.");
+        if (uploadError is not null)
         {
-            return BadRequest("Выберите файл для загрузки.");
+            return BadRequest(uploadError.Message);
         }
+        var uploadFile = file!;
 
         var targetPath = string.IsNullOrWhiteSpace(path)
-            ? file.FileName
+            ? uploadFile.FileName
             : path.Trim().EndsWith("/", StringComparison.Ordinal)
-                ? $"{path.Trim()}{file.FileName}"
+                ? $"{path.Trim()}{uploadFile.FileName}"
                 : path;
-        await using var stream = file.OpenReadStream();
+        await using var stream = uploadFile.OpenReadStream();
 
         return await ExecuteAndAuditAsync(
-            () => _service.UploadAsync(id, targetPath, stream, file.ContentType, overwrite, ct),
+            () => _service.UploadAsync(id, targetPath, stream, uploadFile.ContentType, overwrite, ct),
             "Uploaded",
             "Файл загружен в S3-хранилище.",
-            new { ConnectionId = id, Path = targetPath, file.FileName, file.Length, file.ContentType, Overwrite = overwrite },
+            new { ConnectionId = id, Path = targetPath, uploadFile.FileName, uploadFile.Length, uploadFile.ContentType, Overwrite = overwrite },
             ct);
     }
 

@@ -140,6 +140,22 @@ public sealed class S3StorageControllerTests
     }
 
     [Fact]
+    public async Task Upload_RejectsMissingFile()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var user = await SeedUserAsync(scope.Db, permission => permission with { CanView = true, CanCreate = true });
+        var service = new FakeS3StorageService();
+        var controller = CreateController(scope.Db, service, CreateUserPrincipal(user.Id));
+
+        var response = await controller.Upload("s3-1", null, "/docs/readme.txt", overwrite: true, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(response.Result);
+        Assert.Equal("Выберите файл для загрузки.", badRequest.Value);
+        Assert.False(service.UploadCalled);
+        Assert.Empty(scope.Db.ObjectAuditEvents);
+    }
+
+    [Fact]
     public async Task Download_RequiresExportPermission()
     {
         await using var scope = await CreateDbScopeAsync();
@@ -230,6 +246,7 @@ public sealed class S3StorageControllerTests
         public bool UpsertCalled { get; private set; }
         public bool TestConnectionCalled { get; private set; }
         public bool CreateFolderCalled { get; private set; }
+        public bool UploadCalled { get; private set; }
         public bool DownloadCalled { get; private set; }
 
         public Task<S3StorageConnectionsOverviewDto> GetOverviewAsync(CancellationToken cancellationToken = default)
@@ -313,7 +330,10 @@ public sealed class S3StorageControllerTests
         }
 
         public Task<S3StorageOperationResultDto> UploadAsync(string id, string? path, Stream content, string? contentType, bool overwrite, CancellationToken cancellationToken = default)
-            => Task.FromResult(new S3StorageOperationResultDto { Success = true, Path = path ?? "/file.txt", Key = $"payplanner/{path}" });
+        {
+            UploadCalled = true;
+            return Task.FromResult(new S3StorageOperationResultDto { Success = true, Path = path ?? "/file.txt", Key = $"payplanner/{path}" });
+        }
 
         public Task<S3StorageDownloadResult> DownloadAsync(string id, string? path, CancellationToken cancellationToken = default)
         {

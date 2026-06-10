@@ -2,7 +2,7 @@
 
 Inventory date: 2026-06-10.
 
-This table records the current upload contract before the shared validation helper work. It documents the effective behavior in code; rows marked as "not restricted by app code" are intentional inventory findings, not recommendations.
+This table records the current upload contract. It documents the effective behavior in code; rows marked as "not restricted by app code" are intentional inventory findings, not recommendations.
 
 | Upload type | Code path | Max size | Allowed extensions | Allowed content types | Error message | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -16,6 +16,6 @@ This table records the current upload contract before the shared validation help
 
 ## Follow-up notes
 
-- The same empty-file message and unconstrained extension/content-type behavior appears in task attachments, case documents, S3 uploads, and Yandex Disk uploads. That is the safest starting point for the shared upload validation helper.
+- The same empty-file message and unconstrained extension/content-type behavior appears in task attachments, case documents, S3 uploads, and Yandex Disk uploads. Required-file checks for these upload paths now use the shared upload validation helper.
 - Imports rely on request/form limits for large files, so they do not currently produce the same localized "file is too large" response as task and case uploads.
 - Provider uploads intentionally allow arbitrary file formats today; adding allowlists would be a business-rule change and needs separate UX and permission review.
