@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { Payment } from '../../types';
 import { Payments } from './Payments';
 
@@ -298,6 +298,18 @@ describe('Payments integration', () => {
     createObjectUrl.mockRestore();
     revokeObjectUrl.mockRestore();
     anchorClick.mockRestore();
+  });
+
+  it('exposes payment toolbar actions with accessible names', () => {
+    render(<Payments />);
+
+    const toolbar = screen.getByRole('toolbar', { name: 'Действия с платежами' });
+
+    expect(within(toolbar).getByRole('button', { name: 'Настроить таблицу' })).toBeTruthy();
+    expect(within(toolbar).getByRole('button', { name: 'Обновить' })).toBeTruthy();
+    expect(within(toolbar).getByRole('button', { name: 'Выгрузить платежи в CSV' })).toBeTruthy();
+    expect(within(toolbar).getByRole('button', { name: 'Выгрузить платежи в Excel' })).toBeTruthy();
+    expect(within(toolbar).getByRole('button', { name: 'Частичные без остатка' })).toBeTruthy();
   });
 
   it('uses the profile time zone for the paid date when completing a payment', async () => {

@@ -1,4 +1,6 @@
+import { useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { useModalFocusTrap } from '../../hooks/useModalFocusTrap';
 
 type ConfirmDialogVariant = 'danger' | 'primary';
 
@@ -23,6 +25,10 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
+  const handleDialogKeyDown = useModalFocusTrap(dialogRef, open, onCancel, cancelButtonRef);
+
   if (!open) return null;
 
   const confirmClasses =
@@ -32,7 +38,14 @@ export function ConfirmDialog({
 
   return createPortal(
     <div className="fixed inset-0 z-[2400] flex items-center justify-center bg-slate-900/40 p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white shadow-xl">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onKeyDown={handleDialogKeyDown}
+        className="w-full max-w-md rounded-2xl bg-white shadow-xl"
+      >
         <div className="border-b border-slate-200 px-6 py-4">
           <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
         </div>
@@ -41,11 +54,14 @@ export function ConfirmDialog({
         </div>
         <div className="flex items-center justify-end gap-3 border-t border-slate-200 px-6 py-4">
           <button
+            ref={cancelButtonRef}
+            type="button"
             onClick={onCancel}
             className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
             {cancelLabel}
           </button>
           <button
+            type="button"
             onClick={onConfirm}
             className={`rounded-lg px-4 py-2 text-sm font-semibold text-white ${confirmClasses}`}>
             {confirmLabel}

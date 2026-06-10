@@ -1,3 +1,4 @@
+import userEvent from '@testing-library/user-event';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Navigation from './Navigation';
@@ -57,6 +58,8 @@ describe('Navigation links', () => {
   it('renders navigation destinations as real links', () => {
     renderNavigation();
 
+    expect(screen.getByRole('complementary', { name: 'Навигация' })).toBeTruthy();
+    expect(screen.getByRole('navigation', { name: 'Навигация' })).toBeTruthy();
     expect(findLinkByHref(getTabHref('calendar'))).toBeTruthy();
     expect(findLinkByHref(getTabHref('notifications'))).toBeTruthy();
     expect(findLinkByHref(getTabHref('tasksApprovals'))).toBeTruthy();
@@ -89,6 +92,19 @@ describe('Navigation links', () => {
     fireEvent.click(link!);
 
     expect(onTabChange).toHaveBeenCalledWith('tasksCalendar');
+  });
+
+  it('supports keyboard access for navigation links', async () => {
+    const user = userEvent.setup();
+    const onTabChange = renderNavigation();
+    const clientsLink = screen.getByRole('link', { name: /Клиенты/i });
+
+    clientsLink.focus();
+    expect(document.activeElement).toBe(clientsLink);
+
+    await user.keyboard('{Enter}');
+
+    expect(onTabChange).toHaveBeenCalledWith('clients');
   });
 
   it('opens the approvals submenu inside the single page app', () => {

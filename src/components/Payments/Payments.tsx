@@ -1554,7 +1554,7 @@ export function Payments({
                 </div>
               </div>
 
-              <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+              <div className="mt-3 flex flex-wrap items-center justify-end gap-2" role="toolbar" aria-label="Действия с платежами">
                 <ToolbarIconButton
                   label={settingsOpen ? 'Скрыть настройки таблицы' : 'Настроить таблицу'}
                   icon={<SlidersHorizontal className="h-4 w-4" />}

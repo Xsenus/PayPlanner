@@ -1,5 +1,7 @@
 import { Loader2, X } from 'lucide-react';
+import { useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { useModalFocusTrap } from '../../hooks/useModalFocusTrap';
 
 export interface StatusChangeOption<T extends string = string> {
   value: T;
@@ -51,6 +53,9 @@ export function StatusChangeModal<T extends string = string>({
   reasonPlaceholder = 'Опишите, почему меняется статус',
   onReasonChange,
 }: StatusChangeModalProps<T>) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const handleDialogKeyDown = useModalFocusTrap(dialogRef, open, onCancel);
+
   if (!open || typeof document === 'undefined') return null;
 
   const selectedOption = options.find((option) => option.value === value);
@@ -60,9 +65,11 @@ export function StatusChangeModal<T extends string = string>({
   return createPortal(
     <div className="fixed inset-0 z-[2300] flex items-center justify-center bg-slate-900/45 p-2 sm:p-4">
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        onKeyDown={handleDialogKeyDown}
         data-testid="status-change-dialog"
         className="flex max-h-[calc(100vh-1rem)] w-full max-w-4xl flex-col overflow-hidden rounded-lg bg-white shadow-xl sm:max-h-[calc(100vh-2rem)]"
       >

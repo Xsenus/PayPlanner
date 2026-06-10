@@ -471,7 +471,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
           </button>
         </div>
 
-        <nav className="pp-sidebar-scroll flex-1 overflow-y-auto py-4 px-2">
+        <nav className="pp-sidebar-scroll flex-1 overflow-y-auto py-4 px-2" aria-label={t('navigation') ?? 'Навигация'}>
           <ul className="space-y-1.5">
             {sidebarItems.map((item) => {
               const Icon = item.icon;

@@ -1,6 +1,7 @@
 import { X } from 'lucide-react';
-import { type FormEvent } from 'react';
+import { useRef, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
+import { useModalFocusTrap } from '../../hooks/useModalFocusTrap';
 import { LookupSelect, type LookupSelectOption } from './LookupSelect';
 
 export interface FormPromptField {
@@ -47,6 +48,9 @@ export function FormPromptModal({
   error,
   loading = false,
 }: FormPromptModalProps) {
+  const dialogRef = useRef<HTMLFormElement>(null);
+  const handleDialogKeyDown = useModalFocusTrap(dialogRef, open, onCancel);
+
   if (!open || typeof document === 'undefined') return null;
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -56,7 +60,15 @@ export function FormPromptModal({
 
   return createPortal(
     <div className="fixed inset-0 z-[2200] flex items-center justify-center bg-slate-900/40 p-4">
-      <form onSubmit={handleSubmit} className="w-full max-w-xl rounded-2xl bg-white shadow-xl">
+      <form
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onSubmit={handleSubmit}
+        onKeyDown={handleDialogKeyDown}
+        className="w-full max-w-xl rounded-2xl bg-white shadow-xl"
+      >
         <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
           <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
           <button

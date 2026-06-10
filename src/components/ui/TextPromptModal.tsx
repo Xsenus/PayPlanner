@@ -1,6 +1,7 @@
 import { X } from 'lucide-react';
-import { type FormEvent } from 'react';
+import { useRef, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
+import { useModalFocusTrap } from '../../hooks/useModalFocusTrap';
 
 interface TextPromptModalProps {
   open: boolean;
@@ -35,6 +36,13 @@ export function TextPromptModal({
   loading = false,
   multiline = false,
 }: TextPromptModalProps) {
+  const dialogRef = useRef<HTMLFormElement>(null);
+  const fieldRef = useRef<HTMLElement | null>(null);
+  const handleDialogKeyDown = useModalFocusTrap(dialogRef, open, onCancel, fieldRef);
+  const setFieldRef = (element: HTMLInputElement | HTMLTextAreaElement | null) => {
+    fieldRef.current = element;
+  };
+
   if (!open || typeof document === 'undefined') return null;
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -45,7 +53,12 @@ export function TextPromptModal({
   return createPortal(
     <div className="fixed inset-0 z-[2200] flex items-center justify-center bg-slate-900/40 p-4">
       <form
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
         onSubmit={handleSubmit}
+        onKeyDown={handleDialogKeyDown}
         className="w-full max-w-lg rounded-2xl bg-white shadow-xl"
       >
         <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
@@ -67,6 +80,7 @@ export function TextPromptModal({
             <span className="mb-2 block text-sm font-medium text-slate-700">{label}</span>
             {multiline ? (
               <textarea
+                ref={setFieldRef}
                 value={value}
                 onChange={(event) => onValueChange(event.target.value)}
                 placeholder={placeholder}
@@ -75,6 +89,7 @@ export function TextPromptModal({
               />
             ) : (
               <input
+                ref={setFieldRef}
                 value={value}
                 onChange={(event) => onValueChange(event.target.value)}
                 placeholder={placeholder}

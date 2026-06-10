@@ -534,7 +534,7 @@ npm audit --audit-level=moderate
   - DoD: критичные hooks имеют быстрые unit tests.
   - Выполнено: добавлены быстрые tests для `useRolePermissions`, `useActivityLogger`, `useDebouncedValue`; в targeted run также сохранены storage/date-time hooks `usePersistedTableSettings` и `useUserTimeZone`; детали в `docs/frontend-hook-test-coverage-2026-06-10.md`.
 
-- [ ] Добавить accessibility tests для navigation/modals/toolbars.
+- [x] Добавить accessibility tests для navigation/modals/toolbars.
   - Приоритет: P1.
   - Проверять:
     - role/name;
