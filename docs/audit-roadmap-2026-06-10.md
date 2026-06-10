@@ -212,12 +212,13 @@ npm audit --audit-level=moderate
   - DoD: API возвращает единый формат ошибок, frontend не сломан.
   - Выполнено: добавлен `application/problem+json` для непойманных API исключений и пустых API 401/403/404/409/5xx ответов; существующие локальные `Problem(...)`, validation errors и ответы с `{ message }` не переписаны. Добавлены `ApiErrorContractTests`.
 
-- [ ] Зафиксировать TLS responsibility.
+- [x] Зафиксировать TLS responsibility.
   - Приоритет: P1.
   - Найдено: `UseHttpsRedirection`/`UseHsts` в app code нет.
   - Если TLS делает nginx, описать это в deploy/runbook.
   - Если должен делать app, добавить middleware и проверить deploy.
   - DoD: понятно, где enforced HTTPS и HSTS.
+  - Выполнено: добавлен `docs/deploy-runbook.md` с ответственностью nginx за TLS, HTTP->HTTPS redirect и HSTS; backend остается на внутреннем `127.0.0.1:5080`. Добавлены `ProductionTlsResponsibilityTests`.
 
 ## Milestone 3. Исправить видимые frontend дефекты
 
