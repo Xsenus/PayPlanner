@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Navigation from './Navigation';
 import { getTabHref } from '../../appRouting';
+import { ALL_TABS, type Tab } from '../../types/tabs';
 
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({
@@ -18,6 +19,21 @@ const expandedSections = {
   payments: true,
   acts: true,
 };
+
+const HIDDEN_NAVIGATION_TABS = [
+  'caseDetail',
+  'contactsExternal',
+  'actCreate',
+  'actDetail',
+  'contractCreate',
+  'contractDetail',
+  'clientDetail',
+  'companyProfile',
+  'profile',
+  'userDetail',
+  'yandexDisk',
+  's3Storage',
+] as const satisfies readonly Tab[];
 
 function renderNavigation(onTabChange = vi.fn()) {
   window.localStorage.setItem('pp.sidebar_expanded', JSON.stringify(expandedSections));
@@ -51,6 +67,18 @@ describe('Navigation links', () => {
     expect(findLinkByHref(getTabHref('settings'))).toBeTruthy();
     expect(findLinkByHref(getTabHref('yandexDisk'))).toBeFalsy();
     expect(findLinkByHref(getTabHref('s3Storage'))).toBeFalsy();
+  });
+
+  it('keeps every tab either visible in navigation or explicitly whitelisted as hidden', () => {
+    renderNavigation();
+
+    const hiddenTabs = new Set<Tab>(HIDDEN_NAVIGATION_TABS);
+    const visibleTabs = ALL_TABS.filter((tab) => !hiddenTabs.has(tab));
+    const renderedTabs = ALL_TABS.filter((tab) => Boolean(findLinkByHref(getTabHref(tab))));
+
+    expect(new Set(ALL_TABS).size).toBe(ALL_TABS.length);
+    expect(new Set(HIDDEN_NAVIGATION_TABS).size).toBe(HIDDEN_NAVIGATION_TABS.length);
+    expect(renderedTabs.sort()).toEqual(visibleTabs.sort());
   });
 
   it('opens the task calendar submenu inside the single page app', () => {

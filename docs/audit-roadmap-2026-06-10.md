@@ -294,10 +294,11 @@ npm audit --audit-level=moderate
   - DoD: direct URL не открывает запрещенный раздел.
   - Выполнено: tab access guard вынесен в `appRouting.canAccessTab`, App использует тот же helper. Добавлены negative tests для `/cases/1`, `/acts/new`, `/acts/1`, `/contracts/1`, `/invoices/1`, `/payments/1`, `/tasks/1`, `/clients/1`. Проверки: `npx vitest run src/App.routing.test.ts`, `npm run test:guard`, `npx tsc -p tsconfig.app.json --noEmit`.
 
-- [ ] Зафиксировать whitelist расхождений между `Tab`, `ALL_TABS` и `Navigation`.
+- [x] Зафиксировать whitelist расхождений между `Tab`, `ALL_TABS` и `Navigation`.
   - Приоритет: P1.
   - Сейчас `Tab` и `ALL_TABS` совпадают 47/47, в navigation нет 12 hidden/detail tabs.
   - DoD: тест падает, если появляется новая вкладка без осознанного routing/navigation решения.
+  - Выполнено: `Tab` теперь выводится из единого `ALL_TABS`, а `Navigation.test.tsx` проверяет, что каждая вкладка либо имеет navigation link, либо входит в явный whitelist 12 hidden/detail tabs.
 
 ### 4.2 Backend permission matrix
 

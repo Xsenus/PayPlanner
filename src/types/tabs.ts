@@ -1,48 +1,51 @@
-export type Tab =
-  | 'calendar'
-  | 'notifications'
-  | 'tasks'
-  | 'tasksApprovals'
-  | 'tasksCalendar'
-  | 'reports'
-  | 'calculator'
-  | 'legalEntities'
-  | 'cases'
-  | 'caseDetail'
-  | 'clients'
-  | 'contacts'
-  | 'contactsClients'
-  | 'contactsLegal'
-  | 'contactsExternal'
-  | 'accounts'
-  | 'accountsIncome'
-  | 'accountsExpense'
-  | 'installments'
-  | 'acts'
-  | 'actsIncome'
-  | 'actsExpense'
-  | 'actCreate'
-  | 'actDetail'
-  | 'paymentsIncome'
-  | 'paymentsExpense'
-  | 'payments'
-  | 'moneyBank'
-  | 'moneyCash'
-  | 'moneyCards'
-  | 'moneyEMoney'
-  | 'moneyTotal'
-  | 'contracts'
-  | 'contractCreate'
-  | 'contractDetail'
-  | 'clientDetail'
-  | 'companyProfile'
-  | 'profile'
-  | 'users'
-  | 'userDetail'
-  | 'roles'
-  | 'audit'
-  | 'userActivity'
-  | 'yandexDisk'
-  | 's3Storage'
-  | 'dictionaries'
-  | 'settings';
+export const ALL_TABS = [
+  'calendar',
+  'notifications',
+  'tasks',
+  'tasksApprovals',
+  'tasksCalendar',
+  'reports',
+  'calculator',
+  'legalEntities',
+  'cases',
+  'caseDetail',
+  'clients',
+  'contacts',
+  'contactsClients',
+  'contactsLegal',
+  'contactsExternal',
+  'accounts',
+  'accountsIncome',
+  'accountsExpense',
+  'installments',
+  'acts',
+  'actsIncome',
+  'actsExpense',
+  'actCreate',
+  'actDetail',
+  'paymentsIncome',
+  'paymentsExpense',
+  'payments',
+  'moneyBank',
+  'moneyCash',
+  'moneyCards',
+  'moneyEMoney',
+  'moneyTotal',
+  'contracts',
+  'contractCreate',
+  'contractDetail',
+  'clientDetail',
+  'companyProfile',
+  'profile',
+  'users',
+  'userDetail',
+  'roles',
+  'audit',
+  'userActivity',
+  'yandexDisk',
+  's3Storage',
+  'dictionaries',
+  'settings',
+] as const;
+
+export type Tab = (typeof ALL_TABS)[number];

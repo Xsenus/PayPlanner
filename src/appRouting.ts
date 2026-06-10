@@ -1,60 +1,10 @@
-import type { Tab } from './types/tabs';
+import { ALL_TABS, type Tab } from './types/tabs';
 import type { RolePermissions } from './types/permissions';
 
 export const LAST_TAB_STORAGE_KEY = 'pp.last_active_tab';
 
-const ALL_TABS: Tab[] = [
-  'calendar',
-  'notifications',
-  'tasks',
-  'tasksApprovals',
-  'tasksCalendar',
-  'reports',
-  'calculator',
-  'legalEntities',
-  'cases',
-  'caseDetail',
-  'clients',
-  'contacts',
-  'contactsClients',
-  'contactsLegal',
-  'contactsExternal',
-  'clientDetail',
-  'accounts',
-  'accountsIncome',
-  'accountsExpense',
-  'installments',
-  'acts',
-  'actsIncome',
-  'actsExpense',
-  'actCreate',
-  'actDetail',
-  'paymentsIncome',
-  'paymentsExpense',
-  'payments',
-  'moneyBank',
-  'moneyCash',
-  'moneyCards',
-  'moneyEMoney',
-  'moneyTotal',
-  'contracts',
-  'contractCreate',
-  'contractDetail',
-  'companyProfile',
-  'profile',
-  'users',
-  'userDetail',
-  'roles',
-  'audit',
-  'userActivity',
-  'yandexDisk',
-  's3Storage',
-  'dictionaries',
-  'settings',
-];
-
 function isValidTab(value: string | null): value is Tab {
-  return Boolean(value) && ALL_TABS.includes(value as Tab);
+  return value !== null && (ALL_TABS as readonly string[]).includes(value);
 }
 
 type TabAccessOptions = {
