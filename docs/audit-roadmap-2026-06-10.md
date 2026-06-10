@@ -596,7 +596,7 @@ npm audit --audit-level=moderate
   - DoD: targeted tests + screenshots проходят.
   - Выполнено: из `Reports` вынесены pure presentation helpers в `src/utils/reportPresentation.ts`, добавлены targeted tests; детали в `docs/frontend-component-extraction-2026-06-10.md`.
 
-- [ ] Разбивать большие backend controllers через query/service extraction.
+- [x] Разбивать большие backend controllers через query/service extraction.
   - Приоритет: P2.
   - Hotspots:
     - `CasesV2Controller`;
@@ -607,6 +607,7 @@ npm audit --audit-level=moderate
     - `PaymentsController`.
   - Правило: сначала tests вокруг endpoint/query behavior, потом extraction.
   - DoD: API contract не изменился.
+  - Выполнено: `ReportsController` больше не содержит private helpers нормализации report date/period; они вынесены в `ReportQueryPeriodResolver`, покрыты targeted unit tests и существующим `ReportsControllerTests`; детали в `docs/backend-controller-extraction-2026-06-10.md`.
 
 - [ ] Переименовать package name.
   - Приоритет: P3.

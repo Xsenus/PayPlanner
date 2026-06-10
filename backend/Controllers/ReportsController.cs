@@ -8,6 +8,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Invoices;
+using static PayPlanner.Api.Services.Reports.ReportQueryPeriodResolver;
 using System.Globalization;
 using System.Net;
 using System.Text;
@@ -116,21 +117,6 @@ public class ReportsController : ControllerBase
 
     private async Task<(DateTime Start, DateTime End)> ResolveReportPeriodAsync(DateTime? from, DateTime? to, CancellationToken ct)
         => ResolveReportPeriod(from, to, await ResolveReportTodayAsync(ct));
-
-    private static DateTime NormalizeReportInstant(DateTime value)
-        => CalendarTimeZoneHelper.NormalizeUtcInstant(value);
-
-    private static DateTime? NormalizeReportInstant(DateTime? value)
-        => value.HasValue ? NormalizeReportInstant(value.Value) : null;
-
-    private static DateTime NormalizeReportDate(DateTime value)
-        => DateTime.SpecifyKind(value.Date, DateTimeKind.Unspecified);
-
-    private static DateTime? NormalizeReportDate(DateTime? value)
-        => value.HasValue ? NormalizeReportDate(value.Value) : null;
-
-    private static DateTime ResolveReportLocalDate(DateTime value, TimeZoneInfo timeZone)
-        => NormalizeReportDate(CalendarTimeZoneHelper.ToUserLocal(value, timeZone));
 
     [HttpGet("legal-work")]
     public async Task<ActionResult<LegalWorkReportDto>> LegalWork(
@@ -572,13 +558,6 @@ public class ReportsController : ControllerBase
             default:
                 return (null, BadRequest("Неизвестный управленческий отчет для выгрузки."));
         }
-    }
-
-    private static (DateTime Start, DateTime End) ResolveReportPeriod(DateTime? from, DateTime? to, DateTime today)
-    {
-        var start = (from?.Date) ?? new DateTime(today.Year, today.Month, 1);
-        var end = (to?.Date) ?? start.AddMonths(1).AddDays(-1);
-        return end < start ? (end, start) : (start, end);
     }
 
     [HttpGet("case-activity")]
