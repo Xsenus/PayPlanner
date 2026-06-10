@@ -60,9 +60,10 @@ npm audit --audit-level=moderate
   - DoD: ветка не `main`, рабочее дерево понятно по `git status --short`.
   - Выполнено: создана ветка `audit-roadmap-fixes-2026-06-10`; `git status --short` показывает только изменения, существовавшие до начала исправлений, и новые audit docs.
 
-- [ ] Сохранить ссылку на полный отчет и этот roadmap в задаче/PR.
+- [x] Сохранить ссылку на полный отчет и этот roadmap в задаче/PR.
   - Файлы: `docs/full-project-audit-2026-06-10.md`, `docs/audit-roadmap-2026-06-10.md`.
   - DoD: следующий агент видит, откуда взяты решения.
+  - Выполнено: полный отчет и roadmap сохранены в `docs/`; P0-исправления зафиксированы коммитом `9b61a7c8`.
 
 - [x] Подтвердить, какие изменения уже были сделаны до roadmap.
   - Сейчас в worktree были замечены: `docs/date-time-inventory.md`, `src/components/Tasks/TaskJournal.test.tsx`, `backend/appsettings.Development.json`, новый audit report.
