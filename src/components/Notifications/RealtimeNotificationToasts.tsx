@@ -2,7 +2,9 @@ import { useEffect, useRef } from 'react';
 import { HubConnection, HubConnectionState } from '@microsoft/signalr';
 import { useToast } from '../../hooks/useToast';
 import {
+  canStartNotificationsHubConnection,
   createNotificationsHubConnection,
+  isExpectedRealtimeStartupError,
   REALTIME_USER_NOTIFICATION_CREATED_EVENT,
   stopNotificationsHubConnection,
   type RealtimeUserNotification,
@@ -30,7 +32,7 @@ export function RealtimeNotificationToasts({ userId, onOpenTask }: RealtimeNotif
   }, [onOpenTask]);
 
   useEffect(() => {
-    if (!userId) {
+    if (!userId || !canStartNotificationsHubConnection()) {
       return undefined;
     }
 
@@ -76,8 +78,13 @@ export function RealtimeNotificationToasts({ userId, onOpenTask }: RealtimeNotif
 
       try {
         await connection.start();
-      } catch {
+      } catch (error) {
         if (!disposed) {
+          if (isExpectedRealtimeStartupError(error)) {
+            console.debug('Realtime notifications are unavailable; retrying in background.', error);
+          } else {
+            console.error('Realtime notifications failed to start.', error);
+          }
           retryTimer = window.setTimeout(start, 5000);
         }
       }

@@ -248,7 +248,7 @@ npm audit --audit-level=moderate
   - Тесты и DoD аналогично `/tasks`.
   - Выполнено: общий фикс TaskJournal покрывает calendar initial view. Browser smoke 390px: `/tasks/calendar` overflow 0.
 
-- [ ] Разобрать повторяющуюся SignalR console negotiation error.
+- [x] Разобрать повторяющуюся SignalR console negotiation error.
   - Приоритет: P1.
   - Найдено во visual smoke.
   - Порядок:
@@ -259,6 +259,7 @@ npm audit --audit-level=moderate
     - frontend unit test для notification/realtime service, если есть;
     - manual/browser smoke.
   - DoD: console не зашумлен ожидаемой ошибкой, реальные ошибки не проглатываются.
+  - Выполнено: realtime notifications не стартуют без auth token, ожидаемые offline/network negotiation failures переводятся в тихий debug, а реальные HTTP/auth ошибки остаются в `console.error`. Добавлены `realtimeNotifications.test.ts` и расширены `RealtimeNotificationToasts.test.tsx`; browser smoke на Vite с отключенным API не показал SignalR console error.
 
 - [ ] Проверить и исправить icon-only buttons без accessible name.
   - Приоритет: P1.

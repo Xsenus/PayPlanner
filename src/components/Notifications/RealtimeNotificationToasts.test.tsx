@@ -9,6 +9,8 @@ const toastMock = vi.hoisted(() => ({
 
 const connectionState = vi.hoisted(() => ({
   handlers: new Map<string, (notification: RealtimeUserNotification) => void>(),
+  canStart: true,
+  create: vi.fn(),
   start: vi.fn(),
   stop: vi.fn(),
   off: vi.fn(),
@@ -22,22 +24,35 @@ vi.mock('../../services/realtimeNotifications', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../services/realtimeNotifications')>();
   return {
     ...actual,
-    createNotificationsHubConnection: () => ({
-      state: 'Disconnected',
-      start: connectionState.start,
-      stop: connectionState.stop,
-      on: (eventName: string, handler: (notification: RealtimeUserNotification) => void) => {
-        connectionState.handlers.set(eventName, handler);
-      },
-      off: connectionState.off,
-    }),
+    canStartNotificationsHubConnection: () => connectionState.canStart,
+    createNotificationsHubConnection: () => {
+      connectionState.create();
+      return {
+        state: 'Disconnected',
+        start: connectionState.start,
+        stop: connectionState.stop,
+        on: (eventName: string, handler: (notification: RealtimeUserNotification) => void) => {
+          connectionState.handlers.set(eventName, handler);
+        },
+        off: connectionState.off,
+      };
+    },
   };
 });
+
+async function flushRealtimeStart() {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
 
 describe('RealtimeNotificationToasts', () => {
   beforeEach(() => {
     toastMock.showToast.mockReset();
     connectionState.handlers.clear();
+    connectionState.canStart = true;
+    connectionState.create.mockReset();
     connectionState.start.mockReset();
     connectionState.start.mockResolvedValue(undefined);
     connectionState.stop.mockReset();
@@ -102,5 +117,48 @@ describe('RealtimeNotificationToasts', () => {
     });
 
     expect(toastMock.showToast).not.toHaveBeenCalled();
+  });
+
+  it('does not create realtime connection when auth token is missing', () => {
+    connectionState.canStart = false;
+
+    render(<RealtimeNotificationToasts userId={5} onOpenTask={vi.fn()} />);
+
+    expect(connectionState.create).not.toHaveBeenCalled();
+    expect(connectionState.start).not.toHaveBeenCalled();
+  });
+
+  it('keeps expected offline startup failures out of console.error', async () => {
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    connectionState.start.mockRejectedValue(new TypeError('Failed to fetch'));
+
+    render(<RealtimeNotificationToasts userId={5} onOpenTask={vi.fn()} />);
+
+    await flushRealtimeStart();
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Realtime notifications are unavailable'),
+      expect.any(TypeError),
+    );
+
+    debugSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
+  it('keeps real realtime startup failures visible in console.error', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const startupError = new Error("Response status code does not indicate success: 401 (Unauthorized).");
+    connectionState.start.mockRejectedValue(startupError);
+
+    render(<RealtimeNotificationToasts userId={5} onOpenTask={vi.fn()} />);
+
+    await flushRealtimeStart();
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Realtime notifications failed to start'),
+      startupError,
+    );
+
+    errorSpy.mockRestore();
   });
 });
