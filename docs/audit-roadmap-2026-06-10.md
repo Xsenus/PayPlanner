@@ -570,7 +570,7 @@ npm audit --audit-level=moderate
   - DoD: type cycle исчез, behavior не изменен.
   - Выполнено: `Role` вынесен в `src/components/Roles/types.ts`, модалки больше не импортируют тип из screen component; добавлен guard test `src/components/Roles/roleTypeImports.test.ts`.
 
-- [ ] Проверить кандидаты на unused frontend files.
+- [x] Проверить кандидаты на unused frontend files.
   - Приоритет: P2.
   - Кандидаты:
     - `src/components/Calendar/SummaryCards.tsx`;
@@ -579,6 +579,7 @@ npm audit --audit-level=moderate
     - `src/components/ui/Hint.tsx`;
     - `src/hooks/useClientStats.ts`.
   - DoD: файл либо удален с проверками, либо отмечен как используемый/зарезервированный.
+  - Выполнено: пять кандидатов удалены после ручных `rg` / `git grep` проверок; добавлен guard test `src/unusedFrontendCandidates.test.ts`; детали в `docs/unused-frontend-candidates-2026-06-10.md`.
 
 - [ ] Разбивать большие frontend компоненты только после тестовой страховки.
   - Приоритет: P2.
