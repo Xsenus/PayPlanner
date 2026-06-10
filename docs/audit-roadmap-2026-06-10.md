@@ -195,7 +195,7 @@ npm audit --audit-level=moderate
   - DoD: production CORS не шире необходимого или явно обоснован.
   - Выполнено: Development оставлен с `AllowAnyOrigin`, Production использует только `Cors:AllowedOrigins`; пустой список не включает wildcard. Добавлены `CorsPolicyConfigurationTests` и README пример `Cors__AllowedOrigins__0`.
 
-- [ ] Ввести единый API error contract.
+- [x] Ввести единый API error contract.
   - Приоритет: P1.
   - Найдено: нет `UseExceptionHandler`, `AddProblemDetails`, `UseStatusCodePages`; ошибки мапятся локально.
   - Порядок:
@@ -210,6 +210,7 @@ npm audit --audit-level=moderate
     - conflict;
     - external provider unavailable.
   - DoD: API возвращает единый формат ошибок, frontend не сломан.
+  - Выполнено: добавлен `application/problem+json` для непойманных API исключений и пустых API 401/403/404/409/5xx ответов; существующие локальные `Problem(...)`, validation errors и ответы с `{ message }` не переписаны. Добавлены `ApiErrorContractTests`.
 
 - [ ] Зафиксировать TLS responsibility.
   - Приоритет: P1.

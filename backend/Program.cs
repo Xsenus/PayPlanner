@@ -243,6 +243,7 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+app.UseApiErrorContract(app.Environment);
 app.UseCors();
 app.UseResponseCompression();
 app.UseAuthentication();
