@@ -609,10 +609,11 @@ npm audit --audit-level=moderate
   - DoD: API contract не изменился.
   - Выполнено: `ReportsController` больше не содержит private helpers нормализации report date/period; они вынесены в `ReportQueryPeriodResolver`, покрыты targeted unit tests и существующим `ReportsControllerTests`; детали в `docs/backend-controller-extraction-2026-06-10.md`.
 
-- [ ] Переименовать package name.
+- [x] Переименовать package name.
   - Приоритет: P3.
-  - Сейчас: `vite-react-typescript-starter`.
+  - Сейчас: `payplanner`.
   - DoD: `package.json` name соответствует продукту, CI не сломан.
+  - Выполнено: `package.json` и root `package-lock.json` переименованы в `payplanner`; добавлен `PackageMetadataTests`, который фиксирует имя продукта и не дает вернуть starter-name; детали в `docs/package-name-metadata-2026-06-10.md`.
 
 ## Milestone 11. Documentation and release process
 
