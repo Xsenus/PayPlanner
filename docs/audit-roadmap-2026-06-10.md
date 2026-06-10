@@ -544,7 +544,7 @@ npm audit --audit-level=moderate
     - no positive `tabIndex`.
   - DoD: основные рабочие экраны можно пройти клавиатурой.
 
-- [ ] Добавить visual smoke в CI или scheduled job.
+- [x] Добавить visual smoke в CI или scheduled job.
   - Приоритет: P2.
   - Минимум:
     - desktop/tablet/mobile;
@@ -552,6 +552,7 @@ npm audit --audit-level=moderate
     - overflow check;
     - console errors.
   - DoD: mobile overflow не возвращается незаметно.
+  - Выполнено: добавлен `scripts/run-visual-smoke.mjs`, unit tests для конфигурации smoke, npm script `test:visual-smoke`, scheduled/manual GitHub Actions workflow `.github/workflows/visual-smoke.yml`; детали в `docs/frontend-visual-smoke-coverage-2026-06-10.md`.
 
 ## Milestone 10. Maintainability без поломки логики
 

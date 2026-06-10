@@ -1,0 +1,52 @@
+name: Visual Smoke
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "17 2 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: payplanner-visual-smoke
+  cancel-in-progress: true
+
+jobs:
+  visual-smoke:
+    runs-on: ubuntu-latest
+
+    env:
+      PAYPLANNER_VISUAL_FRONTEND_URL: https://crm.elitpravo.com
+      PAYPLANNER_VISUAL_ARTIFACT_DIR: artifacts/visual-smoke
+      PAYPLANNER_VISUAL_TOKEN: ${{ secrets.PAYPLANNER_VISUAL_TOKEN }}
+      PAYPLANNER_VISUAL_EMAIL: ${{ secrets.PAYPLANNER_VISUAL_EMAIL }}
+      PAYPLANNER_VISUAL_PASSWORD: ${{ secrets.PAYPLANNER_VISUAL_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run visual smoke
+        run: npm run test:visual-smoke
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: visual-smoke-screenshots
+          path: artifacts/visual-smoke
+          if-no-files-found: ignore
