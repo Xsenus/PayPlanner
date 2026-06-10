@@ -59,16 +59,20 @@ import { useBankStatementImportReport } from '../../hooks/useBankStatementImport
 import { useSpreadsheetImportReport } from '../../hooks/useSpreadsheetImportReport';
 import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicker';
 import { apiService } from '../../services/api';
-import { formatCurrencySmart } from '../../utils/formatters';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
-import { formatReportDate, formatReportDateTime, formatReportDeadlineDate } from '../../utils/reportDateFormatting';
 import { buildReportMonthPresetRange, currentReportMonthInTimeZone, type ReportMonthPreset } from '../../utils/reportPeriod';
+import {
+  buildTitleSuffix,
+  formatCurrency,
+  formatDate,
+  formatDateTime,
+  formatDeadlineDate,
+  formatDeadlineOffset,
+  formatYmLabel,
+  monthRangeToDates,
+  normalizeYmRange,
+} from '../../utils/reportPresentation';
 import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CaseFinanceReport, CaseSuccessReport, CashBookSummary, CashFlowReport, CashOrderReport, ContractStatusReport, CounterpartyReport, CurrencyReport, CurrentCasesReport, DirectionReport, InvoiceStatusReport, JournalStatusReport, LawyerWorkloadReport, LegalWorkReport, MatchStatusReport, MoneyCategoryReport, MoneyOperationSource, OverdueProceduralDeadlinesReport, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, TaskReport, VatReport } from '../../types';
-
-const ruMonthFormatter = new Intl.DateTimeFormat('ru-RU', {
-  month: 'long',
-  year: 'numeric',
-});
 
 const statusMeta: Record<
   'Completed' | 'Pending' | 'Overdue',
@@ -139,51 +143,6 @@ const reportGroups: Array<{
     icon: Target,
   },
 ];
-
-function formatCurrency(amount: number) {
-  return formatCurrencySmart(amount).full;
-}
-
-function formatYmLabel(ym: string) {
-  const [year, month] = ym.split('-').map(Number);
-  return ruMonthFormatter.format(new Date(year, (month ?? 1) - 1, 1));
-}
-
-function normalizeYmRange(fromYM: `${number}-${string}`, toYM: `${number}-${string}`) {
-  return fromYM <= toYM ? { fromYM, toYM } : { fromYM: toYM, toYM: fromYM };
-}
-
-function buildTitleSuffix(fromYM: `${number}-${string}`, toYM: `${number}-${string}`) {
-  if (fromYM === toYM) {
-    return formatYmLabel(fromYM);
-  }
-
-  return `${formatYmLabel(fromYM)} - ${formatYmLabel(toYM)}`;
-}
-
-function monthRangeToDates(fromYM: `${number}-${string}`, toYM: `${number}-${string}`) {
-  const normalized = normalizeYmRange(fromYM, toYM);
-  const [fromYear, fromMonth] = normalized.fromYM.split('-').map(Number);
-  const [toYear, toMonth] = normalized.toYM.split('-').map(Number);
-  const monthDays = new Date(toYear, toMonth, 0).getDate();
-
-  return {
-    from: `${fromYear}-${String(fromMonth).padStart(2, '0')}-01`,
-    to: `${toYear}-${String(toMonth).padStart(2, '0')}-${String(monthDays).padStart(2, '0')}`,
-  };
-}
-
-function formatDate(value: string, timeZoneId?: string | null) {
-  return formatReportDate(value, timeZoneId);
-}
-
-function formatDateTime(value: string, timeZoneId?: string | null) {
-  return formatReportDateTime(value, timeZoneId);
-}
-
-function formatDeadlineDate(value: string, allDay?: boolean, timeZoneId?: string | null) {
-  return formatReportDeadlineDate(value, allDay, timeZoneId);
-}
 
 function csvCell(value: unknown) {
   const text = value === null || value === undefined ? '' : String(value);
@@ -1343,18 +1302,6 @@ function ProjectReportSection({
       )}
     </section>
   );
-}
-
-function formatDeadlineOffset(days: number) {
-  if (days < 0) {
-    return `${Math.abs(days)} дн. просрочено`;
-  }
-
-  if (days === 0) {
-    return 'сегодня';
-  }
-
-  return `через ${days} дн.`;
 }
 
 type LegalWorkExportFormat = 'csv' | 'excel' | 'pdf';

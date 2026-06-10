@@ -581,7 +581,7 @@ npm audit --audit-level=moderate
   - DoD: файл либо удален с проверками, либо отмечен как используемый/зарезервированный.
   - Выполнено: пять кандидатов удалены после ручных `rg` / `git grep` проверок; добавлен guard test `src/unusedFrontendCandidates.test.ts`; детали в `docs/unused-frontend-candidates-2026-06-10.md`.
 
-- [ ] Разбивать большие frontend компоненты только после тестовой страховки.
+- [x] Разбивать большие frontend компоненты только после тестовой страховки.
   - Приоритет: P2.
   - Hotspots:
     - `ClientDetail`;
@@ -594,6 +594,7 @@ npm audit --audit-level=moderate
     - `CaseDetailPage`.
   - Правило: сначала вынести pure helper или small subcomponent, не менять UX.
   - DoD: targeted tests + screenshots проходят.
+  - Выполнено: из `Reports` вынесены pure presentation helpers в `src/utils/reportPresentation.ts`, добавлены targeted tests; детали в `docs/frontend-component-extraction-2026-06-10.md`.
 
 - [ ] Разбивать большие backend controllers через query/service extraction.
   - Приоритет: P2.
