@@ -456,7 +456,7 @@ public class PaymentContext : DbContext
         {
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Name).HasMaxLength(2000).IsRequired();
-            entity.Property(e => e.Quantity).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Quantity).HasColumnType("decimal(18,4)");
             entity.Property(e => e.Unit).HasMaxLength(32).IsRequired();
             entity.Property(e => e.Price).HasColumnType("decimal(18,2)");
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
@@ -854,7 +854,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Direction).HasConversion<string>();
             entity.Property(e => e.AccountingType).HasConversion<string>();
             entity.Property(e => e.Amount).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.VatRate).HasColumnType("decimal(5,2)");
+            entity.Property(e => e.VatRate).HasColumnType("decimal(18,4)");
             entity.Property(e => e.VatAmount).HasColumnType("decimal(18,2)");
             entity.Property(e => e.PaidAmount).HasColumnType("decimal(18,2)");
             entity.Property(e => e.Currency).HasMaxLength(12);
@@ -1376,7 +1376,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.ServiceName).HasMaxLength(200).IsRequired();
             entity.Property(e => e.Description).HasMaxLength(1000);
             entity.Property(e => e.ExecutorName).HasMaxLength(256);
-            entity.Property(e => e.Quantity).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.Quantity).HasColumnType("decimal(18,4)");
             entity.Property(e => e.UnitPrice).HasColumnType("decimal(18,2)");
             entity.Property(e => e.TotalAmount).HasColumnType("decimal(18,2)");
 
@@ -2762,6 +2762,8 @@ public class PaymentContext : DbContext
             ConfigureAudit<User>(modelBuilder, enableSoftDelete: false);
         }
 
+        ConfigureDecimalPrecision(modelBuilder);
+
         if (Database.IsNpgsql())
         {
             foreach (var entityType in modelBuilder.Model.GetEntityTypes())
@@ -2797,6 +2799,34 @@ public class PaymentContext : DbContext
                 .HasColumnType("text");
         }
     }
+
+    private static void ConfigureDecimalPrecision(ModelBuilder modelBuilder)
+    {
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            foreach (var property in entityType.GetProperties())
+            {
+                var clrType = Nullable.GetUnderlyingType(property.ClrType) ?? property.ClrType;
+                if (clrType != typeof(decimal))
+                {
+                    continue;
+                }
+
+                property.SetPrecision(property.GetPrecision() ?? 18);
+                property.SetScale(property.GetScale() ?? GetDecimalScale(property));
+            }
+        }
+    }
+
+    private static int GetDecimalScale(IMutableProperty property)
+        => UsesExtendedDecimalScale(property.Name) ? 4 : 2;
+
+    private static bool UsesExtendedDecimalScale(string propertyName)
+        => propertyName.Contains("Quantity", StringComparison.OrdinalIgnoreCase)
+           || propertyName.Contains("Rate", StringComparison.OrdinalIgnoreCase)
+           || propertyName.Contains("Share", StringComparison.OrdinalIgnoreCase)
+           || propertyName.Contains("Percent", StringComparison.OrdinalIgnoreCase)
+           || propertyName.Contains("Hours", StringComparison.OrdinalIgnoreCase);
 
     public override int SaveChanges()
     {

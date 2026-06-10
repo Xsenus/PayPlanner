@@ -1759,7 +1759,9 @@ export function InvoiceModal({
 
   useEffect(() => {
     if (open) {
-      const nextForm = resumeDraft?.form ?? normalizeInvoiceToForm(
+      const nextForm: FormState = resumeDraft?.form
+        ? { ...resumeDraft.form, workflowStatus: resumeDraft.form.workflowStatus ?? 'Draft' }
+        : normalizeInvoiceToForm(
         invoice,
         defaultClientId,
         defaultLegalEntityId,
@@ -4691,7 +4693,7 @@ export function InvoiceModal({
                             {canEditRelatedPayment && (
                               <button
                                 type="button"
-                                onClick={() => onEditRelatedPayment(payment)}
+                                onClick={() => onEditRelatedPayment?.(payment)}
                                 data-testid={`invoice-related-payment-edit-${payment.id}`}
                                 className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-600 transition hover:bg-slate-50"
                                 title={t('edit') ?? 'Редактировать'}
@@ -4704,7 +4706,7 @@ export function InvoiceModal({
                               <button
                                 type="button"
                                 onClick={() => {
-                                  void onDeleteRelatedPayment(payment);
+                                  void onDeleteRelatedPayment?.(payment);
                                 }}
                                 className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-red-600 transition hover:bg-red-50"
                                 title={t('delete') ?? 'Удалить'}

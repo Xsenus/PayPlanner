@@ -187,7 +187,7 @@ builder.Services.Configure<GzipCompressionProviderOptions>(options =>
 });
 
 var jwtSection = builder.Configuration.GetSection("Jwt");
-var jwtSecret = jwtSection.GetValue<string>("Secret") ?? "your-secret-key-min-32-characters-long!";
+var jwtSecret = JwtConfiguration.GetRequiredSecret(builder.Configuration);
 var jwtIssuer = jwtSection.GetValue<string>("Issuer") ?? "PayPlanner";
 var jwtAudience = jwtSection.GetValue<string>("Audience") ?? "PayPlanner";
 var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret));

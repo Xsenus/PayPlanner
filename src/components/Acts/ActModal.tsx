@@ -571,7 +571,7 @@ export function ActModal({
 
         setInvoiceOptions(
           (response.items ?? [])
-            .filter((invoice): invoice is InvoiceLookupRecord => typeof invoice?.id === 'number' && invoice.id > 0)
+            .filter((invoice): invoice is Invoice => typeof invoice?.id === 'number' && invoice.id > 0)
             .map((invoice) => ({
               id: invoice.id,
               number: invoice.number,

@@ -231,6 +231,7 @@ describe("ClientReconciliationAct", () => {
       fullName: "ООО ЭлитПраво",
       inn: "1234567890",
       clientsCount: 0,
+      createdAt: "2026-04-01T00:00:00Z",
       clients: [],
     });
   });

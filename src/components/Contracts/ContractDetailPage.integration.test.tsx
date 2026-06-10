@@ -154,18 +154,34 @@ describe('ContractDetailPage integration', () => {
     vi.mocked(apiService.getInvoices).mockResolvedValue({
       items: [],
       total: 0,
+      page: 1,
+      pageSize: 25,
     });
     vi.mocked(apiService.getActs).mockResolvedValue({
       items: [],
       total: 0,
+      page: 1,
+      pageSize: 25,
     });
     vi.mocked(apiService.getPaymentsV2).mockResolvedValue({
       items: [],
       total: 0,
+      page: 1,
+      pageSize: 25,
+      summary: {
+        income: 0,
+        expense: 0,
+        balance: 0,
+        incomeCount: 0,
+        expenseCount: 0,
+        total: 0,
+      },
     });
     vi.mocked(apiService.getClientsV2).mockResolvedValue({
       items: [],
       total: 0,
+      page: 1,
+      pageSize: 25,
     });
     vi.mocked(apiService.getContractTerminationCheck).mockResolvedValue({
       hasUnpaidInvoices: false,

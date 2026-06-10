@@ -364,7 +364,7 @@ export function PaymentsTable({
                       <div
                         className="inline-flex min-w-0 select-none items-center gap-2"
                         draggable
-                        onDragStart={(event) => onColumnDragStart(column.key, event)}
+                        onDragStart={(event) => onColumnDragStart?.(column.key, event)}
                         onDragEnd={onColumnDragEnd}
                         title="Перетащите, чтобы изменить порядок">
                         <GripVertical className="h-4 w-4 text-slate-400" />

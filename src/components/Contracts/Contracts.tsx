@@ -45,15 +45,15 @@ const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
 const CONTRACT_COLUMNS = [
   { key: 'number', label: 'Номер договора', defaultVisible: true, defaultWidth: 180, sortKey: 'number' as const },
-  { key: 'title', label: 'Название договора', defaultVisible: true, defaultWidth: 240 },
+  { key: 'title', label: 'Название договора', defaultVisible: true, defaultWidth: 240, sortKey: undefined },
   { key: 'date', label: 'Дата договора', defaultVisible: true, defaultWidth: 150, sortKey: 'date' as const },
-  { key: 'startDate', label: 'Начало действия', defaultVisible: true, defaultWidth: 170 },
-  { key: 'validUntil', label: 'Окончание действия', defaultVisible: true, defaultWidth: 180 },
-  { key: 'terminationDate', label: 'Дата расторжения', defaultVisible: false, defaultWidth: 180 },
+  { key: 'startDate', label: 'Начало действия', defaultVisible: true, defaultWidth: 170, sortKey: undefined },
+  { key: 'validUntil', label: 'Окончание действия', defaultVisible: true, defaultWidth: 180, sortKey: undefined },
+  { key: 'terminationDate', label: 'Дата расторжения', defaultVisible: false, defaultWidth: 180, sortKey: undefined },
   { key: 'amount', label: 'Сумма', defaultVisible: true, defaultWidth: 150, sortKey: 'amount' as const },
-  { key: 'status', label: 'Статус', defaultVisible: true, defaultWidth: 160 },
-  { key: 'description', label: 'Описание', defaultVisible: true, defaultWidth: 280 },
-  { key: 'clients', label: 'Клиенты', defaultVisible: true, defaultWidth: 320 },
+  { key: 'status', label: 'Статус', defaultVisible: true, defaultWidth: 160, sortKey: undefined },
+  { key: 'description', label: 'Описание', defaultVisible: true, defaultWidth: 280, sortKey: undefined },
+  { key: 'clients', label: 'Клиенты', defaultVisible: true, defaultWidth: 320, sortKey: undefined },
   { key: 'createdAt', label: 'Создан', defaultVisible: false, defaultWidth: 150, sortKey: 'createdAt' as const },
 ] as const;
 

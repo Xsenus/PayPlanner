@@ -379,7 +379,8 @@ export function ContractDetailPage({
   useEffect(() => {
     if (activeTab !== 'invoices') return;
 
-    if (invoiceScope === 'contract' ? !contract?.id : !contractClientIdsQuery) {
+    const contractId = contract?.id ?? null;
+    if (invoiceScope === 'contract' ? !contractId : !contractClientIdsQuery) {
       setInvoiceState(createTabListState());
       return;
     }
@@ -391,7 +392,7 @@ export function ContractDetailPage({
       try {
         const response = await apiService.getInvoices({
           ...(invoiceScope === 'contract'
-            ? { contractId: contract.id }
+            ? { contractId: contractId! }
             : { clientIds: contractClientIdsQuery }),
           page: invoicePage,
           pageSize: invoicePageSize,
@@ -428,7 +429,8 @@ export function ContractDetailPage({
   useEffect(() => {
     if (activeTab !== 'acts') return;
 
-    if (actScope === 'contract' ? !contract?.id : !contractClientIdsQuery) {
+    const contractId = contract?.id ?? null;
+    if (actScope === 'contract' ? !contractId : !contractClientIdsQuery) {
       setActState(createTabListState());
       return;
     }
@@ -440,7 +442,7 @@ export function ContractDetailPage({
       try {
         const response = await apiService.getActs({
           ...(actScope === 'contract'
-            ? { contractId: contract.id }
+            ? { contractId: contractId! }
             : { clientIds: contractClientIdsQuery }),
           page: actPage,
           pageSize: actPageSize,

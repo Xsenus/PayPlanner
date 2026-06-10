@@ -34,6 +34,8 @@ function createLegalEntity(overrides: Partial<LegalEntitySummary> = {}): LegalEn
     id: 11,
     shortName: 'Alpha Legal',
     inn: '6300000000',
+    clientsCount: 0,
+    createdAt: '2026-05-14T00:00:00Z',
     ...overrides,
   };
 }

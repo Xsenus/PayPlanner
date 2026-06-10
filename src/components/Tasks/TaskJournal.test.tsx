@@ -172,36 +172,11 @@ function dateAt(date: Date, hours = 11) {
   return value.toISOString();
 }
 
-function getWeekStartForTest(date: Date) {
-  const value = new Date(date);
-  const day = value.getDay() || 7;
-  value.setDate(value.getDate() - day + 1);
-  value.setHours(0, 0, 0, 0);
-  return value;
-}
-
 function getSameWeekDateOutsideTodayForTest(date: Date) {
   const value = new Date(date);
   const day = value.getDay() || 7;
   value.setDate(value.getDate() + (day === 1 ? 1 : -1));
   return value;
-}
-
-function getSameMonthDateOutsideCurrentWeekForTest(date: Date) {
-  const weekStart = getWeekStartForTest(date);
-  const weekEnd = new Date(weekStart);
-  weekEnd.setDate(weekStart.getDate() + 6);
-  weekEnd.setHours(23, 59, 59, 999);
-  const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
-
-  for (let day = 1; day <= lastDay; day += 1) {
-    const candidate = new Date(date.getFullYear(), date.getMonth(), day, 11, 0, 0, 0);
-    if (candidate < weekStart || candidate > weekEnd) {
-      return candidate;
-    }
-  }
-
-  return new Date(date);
 }
 
 function createDataTransfer() {
@@ -1248,6 +1223,15 @@ describe('TaskJournal', () => {
     expect(screen.getByTestId('task-view-list').getAttribute('aria-pressed')).toBe('true');
   });
 
+  it('keeps task filter and view controls constrained on mobile widths', async () => {
+    await renderJournal();
+
+    expect(screen.getByTestId('task-quick-filter-row').className).toContain('max-w-full');
+    expect(screen.getByTestId('task-view-controls').className).toContain('max-w-full');
+    expect(screen.getByTestId('task-period-control').className).toContain('overflow-x-auto');
+    expect(screen.getByTestId('task-view-mode-control').className).toContain('overflow-x-auto');
+  });
+
   it('restores the saved journal presentation mode for the current user', async () => {
     window.localStorage.setItem('pp.task_journal.filters.v1.user:7', JSON.stringify({
       quickFilter: 'all',
@@ -1947,7 +1931,7 @@ describe('TaskJournal', () => {
       expect.objectContaining({ role: 'assignee', userId: 7, displayName: 'Администратор' }),
       expect.objectContaining({ role: 'assignee', userId: 8, displayName: 'Дополнительный исполнитель' }),
     ]));
-    expect(payload.participants.filter((participant) => participant.role === 'assignee' && participant.userId === 7)).toHaveLength(1);
+    expect(payload.participants.filter((participant: { role: string; userId?: number | null }) => participant.role === 'assignee' && participant.userId === 7)).toHaveLength(1);
   });
 
   it('sends a change comment with task edits', async () => {

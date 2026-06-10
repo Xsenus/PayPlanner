@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  canAccessTab,
   getInitialActReturnTab,
   getInitialActId,
   getInitialClientId,
@@ -26,6 +27,31 @@ import {
   isTasksCalendarPath,
   isTasksListPath,
 } from './appRouting';
+import { defaultRolePermissions, type RolePermissions } from './types/permissions';
+import type { Tab } from './types/tabs';
+
+function createPermissions(overrides: Partial<RolePermissions> = {}): RolePermissions {
+  return {
+    ...defaultRolePermissions,
+    calendar: { ...defaultRolePermissions.calendar, ...overrides.calendar },
+    tasks: { ...defaultRolePermissions.tasks, ...overrides.tasks },
+    reports: { ...defaultRolePermissions.reports, ...overrides.reports },
+    calculator: { ...defaultRolePermissions.calculator, ...overrides.calculator },
+    legalEntities: { ...defaultRolePermissions.legalEntities, ...overrides.legalEntities },
+    clients: { ...defaultRolePermissions.clients, ...overrides.clients },
+    cases: { ...defaultRolePermissions.cases, ...overrides.cases },
+    accounts: { ...defaultRolePermissions.accounts, ...overrides.accounts },
+    acts: { ...defaultRolePermissions.acts, ...overrides.acts },
+    payments: { ...defaultRolePermissions.payments, ...overrides.payments },
+    contracts: { ...defaultRolePermissions.contracts, ...overrides.contracts },
+    dictionaries: { ...defaultRolePermissions.dictionaries, ...overrides.dictionaries },
+    notifications: { ...defaultRolePermissions.notifications, ...overrides.notifications },
+    roles: { ...defaultRolePermissions.roles, ...overrides.roles },
+    audit: { ...defaultRolePermissions.audit, ...overrides.audit },
+    yandexDisk: { ...defaultRolePermissions.yandexDisk, ...overrides.yandexDisk },
+    s3Storage: { ...defaultRolePermissions.s3Storage, ...overrides.s3Storage },
+  };
+}
 
 describe('App payment routing helpers', () => {
   beforeEach(() => {
@@ -214,6 +240,61 @@ describe('App sidebar routing helpers', () => {
 
     expect(isNotificationsPath()).toBe(true);
     expect(getInitialTab()).toBe('notifications');
+  });
+});
+
+describe('App negative deep-link guards', () => {
+  beforeEach(() => {
+    window.history.replaceState({}, '', '/');
+    window.localStorage.clear();
+  });
+
+  it.each([
+    {
+      path: '/cases/1',
+      expectedTab: 'caseDetail' as Tab,
+      permissions: createPermissions({ cases: { ...defaultRolePermissions.cases, canView: false } }),
+    },
+    {
+      path: '/acts/new',
+      expectedTab: 'actCreate' as Tab,
+      permissions: createPermissions({ acts: { ...defaultRolePermissions.acts, canCreate: false } }),
+    },
+    {
+      path: '/acts/1',
+      expectedTab: 'actDetail' as Tab,
+      permissions: createPermissions({ acts: { ...defaultRolePermissions.acts, canView: false } }),
+    },
+    {
+      path: '/contracts/1',
+      expectedTab: 'contractDetail' as Tab,
+      permissions: createPermissions({ contracts: { ...defaultRolePermissions.contracts, canView: false } }),
+    },
+    {
+      path: '/invoices/1',
+      expectedTab: 'accounts' as Tab,
+      permissions: createPermissions({ accounts: { ...defaultRolePermissions.accounts, canView: false } }),
+    },
+    {
+      path: '/payments/1',
+      expectedTab: 'payments' as Tab,
+      permissions: createPermissions({ payments: { ...defaultRolePermissions.payments, canView: false } }),
+    },
+    {
+      path: '/tasks/1',
+      expectedTab: 'tasks' as Tab,
+      permissions: createPermissions({ tasks: { ...defaultRolePermissions.tasks, canView: false } }),
+    },
+    {
+      path: '/clients/1',
+      expectedTab: 'clientDetail' as Tab,
+      permissions: createPermissions({ clients: { ...defaultRolePermissions.clients, canView: false } }),
+    },
+  ])('denies $path when the required permission is missing', ({ path, expectedTab, permissions }) => {
+    window.history.replaceState({}, '', path);
+
+    expect(getInitialTab()).toBe(expectedTab);
+    expect(canAccessTab(expectedTab, permissions)).toBe(false);
   });
 });
 

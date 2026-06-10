@@ -34,9 +34,9 @@ const INSTALLMENT_COLUMNS = [
   { key: 'status', label: 'Статус', defaultVisible: true, defaultWidth: 180, sortKey: 'status' as const },
   { key: 'responsible', label: 'Ответственный', defaultVisible: true, defaultWidth: 190, sortKey: 'responsible' as const },
   { key: 'dueDate', label: 'Срок оплаты', defaultVisible: true, defaultWidth: 150, sortKey: 'dueDate' as const },
-  { key: 'act', label: 'Акт', defaultVisible: true, defaultWidth: 210 },
-  { key: 'type', label: 'Тип', defaultVisible: false, defaultWidth: 130 },
-  { key: 'description', label: 'Описание', defaultVisible: false, defaultWidth: 280 },
+  { key: 'act', label: 'Акт', defaultVisible: true, defaultWidth: 210, sortKey: undefined },
+  { key: 'type', label: 'Тип', defaultVisible: false, defaultWidth: 130, sortKey: undefined },
+  { key: 'description', label: 'Описание', defaultVisible: false, defaultWidth: 280, sortKey: undefined },
   { key: 'createdAt', label: 'Создан', defaultVisible: false, defaultWidth: 150, sortKey: 'createdAt' as const },
 ] as const;
 type InstallmentColumnKey = (typeof INSTALLMENT_COLUMNS)[number]['key'];

@@ -88,14 +88,16 @@ describe('bindClientInvoiceModalApi', () => {
 
   it('shows why raw detached api methods are unsafe for this flow', async () => {
     const service = {
-      getInvoice: vi.fn(function (this: unknown) {
+      getInvoice: vi.fn(function (this: unknown, id: number) {
+        void id;
         if (this !== service) {
           throw new Error('lost invoice context');
         }
 
         return Promise.resolve(createInvoice());
       }),
-      getPayments: vi.fn(function (this: unknown) {
+      getPayments: vi.fn(function (this: unknown, params: { from: string; to: string; clientId: number }) {
+        void params;
         if (this !== service) {
           throw new Error('lost payments context');
         }

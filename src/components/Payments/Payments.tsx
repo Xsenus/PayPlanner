@@ -1845,7 +1845,9 @@ export function Payments({
                 onEditPayment={handleEditPayment}
                 onOpenClient={onOpenClient}
                 onAddPayment={handleAddPayment}
-                onDeletePayment={handleDeletePayment}
+                onDeletePayment={async (payment) => {
+                  await handleDeletePayment(payment);
+                }}
                 onStatusChange={openPaymentStatusChange}
                 canAdd={paymentsPermissions.canCreate}
                 canEdit={paymentsPermissions.canEdit}

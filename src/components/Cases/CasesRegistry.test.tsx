@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DialogProvider } from '../../contexts/DialogContext';
 import { apiService } from '../../services/api';
 import type { ClientCase } from '../../types';
+import type { TaskJournalItem } from '../../utils/taskJournalStore';
 import { CasesRegistry } from './CasesRegistry';
 
 const authState = vi.hoisted(() => ({
@@ -19,6 +20,29 @@ const authState = vi.hoisted(() => ({
 const permissionsState = vi.hoisted(() => ({
   casesCanExport: true,
 }));
+
+function createTaskJournalItem(overrides: Partial<TaskJournalItem> = {}): TaskJournalItem {
+  return {
+    id: 501,
+    objectName: 'Р”РµР»Рѕ',
+    title: 'РџСЂРѕРІРµСЂРёС‚СЊ РґРµР»Рѕ',
+    description: '',
+    assigneeName: 'РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ',
+    authorName: 'РЎРёСЃС‚РµРјР°',
+    dueAt: '2026-05-20T10:00:00Z',
+    plannedDurationMinutes: 60,
+    type: 'task',
+    priority: 'normal',
+    status: 'new',
+    result: '',
+    reminders: [],
+    channels: [],
+    tags: [],
+    createdAt: '2026-05-19T10:00:00Z',
+    updatedAt: '2026-05-19T10:00:00Z',
+    ...overrides,
+  };
+}
 
 vi.mock('../../services/api', () => ({
   apiService: {
@@ -181,9 +205,9 @@ describe('CasesRegistry', () => {
       isHiddenFromExecutor: false,
     });
     vi.mocked(apiService.createTaskJournalCaseAutomationTask).mockReset();
-    vi.mocked(apiService.createTaskJournalCaseAutomationTask).mockResolvedValue({ id: 501 });
+    vi.mocked(apiService.createTaskJournalCaseAutomationTask).mockResolvedValue(createTaskJournalItem());
     vi.mocked(apiService.createTaskJournalItem).mockReset();
-    vi.mocked(apiService.createTaskJournalItem).mockResolvedValue({ id: 501 });
+    vi.mocked(apiService.createTaskJournalItem).mockResolvedValue(createTaskJournalItem());
     vi.mocked(apiService.runCaseCourtSync).mockReset();
     vi.mocked(apiService.runCaseCourtSync).mockResolvedValue({
       clientCaseId: 1,

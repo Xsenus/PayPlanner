@@ -101,7 +101,7 @@ export function normalizeAct(value: unknown): Act | null {
     .filter((item): item is ActLineItem => item !== null);
 
   return {
-    ...(value as Act),
+    ...(value as unknown as Act),
     status: isActStatus(value.status) ? value.status : 'Created',
     lineItems,
   };

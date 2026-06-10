@@ -1,9 +1,24 @@
-import type { ActStatus, InstallmentPlanInput, PaymentKind, PaymentStatus } from '../types';
+import type { ActStatus, InstallmentPlanInput, InvoiceWorkflowStatus, PaymentKind, PaymentStatus } from '../types';
 
 export const INVOICE_EDITOR_STORAGE_KEY = 'pp.invoice-editor-draft';
 
 const PAYMENT_KINDS: readonly PaymentKind[] = ['Income', 'Expense'];
 const PAYMENT_STATUSES: readonly PaymentStatus[] = ['Pending', 'Overdue', 'Completed', 'Processing', 'Cancelled'];
+const INVOICE_WORKFLOW_STATUSES: readonly InvoiceWorkflowStatus[] = [
+  'Draft',
+  'NotSigned',
+  'RequiresClientSignature',
+  'OnApproval',
+  'Approved',
+  'ApprovalRejected',
+  'NeedsCorrection',
+  'OnSigning',
+  'SignedByClient',
+  'Paid',
+  'PartiallyPaid',
+  'Overdue',
+  'Cancelled',
+];
 const ACT_STATUSES: readonly ActStatus[] = ['Created', 'Transferred', 'Signed', 'Terminated'];
 
 export interface InvoiceEditorFormDraft {
@@ -13,6 +28,7 @@ export interface InvoiceEditorFormDraft {
   amount: string;
   type: PaymentKind;
   status: PaymentStatus;
+  workflowStatus: InvoiceWorkflowStatus;
   clientId: string;
   legalEntityId: string;
   expenseClientId: string;
@@ -138,6 +154,9 @@ function normalizeInvoiceEditorDraft(raw: unknown): InvoiceEditorDraftState | nu
 
   const type = PAYMENT_KINDS.includes(form.type as PaymentKind) ? (form.type as PaymentKind) : 'Income';
   const status = PAYMENT_STATUSES.includes(form.status as PaymentStatus) ? (form.status as PaymentStatus) : 'Pending';
+  const workflowStatus = INVOICE_WORKFLOW_STATUSES.includes(form.workflowStatus as InvoiceWorkflowStatus)
+    ? (form.workflowStatus as InvoiceWorkflowStatus)
+    : 'Draft';
 
   const lineItems = Array.isArray(raw.lineItems)
     ? raw.lineItems
@@ -184,18 +203,19 @@ function normalizeInvoiceEditorDraft(raw: unknown): InvoiceEditorDraftState | nu
     pageViewMode: typeof raw.pageViewMode === 'boolean' ? raw.pageViewMode : true,
     form: {
       number: readString(form.number),
-    date: readString(form.date),
-    dueDate: readString(form.dueDate),
-    amount: readString(form.amount),
-    type,
-    status,
-    clientId: readString(form.clientId),
-    legalEntityId: readString(form.legalEntityId),
-    expenseClientId: readString(form.expenseClientId),
-    expenseLegalEntityId: readString(form.expenseLegalEntityId),
-    contractId: readString(form.contractId),
-    clientCaseReference: readString(form.clientCaseReference),
-    description: readString(form.description),
+      date: readString(form.date),
+      dueDate: readString(form.dueDate),
+      amount: readString(form.amount),
+      type,
+      status,
+      workflowStatus,
+      clientId: readString(form.clientId),
+      legalEntityId: readString(form.legalEntityId),
+      expenseClientId: readString(form.expenseClientId),
+      expenseLegalEntityId: readString(form.expenseLegalEntityId),
+      contractId: readString(form.contractId),
+      clientCaseReference: readString(form.clientCaseReference),
+      description: readString(form.description),
       isNotForAccounting: readBoolean(form.isNotForAccounting),
       actReference: readString(form.actReference),
       paidDate: readString(form.paidDate),

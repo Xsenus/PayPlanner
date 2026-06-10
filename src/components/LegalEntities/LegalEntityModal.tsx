@@ -465,9 +465,9 @@ function toClientAssociationItem(
   return {
     id: client.id,
     name: client.name,
-    company: client.company ?? null,
-    phone: client.phone ?? null,
-    email: client.email ?? null,
+    company: client.company ?? "",
+    phone: client.phone ?? "",
+    email: client.email ?? "",
     clientStatus: client.clientStatus ?? null,
     clientStatusId: client.clientStatusId ?? null,
   };
@@ -1172,8 +1172,8 @@ export function LegalEntityModal({
           toClientAssociationItem({
             id: client.id,
             name: client.name,
-            phone: client.phone ?? null,
-            email: client.email ?? null,
+            phone: client.phone ?? undefined,
+            email: client.email ?? undefined,
           }),
         ),
       );
@@ -2173,8 +2173,8 @@ export function LegalEntityModal({
             toClientAssociationItem({
               id: client.id,
               name: client.name,
-              phone: client.phone ?? null,
-              email: client.email ?? null,
+              phone: client.phone ?? undefined,
+              email: client.email ?? undefined,
             }),
           ),
         ),
@@ -3264,9 +3264,10 @@ export function LegalEntityModal({
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {filteredLegalEntityCases.map((caseItem) => {
                 const finance = caseFinanceSummaries[caseItem.id];
+                const legacyCasePayments = (caseItem as ClientCase & { payments?: Payment[] }).payments;
                 const paymentsCount = finance
                   ? finance.incomeCount + finance.expenseCount
-                  : caseItem.payments?.length ?? 0;
+                  : legacyCasePayments?.length ?? 0;
                 const debt = finance
                   ? finance.incomeOutstanding + finance.expenseOutstanding
                   : 0;

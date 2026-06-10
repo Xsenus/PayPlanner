@@ -1848,7 +1848,7 @@ export function CaseDetailPage({
       const documentKey = buildDocumentSourceKey({
         sourceType: documentSourceType,
         sourceId: documentSourceId,
-        sourceStage: documentSourceStage || caseItem.stage,
+        sourceStage: documentSourceStage || caseItem.stage || '',
         fileName: documentFile.name,
         workOrderId: workOrder?.id ?? null,
       });
@@ -2187,7 +2187,7 @@ export function CaseDetailPage({
       const item = await apiService.createCaseCourtEvent(caseItem.id, {
         eventType: courtEventTypeDraft,
         title: courtEventTitleDraft.trim() || undefined,
-        scheduledAt: fromDateTimeInput(courtEventScheduledAtDraft),
+        scheduledAt: fromDateTimeInput(courtEventScheduledAtDraft) ?? undefined,
         allDay: courtEventTypeDraft !== 'hearing',
         courtId: courtEventCourtIdDraft ? Number(courtEventCourtIdDraft) : undefined,
         courtInstance: activeCourtInstance,
@@ -2598,7 +2598,7 @@ export function CaseDetailPage({
     setNotice(null);
     try {
       const document = await apiService.generateCaseWorkOrderDocument(caseItem.id);
-      await loadDocuments(caseItem.id);
+      setReloadToken((value) => value + 1);
       setNotice(`Заказ-наряд сохранен в документы дела: ${document.originalFileName}.`);
       setActiveTab('documents');
     } catch (err) {
@@ -3980,7 +3980,7 @@ function WorkOrderPanel({
     <>
       <option value="">Не назначен</option>
       {responsibles.map((responsible) => (
-        <option key={responsible.id} value={responsible.id}>{responsible.name}</option>
+        <option key={responsible.id} value={responsible.id}>{responsible.fullName}</option>
       ))}
     </>
   );
@@ -4951,7 +4951,7 @@ function buildCourtTimeline(caseItem: ClientCase, logs: ClientCaseCourtSyncLog[]
       id: 'claim-filed',
       label: 'Подача заявления',
       value: caseItem.claimFiledAt,
-      kind: 'milestone',
+      kind: 'milestone' as CourtTimelineKind,
       state: getCourtTimelineState(caseItem.claimFiledAt),
     },
     {
@@ -4959,42 +4959,42 @@ function buildCourtTimeline(caseItem: ClientCase, logs: ClientCaseCourtSyncLog[]
       label: 'Ближайшее заседание',
       value: caseItem.nextHearingAt,
       description: [caseItem.courtroom, caseItem.judgeName].filter(Boolean).join(' · '),
-      kind: 'hearing',
+      kind: 'hearing' as CourtTimelineKind,
       state: getCourtTimelineState(caseItem.nextHearingAt),
     },
     {
       id: 'decision',
       label: 'Решение суда',
       value: caseItem.courtDecisionAt,
-      kind: 'milestone',
+      kind: 'milestone' as CourtTimelineKind,
       state: getCourtTimelineState(caseItem.courtDecisionAt),
     },
     {
       id: 'appeal',
       label: 'Апелляция',
       value: caseItem.appealDeadlineAt,
-      kind: 'deadline',
+      kind: 'deadline' as CourtTimelineKind,
       state: getCourtTimelineState(caseItem.appealDeadlineAt),
     },
     {
       id: 'cassation',
       label: 'Кассация',
       value: caseItem.cassationDeadlineAt,
-      kind: 'deadline',
+      kind: 'deadline' as CourtTimelineKind,
       state: getCourtTimelineState(caseItem.cassationDeadlineAt),
     },
     {
       id: 'motion',
       label: 'Ходатайства',
       value: caseItem.motionDeadlineAt,
-      kind: 'deadline',
+      kind: 'deadline' as CourtTimelineKind,
       state: getCourtTimelineState(caseItem.motionDeadlineAt),
     },
     {
       id: 'objection',
       label: 'Возражения',
       value: caseItem.objectionDeadlineAt,
-      kind: 'deadline',
+      kind: 'deadline' as CourtTimelineKind,
       state: getCourtTimelineState(caseItem.objectionDeadlineAt),
     },
     ...logs.map((log) => ({

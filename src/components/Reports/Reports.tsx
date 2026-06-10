@@ -3150,6 +3150,7 @@ function CaseActivityReportSection({
   onReload,
   onOpenCase,
   onOpenCaseSection,
+  profileTimeZoneId,
 }: {
   report: CaseActivityReport | null;
   loading: boolean;
@@ -3158,6 +3159,7 @@ function CaseActivityReportSection({
   onReload: () => void;
   onOpenCase?: (caseId: number) => void;
   onOpenCaseSection?: (caseId: number, section: ReportCaseSection) => void;
+  profileTimeZoneId: string;
 }) {
   const rows = report?.items ?? [];
 

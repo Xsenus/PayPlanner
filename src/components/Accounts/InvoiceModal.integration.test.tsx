@@ -12,12 +12,13 @@ import type {
   Invoice,
   LegalEntitySummary,
   MoneyOperation,
+  MoneyOperationsSummary,
   Payment,
   ServiceCategoryDictionaryItem,
   ServiceDictionaryItem,
 } from '../../types';
 import type { BaseDictItem } from '../../types/dictionaries';
-import { apiService } from '../../services/api';
+import { apiService, type PagedResult } from '../../services/api';
 import { storeInvoiceEditorDraft } from '../../utils/invoiceEditorBridge';
 
 type ContractModalMockProps = {
@@ -126,7 +127,7 @@ vi.mock('../../services/api', () => ({
     getLegalEntitiesPaged: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 25 }),
     getNextInvoiceNumber: vi.fn().mockResolvedValue('24'),
     getPayment: vi.fn(),
-    getMoneyOperationsPaged: vi.fn().mockResolvedValue({ items: [], totalCount: 0, summary: {} }),
+    getMoneyOperationsPaged: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20, summary: createEmptyMoneyOperationsSummary() }),
     createContract: vi.fn(),
     createCase: vi.fn(),
     createAct: vi.fn(),
@@ -220,10 +221,30 @@ function createTestClient(id: number, name: string): Client {
   return {
     id,
     name,
+    email: '',
+    phone: '',
     company: null,
+    address: '',
+    notes: '',
     isActive: true,
     createdAt: '2026-04-15T00:00:00Z',
-  } as Client;
+  } as unknown as Client;
+}
+
+function createEmptyMoneyOperationsSummary(): MoneyOperationsSummary {
+  return {
+    startBalance: 0,
+    income: 0,
+    expense: 0,
+    endBalance: 0,
+    incomeCount: 0,
+    expenseCount: 0,
+    bySource: [],
+  };
+}
+
+function createPagedResult<T>(items: T[], total = items.length): PagedResult<T> {
+  return { items, total, page: 1, pageSize: 25 };
 }
 
 function getPickerOptionAction(label: HTMLElement): HTMLButtonElement {
@@ -320,7 +341,7 @@ describe('InvoiceModal integration', () => {
     vi.mocked(apiService.getLegalEntities).mockResolvedValue([]);
     vi.mocked(apiService.getPayment).mockReset();
     vi.mocked(apiService.getMoneyOperationsPaged).mockReset();
-    vi.mocked(apiService.getMoneyOperationsPaged).mockResolvedValue({ items: [], totalCount: 0, summary: {} });
+    vi.mocked(apiService.getMoneyOperationsPaged).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20, summary: createEmptyMoneyOperationsSummary() });
     vi.mocked(apiService.updateInvoice).mockClear();
     vi.mocked(apiService.cancelInvoice).mockReset();
     vi.mocked(apiService.createClient).mockReset();
@@ -354,7 +375,7 @@ describe('InvoiceModal integration', () => {
   });
 
   it('keeps the linked contract selected after invoice data is reopened and contracts finish loading', async () => {
-    const deferredContracts = createDeferred<{ items: Array<{ id: number; number: string; title?: string; date: string }> }>();
+    const deferredContracts = createDeferred<PagedResult<Contract>>();
     vi.mocked(apiService.getContracts).mockImplementationOnce(async () => deferredContracts.promise);
 
     const invoice = {
@@ -386,9 +407,9 @@ describe('InvoiceModal integration', () => {
       />,
     );
 
-    deferredContracts.resolve({
-      items: [{ id: 77, number: 'CT-077', title: 'Обслуживание', date: '2026-04-15' }],
-    });
+    deferredContracts.resolve(createPagedResult([
+      { id: 77, number: 'CT-077', title: 'Обслуживание', date: '2026-04-15' } as Contract,
+    ]));
 
     await waitFor(() => {
       expect(getContractSelect().value).toBe('77');
@@ -413,7 +434,7 @@ describe('InvoiceModal integration', () => {
     const onClientCreated = vi.fn();
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     vi.mocked(apiService.getLegalEntities).mockResolvedValue([legalEntity]);
-    vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({ items: [legalEntity], total: 1 });
+    vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue(createPagedResult([legalEntity]));
 
     const invoice = {
       id: 701,
@@ -469,7 +490,7 @@ describe('InvoiceModal integration', () => {
   });
 
   it('preserves a contract created from the invoice even when an older contracts request resolves afterwards', async () => {
-    const deferredContracts = createDeferred<{ items: Array<{ id: number; number: string; title?: string; date: string }> }>();
+    const deferredContracts = createDeferred<PagedResult<Contract>>();
     vi.mocked(apiService.getContracts).mockImplementationOnce(async () => deferredContracts.promise);
     vi.mocked(apiService.createContract).mockResolvedValue({
       id: 91,
@@ -514,7 +535,7 @@ describe('InvoiceModal integration', () => {
       expect(getContractSelect().value).toBe('91');
     });
 
-    deferredContracts.resolve({ items: [] });
+    deferredContracts.resolve(createPagedResult<Contract>([]));
 
     await waitFor(() => {
       expect(getContractSelect().value).toBe('91');
@@ -745,8 +766,10 @@ describe('InvoiceModal integration', () => {
 
     vi.mocked(apiService.getMoneyOperationsPaged).mockResolvedValueOnce({
       items: [linkedOperation],
-      totalCount: 1,
-      summary: {},
+      total: 1,
+      page: 1,
+      pageSize: 20,
+      summary: createEmptyMoneyOperationsSummary(),
     });
 
     render(
@@ -791,8 +814,10 @@ describe('InvoiceModal integration', () => {
 
     vi.mocked(apiService.getMoneyOperationsPaged).mockResolvedValueOnce({
       items: [],
-      totalCount: 0,
-      summary: {},
+      total: 0,
+      page: 1,
+      pageSize: 20,
+      summary: createEmptyMoneyOperationsSummary(),
     });
 
     render(
@@ -1300,7 +1325,7 @@ describe('InvoiceModal integration', () => {
   });
 
   it('opens polished category and service dialogs, filters by search and applies the matching template', async () => {
-    invoiceUnitsMock.push({ name: 'шт' }, { name: 'усл.ед.' }, { name: 'час' });
+    invoiceUnitsMock.push({ id: 1, name: 'шт' }, { id: 2, name: 'усл.ед.' }, { id: 3, name: 'час' });
     serviceCategoriesMock.push(
       { id: 1, name: 'Арбитраж', description: '', colorHex: '#111827', isActive: true, createdAt: '2026-04-01' },
       { id: 2, name: 'Гражданские дела', description: '', colorHex: '#1d4ed8', isActive: true, createdAt: '2026-04-01' },
@@ -1380,7 +1405,7 @@ describe('InvoiceModal integration', () => {
     const serviceName = 'Claim drafting';
     const customServiceName = 'Claim drafting for case 42';
 
-    invoiceUnitsMock.push({ name: 'pcs' }, { name: 'svc' }, { name: 'hour' });
+    invoiceUnitsMock.push({ id: 1, name: 'pcs' }, { id: 2, name: 'svc' }, { id: 3, name: 'hour' });
     serviceCategoriesMock.push(
       { id: 1, name: 'Litigation', description: '', colorHex: '#111827', isActive: true, createdAt: '2026-04-01' },
     );
@@ -2016,7 +2041,7 @@ describe('InvoiceModal integration', () => {
       description: 'Основной договор на обслуживание',
     } as unknown as Contract;
 
-    vi.mocked(apiService.getContracts).mockResolvedValueOnce({ items: [contract] });
+    vi.mocked(apiService.getContracts).mockResolvedValueOnce(createPagedResult([contract]));
     vi.mocked(apiService.getContract).mockResolvedValue(contract);
 
     render(
@@ -2081,7 +2106,7 @@ describe('InvoiceModal integration', () => {
       description: 'Основной договор на обслуживание',
     } as unknown as Contract;
 
-    vi.mocked(apiService.getContracts).mockResolvedValueOnce({ items: [contract] });
+    vi.mocked(apiService.getContracts).mockResolvedValueOnce(createPagedResult([contract]));
     vi.mocked(apiService.getContract).mockResolvedValue(contract);
 
     render(

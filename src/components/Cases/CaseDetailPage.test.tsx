@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { apiService } from '../../services/api';
-import type { ClientCase } from '../../types';
+import type { ClientCase, ClientCaseWorkOrder } from '../../types';
 import type { TaskJournalItem } from '../../utils/taskJournalStore';
 import { CaseDetailPage } from './CaseDetailPage';
 
@@ -214,7 +214,9 @@ describe('CaseDetailPage', () => {
           inn: '6310000000',
           phone: '+79991112233',
           email: 'office@example.test',
-          clientIds: [],
+          clientsCount: 0,
+          createdAt: '2026-05-01T00:00:00Z',
+          clients: [],
         },
       ],
       total: 1,
@@ -765,7 +767,7 @@ describe('CaseDetailPage', () => {
     vi.mocked(apiService.getLegalEntityCaseFinanceSummaries).mockReset();
     vi.mocked(apiService.getLegalEntityCaseFinanceSummaries).mockResolvedValue([]);
     vi.mocked(apiService.getCaseWorkOrder).mockReset();
-    vi.mocked(apiService.getCaseWorkOrder).mockResolvedValue(null);
+    vi.mocked(apiService.getCaseWorkOrder).mockResolvedValue(null as unknown as ClientCaseWorkOrder);
     vi.mocked(apiService.createCaseWorkOrder).mockReset();
     vi.mocked(apiService.updateCaseWorkOrder).mockReset();
     vi.mocked(apiService.deleteCaseWorkOrder).mockReset();

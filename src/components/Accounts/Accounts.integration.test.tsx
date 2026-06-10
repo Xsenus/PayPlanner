@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Accounts } from './Accounts';
 import type { Act, AccountRegistryRow, AccountsSummary, Client, Contract, Invoice, Payment } from '../../types';
-import { clearInvoiceEditorDraft, peekInvoiceEditorDraft } from '../../utils/invoiceEditorBridge';
+import { clearInvoiceEditorDraft, peekInvoiceEditorDraft, type InvoiceEditorDraftState } from '../../utils/invoiceEditorBridge';
 
 const {
   createPaymentMock,
@@ -828,6 +828,7 @@ describe('Accounts integration', () => {
       .map((element) => element.closest('button'))
       .find((element): element is HTMLButtonElement => Boolean(element));
     expect(signedStatusButton).toBeTruthy();
+    if (!signedStatusButton) throw new Error('Signed status button not found');
     fireEvent.click(signedStatusButton);
     fireEvent.click(screen.getByRole('button', { name: /Изменить статус счета №24/ }));
 
@@ -1170,9 +1171,34 @@ describe('Accounts integration', () => {
 
   it('clears a stale persisted invoice draft after a not found response and returns to the registry', async () => {
     const onRouteInvoiceChange = vi.fn();
-    let persistedDraft: { mode: 'edit'; invoiceId: number } | null = {
+    let persistedDraft: InvoiceEditorDraftState | null = {
       mode: 'edit',
       invoiceId: 999,
+      presentation: 'page',
+      pageViewMode: false,
+      form: {
+        number: '999',
+        date: '2026-04-02',
+        dueDate: '',
+        amount: '15000',
+        type: 'Income',
+        status: 'Pending',
+        workflowStatus: 'Draft',
+        clientId: '',
+        legalEntityId: '',
+        expenseClientId: '',
+        expenseLegalEntityId: '',
+        contractId: '',
+        clientCaseReference: '',
+        description: '',
+        isNotForAccounting: false,
+        actReference: '',
+        paidDate: '',
+        responsibleIds: [],
+      },
+      lineItems: [],
+      selectedActs: [],
+      selectedClientCaseIds: [],
     };
 
     peekInvoiceEditorDraftMock.mockImplementation(() => persistedDraft);

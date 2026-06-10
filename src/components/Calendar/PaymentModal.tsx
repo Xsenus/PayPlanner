@@ -501,6 +501,7 @@ export function PaymentModal({
         amount,
         type: formData.type,
         status: formData.status,
+        workflowStatus: 'Draft',
         clientId,
         legalEntityId: formData.legalEntityId,
         expenseClientId: formData.type === 'Expense' ? formData.expenseClientId : '',
@@ -508,6 +509,7 @@ export function PaymentModal({
         contractId: formData.contractId || invoiceCreateSeedContractId,
         clientCaseReference: '',
         description,
+        isNotForAccounting: false,
         actReference: '',
         paidDate: formData.paidDate || '',
         responsibleIds: [],
@@ -519,6 +521,8 @@ export function PaymentModal({
           quantity: '1',
           unit: 'усл. ед.',
           price: amount,
+          serviceCategoryId: '',
+          serviceId: '',
         },
       ],
       selectedActs: [],
@@ -2476,7 +2480,7 @@ export function PaymentModal({
                   ...item,
                   paidAmount: Math.min(item.amount, (item.paidAmount ?? 0) + appliedAmount),
                   outstandingAmount: Math.max(resolvePaymentOutstandingAmount(item) - appliedAmount, 0),
-                  status: resolvePaymentOutstandingAmount(item) - appliedAmount <= 0.005 ? 'Completed' : 'Processing',
+                  status: (resolvePaymentOutstandingAmount(item) - appliedAmount <= 0.005 ? 'Completed' : 'Processing') as PaymentStatus,
                 }
               : item,
           )

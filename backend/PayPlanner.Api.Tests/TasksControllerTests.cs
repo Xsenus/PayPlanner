@@ -2426,6 +2426,125 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task UploadFile_RejectsEmptyFile()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author-empty@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id);
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.UploadFile(
+            task.Id,
+            CreateFormFileWithDeclaredLength([], "empty.txt", 0),
+            null,
+            CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task UploadFile_RejectsTooLargeFileByDeclaredLength()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author-large@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id);
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.UploadFile(
+            task.Id,
+            CreateFormFileWithDeclaredLength([1], "large.txt", 25L * 1024 * 1024 + 1),
+            null,
+            CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Theory]
+    [InlineData("..\\..\\evil?.txt")]
+    [InlineData("../outside/evil?.txt")]
+    [InlineData("..%2foutside%2fevil?.txt")]
+    public async Task UploadFile_SanitizesTraversalFileNameAndKeepsStoragePathUnderTask(string fileName)
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author-path@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id);
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.UploadFile(
+            task.Id,
+            CreateFormFile("safe content", fileName),
+            null,
+            CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalFileDto>(created.Value);
+        var stored = await db.TaskJournalFiles.SingleAsync(item => item.Id == dto.Id);
+
+        Assert.DoesNotContain("..", dto.OriginalFileName, StringComparison.Ordinal);
+        Assert.DoesNotContain("/", dto.OriginalFileName, StringComparison.Ordinal);
+        Assert.DoesNotContain("\\", dto.OriginalFileName, StringComparison.Ordinal);
+        Assert.StartsWith($"{task.Id}{Path.DirectorySeparatorChar}", stored.StoragePath, StringComparison.Ordinal);
+        Assert.DoesNotContain("..", stored.StoragePath, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DownloadFile_ReturnsNotFoundForMissingPhysicalFile()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author-missing-file@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id);
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+        db.TaskJournalFiles.Add(new TaskJournalFile
+        {
+            TaskJournalItemId = task.Id,
+            DocumentKey = Guid.NewGuid().ToString("N"),
+            Version = 1,
+            OriginalFileName = "missing.txt",
+            StoredFileName = "missing.txt",
+            StoragePath = Path.Combine(task.Id.ToString(), "missing.txt"),
+            ContentType = "text/plain",
+            SizeBytes = 10,
+            UploadedByUserId = author.Id,
+            UploadedByName = author.FullName,
+            UploadedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+        var file = await db.TaskJournalFiles.SingleAsync();
+
+        var result = await controller.DownloadFile(task.Id, file.Id, CancellationToken.None);
+
+        Assert.IsType<NotFoundObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task DownloadFile_ReturnsNotFoundForFileFromAnotherTask()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author-other-task-file@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        var firstTask = await CreateTaskAsync(db, author.Id, client.Id, author.Id);
+        var secondTask = await CreateTaskAsync(db, author.Id, client.Id, author.Id);
+        secondTask.Title = "Вторая задача";
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+        var upload = await controller.UploadFile(
+            firstTask.Id,
+            CreateFormFile("task file", "document.txt"),
+            null,
+            CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(upload.Result);
+        var file = Assert.IsType<TaskJournalFileDto>(created.Value);
+
+        var result = await controller.DownloadFile(secondTask.Id, file.Id, CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(result);
+    }
+
+    [Fact]
     public async Task UpdateStatus_DoneRequiresApprovedApprovers()
     {
         await using var db = await CreateContextAsync();
@@ -3158,6 +3277,16 @@ public class TasksControllerTests
         var bytes = Encoding.UTF8.GetBytes(content);
         var stream = new MemoryStream(bytes);
         return new FormFile(stream, 0, bytes.Length, "file", fileName)
+        {
+            Headers = new HeaderDictionary(),
+            ContentType = contentType,
+        };
+    }
+
+    private static IFormFile CreateFormFileWithDeclaredLength(byte[] content, string fileName, long declaredLength, string contentType = "text/plain")
+    {
+        var stream = new MemoryStream(content);
+        return new FormFile(stream, 0, declaredLength, "file", fileName)
         {
             Headers = new HeaderDictionary(),
             ContentType = contentType,

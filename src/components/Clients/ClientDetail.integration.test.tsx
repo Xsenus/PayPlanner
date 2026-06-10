@@ -803,6 +803,8 @@ describe('ClientDetail integration', () => {
         shortName: 'ООО Ромашка',
         fullName: 'Общество с ограниченной ответственностью Ромашка',
         inn: '6312000000',
+        clientsCount: 0,
+        createdAt: '2026-04-01T00:00:00Z',
         clients: [],
       },
     } as Client);
@@ -813,6 +815,8 @@ describe('ClientDetail integration', () => {
           shortName: 'ООО Ромашка',
           fullName: 'Общество с ограниченной ответственностью Ромашка',
           inn: '6312000000',
+          clientsCount: 0,
+          createdAt: '2026-04-01T00:00:00Z',
           clients: [],
         },
       ],

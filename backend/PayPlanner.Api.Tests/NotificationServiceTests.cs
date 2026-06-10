@@ -1289,6 +1289,160 @@ public class NotificationServiceTests
         Assert.Equal(777888, identity.ChatId);
     }
 
+    [Fact]
+    public async Task HandleWebhookAsync_WhenTelegramWebhookSecretMissingRejectsRequest()
+    {
+        await using var db = await CreateContextAsync();
+        var sender = CreateTelegramSender(
+            "Login bot",
+            NotificationPurposes.TelegramAuth,
+            updateMode: TelegramBotUpdateModes.Webhook,
+            webhookSecret: "secret");
+        db.NotificationSenders.Add(sender);
+        await db.SaveChangesAsync();
+        using var update = JsonDocument.Parse("""{"update_id":1}""");
+        var updateService = new TelegramBotUpdateService(
+            db,
+            new StaticHttpClientFactory(new HttpClient(new TelegramOkHandler())),
+            NullLogger<TelegramBotUpdateService>.Instance,
+            CreateExternalAuthService(db));
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            updateService.HandleWebhookAsync(sender.Id, update, new DefaultHttpContext().Request));
+    }
+
+    [Fact]
+    public async Task HandleWebhookAsync_WhenTelegramWebhookSecretInvalidRejectsRequest()
+    {
+        await using var db = await CreateContextAsync();
+        var sender = CreateTelegramSender(
+            "Login bot",
+            NotificationPurposes.TelegramAuth,
+            updateMode: TelegramBotUpdateModes.Webhook,
+            webhookSecret: "secret");
+        db.NotificationSenders.Add(sender);
+        await db.SaveChangesAsync();
+        using var update = JsonDocument.Parse("""{"update_id":1}""");
+        var context = new DefaultHttpContext();
+        context.Request.Headers["X-Telegram-Bot-Api-Secret-Token"] = "wrong";
+        var updateService = new TelegramBotUpdateService(
+            db,
+            new StaticHttpClientFactory(new HttpClient(new TelegramOkHandler())),
+            NullLogger<TelegramBotUpdateService>.Instance,
+            CreateExternalAuthService(db));
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            updateService.HandleWebhookAsync(sender.Id, update, context.Request));
+    }
+
+    [Fact]
+    public async Task HandleWebhookAsync_WhenTelegramAuthRequestExpiredDoesNotLinkUser()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "expired-telegram-link@example.com");
+        db.TelegramAuthRequests.Add(new TelegramAuthRequest
+        {
+            State = "expired-state",
+            UserId = user.Id,
+            Intent = "link",
+            Status = "pending",
+            CreatedAt = DateTime.UtcNow.AddMinutes(-20),
+            ExpiresAt = DateTime.UtcNow.AddMinutes(-1)
+        });
+        var sender = CreateTelegramSender(
+            "Login bot",
+            NotificationPurposes.TelegramAuth,
+            updateMode: TelegramBotUpdateModes.Webhook,
+            webhookSecret: "secret");
+        db.NotificationSenders.Add(sender);
+        await db.SaveChangesAsync();
+        using var update = JsonDocument.Parse("""
+            {
+              "update_id": 12,
+              "message": {
+                "message_id": 1,
+                "text": "/start login_expired-state",
+                "chat": { "id": 777888 },
+                "from": { "id": 12345, "username": "auth_user" }
+              }
+            }
+            """);
+        var context = new DefaultHttpContext();
+        context.Request.Headers["X-Telegram-Bot-Api-Secret-Token"] = "secret";
+        var httpFactory = new StaticHttpClientFactory(new HttpClient(new TelegramOkHandler()));
+        var updateService = new TelegramBotUpdateService(
+            db,
+            httpFactory,
+            NullLogger<TelegramBotUpdateService>.Instance,
+            CreateExternalAuthService(db, httpFactory));
+
+        await updateService.HandleWebhookAsync(sender.Id, update, context.Request);
+
+        var authRequest = await db.TelegramAuthRequests.SingleAsync();
+        Assert.Equal("expired", authRequest.Status);
+        Assert.False(await db.UserExternalIdentities.AnyAsync(item => item.UserId == user.Id && item.Provider == "telegram"));
+    }
+
+    [Fact]
+    public async Task GetExternalStatusForClientAsync_WhenStateUnknownThrows()
+    {
+        await using var db = await CreateContextAsync();
+        var service = CreateExternalAuthService(db);
+
+        await Assert.ThrowsAsync<KeyNotFoundException>(() =>
+            service.GetExternalStatusForClientAsync("missing-state", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task GetExternalStatusForClientAsync_WhenStateExpiredMarksRequestExpired()
+    {
+        await using var db = await CreateContextAsync();
+        db.ExternalAuthRequests.Add(new ExternalAuthRequest
+        {
+            Provider = "google",
+            State = "expired-state",
+            ReturnUrl = "/",
+            Intent = "signin",
+            Status = "pending",
+            CreatedAt = DateTime.UtcNow.AddMinutes(-20),
+            ExpiresAt = DateTime.UtcNow.AddMinutes(-1)
+        });
+        await db.SaveChangesAsync();
+        var service = CreateExternalAuthService(db);
+
+        var status = await service.GetExternalStatusForClientAsync("expired-state", CancellationToken.None);
+
+        Assert.Equal("expired", status.Status);
+        Assert.False(status.Completed);
+        Assert.Equal("expired", (await db.ExternalAuthRequests.SingleAsync()).Status);
+    }
+
+    [Fact]
+    public async Task HandleTelegramWebhookFlowAsync_WhenSecretMissingRejectsRequest()
+    {
+        await using var db = await CreateContextAsync();
+        using var update = JsonDocument.Parse("""{"update_id":1}""");
+        var service = CreateExternalAuthService(db);
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            service.HandleTelegramWebhookFlowAsync(update, new DefaultHttpContext().Request, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task HandleTelegramWebhookFlowAsync_WhenSecretInvalidRejectsRequest()
+    {
+        await using var db = await CreateContextAsync();
+        db.SystemSettings.Add(Setting("auth.telegram.webhookSecret", "secret"));
+        await db.SaveChangesAsync();
+        using var update = JsonDocument.Parse("""{"update_id":1}""");
+        var context = new DefaultHttpContext();
+        context.Request.Headers["X-Telegram-Bot-Api-Secret-Token"] = "wrong";
+        var service = CreateExternalAuthService(db);
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            service.HandleTelegramWebhookFlowAsync(update, context.Request, CancellationToken.None));
+    }
+
     private static NotificationService CreateService(
         PaymentContext db,
         IEmailService emailService,

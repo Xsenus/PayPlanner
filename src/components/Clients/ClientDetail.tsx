@@ -1009,7 +1009,7 @@ const buildAddressEntriesFromClient = (client: Client): ClientAddressItem[] => {
   const prepared = (client.addresses ?? [])
     .slice()
     .sort((left, right) => Number(right.isPrimary) - Number(left.isPrimary))
-    .map((address) => {
+    .map((address): ClientAddressItem | null => {
       const fullAddress = (
         address.unrestrictedValue ??
         address.value ??
@@ -8142,7 +8142,7 @@ export function ClientDetail({
                                         <span
                                           className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${statusClass}`}
                                         >
-                                          {caseStatusLabel(finance.caseStatus)}
+                                          {caseStatusLabel(finance.caseStatus ?? undefined)}
                                         </span>
                                       </div>
                                       <p className="mt-2 text-sm text-slate-500">
@@ -8208,9 +8208,10 @@ export function ClientDetail({
                             caseItem.status ?? ""
                           ).toLowerCase();
                           const finance = caseFinanceSummaries[caseItem.id];
+                          const legacyCasePayments = (caseItem as ClientCase & { payments?: Payment[] }).payments;
                           const casePaymentsCount = finance
                             ? finance.incomeCount + finance.expenseCount
-                            : caseItem.payments?.length ?? 0;
+                            : legacyCasePayments?.length ?? 0;
                           const statusClass = statusValue.includes("open")
                             ? "bg-green-50 text-green-700 border-green-200"
                             : statusValue.includes("hold")
@@ -10404,29 +10405,7 @@ export function ClientDetail({
                   clientName={clientName}
                 />
               ) : (
-                (() => {
-                  const meta = SECTION_META[activeSection];
-                  if (!meta.placeholderTitle) {
-                    return null;
-                  }
-                  const PlaceholderIcon = meta.icon;
-                  return (
-                    <div className="text-center py-12">
-                      {PlaceholderIcon ? (
-                        <PlaceholderIcon
-                          size={48}
-                          className="mx-auto mb-4 text-gray-300"
-                        />
-                      ) : null}
-                      <h3 className="text-lg font-medium text-gray-900 mb-2">
-                        {meta.placeholderTitle}
-                      </h3>
-                      <p className="text-gray-500">
-                        {meta.placeholderDescription}
-                      </p>
-                    </div>
-                  );
-                })()
+                null
               )}
             </div>
           </div>
@@ -10826,7 +10805,7 @@ export function ClientDetail({
           defaultClientId={
             paymentViewMode === "expenseClient" ? undefined : clientId
           }
-          defaultExpenseClientId={paymentModalDefaultExpenseClientId}
+          defaultExpenseClientId={paymentModalDefaultExpenseClientId ?? undefined}
           defaultClientCaseId={
             selectedCaseId === "all" ? undefined : Number(selectedCaseId)
           }

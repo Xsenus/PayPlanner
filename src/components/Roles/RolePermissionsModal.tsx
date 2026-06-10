@@ -596,6 +596,19 @@ export function RolePermissionsModal({
           continue;
         }
 
+        if (key === 'calendar') {
+          next.calendar = {
+            ...prev.calendar,
+            canView: value,
+            canCreate: value,
+            canEdit: value,
+            canDelete: value,
+            canExport: value,
+            canViewAnalytics: value,
+          };
+          continue;
+        }
+
         next[key] = {
           ...prev[key],
           canView: value,
@@ -604,13 +617,6 @@ export function RolePermissionsModal({
           canDelete: value,
           canExport: key === 'roles' ? false : value,
         } as RolePermissions[typeof key];
-
-        if (key === 'calendar') {
-          next.calendar = {
-            ...next.calendar,
-            canViewAnalytics: value,
-          };
-        }
       }
 
       return next;

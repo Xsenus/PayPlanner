@@ -63,7 +63,7 @@ public partial class AuthService
     private string GenerateJwtToken(User user)
     {
         var key = new SymmetricSecurityKey(
-            Encoding.UTF8.GetBytes(_configuration["Jwt:Secret"] ?? "your-secret-key-min-32-characters-long!"));
+            Encoding.UTF8.GetBytes(JwtConfiguration.GetRequiredSecret(_configuration)));
 
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 

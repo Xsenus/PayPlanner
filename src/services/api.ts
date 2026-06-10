@@ -94,7 +94,7 @@ export interface PagedResult<T> {
 export interface UserSettingDto {
   key: string;
   value: string;
-  updatedAt: string;
+  updatedAt?: string;
 }
 
 export interface AppFeatureFlagsDto {
@@ -2555,7 +2555,7 @@ export class ApiService {
   }
 
   // ===== User settings =====
-  async getUserSetting(key: string) {
+  async getUserSetting(key: string): Promise<UserSettingDto | null> {
     return this.request<UserSettingDto>(`/user-settings/${encodeURIComponent(key)}`);
   }
 
@@ -2566,7 +2566,7 @@ export class ApiService {
     });
   }
 
-  async getUserSettingForUser(userId: number, key: string) {
+  async getUserSettingForUser(userId: number, key: string): Promise<UserSettingDto | null> {
     return this.request<UserSettingDto>(`/user-settings/users/${userId}/${encodeURIComponent(key)}`);
   }
 

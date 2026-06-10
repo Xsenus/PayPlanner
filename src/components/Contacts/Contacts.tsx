@@ -376,7 +376,7 @@ export function Contacts({ initialScope = 'all', onScopeChange }: ContactsProps)
       description: `Будет создано: ${createCount}. Обновлено: ${updateCount}. Оставлено без изменений или пропущено: ${skipCount}.`,
       confirmLabel: 'Импортировать',
       cancelLabel: 'Отмена',
-      variant: 'default',
+      variant: 'primary',
     });
 
     if (!approved) {

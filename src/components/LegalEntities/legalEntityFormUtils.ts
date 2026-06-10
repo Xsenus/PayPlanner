@@ -17,6 +17,7 @@ type ComparableAddress = {
   city?: string | null;
   cityWithType?: string | null;
   settlement?: string | null;
+  settlementWithType?: string | null;
   street?: string | null;
   streetWithType?: string | null;
   house?: string | null;

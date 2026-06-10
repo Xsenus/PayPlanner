@@ -163,7 +163,7 @@ export function CaseDocumentTemplateSettings() {
         heading: selectedTemplate.heading,
         caseTypes: selectedTemplate.caseTypes ?? [],
         description: selectedTemplate.description,
-        content: selectedTemplate.content,
+        content: selectedTemplate.content ?? undefined,
         isActive: selectedTemplate.isActive ?? true,
       };
       const saved = originalKeys.has(selectedTemplate.key)

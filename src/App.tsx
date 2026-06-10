@@ -23,6 +23,7 @@ import { apiService, type ContactScope } from './services/api';
 import { extractDisplayErrorMessage } from './utils/errorUtils';
 import type { InvoiceEditorDraftState } from './utils/invoiceEditorBridge';
 import {
+  canAccessTab,
   getInitialActId,
   getInitialActReturnTab,
   getPathCaseId,
@@ -92,6 +93,7 @@ function buildCaseInvoiceCreateDraft(caseItem: ClientCase, type: PaymentKind): I
       amount,
       type,
       status: 'Pending',
+      workflowStatus: 'Draft',
       clientId: !isExpense && caseItem.clientId ? String(caseItem.clientId) : '',
       legalEntityId: !isExpense && caseItem.legalEntityId ? String(caseItem.legalEntityId) : '',
       expenseClientId: isExpense && caseItem.clientId ? String(caseItem.clientId) : '',
@@ -308,85 +310,14 @@ function AppContent() {
   );
 
   const canViewTab = useCallback(
-    (tab: Tab) => {
-      switch (tab) {
-        case 'notifications':
-          return true;
-        case 'calendar':
-          return permissions.calendar.canView;
-        case 'tasks':
-        case 'tasksApprovals':
-        case 'tasksCalendar':
-          return permissions.tasks.canView;
-        case 'reports':
-          return permissions.reports.canView;
-        case 'calculator':
-          return permissions.calculator.canView;
-        case 'legalEntities':
-          return permissions.legalEntities.canView;
-        case 'cases':
-        case 'caseDetail':
-          return permissions.cases.canView;
-        case 'clients':
-        case 'contacts':
-          return permissions.clients.canView || permissions.legalEntities.canView;
-        case 'contactsClients':
-          return permissions.clients.canView;
-        case 'contactsLegal':
-          return permissions.legalEntities.canView;
-        case 'contactsExternal':
-        case 'clientDetail':
-          return permissions.clients.canView;
-        case 'accounts':
-        case 'accountsIncome':
-        case 'accountsExpense':
-        case 'installments':
-          return permissions.accounts.canView;
-        case 'acts':
-        case 'actsIncome':
-        case 'actsExpense':
-        case 'actDetail':
-          return permissions.acts.canView;
-        case 'actCreate':
-          return permissions.acts.canCreate;
-        case 'payments':
-        case 'paymentsIncome':
-        case 'paymentsExpense':
-        case 'moneyBank':
-        case 'moneyCash':
-        case 'moneyCards':
-        case 'moneyEMoney':
-        case 'moneyTotal':
-          return permissions.payments.canView;
-        case 'contracts':
-        case 'contractDetail':
-          return permissions.contracts.canView;
-        case 'contractCreate':
-          return permissions.contracts.canCreate;
-        case 'companyProfile':
-          return isAdminRole;
-        case 'profile':
-          return true;
-        case 'users':
-        case 'userDetail':
-        case 'userActivity':
-          return isAdminRole;
-        case 'audit':
-          return canViewAudit;
-        case 'yandexDisk':
-          return canViewYandexDisk;
-        case 's3Storage':
-          return canViewS3Storage;
-        case 'settings':
-          return canViewSettings;
-        case 'roles':
-          return canManageRoles;
-        case 'dictionaries':
-          return permissions.dictionaries.canView;
-        default:
-          return true;
-      }
-    },
+    (tab: Tab) => canAccessTab(tab, permissions, {
+      isAdminRole,
+      canManageRoles,
+      canViewAudit,
+      canViewSettings,
+      canViewYandexDisk,
+      canViewS3Storage,
+    }),
     [permissions, isAdminRole, canManageRoles, canViewAudit, canViewSettings, canViewYandexDisk, canViewS3Storage],
   );
 
@@ -1299,8 +1230,7 @@ function AppContent() {
           : renderNoAccess('Раздел контактов недоступен для вашей роли.');
 
       case 'contactsExternal': {
-        const contactScope: ContactScope =
-          activeTab === 'contactsClients' ? 'clients' : activeTab === 'contactsExternal' ? 'external' : 'all';
+        const contactScope: ContactScope = 'external';
         const handleContactScopeChange = (nextScope: ContactScope) => {
           setActiveTab(nextScope === 'clients' ? 'contactsClients' : nextScope === 'external' ? 'contactsExternal' : 'contacts');
         };

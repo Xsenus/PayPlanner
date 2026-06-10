@@ -131,7 +131,7 @@ function renderTemplatePreview(templateHtml: string, includeSignatureAndSeal: bo
     ))).join('')
   ));
 
-  return withLineItems.replace(/\{\{\s*([a-zA-Z0-9._]+)\s*\}\}/g, (match, key: string) => {
+  return withLineItems.replace(/\{\{\s*([a-zA-Z0-9._]+)\s*\}\}/g, (_match, key: string) => {
     const raw = PREVIEW_TOKENS[key];
     if (raw === undefined) return '';
     if (!includeSignatureAndSeal && (key === 'seller.sealHtml' || key === 'seller.signatureHtml')) {

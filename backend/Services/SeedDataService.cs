@@ -139,7 +139,7 @@ namespace PayPlanner.Api.Services
                     context.IncomeTypes.AddRange(expenseTypes);
                     await context.SaveChangesAsync();
                 }
-            }                
+            }
 
             if (!await context.PaymentSources.AnyAsync())
             {

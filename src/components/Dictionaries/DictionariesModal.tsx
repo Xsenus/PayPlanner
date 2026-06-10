@@ -252,6 +252,8 @@ type RowState =
   | { _key: RowKey; mode: 'new'; item: Omit<FullDictItem, 'id' | 'createdAt'> };
 
 const makeKey = (): RowKey => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+const isPersistedFullDictItem = (item: FullDictItem | Omit<FullDictItem, 'id' | 'createdAt'>): item is FullDictItem =>
+  typeof (item as FullDictItem).id === 'number';
 
 const TABS: { value: VisibleKind; label: string }[] = [
   { value: 'deal-types', label: 'Тип сделки' },
@@ -403,7 +405,7 @@ export default function DictionariesModal({
   const serviceCategories = useMemo(
     () => (data['service-categories'] ?? [])
       .map((row) => row.item)
-      .filter((item) => item.isActive),
+      .filter((item): item is FullDictItem => isPersistedFullDictItem(item) && item.isActive),
     [data],
   );
 

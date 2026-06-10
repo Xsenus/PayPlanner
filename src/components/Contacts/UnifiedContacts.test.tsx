@@ -5,7 +5,23 @@ import { UnifiedContacts, formatDate } from './UnifiedContacts';
 import { apiService, type UserSettingDto } from '../../services/api';
 import type { Client, LegalEntityDetail, LegalEntitySummary } from '../../types';
 
-const legalEntityModalMock = vi.hoisted(() => vi.fn(() => null));
+type LegalEntityModalMockProps = {
+  isOpen?: boolean;
+  allowEdit?: boolean;
+  allowDelete?: boolean;
+  mode?: string;
+  onBack?: () => void;
+  onSubmit: (payload: Partial<LegalEntityDetail>) => Promise<void> | void;
+  hideFormActions?: boolean;
+  hideDadataSection?: boolean;
+  compactReadOnlyView?: boolean;
+  titleOverride?: string;
+};
+
+const legalEntityModalMock = vi.hoisted(() => vi.fn((props: LegalEntityModalMockProps) => {
+  void props;
+  return null;
+}));
 const toastSuccessMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../../contexts/AuthContext', () => ({
@@ -343,6 +359,8 @@ describe('UnifiedContacts', () => {
 
     await waitFor(() => {
       const props = legalEntityModalMock.mock.calls.at(-1)?.[0];
+      expect(props).toBeTruthy();
+      if (!props) throw new Error('Legal entity modal props not captured');
       expect(props).toMatchObject({
         isOpen: true,
         allowEdit: true,
@@ -378,6 +396,8 @@ describe('UnifiedContacts', () => {
     });
 
     const props = legalEntityModalMock.mock.calls.at(-1)?.[0];
+    expect(props).toBeTruthy();
+    if (!props) throw new Error('Legal entity modal props not captured');
     const payload = { shortName: 'ООО Ромашка плюс' } as Parameters<typeof props.onSubmit>[0];
     await props.onSubmit(payload);
 

@@ -3045,7 +3045,7 @@ export interface Payment {
   status: PaymentStatus;
   description: string;
   isPaid: boolean;
-  paidDate?: string;
+  paidDate?: string | null;
   lastPaymentDate?: string | null;
   notes: string;
   systemNotes: string;
@@ -3055,6 +3055,7 @@ export interface Payment {
   hasPartialPayment: boolean;
   delayDays?: number | null;
   createdAt: string;
+  updatedAt?: string | null;
   auditCreatedByUserId?: number | null;
   auditCreatedByUserName?: string | null;
   auditUpdatedAt?: string | null;
@@ -3175,6 +3176,8 @@ export interface InvoiceActLink {
   workflowStatus?: ActWorkflowStatus;
   clientId?: number | null;
   clientName?: string | null;
+  legalEntityId?: number | null;
+  legalEntityName?: string | null;
   responsibleId?: number | null;
   responsibleName?: string | null;
   comment?: string | null;

@@ -37,36 +37,45 @@ jobs:
       - name: Restore backend
         run: dotnet restore "${{ env.BE_SLN }}"
 
+      - name: Verify backend formatting
+        run: dotnet format "${{ env.BE_SLN }}" --verify-no-changes --no-restore --verbosity minimal
+
+      - name: Audit backend packages
+        run: dotnet list "${{ env.BE_SLN }}" package --vulnerable --include-transitive
+
       - name: Test backend
         run: dotnet test backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-restore
 
-      - name: Publish backend
-        run: dotnet publish "${{ env.BE_CSPROJ }}" -c Release -o "${{ env.OUT_DIR }}/be"
-
-      - name: Setup Node (with cache)
-        if: ${{ hashFiles('package-lock.json') != '' }}
+      - name: Setup Node
         uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: "npm"
           cache-dependency-path: package-lock.json
 
-      - name: Setup Node (no cache)
-        if: ${{ hashFiles('package-lock.json') == '' }}
-        uses: actions/setup-node@v6
-        with:
-          node-version: "20"
-
-      - name: Install FE deps (ci)
-        if: ${{ hashFiles('package-lock.json') != '' }}
+      - name: Install FE deps
         run: npm ci
 
-      - name: Install FE deps (install fallback)
-        if: ${{ hashFiles('package-lock.json') == '' }}
-        run: npm install
+      - name: Lint FE
+        run: npm run lint
+
+      - name: Typecheck FE
+        run: npx tsc -p tsconfig.app.json --noEmit
+
+      - name: Verify date/time audit
+        run: npm run audit:dates:test
+
+      - name: Audit FE packages
+        run: npm audit --audit-level=moderate
 
       - name: Test FE guard and unit
         run: npm run test:ci
+
+      - name: Test FE integration
+        run: npm run test:integration
+
+      - name: Publish backend
+        run: dotnet publish "${{ env.BE_CSPROJ }}" -c Release -o "${{ env.OUT_DIR }}/be"
 
       - name: Build FE
         env:

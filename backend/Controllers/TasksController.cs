@@ -4079,11 +4079,26 @@ public class TasksController : ControllerBase
 
     private static string SanitizeFileName(string? value)
     {
-        var fileName = Path.GetFileName(value ?? string.Empty).Trim();
+        var rawValue = value ?? string.Empty;
+        try
+        {
+            rawValue = Uri.UnescapeDataString(rawValue);
+        }
+        catch (UriFormatException)
+        {
+            // Keep the original name if it is not a valid URI-escaped string.
+        }
+
+        var fileName = rawValue
+            .Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries)
+            .LastOrDefault()
+            ?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(fileName))
         {
             fileName = "file";
         }
+
+        fileName = fileName.Replace("..", "_", StringComparison.Ordinal);
 
         foreach (var invalidChar in Path.GetInvalidFileNameChars())
         {

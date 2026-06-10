@@ -24,6 +24,73 @@ public class YandexCalendarSyncServiceTests
         DataProtectionProvider.Create(new DirectoryInfo(Path.Combine(Path.GetTempPath(), "pp-yandex-calendar-tests")));
 
     [Fact]
+    public async Task HandleCallbackAsync_WhenStateMissingDoesNotCreateAuthRequest()
+    {
+        await using var db = await CreateContextAsync();
+        var service = CreateService(db, new FakeHttpClientFactory());
+
+        var html = await service.HandleCallbackAsync(
+            state: null,
+            code: "code",
+            error: null,
+            errorDescription: null,
+            CreateHttpRequest(0),
+            CancellationToken.None);
+
+        Assert.Contains("<!doctype html>", html, StringComparison.OrdinalIgnoreCase);
+        Assert.False(await db.YandexCalendarAuthRequests.AnyAsync());
+    }
+
+    [Fact]
+    public async Task HandleCallbackAsync_WhenStateUnknownDoesNotCreateAuthRequest()
+    {
+        await using var db = await CreateContextAsync();
+        var service = CreateService(db, new FakeHttpClientFactory());
+
+        var html = await service.HandleCallbackAsync(
+            state: "unknown-state",
+            code: "code",
+            error: null,
+            errorDescription: null,
+            CreateHttpRequest(0),
+            CancellationToken.None);
+
+        Assert.Contains("<!doctype html>", html, StringComparison.OrdinalIgnoreCase);
+        Assert.False(await db.YandexCalendarAuthRequests.AnyAsync());
+    }
+
+    [Fact]
+    public async Task HandleCallbackAsync_WhenStateExpiredMarksRequestExpired()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "expired-yandex-callback@example.com", "user");
+        db.YandexCalendarAuthRequests.Add(new YandexCalendarAuthRequest
+        {
+            UserId = user.Id,
+            State = "expired-state",
+            ReturnUrl = "/?ppTab=profile",
+            Status = "pending",
+            CreatedAt = DateTime.UtcNow.AddMinutes(-20),
+            ExpiresAt = DateTime.UtcNow.AddMinutes(-1)
+        });
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new FakeHttpClientFactory());
+
+        var html = await service.HandleCallbackAsync(
+            state: "expired-state",
+            code: "code",
+            error: null,
+            errorDescription: null,
+            CreateHttpRequest(user.Id),
+            CancellationToken.None);
+
+        Assert.Contains("<!doctype html>", html, StringComparison.OrdinalIgnoreCase);
+        var authRequest = await db.YandexCalendarAuthRequests.SingleAsync();
+        Assert.Equal("expired", authRequest.Status);
+        Assert.NotNull(authRequest.Error);
+    }
+
+    [Fact]
     public async Task StartAuthAsync_WhenProviderDisabledRejectsConnection()
     {
         await using var db = await CreateContextAsync();

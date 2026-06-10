@@ -116,17 +116,25 @@ VITE_API_URL=http://localhost:5080/api
 
 ### Backend (`/backend`)
 
-В `appsettings.json` укажите строку подключения к БД. Пример для PostgreSQL:
+Реальные секреты не хранятся в `appsettings*.json`. Для локальной разработки используйте `dotnet user-secrets`, для сервера — переменные окружения или secret store. Пример для PostgreSQL через user-secrets:
 
-```json
-{
-  "ConnectionStrings": {
-    "DefaultConnection": "Host=localhost;Port=5432;Database=payplanner;Username=postgres;Password=postgres"
-  }
-}
+```bash
+cd /workspace/PayPlanner/backend
+dotnet user-secrets set "ConnectionStrings:Default" "Host=localhost;Port=5432;Database=payplanner;Username=postgres;Password=<password>"
+dotnet user-secrets set "Jwt:Secret" "<at-least-32-random-characters>"
 ```
 
-Локальные секреты/пароли храните в `appsettings.Development.json` или `User Secrets`.
+Эквивалентные переменные окружения:
+
+```bash
+ConnectionStrings__Default=Host=localhost;Port=5432;Database=payplanner;Username=postgres;Password=<password>
+Jwt__Secret=<at-least-32-random-characters>
+DaData__ApiKey=<optional-dadata-api-key>
+DaData__Secret=<optional-dadata-secret>
+Email__SmtpPassword=<optional-smtp-password>
+```
+
+Обязательные параметры для запуска backend: `ConnectionStrings:Default` и `Jwt:Secret`. `Jwt:Secret` должен быть не короче 32 символов; приложение завершит старт с ошибкой, если секрет не задан. `DaData:*` и `Email:*` нужны только для соответствующих интеграций.
 
 ## Миграции БД и сидирование
 

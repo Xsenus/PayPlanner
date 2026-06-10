@@ -28,6 +28,7 @@ export function Calculator() {
   const handleSavePayments = async ({
     plan,
     clientId,
+    legalEntityId,
     clientCaseId,
     invoiceNumber,
     clientName,

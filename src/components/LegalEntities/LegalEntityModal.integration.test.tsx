@@ -141,7 +141,7 @@ describe('LegalEntityModal integration', () => {
 
   it('prefills DaData query from saved inn and keeps the full address after suggestion selection', async () => {
     const suggestMock = vi
-      .fn<[{ query?: string; inn?: string; limit?: number }], Promise<LegalEntitySuggestion[]>>()
+      .fn<(payload: { query?: string; inn?: string; limit?: number }) => Promise<LegalEntitySuggestion[]>>()
       .mockResolvedValue([
         {
           shortName: 'ИП Кожеваткин Андрей Владимирович',
@@ -170,7 +170,7 @@ describe('LegalEntityModal integration', () => {
     };
 
     const findByIdMock = vi
-      .fn<[{ query: string; kpp?: string }], Promise<LegalEntityDadataDetails>>()
+      .fn<(payload: { query: string; kpp?: string }) => Promise<LegalEntityDadataDetails>>()
       .mockResolvedValue(details);
 
     const initial = createInitialLegalEntity({ inn: '633009620345' });
@@ -223,7 +223,7 @@ describe('LegalEntityModal integration', () => {
 
   it('deduplicates repeated DaData suggestions in the modal UI', async () => {
     const suggestMock = vi
-      .fn<[{ query?: string; inn?: string; limit?: number }], Promise<LegalEntitySuggestion[]>>()
+      .fn<(payload: { query?: string; inn?: string; limit?: number }) => Promise<LegalEntitySuggestion[]>>()
       .mockResolvedValue([
         {
           shortName: 'ИП Кожеваткин Андрей Владимирович',

@@ -1,4 +1,5 @@
 import type { Tab } from './types/tabs';
+import type { RolePermissions } from './types/permissions';
 
 export const LAST_TAB_STORAGE_KEY = 'pp.last_active_tab';
 
@@ -54,6 +55,93 @@ const ALL_TABS: Tab[] = [
 
 function isValidTab(value: string | null): value is Tab {
   return Boolean(value) && ALL_TABS.includes(value as Tab);
+}
+
+type TabAccessOptions = {
+  isAdminRole?: boolean;
+  canManageRoles?: boolean;
+  canViewAudit?: boolean;
+  canViewSettings?: boolean;
+  canViewYandexDisk?: boolean;
+  canViewS3Storage?: boolean;
+};
+
+export function canAccessTab(tab: Tab, permissions: RolePermissions, options: TabAccessOptions = {}): boolean {
+  switch (tab) {
+    case 'notifications':
+    case 'profile':
+      return true;
+    case 'calendar':
+      return permissions.calendar.canView;
+    case 'tasks':
+    case 'tasksApprovals':
+    case 'tasksCalendar':
+      return permissions.tasks.canView;
+    case 'reports':
+      return permissions.reports.canView;
+    case 'calculator':
+      return permissions.calculator.canView;
+    case 'legalEntities':
+      return permissions.legalEntities.canView;
+    case 'cases':
+    case 'caseDetail':
+      return permissions.cases.canView;
+    case 'clients':
+    case 'contacts':
+      return permissions.clients.canView || permissions.legalEntities.canView;
+    case 'contactsClients':
+      return permissions.clients.canView;
+    case 'contactsLegal':
+      return permissions.legalEntities.canView;
+    case 'contactsExternal':
+    case 'clientDetail':
+      return permissions.clients.canView;
+    case 'accounts':
+    case 'accountsIncome':
+    case 'accountsExpense':
+    case 'installments':
+      return permissions.accounts.canView;
+    case 'acts':
+    case 'actsIncome':
+    case 'actsExpense':
+    case 'actDetail':
+      return permissions.acts.canView;
+    case 'actCreate':
+      return permissions.acts.canCreate;
+    case 'payments':
+    case 'paymentsIncome':
+    case 'paymentsExpense':
+    case 'moneyBank':
+    case 'moneyCash':
+    case 'moneyCards':
+    case 'moneyEMoney':
+    case 'moneyTotal':
+      return permissions.payments.canView;
+    case 'contracts':
+    case 'contractDetail':
+      return permissions.contracts.canView;
+    case 'contractCreate':
+      return permissions.contracts.canCreate;
+    case 'companyProfile':
+    case 'users':
+    case 'userDetail':
+    case 'userActivity':
+      return options.isAdminRole === true;
+    case 'audit':
+      return options.canViewAudit === true;
+    case 'yandexDisk':
+      return options.canViewYandexDisk === true;
+    case 's3Storage':
+      return options.canViewS3Storage === true;
+    case 'settings':
+      return options.canViewSettings === true;
+    case 'roles':
+      return options.canManageRoles === true;
+    case 'dictionaries':
+      return permissions.dictionaries.canView;
+    default:
+      return true;
+  }
 }
 
 export function getPathInvoiceId(): number | null {

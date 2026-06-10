@@ -1176,11 +1176,11 @@ public sealed class DatabaseBackupService
 
         if (!string.IsNullOrWhiteSpace(normalizedRequestedFormat))
         {
-          var selected = availableFormats.FirstOrDefault(option => option.Key == normalizedRequestedFormat);
-          if (selected is not null)
-          {
-              return selected;
-          }
+            var selected = availableFormats.FirstOrDefault(option => option.Key == normalizedRequestedFormat);
+            if (selected is not null)
+            {
+                return selected;
+            }
         }
 
         if (!fallbackToDefault)

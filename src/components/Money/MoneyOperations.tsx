@@ -52,6 +52,7 @@ import type {
   MoneyOperation,
   MoneyOperationAccountSummary,
   MoneyOperationAccountingType,
+  MoneyOperationsSummary,
   MoneyBalanceReconciliationResult,
   MoneyOperationDailyBalance,
   MoneyOperationDirection,
@@ -632,7 +633,7 @@ function parseBankStatementCategoryRulesSettings(value?: string | null): BankSta
               id: typeof source.id === 'string' && source.id.trim() ? source.id : `saved-rule-${index}`,
               enabled: source.enabled !== false,
               categoryName: typeof source.categoryName === 'string' ? source.categoryName : '',
-              paymentType: source.paymentType === 'Income' ? 'Income' : 'Expense',
+              paymentType: source.paymentType === 'Income' ? ('Income' as PaymentKind) : ('Expense' as PaymentKind),
               keywords: typeof source.keywords === 'string' ? source.keywords : '',
               incomeTypeId: typeof source.incomeTypeId === 'number' && source.incomeTypeId > 0 ? source.incomeTypeId : null,
             };
@@ -2248,6 +2249,7 @@ export function MoneyOperations({
   const [journalActionsOpen, setJournalActionsOpen] = useState(false);
   const [bankStatementImportResult, setBankStatementImportResult] = useState<{
     batchId?: number | null;
+    fileName?: string | null;
     rowsRead: number;
     created: number;
     skipped: number;
@@ -2759,7 +2761,7 @@ export function MoneyOperations({
       .getUserSetting(BANK_STATEMENT_AUTO_IMPORT_SETTING_KEY)
       .then((setting) => {
         if (!cancelled) {
-          setBankAutoImportSettings(parseBankStatementAutoImportSettings(setting.value));
+          setBankAutoImportSettings(parseBankStatementAutoImportSettings(setting?.value ?? ''));
         }
       })
       .catch(() => {
@@ -2792,7 +2794,7 @@ export function MoneyOperations({
       .getUserSetting(BANK_STATEMENT_CATEGORY_RULES_SETTING_KEY)
       .then((setting) => {
         if (!cancelled) {
-          setBankCategoryRulesSettings(parseBankStatementCategoryRulesSettings(setting.value));
+          setBankCategoryRulesSettings(parseBankStatementCategoryRulesSettings(setting?.value ?? ''));
         }
       })
       .catch(() => {
@@ -2824,7 +2826,7 @@ export function MoneyOperations({
       .getUserSetting(CASH_LIMIT_SETTING_KEY)
       .then((setting) => {
         if (!cancelled) {
-          setCashLimitSettings(parseCashLimitSettings(setting.value));
+          setCashLimitSettings(parseCashLimitSettings(setting?.value ?? ''));
         }
       })
       .catch(() => {
@@ -4105,10 +4107,10 @@ export function MoneyOperations({
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold text-slate-900">
-            {source !== 'Total' && selectedMoneyAccount ? selectedMoneyAccount.name : SOURCE_LABELS[source]}
+            {selectedMoneyAccount ? selectedMoneyAccount.name : SOURCE_LABELS[source]}
           </h1>
           <p className="text-sm text-slate-500">{SOURCE_OPERATION_SUBTITLES[source]}</p>
-          {source !== 'Total' && selectedMoneyAccount && (
+          {selectedMoneyAccount && (
             <p className="mt-1 text-xs text-slate-400">
               {selectedMoneyAccount.bankName ? `${selectedMoneyAccount.bankName} · ` : ''}
               {selectedMoneyAccount.bankAccountNumber || selectedMoneyAccount.currency || 'RUB'}
@@ -4116,7 +4118,7 @@ export function MoneyOperations({
           )}
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          {source !== 'Total' && (
+          {(
             <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-slate-400">
               <span>{SOURCE_ACCOUNT_FILTER_LABELS[source]}</span>
               <select
@@ -4881,7 +4883,7 @@ export function MoneyOperations({
         </div>
       </div>
 
-      {source !== 'Total' && reconciliationNotifications.length > 0 && (
+      {reconciliationNotifications.length > 0 && (
         <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
           <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800">
             <AlertTriangle className="h-4 w-4 text-amber-600" />
@@ -4904,7 +4906,7 @@ export function MoneyOperations({
         </div>
       )}
 
-      {source !== 'Total' && visibleDailyBalances.length > 0 && (
+      {visibleDailyBalances.length > 0 && (
         <div className="mt-6 rounded-xl border border-slate-200 bg-white">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
             <div>

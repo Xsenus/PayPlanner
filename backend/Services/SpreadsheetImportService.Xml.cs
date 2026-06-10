@@ -118,102 +118,102 @@ public sealed partial class SpreadsheetImportService
                 {
                     case "Контрагенты":
                     case "СправочникСсылка.Контрагенты":
-                    {
-                        var counterparty = ParseOneCCounterparty(sourceFileName, fileHash, sheetName, rowNumber, root);
-                        if (counterparty is not null)
                         {
-                            bundle.CounterpartyDrafts.Add(counterparty.Draft);
-                            if (!string.IsNullOrWhiteSpace(counterparty.Info.ExternalId))
+                            var counterparty = ParseOneCCounterparty(sourceFileName, fileHash, sheetName, rowNumber, root);
+                            if (counterparty is not null)
                             {
-                                counterpartyByExternalId[counterparty.Info.ExternalId] = counterparty.Info;
+                                bundle.CounterpartyDrafts.Add(counterparty.Draft);
+                                if (!string.IsNullOrWhiteSpace(counterparty.Info.ExternalId))
+                                {
+                                    counterpartyByExternalId[counterparty.Info.ExternalId] = counterparty.Info;
+                                }
                             }
-                        }
 
-                        break;
-                    }
+                            break;
+                        }
                     case "Банки":
                     case "СправочникСсылка.Банки":
-                    {
-                        IncrementOneCNonImportObjectCount(bundle, discriminator);
-                        var bank = ParseOneCBank(root);
-                        if (bank is not null && !string.IsNullOrWhiteSpace(bank.Bik))
                         {
-                            bankByBik[bank.Bik] = bank;
-                        }
+                            IncrementOneCNonImportObjectCount(bundle, discriminator);
+                            var bank = ParseOneCBank(root);
+                            if (bank is not null && !string.IsNullOrWhiteSpace(bank.Bik))
+                            {
+                                bankByBik[bank.Bik] = bank;
+                            }
 
-                        break;
-                    }
+                            break;
+                        }
                     case "БанковскиеСчета":
                     case "СправочникСсылка.БанковскиеСчета":
-                    {
-                        IncrementOneCNonImportObjectCount(bundle, discriminator);
-                        var bankAccount = ParseOneCBankAccount(root);
-                        if (bankAccount is not null)
                         {
-                            bankAccounts.Add(bankAccount);
-                        }
+                            IncrementOneCNonImportObjectCount(bundle, discriminator);
+                            var bankAccount = ParseOneCBankAccount(root);
+                            if (bankAccount is not null)
+                            {
+                                bankAccounts.Add(bankAccount);
+                            }
 
-                        break;
-                    }
+                            break;
+                        }
                     case "СчетНаОплатуПокупателю":
                     case "ДокументСсылка.СчетНаОплатуПокупателю":
                     case "СчетНаОплатуПоставщика":
                     case "ДокументСсылка.СчетНаОплатуПоставщика":
-                    {
-                        var invoice = ParseOneCInvoice(
-                            sourceFileName,
-                            fileHash,
-                            sheetName,
-                            rowNumber,
-                            root,
-                            discriminator is "СчетНаОплатуПоставщика" or "ДокументСсылка.СчетНаОплатуПоставщика",
-                            counterpartyByExternalId);
-                        if (invoice is not null)
                         {
-                            bundle.InvoiceDrafts.Add(invoice);
-                            if (!string.IsNullOrWhiteSpace(invoice.ExternalId) && !string.IsNullOrWhiteSpace(invoice.Number))
+                            var invoice = ParseOneCInvoice(
+                                sourceFileName,
+                                fileHash,
+                                sheetName,
+                                rowNumber,
+                                root,
+                                discriminator is "СчетНаОплатуПоставщика" or "ДокументСсылка.СчетНаОплатуПоставщика",
+                                counterpartyByExternalId);
+                            if (invoice is not null)
                             {
-                                if (!invoiceByExternalId.TryGetValue(invoice.ExternalId, out var invoiceReferences))
+                                bundle.InvoiceDrafts.Add(invoice);
+                                if (!string.IsNullOrWhiteSpace(invoice.ExternalId) && !string.IsNullOrWhiteSpace(invoice.Number))
                                 {
-                                    invoiceReferences = new List<OneCInvoiceReference>();
-                                    invoiceByExternalId[invoice.ExternalId] = invoiceReferences;
+                                    if (!invoiceByExternalId.TryGetValue(invoice.ExternalId, out var invoiceReferences))
+                                    {
+                                        invoiceReferences = new List<OneCInvoiceReference>();
+                                        invoiceByExternalId[invoice.ExternalId] = invoiceReferences;
+                                    }
+
+                                    invoiceReferences.Add(new OneCInvoiceReference(
+                                        invoice.ExternalId,
+                                        invoice.Number,
+                                        invoice.Date,
+                                        invoice.Type));
                                 }
-
-                                invoiceReferences.Add(new OneCInvoiceReference(
-                                    invoice.ExternalId,
-                                    invoice.Number,
-                                    invoice.Date,
-                                    invoice.Type));
                             }
-                        }
 
-                        break;
-                    }
+                            break;
+                        }
                     case "РеализацияТоваровУслуг":
                     case "ДокументСсылка.РеализацияТоваровУслуг":
                     case "ПоступлениеТоваровУслуг":
                     case "ДокументСсылка.ПоступлениеТоваровУслуг":
-                    {
-                        var act = ParseOneCAct(
-                            sourceFileName,
-                            fileHash,
-                            sheetName,
-                            rowNumber,
-                            root,
-                            discriminator is "ПоступлениеТоваровУслуг" or "ДокументСсылка.ПоступлениеТоваровУслуг",
-                            counterpartyByExternalId);
-                        if (act is not null)
                         {
-                            bundle.ActDrafts.Add(act);
-                        }
+                            var act = ParseOneCAct(
+                                sourceFileName,
+                                fileHash,
+                                sheetName,
+                                rowNumber,
+                                root,
+                                discriminator is "ПоступлениеТоваровУслуг" or "ДокументСсылка.ПоступлениеТоваровУслуг",
+                                counterpartyByExternalId);
+                            if (act is not null)
+                            {
+                                bundle.ActDrafts.Add(act);
+                            }
 
-                        break;
-                    }
+                            break;
+                        }
                     default:
-                    {
-                        IncrementOneCNonImportObjectCount(bundle, discriminator);
-                        break;
-                    }
+                        {
+                            IncrementOneCNonImportObjectCount(bundle, discriminator);
+                            break;
+                        }
                 }
             }
         }

@@ -41,7 +41,10 @@ describe('usePersistedTableSettings', () => {
     localStorage.clear();
     vi.clearAllMocks();
     vi.mocked(apiService.getUserSetting).mockResolvedValue(null);
-    vi.mocked(apiService.upsertUserSetting).mockResolvedValue(null);
+    vi.mocked(apiService.upsertUserSetting).mockResolvedValue({
+      key: 'test_table_settings',
+      value: '{}',
+    });
   });
 
   it('adds newly introduced default-visible columns to saved settings', () => {

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+﻿import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AUTH_SESSION_EXPIRED_EVENT, apiService, extractResponseErrorMessage } from './api';
 import { resolveApiBaseUrl } from './apiBaseUrl';
@@ -90,7 +90,7 @@ describe('apiService auth handling', () => {
         documentTemplateLibrary: false,
       },
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -119,7 +119,7 @@ describe('apiService auth handling', () => {
         message: 'ICS доступен',
       },
     ];
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -150,7 +150,7 @@ describe('apiService auth handling', () => {
         },
       ],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -179,7 +179,7 @@ describe('apiService auth handling', () => {
       notes: '',
       updatedAt: '2026-05-26T17:00:00Z',
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -207,7 +207,7 @@ describe('apiService auth handling', () => {
       dryRunConfirmed: true,
       notes: 'Проверено',
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ...payload, updatedAt: '2026-05-26T17:00:00Z' }), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ ...payload, updatedAt: '2026-05-26T17:00:00Z' }), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -240,7 +240,7 @@ describe('apiService auth handling', () => {
       },
       recentLogs: [],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -258,7 +258,7 @@ describe('apiService auth handling', () => {
       authUrl: 'https://accounts.google.com/o/oauth2/v2/auth?state=state-1',
       pollIntervalMs: 2000,
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -285,7 +285,7 @@ describe('apiService auth handling', () => {
         recentLogs: [],
       },
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -317,7 +317,7 @@ describe('apiService auth handling', () => {
       },
       recentLogs: [],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -335,7 +335,7 @@ describe('apiService auth handling', () => {
       authUrl: 'https://oauth.yandex.ru/authorize?state=state-1',
       pollIntervalMs: 2000,
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -362,7 +362,7 @@ describe('apiService auth handling', () => {
         recentLogs: [],
       },
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -382,7 +382,7 @@ describe('apiService auth handling', () => {
       tokenPreview: 'abcd...wxyz',
       updatedAt: '2026-06-01T10:00:00Z',
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -410,7 +410,7 @@ describe('apiService auth handling', () => {
         },
       ],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -440,7 +440,7 @@ describe('apiService auth handling', () => {
       availableTokens: ['clientName', 'documentTitle'],
       updatedAt: '2026-06-01T11:00:00Z',
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -465,7 +465,7 @@ describe('apiService auth handling', () => {
       folderTemplate: 'CRM/{clientName}/{caseNumber}',
       fileNameTemplate: '{documentDate}-{documentTitle}',
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ...payload, availableTokens: [] }), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ ...payload, availableTokens: [] }), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -501,7 +501,7 @@ describe('apiService auth handling', () => {
         },
       ],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -536,7 +536,7 @@ describe('apiService auth handling', () => {
         },
       ],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -550,7 +550,7 @@ describe('apiService auth handling', () => {
 
   it('uploads a case document to Yandex Disk', async () => {
     const payload = { success: true, path: '/CRM/client/file.pdf' };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -565,7 +565,7 @@ describe('apiService auth handling', () => {
 
   it('uploads a task file to Yandex Disk', async () => {
     const payload = { success: true, path: '/CRM/tasks/file.pdf' };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -580,7 +580,7 @@ describe('apiService auth handling', () => {
 
   it('uploads a contract document to Yandex Disk', async () => {
     const payload = { success: true, path: '/CRM/contracts/contract.pdf' };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -595,7 +595,7 @@ describe('apiService auth handling', () => {
 
   it('uploads an invoice document to Yandex Disk', async () => {
     const payload = { success: true, path: '/CRM/invoices/invoice.pdf' };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -613,7 +613,7 @@ describe('apiService auth handling', () => {
 
   it('uploads an act document to Yandex Disk', async () => {
     const payload = { success: true, path: '/CRM/acts/act.pdf' };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -630,7 +630,7 @@ describe('apiService auth handling', () => {
   });
 
   it('uploads a Yandex Disk file with form data', async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ success: true, path: '/docs/a.txt' }), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ success: true, path: '/docs/a.txt' }), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -660,7 +660,7 @@ describe('apiService auth handling', () => {
         },
       ],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -685,7 +685,7 @@ describe('apiService auth handling', () => {
         items: [],
       },
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -712,7 +712,7 @@ describe('apiService auth handling', () => {
       },
       seenByCurrentUser: false,
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -725,7 +725,7 @@ describe('apiService auth handling', () => {
   });
 
   it('marks app version release as seen', async () => {
-    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
     vi.stubGlobal('fetch', fetchMock);
 
     await apiService.markAppVersionSeen('2026-05-21-accounting-v2');
@@ -747,7 +747,7 @@ describe('apiService auth handling', () => {
       items: [{ type: 'new', text: 'Manual item' }],
     };
     const response = { id: 2, ...payload, source: 'manual', createdAt: '2026-05-22T00:00:00', updatedAt: '2026-05-22T00:00:00' };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(response), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(response), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -762,7 +762,7 @@ describe('apiService auth handling', () => {
   });
 
   it('deletes app release through admin API', async () => {
-    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
     vi.stubGlobal('fetch', fetchMock);
 
     await apiService.deleteAdminAppRelease(7);
@@ -800,7 +800,7 @@ describe('apiService auth handling', () => {
         },
       ],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -813,7 +813,7 @@ describe('apiService auth handling', () => {
   });
 
   it('downloads role permission audit csv from the backend', async () => {
-    const fetchMock = vi.fn(async () => new Response('RoleId;RoleName', {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('RoleId;RoleName', {
       headers: {
         'content-type': 'text/csv',
         'content-disposition': 'attachment; filename="roles-audit.csv"',
@@ -831,7 +831,7 @@ describe('apiService auth handling', () => {
 
   it('uses the primary pp_token storage key for API requests', async () => {
     localStorage.setItem('pp_token', 'main-token');
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify([]), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify([]), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -844,7 +844,7 @@ describe('apiService auth handling', () => {
   });
 
   it('loads the notification inbox with filters', async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       items: [],
       total: 0,
       page: 2,
@@ -882,7 +882,7 @@ describe('apiService auth handling', () => {
   });
 
   it('marks all filtered inbox notifications as read', async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       updatedCount: 3,
     }), {
       headers: { 'content-type': 'application/json' },
@@ -915,7 +915,7 @@ describe('apiService auth handling', () => {
   });
 
   it('sends selected inbox notifications to archive and delete endpoints', async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
       updatedCount: 2,
     }), {
       headers: { 'content-type': 'application/json' },
@@ -941,7 +941,7 @@ describe('apiService auth handling', () => {
   });
 
   it('loads and updates notification role preferences', async () => {
-    const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => new Response(JSON.stringify(
+    const fetchMock = vi.fn<typeof fetch>(async (_url: RequestInfo | URL, init?: RequestInit) => new Response(JSON.stringify(
       init?.method === 'PUT'
         ? {
           roleId: 2,
@@ -1010,7 +1010,7 @@ describe('apiService auth handling', () => {
         isFuture: true,
       },
     ];
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -1025,7 +1025,7 @@ describe('apiService auth handling', () => {
   it('emits a session-expired event when the API returns 401', async () => {
     const listener = vi.fn();
     window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, listener);
-    const fetchMock = vi.fn(async () => new Response('', { status: 401, statusText: 'Unauthorized' }));
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('', { status: 401, statusText: 'Unauthorized' }));
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(apiService.getTaskJournalNotifications()).rejects.toThrow('Сессия истекла. Войдите снова.');
@@ -1037,7 +1037,7 @@ describe('apiService auth handling', () => {
 
 describe('apiService case calendar', () => {
   it('downloads task calendar ICS with client filters', async () => {
-    const fetchMock = vi.fn(async () => new Response('task-calendar', {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('task-calendar', {
       headers: {
         'content-disposition': 'attachment; filename="task-calendar.ics"',
       },
@@ -1065,7 +1065,7 @@ describe('apiService case calendar', () => {
   });
 
   it('downloads case calendar ICS with filters', async () => {
-    const fetchMock = vi.fn(async () => new Response('case-calendar', {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('case-calendar', {
       headers: {
         'content-disposition': 'attachment; filename="case-calendar.ics"',
       },
@@ -1111,7 +1111,7 @@ describe('apiService reports', () => {
       byAccount: [],
       days: [],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -1146,7 +1146,7 @@ describe('apiService reports', () => {
       outgoingCount: 2,
       days: [],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -1176,7 +1176,7 @@ describe('apiService reports', () => {
       income: [{ categoryName: 'Услуги', amount: 15000, count: 2, share: 100 }],
       expense: [{ categoryName: 'Налоги', amount: 4000, count: 1, share: 100 }],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -1215,7 +1215,7 @@ describe('apiService reports', () => {
         share: 100,
       }],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -1254,7 +1254,7 @@ describe('apiService reports', () => {
         share: 100,
       }],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -1275,7 +1275,7 @@ describe('apiService reports', () => {
   });
 
   it('downloads legal work report exports with filters', async () => {
-    const fetchMock = vi.fn(async () => new Response('excel-data', {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('excel-data', {
       headers: {
         'content-disposition': 'attachment; filename="legal-work-report.xls"',
       },
@@ -1304,7 +1304,7 @@ describe('apiService reports', () => {
   });
 
   it('downloads management report exports with filters', async () => {
-    const fetchMock = vi.fn(async () => new Response('pdf-data', {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('pdf-data', {
       headers: {
         'content-disposition': 'attachment; filename="case-success-report.pdf"',
       },
@@ -1346,7 +1346,7 @@ describe('apiService reports', () => {
       byResponsible: [],
       items: [],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -1388,7 +1388,7 @@ describe('apiService reports', () => {
       byResponsible: [],
       items: [],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -1429,7 +1429,7 @@ describe('apiService reports', () => {
       byResponsible: [],
       items: [],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -1475,7 +1475,7 @@ describe('apiService reports', () => {
       byResponsible: [],
       items: [],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -1525,7 +1525,7 @@ describe('apiService reports', () => {
       byType: [],
       items: [],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -1567,7 +1567,7 @@ describe('apiService reports', () => {
       totalPlannedHours: 6,
       items: [],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -1608,7 +1608,7 @@ describe('apiService reports', () => {
         share: 100,
       }],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -1647,7 +1647,7 @@ describe('apiService reports', () => {
         share: 100,
       }],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -1691,7 +1691,7 @@ describe('apiService reports', () => {
         expenseCount: 1,
       }],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -1729,7 +1729,7 @@ describe('apiService reports', () => {
       netVariance: -3000,
       days: [],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -1772,7 +1772,7 @@ describe('apiService reports', () => {
         unrecognizedCount: 1,
       }],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -1812,7 +1812,7 @@ describe('apiService reports', () => {
         share: 100,
       }],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -1851,7 +1851,7 @@ describe('apiService reports', () => {
         share: 100,
       }],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -1892,7 +1892,7 @@ describe('apiService reports', () => {
         share: 100,
       }],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -1938,7 +1938,7 @@ describe('apiService reports', () => {
         share: 60,
       }],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -1982,7 +1982,7 @@ describe('apiService reports', () => {
         share: 75,
       }],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -2019,7 +2019,7 @@ describe('apiService reports', () => {
         share: 100,
       }],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -2058,7 +2058,7 @@ describe('apiService reports', () => {
         share: 100,
       }],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -2102,7 +2102,7 @@ describe('apiService reports', () => {
         share: 100,
       }],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -2147,7 +2147,7 @@ describe('apiService reports', () => {
         share: 100,
       }],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -2186,7 +2186,7 @@ describe('apiService reports', () => {
         share: 100,
       }],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -2230,7 +2230,7 @@ describe('apiService reports', () => {
         share: 100,
       }],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -2274,7 +2274,7 @@ describe('apiService reports', () => {
         share: 50,
       }],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
@@ -2322,7 +2322,7 @@ describe('apiService reports', () => {
         share: 50,
       }],
     };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);

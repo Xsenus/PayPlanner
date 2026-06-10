@@ -466,108 +466,108 @@ public class ReportsController : ControllerBase
         switch (normalizedReport)
         {
             case "case-finance":
-            {
-                var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
-                var accountsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
-                if (casesVisibility is null || accountsVisibility is null)
                 {
-                    return (null, Unauthorized());
-                }
+                    var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
+                    var accountsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+                    if (casesVisibility is null || accountsVisibility is null)
+                    {
+                        return (null, Unauthorized());
+                    }
 
-                var (start, end) = ResolveReportPeriod(from, to, reportToday);
-                var filters = new LegalWorkReportFilters(NormalizeOptional(status), responsibleUserId, NormalizeOptional(caseType));
-                var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                    cancellationToken => BuildCaseFinanceReportAsync(start, end, timeZone, filters, effectiveLimit, casesVisibility, accountsVisibility, cancellationToken),
-                    _logger,
-                    ct);
-                return (BuildCaseFinanceExportDocument(reportDto), null);
-            }
+                    var (start, end) = ResolveReportPeriod(from, to, reportToday);
+                    var filters = new LegalWorkReportFilters(NormalizeOptional(status), responsibleUserId, NormalizeOptional(caseType));
+                    var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                        cancellationToken => BuildCaseFinanceReportAsync(start, end, timeZone, filters, effectiveLimit, casesVisibility, accountsVisibility, cancellationToken),
+                        _logger,
+                        ct);
+                    return (BuildCaseFinanceExportDocument(reportDto), null);
+                }
 
             case "case-success":
-            {
-                var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
-                if (casesVisibility is null)
                 {
-                    return (null, Unauthorized());
-                }
+                    var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
+                    if (casesVisibility is null)
+                    {
+                        return (null, Unauthorized());
+                    }
 
-                var (start, end) = ResolveReportPeriod(from, to, reportToday);
-                var filters = new LegalWorkReportFilters(NormalizeOptional(status), responsibleUserId, NormalizeOptional(caseType));
-                var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                    cancellationToken => BuildCaseSuccessReportAsync(start, end, reportToday, timeZone, filters, effectiveLimit, casesVisibility, cancellationToken),
-                    _logger,
-                    ct);
-                return (BuildCaseSuccessExportDocument(reportDto), null);
-            }
+                    var (start, end) = ResolveReportPeriod(from, to, reportToday);
+                    var filters = new LegalWorkReportFilters(NormalizeOptional(status), responsibleUserId, NormalizeOptional(caseType));
+                    var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                        cancellationToken => BuildCaseSuccessReportAsync(start, end, reportToday, timeZone, filters, effectiveLimit, casesVisibility, cancellationToken),
+                        _logger,
+                        ct);
+                    return (BuildCaseSuccessExportDocument(reportDto), null);
+                }
 
             case "current-cases":
-            {
-                var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
-                var tasksVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
-                if (casesVisibility is null || tasksVisibility is null)
                 {
-                    return (null, Unauthorized());
-                }
+                    var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
+                    var tasksVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
+                    if (casesVisibility is null || tasksVisibility is null)
+                    {
+                        return (null, Unauthorized());
+                    }
 
-                var filters = new CurrentCasesReportFilters(NormalizeOptional(status), responsibleUserId, NormalizeOptional(caseType));
-                var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                    cancellationToken => BuildCurrentCasesReportAsync(effectiveAsOf, timeZone, filters, effectiveLimit, casesVisibility, tasksVisibility, cancellationToken),
-                    _logger,
-                    ct);
-                return (BuildCurrentCasesExportDocument(reportDto), null);
-            }
+                    var filters = new CurrentCasesReportFilters(NormalizeOptional(status), responsibleUserId, NormalizeOptional(caseType));
+                    var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                        cancellationToken => BuildCurrentCasesReportAsync(effectiveAsOf, timeZone, filters, effectiveLimit, casesVisibility, tasksVisibility, cancellationToken),
+                        _logger,
+                        ct);
+                    return (BuildCurrentCasesExportDocument(reportDto), null);
+                }
 
             case "lawyer-workload":
-            {
-                var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
-                var tasksVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
-                if (casesVisibility is null || tasksVisibility is null)
                 {
-                    return (null, Unauthorized());
-                }
+                    var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
+                    var tasksVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
+                    if (casesVisibility is null || tasksVisibility is null)
+                    {
+                        return (null, Unauthorized());
+                    }
 
-                var effectiveHorizonDays = Math.Clamp(horizonDays ?? 7, 1, 60);
-                var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                    cancellationToken => BuildLawyerWorkloadReportAsync(effectiveAsOf, effectiveHorizonDays, lawyerUserId, effectiveLimit, casesVisibility, tasksVisibility, cancellationToken),
-                    _logger,
-                    ct);
-                return (BuildLawyerWorkloadExportDocument(reportDto, timeZone), null);
-            }
+                    var effectiveHorizonDays = Math.Clamp(horizonDays ?? 7, 1, 60);
+                    var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                        cancellationToken => BuildLawyerWorkloadReportAsync(effectiveAsOf, effectiveHorizonDays, lawyerUserId, effectiveLimit, casesVisibility, tasksVisibility, cancellationToken),
+                        _logger,
+                        ct);
+                    return (BuildLawyerWorkloadExportDocument(reportDto, timeZone), null);
+                }
 
             case "overdue-deadlines":
-            {
-                var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
-                if (casesVisibility is null)
                 {
-                    return (null, Unauthorized());
-                }
+                    var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
+                    if (casesVisibility is null)
+                    {
+                        return (null, Unauthorized());
+                    }
 
-                var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                    cancellationToken => BuildOverdueProceduralDeadlinesReportAsync(effectiveAsOf, NormalizeOptional(deadlineType), responsibleUserId, effectiveLimit, casesVisibility, cancellationToken),
-                    _logger,
-                    ct);
-                return (BuildOverdueDeadlinesExportDocument(reportDto, timeZone), null);
-            }
+                    var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                        cancellationToken => BuildOverdueProceduralDeadlinesReportAsync(effectiveAsOf, NormalizeOptional(deadlineType), responsibleUserId, effectiveLimit, casesVisibility, cancellationToken),
+                        _logger,
+                        ct);
+                    return (BuildOverdueDeadlinesExportDocument(reportDto, timeZone), null);
+                }
 
             case "case-activity":
-            {
-                var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
-                if (casesVisibility is null)
                 {
-                    return (null, Unauthorized());
-                }
+                    var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
+                    if (casesVisibility is null)
+                    {
+                        return (null, Unauthorized());
+                    }
 
-                var settings = await GetCaseActivityReportSettingsAsync(ct);
-                var effectiveInactiveDays = Math.Clamp(inactiveDays ?? settings.InactivityDays, 1, 365);
-                var effectiveEscalationDays = Math.Clamp(escalationDays ?? settings.EscalationDays, effectiveInactiveDays, 365);
-                var effectiveActivityLimit = Math.Clamp(limit ?? 50, 1, 200);
-                var normalizedActivity = NormalizeCaseActivityFilter(activity);
-                var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                    cancellationToken => BuildCaseActivityReportAsync(effectiveInactiveDays, effectiveEscalationDays, normalizedActivity, effectiveActivityLimit, casesVisibility, cancellationToken),
-                    _logger,
-                    ct);
-                return (BuildCaseActivityExportDocument(reportDto, timeZone), null);
-            }
+                    var settings = await GetCaseActivityReportSettingsAsync(ct);
+                    var effectiveInactiveDays = Math.Clamp(inactiveDays ?? settings.InactivityDays, 1, 365);
+                    var effectiveEscalationDays = Math.Clamp(escalationDays ?? settings.EscalationDays, effectiveInactiveDays, 365);
+                    var effectiveActivityLimit = Math.Clamp(limit ?? 50, 1, 200);
+                    var normalizedActivity = NormalizeCaseActivityFilter(activity);
+                    var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                        cancellationToken => BuildCaseActivityReportAsync(effectiveInactiveDays, effectiveEscalationDays, normalizedActivity, effectiveActivityLimit, casesVisibility, cancellationToken),
+                        _logger,
+                        ct);
+                    return (BuildCaseActivityExportDocument(reportDto, timeZone), null);
+                }
 
             default:
                 return (null, BadRequest("Неизвестный управленческий отчет для выгрузки."));

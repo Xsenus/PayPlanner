@@ -577,10 +577,10 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
     toast.error(message || 'Недостаточно прав для выполнения действия.', 'Недостаточно прав');
   };
 
-  const handleOpenClient = (clientId: number) => {
+  const handleOpenClient = (clientId: number, caseId: number | 'all' = 'all') => {
     clearTableClientSelection();
     setSelectedClientId(clientId);
-    setInitialCaseId('all');
+    setInitialCaseId(caseId);
   };
 
   const ensureResponsiblesLoaded = async () => {

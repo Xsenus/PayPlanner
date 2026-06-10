@@ -110,6 +110,83 @@ public class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task HandleCallbackAsync_WhenStateMissingDoesNotCreateAuthRequest()
+    {
+        await using var db = await CreateContextAsync();
+        var service = CreateService(db, new FakeHttpClientFactory());
+
+        var html = await service.HandleCallbackAsync(
+            state: null,
+            code: "code",
+            error: null,
+            errorDescription: null,
+            CreateHttpRequest(0),
+            CancellationToken.None);
+
+        Assert.Contains("<!doctype html>", html, StringComparison.OrdinalIgnoreCase);
+        Assert.False(await db.GoogleCalendarAuthRequests.AnyAsync());
+    }
+
+    [Fact]
+    public async Task HandleCallbackAsync_WhenStateUnknownDoesNotCreateAuthRequest()
+    {
+        await using var db = await CreateContextAsync();
+        var service = CreateService(db, new FakeHttpClientFactory());
+
+        var html = await service.HandleCallbackAsync(
+            state: "unknown-state",
+            code: "code",
+            error: null,
+            errorDescription: null,
+            CreateHttpRequest(0),
+            CancellationToken.None);
+
+        Assert.Contains("<!doctype html>", html, StringComparison.OrdinalIgnoreCase);
+        Assert.False(await db.GoogleCalendarAuthRequests.AnyAsync());
+    }
+
+    [Fact]
+    public async Task HandleCallbackAsync_WhenStateExpiredMarksRequestExpired()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "expired-google-callback@example.com", "user");
+        db.GoogleCalendarAuthRequests.Add(new GoogleCalendarAuthRequest
+        {
+            UserId = user.Id,
+            State = "expired-state",
+            ReturnUrl = "/?ppTab=profile",
+            Status = "pending",
+            CreatedAt = DateTime.UtcNow.AddMinutes(-20),
+            ExpiresAt = DateTime.UtcNow.AddMinutes(-1)
+        });
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new FakeHttpClientFactory());
+
+        var html = await service.HandleCallbackAsync(
+            state: "expired-state",
+            code: "code",
+            error: null,
+            errorDescription: null,
+            CreateHttpRequest(user.Id),
+            CancellationToken.None);
+
+        Assert.Contains("<!doctype html>", html, StringComparison.OrdinalIgnoreCase);
+        var authRequest = await db.GoogleCalendarAuthRequests.SingleAsync();
+        Assert.Equal("expired", authRequest.Status);
+        Assert.NotNull(authRequest.Error);
+    }
+
+    [Fact]
+    public async Task HandleWebhookAsync_WhenHeadersMissingRejectsRequest()
+    {
+        await using var db = await CreateContextAsync();
+        var service = CreateService(db, new FakeHttpClientFactory());
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            service.HandleWebhookAsync(CreateHttpRequest(0), CancellationToken.None));
+    }
+
+    [Fact]
     public async Task SyncNowAsync_CreatesCalendarEventAndTaskLink()
     {
         await using var db = await CreateContextAsync();

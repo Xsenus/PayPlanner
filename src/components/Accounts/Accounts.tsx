@@ -308,7 +308,7 @@ function readNumberProperty(value: Record<string, unknown>, propertyName: string
   return typeof rawValue === 'number' && Number.isFinite(rawValue) ? rawValue : undefined;
 }
 
-function getInvoiceCaseSummary(invoice: Invoice | null): string[] {
+function getInvoiceCaseSummary(invoice: Invoice | null | undefined): string[] {
   if (!invoice) return [];
   if (invoice.clientCases?.length) {
     return invoice.clientCases.map((item) => item.title?.trim() || `Дело #${item.id}`);
@@ -330,7 +330,7 @@ function getPaymentCaseSummary(payment?: Payment | null): string[] {
   return [];
 }
 
-function resolveAccountCounterparty(invoice: Invoice | null, payments: Payment[], type: Payment['type']) {
+function resolveAccountCounterparty(invoice: Invoice | null | undefined, payments: Payment[], type: Payment['type']) {
   const firstPayment = payments[0] ?? null;
   const counterpartyName = invoice?.counterpartyName?.trim() || firstPayment?.counterpartyName?.trim() || '';
   const expenseClientName = invoice?.expenseClientName?.trim() || firstPayment?.expenseClient?.name?.trim() || '';
@@ -2550,7 +2550,7 @@ export function Accounts({
           {canCreate && (
             <button
               type="button"
-              onClick={openCreateModal}
+              onClick={() => openCreateModal()}
               className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow hover:bg-blue-500"
             >
               <Plus className="h-4 w-4" />

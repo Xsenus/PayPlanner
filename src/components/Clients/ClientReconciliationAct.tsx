@@ -952,7 +952,7 @@ export function ClientReconciliationAct({
                   onChange={(event) =>
                     updateDraft({
                       [key]: event.target.checked,
-                    } as DraftPatch<keyof ReconciliationDraft>)
+                    } as unknown as DraftPatch<keyof ReconciliationDraft>)
                   }
                   className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                 />

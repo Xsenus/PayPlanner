@@ -115,6 +115,10 @@ type TaskJournalProps = {
 
 type TaskForm = TaskJournalUpsertPayload & { dueAt: string; approvalDueAt: string | null };
 
+function isKeyword(value: string | null | undefined): value is string {
+  return Boolean(value);
+}
+
 type TaskJournalFilterPreferences = {
   viewMode: ViewMode;
   calendarColorMode: TaskCalendarColorMode;
@@ -1932,7 +1936,7 @@ export function TaskJournal({
           value: `client:${client.id}`,
           label: client.name,
           description: [client.phone, client.email].filter(Boolean).join(' · ') || undefined,
-          keywords: [String(client.id), client.name, client.phone, client.email, client.company].filter(Boolean),
+          keywords: [String(client.id), client.name, client.phone, client.email, client.company].filter(isKeyword),
         }))
         .concat(legalEntities
           .filter((entity) => entity?.id && getLegalEntityDisplayName(entity))
@@ -1956,7 +1960,7 @@ export function TaskJournal({
                 'юрлицо',
                 'контрагент',
                 ...roleLabels,
-              ].filter(Boolean),
+              ].filter(isKeyword),
             };
           }))
         .sort((a, b) => a.label.localeCompare(b.label, 'ru')),
@@ -2808,7 +2812,7 @@ export function TaskJournal({
               </p>
             </div>
 
-            <div className="flex flex-wrap gap-2">
+            <div className="flex min-w-0 max-w-full flex-wrap gap-2">
               {canExportTasks ? (
                 <>
                   <button
@@ -2916,7 +2920,7 @@ export function TaskJournal({
         </section>
 
         <section className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap rounded-xl bg-slate-100 p-1">
+          <div className="flex max-w-full flex-wrap overflow-x-auto rounded-xl bg-slate-100 p-1" data-testid="task-quick-filter-row">
             {QUICK_FILTER_OPTIONS.map(({ value, label, icon: Icon }) => (
               <button
                 key={value}
@@ -3041,9 +3045,9 @@ export function TaskJournal({
               </label>
             </div>
 
-            <div className="flex min-w-0 flex-wrap justify-start gap-2 xl:justify-end" data-testid="task-view-controls">
+            <div className="flex min-w-0 max-w-full flex-wrap justify-start gap-2 xl:justify-end" data-testid="task-view-controls">
             {viewMode !== 'timeline' ? (
-              <div className="flex rounded-xl bg-slate-100 p-1">
+              <div className="flex max-w-full overflow-x-auto rounded-xl bg-slate-100 p-1" data-testid="task-period-control">
                 {(['day', 'week', 'month', 'all'] as PeriodMode[]).map((mode) => (
                   <button
                     key={mode}
@@ -3059,7 +3063,7 @@ export function TaskJournal({
               </div>
             ) : null}
 
-            <div className="flex rounded-xl bg-slate-100 p-1" aria-label="Цветовая схема календаря задач">
+            <div className="flex max-w-full overflow-x-auto rounded-xl bg-slate-100 p-1" aria-label="Цветовая схема календаря задач">
               <span className="inline-flex items-center gap-1 px-2 text-sm font-semibold text-slate-500">
                 <Palette className="h-4 w-4" />
                 Цвет
@@ -3078,7 +3082,7 @@ export function TaskJournal({
               ))}
             </div>
 
-            <div className="flex rounded-xl bg-slate-100 p-1" aria-label="Стратегия конфликтов календаря задач">
+            <div className="flex max-w-full overflow-x-auto rounded-xl bg-slate-100 p-1" aria-label="Стратегия конфликтов календаря задач">
               <span className="inline-flex items-center gap-1 px-2 text-sm font-semibold text-slate-500">
                 <ShieldAlert className="h-4 w-4" />
                 Конфликты
@@ -3097,7 +3101,7 @@ export function TaskJournal({
               ))}
             </div>
 
-            <div className="flex rounded-xl bg-slate-100 p-1" aria-label="Порог предупреждений о загрузке календаря задач">
+            <div className="flex max-w-full overflow-x-auto rounded-xl bg-slate-100 p-1" aria-label="Порог предупреждений о загрузке календаря задач">
               <span className="inline-flex items-center gap-1 px-2 text-sm font-semibold text-slate-500">
                 <AlarmClock className="h-4 w-4" />
                 Загрузка
@@ -3116,7 +3120,7 @@ export function TaskJournal({
               ))}
             </div>
 
-            <div className="flex rounded-xl bg-slate-100 p-1">
+            <div className="flex max-w-full overflow-x-auto rounded-xl bg-slate-100 p-1" data-testid="task-view-mode-control">
               <button
                 type="button"
                 onClick={() => setViewMode('list')}
