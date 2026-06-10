@@ -410,7 +410,7 @@ npm audit --audit-level=moderate
   - DoD: прямой тест по имени сервиса есть или причина отсутствия документирована.
   - Выполнено: добавлена матрица `docs/hosted-service-lifecycle-coverage-2026-06-10.md` и guard-тест `HostedServiceLifecycleCoverageTests`; для каждого из 15 hosted services зафиксированы прямые one-tick тесты либо документирован gap и требуемый testability seam без реальных внешних API.
 
-- [ ] Добавить admin-visible status для критичных jobs.
+- [x] Добавить admin-visible status для критичных jobs.
   - Приоритет: P2.
   - Поля:
     - last run;
@@ -419,6 +419,7 @@ npm audit --audit-level=moderate
     - duration;
     - next run, если есть.
   - DoD: администратор видит, что синхронизация/ретеншн/backup не умерли молча.
+  - Выполнено: существующая админская диагностика фоновых сервисов расширена полями last success и duration; при ошибке сохраняется предыдущий успешный запуск, UI показывает длительность и последний успех, добавлен release note `2026-06-10-system-jobs-runtime-status`.
 
 ## Milestone 7. Data model, migrations, seed/backfill
 

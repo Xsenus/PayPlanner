@@ -17,6 +17,27 @@ function formatDateTime(value?: string | null, timeZoneId?: string | null) {
   }
 }
 
+function formatDuration(durationMs?: number | null) {
+  if (durationMs == null) {
+    return '—';
+  }
+
+  const safeDurationMs = Math.max(0, Math.round(durationMs));
+  if (safeDurationMs < 1000) {
+    return `${safeDurationMs} мс`;
+  }
+
+  const totalSeconds = Math.round(safeDurationMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  if (minutes > 0) {
+    return `${minutes} мин. ${seconds.toString().padStart(2, '0')} сек.`;
+  }
+
+  return `${seconds} сек.`;
+}
+
 function getStatusClasses(status: string) {
   if (status === 'active') {
     return 'border-emerald-200 bg-emerald-50 text-emerald-700';
@@ -79,7 +100,7 @@ function JobDiagnosticsCard({
         </span>
       </div>
 
-      <div className="mt-4 grid gap-3 text-sm text-slate-600 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mt-4 grid gap-3 text-sm text-slate-600 sm:grid-cols-2 xl:grid-cols-6">
         <div className="rounded-xl bg-slate-50 p-3">
           <div className="font-medium text-slate-500">Периодичность</div>
           <div className="mt-1 text-slate-900">{item.intervalText || '—'}</div>
@@ -95,6 +116,14 @@ function JobDiagnosticsCard({
         <div className="rounded-xl bg-slate-50 p-3">
           <div className="font-medium text-slate-500">Последний запуск</div>
           <div className="mt-1 text-slate-900">{formatDateTime(item.lastRunFinishedAt, timeZoneId)}</div>
+        </div>
+        <div className="rounded-xl bg-slate-50 p-3">
+          <div className="font-medium text-slate-500">Последний успех</div>
+          <div className="mt-1 text-slate-900">{formatDateTime(item.lastSuccessAt, timeZoneId)}</div>
+        </div>
+        <div className="rounded-xl bg-slate-50 p-3">
+          <div className="font-medium text-slate-500">Длительность</div>
+          <div className="mt-1 text-slate-900">{formatDuration(item.lastRunDurationMs)}</div>
         </div>
       </div>
 

@@ -1094,6 +1094,8 @@ public sealed class SystemJobsController : ControllerBase
             LastRunStatusText = state.Status == "success" ? "Успешно" : state.Status == "error" ? "Ошибка" : "Неизвестно",
             LastRunStartedAt = state.StartedAt,
             LastRunFinishedAt = state.FinishedAt,
+            LastSuccessAt = state.LastSuccessAt ?? (state.Status == "success" ? state.FinishedAt : null),
+            LastRunDurationMs = Math.Max(0, (long)(state.FinishedAt - state.StartedAt).TotalMilliseconds),
             LastRunError = state.ErrorMessage,
             ManualRunEnabled = item.ManualRunEnabled,
             ManualRunHint = item.ManualRunHint,

@@ -37,6 +37,8 @@ describe('SystemJobDiagnosticsSettings', () => {
           lastRunStatusText: 'Успешно',
           lastRunStartedAt: '2026-05-26T09:59:00Z',
           lastRunFinishedAt: '2026-05-26T10:00:00Z',
+          lastSuccessAt: '2026-05-26T10:00:00Z',
+          lastRunDurationMs: 60000,
           lastRunError: null,
           manualRunEnabled: true,
           manualRunHint: 'Можно вручную создать резервную копию базы данных.',
@@ -58,6 +60,8 @@ describe('SystemJobDiagnosticsSettings', () => {
           lastRunStatusText: 'Ошибка',
           lastRunStartedAt: '2026-05-26T11:00:00Z',
           lastRunFinishedAt: '2026-05-26T11:00:10Z',
+          lastSuccessAt: '2026-05-26T10:30:00Z',
+          lastRunDurationMs: 10000,
           lastRunError: 'feature flag disabled',
           manualRunEnabled: false,
           manualRunHint: 'Ручной запуск доступен только после включения feature flag.',
@@ -88,6 +92,10 @@ describe('SystemJobDiagnosticsSettings', () => {
     expect(screen.getByText('Ожидает feature flag')).toBeTruthy();
     expect(screen.getByText('Успешно')).toBeTruthy();
     expect(screen.getByText('feature flag disabled')).toBeTruthy();
+    expect(screen.getAllByText('Последний успех').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Длительность').length).toBeGreaterThan(0);
+    expect(screen.getByText('1 мин. 00 сек.')).toBeTruthy();
+    expect(screen.getByText('10 сек.')).toBeTruthy();
     expect(screen.getByText('Всего сервисов')).toBeTruthy();
     expect(screen.getByText('Ожидает условий')).toBeTruthy();
   });

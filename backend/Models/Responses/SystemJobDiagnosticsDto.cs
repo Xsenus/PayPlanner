@@ -24,6 +24,8 @@ public sealed class SystemJobDiagnosticsItemDto
     public string? LastRunStatusText { get; init; }
     public DateTime? LastRunStartedAt { get; init; }
     public DateTime? LastRunFinishedAt { get; init; }
+    public DateTime? LastSuccessAt { get; init; }
+    public long? LastRunDurationMs { get; init; }
     public string? LastRunError { get; init; }
     public bool ManualRunEnabled { get; init; }
     public string? ManualRunHint { get; init; }

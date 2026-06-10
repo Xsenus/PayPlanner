@@ -25,6 +25,7 @@ public sealed class SystemJobRunState
     public string Status { get; init; } = "unknown";
     public DateTime StartedAt { get; init; }
     public DateTime FinishedAt { get; init; }
+    public DateTime? LastSuccessAt { get; init; }
     public int? ProcessedCount { get; init; }
     public int? SkippedCount { get; init; }
     public string Summary { get; init; } = string.Empty;
@@ -75,16 +76,20 @@ public sealed class SystemJobRunStateService : ISystemJobRunStateService
         int? skippedCount,
         string summary,
         CancellationToken cancellationToken = default)
-        => SaveStateAsync(new SystemJobRunState
+    {
+        var finishedAt = DateTime.UtcNow;
+        return SaveStateAsync(new SystemJobRunState
         {
             JobKey = NormalizeJobKey(jobKey),
             Status = "success",
             StartedAt = startedAt,
-            FinishedAt = DateTime.UtcNow,
+            FinishedAt = finishedAt,
+            LastSuccessAt = finishedAt,
             ProcessedCount = processedCount,
             SkippedCount = skippedCount,
             Summary = Truncate(summary, 1000),
-        }, cancellationToken);
+        }, preserveLastSuccess: false, cancellationToken);
+    }
 
     public Task RecordFailureAsync(
         string jobKey,
@@ -100,7 +105,7 @@ public sealed class SystemJobRunStateService : ISystemJobRunStateService
             FinishedAt = DateTime.UtcNow,
             Summary = Truncate(summary ?? "Фоновый сервис завершился с ошибкой.", 1000),
             ErrorMessage = Truncate(exception.Message, 1000),
-        }, cancellationToken);
+        }, preserveLastSuccess: true, cancellationToken);
 
     public async Task<IReadOnlyDictionary<string, SystemJobRunState>> GetLastRunsAsync(
         IEnumerable<string> jobKeys,
@@ -139,15 +144,29 @@ public sealed class SystemJobRunStateService : ISystemJobRunStateService
         return result;
     }
 
-    private async Task SaveStateAsync(SystemJobRunState state, CancellationToken cancellationToken)
+    private async Task SaveStateAsync(SystemJobRunState state, bool preserveLastSuccess, CancellationToken cancellationToken)
     {
         try
         {
             await using var context = await _contextFactory.CreateDbContextAsync(cancellationToken);
             var key = BuildSettingKey(state.JobKey);
             var now = DateTime.UtcNow;
-            var value = JsonSerializer.Serialize(state, JsonOptions);
             var setting = await context.SystemSettings.FirstOrDefaultAsync(item => item.Key == key, cancellationToken);
+            var stateToSave = preserveLastSuccess
+                ? new SystemJobRunState
+                {
+                    JobKey = state.JobKey,
+                    Status = state.Status,
+                    StartedAt = state.StartedAt,
+                    FinishedAt = state.FinishedAt,
+                    LastSuccessAt = ResolvePreviousLastSuccessAt(setting?.Value),
+                    ProcessedCount = state.ProcessedCount,
+                    SkippedCount = state.SkippedCount,
+                    Summary = state.Summary,
+                    ErrorMessage = state.ErrorMessage,
+                }
+                : state;
+            var value = JsonSerializer.Serialize(stateToSave, JsonOptions);
             if (setting is null)
             {
                 context.SystemSettings.Add(new SystemSetting
@@ -169,6 +188,29 @@ public sealed class SystemJobRunStateService : ISystemJobRunStateService
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex, "Failed to save system job run state {JobKey}.", state.JobKey);
+        }
+    }
+
+    private static DateTime? ResolvePreviousLastSuccessAt(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        try
+        {
+            var state = JsonSerializer.Deserialize<SystemJobRunState>(value, JsonOptions);
+            if (state is null)
+            {
+                return null;
+            }
+
+            return state.LastSuccessAt ?? (state.Status == "success" ? state.FinishedAt : null);
+        }
+        catch (JsonException)
+        {
+            return null;
         }
     }
 

@@ -172,6 +172,7 @@ public class SystemJobsControllerTests
                     Status = "success",
                     StartedAt = now.AddMinutes(-5),
                     FinishedAt = now.AddMinutes(-4),
+                    LastSuccessAt = now.AddMinutes(-4),
                     ProcessedCount = 3,
                     Summary = "Проверено дел: 3.",
                 },
@@ -192,6 +193,7 @@ public class SystemJobsControllerTests
         Assert.Contains(dto.Items, item => item.Key == "case-inactivity-control" && item.PendingCount == 1 && item.LastProcessedCount == 7);
         Assert.Contains(dto.Items, item => item.Key == "court-sync" && item.Status == "active" && item.PendingCount == 1 && item.LastProcessedCount == 12);
         Assert.Contains(dto.Items, item => item.Key == "court-sync" && item.LastRunStatus == "success" && item.LastRunStatusText == "Успешно");
+        Assert.Contains(dto.Items, item => item.Key == "court-sync" && item.LastSuccessAt == now.AddMinutes(-4) && item.LastRunDurationMs == 60000);
         Assert.Contains(dto.Items, item => item.Key == "database-backup" && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "court-sync" && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "money-balance-reconciliation" && item.LastProcessedCount == 2);
@@ -818,6 +820,22 @@ public class SystemJobsControllerTests
         Assert.Equal(1, state.SkippedCount);
         Assert.Equal("Отправлены напоминания.", state.Summary);
         Assert.Null(state.ErrorMessage);
+        Assert.NotNull(state.LastSuccessAt);
+
+        var previousSuccessAt = state.LastSuccessAt;
+        await service.RecordFailureAsync(
+            SystemJobKeys.TaskReminders,
+            DateTime.UtcNow.AddSeconds(-10),
+            new InvalidOperationException("smtp unavailable"),
+            "Проверка напоминаний завершилась с ошибкой.",
+            CancellationToken.None);
+
+        states = await service.GetLastRunsAsync([SystemJobKeys.TaskReminders], CancellationToken.None);
+        state = Assert.Single(states.Values);
+
+        Assert.Equal("error", state.Status);
+        Assert.Equal("smtp unavailable", state.ErrorMessage);
+        Assert.Equal(previousSuccessAt, state.LastSuccessAt);
     }
 
     private static async Task<TestDbScope> CreateDbScopeAsync()

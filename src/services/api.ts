@@ -1090,6 +1090,8 @@ export interface SystemJobDiagnosticsItemDto {
   lastRunStatusText?: string | null;
   lastRunStartedAt?: string | null;
   lastRunFinishedAt?: string | null;
+  lastSuccessAt?: string | null;
+  lastRunDurationMs?: number | null;
   lastRunError?: string | null;
   manualRunEnabled?: boolean;
   manualRunHint?: string | null;
