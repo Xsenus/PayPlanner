@@ -333,7 +333,7 @@ npm audit --audit-level=moderate
 
 Цель: закрыть upload/download риски и не сломать документы, задачи, импорт, S3/Я.Диск.
 
-- [ ] Составить таблицу лимитов файлов.
+- [x] Составить таблицу лимитов файлов.
   - Приоритет: P0.
   - Типы:
     - profile photo;
@@ -344,6 +344,7 @@ npm audit --audit-level=moderate
     - S3 upload;
     - Yandex Disk upload.
   - DoD: для каждого типа есть max size, allowed extensions/content type, error message.
+  - Выполнено: добавлена таблица `docs/file-upload-limits-2026-06-10.md` с текущими лимитами, allowlist/отсутствием allowlist и пользовательскими сообщениями; добавлен тест полноты документации.
 
 - [ ] Добавить shared upload validation helper.
   - Приоритет: P1.
