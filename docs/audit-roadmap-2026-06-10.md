@@ -183,7 +183,7 @@ npm audit --audit-level=moderate
 
 ### 2.2 CORS, HTTPS, error contract
 
-- [ ] Ограничить production CORS или документировать причину `AllowAnyOrigin`.
+- [x] Ограничить production CORS или документировать причину `AllowAnyOrigin`.
   - Приоритет: P0/P1.
   - Найдено: `AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader()`.
   - Рекомендуемый путь:
@@ -193,6 +193,7 @@ npm audit --audit-level=moderate
     - backend test на CORS policy, если удобно;
     - manual smoke frontend/backend после deploy config.
   - DoD: production CORS не шире необходимого или явно обоснован.
+  - Выполнено: Development оставлен с `AllowAnyOrigin`, Production использует только `Cors:AllowedOrigins`; пустой список не включает wildcard. Добавлены `CorsPolicyConfigurationTests` и README пример `Cors__AllowedOrigins__0`.
 
 - [ ] Ввести единый API error contract.
   - Приоритет: P1.

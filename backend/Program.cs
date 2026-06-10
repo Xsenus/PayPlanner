@@ -163,12 +163,7 @@ builder.Services.AddSingleton<YandexDiskCrmSyncSchedulerService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<YandexDiskCrmSyncSchedulerService>());
 
 builder.Services.AddCors(options =>
-{
-    options.AddDefaultPolicy(policy =>
-    {
-        policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader();
-    });
-});
+    CorsPolicyConfiguration.ConfigureDefaultPolicy(options, builder.Configuration, builder.Environment));
 
 builder.Services.AddResponseCompression(options =>
 {

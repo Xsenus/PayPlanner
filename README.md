@@ -132,9 +132,11 @@ Jwt__Secret=<at-least-32-random-characters>
 DaData__ApiKey=<optional-dadata-api-key>
 DaData__Secret=<optional-dadata-secret>
 Email__SmtpPassword=<optional-smtp-password>
+Cors__AllowedOrigins__0=https://crm.example.com
 ```
 
 Обязательные параметры для запуска backend: `ConnectionStrings:Default` и `Jwt:Secret`. `Jwt:Secret` должен быть не короче 32 символов; приложение завершит старт с ошибкой, если секрет не задан. `DaData:*` и `Email:*` нужны только для соответствующих интеграций.
+В Development backend оставляет CORS открытым для локальной разработки. В Production внешние origins берутся только из `Cors:AllowedOrigins`; если список пустой, cross-origin запросы не разрешаются, а работа через тот же домен продолжает идти без CORS.
 
 ## Миграции БД и сидирование
 
