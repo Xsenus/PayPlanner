@@ -435,12 +435,13 @@ npm audit --audit-level=moderate
     4. Добавить tests на округление/сохранение.
   - DoD: деньги не теряют точность и одинаково ведут себя в SQLite/PostgreSQL.
 
-- [ ] Проверить unique indexes с soft-delete и business scope.
+- [x] Проверить unique indexes с soft-delete и business scope.
   - Приоритет: P1.
   - Вопросы:
     - uniqueness глобальная или по компании/году/legal entity?
     - учитывает ли soft-delete?
   - DoD: tests фиксируют expected uniqueness для счетов, актов, договоров, кассовых документов, справочников.
+  - Выполнено: добавлена документация `docs/unique-index-soft-delete-scope-2026-06-10.md` и metadata tests `UniqueIndexBusinessScopeTests`; зафиксировано, что счета/акты/договоры не имеют уникальности номера, кассовые документы имеют глобальную уникальность без soft-delete фильтра, коды OKIN/OKSO/OKPDTR глобально уникальны.
 
 - [ ] Документировать и протестировать delete behavior.
   - Приоритет: P1.
