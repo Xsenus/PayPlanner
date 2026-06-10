@@ -1,24 +1,18 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { apiService } from '../../services/api';
+import { apiServiceMock, resetApiServiceMock } from '../../test/apiMock';
 import { UserOnlineSettings } from './UserOnlineSettings';
 
-vi.mock('../../services/api', () => ({
-  apiService: {
-    getUsersOnline: vi.fn(),
-    sendUserActivityHeartbeat: vi.fn(),
-    getUserSetting: vi.fn(),
-  },
+vi.mock('../../services/api', async () => ({
+  apiService: (await import('../../test/apiMock')).apiServiceMock,
 }));
 
 describe('UserOnlineSettings', () => {
   beforeEach(() => {
-    vi.mocked(apiService.getUsersOnline).mockReset();
-    vi.mocked(apiService.sendUserActivityHeartbeat).mockReset();
-    vi.mocked(apiService.getUserSetting).mockReset();
-    vi.mocked(apiService.sendUserActivityHeartbeat).mockResolvedValue(undefined);
-    vi.mocked(apiService.getUserSetting).mockResolvedValue({ key: 'profile.timeZoneId', value: 'Europe/Samara' });
+    resetApiServiceMock('getUsersOnline', 'sendUserActivityHeartbeat', 'getUserSetting');
+    apiServiceMock.sendUserActivityHeartbeat.mockResolvedValue(undefined);
+    apiServiceMock.getUserSetting.mockResolvedValue({ key: 'profile.timeZoneId', value: 'Europe/Samara' });
   });
 
   afterEach(() => {
@@ -28,7 +22,7 @@ describe('UserOnlineSettings', () => {
   it('shows online users, translated activity and split refresh time', async () => {
     const nowWithoutTimezone = new Date().toISOString().replace(/Z$/, '');
 
-    vi.mocked(apiService.getUsersOnline).mockResolvedValue({
+    apiServiceMock.getUsersOnline.mockResolvedValue({
       generatedAt: '2026-05-25T08:00:00',
       onlineThresholdMinutes: 5,
       totalUsers: 2,
@@ -91,14 +85,14 @@ describe('UserOnlineSettings', () => {
     expect(screen.getByTestId('user-online-table-card')).toBeTruthy();
 
     await waitFor(() => {
-      expect(apiService.getUsersOnline).toHaveBeenCalledTimes(1);
-      expect(apiService.sendUserActivityHeartbeat).toHaveBeenCalledTimes(1);
+      expect(apiServiceMock.getUsersOnline).toHaveBeenCalledTimes(1);
+      expect(apiServiceMock.sendUserActivityHeartbeat).toHaveBeenCalledTimes(1);
     });
   });
 
   it('auto-refreshes every 10 seconds while the section is visible', async () => {
     const intervalSpy = vi.spyOn(window, 'setInterval');
-    vi.mocked(apiService.getUsersOnline).mockResolvedValue({
+    apiServiceMock.getUsersOnline.mockResolvedValue({
       generatedAt: '2026-05-25T08:00:00',
       onlineThresholdMinutes: 5,
       totalUsers: 0,
@@ -109,7 +103,7 @@ describe('UserOnlineSettings', () => {
     const { unmount } = render(<UserOnlineSettings />);
 
     await waitFor(() => {
-      expect(apiService.getUsersOnline).toHaveBeenCalledTimes(1);
+      expect(apiServiceMock.getUsersOnline).toHaveBeenCalledTimes(1);
     });
 
     expect(intervalSpy).toHaveBeenCalledWith(expect.any(Function), 10000);
@@ -118,7 +112,7 @@ describe('UserOnlineSettings', () => {
   });
 
   it('shows loading error', async () => {
-    vi.mocked(apiService.getUsersOnline).mockRejectedValue(new Error('network down'));
+    apiServiceMock.getUsersOnline.mockRejectedValue(new Error('network down'));
 
     render(<UserOnlineSettings />);
 

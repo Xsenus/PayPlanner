@@ -521,10 +521,11 @@ npm audit --audit-level=moderate
 
 Цель: тесты должны проверять пользовательские сценарии, а не только факт render.
 
-- [ ] Ввести shared API mock layer или MSW.
+- [x] Ввести shared API mock layer или MSW.
   - Приоритет: P2.
   - Причина: сейчас много ad hoc fetch/api mocks.
   - DoD: новые tests используют единый mock layer, старые мигрируются постепенно.
+  - Выполнено: добавлен `src/test/apiMock.ts` с lazy `apiServiceMock` и reset/clear helpers; на общий слой переведены первые frontend tests (`FeatureFlagSettings`, `UserOnlineSettings`); контракт helper зафиксирован в `src/test/apiMock.test.ts`; детали в `docs/frontend-api-mock-layer-2026-06-10.md`.
 
 - [ ] Добавить hook-specific tests для hooks без покрытия.
   - Приоритет: P1.

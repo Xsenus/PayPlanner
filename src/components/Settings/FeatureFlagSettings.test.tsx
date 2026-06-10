@@ -1,22 +1,20 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { apiService } from '../../services/api';
+import { apiServiceMock, resetApiServiceMock } from '../../test/apiMock';
 import { FeatureFlagSettings } from './FeatureFlagSettings';
 
-vi.mock('../../services/api', () => ({
-  apiService: {
-    getFeatureFlags: vi.fn(),
-  },
+vi.mock('../../services/api', async () => ({
+  apiService: (await import('../../test/apiMock')).apiServiceMock,
 }));
 
 describe('FeatureFlagSettings', () => {
   beforeEach(() => {
-    vi.mocked(apiService.getFeatureFlags).mockReset();
+    resetApiServiceMock('getFeatureFlags');
   });
 
   it('shows legal feature flag states', async () => {
-    vi.mocked(apiService.getFeatureFlags).mockResolvedValue({
+    apiServiceMock.getFeatureFlags.mockResolvedValue({
       legal: {
         externalCourtSync: false,
         externalCalendarSync: true,
@@ -37,7 +35,7 @@ describe('FeatureFlagSettings', () => {
   });
 
   it('shows a fallback error when flags cannot be loaded', async () => {
-    vi.mocked(apiService.getFeatureFlags).mockRejectedValue(new Error('network down'));
+    apiServiceMock.getFeatureFlags.mockRejectedValue(new Error('network down'));
 
     render(<FeatureFlagSettings />);
 
