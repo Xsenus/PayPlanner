@@ -443,7 +443,7 @@ npm audit --audit-level=moderate
   - DoD: tests фиксируют expected uniqueness для счетов, актов, договоров, кассовых документов, справочников.
   - Выполнено: добавлена документация `docs/unique-index-soft-delete-scope-2026-06-10.md` и metadata tests `UniqueIndexBusinessScopeTests`; зафиксировано, что счета/акты/договоры не имеют уникальности номера, кассовые документы имеют глобальную уникальность без soft-delete фильтра, коды OKIN/OKSO/OKPDTR глобально уникальны.
 
-- [ ] Документировать и протестировать delete behavior.
+- [x] Документировать и протестировать delete behavior.
   - Приоритет: P1.
   - Сущности:
     - клиент;
@@ -454,6 +454,7 @@ npm audit --audit-level=moderate
     - договор;
     - документы/attachments.
   - DoD: понятно, что cascade/delete/set null/restrict делает с данными.
+  - Выполнено: добавлены `DeleteBehaviorContractTests` и `docs/delete-behavior-contract-2026-06-10.md`; для ключевых связей клиента, дела, платежа, счета, акта, договора и attachments зафиксированы cascade/set null/restrict правила в SQLite/PostgreSQL metadata.
 
 - [x] Добавить seed idempotency tests.
   - Приоритет: P0.
