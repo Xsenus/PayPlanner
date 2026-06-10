@@ -383,7 +383,7 @@ npm audit --audit-level=moderate
 
 Цель: фоновые задачи должны быть проверяемыми, отменяемыми и наблюдаемыми.
 
-- [ ] Добавить lifecycle tests для 15 hosted services.
+- [x] Добавить lifecycle tests для 15 hosted services.
   - Приоритет: P1.
   - Services:
     - `DatabaseBackupSchedulerService`;
@@ -408,6 +408,7 @@ npm audit --audit-level=moderate
     - exception не убивает host;
     - не дергает реальные внешние API.
   - DoD: прямой тест по имени сервиса есть или причина отсутствия документирована.
+  - Выполнено: добавлена матрица `docs/hosted-service-lifecycle-coverage-2026-06-10.md` и guard-тест `HostedServiceLifecycleCoverageTests`; для каждого из 15 hosted services зафиксированы прямые one-tick тесты либо документирован gap и требуемый testability seam без реальных внешних API.
 
 - [ ] Добавить admin-visible status для критичных jobs.
   - Приоритет: P2.
