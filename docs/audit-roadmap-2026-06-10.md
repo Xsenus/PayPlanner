@@ -619,24 +619,27 @@ npm audit --audit-level=moderate
 
 Цель: изменения должны быть понятны пользователю, разработчику и администратору.
 
-- [ ] Обновить README.
+- [x] Обновить README.
   - Приоритет: P1.
   - Найдено:
     - README drift по PostgreSQL/SQLite;
     - устаревшие утверждения про typecheck/CI;
     - неактуальные инструкции.
   - DoD: новый разработчик может поднять проект по README.
+  - Выполнено: README получил актуальный root-level setup через `npm ci`, `dotnet restore backend\PayPlanner.Api.sln`, `dotnet run --project backend\PayPlanner.Api.csproj`, env/secrets и ссылки на process docs; покрыто `DocumentationProcessTests`.
 
-- [ ] Описать quality gates.
+- [x] Описать quality gates.
   - Приоритет: P1.
   - Где: README или `docs/quality-gates.md`.
   - DoD: понятно, какие команды запускать перед PR/deploy.
+  - Выполнено: добавлен `docs/quality-gates.md` со стандартным local gate, targeted checks и CI gate before deploy; покрыто `DocumentationProcessTests`.
 
-- [ ] Описать release note policy из `AGENTS.md` в dev docs.
+- [x] Описать release note policy из `AGENTS.md` в dev docs.
   - Приоритет: P2.
   - DoD: при user-facing change агент не забывает `backend/AppReleases/releases.json`.
+  - Выполнено: добавлен `docs/release-note-policy.md` с правилами What New, категориями `new`/`improved`/`fixed`/`important` и workflow; покрыто `DocumentationProcessTests`.
 
-- [ ] Обновить deploy/runbook по production config.
+- [x] Обновить deploy/runbook по production config.
   - Приоритет: P1.
   - Темы:
     - secrets;
@@ -646,6 +649,7 @@ npm audit --audit-level=moderate
     - backup/rollback;
     - health checks.
   - DoD: администратор понимает, что происходит при deploy.
+  - Выполнено: `docs/deploy-runbook.md` расширен по secrets, CORS origins, TLS/HSTS, startup migrations/release sync, backup/rollback и health checks; покрыто `DocumentationProcessTests`.
 
 ## Milestone 12. Финальная приемка
 

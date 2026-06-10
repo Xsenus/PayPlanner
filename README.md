@@ -26,7 +26,7 @@
   - [Как считается сводка](#как-считается-сводка)
   - [Как считаются бакеты просрочки (aging)](#как-считаются-бакеты-просрочки-aging)
 - [Качество кода](#качество-кода)
-- [Результаты технического аудита (2026-02-15)](#результаты-технического-аудита-2026-02-15)
+- [Актуальное состояние аудита и quality gates](#актуальное-состояние-аудита-и-quality-gates)
   - [Что проверено](#что-проверено)
   - [Критические проблемы](#критические-проблемы)
   - [Что доработать в первую очередь](#что-доработать-в-первую-очередь)
@@ -85,7 +85,7 @@
 
 ```bash
 cd /workspace/PayPlanner
-npm i
+npm ci
 npm run dev
 ```
 
@@ -95,9 +95,8 @@ npm run dev
 
 ```bash
 cd /workspace/PayPlanner/backend
-dotnet build
-dotnet ef database update
-dotnet run
+dotnet restore PayPlanner.Api.sln
+dotnet run --project PayPlanner.Api.csproj
 ```
 
 - API поднимается на `<http://localhost:5080>` (порт может отличаться согласно `launchSettings.json`).
@@ -139,6 +138,27 @@ Cors__AllowedOrigins__0=https://crm.example.com
 В Development backend оставляет CORS открытым для локальной разработки. В Production внешние origins берутся только из `Cors:AllowedOrigins`; если список пустой, cross-origin запросы не разрешаются, а работа через тот же домен продолжает идти без CORS.
 
 Production TLS/HSTS закреплены в [deploy runbook](docs/deploy-runbook.md): публичный HTTPS, редирект HTTP->HTTPS и заголовок `Strict-Transport-Security` должны обеспечиваться nginx, а backend слушает внутренний HTTP endpoint `127.0.0.1:5080`.
+
+## Current developer setup
+
+From the repository root:
+
+```powershell
+npm ci
+dotnet restore backend\PayPlanner.Api.sln
+dotnet run --project backend\PayPlanner.Api.csproj
+```
+
+In another shell:
+
+```powershell
+$env:VITE_API_URL = "http://localhost:5080/api"
+npm run dev
+```
+
+For local PostgreSQL development, provide `ConnectionStrings__Default` and `Jwt__Secret` through environment variables, `dotnet user-secrets`, or another local secret store. `Jwt__Secret` must contain at least 32 characters. Startup applies migrations, seed data, release sync, and data maintenance steps automatically; do not commit real secrets to `appsettings*.json`.
+
+Before a PR or deploy, use [quality gates](docs/quality-gates.md). For user-visible changes, follow [release note policy](docs/release-note-policy.md). Production operations, secrets, CORS, TLS/HSTS, startup migrations, backup/rollback, and health checks are documented in [deploy runbook](docs/deploy-runbook.md).
 
 ## Миграции БД и сидирование
 
@@ -214,14 +234,14 @@ dotnet ef migrations add Init
 - Обработка ошибок: валидация входных данных, аккуратные исключения, сообщения для пользователя.
 - Тестирование: модульные (фронт/бэк), интеграционные для API (по мере готовности).
 
-## Результаты технического аудита (2026-02-15)
+## Актуальное состояние аудита и quality gates
 
 ### Что проверено
 
 - `npm run lint` — линтер проходит без ошибок.
 - `npx tsc --noEmit -p tsconfig.app.json` — ошибок типизации не обнаружено (после исправлений).
 - `npm run build` — production-сборка успешна, но есть предупреждение о большом чанке (`~1.2MB`).
-- `dotnet build backend/PayPlanner.Api.csproj` — не выполнено в текущем окружении (отсутствует `dotnet`).
+- `dotnet test backend\PayPlanner.Api.sln --no-restore -c Debug` — backend tests проходят; `dotnet format backend\PayPlanner.Api.sln --verify-no-changes --no-restore --verbosity minimal` закреплен как gate.
 
 ### Критические проблемы
 
@@ -230,8 +250,8 @@ dotnet ef migrations add Init
    - Текущее состояние: `tsc --noEmit` проходит успешно, но важно удерживать это как обязательный quality gate.
 
 2. **Слабая “защита от регрессий”**.
-   - В репозитории не настроены автотесты (как минимум для ключевых доменных сценариев фронта и API).
-   - Нет CI-пайплайна, который бы гарантировал проход `lint + tsc + build + backend build` на каждый PR.
+   - В репозитории есть backend tests, frontend guard/unit/integration tests и отдельные smoke/readiness scripts.
+   - Deploy workflow запускает backend format/package audit/tests, frontend lint/typecheck/audit/tests и legal feature flag gate до публикации артефактов.
 
 3. **Проблема производительности frontend bundle**.
    - Vite предупреждает о крупном JS-чанке после минификации.
@@ -243,9 +263,9 @@ dotnet ef migrations add Init
    - Зафиксировать в CI обязательный gate: `tsc --noEmit` + запрет merge при падении компиляции.
    - Добавить регрессионные проверки для зон, где были исправления (платежные модалки, роли, локализация).
 
-2. **Добавить CI и quality gates (P0)**
-   - Минимум: `npm run lint`, `npx tsc --noEmit`, `npm run build`, `dotnet build`.
-   - Блокировать merge при падении любого шага.
+2. **Поддерживать CI и quality gates**
+   - Стандартный набор команд описан в [quality gates](docs/quality-gates.md).
+   - Не ослаблять deploy gate без явного решения и причины.
 
 3. **Ускорить загрузку фронтенда (P1)**
    - Вынести крупные разделы (Календарь/Клиенты/Платежи/Отчёты) в `React.lazy`.
@@ -276,7 +296,7 @@ dotnet ef migrations add Init
 
 - **CORS**: при старте фронта/бэка на разных портах настройте CORS в API.
 - **ENV**: Vite видит только переменные, начинающиеся с `VITE_*`.
-- **Миграции**: после изменения моделей не забывайте `dotnet ef database update`.
+- **Миграции**: после изменения моделей добавляйте EF migration и проверяйте startup на локальной БД; приложение применяет миграции при старте.
 
 ## Лицензия
 
