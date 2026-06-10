@@ -473,10 +473,11 @@ npm audit --audit-level=moderate
   - DoD: SQLite/PostgreSQL behavior покрыт тестом или код разделен по provider.
   - Выполнено: добавлены `ProviderSpecificSqlTests` и `docs/provider-specific-sql-2026-06-10.md`; зафиксировано, что `FOR UPDATE` используется только в `LockInvoiceAggregateAsync` и защищен `_db.Database.IsNpgsql()`, SQLite выходит без raw SQL.
 
-- [ ] Документировать batch operations, которые обходят audit hooks.
+- [x] Документировать batch operations, которые обходят audit hooks.
   - Приоритет: P2.
   - Найдено: `ExecuteUpdateAsync`, `ExecuteDeleteAsync`.
   - DoD: понятно, где object audit сознательно не пишется.
+  - Выполнено: добавлены `docs/batch-operations-audit-coverage-2026-06-10.md` и `BatchOperationAuditCoverageTests`; зафиксированы 6 текущих batch operations, их audit behavior и rationale.
 
 ## Milestone 8. API, integrations and external callbacks
 
