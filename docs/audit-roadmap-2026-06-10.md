@@ -527,11 +527,12 @@ npm audit --audit-level=moderate
   - DoD: новые tests используют единый mock layer, старые мигрируются постепенно.
   - Выполнено: добавлен `src/test/apiMock.ts` с lazy `apiServiceMock` и reset/clear helpers; на общий слой переведены первые frontend tests (`FeatureFlagSettings`, `UserOnlineSettings`); контракт helper зафиксирован в `src/test/apiMock.test.ts`; детали в `docs/frontend-api-mock-layer-2026-06-10.md`.
 
-- [ ] Добавить hook-specific tests для hooks без покрытия.
+- [x] Добавить hook-specific tests для hooks без покрытия.
   - Приоритет: P1.
   - Из аудита: 35 hooks без прямых tests.
   - Начать с hooks, влияющих на permissions, storage, date/time, API loading.
   - DoD: критичные hooks имеют быстрые unit tests.
+  - Выполнено: добавлены быстрые tests для `useRolePermissions`, `useActivityLogger`, `useDebouncedValue`; в targeted run также сохранены storage/date-time hooks `usePersistedTableSettings` и `useUserTimeZone`; детали в `docs/frontend-hook-test-coverage-2026-06-10.md`.
 
 - [ ] Добавить accessibility tests для navigation/modals/toolbars.
   - Приоритет: P1.
