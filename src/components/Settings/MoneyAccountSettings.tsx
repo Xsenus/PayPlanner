@@ -369,7 +369,12 @@ export function MoneyAccountSettings() {
                   </h3>
                   <p className="mt-1 text-sm text-gray-500">Источник определяет, в какой журнал попадут операции.</p>
                 </div>
-                <button type="button" onClick={closeEditor} className="rounded-lg p-2 text-gray-400 hover:bg-gray-50 hover:text-gray-600">
+                <button
+                  type="button"
+                  onClick={closeEditor}
+                  className="rounded-lg p-2 text-gray-400 hover:bg-gray-50 hover:text-gray-600"
+                  aria-label="Закрыть форму денежного счета"
+                  title="Закрыть">
                   <X className="h-5 w-5" />
                 </button>
               </div>

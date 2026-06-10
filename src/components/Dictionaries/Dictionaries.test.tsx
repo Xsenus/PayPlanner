@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Dictionaries } from './Dictionaries';
 
@@ -49,5 +50,17 @@ describe('Dictionaries page layout', () => {
     expect(screen.getByTestId('dictionaries-nav').className).toContain('max-h-[calc(100vh-12rem)]');
     expect(screen.getByTestId('dictionaries-nav-scroll').className).toContain('overflow-y-auto');
     expect(screen.getByTestId('dictionaries-items-scroll').className).toContain('overflow-y-auto');
+  });
+
+  it('names icon-only row actions for assistive technologies', async () => {
+    const user = userEvent.setup();
+    render(<Dictionaries />);
+
+    await waitFor(() => expect(apiMocks.getIncomeTypes).toHaveBeenCalled());
+    await user.click(screen.getByRole('button', { name: /Тип дохода/ }));
+    await screen.findByText('Доход от услуг');
+
+    expect(screen.getByRole('button', { name: 'Редактировать Доход от услуг' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Удалить Доход от услуг' })).toBeTruthy();
   });
 });

@@ -158,7 +158,11 @@ function Modal(props: {
       <div className="absolute left-1/2 top-1/2 w-[min(900px,92vw)] -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b px-5 py-4">
           <div className="text-lg font-semibold">{title}</div>
-          <button onClick={onClose} className="rounded-lg p-2 hover:bg-gray-100">
+          <button
+            onClick={onClose}
+            className="rounded-lg p-2 hover:bg-gray-100"
+            aria-label="Закрыть окно справочников"
+            title="Закрыть">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -183,7 +187,11 @@ function ConfirmModal(props: {
       <div className="absolute left-1/2 top-1/2 w-[min(520px,92vw)] -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b px-5 py-4">
           <div className="text-lg font-semibold">{title}</div>
-          <button onClick={onClose} className="rounded-lg p-2 hover:bg-gray-100">
+          <button
+            onClick={onClose}
+            className="rounded-lg p-2 hover:bg-gray-100"
+            aria-label="Закрыть подтверждение удаления"
+            title="Закрыть">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -1033,11 +1041,19 @@ export default function DictionariesModal({
               Выбрать
             </Btn>
           )}
-          <Btn variant="ghost" onClick={onEdit}>
+          <Btn
+            variant="ghost"
+            onClick={onEdit}
+            aria-label={`Редактировать ${item.name}`}
+            title="Редактировать">
             <Pencil className="h-4 w-4" />
           </Btn>
           {!isDocumentStatusKind(kind) && (
-            <Btn variant="ghost" onClick={onDelete}>
+            <Btn
+              variant="ghost"
+              onClick={onDelete}
+              aria-label={`Удалить ${item.name}`}
+              title="Удалить">
               <Trash2 className="h-4 w-4" />
             </Btn>
           )}

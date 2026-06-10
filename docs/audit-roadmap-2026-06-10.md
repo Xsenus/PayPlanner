@@ -261,13 +261,14 @@ npm audit --audit-level=moderate
   - DoD: console не зашумлен ожидаемой ошибкой, реальные ошибки не проглатываются.
   - Выполнено: realtime notifications не стартуют без auth token, ожидаемые offline/network negotiation failures переводятся в тихий debug, а реальные HTTP/auth ошибки остаются в `console.error`. Добавлены `realtimeNotifications.test.ts` и расширены `RealtimeNotificationToasts.test.tsx`; browser smoke на Vite с отключенным API не показал SignalR console error.
 
-- [ ] Проверить и исправить icon-only buttons без accessible name.
+- [x] Проверить и исправить icon-only buttons без accessible name.
   - Приоритет: P1.
   - Кандидаты: Dictionaries, DictionariesModal, MoneyAccountSettings.
   - Тесты:
     - role/name queries в Testing Library;
     - manual keyboard navigation.
   - DoD: все icon-only buttons имеют `aria-label` или видимый accessible name.
+  - Выполнено: добавлены accessible names для icon-only действий в `Dictionaries`, `DictionariesModal` и `MoneyAccountSettings`; покрыто role/name queries в Testing Library. Добавлен release note `2026-06-10-dictionary-money-accessible-actions`.
 
 ## Milestone 4. Усилить права доступа и deep-link сценарии
 

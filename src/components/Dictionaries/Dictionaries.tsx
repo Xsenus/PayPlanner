@@ -880,13 +880,17 @@ export const Dictionaries = () => {
             <>
               <button
                 onClick={onEdit}
-                className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition">
+                className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition"
+                aria-label={`Редактировать ${item.name}`}
+                title="Редактировать">
                 <Pencil className="h-4 w-4" />
               </button>
               {!isDocumentStatusKind(kind) && (
                 <button
                   onClick={onDelete}
-                  className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition">
+                  className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition"
+                  aria-label={`Удалить ${item.name}`}
+                  title="Удалить">
                   <Trash2 className="h-4 w-4" />
                 </button>
               )}

@@ -95,6 +95,17 @@ describe('MoneyAccountSettings', () => {
     expect(toastSuccessMock).toHaveBeenCalledWith('Денежный счет добавлен.', 'Денежные счета');
   });
 
+  it('names the icon-only editor close button', async () => {
+    const user = userEvent.setup();
+
+    render(<MoneyAccountSettings />);
+
+    await screen.findByText('Денежные счета');
+    await user.click(screen.getByRole('button', { name: 'Добавить счет' }));
+
+    expect(screen.getByRole('button', { name: 'Закрыть форму денежного счета' })).toBeTruthy();
+  });
+
   it('reloads money accounts after deleting an account', async () => {
     const user = userEvent.setup();
     const account: MoneyAccount = {
