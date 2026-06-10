@@ -461,10 +461,11 @@ npm audit --audit-level=moderate
   - Сценарий: пустая БД -> seed -> seed повторно -> нет дублей, права/роли корректны.
   - DoD: seed безопасен при каждом startup.
 
-- [ ] Проверить startup migrations/seed/backfills observability.
+- [x] Проверить startup migrations/seed/backfills observability.
   - Приоритет: P1.
   - Найдено: startup выполняет `MigrateAsync`, seed, release sync, backfills.
   - DoD: ошибки видны в логах, долгие операции понятны, rollback procedure описана.
+  - Выполнено: startup операции обернуты в `RunStartupStepAsync` с логами start/success/failure и duration; добавлены `StartupDataMaintenanceObservabilityTests` и `docs/startup-data-maintenance-observability-2026-06-10.md` с rollback notes.
 
 - [ ] Проверить provider-specific SQL.
   - Приоритет: P1.

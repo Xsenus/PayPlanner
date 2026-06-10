@@ -16,6 +16,7 @@ using PayPlanner.Api.Services.LegalIntegrations;
 using PayPlanner.Api.Services.LegalEntities;
 using PayPlanner.Api.Services.Notifications;
 using PayPlanner.Api.Services.UserActivity;
+using System.Diagnostics;
 using System.IO.Compression;
 using System.Text;
 using System.Text.Json.Serialization;
@@ -255,26 +256,27 @@ app.UseStaticFiles();
 using (var scope = app.Services.CreateScope())
 {
     var cfg = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+    var startupLogger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("StartupDataMaintenance");
     var seedClients = cfg.GetValue<bool>("Seed:ClientsAndPayments");
 
     if (databaseProvider.IsSqlite)
     {
         var ctx = scope.ServiceProvider.GetRequiredService<PaymentContext>();
-        await ctx.Database.MigrateAsync();
-        await SeedDataService.SeedAsync(ctx, seedClients);
-        await AppReleaseSeedService.SyncAsync(ctx, app.Environment.ContentRootPath);
-        await PaymentRemainderTransferBackfillService.EnsureLegacyLinksAsync(ctx);
-        await TaskContractorPaymentBackfillService.EnsureGeneratedPaymentDetailsAsync(ctx);
+        await RunStartupStepAsync(startupLogger, "SQLite database migrations", async () => await ctx.Database.MigrateAsync());
+        await RunStartupStepAsync(startupLogger, "SQLite seed data", async () => await SeedDataService.SeedAsync(ctx, seedClients));
+        await RunStartupStepAsync(startupLogger, "SQLite app release sync", async () => await AppReleaseSeedService.SyncAsync(ctx, app.Environment.ContentRootPath));
+        await RunStartupStepAsync(startupLogger, "SQLite payment remainder transfer backfill", async () => await PaymentRemainderTransferBackfillService.EnsureLegacyLinksAsync(ctx));
+        await RunStartupStepAsync(startupLogger, "SQLite task contractor payment backfill", async () => await TaskContractorPaymentBackfillService.EnsureGeneratedPaymentDetailsAsync(ctx));
     }
     else
     {
         var pgFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<PostgreSqlPaymentContext>>();
         await using var pgContext = await pgFactory.CreateDbContextAsync();
-        await pgContext.Database.MigrateAsync();
-        await SeedDataService.SeedAsync(pgContext, seedClients);
-        await AppReleaseSeedService.SyncAsync(pgContext, app.Environment.ContentRootPath);
-        await PaymentRemainderTransferBackfillService.EnsureLegacyLinksAsync(pgContext);
-        await TaskContractorPaymentBackfillService.EnsureGeneratedPaymentDetailsAsync(pgContext);
+        await RunStartupStepAsync(startupLogger, "PostgreSQL database migrations", async () => await pgContext.Database.MigrateAsync());
+        await RunStartupStepAsync(startupLogger, "PostgreSQL seed data", async () => await SeedDataService.SeedAsync(pgContext, seedClients));
+        await RunStartupStepAsync(startupLogger, "PostgreSQL app release sync", async () => await AppReleaseSeedService.SyncAsync(pgContext, app.Environment.ContentRootPath));
+        await RunStartupStepAsync(startupLogger, "PostgreSQL payment remainder transfer backfill", async () => await PaymentRemainderTransferBackfillService.EnsureLegacyLinksAsync(pgContext));
+        await RunStartupStepAsync(startupLogger, "PostgreSQL task contractor payment backfill", async () => await TaskContractorPaymentBackfillService.EnsureGeneratedPaymentDetailsAsync(pgContext));
     }
 }
 
@@ -282,3 +284,27 @@ app.MapControllers();
 app.MapHub<NotificationsHub>(NotificationsHub.Path);
 
 app.Run();
+
+static async Task RunStartupStepAsync(ILogger logger, string stepName, Func<Task> action)
+{
+    var startedAt = Stopwatch.GetTimestamp();
+    logger.LogInformation("Startup data step {StepName} started.", stepName);
+
+    try
+    {
+        await action();
+        logger.LogInformation(
+            "Startup data step {StepName} completed in {ElapsedMs} ms.",
+            stepName,
+            Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(
+            ex,
+            "Startup data step {StepName} failed after {ElapsedMs} ms.",
+            stepName,
+            Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds);
+        throw;
+    }
+}
