@@ -151,7 +151,11 @@ public sealed class TelegramNotificationService : ITelegramNotificationService
 
             return new TelegramSendResult(true, NotificationDeliveryStatus.Sent);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to send Telegram message to chat {ChatId}.", chatId);
             return new TelegramSendResult(false, NotificationDeliveryStatus.Failed, ex.Message);

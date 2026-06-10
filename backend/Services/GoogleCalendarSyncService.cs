@@ -546,7 +546,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         {
             importedEvents += await ImportGoogleChangesAsync(connection, forceFull, cancellationToken);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
             errors++;
             connection.LastError = Trim(ex.Message, 2000);
@@ -583,7 +583,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
 
                 processedTasks++;
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
             {
                 errors++;
                 connection.LastError = Trim(ex.Message, 2000);
@@ -665,8 +665,9 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         {
             accessToken = await ResolveAccessTokenAsync(connection, cancellationToken);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             failures.Add($"подключение #{connection.Id}: {ex.Message}");
             await AddLogAsync(
                 connection.Id,
@@ -710,8 +711,9 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
 
                 _db.GoogleCalendarSyncCalendars.Remove(calendar);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 failures.Add($"календарь {calendar.Name}: {ex.Message}");
                 calendar.LastError = Trim(ex.Message, 2000);
                 calendar.UpdatedAt = DateTime.UtcNow;

@@ -483,7 +483,7 @@ npm audit --audit-level=moderate
 
 Цель: внешние интеграции должны быть тестируемыми без реальных сервисов и безопасными на public callbacks.
 
-- [ ] Добавить mocked HTTP integration tests.
+- [x] Добавить mocked HTTP integration tests.
   - Приоритет: P1.
   - Интеграции:
     - DaData;
@@ -494,6 +494,7 @@ npm audit --audit-level=moderate
     - Telegram;
     - S3.
   - DoD: ошибки timeout/401/403/404/429/5xx мапятся в ожидаемые сообщения/статусы.
+  - Выполнено: добавлены/расширены mocked tests для DaData, Sudrf, Yandex Disk, Google Calendar, Yandex Calendar, Telegram и S3; матрица покрытия зафиксирована в `docs/http-integration-error-coverage-2026-06-10.md`; targeted suite: 146 passed.
 
 - [x] Добавить public callback negative tests.
   - Приоритет: P0.

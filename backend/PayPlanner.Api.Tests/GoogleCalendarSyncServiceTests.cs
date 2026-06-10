@@ -836,15 +836,20 @@ public class GoogleCalendarSyncServiceTests
             item.Status == "success");
     }
 
-    [Fact]
-    public async Task DisconnectAsync_WhenGoogleCleanupFails_KeepsConnection()
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    [InlineData(HttpStatusCode.TooManyRequests)]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    [InlineData(HttpStatusCode.ServiceUnavailable)]
+    public async Task DisconnectAsync_WhenGoogleCleanupFails_KeepsConnection(HttpStatusCode statusCode)
     {
         await using var db = await CreateContextAsync();
         var user = await CreateUserAsync(db, "executor-disconnect-error@example.com", "user");
         await EnableGoogleSettingsAsync(db);
         var connection = await CreateConnectionAsync(db, user.Id);
         await CreateCalendarAsync(db, connection.Id, "calendar-disconnect-error", "PayPlanner задачи");
-        var service = CreateService(db, new FakeHttpClientFactory(new RecordingGoogleHandler(HttpStatusCode.BadGateway)));
+        var service = CreateService(db, new FakeHttpClientFactory(new RecordingGoogleHandler(statusCode)));
 
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.DisconnectAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None));
@@ -855,6 +860,48 @@ public class GoogleCalendarSyncServiceTests
         Assert.Contains(await db.GoogleCalendarSyncLogs.ToListAsync(), item =>
             item.ConnectionId == connection.Id &&
             item.Operation == "delete-calendar" &&
+            item.Status == "error");
+    }
+
+    [Fact]
+    public async Task DisconnectAsync_WhenGoogleCalendarAlreadyMissing_RemovesLocalConnection()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-disconnect-missing@example.com", "user");
+        await EnableGoogleSettingsAsync(db);
+        var connection = await CreateConnectionAsync(db, user.Id);
+        await CreateCalendarAsync(db, connection.Id, "calendar-disconnect-missing", "PayPlanner задачи");
+        var service = CreateService(db, new FakeHttpClientFactory(new RecordingGoogleHandler(HttpStatusCode.NotFound)));
+
+        var status = await service.DisconnectAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+
+        Assert.Null(status.Connection);
+        Assert.False(await db.GoogleCalendarConnections.AnyAsync(item => item.Id == connection.Id));
+        Assert.Contains(await db.GoogleCalendarSyncLogs.ToListAsync(), item =>
+            item.Operation == "delete-calendar-missing" &&
+            item.Status == "success");
+    }
+
+    [Fact]
+    public async Task DisconnectAsync_WhenGoogleCleanupTimesOut_KeepsConnection()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-disconnect-timeout@example.com", "user");
+        await EnableGoogleSettingsAsync(db);
+        var connection = await CreateConnectionAsync(db, user.Id);
+        await CreateCalendarAsync(db, connection.Id, "calendar-disconnect-timeout", "PayPlanner задачи");
+        var service = CreateService(db, new FakeHttpClientFactory(new ThrowingGoogleHandler(_ =>
+            new TaskCanceledException("Google Calendar timeout."))));
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.DisconnectAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None));
+
+        Assert.Contains("Не удалось отключить Google Calendar", error.Message);
+        Assert.True(await db.GoogleCalendarConnections.AnyAsync(item => item.Id == connection.Id));
+        Assert.True(await db.GoogleCalendarSyncCalendars.AnyAsync(item => item.GoogleCalendarId == "calendar-disconnect-timeout"));
+        Assert.Contains(await db.GoogleCalendarSyncLogs.ToListAsync(), item =>
+            item.ConnectionId == connection.Id &&
+            item.Operation == "cleanup-user-calendars" &&
             item.Status == "error");
     }
 
@@ -1233,5 +1280,11 @@ public class GoogleCalendarSyncServiceTests
 
             return clone;
         }
+    }
+
+    private sealed class ThrowingGoogleHandler(Func<HttpRequestMessage, Exception> resolveException) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromException<HttpResponseMessage>(resolveException(request));
     }
 }

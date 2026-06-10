@@ -515,7 +515,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         {
             importedEvents += await ImportYandexChangesAsync(connection, forceFull, cancellationToken);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
             errors++;
             connection.LastError = Trim(ex.Message, 2000);
@@ -552,7 +552,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
 
                 processedTasks++;
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
             {
                 errors++;
                 connection.LastError = Trim(ex.Message, 2000);
@@ -633,8 +633,9 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         {
             accessToken = await ResolveAccessTokenAsync(connection, cancellationToken);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             failures.Add($"подключение #{connection.Id}: {ex.Message}");
             await AddLogAsync(connection.Id, null, null, "system", "cleanup-user-calendars", "error", "Не удалось получить токен Яндекс.Календаря для очистки календарей удаляемого пользователя.", ex.Message, cancellationToken);
             return;
@@ -667,8 +668,9 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
 
                 _db.YandexCalendarSyncCalendars.Remove(calendar);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 failures.Add($"календарь {calendar.Name}: {ex.Message}");
                 calendar.LastError = Trim(ex.Message, 2000);
                 calendar.UpdatedAt = DateTime.UtcNow;

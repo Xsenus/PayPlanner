@@ -84,20 +84,32 @@ namespace PayPlanner.Api.Services.LegalEntities
             req.Headers.Authorization = new AuthenticationHeaderValue("Token", token);
             req.Headers.Add("X-Secret", secret);
 
-            using var resp = await SendWithRetriesAsync(req, ct);
-            if (!resp.IsSuccessStatusCode)
+            try
             {
-                _logger.LogWarning("DaData clean/{Kind} failed: {Code} {Reason}", kind, (int)resp.StatusCode, resp.ReasonPhrase);
+                using var resp = await SendWithRetriesAsync(req, ct);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("DaData clean/{Kind} failed: {Code} {Reason}", kind, (int)resp.StatusCode, resp.ReasonPhrase);
+                    return default;
+                }
+
+                await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+                using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+                var arr = doc.RootElement;
+                if (arr.ValueKind != JsonValueKind.Array || arr.GetArrayLength() == 0)
+                    return default;
+
+                return mapper(arr[0]);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex) when (IsRecoverableDadataException(ex))
+            {
+                _logger.LogError(ex, "DaData clean/{Kind} error", kind);
                 return default;
             }
-
-            await using var stream = await resp.Content.ReadAsStreamAsync(ct);
-            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
-            var arr = doc.RootElement;
-            if (arr.ValueKind != JsonValueKind.Array || arr.GetArrayLength() == 0)
-                return default;
-
-            return mapper(arr[0]);
         }
 
         private static string Combine(string baseUrl, string relative)
@@ -225,59 +237,71 @@ namespace PayPlanner.Api.Services.LegalEntities
             };
             req.Headers.Authorization = new AuthenticationHeaderValue("Token", token);
 
-            using var resp = await SendWithRetriesAsync(req, ct);
-            if (!resp.IsSuccessStatusCode)
+            try
             {
-                _logger.LogWarning("DaData findById failed: {Code} {Reason}",
-                    (int)resp.StatusCode, resp.ReasonPhrase);
+                using var resp = await SendWithRetriesAsync(req, ct);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning("DaData findById failed: {Code} {Reason}",
+                        (int)resp.StatusCode, resp.ReasonPhrase);
+                    return null;
+                }
+
+                await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+                var result = await JsonSerializer.DeserializeAsync<SuggestResponse>(stream, JsonOptions, ct);
+                var s = result?.Suggestions?.FirstOrDefault()?.Data;
+                if (s == null) return null;
+
+                return new LegalEntityDetails(
+                    ShortName: s.Name?.ShortWithOpf ?? string.Empty,
+                    FullName: s.Name?.FullWithOpf ?? s.Name?.ShortWithOpf ?? result!.Suggestions![0].Value,
+                    Inn: s.Inn,
+                    Kpp: s.Kpp,
+                    Ogrn: s.Ogrn,
+                    OpfShort: s.Opf?.Short,
+                    OpfFull: s.Opf?.Full,
+                    Status: s.State?.Status,
+                    RegistrationDate: FromEpochMs(s.State?.RegistrationDate),
+                    LiquidationDate: FromEpochMs(s.State?.LiquidationDate),
+                    Okved: s.Okved,
+                    OkvedType: s.OkvedType,
+                    BranchCount: s.BranchCount,
+                    ManagementName: s.Management?.Name,
+                    ManagementPost: s.Management?.Post,
+                    AddressValue: s.Address?.Value,
+                    AddressUnrestrictedValue: s.Address?.UnrestrictedValue,
+                    Country: s.Address?.Data?.Country,
+                    RegionWithType: s.Address?.Data?.RegionWithType,
+                    AreaWithType: s.Address?.Data?.AreaWithType,
+                    CityWithType: s.Address?.Data?.CityWithType,
+                    SettlementWithType: s.Address?.Data?.SettlementWithType,
+                    StreetWithType: s.Address?.Data?.StreetWithType,
+                    House: s.Address?.Data?.House,
+                    Flat: s.Address?.Data?.Flat,
+                    PostalCode: s.Address?.Data?.PostalCode,
+                    FiasId: s.Address?.Data?.FiasId,
+                    KladrId: s.Address?.Data?.KladrId,
+                    GeoLat: s.Address?.Data?.GeoLat,
+                    GeoLon: s.Address?.Data?.GeoLon,
+                    Okato: s.Okato,
+                    Oktmo: s.Oktmo,
+                    Okpo: s.Okpo,
+                    Okogu: s.Okogu,
+                    Okfs: s.Okfs,
+                    TaxSystem: s.Finance?.TaxSystem,
+                    Phones: ExtractContactValues(s.Phones),
+                    Emails: ExtractContactValues(s.Emails)
+                );
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex) when (IsRecoverableDadataException(ex))
+            {
+                _logger.LogError(ex, "DaData findById error");
                 return null;
             }
-
-            await using var stream = await resp.Content.ReadAsStreamAsync(ct);
-            var result = await JsonSerializer.DeserializeAsync<SuggestResponse>(stream, JsonOptions, ct);
-            var s = result?.Suggestions?.FirstOrDefault()?.Data;
-            if (s == null) return null;
-
-            return new LegalEntityDetails(
-                ShortName: s.Name?.ShortWithOpf ?? string.Empty,
-                FullName: s.Name?.FullWithOpf ?? s.Name?.ShortWithOpf ?? result!.Suggestions![0].Value,
-                Inn: s.Inn,
-                Kpp: s.Kpp,
-                Ogrn: s.Ogrn,
-                OpfShort: s.Opf?.Short,
-                OpfFull: s.Opf?.Full,
-                Status: s.State?.Status,
-                RegistrationDate: FromEpochMs(s.State?.RegistrationDate),
-                LiquidationDate: FromEpochMs(s.State?.LiquidationDate),
-                Okved: s.Okved,
-                OkvedType: s.OkvedType,
-                BranchCount: s.BranchCount,
-                ManagementName: s.Management?.Name,
-                ManagementPost: s.Management?.Post,
-                AddressValue: s.Address?.Value,
-                AddressUnrestrictedValue: s.Address?.UnrestrictedValue,
-                Country: s.Address?.Data?.Country,
-                RegionWithType: s.Address?.Data?.RegionWithType,
-                AreaWithType: s.Address?.Data?.AreaWithType,
-                CityWithType: s.Address?.Data?.CityWithType,
-                SettlementWithType: s.Address?.Data?.SettlementWithType,
-                StreetWithType: s.Address?.Data?.StreetWithType,
-                House: s.Address?.Data?.House,
-                Flat: s.Address?.Data?.Flat,
-                PostalCode: s.Address?.Data?.PostalCode,
-                FiasId: s.Address?.Data?.FiasId,
-                KladrId: s.Address?.Data?.KladrId,
-                GeoLat: s.Address?.Data?.GeoLat,
-                GeoLon: s.Address?.Data?.GeoLon,
-                Okato: s.Okato,
-                Oktmo: s.Oktmo,
-                Okpo: s.Okpo,
-                Okogu: s.Okogu,
-                Okfs: s.Okfs,
-                TaxSystem: s.Finance?.TaxSystem,
-                Phones: ExtractContactValues(s.Phones),
-                Emails: ExtractContactValues(s.Emails)
-            );
         }
 
         private static IReadOnlyList<string> ExtractContactValues(IEnumerable<JsonElement>? contacts)
@@ -369,7 +393,7 @@ namespace PayPlanner.Api.Services.LegalEntities
                     .Where(x => !string.IsNullOrWhiteSpace(x.Value))
                     .ToList();
             }
-            catch (OperationCanceledException) { throw; }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "DaData address suggest error");
@@ -430,13 +454,18 @@ namespace PayPlanner.Api.Services.LegalEntities
                     .Where(x => !string.IsNullOrWhiteSpace(x.ShortName))
                     .ToList();
             }
-            catch (OperationCanceledException) { throw; }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "DaData suggest error");
                 return Array.Empty<LegalEntitySuggestion>();
             }
         }
+
+        private static bool IsRecoverableDadataException(Exception ex) =>
+            ex is HttpRequestException
+            or JsonException
+            or TaskCanceledException;
 
         private sealed class SuggestResponse
         {

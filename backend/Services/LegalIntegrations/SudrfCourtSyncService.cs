@@ -84,9 +84,14 @@ public sealed partial class SudrfCourtSyncService : ISudrfCourtSyncService
         {
             throw;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            _logger.LogWarning(ex, "SUDRF court case request timed out for {SourceUrl}", uri);
+            throw new SudrfCourtSyncException("Сайт суда не ответил вовремя. Повторите синхронизацию позже.", ex);
         }
         catch (Exception ex)
         {

@@ -453,6 +453,9 @@ public sealed class YandexDiskServiceTests
     [Theory]
     [InlineData(401, """{"message":"Unauthorized"}""", "OAuth-токен")]
     [InlineData(403, """{"message":"Forbidden"}""", "нет прав")]
+    [InlineData(404, """{"message":"Not found"}""", "Not found")]
+    [InlineData(429, """{"message":"Too many requests"}""", "Too many requests")]
+    [InlineData(500, """{"message":"Internal server error"}""", "Internal server error")]
     [InlineData(507, """{"message":"Insufficient Storage"}""", "не хватает свободного места")]
     [InlineData(503, """{"message":"Service unavailable"}""", "временно недоступен")]
     public async Task ListAsync_ReturnsHelpfulMessageForCommonYandexDiskErrors(int statusCode, string responseBody, string expectedMessagePart)
@@ -471,6 +474,22 @@ public sealed class YandexDiskServiceTests
 
         Assert.Equal(statusCode, error.StatusCode);
         Assert.Contains(expectedMessagePart, error.Message);
+    }
+
+    [Fact]
+    public async Task ListAsync_ReturnsGatewayTimeoutForExternalTimeout()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        scope.Db.SystemSettings.Add(new SystemSetting { Key = "integrations.yandexDisk.oauthToken", Value = "ya-token", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
+        await scope.Db.SaveChangesAsync();
+        var service = new YandexDiskService(scope.Db, new HttpClient(new FakeYandexDiskHandler(_ =>
+            throw new TaskCanceledException("Yandex Disk timeout."))));
+
+        var error = await Assert.ThrowsAsync<YandexDiskOperationException>(() =>
+            service.ListAsync("/", 100, 0, CancellationToken.None));
+
+        Assert.Equal(504, error.StatusCode);
+        Assert.Contains("не ответил", error.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

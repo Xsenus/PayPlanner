@@ -1,3 +1,5 @@
+using System.Net;
+using Amazon.S3;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
@@ -187,6 +189,31 @@ public sealed class S3StorageServiceTests
 
         Assert.Equal(400, error.StatusCode);
         Assert.Contains("Путь S3 не должен содержать переходы", error.Message);
+    }
+
+    [Theory]
+    [InlineData((int)HttpStatusCode.Unauthorized, "Access Key")]
+    [InlineData((int)HttpStatusCode.Forbidden, "отказ доступа")]
+    [InlineData((int)HttpStatusCode.NotFound, "не найден")]
+    [InlineData((int)HttpStatusCode.TooManyRequests, "S3 raw error")]
+    [InlineData((int)HttpStatusCode.InternalServerError, "S3 raw error")]
+    [InlineData((int)HttpStatusCode.ServiceUnavailable, "временно недоступно")]
+    [InlineData(0, "S3 raw error")]
+    public void AwsS3StorageClient_MapsAmazonS3ErrorsToOperationException(int statusCode, string expectedMessagePart)
+    {
+        var method = typeof(AwsS3StorageClient).GetMethod(
+            "MapException",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(method);
+        var source = new AmazonS3Exception("S3 raw error")
+        {
+            StatusCode = (HttpStatusCode)statusCode,
+        };
+
+        var mapped = Assert.IsType<S3StorageOperationException>(method.Invoke(null, [source]));
+
+        Assert.Equal(statusCode == 0 ? 502 : statusCode, mapped.StatusCode);
+        Assert.Contains(expectedMessagePart, mapped.Message);
     }
 
     private static async Task<TestDbScope> CreateDbScopeAsync()

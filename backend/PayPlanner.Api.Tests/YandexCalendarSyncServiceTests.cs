@@ -164,14 +164,19 @@ public class YandexCalendarSyncServiceTests
             item.Status == "success");
     }
 
-    [Fact]
-    public async Task DisconnectAsync_WhenYandexCleanupFails_KeepsConnection()
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    [InlineData(HttpStatusCode.TooManyRequests)]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    [InlineData(HttpStatusCode.ServiceUnavailable)]
+    public async Task DisconnectAsync_WhenYandexCleanupFails_KeepsConnection(HttpStatusCode statusCode)
     {
         await using var db = await CreateContextAsync();
         var user = await CreateUserAsync(db, "executor-yandex-disconnect-error@example.com", "user");
         var connection = await CreateConnectionAsync(db, user.Id);
         await CreateCalendarAsync(db, connection.Id, "calendar-yandex-disconnect-error", "PayPlanner задачи");
-        var service = CreateService(db, new FakeHttpClientFactory(new RecordingYandexHandler(HttpStatusCode.BadGateway)));
+        var service = CreateService(db, new FakeHttpClientFactory(new RecordingYandexHandler(statusCode)));
 
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.DisconnectAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None));
@@ -179,6 +184,46 @@ public class YandexCalendarSyncServiceTests
         Assert.Contains("Не удалось отключить Яндекс.Календарь", error.Message);
         Assert.True(await db.YandexCalendarConnections.AnyAsync(item => item.Id == connection.Id));
         Assert.True(await db.YandexCalendarSyncCalendars.AnyAsync(item => item.YandexCalendarId == "calendar-yandex-disconnect-error"));
+        Assert.Contains(await db.YandexCalendarSyncLogs.ToListAsync(), item =>
+            item.ConnectionId == connection.Id &&
+            item.Operation == "delete-calendar" &&
+            item.Status == "error");
+    }
+
+    [Fact]
+    public async Task DisconnectAsync_WhenYandexCalendarAlreadyMissing_RemovesLocalConnection()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-yandex-disconnect-missing@example.com", "user");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        await CreateCalendarAsync(db, connection.Id, "calendar-yandex-disconnect-missing", "PayPlanner задачи");
+        var service = CreateService(db, new FakeHttpClientFactory(new RecordingYandexHandler(HttpStatusCode.NotFound)));
+
+        var status = await service.DisconnectAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+
+        Assert.Null(status.Connection);
+        Assert.False(await db.YandexCalendarConnections.AnyAsync(item => item.Id == connection.Id));
+        Assert.Contains(await db.YandexCalendarSyncLogs.ToListAsync(), item =>
+            item.Operation == "delete-calendar-missing" &&
+            item.Status == "success");
+    }
+
+    [Fact]
+    public async Task DisconnectAsync_WhenYandexCleanupTimesOut_KeepsConnection()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-yandex-disconnect-timeout@example.com", "user");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        await CreateCalendarAsync(db, connection.Id, "calendar-yandex-disconnect-timeout", "PayPlanner задачи");
+        var service = CreateService(db, new FakeHttpClientFactory(new ThrowingYandexHandler(_ =>
+            new TaskCanceledException("Yandex Calendar timeout."))));
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.DisconnectAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None));
+
+        Assert.Contains("Не удалось отключить Яндекс.Календарь", error.Message);
+        Assert.True(await db.YandexCalendarConnections.AnyAsync(item => item.Id == connection.Id));
+        Assert.True(await db.YandexCalendarSyncCalendars.AnyAsync(item => item.YandexCalendarId == "calendar-yandex-disconnect-timeout"));
         Assert.Contains(await db.YandexCalendarSyncLogs.ToListAsync(), item =>
             item.ConnectionId == connection.Id &&
             item.Operation == "delete-calendar" &&
@@ -951,5 +996,11 @@ END:VCALENDAR
 </D:multistatus>
 """;
         }
+    }
+
+    private sealed class ThrowingYandexHandler(Func<HttpRequestMessage, Exception> resolveException) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromException<HttpResponseMessage>(resolveException(request));
     }
 }
