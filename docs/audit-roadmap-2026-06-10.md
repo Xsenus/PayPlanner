@@ -511,10 +511,11 @@ npm audit --audit-level=moderate
     - expired auth request.
   - DoD: public endpoints не принимают неподписанные/чужие запросы.
 
-- [ ] Добавить feature flag tests для legal/calendar integrations.
+- [x] Добавить feature flag tests для legal/calendar integrations.
   - Приоритет: P1.
   - Использовать существующие `test:legal-flags:strict` и readiness scripts как gate.
   - DoD: disabled-by-default сценарий стабильно проверяется в CI.
+  - Выполнено: `test:legal-flags:strict` добавлен в deploy workflow до публикации артефактов; добавлен `LegalFeatureFlagCiGateTests`, который фиксирует CI wiring, strict script options и disabled-by-default flags; детали в `docs/legal-feature-flag-ci-gate-2026-06-10.md`.
 
 ## Milestone 9. Frontend tests and accessibility
 

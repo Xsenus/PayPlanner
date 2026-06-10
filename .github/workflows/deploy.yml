@@ -74,6 +74,11 @@ jobs:
       - name: Test FE integration
         run: npm run test:integration
 
+      - name: Test legal feature flags readiness
+        env:
+          PAYPLANNER_READINESS_API_URL: ${{ env.FE_API_URL }}
+        run: npm run test:legal-flags:strict
+
       - name: Publish backend
         run: dotnet publish "${{ env.BE_CSPROJ }}" -c Release -o "${{ env.OUT_DIR }}/be"
 
