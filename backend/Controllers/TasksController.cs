@@ -2440,25 +2440,26 @@ public class TasksController : ControllerBase
 
         if (!string.IsNullOrWhiteSpace(search))
         {
-            var term = search.Trim().ToLower();
+            var rawTerm = search.Trim();
+            var term = rawTerm.ToLower();
             query = query.Where(task =>
                 task.ObjectName.ToLower().Contains(term) ||
-                (task.Client != null && task.Client.Name.ToLower().Contains(term)) ||
+                task.ObjectName.Contains(rawTerm) ||
+                (task.Client != null && (
+                    task.Client.Name.ToLower().Contains(term) ||
+                    task.Client.Name.Contains(rawTerm))) ||
                 (task.LegalEntity != null && (
                     task.LegalEntity.ShortName.ToLower().Contains(term) ||
+                    task.LegalEntity.ShortName.Contains(rawTerm) ||
                     (task.LegalEntity.FullName ?? "").ToLower().Contains(term) ||
-                    (task.LegalEntity.Inn ?? "").ToLower().Contains(term))) ||
-                (task.ClientCase != null && task.ClientCase.Title.ToLower().Contains(term)) ||
+                    (task.LegalEntity.FullName ?? "").Contains(rawTerm) ||
+                    (task.LegalEntity.Inn ?? "").ToLower().Contains(term) ||
+                    (task.LegalEntity.Inn ?? "").Contains(rawTerm))) ||
+                (task.ClientCase != null && (
+                    task.ClientCase.Title.ToLower().Contains(term) ||
+                    task.ClientCase.Title.Contains(rawTerm))) ||
                 task.Title.ToLower().Contains(term) ||
-                (task.Description ?? "").ToLower().Contains(term) ||
-                task.AssigneeName.ToLower().Contains(term) ||
-                task.Participants.Any(participant =>
-                    participant.DisplayName.ToLower().Contains(term) ||
-                    participant.Email.ToLower().Contains(term) ||
-                    (participant.Resolution ?? "").ToLower().Contains(term)) ||
-                task.AuthorName.ToLower().Contains(term) ||
-                (task.Result ?? "").ToLower().Contains(term) ||
-                task.TagsJson.ToLower().Contains(term));
+                task.Title.Contains(rawTerm));
         }
 
         return query;

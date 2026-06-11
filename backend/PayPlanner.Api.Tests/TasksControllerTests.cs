@@ -612,6 +612,54 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task GetTasks_SearchByClientNameDoesNotMatchHiddenTaskFields()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author-search@example.com", "Автор");
+        var egorova = await CreateClientAsync(db, "Егорова Татьяна Евгеньевна");
+        var egorovaCase = await CreateCaseAsync(db, egorova.Id, "ЕГОРОВА - дом и земля");
+        var expectedTask = await CreateTaskAsync(db, author.Id, egorova.Id, clientCaseId: egorovaCase.Id);
+        expectedTask.Title = "ЕГОРОВА - счет 94";
+
+        var voyakina = await CreateClientAsync(db, "Воякина Елена Михайловна");
+        var voyakinaCase = await CreateCaseAsync(db, voyakina.Id, "ВОЯКИНА - оформление дома");
+        var hiddenMatchTask = await CreateTaskAsync(db, author.Id, voyakina.Id, clientCaseId: voyakinaCase.Id, result: "Егорова упомянута во внутреннем результате");
+        hiddenMatchTask.Title = "ВОЯКИНА - решить вопрос по заключению договора";
+        hiddenMatchTask.AssigneeName = "Егорова Татьяна";
+        hiddenMatchTask.AuthorName = "Егорова Татьяна";
+        hiddenMatchTask.TagsJson = "[\"Егорова\"]";
+        hiddenMatchTask.Participants.Add(new TaskJournalParticipant
+        {
+            Role = "observer",
+            DisplayName = "Егорова Татьяна",
+            Email = "egorova@example.com",
+            ApprovalStatus = "pending",
+            Resolution = "Егорова в резолюции",
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.GetTasks(
+            search: "ЕГОРОВА",
+            status: null,
+            type: null,
+            assigneeUserId: null,
+            from: null,
+            to: null,
+            page: 1,
+            pageSize: 50,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var page = Assert.IsType<PagedResponse<TaskJournalItemDto>>(ok.Value);
+        var dto = Assert.Single(page.Items);
+
+        Assert.Equal(expectedTask.Id, dto.Id);
+        Assert.Equal(egorova.Id, dto.ClientId);
+        Assert.Equal(egorovaCase.Id, dto.ClientCaseId);
+    }
+
+    [Fact]
     public async Task GetTasks_FiltersByClientCaseId()
     {
         await using var db = await CreateContextAsync();

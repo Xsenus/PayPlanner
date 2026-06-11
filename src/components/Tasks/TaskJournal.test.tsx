@@ -1099,6 +1099,38 @@ describe('TaskJournal', () => {
     });
   });
 
+  it('does not match another client by hidden task fields when searching by surname', async () => {
+    await renderJournal([
+      createTask({
+        id: 101,
+        title: 'ЕГОРОВА - счет 94',
+        clientName: 'Егорова Татьяна Евгеньевна',
+        clientCaseTitle: 'ОСПАРИВАНИЕ СДЕЛКИ ДОМ+ЗЕМЛЯ',
+        objectName: 'Егорова Татьяна Евгеньевна - ОСПАРИВАНИЕ СДЕЛКИ',
+      }),
+      createTask({
+        id: 102,
+        title: 'ВОЯКИНА - решить вопрос по заключению договора',
+        clientName: 'Воякина Елена Михайловна',
+        clientCaseTitle: 'ВОЯКИНА - оформление дома и земли',
+        objectName: 'Воякина Елена Михайловна - ОФОРМЛЕНИЕ ДОМА',
+        assigneeName: 'Егорова Татьяна',
+        authorName: 'Егорова Татьяна',
+        result: 'Егорова упомянута во внутреннем результате',
+        tags: ['Егорова'],
+        participants: [
+          { userId: 8, role: 'observer', displayName: 'Егорова Татьяна', approvalStatus: 'pending' },
+        ],
+      }),
+    ]);
+
+    const searchInput = screen.getByRole('textbox') as HTMLInputElement;
+    fireEvent.change(searchInput, { target: { value: 'ЕГОРОВА' } });
+
+    expect(await screen.findByText('ЕГОРОВА - счет 94')).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText('ВОЯКИНА - решить вопрос по заключению договора')).toBeNull());
+  });
+
   it('filters tasks by due date range and remembers the range', async () => {
     await renderJournal([
       createTask({

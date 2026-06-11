@@ -2000,12 +2000,6 @@ export function TaskJournal({
         task.legalEntityName ?? '',
         task.clientCaseTitle ?? '',
         task.title,
-        task.description,
-        task.assigneeName,
-        (task.participants ?? []).map(getParticipantDisplayName).join(' '),
-        task.authorName,
-        task.result,
-        task.tags.join(' '),
       ].some((value) => value.toLowerCase().includes(q));
 
       return approvalScopeOk && quickOk && assigneeOk && typeOk && priorityOk && dateOk && searchOk;
@@ -2983,7 +2977,7 @@ export function TaskJournal({
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Поиск по контрагенту, делу, наименованию, исполнителю или результату"
+                placeholder="Поиск по контрагенту, делу или наименованию задачи"
                 className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
               />
             </label>
