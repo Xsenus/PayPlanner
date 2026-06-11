@@ -22,6 +22,7 @@ import {
   MoreHorizontal,
   Palette,
   Phone,
+  Play,
   Plus,
   Search,
   Send,
@@ -107,6 +108,7 @@ type TaskJournalProps = {
   mode?: TaskJournalMode;
   embedded?: boolean;
   contextFilter?: TaskJournalContextFilter;
+  underControlOnly?: boolean;
   routeTaskId?: number | null;
   onRouteTaskChange?: (taskId: number | null) => void;
   onOpenClient?: (clientId: number, caseId?: number | null) => void | Promise<void>;
@@ -449,6 +451,7 @@ const emptyForm = (
     type: 'task',
     priority: 'normal',
     status: 'new',
+    isUnderControl: false,
     result: '',
     reminders: defaults.reminders,
     channels: defaults.channels,
@@ -544,6 +547,7 @@ function taskToPayload(task: TaskJournalItem, overrides: Partial<TaskJournalUpse
     type: task.type,
     priority: task.priority,
     status: task.status,
+    isUnderControl: Boolean(task.isUnderControl),
     result: task.result,
     reminders: task.reminders,
     channels: task.channels,
@@ -562,7 +566,7 @@ function downloadBlob(fileName: string, blob: Blob) {
   URL.revokeObjectURL(url);
 }
 
-async function loadAllTaskJournalItems(contextFilter?: TaskJournalContextFilter) {
+async function loadAllTaskJournalItems(contextFilter?: TaskJournalContextFilter, underControlOnly = false) {
   const pageSize = 200;
   let page = 1;
   let total = Number.POSITIVE_INFINITY;
@@ -572,6 +576,7 @@ async function loadAllTaskJournalItems(contextFilter?: TaskJournalContextFilter)
     const response = await apiService.getTaskJournalItems({
       page,
       pageSize,
+      underControl: underControlOnly || undefined,
       clientId: contextFilter?.clientId ?? undefined,
       legalEntityId: contextFilter?.legalEntityId ?? undefined,
     });
@@ -1521,6 +1526,7 @@ export function TaskJournal({
   mode = 'journal',
   embedded = false,
   contextFilter,
+  underControlOnly = false,
   routeTaskId = null,
   onRouteTaskChange,
   onOpenClient,
@@ -1726,7 +1732,7 @@ export function TaskJournal({
     try {
       const settingsPromise = apiService.getTaskJournalSettings();
       const automationPromise = settingsPromise.then((settingsResponse) => (
-        !embedded && settingsResponse.caseInactivityAutomationEnabled
+        !embedded && !underControlOnly && settingsResponse.caseInactivityAutomationEnabled
           ? apiService.getTaskJournalCaseAutomationCandidates({
             inactiveDays: settingsResponse.caseInactivityDays,
             limit: Math.min(settingsResponse.caseInactivityLimit, 20),
@@ -1735,7 +1741,7 @@ export function TaskJournal({
           : []
       ));
       const [taskItems, assigneeResponse, settingsResponse, notificationDefaultsResponse, timeZoneResponse, calendarSyncSettingsResponse, automationResponse] = await Promise.all([
-        loadAllTaskJournalItems(contextFilter),
+        loadAllTaskJournalItems(contextFilter, underControlOnly),
         apiService.getTaskJournalAssignees(),
         settingsPromise,
         apiService.getUserSetting(TASK_NOTIFICATION_DEFAULTS_SETTING_KEY).catch(() => null),
@@ -1755,7 +1761,7 @@ export function TaskJournal({
     } finally {
       setLoading(false);
     }
-  }, [contextFilter, embedded, toast]);
+  }, [contextFilter, embedded, toast, underControlOnly]);
 
   useEffect(() => {
     void refreshTasks();
@@ -2484,6 +2490,17 @@ export function TaskJournal({
     }
   };
 
+  const toggleTaskControl = async (task: TaskJournalItem) => {
+    try {
+      await apiService.updateTaskJournalControl(task.id, !task.isUnderControl);
+      await refreshTasks();
+      emitTaskChange();
+      toast.success(task.isUnderControl ? 'Задача снята с контроля.' : 'Задача поставлена на контроль.', 'Журнал задач');
+    } catch (error) {
+      toast.error(extractDisplayErrorMessage(error, 'Не удалось обновить контроль задачи.'), 'Журнал задач');
+    }
+  };
+
   const handleApprovalDecision = async (
     taskId: number,
     decision: 'approved' | 'revisionRequested',
@@ -2749,9 +2766,11 @@ export function TaskJournal({
   };
 
   const contextTitle = contextFilter?.title?.trim();
-  const pageTitle = isApprovalsMode ? 'Согласования' : contextTitle ? `Задачи: ${contextTitle}` : 'Журнал задач';
+  const pageTitle = isApprovalsMode ? 'Согласования' : underControlOnly ? 'На контроле' : contextTitle ? `Задачи: ${contextTitle}` : 'Журнал задач';
   const pageDescription = isApprovalsMode
     ? 'Задачи, которые находятся на согласовании и требуют решения текущего согласующего. Они остаются в общем журнале задач.'
+    : underControlOnly
+      ? 'Задачи, поставленные на контроль руководством и отслеживаемые через движение, комментарии и изменения статусов.'
     : contextTitle
       ? 'Задачи, связанные с этим клиентом: исполнитель, срок, результат и напоминания в одном списке.'
     : 'Задачи по контрагентам, делам, платежам, звонкам и документам: исполнитель, срок, результат и напоминания в одном рабочем журнале.';
@@ -3219,6 +3238,7 @@ export function TaskJournal({
             onEdit={openTaskEditor}
             onDelete={handleDelete}
             onStatusChange={setTaskStatus}
+            onToggleControl={toggleTaskControl}
             onDone={(task) => setTaskStatus(task, 'done')}
           />
           )
@@ -3706,6 +3726,7 @@ function TaskTable({
   onEdit,
   onDelete,
   onStatusChange,
+  onToggleControl,
   onDone,
 }: {
   tasks: TaskJournalItem[];
@@ -3724,6 +3745,7 @@ function TaskTable({
   onEdit: (task: TaskJournalItem) => void;
   onDelete: (task: TaskJournalItem) => void;
   onStatusChange: (task: TaskJournalItem, status: TaskJournalStatus) => void;
+  onToggleControl: (task: TaskJournalItem) => void;
   onDone: (task: TaskJournalItem) => void;
 }) {
   return (
@@ -3818,6 +3840,12 @@ function TaskTable({
                       <div className="mt-1 text-sm text-slate-500">{getTaskCaseTitle(task)}</div>
                     ) : null}
                     <div className="mt-2 flex flex-wrap gap-1.5">
+                      {task.isUnderControl ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-xs font-semibold text-rose-700">
+                          <ShieldAlert className="h-3 w-3" />
+                          На контроле
+                        </span>
+                      ) : null}
                       {task.tags.map((tag) => (
                         <span key={tag} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">{tag}</span>
                       ))}
@@ -3885,6 +3913,21 @@ function TaskTable({
                   </td>
                   <td className="px-4 py-4">
                     <div className="flex justify-end gap-2">
+                      {isTaskJournalActive(task.status) && task.status !== 'inProgress' ? (
+                        <button type="button" onClick={() => onStatusChange(task, 'inProgress')} className="rounded-xl p-2 text-blue-600 transition hover:bg-blue-50 hover:text-blue-700" title="Принять в работу">
+                          <Play className="h-4 w-4" />
+                        </button>
+                      ) : null}
+                      {!isReadOnly ? (
+                        <button
+                          type="button"
+                          onClick={() => onToggleControl(task)}
+                          className={`rounded-xl p-2 transition ${task.isUnderControl ? 'text-rose-600 hover:bg-rose-50 hover:text-rose-700' : 'text-slate-400 hover:bg-rose-50 hover:text-rose-600'}`}
+                          title={task.isUnderControl ? 'Снять с контроля' : 'Поставить на контроль'}
+                        >
+                          <ShieldAlert className="h-4 w-4" />
+                        </button>
+                      ) : null}
                       {isTaskJournalActive(task.status) ? (
                         <button type="button" onClick={() => onDone(task)} className="rounded-xl p-2 text-emerald-600 transition hover:bg-emerald-50 hover:text-emerald-700" title="Завершить">
                           <CheckCircle2 className="h-4 w-4" />
@@ -5328,6 +5371,7 @@ function TaskModal({
         type: state.task.type,
         priority: state.task.priority,
         status: state.task.status,
+        isUnderControl: Boolean(state.task.isUnderControl),
         result: state.task.result,
         plannedDurationMinutes: normalizeTaskDuration(state.task.plannedDurationMinutes),
         reminders: state.task.reminders,

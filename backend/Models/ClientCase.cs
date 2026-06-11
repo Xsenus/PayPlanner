@@ -290,6 +290,17 @@ namespace PayPlanner.Api.Models
         /// </summary>
         public bool InactivityRemindersEnabled { get; set; } = true;
 
+        public bool IsUnderControl { get; set; }
+
+        public DateTime? ControlMarkedAt { get; set; }
+
+        public int? ControlMarkedByUserId { get; set; }
+
+        public User? ControlMarkedByUser { get; set; }
+
+        [MaxLength(256)]
+        public string ControlMarkedByUserName { get; set; } = string.Empty;
+
         /// <summary>
         /// Дело скрыто от исполнителей с ограниченной видимостью и доступно только ролям с полным обзором.
         /// </summary>

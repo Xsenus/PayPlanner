@@ -115,6 +115,7 @@ public class TasksController : ControllerBase
         [FromQuery] int? clientId = null,
         [FromQuery] int? legalEntityId = null,
         [FromQuery] string? priority = null,
+        [FromQuery] bool? underControl = null,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
         CancellationToken ct = default)
@@ -141,7 +142,8 @@ public class TasksController : ControllerBase
             clientCaseId,
             clientId,
             legalEntityId,
-            priority);
+            priority,
+            underControl);
 
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 200);
@@ -1487,6 +1489,10 @@ public class TasksController : ControllerBase
             Type = NormalizeEnumValue(request.Type, AllowedTypes, "task"),
             Priority = NormalizeEnumValue(request.Priority, AllowedPriorities, "normal"),
             Status = nextStatus,
+            IsUnderControl = request.IsUnderControl,
+            ControlMarkedAt = request.IsUnderControl ? DateTime.UtcNow : null,
+            ControlMarkedByUserId = request.IsUnderControl ? access.UserId : null,
+            ControlMarkedByUserName = request.IsUnderControl ? access.DisplayName : string.Empty,
             Result = nextResult,
             RemindersJson = SerializeList(request.Reminders, AllowedReminders, ["atDue"]),
             ChannelsJson = SerializeList(request.Channels, AllowedChannels, ["inApp"]),
@@ -1592,6 +1598,7 @@ public class TasksController : ControllerBase
         entity.Type = NormalizeEnumValue(request.Type, AllowedTypes, "task");
         entity.Priority = NormalizeEnumValue(request.Priority, AllowedPriorities, "normal");
         entity.Status = nextStatus;
+        ApplyTaskControlState(entity, request.IsUnderControl, access);
         entity.Result = nextResult;
         entity.RemindersJson = SerializeList(request.Reminders, AllowedReminders, ["atDue"]);
         entity.ChannelsJson = SerializeList(request.Channels, AllowedChannels, ["inApp"]);
@@ -1751,6 +1758,58 @@ public class TasksController : ControllerBase
             await _notificationService.NotifyTaskCompletedAsync(entity, ct);
         }
         await SafeSyncExternalCalendarTaskAsync(entity.Id, ct);
+        return Ok(Map(entity));
+    }
+
+    [HttpPatch("{id:int}/control")]
+    public async Task<ActionResult<TaskJournalItemDto>> UpdateControl(int id, [FromBody] UpdateTaskJournalControlRequest request, CancellationToken ct)
+    {
+        var access = await GetTaskAccessAsync(ct);
+        if (access is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!access.IsAdmin && access.Permission?.CanEdit != true)
+        {
+            return Forbid();
+        }
+
+        var entity = await BuildVisibleTasksQuery(access).FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (entity is null)
+        {
+            return NotFound();
+        }
+
+        var changed = ApplyTaskControlState(entity, request.IsUnderControl, access);
+        var observerAdded = false;
+        if (request.IsUnderControl && !IsTaskAuthor(entity, access.UserId) && !IsTaskExecutor(entity, access.UserId))
+        {
+            observerAdded = await EnsureTaskObserverAsync(entity, access.UserId, ct);
+        }
+
+        if (!changed && !observerAdded)
+        {
+            return Ok(Map(entity));
+        }
+
+        entity.UpdatedAt = DateTime.UtcNow;
+        AddTaskHistory(
+            entity,
+            access,
+            request.IsUnderControl
+                ? "Задача поставлена на контроль."
+                : "Задача снята с контроля.",
+            new { request.IsUnderControl, observerAdded });
+        await _db.SaveChangesAsync(ct);
+
+        await _notificationService.NotifyTaskChangedAsync(
+            entity,
+            [request.IsUnderControl ? "контроль: включен" : "контроль: выключен"],
+            access.DisplayName,
+            access.UserId,
+            null,
+            ct);
         return Ok(Map(entity));
     }
 
@@ -2305,7 +2364,8 @@ public class TasksController : ControllerBase
         int? clientCaseId,
         int? clientId,
         int? legalEntityId,
-        string? priority = null)
+        string? priority = null,
+        bool? underControl = null)
     {
         if (!string.IsNullOrWhiteSpace(status) && !string.Equals(status, "all", StringComparison.OrdinalIgnoreCase))
         {
@@ -2337,6 +2397,11 @@ public class TasksController : ControllerBase
                 var normalizedPriority = NormalizeEnumValue(priority, AllowedPriorities, "normal");
                 query = query.Where(task => task.Priority == normalizedPriority);
             }
+        }
+
+        if (underControl.HasValue)
+        {
+            query = query.Where(task => task.IsUnderControl == underControl.Value);
         }
 
         if (assigneeUserId.HasValue)
@@ -3106,6 +3171,10 @@ public class TasksController : ControllerBase
             Type = entity.Type,
             Priority = entity.Priority,
             Status = ResolveTaskStatus(entity),
+            IsUnderControl = entity.IsUnderControl,
+            ControlMarkedAt = entity.ControlMarkedAt.HasValue ? ToIso(entity.ControlMarkedAt.Value) : null,
+            ControlMarkedByUserId = entity.ControlMarkedByUserId,
+            ControlMarkedByUserName = entity.ControlMarkedByUserName,
             Result = entity.Result ?? string.Empty,
             Reminders = DeserializeList(entity.RemindersJson),
             Channels = DeserializeList(entity.ChannelsJson),
@@ -4276,6 +4345,59 @@ public class TasksController : ControllerBase
         return true;
     }
 
+    private static bool ApplyTaskControlState(TaskJournalItem entity, bool isUnderControl, TaskAccess access)
+    {
+        if (entity.IsUnderControl == isUnderControl)
+        {
+            return false;
+        }
+
+        entity.IsUnderControl = isUnderControl;
+        if (isUnderControl)
+        {
+            entity.ControlMarkedAt = DateTime.UtcNow;
+            entity.ControlMarkedByUserId = access.UserId;
+            entity.ControlMarkedByUserName = access.DisplayName;
+        }
+        else
+        {
+            entity.ControlMarkedAt = null;
+            entity.ControlMarkedByUserId = null;
+            entity.ControlMarkedByUserName = string.Empty;
+        }
+
+        return true;
+    }
+
+    private async Task<bool> EnsureTaskObserverAsync(TaskJournalItem entity, int userId, CancellationToken ct)
+    {
+        if (entity.Participants.Any(participant => participant.UserId == userId))
+        {
+            return false;
+        }
+
+        var user = await _db.Users.AsNoTracking().FirstOrDefaultAsync(item => item.Id == userId, ct);
+        if (user is null)
+        {
+            return false;
+        }
+
+        var now = DateTime.UtcNow;
+        entity.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = user.Id,
+            Role = "observer",
+            DisplayName = BuildUserDisplayName(user.FullName, user.Email),
+            Email = user.Email,
+            SortOrder = entity.Participants.Count,
+            ApprovalStatus = "pending",
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+
+        return true;
+    }
+
     private static IReadOnlyList<string> BuildTaskChangeLabels(
         TaskJournalItem entity,
         UpsertTaskJournalItemRequest request,
@@ -4290,6 +4412,10 @@ public class TasksController : ControllerBase
         AddIfChanged(changes, "Наименование", entity.Title, request.Title.Trim());
         AddIfChanged(changes, "Описание", NormalizeOptional(entity.Description), NormalizeOptional(request.Description));
         AddIfChanged(changes, "Исполнитель", entity.AssigneeName, participants.PrimaryAssigneeName);
+        if (entity.IsUnderControl != request.IsUnderControl)
+        {
+            changes.Add(request.IsUnderControl ? "контроль: включен" : "контроль: выключен");
+        }
         var nextDueAt = NormalizeUtcInstant(request.DueAt);
         if (entity.DueAt != nextDueAt)
         {

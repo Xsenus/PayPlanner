@@ -354,6 +354,7 @@ namespace PayPlanner.Api.Extensions
                 "active" => q.Where(c => c.Status != ClientCaseStatus.Closed && c.Status != ClientCaseStatus.Lost),
                 "archive" => q.Where(c => c.Status == ClientCaseStatus.Closed || c.Status == ClientCaseStatus.Lost),
                 "mine" => q.Where(c => c.ResponsibleUserId == currentUserId),
+                "control" => q.Where(c => c.IsUnderControl),
                 _ => q,
             };
         }

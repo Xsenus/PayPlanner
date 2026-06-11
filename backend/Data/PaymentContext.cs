@@ -1217,6 +1217,8 @@ public class PaymentContext : DbContext
             entity.Property(e => e.LastViewedByUserName).HasMaxLength(256);
             entity.Property(e => e.ActivityConfirmedByUserName).HasMaxLength(256);
             entity.Property(e => e.InactivityRemindersEnabled).HasDefaultValue(true);
+            entity.Property(e => e.IsUnderControl).HasDefaultValue(false);
+            entity.Property(e => e.ControlMarkedByUserName).HasMaxLength(256);
             entity.Property(e => e.IsHiddenFromExecutor).HasDefaultValue(false);
             entity.Property(e => e.HiddenFromExecutorByUserName).HasMaxLength(256);
             entity.Property(e => e.AccessRequestedByUserName).HasMaxLength(256);
@@ -1238,6 +1240,11 @@ public class PaymentContext : DbContext
                   .HasForeignKey(cc => cc.ResponsibleUserId)
                   .OnDelete(DeleteBehavior.SetNull);
 
+            entity.HasOne(cc => cc.ControlMarkedByUser)
+                  .WithMany()
+                  .HasForeignKey(cc => cc.ControlMarkedByUserId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
             // ---- Индексы ----
             entity.HasIndex(e => e.Status).HasDatabaseName("IX_ClientCases_Status");
             entity.HasIndex(e => e.CreatedAt).HasDatabaseName("IX_ClientCases_CreatedAt");
@@ -1249,6 +1256,8 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.CourtName).HasDatabaseName("IX_ClientCases_CourtName");
             entity.HasIndex(e => e.LastViewedAt).HasDatabaseName("IX_ClientCases_LastViewedAt");
             entity.HasIndex(e => e.InactivityRemindersEnabled).HasDatabaseName("IX_ClientCases_InactivityRemindersEnabled");
+            entity.HasIndex(e => e.IsUnderControl).HasDatabaseName("IX_ClientCases_IsUnderControl");
+            entity.HasIndex(e => e.ControlMarkedByUserId).HasDatabaseName("IX_ClientCases_ControlMarkedByUserId");
             entity.HasIndex(e => e.IsHiddenFromExecutor).HasDatabaseName("IX_ClientCases_IsHiddenFromExecutor");
             entity.HasIndex(e => e.AccessRequestedAt).HasDatabaseName("IX_ClientCases_AccessRequestedAt");
             entity.HasIndex(e => e.ClaimFiledAt).HasDatabaseName("IX_ClientCases_ClaimFiledAt");
@@ -2519,6 +2528,8 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Type).HasMaxLength(32).HasDefaultValue("task").IsRequired();
             entity.Property(e => e.Priority).HasMaxLength(32).HasDefaultValue("normal").IsRequired();
             entity.Property(e => e.Status).HasMaxLength(32).HasDefaultValue("new").IsRequired();
+            entity.Property(e => e.IsUnderControl).HasDefaultValue(false);
+            entity.Property(e => e.ControlMarkedByUserName).HasMaxLength(256);
             entity.Property(e => e.Result).HasMaxLength(4000);
             entity.Property(e => e.RemindersJson).HasColumnType("text").HasDefaultValue("[]").IsRequired();
             entity.Property(e => e.ChannelsJson).HasColumnType("text").HasDefaultValue("[]").IsRequired();
@@ -2535,6 +2546,11 @@ public class PaymentContext : DbContext
                 .HasForeignKey(e => e.AuthorUserId)
                 .OnDelete(DeleteBehavior.SetNull);
 
+            entity.HasOne(e => e.ControlMarkedByUser)
+                .WithMany()
+                .HasForeignKey(e => e.ControlMarkedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
             entity.HasOne(e => e.ContractorPayment)
                 .WithMany()
                 .HasForeignKey(e => e.ContractorPaymentId)
@@ -2547,6 +2563,8 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.Status).HasDatabaseName("IX_TaskJournalItems_Status");
             entity.HasIndex(e => e.Type).HasDatabaseName("IX_TaskJournalItems_Type");
             entity.HasIndex(e => e.Priority).HasDatabaseName("IX_TaskJournalItems_Priority");
+            entity.HasIndex(e => e.IsUnderControl).HasDatabaseName("IX_TaskJournalItems_IsUnderControl");
+            entity.HasIndex(e => e.ControlMarkedByUserId).HasDatabaseName("IX_TaskJournalItems_ControlMarkedByUserId");
             entity.HasIndex(e => e.ClientId).HasDatabaseName("IX_TaskJournalItems_ClientId");
             entity.HasIndex(e => e.LegalEntityId).HasDatabaseName("IX_TaskJournalItems_LegalEntityId");
             entity.HasIndex(e => e.ClientCaseId).HasDatabaseName("IX_TaskJournalItems_ClientCaseId");

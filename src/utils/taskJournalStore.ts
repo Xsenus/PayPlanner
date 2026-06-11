@@ -66,6 +66,10 @@ export interface TaskJournalItem {
   type: TaskJournalType;
   priority: TaskJournalPriority;
   status: TaskJournalStatus;
+  isUnderControl?: boolean;
+  controlMarkedAt?: string | null;
+  controlMarkedByUserId?: number | null;
+  controlMarkedByUserName?: string;
   result: string;
   reminders: TaskJournalReminder[];
   channels: TaskJournalChannel[];

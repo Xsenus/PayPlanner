@@ -644,6 +644,53 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task UpdateControl_MarksTaskAndAddsManagerAsObserver()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "control-author@example.com", "Автор");
+        var assignee = await CreateAdminUserAsync(db, "control-assignee@example.com", "Исполнитель");
+        var manager = await CreateAdminUserAsync(db, "control-manager@example.com", "Руководитель");
+        var client = await CreateClientAsync(db, "Клиент на контроле");
+        var clientCase = await CreateCaseAsync(db, client.Id, "Дело на контроле");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id, clientCase.Id);
+        var controller = CreateController(db, new RecordingNotificationService(), manager);
+
+        var result = await controller.UpdateControl(task.Id, new UpdateTaskJournalControlRequest
+        {
+            IsUnderControl = true,
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(ok.Value);
+        Assert.True(dto.IsUnderControl);
+        Assert.Equal(manager.Id, dto.ControlMarkedByUserId);
+        Assert.Equal("Руководитель", dto.ControlMarkedByUserName);
+
+        var stored = await db.TaskJournalItems
+            .Include(item => item.Participants)
+            .SingleAsync(item => item.Id == task.Id);
+        Assert.True(stored.IsUnderControl);
+        Assert.Contains(stored.Participants, participant => participant.UserId == manager.Id && participant.Role == "observer");
+
+        var filteredResult = await controller.GetTasks(
+            search: null,
+            status: null,
+            type: null,
+            assigneeUserId: null,
+            from: null,
+            to: null,
+            priority: null,
+            underControl: true,
+            page: 1,
+            pageSize: 50,
+            ct: CancellationToken.None);
+
+        var filteredOk = Assert.IsType<OkObjectResult>(filteredResult.Result);
+        var filteredPage = Assert.IsType<PagedResponse<TaskJournalItemDto>>(filteredOk.Value);
+        Assert.Equal(task.Id, Assert.Single(filteredPage.Items).Id);
+    }
+
+    [Fact]
     public async Task GetTasks_SearchesByLegalEntityAndLegalEntityCase()
     {
         await using var db = await CreateContextAsync();

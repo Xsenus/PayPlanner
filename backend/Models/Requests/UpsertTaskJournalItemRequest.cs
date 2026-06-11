@@ -22,6 +22,7 @@ public class UpsertTaskJournalItemRequest
     public string Type { get; set; } = "task";
     public string Priority { get; set; } = "normal";
     public string Status { get; set; } = "new";
+    public bool IsUnderControl { get; set; }
     public string? Result { get; set; }
     public string? ChangeComment { get; set; }
     public List<string> Reminders { get; set; } = [];
@@ -53,4 +54,9 @@ public class BulkUpdateTaskJournalItemsRequest
 public class BulkDeleteTaskJournalItemsRequest
 {
     public List<int> Ids { get; set; } = [];
+}
+
+public class UpdateTaskJournalControlRequest
+{
+    public bool IsUnderControl { get; set; }
 }

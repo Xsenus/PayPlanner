@@ -550,6 +550,10 @@ export interface ClientCase {
   activityConfirmedByUserId?: number | null;
   activityConfirmedByUserName?: string | null;
   inactivityRemindersEnabled?: boolean;
+  isUnderControl?: boolean;
+  controlMarkedAt?: string | null;
+  controlMarkedByUserId?: number | null;
+  controlMarkedByUserName?: string | null;
   isHiddenFromExecutor?: boolean;
   hiddenFromExecutorAt?: string | null;
   hiddenFromExecutorByUserId?: number | null;

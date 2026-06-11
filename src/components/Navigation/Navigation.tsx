@@ -9,6 +9,7 @@ import {
   Settings,
   UserCog,
   Shield,
+  ShieldAlert,
   Menu,
   X,
   WalletCards,
@@ -138,6 +139,11 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
         label: 'Журнал задач',
         icon: ListTodo,
         children: [
+          {
+            id: 'tasksControl' as Tab,
+            label: 'На контроле',
+            icon: ShieldAlert,
+          },
           {
             id: 'tasksApprovals' as Tab,
             label: 'Согласования',

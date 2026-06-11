@@ -60,6 +60,7 @@ vi.mock('../../services/api', () => ({
     runCaseCourtSync: vi.fn(),
     createCaseV2: vi.fn(),
     updateCaseV2: vi.fn(),
+    updateCaseControl: vi.fn(),
     getCaseDocumentTemplates: vi.fn(),
     getCaseDocuments: vi.fn(),
     getTaskJournalItems: vi.fn(),
@@ -225,6 +226,8 @@ describe('CasesRegistry', () => {
     vi.mocked(apiService.createCaseV2).mockResolvedValue(createCase({ id: 99, title: 'Новое дело' }));
     vi.mocked(apiService.updateCaseV2).mockReset();
     vi.mocked(apiService.updateCaseV2).mockImplementation(async (id, payload) => createCase({ ...payload, id }));
+    vi.mocked(apiService.updateCaseControl).mockReset();
+    vi.mocked(apiService.updateCaseControl).mockResolvedValue(createCase({ isUnderControl: true }));
     vi.mocked(apiService.getCaseDocumentTemplates).mockReset();
     vi.mocked(apiService.getCaseDocumentTemplates).mockResolvedValue([]);
     vi.mocked(apiService.getCaseDocuments).mockReset();
@@ -324,6 +327,36 @@ describe('CasesRegistry', () => {
         page: 1,
       }));
     });
+  });
+
+  it('passes the manual control scope to the cases api', async () => {
+    render(<CasesRegistry />);
+
+    await waitFor(() => {
+      expect(apiService.getCasesV2).toHaveBeenCalled();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'На контроле' }));
+
+    await waitFor(() => {
+      expect(apiService.getCasesV2).toHaveBeenLastCalledWith(expect.objectContaining({
+        scope: 'control',
+        status: undefined,
+        page: 1,
+      }));
+    });
+  });
+
+  it('marks a case for manual control from the row actions', async () => {
+    render(<CasesRegistry />);
+
+    const controlButtons = await screen.findAllByLabelText('Поставить дело на контроль');
+    fireEvent.click(controlButtons[0]);
+
+    await waitFor(() => {
+      expect(apiService.updateCaseControl).toHaveBeenCalledWith(1, true);
+    });
+    expect(await screen.findByText('Дело поставлено на контроль.')).toBeTruthy();
   });
 
   it('exports the filtered registry through the backend export endpoint', async () => {

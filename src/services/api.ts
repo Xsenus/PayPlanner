@@ -3369,6 +3369,7 @@ export class ApiService {
     status?: string;
     type?: string;
     priority?: string;
+    underControl?: boolean;
     assigneeUserId?: number;
     clientCaseId?: number;
     clientId?: number;
@@ -3383,6 +3384,7 @@ export class ApiService {
       status: params?.status,
       type: params?.type,
       priority: params?.priority,
+      underControl: params?.underControl,
       assigneeUserId: params?.assigneeUserId,
       clientCaseId: params?.clientCaseId,
       clientId: params?.clientId,
@@ -3616,6 +3618,13 @@ export class ApiService {
     return this.request<TaskJournalItem>(`/tasks/${id}/status`, {
       method: 'PATCH',
       body: JSON.stringify({ status, result }),
+    });
+  }
+
+  async updateTaskJournalControl(id: number, isUnderControl: boolean) {
+    return this.request<TaskJournalItem>(`/tasks/${id}/control`, {
+      method: 'PATCH',
+      body: JSON.stringify({ isUnderControl }),
     });
   }
 
@@ -4273,6 +4282,13 @@ export class ApiService {
     return this.request<ClientCase>(`/v2/cases/${id}`, { method: 'PUT', body: JSON.stringify(model) });
   }
 
+  async updateCaseControl(id: number, isUnderControl: boolean) {
+    return this.request<ClientCase>(`/v2/cases/${id}/control`, {
+      method: 'PATCH',
+      body: JSON.stringify({ isUnderControl }),
+    });
+  }
+
   async updateCase(id: number, model: Omit<ClientCase, 'id' | 'createdAt' | 'payments'>) {
     return this.request<ClientCase>(`/cases/${id}`, { method: 'PUT', body: JSON.stringify(model) });
   }
@@ -4419,6 +4435,7 @@ export class ApiService {
     priority?: string;
     isHiddenFromExecutor?: boolean;
     inactivityRemindersEnabled?: boolean;
+    isUnderControl?: boolean;
   }) {
     return this.request<{ updated: number; requested: number }>('/v2/cases/bulk-update', {
       method: 'POST',

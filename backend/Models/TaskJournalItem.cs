@@ -66,6 +66,16 @@ public class TaskJournalItem
     [MaxLength(32)]
     public string Status { get; set; } = "new";
 
+    public bool IsUnderControl { get; set; }
+
+    public DateTime? ControlMarkedAt { get; set; }
+
+    public int? ControlMarkedByUserId { get; set; }
+    public User? ControlMarkedByUser { get; set; }
+
+    [MaxLength(256)]
+    public string ControlMarkedByUserName { get; set; } = string.Empty;
+
     [MaxLength(4000)]
     public string? Result { get; set; }
 

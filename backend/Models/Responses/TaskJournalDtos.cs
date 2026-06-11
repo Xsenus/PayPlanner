@@ -30,6 +30,10 @@ public class TaskJournalItemDto
     public string Type { get; set; } = "task";
     public string Priority { get; set; } = "normal";
     public string Status { get; set; } = "new";
+    public bool IsUnderControl { get; set; }
+    public string? ControlMarkedAt { get; set; }
+    public int? ControlMarkedByUserId { get; set; }
+    public string ControlMarkedByUserName { get; set; } = string.Empty;
     public string Result { get; set; } = string.Empty;
     public IReadOnlyList<string> Reminders { get; set; } = Array.Empty<string>();
     public IReadOnlyList<string> Channels { get; set; } = Array.Empty<string>();

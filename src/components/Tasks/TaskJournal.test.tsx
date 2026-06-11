@@ -27,6 +27,7 @@ const apiMock = vi.hoisted(() => ({
   createTaskJournalItem: vi.fn(),
   updateTaskJournalItem: vi.fn(),
   updateTaskJournalStatus: vi.fn(),
+  updateTaskJournalControl: vi.fn(),
   bulkUpdateTaskJournalItems: vi.fn(),
   bulkDeleteTaskJournalItems: vi.fn(),
   updateTaskJournalApproval: vi.fn(),
@@ -246,6 +247,7 @@ async function renderJournal(
     onOpenClient?: (clientId: number, caseId?: number | null) => void;
     onOpenLegalEntity?: (legalEntityId: number) => void;
     settings?: Partial<TaskJournalSettingsDto>;
+    underControlOnly?: boolean;
   } = {},
 ) {
   apiMock.getTaskJournalItems.mockResolvedValue({
@@ -293,6 +295,7 @@ async function renderJournal(
         onRouteTaskChange={setRouteTaskId}
         onOpenClient={options.onOpenClient}
         onOpenLegalEntity={options.onOpenLegalEntity}
+        underControlOnly={options.underControlOnly}
       />
     );
   }
@@ -307,6 +310,7 @@ async function renderJournal(
       contextFilter={options.contextFilter}
       onOpenClient={options.onOpenClient}
       onOpenLegalEntity={options.onOpenLegalEntity}
+      underControlOnly={options.underControlOnly}
     />
   ));
   if (options.waitForTitle === null) {
@@ -399,6 +403,7 @@ describe('TaskJournal', () => {
     apiMock.createTaskJournalItem.mockResolvedValue(createTask());
     apiMock.updateTaskJournalItem.mockResolvedValue(createTask());
     apiMock.updateTaskJournalStatus.mockResolvedValue(createTask({ status: 'done', result: 'Готово' }));
+    apiMock.updateTaskJournalControl.mockResolvedValue(createTask({ isUnderControl: true }));
     apiMock.bulkUpdateTaskJournalItems.mockResolvedValue({ requested: 1, updated: 1, skipped: 0 });
     apiMock.bulkDeleteTaskJournalItems.mockResolvedValue({ requested: 1, updated: 1, skipped: 0 });
     apiMock.updateTaskJournalApproval.mockResolvedValue(createTask({ status: 'approved' }));
@@ -450,6 +455,37 @@ describe('TaskJournal', () => {
     expect(screen.getByText('Наименование задачи')).toBeTruthy();
     expect(screen.getByText('Иванов Иван Иванович')).toBeTruthy();
     expect(screen.getByText('БАНКРОТСТВО')).toBeTruthy();
+  });
+
+  it('loads the manual control section with the under-control filter', async () => {
+    await renderJournal([createTask({ isUnderControl: true })], { underControlOnly: true });
+
+    expect(screen.getByRole('heading', { name: 'На контроле' })).toBeTruthy();
+    expect(apiMock.getTaskJournalItems).toHaveBeenCalledWith(expect.objectContaining({
+      underControl: true,
+    }));
+    expect(apiMock.getTaskJournalCaseAutomationCandidates).not.toHaveBeenCalled();
+  });
+
+  it('marks a task for manual control from the row actions', async () => {
+    await renderJournal([createTask({ isUnderControl: false })]);
+
+    fireEvent.click(screen.getByTitle('Поставить на контроль'));
+
+    await waitFor(() => {
+      expect(apiMock.updateTaskJournalControl).toHaveBeenCalledWith(101, true);
+    });
+    expect(toastMock.success).toHaveBeenCalledWith('Задача поставлена на контроль.', 'Журнал задач');
+  });
+
+  it('accepts a task into work from the row actions', async () => {
+    await renderJournal([createTask({ status: 'new' })]);
+
+    fireEvent.click(screen.getByTitle('Принять в работу'));
+
+    await waitFor(() => {
+      expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(101, 'inProgress', undefined);
+    });
   });
 
   it('loads and creates tasks inside a client context', async () => {
@@ -1022,8 +1058,7 @@ describe('TaskJournal', () => {
 
     const row = screen.getByText('Egor task').closest('tr');
     expect(row).toBeTruthy();
-    const rowButtons = within(row as HTMLTableRowElement).getAllByRole('button');
-    fireEvent.click(rowButtons[1]);
+    fireEvent.click(within(row as HTMLTableRowElement).getByTitle('Просмотр'));
 
     await screen.findByRole('heading', { name: 'Просмотр задачи' });
 

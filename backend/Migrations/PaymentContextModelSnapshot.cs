@@ -24,6 +24,7 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<DateTime?>("CancelledAt")
@@ -193,9 +194,11 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<decimal>("Price")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 4)
                         .HasColumnType("decimal(18,4)");
 
                     b.Property<int>("SortOrder")
@@ -637,6 +640,7 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<int>("BatchId")
@@ -756,9 +760,11 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<decimal>("AccountingBalance")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<decimal>("ActualBalance")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<string>("Comment")
@@ -794,6 +800,7 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<decimal>("Difference")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<bool>("IsDeleted")
@@ -854,6 +861,7 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<string>("Appendix")
@@ -1127,6 +1135,7 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<int?>("ClientId")
@@ -1252,6 +1261,17 @@ namespace PayPlanner.Api.Migrations
                     b.Property<int?>("ClientId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTime?>("ControlMarkedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ControlMarkedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ControlMarkedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("CourtCaseNumber")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -1349,6 +1369,11 @@ namespace PayPlanner.Api.Migrations
                         .HasDefaultValue(false);
 
                     b.Property<bool>("IsHiddenFromExecutor")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("IsUnderControl")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
                         .HasDefaultValue(false);
@@ -1452,6 +1477,9 @@ namespace PayPlanner.Api.Migrations
                     b.HasIndex("ClaimFiledAt")
                         .HasDatabaseName("IX_ClientCases_ClaimFiledAt");
 
+                    b.HasIndex("ControlMarkedByUserId")
+                        .HasDatabaseName("IX_ClientCases_ControlMarkedByUserId");
+
                     b.HasIndex("CourtDecisionAt")
                         .HasDatabaseName("IX_ClientCases_CourtDecisionAt");
 
@@ -1475,6 +1503,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("IsHiddenFromExecutor")
                         .HasDatabaseName("IX_ClientCases_IsHiddenFromExecutor");
+
+                    b.HasIndex("IsUnderControl")
+                        .HasDatabaseName("IX_ClientCases_IsUnderControl");
 
                     b.HasIndex("LastViewedAt")
                         .HasDatabaseName("IX_ClientCases_LastViewedAt");
@@ -2509,6 +2540,7 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<decimal>("TotalAmount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<DateTime?>("UpdatedAt")
@@ -2569,7 +2601,8 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<decimal>("Quantity")
-                        .HasColumnType("decimal(18,2)");
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
 
                     b.Property<string>("ServiceName")
                         .IsRequired()
@@ -2580,9 +2613,11 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<decimal>("TotalAmount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<decimal>("UnitPrice")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.HasKey("Id");
@@ -2779,6 +2814,7 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<decimal?>("Amount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<string>("BillingMode")
@@ -3973,10 +4009,12 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<decimal>("Price")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<decimal>("Quantity")
-                        .HasColumnType("decimal(18,2)");
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
 
                     b.Property<int?>("ServiceId")
                         .HasColumnType("INTEGER");
@@ -4465,18 +4503,21 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<decimal>("ClosingBalance")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<DateTime>("Date")
                         .HasColumnType("date");
 
                     b.Property<decimal>("Expense")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<int>("ExpenseCount")
                         .HasColumnType("INTEGER");
 
                     b.Property<decimal>("Income")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<int>("IncomeCount")
@@ -4489,6 +4530,7 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<decimal>("OpeningBalance")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<string>("Source")
@@ -4528,6 +4570,7 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<int?>("BankStatementImportBatchId")
@@ -4611,6 +4654,7 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<decimal?>("PaidAmount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<string>("PaidInvoiceNumber")
@@ -4657,10 +4701,12 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<decimal?>("VatAmount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<decimal?>("VatRate")
-                        .HasColumnType("decimal(5,2)");
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
 
                     b.HasKey("Id");
 
@@ -5093,6 +5139,7 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("date");
 
                     b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<int?>("ClientCaseId")
@@ -5214,6 +5261,7 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<decimal>("PaidAmount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<DateTime?>("PaidDate")
@@ -5385,9 +5433,11 @@ namespace PayPlanner.Api.Migrations
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
                     b.Property<decimal>("PaidAmount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<decimal>("RemainderAmount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<DateTime>("RemainderDate")
@@ -5397,6 +5447,7 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<decimal>("SourceOriginalAmount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<int>("SourcePaymentId")
@@ -5777,6 +5828,7 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<decimal>("DefaultPrice")
+                        .HasPrecision(18, 2)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Description")
@@ -6269,6 +6321,7 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<decimal?>("ContractorPaymentAmount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<DateTime?>("ContractorPaymentDueDate")
@@ -6289,6 +6342,17 @@ namespace PayPlanner.Api.Migrations
 
                     b.Property<int?>("ContractorPaymentResultDelayDays")
                         .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("ControlMarkedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ControlMarkedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ControlMarkedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
 
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
@@ -6320,6 +6384,11 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("IsUnderControl")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
                         .HasDefaultValue(false);
@@ -6412,6 +6481,9 @@ namespace PayPlanner.Api.Migrations
                     b.HasIndex("ContractorPaymentId")
                         .HasDatabaseName("IX_TaskJournalItems_ContractorPaymentId");
 
+                    b.HasIndex("ControlMarkedByUserId")
+                        .HasDatabaseName("IX_TaskJournalItems_ControlMarkedByUserId");
+
                     b.HasIndex("DeletedAt")
                         .HasDatabaseName("IX_TaskJournalItem_DeletedAt_Audit");
 
@@ -6420,6 +6492,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("IsDeleted")
                         .HasDatabaseName("IX_TaskJournalItem_IsDeleted");
+
+                    b.HasIndex("IsUnderControl")
+                        .HasDatabaseName("IX_TaskJournalItems_IsUnderControl");
 
                     b.HasIndex("LegalEntityId")
                         .HasDatabaseName("IX_TaskJournalItems_LegalEntityId");
@@ -7870,6 +7945,11 @@ namespace PayPlanner.Api.Migrations
                         .HasForeignKey("ClientId")
                         .OnDelete(DeleteBehavior.Cascade);
 
+                    b.HasOne("PayPlanner.Api.Models.User", "ControlMarkedByUser")
+                        .WithMany()
+                        .HasForeignKey("ControlMarkedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("PayPlanner.Api.Models.LegalEntity", "LegalEntity")
                         .WithMany("Cases")
                         .HasForeignKey("LegalEntityId")
@@ -7881,6 +7961,8 @@ namespace PayPlanner.Api.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("Client");
+
+                    b.Navigation("ControlMarkedByUser");
 
                     b.Navigation("LegalEntity");
 
@@ -8696,6 +8778,11 @@ namespace PayPlanner.Api.Migrations
                         .HasForeignKey("ContractorPaymentId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("PayPlanner.Api.Models.User", "ControlMarkedByUser")
+                        .WithMany()
+                        .HasForeignKey("ControlMarkedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("PayPlanner.Api.Models.LegalEntity", "LegalEntity")
                         .WithMany()
                         .HasForeignKey("LegalEntityId")
@@ -8710,6 +8797,8 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("ClientCase");
 
                     b.Navigation("ContractorPayment");
+
+                    b.Navigation("ControlMarkedByUser");
 
                     b.Navigation("LegalEntity");
                 });

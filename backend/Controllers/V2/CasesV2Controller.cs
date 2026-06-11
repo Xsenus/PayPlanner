@@ -6797,6 +6797,7 @@ public class CasesV2Controller : ControllerBase
         var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, visibility, ct);
         if (validation is not null) return validation;
         ApplyCaseDetails(model, model);
+        ApplyCaseControlState(model, model.IsUnderControl, User.GetUserId(), User.GetDisplayName());
         ApplyHiddenFromExecutorMetadata(model, model.IsHiddenFromExecutor, User.GetUserId(), User.GetDisplayName());
         _db.ClientCases.Add(model);
         await _db.SaveChangesAsync(ct);
@@ -6833,6 +6834,7 @@ public class CasesV2Controller : ControllerBase
         e.LegalEntityId = model.LegalEntityId;
         var previousHiddenFromExecutor = e.IsHiddenFromExecutor;
         ApplyCaseDetails(e, model);
+        ApplyCaseControlState(e, model.IsUnderControl, User.GetUserId(), User.GetDisplayName());
         if (previousHiddenFromExecutor != e.IsHiddenFromExecutor)
         {
             ApplyHiddenFromExecutorMetadata(e, e.IsHiddenFromExecutor, User.GetUserId(), User.GetDisplayName());
@@ -6846,6 +6848,45 @@ public class CasesV2Controller : ControllerBase
         await _db.SaveChangesAsync(ct);
         await ClientCaseDeadlineTaskSyncService.SyncAsync(_db, e.Id, User.GetUserId(), User.GetDisplayName(), ct);
         return Ok(e);
+    }
+
+    [HttpPatch("{id:int}/control")]
+    public async Task<IActionResult> UpdateControl(int id, [FromBody] UpdateClientCaseControlRequest request, CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var clientCase = await _db.ClientCases
+            .ApplyClientCaseVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (clientCase is null)
+        {
+            return NotFound();
+        }
+
+        if (!ApplyCaseControlState(clientCase, request.IsUnderControl, User.GetUserId(), User.GetDisplayName()))
+        {
+            return Ok(clientCase);
+        }
+
+        AppendCaseEvent(
+            clientCase,
+            request.IsUnderControl
+                ? $"Дело поставлено на контроль. Автор: {User.GetDisplayName()}."
+                : $"Дело снято с контроля. Автор: {User.GetDisplayName()}.");
+        _db.SetAuditReason(request.IsUnderControl
+            ? $"Дело поставлено на контроль: {clientCase.Title}"
+            : $"Дело снято с контроля: {clientCase.Title}");
+        await _db.SaveChangesAsync(ct);
+        return Ok(clientCase);
     }
 
     [HttpDelete("{id:int}")]
@@ -6907,9 +6948,10 @@ public class CasesV2Controller : ControllerBase
             && nextStage is null
             && nextPriority is null
             && !request.IsHiddenFromExecutor.HasValue
-            && !request.InactivityRemindersEnabled.HasValue)
+            && !request.InactivityRemindersEnabled.HasValue
+            && !request.IsUnderControl.HasValue)
         {
-            return BadRequest("Укажите новый статус, ответственного, стадию, приоритет, режим доступа или автоконтроль.");
+            return BadRequest("Укажите новый статус, ответственного, стадию, приоритет, режим доступа, автоконтроль или контроль.");
         }
 
         User? nextResponsible = null;
@@ -7007,6 +7049,11 @@ public class CasesV2Controller : ControllerBase
                 var nextEnabled = request.InactivityRemindersEnabled.Value;
                 changes.Add(nextEnabled ? "автоконтроль: включен" : "автоконтроль: выключен");
                 item.InactivityRemindersEnabled = nextEnabled;
+            }
+
+            if (request.IsUnderControl.HasValue && ApplyCaseControlState(item, request.IsUnderControl.Value, actorUserId, actorName))
+            {
+                changes.Add(request.IsUnderControl.Value ? "контроль: включен" : "контроль: выключен");
             }
 
             if (changes.Count > 0)
@@ -7108,6 +7155,35 @@ public class CasesV2Controller : ControllerBase
         target.Strategy = source.Strategy?.Trim() ?? string.Empty;
         target.InactivityRemindersEnabled = source.InactivityRemindersEnabled;
         target.IsHiddenFromExecutor = source.IsHiddenFromExecutor;
+    }
+
+    private static bool ApplyCaseControlState(
+        ClientCase clientCase,
+        bool isUnderControl,
+        int? actorUserId,
+        string actorName)
+    {
+        if (clientCase.IsUnderControl == isUnderControl
+            && (!isUnderControl || clientCase.ControlMarkedAt.HasValue))
+        {
+            return false;
+        }
+
+        clientCase.IsUnderControl = isUnderControl;
+        if (isUnderControl)
+        {
+            clientCase.ControlMarkedAt = DateTime.UtcNow;
+            clientCase.ControlMarkedByUserId = actorUserId;
+            clientCase.ControlMarkedByUserName = Truncate(actorName, 256);
+        }
+        else
+        {
+            clientCase.ControlMarkedAt = null;
+            clientCase.ControlMarkedByUserId = null;
+            clientCase.ControlMarkedByUserName = string.Empty;
+        }
+
+        return true;
     }
 
     private static void ApplyHiddenFromExecutorMetadata(
@@ -10404,6 +10480,11 @@ public class CasesV2Controller : ControllerBase
                 : "автоконтроль: выключен");
         }
 
+        if (request.IsUnderControl.HasValue)
+        {
+            targets.Add(request.IsUnderControl.Value ? "контроль: включен" : "контроль: выключен");
+        }
+
         if (nextStage is not null)
         {
             targets.Add($"стадия: {nextStage}");
@@ -10427,6 +10508,12 @@ public class CasesV2Controller : ControllerBase
         public string? Priority { get; set; }
         public bool? IsHiddenFromExecutor { get; set; }
         public bool? InactivityRemindersEnabled { get; set; }
+        public bool? IsUnderControl { get; set; }
+    }
+
+    public sealed class UpdateClientCaseControlRequest
+    {
+        public bool IsUnderControl { get; set; }
     }
 
     public sealed class RequestCaseAccessRequest

@@ -31,6 +31,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
                     b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<DateTime?>("CancelledAt")
@@ -202,9 +203,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("character varying(2000)");
 
                     b.Property<decimal>("Price")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 4)
                         .HasColumnType("decimal(18,4)");
 
                     b.Property<int>("SortOrder")
@@ -660,6 +663,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("character varying(200)");
 
                     b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<int>("BatchId")
@@ -783,9 +787,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("character varying(120)");
 
                     b.Property<decimal>("AccountingBalance")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<decimal>("ActualBalance")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<string>("Comment")
@@ -821,6 +827,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("character varying(256)");
 
                     b.Property<decimal>("Difference")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<bool>("IsDeleted")
@@ -883,6 +890,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("character varying(120)");
 
                     b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<string>("Appendix")
@@ -1160,6 +1168,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
                     b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<int?>("ClientId")
@@ -1287,6 +1296,17 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<int?>("ClientId")
                         .HasColumnType("integer");
 
+                    b.Property<DateTime?>("ControlMarkedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("ControlMarkedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ControlMarkedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<string>("CourtCaseNumber")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -1384,6 +1404,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasDefaultValue(false);
 
                     b.Property<bool>("IsHiddenFromExecutor")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("IsUnderControl")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
                         .HasDefaultValue(false);
@@ -1487,6 +1512,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("ClaimFiledAt")
                         .HasDatabaseName("IX_ClientCases_ClaimFiledAt");
 
+                    b.HasIndex("ControlMarkedByUserId")
+                        .HasDatabaseName("IX_ClientCases_ControlMarkedByUserId");
+
                     b.HasIndex("CourtDecisionAt")
                         .HasDatabaseName("IX_ClientCases_CourtDecisionAt");
 
@@ -1510,6 +1538,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("IsHiddenFromExecutor")
                         .HasDatabaseName("IX_ClientCases_IsHiddenFromExecutor");
+
+                    b.HasIndex("IsUnderControl")
+                        .HasDatabaseName("IX_ClientCases_IsUnderControl");
 
                     b.HasIndex("LastViewedAt")
                         .HasDatabaseName("IX_ClientCases_LastViewedAt");
@@ -2564,6 +2595,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("character varying(200)");
 
                     b.Property<decimal>("TotalAmount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<DateTime?>("UpdatedAt")
@@ -2626,7 +2658,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("integer");
 
                     b.Property<decimal>("Quantity")
-                        .HasColumnType("decimal(18,2)");
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
 
                     b.Property<string>("ServiceName")
                         .IsRequired()
@@ -2637,9 +2670,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("integer");
 
                     b.Property<decimal>("TotalAmount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<decimal>("UnitPrice")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.HasKey("Id");
@@ -2842,6 +2877,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
                     b.Property<decimal?>("Amount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<string>("BillingMode")
@@ -4068,10 +4104,12 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("integer");
 
                     b.Property<decimal>("Price")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<decimal>("Quantity")
-                        .HasColumnType("decimal(18,2)");
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
 
                     b.Property<int?>("ServiceId")
                         .HasColumnType("integer");
@@ -4568,18 +4606,21 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("integer");
 
                     b.Property<decimal>("ClosingBalance")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<DateTime>("Date")
                         .HasColumnType("date");
 
                     b.Property<decimal>("Expense")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<int>("ExpenseCount")
                         .HasColumnType("integer");
 
                     b.Property<decimal>("Income")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<int>("IncomeCount")
@@ -4592,6 +4633,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("integer");
 
                     b.Property<decimal>("OpeningBalance")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<string>("Source")
@@ -4633,6 +4675,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("text");
 
                     b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<int?>("BankStatementImportBatchId")
@@ -4716,6 +4759,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("character varying(200)");
 
                     b.Property<decimal?>("PaidAmount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<string>("PaidInvoiceNumber")
@@ -4762,10 +4806,12 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("character varying(256)");
 
                     b.Property<decimal?>("VatAmount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<decimal?>("VatRate")
-                        .HasColumnType("decimal(5,2)");
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
 
                     b.HasKey("Id");
 
@@ -5216,6 +5262,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("date");
 
                     b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<int?>("ClientCaseId")
@@ -5337,6 +5384,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("character varying(1000)");
 
                     b.Property<decimal>("PaidAmount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<DateTime?>("PaidDate")
@@ -5510,9 +5558,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasDefaultValueSql("CURRENT_TIMESTAMP");
 
                     b.Property<decimal>("PaidAmount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<decimal>("RemainderAmount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<DateTime>("RemainderDate")
@@ -5522,6 +5572,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("integer");
 
                     b.Property<decimal>("SourceOriginalAmount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<int>("SourcePaymentId")
@@ -5916,7 +5967,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("timestamp without time zone");
 
                     b.Property<decimal>("DefaultPrice")
-                        .HasColumnType("numeric");
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
 
                     b.Property<string>("Description")
                         .IsRequired()
@@ -6424,6 +6476,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("integer");
 
                     b.Property<decimal?>("ContractorPaymentAmount")
+                        .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<DateTime?>("ContractorPaymentDueDate")
@@ -6444,6 +6497,17 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.Property<int?>("ContractorPaymentResultDelayDays")
                         .HasColumnType("integer");
+
+                    b.Property<DateTime?>("ControlMarkedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("ControlMarkedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ControlMarkedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
 
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
@@ -6475,6 +6539,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("timestamp without time zone");
 
                     b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("IsUnderControl")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
                         .HasDefaultValue(false);
@@ -6567,6 +6636,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("ContractorPaymentId")
                         .HasDatabaseName("IX_TaskJournalItems_ContractorPaymentId");
 
+                    b.HasIndex("ControlMarkedByUserId")
+                        .HasDatabaseName("IX_TaskJournalItems_ControlMarkedByUserId");
+
                     b.HasIndex("DeletedAt")
                         .HasDatabaseName("IX_TaskJournalItem_DeletedAt_Audit");
 
@@ -6575,6 +6647,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("IsDeleted")
                         .HasDatabaseName("IX_TaskJournalItem_IsDeleted");
+
+                    b.HasIndex("IsUnderControl")
+                        .HasDatabaseName("IX_TaskJournalItems_IsUnderControl");
 
                     b.HasIndex("LegalEntityId")
                         .HasDatabaseName("IX_TaskJournalItems_LegalEntityId");
@@ -8056,6 +8131,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasForeignKey("ClientId")
                         .OnDelete(DeleteBehavior.Cascade);
 
+                    b.HasOne("PayPlanner.Api.Models.User", "ControlMarkedByUser")
+                        .WithMany()
+                        .HasForeignKey("ControlMarkedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("PayPlanner.Api.Models.LegalEntity", "LegalEntity")
                         .WithMany("Cases")
                         .HasForeignKey("LegalEntityId")
@@ -8067,6 +8147,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("Client");
+
+                    b.Navigation("ControlMarkedByUser");
 
                     b.Navigation("LegalEntity");
 
@@ -8882,6 +8964,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasForeignKey("ContractorPaymentId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("PayPlanner.Api.Models.User", "ControlMarkedByUser")
+                        .WithMany()
+                        .HasForeignKey("ControlMarkedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("PayPlanner.Api.Models.LegalEntity", "LegalEntity")
                         .WithMany()
                         .HasForeignKey("LegalEntityId")
@@ -8896,6 +8983,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("ClientCase");
 
                     b.Navigation("ContractorPayment");
+
+                    b.Navigation("ControlMarkedByUser");
 
                     b.Navigation("LegalEntity");
                 });

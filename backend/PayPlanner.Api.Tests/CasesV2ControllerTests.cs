@@ -140,6 +140,71 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task UpdateControl_MarksCaseAndScopeReturnsOnlyControlledCases()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "case-control-owner@example.com", "Владелец");
+        var client = new Client
+        {
+            Name = "Клиент с контрольным делом",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var controlledCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело на контроле",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+        };
+        var regularCase = new ClientCase
+        {
+            Client = client,
+            Title = "Обычное дело",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.AddRange(controlledCase, regularCase);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var result = await controller.UpdateControl(controlledCase.Id, new CasesV2Controller.UpdateClientCaseControlRequest
+        {
+            IsUnderControl = true,
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var dto = Assert.IsType<ClientCase>(ok.Value);
+        Assert.True(dto.IsUnderControl);
+        Assert.Equal(owner.Id, dto.ControlMarkedByUserId);
+        Assert.Equal("Владелец", dto.ControlMarkedByUserName);
+
+        var scopedResult = await controller.Get(
+            clientId: null,
+            legalEntityId: null,
+            status: null,
+            search: null,
+            responsibleUserId: null,
+            caseType: null,
+            priority: null,
+            from: null,
+            to: null,
+            minFee: null,
+            maxFee: null,
+            sortBy: null,
+            sortDir: null,
+            page: 1,
+            pageSize: 50,
+            scope: "control",
+            ct: CancellationToken.None);
+
+        var scopedOk = Assert.IsType<OkObjectResult>(scopedResult);
+        var scopedItem = Assert.Single(GetAnonymousItems(scopedOk.Value));
+        Assert.Equal(controlledCase.Id, scopedItem.Id);
+    }
+
+    [Fact]
     public async Task GetById_HiddenCaseReturnsAccessHintForExecutor()
     {
         await using var db = await CreateContextAsync();

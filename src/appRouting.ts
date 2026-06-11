@@ -24,6 +24,7 @@ export function canAccessTab(tab: Tab, permissions: RolePermissions, options: Ta
     case 'calendar':
       return permissions.calendar.canView;
     case 'tasks':
+    case 'tasksControl':
     case 'tasksApprovals':
     case 'tasksCalendar':
       return permissions.tasks.canView;
@@ -166,6 +167,14 @@ export function isTasksCalendarPath(): boolean {
   }
 
   return /^\/tasks\/calendar\/?$/i.test(window.location.pathname);
+}
+
+export function isTasksControlPath(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return /^\/tasks\/control\/?$/i.test(window.location.pathname);
 }
 
 export function isTasksApprovalsPath(): boolean {
@@ -340,6 +349,10 @@ export function getInitialTab(): Tab {
     return 'tasks';
   }
 
+  if (isTasksControlPath()) {
+    return 'tasksControl';
+  }
+
   if (isTasksApprovalsPath()) {
     return 'tasksApprovals';
   }
@@ -403,6 +416,10 @@ export function getTabHref(tab: Tab): string {
 
   if (tab === 'tasksApprovals') {
     return '/tasks/approvals';
+  }
+
+  if (tab === 'tasksControl') {
+    return '/tasks/control';
   }
 
   if (tab === 'tasksCalendar') {

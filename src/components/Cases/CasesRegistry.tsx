@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type MouseEvent } from 'react';
-import { Archive, ArrowUpDown, Bookmark, Briefcase, ClipboardPlus, Download, Loader2, LockKeyhole, Pencil, Plus, Printer, RefreshCw, Search, Settings2, Trash2, UserRound, WalletCards } from 'lucide-react';
+import { Archive, ArrowUpDown, Bookmark, Briefcase, ClipboardPlus, Download, Loader2, LockKeyhole, Pencil, Plus, Printer, RefreshCw, Search, Settings2, ShieldAlert, Trash2, UserRound, WalletCards } from 'lucide-react';
 
 import { useAuth } from '../../contexts/AuthContext';
 import { apiService } from '../../services/api';
@@ -34,7 +34,7 @@ type SortKey =
   | 'lastViewedAt';
 
 type SortDir = 'asc' | 'desc';
-type CaseScope = 'all' | 'active' | 'mine' | 'archive';
+type CaseScope = 'all' | 'active' | 'mine' | 'control' | 'archive';
 type CaseActivityFilter = 'all' | 'active' | 'inactive';
 type CaseRegistryViewState = {
   search: string;
@@ -115,6 +115,7 @@ const CASE_SCOPE_OPTIONS: Array<{ value: CaseScope; label: string }> = [
   { value: 'all', label: 'Все' },
   { value: 'active', label: 'Активные' },
   { value: 'mine', label: 'Мои' },
+  { value: 'control', label: 'На контроле' },
   { value: 'archive', label: 'Архив' },
 ];
 const CASE_ACTIVITY_FILTER_OPTIONS: Array<{ value: CaseActivityFilter; label: string }> = [
@@ -364,6 +365,7 @@ function buildCaseUpdatePayload(base: ClientCase, patch: Partial<ClientCase>): O
     eventHistory: patch.eventHistory ?? base.eventHistory ?? '',
     strategy: patch.strategy ?? base.strategy ?? '',
     inactivityRemindersEnabled: patch.inactivityRemindersEnabled ?? base.inactivityRemindersEnabled ?? true,
+    isUnderControl: patch.isUnderControl ?? base.isUnderControl ?? false,
     isHiddenFromExecutor: patch.isHiddenFromExecutor ?? base.isHiddenFromExecutor ?? false,
   } as Omit<ClientCase, 'id' | 'createdAt' | 'payments'>;
 }
@@ -411,6 +413,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
   const [bulkPriority, setBulkPriority] = useState('');
   const [bulkSaving, setBulkSaving] = useState(false);
   const [creatingTaskCaseId, setCreatingTaskCaseId] = useState<number | null>(null);
+  const [controlCaseId, setControlCaseId] = useState<number | null>(null);
   const [courtSyncCaseId, setCourtSyncCaseId] = useState<number | null>(null);
   const timeZoneId = useUserTimeZone();
   const [columnsOpen, setColumnsOpen] = useState(false);
@@ -874,6 +877,24 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
     }
   };
 
+  const toggleCaseControl = async (item: ClientCase) => {
+    setControlCaseId(item.id);
+    setError(null);
+    setNotice(null);
+    try {
+      const updated = await apiService.updateCaseControl(item.id, !item.isUnderControl);
+      setItems((current) => current.map((caseItem) => (caseItem.id === updated.id ? updated : caseItem)));
+      setNotice(updated.isUnderControl ? 'Дело поставлено на контроль.' : 'Дело снято с контроля.');
+      if (caseScope === 'control') {
+        setReloadToken((value) => value + 1);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось обновить контроль дела.');
+    } finally {
+      setControlCaseId(null);
+    }
+  };
+
   const runCourtSyncForCase = async (item: ClientCase) => {
     setCourtSyncCaseId(item.id);
     setError(null);
@@ -1004,7 +1025,15 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
       case 'title':
         return (
           <div>
-            <div className="font-medium text-slate-900">{item.title || 'Без названия'}</div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium text-slate-900">{item.title || 'Без названия'}</span>
+              {item.isUnderControl ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-xs font-semibold text-rose-700">
+                  <ShieldAlert className="h-3 w-3" />
+                  На контроле
+                </span>
+              ) : null}
+            </div>
             {item.description ? <div className="mt-1 line-clamp-2 text-xs text-slate-500">{item.description}</div> : null}
           </div>
         );
@@ -1111,6 +1140,17 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
               className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50">
               {creatingTaskCaseId === item.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardPlus className="h-4 w-4" />}
             </button>
+            {canEditCases ? (
+              <button
+                type="button"
+                onClick={() => void toggleCaseControl(item)}
+                disabled={controlCaseId === item.id}
+                aria-label={item.isUnderControl ? 'Снять дело с контроля' : 'Поставить дело на контроль'}
+                title={item.isUnderControl ? 'Снять с контроля' : 'Поставить на контроль'}
+                className={`inline-flex h-8 w-8 items-center justify-center rounded-full border disabled:cursor-not-allowed disabled:opacity-50 ${item.isUnderControl ? 'border-rose-200 text-rose-700 hover:bg-rose-50' : 'border-slate-200 text-slate-500 hover:bg-rose-50 hover:text-rose-700'}`}>
+                {controlCaseId === item.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldAlert className="h-4 w-4" />}
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => openOwner(item)}
@@ -1815,6 +1855,16 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
             className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
             <ClipboardPlus className="h-4 w-4 text-emerald-700" /> Создать задачу
           </button>
+          {canEditCases ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => runContextMenuAction(() => void toggleCaseControl(caseContextMenu.item))}
+              disabled={controlCaseId === caseContextMenu.item.id}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50">
+              <ShieldAlert className="h-4 w-4 text-rose-700" /> {caseContextMenu.item.isUnderControl ? 'Снять с контроля' : 'Поставить на контроль'}
+            </button>
+          ) : null}
           <button
             type="button"
             role="menuitem"
