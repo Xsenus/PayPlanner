@@ -1186,6 +1186,51 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task UpdateInvoiceManaged_WhenDueDateChanges_SyncsPlannedDateAndInstallmentScheduleDate()
+    {
+        await using var db = await CreateContextAsync();
+        var invoice = await CreateInvoiceAggregateAsync(db);
+        var installmentPayment = await db.Payments.FindAsync(invoice.InstallmentPaymentIds[0]);
+        Assert.NotNull(installmentPayment);
+
+        installmentPayment!.Date = new DateTime(2026, 4, 8);
+        installmentPayment.PlannedDate = new DateTime(2026, 4, 8);
+        installmentPayment.SystemNotes = string.Join(
+            "\n",
+            $"{InstallmentPaymentMarker} {{\"sequence\":1,\"startDate\":\"2026-04-08\",\"item\":{{\"sequence\":1,\"date\":\"2026-04-08\",\"principal\":6000,\"interest\":0,\"payment\":6000,\"balance\":12000}}}}",
+            "Платеж 1/3");
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var model = CreatePayment(new DateTime(2026, 5, 20), installmentPayment.Amount, "Moved installment payment");
+        model.PlannedDate = new DateTime(2026, 4, 8);
+        model.InvoiceId = null;
+        model.SystemNotes = installmentPayment.SystemNotes;
+
+        var actionResult = await controller.UpdateInvoiceManaged(
+            installmentPayment.Id,
+            model,
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult);
+        var updated = Assert.IsType<Payment>(ok.Value);
+        Assert.Equal(new DateTime(2026, 5, 20), updated.Date);
+        Assert.Equal(new DateTime(2026, 5, 20), updated.PlannedDate);
+
+        db.ChangeTracker.Clear();
+        var stored = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == installmentPayment.Id);
+        Assert.Equal(new DateTime(2026, 5, 20), stored.PlannedDate);
+
+        var markerLine = stored.SystemNotes
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Single(line => line.StartsWith(InstallmentPaymentMarker, StringComparison.Ordinal));
+        using var document = JsonDocument.Parse(markerLine[InstallmentPaymentMarker.Length..].Trim());
+        Assert.Equal("2026-05-20", document.RootElement.GetProperty("startDate").GetString());
+        Assert.Equal("2026-05-20", document.RootElement.GetProperty("item").GetProperty("date").GetString());
+    }
+
+    [Fact]
     public async Task UpdateInvoiceManaged_SyncsGeneratedInstallmentBindingsFromRepresentative()
     {
         await using var db = await CreateContextAsync();
@@ -1895,7 +1940,7 @@ public class PaymentsControllerTests
     }
 
     [Fact]
-    public async Task Update_WhenStoredPlannedDateIsDefault_PreservesOriginalDueDateAsPlanned()
+    public async Task Update_WhenDueDateChangesWithoutExplicitPlannedDate_SyncsPlannedDate()
     {
         await using var db = await CreateContextAsync();
 
@@ -1924,11 +1969,11 @@ public class PaymentsControllerTests
 
         var ok = Assert.IsType<OkObjectResult>(actionResult);
         var updated = Assert.IsType<Payment>(ok.Value);
-        Assert.Equal(originalDate, updated.PlannedDate);
+        Assert.Equal(originalDate.AddDays(3), updated.PlannedDate);
         Assert.Equal(originalDate.AddDays(3), updated.Date);
 
         var stored = await db.Payments.AsNoTracking().SingleAsync(item => item.Id == payment.Id);
-        Assert.Equal(originalDate, stored.PlannedDate);
+        Assert.Equal(originalDate.AddDays(3), stored.PlannedDate);
     }
 
     [Fact]

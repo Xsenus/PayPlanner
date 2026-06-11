@@ -355,6 +355,51 @@ describe('PaymentModal integration', () => {
     expect(document.querySelector<HTMLInputElement>('input[name="plannedDate"]')?.value).toBe('2026-06-05');
   });
 
+  it('syncs the planned date when the payment date changes', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        payment={{
+          id: 771,
+          date: '2026-04-10',
+          plannedDate: '2026-04-10',
+          amount: 12_000,
+          paidAmount: 0,
+          outstandingAmount: 12_000,
+          hasPartialPayment: false,
+          status: 'Pending',
+          description: 'Payment date sync',
+          isPaid: false,
+          notes: '',
+          type: 'Income',
+          createdAt: '2026-04-01T00:00:00Z',
+          systemNotes: '',
+          rescheduleCount: 0,
+        }}
+      />,
+    );
+
+    fireEvent.change(document.querySelector<HTMLInputElement>('input[name="date"]')!, {
+      target: { value: '2026-05-20' },
+    });
+
+    expect(document.querySelector<HTMLInputElement>('input[name="plannedDate"]')?.value).toBe('2026-05-20');
+    fireEvent.click(document.querySelector<HTMLButtonElement>('button[type="submit"]')!);
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 771,
+        date: '2026-05-20',
+        plannedDate: '2026-05-20',
+      }),
+    );
+  });
+
   it('uses the profile timezone day when marking a payment as paid', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-06-04T20:30:00.000Z'));

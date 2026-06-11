@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -204,6 +206,7 @@ public class PaymentsController : ControllerBase
         {
             e.PlannedDate = model.PlannedDate;
         }
+        SyncPlannedDateWithChangedDueDate(e, originalDueDate, originalPlannedDate, model);
         e.Amount = model.Amount;
         e.Type = model.Type;
         e.Status = model.Status;
@@ -255,6 +258,7 @@ public class PaymentsController : ControllerBase
         }
 
         PaymentDomainService.ApplyStatusRules(e, now, paymentTimeZone);
+        SyncInstallmentScheduleMetadataDate(e);
 
         var rescheduleCount = originalRescheduleCount;
         var plannedDateChanged = model.PlannedDate != default && originalPlannedDate != e.PlannedDate.Date;
@@ -486,6 +490,7 @@ public class PaymentsController : ControllerBase
         {
             e.PlannedDate = model.PlannedDate;
         }
+        SyncPlannedDateWithChangedDueDate(e, originalDueDate, originalPlannedDate, model);
         e.Amount = model.Amount;
         e.Status = model.Status;
         e.Description = model.Description ?? string.Empty;
@@ -545,6 +550,7 @@ public class PaymentsController : ControllerBase
         }
 
         PaymentDomainService.ApplyStatusRules(e, now, paymentTimeZone);
+        SyncInstallmentScheduleMetadataDate(e);
 
         var rescheduleCount = originalRescheduleCount;
         var plannedDateChanged = model.PlannedDate != default && originalPlannedDate != e.PlannedDate.Date;
@@ -3019,6 +3025,137 @@ public class PaymentsController : ControllerBase
         AppendLines(incoming ?? string.Empty);
 
         return string.Join("\n", lines);
+    }
+
+    private static void SyncPlannedDateWithChangedDueDate(
+        Payment payment,
+        DateTime originalDueDate,
+        DateTime originalPlannedDate,
+        Payment incoming)
+    {
+        if (incoming.Date.Date == originalDueDate)
+        {
+            return;
+        }
+
+        var incomingPlannedDate = incoming.PlannedDate == default
+            ? (DateTime?)null
+            : incoming.PlannedDate.Date;
+        var plannedDateChangedExplicitly =
+            incomingPlannedDate.HasValue && incomingPlannedDate.Value != originalPlannedDate;
+
+        if (!plannedDateChangedExplicitly)
+        {
+            payment.PlannedDate = incoming.Date.Date;
+        }
+    }
+
+    private static void SyncInstallmentScheduleMetadataDate(Payment payment)
+    {
+        if (!InvoiceManagedPaymentRules.IsGeneratedInstallmentPayment(payment))
+        {
+            return;
+        }
+
+        var scheduleDate = PaymentDomainService.NormalizeLocalDate(
+            payment.PlannedDate == default ? payment.Date : payment.PlannedDate);
+        payment.SystemNotes = ReplaceInstallmentMetadataDate(payment.SystemNotes, scheduleDate);
+    }
+
+    private static string ReplaceInstallmentMetadataDate(string? notes, DateTime scheduleDate)
+    {
+        var lines = SplitSystemNoteLines(notes).ToList();
+        var markerIndex = lines.FindIndex(line =>
+            line.StartsWith(InvoiceManagedPaymentRules.InstallmentPaymentMarker, StringComparison.Ordinal));
+        if (markerIndex < 0)
+        {
+            return string.Join("\n", lines);
+        }
+
+        var line = lines[markerIndex];
+        var json = line[InvoiceManagedPaymentRules.InstallmentPaymentMarker.Length..].Trim();
+        if (string.IsNullOrWhiteSpace(json) || json[0] != '{')
+        {
+            return string.Join("\n", lines);
+        }
+
+        try
+        {
+            var root = JsonNode.Parse(json)?.AsObject();
+            if (root is null)
+            {
+                return string.Join("\n", lines);
+            }
+
+            var item = GetObjectProperty(root, "item");
+            if (item is null)
+            {
+                return string.Join("\n", lines);
+            }
+
+            var normalizedDate = scheduleDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            SetPropertyCaseInsensitive(item, "date", normalizedDate);
+            if (TryGetIntegerProperty(root, "sequence", out var sequence) && sequence == 1)
+            {
+                SetPropertyCaseInsensitive(root, "startDate", normalizedDate);
+            }
+
+            lines[markerIndex] = $"{InvoiceManagedPaymentRules.InstallmentPaymentMarker} {root.ToJsonString()}";
+            return string.Join("\n", lines);
+        }
+        catch (JsonException)
+        {
+            return string.Join("\n", lines);
+        }
+        catch (InvalidOperationException)
+        {
+            return string.Join("\n", lines);
+        }
+    }
+
+    private static JsonObject? GetObjectProperty(JsonObject source, string name)
+    {
+        foreach (var property in source)
+        {
+            if (string.Equals(property.Key, name, StringComparison.OrdinalIgnoreCase)
+                && property.Value is JsonObject obj)
+            {
+                return obj;
+            }
+        }
+
+        return null;
+    }
+
+    private static void SetPropertyCaseInsensitive(JsonObject source, string name, string value)
+    {
+        var key = source
+            .Select(property => property.Key)
+            .FirstOrDefault(key => string.Equals(key, name, StringComparison.OrdinalIgnoreCase))
+            ?? name;
+        source[key] = value;
+    }
+
+    private static bool TryGetIntegerProperty(JsonObject source, string name, out int value)
+    {
+        foreach (var property in source)
+        {
+            if (!string.Equals(property.Key, name, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (property.Value is not null && property.Value.GetValueKind() == JsonValueKind.Number)
+            {
+                value = property.Value.GetValue<int>();
+                return true;
+            }
+
+            break;
+        }
+
+        value = 0;
+        return false;
     }
 
     private static string ReplaceTechnicalMarkerLine(string? notes, string marker, string replacement)

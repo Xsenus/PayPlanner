@@ -1135,7 +1135,7 @@ export function PaymentModal({
     setFormData((prev) => {
       if (!prev.lastPaymentDate) return prev;
       if (prev.date === prev.lastPaymentDate) return prev;
-      return { ...prev, date: prev.lastPaymentDate };
+      return { ...prev, date: prev.lastPaymentDate, plannedDate: prev.lastPaymentDate };
     });
   }, [formData.lastPaymentDate, syncDateWithPayment, isOpen]);
 
@@ -1837,6 +1837,11 @@ export function PaymentModal({
           paidDate: '',
           lastPaymentDate: '',
         }));
+      return;
+    }
+
+    if (name === 'date') {
+      setFormData((prev) => ({ ...prev, date: value, plannedDate: value }));
       return;
     }
 
