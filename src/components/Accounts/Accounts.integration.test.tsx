@@ -887,7 +887,7 @@ describe('Accounts integration', () => {
     expect(refreshAccountsMock).toHaveBeenCalled();
   });
 
-  it('uses the document status dictionary label in the accounts journal', async () => {
+  it('keeps the canonical signed client label in the accounts journal', async () => {
     getDocumentStatusesMock.mockResolvedValue([
       {
         id: 31,
@@ -925,7 +925,7 @@ describe('Accounts integration', () => {
 
     const row = screen.getByRole('button', { name: '24' }).closest('tr');
     expect(row).toBeTruthy();
-    expect(await within(row as HTMLTableRowElement).findByText('Подписан клиентом (справочник)')).toBeTruthy();
+    expect(await within(row as HTMLTableRowElement).findByText('Подписан клиентом')).toBeTruthy();
     expect(within(row as HTMLTableRowElement).queryByText(/^Подписан$/)).toBeNull();
   });
 
