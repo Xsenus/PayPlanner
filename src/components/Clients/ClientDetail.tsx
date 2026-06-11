@@ -68,6 +68,7 @@ import type {
   Contract,
   ContractClient,
   ContractInput,
+  ContractStatus,
   DadataAddressSuggestion,
   Invoice,
   InvoiceInput,
@@ -232,6 +233,7 @@ type ActTableColumnKey =
 type ContractTableColumnKey =
   | "number"
   | "title"
+  | "status"
   | "date"
   | "clients"
   | "amount"
@@ -376,6 +378,7 @@ const CONTRACT_TABLE_COLUMNS: Array<{
 }> = [
   { key: "number", label: "Номер договора", defaultWidth: 180 },
   { key: "title", label: "Название договора", defaultWidth: 240 },
+  { key: "status", label: "Статус документа", defaultWidth: 180 },
   { key: "date", label: "Дата договора", defaultWidth: 150 },
   { key: "clients", label: "Клиенты", defaultWidth: 260 },
   { key: "amount", label: "Сумма договора", defaultWidth: 170 },
@@ -385,6 +388,34 @@ const CONTRACT_TABLE_COLUMNS: Array<{
   { key: "validUntil", label: "Действует до", defaultWidth: 170 },
   { key: "createdAt", label: "Создано", defaultWidth: 150 },
 ];
+
+const CONTRACT_STATUS_LABELS: Record<ContractStatus, string> = {
+  Draft: "Черновик",
+  NotSigned: "Не подписан",
+  RequiresClientSignature: "Требуется подпись клиента",
+  OnApproval: "На согласовании",
+  Approved: "Согласован",
+  ApprovalRejected: "Отказ в согласовании",
+  NeedsCorrection: "Требует исправления",
+  OnSigning: "На подписании",
+  Concluded: "Подписан клиентом",
+  Terminated: "Расторгнут",
+  Cancelled: "Аннулирован",
+};
+
+const CONTRACT_STATUS_CLASSES: Record<ContractStatus, string> = {
+  Draft: "bg-slate-100 text-slate-700 border border-slate-200",
+  NotSigned: "bg-slate-100 text-slate-700 border border-slate-200",
+  RequiresClientSignature: "bg-amber-100 text-amber-800 border border-amber-200",
+  OnApproval: "bg-cyan-100 text-cyan-700 border border-cyan-200",
+  Approved: "bg-emerald-100 text-emerald-700 border border-emerald-200",
+  ApprovalRejected: "bg-rose-100 text-rose-700 border border-rose-200",
+  NeedsCorrection: "bg-orange-100 text-orange-700 border border-orange-200",
+  OnSigning: "bg-violet-100 text-violet-700 border border-violet-200",
+  Concluded: "bg-emerald-100 text-emerald-700 border border-emerald-200",
+  Terminated: "bg-orange-100 text-orange-700 border border-orange-200",
+  Cancelled: "bg-rose-100 text-rose-700 border border-rose-200",
+};
 
 const SECTION_META: Record<
   ClientDetailSection,
@@ -10151,6 +10182,7 @@ export function ClientDetail({
                               {visibleContractTableColumns.map((column) => {
                                 const sortKey =
                                   column.key === "clients" ||
+                                  column.key === "status" ||
                                   column.key === "validUntil" ||
                                   column.key === "title" ||
                                   column.key === "linkedInvoices" ||
@@ -10283,6 +10315,17 @@ export function ClientDetail({
                                       >
                                         {contract.title?.trim() || "—"}
                                       </span>
+                                    ) : column.key === "status" ? (
+                                      (() => {
+                                        const status = contract.status ?? "Draft";
+                                        return (
+                                          <span
+                                            className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${CONTRACT_STATUS_CLASSES[status]}`}
+                                          >
+                                            {CONTRACT_STATUS_LABELS[status]}
+                                          </span>
+                                        );
+                                      })()
                                     ) : column.key === "date" ? (
                                       <span className="text-gray-900">
                                         {toRuDate(contract.date)}

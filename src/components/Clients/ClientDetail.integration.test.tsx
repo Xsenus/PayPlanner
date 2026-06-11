@@ -1844,6 +1844,7 @@ describe('ClientDetail integration', () => {
       title: 'Спор между клиентами',
       date: '2026-05-18',
       billingMode: 'Actual',
+      status: 'Concluded',
       isOpenEnded: true,
       invoiceAmountTotal: 0,
       actAmountTotal: 0,
@@ -1927,6 +1928,7 @@ describe('ClientDetail integration', () => {
     render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="contracts" />);
 
     await screen.findByText('№1-18/05-26');
+    expect(await screen.findByText('Подписан клиентом')).toBeTruthy();
     expect(await screen.findByText('Счет №154')).toBeTruthy();
     expect(await screen.findByText('Акт №1183')).toBeTruthy();
     await waitFor(() => {
@@ -1936,6 +1938,51 @@ describe('ClientDetail integration', () => {
         ).length,
       ).toBeGreaterThan(0);
     });
+  });
+
+  it('shows document status in the client contracts table', async () => {
+    useContractsMock.mockReturnValue({
+      ...emptyContractsResult,
+      contracts: [
+        {
+          id: 11,
+          number: '1-18/05-26',
+          title: 'Договор на сопровождение',
+          date: '2026-05-18',
+          billingMode: 'Fixed',
+          status: 'Concluded',
+          amount: 25_000,
+          isOpenEnded: false,
+          clients: [{ id: 1, name: 'Иванов Иван Иванович' }],
+          invoiceIds: [],
+          actIds: [],
+          paymentIds: [],
+          createdAt: '2026-05-18T00:00:00Z',
+        } as Contract,
+        {
+          id: 12,
+          number: '2-20/05-26',
+          title: 'Расторгнутый договор',
+          date: '2026-05-20',
+          billingMode: 'Fixed',
+          status: 'Terminated',
+          amount: 30_000,
+          isOpenEnded: false,
+          clients: [{ id: 1, name: 'Иванов Иван Иванович' }],
+          invoiceIds: [],
+          actIds: [],
+          paymentIds: [],
+          createdAt: '2026-05-20T00:00:00Z',
+        } as Contract,
+      ],
+      pagination: { total: 2, page: 1, pageSize: 10 },
+    });
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="contracts" />);
+
+    expect(await screen.findByText('Статус документа')).toBeTruthy();
+    expect(await screen.findByText('Подписан клиентом')).toBeTruthy();
+    expect(await screen.findByText('Расторгнут')).toBeTruthy();
   });
 
   it('shows contract filter badges and resets the contract query state', async () => {
