@@ -697,10 +697,14 @@ export function Accounts({
 
   useEffect(() => {
     let active = true;
+    const ownerParams = {
+      ...(selectedClientIdNumber ? { clientId: selectedClientIdNumber } : {}),
+      ...(selectedLegalEntityIdNumber ? { legalEntityId: selectedLegalEntityIdNumber } : {}),
+    };
 
     setContractsLoading(true);
     void apiService
-      .getContracts({ sortBy: 'date', sortDir: 'desc', page: 1, pageSize: 200 })
+      .getContracts({ ...ownerParams, sortBy: 'date', sortDir: 'desc', page: 1, pageSize: 200 })
       .then((response) => {
         if (active) {
           setContracts(response.items ?? []);
@@ -720,7 +724,13 @@ export function Accounts({
     return () => {
       active = false;
     };
-  }, []);
+  }, [selectedClientIdNumber, selectedLegalEntityIdNumber]);
+
+  useEffect(() => {
+    if (!selectedContractId || contractsLoading) return;
+    if (contracts.some((contract) => contract.id === selectedContractId)) return;
+    setSelectedContractId(null);
+  }, [contracts, contractsLoading, selectedContractId]);
 
   const payablesOverdueCount = useMemo(
     () => payablesDashboard?.dueBuckets.find((bucket) => bucket.key === 'overdue')?.count ?? 0,

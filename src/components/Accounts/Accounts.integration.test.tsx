@@ -688,6 +688,16 @@ describe('Accounts integration', () => {
         clientRole: 'expenseClient',
       });
     });
+
+    await waitFor(() => {
+      expect(getContractsMock).toHaveBeenCalledWith({
+        clientId: 55,
+        sortBy: 'date',
+        sortDir: 'desc',
+        page: 1,
+        pageSize: 200,
+      });
+    });
   });
 
   it('passes selected contract into the accounts registry query', async () => {

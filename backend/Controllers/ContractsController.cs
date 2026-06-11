@@ -94,7 +94,8 @@ public class ContractsController : ControllerBase
     public async Task<IActionResult> Get([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] int? clientId,
         [FromQuery] string? search, [FromQuery] string? sortBy, [FromQuery] string? sortDir, [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20, CancellationToken ct = default, [FromQuery] string? status = null,
-        [FromQuery] int? invoiceId = null, [FromQuery] int? actId = null, [FromQuery] int? paymentId = null)
+        [FromQuery] int? invoiceId = null, [FromQuery] int? actId = null, [FromQuery] int? paymentId = null,
+        [FromQuery] int? legalEntityId = null)
     {
         page = page <= 0 ? 1 : page;
         pageSize = pageSize <= 0 ? 20 : Math.Min(pageSize, 200);
@@ -110,9 +111,9 @@ public class ContractsController : ControllerBase
             return ValidationError(nameof(status), "Unknown contract status.");
         }
 
-        var query = ApplySort(ApplyFilters(BuildContractsListCountQuery(visibility), from, to, clientId, invoiceId, actId, paymentId, normalizedStatus, search), sortBy, sortDir);
+        var query = ApplySort(ApplyFilters(BuildContractsListCountQuery(visibility), from, to, clientId, legalEntityId, invoiceId, actId, paymentId, normalizedStatus, search), sortBy, sortDir);
         var total = await query.CountAsync(ct);
-        var contracts = await ApplySort(ApplyFilters(BuildContractDetailQuery(visibility), from, to, clientId, invoiceId, actId, paymentId, normalizedStatus, search), sortBy, sortDir)
+        var contracts = await ApplySort(ApplyFilters(BuildContractDetailQuery(visibility), from, to, clientId, legalEntityId, invoiceId, actId, paymentId, normalizedStatus, search), sortBy, sortDir)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(ct);
@@ -1776,6 +1777,7 @@ public class ContractsController : ControllerBase
         DateTime? from,
         DateTime? to,
         int? clientId,
+        int? legalEntityId,
         int? invoiceId,
         int? actId,
         int? paymentId,
@@ -1785,6 +1787,7 @@ public class ContractsController : ControllerBase
         if (from.HasValue) query = query.Where(c => c.Date >= from.Value.Date);
         if (to.HasValue) query = query.Where(c => c.Date <= to.Value.Date);
         if (clientId.HasValue) query = query.Where(c => c.ClientContracts.Any(link => link.ClientId == clientId.Value));
+        if (legalEntityId.HasValue) query = query.Where(c => c.LegalEntityContracts.Any(link => link.LegalEntityId == legalEntityId.Value));
         if (invoiceId.HasValue)
         {
             query = query.Where(c =>

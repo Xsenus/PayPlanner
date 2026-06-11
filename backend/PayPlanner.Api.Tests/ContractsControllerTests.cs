@@ -1222,6 +1222,61 @@ public class ContractsControllerTests
     }
 
     [Fact]
+    public async Task Get_FiltersByLegalEntity()
+    {
+        await using var db = await CreateContextAsync();
+
+        var targetLegalEntity = new LegalEntity { ShortName = "ООО Целевой контрагент" };
+        var otherLegalEntity = new LegalEntity { ShortName = "ООО Другой контрагент" };
+        db.LegalEntities.AddRange(targetLegalEntity, otherLegalEntity);
+        await db.SaveChangesAsync();
+
+        var targetContract = new Contract
+        {
+            Number = "LE-TARGET",
+            Date = new DateTime(2026, 4, 10),
+            BillingMode = ContractBillingMode.Actual,
+            IsOpenEnded = true,
+            LegalEntityContracts =
+            {
+                new LegalEntityContract { LegalEntityId = targetLegalEntity.Id },
+            },
+        };
+        var otherContract = new Contract
+        {
+            Number = "LE-OTHER",
+            Date = new DateTime(2026, 4, 11),
+            BillingMode = ContractBillingMode.Actual,
+            IsOpenEnded = true,
+            LegalEntityContracts =
+            {
+                new LegalEntityContract { LegalEntityId = otherLegalEntity.Id },
+            },
+        };
+        db.Contracts.AddRange(targetContract, otherContract);
+        await db.SaveChangesAsync();
+
+        var controller = new ContractsController(db, new NoopFormRequirementsService());
+        var actionResult = await controller.Get(
+            from: null,
+            to: null,
+            clientId: null,
+            search: null,
+            sortBy: null,
+            sortDir: null,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None,
+            legalEntityId: targetLegalEntity.Id);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult);
+        var items = GetAnonymousProperty<IEnumerable<ContractDto>>(ok.Value!, "items").ToList();
+        var item = Assert.Single(items);
+        Assert.Equal(targetContract.Id, item.Id);
+        Assert.Equal("LE-TARGET", item.Number);
+    }
+
+    [Fact]
     public async Task GetById_KeepsLegacyManualInvoiceLinks_VisibleBeforeResave()
     {
         await using var db = await CreateContextAsync();
