@@ -935,6 +935,36 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task GetAutomationCaseCandidates_AppliesSearchBeforeLimit()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author-search-candidates@example.com", "Автор");
+        var olderClient = await CreateClientAsync(db, "Петров Петр Петрович");
+        var olderCase = await CreateCaseAsync(db, olderClient.Id, "ПЕТРОВ - старое дело");
+        olderCase.CreatedAt = DateTime.UtcNow.AddDays(-45);
+        var targetClient = await CreateClientAsync(db, "Кошелева Елена Юрьевна");
+        var targetCase = await CreateCaseAsync(db, targetClient.Id, "КОШЕЛЕВА - уголовное дело");
+        targetCase.CreatedAt = DateTime.UtcNow.AddDays(-25);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.GetAutomationCaseCandidates(
+            inactiveDays: 14,
+            limit: 1,
+            escalationDays: null,
+            search: "КОШЕЛЕВА",
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var candidates = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalCaseAutomationCandidateDto>>(ok.Value);
+        var candidate = Assert.Single(candidates);
+
+        Assert.Equal(targetClient.Id, candidate.ClientId);
+        Assert.Equal(targetCase.Id, candidate.ClientCaseId);
+        Assert.Equal("КОШЕЛЕВА - уголовное дело", candidate.ClientCaseTitle);
+    }
+
+    [Fact]
     public async Task GetAutomationCaseCandidates_AppliesCaseOwnerVisibility()
     {
         await using var db = await CreateContextAsync();

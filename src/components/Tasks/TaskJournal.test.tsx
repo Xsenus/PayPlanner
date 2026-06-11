@@ -1810,6 +1810,41 @@ describe('TaskJournal', () => {
     expect(await screen.findByRole('heading', { name: 'Просмотр задачи' })).toBeTruthy();
   });
 
+  it('reloads case automation candidates for the current search', async () => {
+    apiMock.getTaskJournalCaseAutomationCandidates.mockImplementation(async (params?: { search?: string }) => (
+      params?.search === 'КОШЕЛЕВА'
+        ? [
+          {
+            clientId: 10,
+            clientName: 'Кошелева Елена Юрьевна',
+            clientCaseId: 100,
+            clientCaseTitle: 'КОШЕЛЕВА - уголовное дело',
+            reason: 'Нет активной задачи уже 21 дн.',
+            activeTaskCount: 0,
+            completedTaskCount: 2,
+            daysWithoutActiveTask: 21,
+            isEscalated: false,
+            lastTaskAt: todayAt(8),
+            suggestedTitle: 'Проверить движение по делу',
+            suggestedDescription: 'Автоконтроль: по делу нет активной задачи.',
+            suggestedDueAt: todayAt(9),
+            suggestedPriority: 'normal',
+          },
+        ]
+        : []
+    ));
+    await renderJournal([], { waitForTitle: null });
+
+    const searchInput = screen.getByRole('textbox') as HTMLInputElement;
+    fireEvent.change(searchInput, { target: { value: 'КОШЕЛЕВА' } });
+
+    await waitFor(() => expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledWith(expect.objectContaining({
+      search: 'КОШЕЛЕВА',
+    })));
+    expect(await screen.findByText('Кошелева Елена Юрьевна')).toBeTruthy();
+    expect(screen.getByText('КОШЕЛЕВА - уголовное дело')).toBeTruthy();
+  });
+
   it('creates control tasks for all automation candidates', async () => {
     apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([
       {

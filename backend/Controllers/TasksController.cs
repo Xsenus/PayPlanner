@@ -616,6 +616,7 @@ public class TasksController : ControllerBase
         [FromQuery] int? inactiveDays = null,
         [FromQuery] int? limit = null,
         [FromQuery] int? escalationDays = null,
+        [FromQuery] string? search = null,
         CancellationToken ct = default)
     {
         var access = await GetTaskAccessAsync(ct);
@@ -641,7 +642,7 @@ public class TasksController : ControllerBase
         var now = DateTime.UtcNow;
         var cutoff = now.AddDays(-effectiveInactiveDays);
 
-        var candidates = await _db.ClientCases
+        var candidates = _db.ClientCases
             .AsNoTracking()
             .ApplyClientCaseVisibility(access.Visibility)
             .Where(clientCase =>
@@ -683,7 +684,22 @@ public class TasksController : ControllerBase
                 LastCourtEventAt = _db.ClientCaseCourtEvents
                     .Where(courtEvent => courtEvent.ClientCaseId == clientCase.Id)
                     .Max(courtEvent => (DateTime?)(courtEvent.UpdatedAt ?? courtEvent.CreatedAt)),
-            })
+            });
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var rawTerm = search.Trim();
+            var term = rawTerm.ToLower();
+            candidates = candidates.Where(item =>
+                item.Title.ToLower().Contains(term) ||
+                item.Title.Contains(rawTerm) ||
+                item.ClientName.ToLower().Contains(term) ||
+                item.ClientName.Contains(rawTerm) ||
+                item.LegalEntityName.ToLower().Contains(term) ||
+                item.LegalEntityName.Contains(rawTerm));
+        }
+
+        var filteredCandidates = await candidates
             .Where(item => item.ActiveTaskCount == 0
                 && (item.LastTaskAt ?? item.CreatedAt) <= cutoff
                 && (item.LastTaskCommentAt ?? item.CreatedAt) <= cutoff
@@ -698,7 +714,7 @@ public class TasksController : ControllerBase
             .Take(effectiveLimit)
             .ToListAsync(ct);
 
-        return Ok(candidates.Select(item =>
+        return Ok(filteredCandidates.Select(item =>
         {
             var lastActivity = ResolveLastCaseActivity(
                 item.CreatedAt,

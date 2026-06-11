@@ -1582,12 +1582,14 @@ export function TaskJournal({
   const [automationCandidates, setAutomationCandidates] = useState<TaskJournalCaseAutomationCandidate[]>([]);
   const [creatingAutomationCaseId, setCreatingAutomationCaseId] = useState<number | null>(null);
   const [creatingAutomationAll, setCreatingAutomationAll] = useState(false);
+  const automationCandidatesRequestRef = useRef(0);
   const [loading, setLoading] = useState(true);
   const [filterOwnerKey, setFilterOwnerKey] = useState(() => getTaskJournalFilterStorageKey(currentUserId, mode));
 
   const [quickFilter, setQuickFilter] = useState<QuickFilter>(initialPreferences.quickFilter);
   const [metricFilter, setMetricFilter] = useState<MetricFilter>(initialPreferences.metricFilter);
   const [search, setSearch] = useState(initialPreferences.search);
+  const searchRef = useRef(initialPreferences.search);
   const [dateFromFilter, setDateFromFilter] = useState(initialPreferences.dateFrom);
   const [dateToFilter, setDateToFilter] = useState(initialPreferences.dateTo);
   const [viewMode, setViewMode] = useState<ViewMode>(initialPreferences.viewMode);
@@ -1729,19 +1731,27 @@ export function TaskJournal({
     window.dispatchEvent(new CustomEvent(TASK_JOURNAL_EVENT));
   }, []);
 
+  const loadAutomationCandidates = useCallback(async (
+    settings: TaskJournalSettingsDto,
+    searchValue: string,
+  ) => {
+    if (embedded || underControlOnly || isApprovalsMode || !settings.caseInactivityAutomationEnabled) {
+      return [];
+    }
+
+    return apiService.getTaskJournalCaseAutomationCandidates({
+      inactiveDays: settings.caseInactivityDays,
+      limit: Math.min(settings.caseInactivityLimit, 20),
+      escalationDays: settings.caseInactivityEscalationDays,
+      search: searchValue.trim() || undefined,
+    });
+  }, [embedded, isApprovalsMode, underControlOnly]);
+
   const refreshTasks = useCallback(async () => {
     setLoading(true);
     try {
       const settingsPromise = apiService.getTaskJournalSettings();
-      const automationPromise = settingsPromise.then((settingsResponse) => (
-        !embedded && !underControlOnly && settingsResponse.caseInactivityAutomationEnabled
-          ? apiService.getTaskJournalCaseAutomationCandidates({
-            inactiveDays: settingsResponse.caseInactivityDays,
-            limit: Math.min(settingsResponse.caseInactivityLimit, 20),
-            escalationDays: settingsResponse.caseInactivityEscalationDays,
-          })
-          : []
-      ));
+      const automationPromise = settingsPromise.then((settingsResponse) => loadAutomationCandidates(settingsResponse, searchRef.current));
       const [taskItems, assigneeResponse, settingsResponse, notificationDefaultsResponse, timeZoneResponse, calendarSyncSettingsResponse, automationResponse] = await Promise.all([
         loadAllTaskJournalItems(contextFilter, underControlOnly),
         apiService.getTaskJournalAssignees(),
@@ -1763,7 +1773,7 @@ export function TaskJournal({
     } finally {
       setLoading(false);
     }
-  }, [contextFilter, embedded, toast, underControlOnly]);
+  }, [contextFilter, loadAutomationCandidates, toast, underControlOnly]);
 
   useEffect(() => {
     void refreshTasks();
@@ -1771,6 +1781,24 @@ export function TaskJournal({
     window.addEventListener(TASK_JOURNAL_EVENT, refresh);
     return () => window.removeEventListener(TASK_JOURNAL_EVENT, refresh);
   }, [refreshTasks]);
+
+  useEffect(() => {
+    searchRef.current = search;
+    const requestId = automationCandidatesRequestRef.current + 1;
+    automationCandidatesRequestRef.current = requestId;
+
+    void loadAutomationCandidates(taskSettings, search)
+      .then((items) => {
+        if (automationCandidatesRequestRef.current === requestId) {
+          setAutomationCandidates(items);
+        }
+      })
+      .catch(() => {
+        if (automationCandidatesRequestRef.current === requestId) {
+          setAutomationCandidates([]);
+        }
+      });
+  }, [loadAutomationCandidates, search, taskSettings]);
 
   const assigneeOptions = useMemo(() => {
     const byId = new Map<number, TaskJournalAssignee>();
