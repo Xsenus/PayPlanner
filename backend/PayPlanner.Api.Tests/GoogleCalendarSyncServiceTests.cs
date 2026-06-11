@@ -572,6 +572,67 @@ public class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncTaskForConnectedUsersAsync_DeletesDuplicateGoogleEventAfterWrite()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-google-post-write-duplicate@example.com", "user");
+        await EnableGoogleSettingsAsync(db);
+        var connection = await CreateConnectionAsync(db, user.Id);
+        var calendar = await CreateCalendarAsync(db, connection.Id, "calendar-google-post-write-duplicate", "PayPlanner tasks");
+        var task = await CreateTaskAsync(db, user.Id, "Delete duplicate Google event after write");
+        var googleEvents = new object[]
+        {
+            new
+            {
+                id = "event-1",
+                etag = "\"etag-current\"",
+                status = "confirmed",
+                summary = "[New] Current event",
+                start = new { dateTime = "2026-06-12T10:00:00+04:00" },
+                end = new { dateTime = "2026-06-12T11:00:00+04:00" },
+                extendedProperties = new
+                {
+                    @private = new Dictionary<string, string>
+                    {
+                        ["payPlannerTaskId"] = task.Id.ToString(),
+                    },
+                },
+            },
+            new
+            {
+                id = "duplicate-event",
+                etag = "\"etag-duplicate\"",
+                status = "confirmed",
+                summary = "[New] Duplicate event",
+                start = new { dateTime = "2026-06-12T10:00:00+04:00" },
+                end = new { dateTime = "2026-06-12T11:00:00+04:00" },
+                extendedProperties = new
+                {
+                    @private = new Dictionary<string, string>
+                    {
+                        ["payPlannerTaskId"] = task.Id.ToString(),
+                    },
+                },
+            },
+        };
+        var handler = new RecordingGoogleHandler(eventItems: googleEvents);
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+
+        Assert.Contains(handler.Requests, request =>
+            request.Method == HttpMethod.Delete &&
+            request.RequestUri!.AbsolutePath.EndsWith("/calendars/calendar-google-post-write-duplicate/events/duplicate-event", StringComparison.Ordinal));
+        Assert.DoesNotContain(handler.Requests, request =>
+            request.Method == HttpMethod.Delete &&
+            request.RequestUri!.AbsolutePath.EndsWith("/calendars/calendar-google-post-write-duplicate/events/event-1", StringComparison.Ordinal));
+        Assert.Contains(await db.GoogleCalendarSyncLogs.ToListAsync(), item =>
+            item.TaskJournalItemId == task.Id &&
+            item.Operation == "delete-duplicate-event" &&
+            item.Status == "success");
+    }
+
+    [Fact]
     public async Task SyncNowAsync_WhenManualFullSyncCooldownActiveRejectsRepeatedRun()
     {
         await using var db = await CreateContextAsync();

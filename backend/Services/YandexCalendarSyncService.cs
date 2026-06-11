@@ -688,7 +688,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             var events = await ListYandexEventsAsync(accessToken, calendar, cancellationToken);
             foreach (var yandexEvent in events)
             {
-                if (await ApplyYandexEventAsync(connection, calendar, yandexEvent, cancellationToken))
+                if (await ApplyYandexEventAsync(connection, calendar, yandexEvent, accessToken, cancellationToken))
                 {
                     imported++;
                 }
@@ -707,6 +707,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         YandexCalendarConnection connection,
         YandexCalendarSyncCalendar calendar,
         YandexEventItem yandexEvent,
+        string accessToken,
         CancellationToken cancellationToken)
     {
         var taskId = yandexEvent.PayPlannerTaskId;
@@ -716,6 +717,46 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             link = await _db.YandexCalendarTaskLinks
                 .Include(item => item.TaskJournalItem)
                 .FirstOrDefaultAsync(item => item.ConnectionId == connection.Id && item.TaskJournalItemId == taskId.Value, cancellationToken);
+
+            if (link is not null && !IsLinkedYandexEvent(link, calendar.YandexCalendarId, yandexEvent.Id))
+            {
+                if (yandexEvent.Deleted)
+                {
+                    return false;
+                }
+
+                try
+                {
+                    var deleted = await DeleteYandexEventAsync(accessToken, yandexEvent.EventUrl, cancellationToken);
+                    await AddLogAsync(
+                        connection.Id,
+                        calendar.Id,
+                        link.TaskJournalItemId,
+                        "yandex-to-crm",
+                        "delete-stale-event",
+                        deleted ? "success" : "skip",
+                        deleted
+                            ? "Лишний дубль события Яндекс.Календаря для задачи CRM удалён; задача CRM оставлена без изменений."
+                            : "Лишний дубль события Яндекс.Календаря для задачи CRM уже отсутствовал; задача CRM оставлена без изменений.",
+                        yandexEvent.Summary,
+                        cancellationToken);
+                    return deleted;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    await AddLogAsync(
+                        connection.Id,
+                        calendar.Id,
+                        link.TaskJournalItemId,
+                        "yandex-to-crm",
+                        "delete-stale-event",
+                        "error",
+                        "Не удалось удалить лишний дубль события Яндекс.Календаря для задачи CRM; задача CRM оставлена без изменений.",
+                        ex.Message,
+                        cancellationToken);
+                    return false;
+                }
+            }
         }
 
         link ??= await _db.YandexCalendarTaskLinks
@@ -886,6 +927,14 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         link.LastError = null;
         link.LastSyncedAt = DateTime.UtcNow;
         link.UpdatedAt = DateTime.UtcNow;
+
+        await DeleteDuplicateYandexEventsForTaskAsync(
+            connection,
+            calendar,
+            task.Id,
+            eventId,
+            accessToken,
+            cancellationToken);
     }
 
     private async Task EnsureAdminAssigneeCalendarsAsync(
@@ -1541,6 +1590,52 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         return await SendYandexDeleteAsync(request, cancellationToken);
     }
 
+    private async Task DeleteDuplicateYandexEventsForTaskAsync(
+        YandexCalendarConnection connection,
+        YandexCalendarSyncCalendar calendar,
+        int taskId,
+        string activeEventId,
+        string accessToken,
+        CancellationToken cancellationToken)
+    {
+        var events = await ListYandexEventsAsync(accessToken, calendar, cancellationToken);
+        foreach (var duplicate in events.Where(item =>
+            item.PayPlannerTaskId == taskId &&
+            !item.Deleted &&
+            !string.Equals(item.Id, activeEventId, StringComparison.Ordinal)))
+        {
+            try
+            {
+                var deleted = await DeleteYandexEventAsync(accessToken, duplicate.EventUrl, cancellationToken);
+                await AddLogAsync(
+                    connection.Id,
+                    calendar.Id,
+                    taskId,
+                    "crm-to-yandex",
+                    "delete-duplicate-event",
+                    deleted ? "success" : "skip",
+                    deleted
+                        ? "Лишний дубль события Яндекс.Календаря для задачи CRM удалён."
+                        : "Лишний дубль события Яндекс.Календаря для задачи CRM уже отсутствовал.",
+                    duplicate.Summary,
+                    cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                await AddLogAsync(
+                    connection.Id,
+                    calendar.Id,
+                    taskId,
+                    "crm-to-yandex",
+                    "delete-duplicate-event",
+                    "error",
+                    "Не удалось удалить лишний дубль события Яндекс.Календаря для задачи CRM.",
+                    ex.Message,
+                    cancellationToken);
+            }
+        }
+    }
+
     private async Task<IReadOnlyList<YandexEventItem>> ListYandexEventsAsync(
         string accessToken,
         YandexCalendarSyncCalendar calendar,
@@ -1877,6 +1972,10 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
     private static bool ShouldHideCompletedTask(CalendarSyncSettingsDto settings, TaskJournalItem task)
         => string.Equals(settings.CompletedTaskCalendarAction, "hide", StringComparison.Ordinal) &&
            string.Equals(task.Status, "done", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsLinkedYandexEvent(YandexCalendarTaskLink link, string yandexCalendarId, string yandexEventId)
+        => string.Equals(link.YandexCalendarId, yandexCalendarId, StringComparison.Ordinal) &&
+           string.Equals(link.YandexEventId, yandexEventId, StringComparison.Ordinal);
 
     private static DateTime? BuildManualFullSyncAvailableAt(DateTime? lastFullSyncAt, int cooldownMinutes)
         => lastFullSyncAt.HasValue

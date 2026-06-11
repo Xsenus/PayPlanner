@@ -1011,6 +1011,14 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         link.LastError = null;
         link.LastSyncedAt = DateTime.UtcNow;
         link.UpdatedAt = DateTime.UtcNow;
+
+        await DeleteDuplicateGoogleEventsForTaskAsync(
+            connection,
+            calendar,
+            task.Id,
+            result.Id,
+            accessToken,
+            cancellationToken);
     }
 
     private async Task EnsureAdminAssigneeCalendarsAsync(
@@ -1523,6 +1531,109 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
     {
         using var request = BuildGoogleRequest(HttpMethod.Delete, $"{GoogleApiBaseUrl}/calendars/{Uri.EscapeDataString(calendarId)}/events/{Uri.EscapeDataString(eventId)}", accessToken);
         return await SendGoogleDeleteAsync(request, cancellationToken);
+    }
+
+    private async Task DeleteDuplicateGoogleEventsForTaskAsync(
+        GoogleCalendarConnection connection,
+        GoogleCalendarSyncCalendar calendar,
+        int taskId,
+        string activeEventId,
+        string accessToken,
+        CancellationToken cancellationToken)
+    {
+        var duplicates = await ListGoogleEventsForTaskAsync(accessToken, calendar.GoogleCalendarId, taskId, cancellationToken);
+        foreach (var duplicate in duplicates.Where(item =>
+            !string.Equals(item.Id, activeEventId, StringComparison.Ordinal) &&
+            !string.Equals(item.Status, "cancelled", StringComparison.OrdinalIgnoreCase)))
+        {
+            try
+            {
+                var deleted = await DeleteGoogleEventAsync(accessToken, calendar.GoogleCalendarId, duplicate.Id, cancellationToken);
+                await AddLogAsync(
+                    connection.Id,
+                    calendar.Id,
+                    taskId,
+                    "crm-to-google",
+                    "delete-duplicate-event",
+                    deleted ? "success" : "skip",
+                    deleted
+                        ? "Лишний дубль события Google Calendar для задачи CRM удалён."
+                        : "Лишний дубль события Google Calendar для задачи CRM уже отсутствовал.",
+                    duplicate.Summary,
+                    cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                await AddLogAsync(
+                    connection.Id,
+                    calendar.Id,
+                    taskId,
+                    "crm-to-google",
+                    "delete-duplicate-event",
+                    "error",
+                    "Не удалось удалить лишний дубль события Google Calendar для задачи CRM.",
+                    ex.Message,
+                    cancellationToken);
+            }
+        }
+    }
+
+    private async Task<IReadOnlyList<GoogleEventItem>> ListGoogleEventsForTaskAsync(
+        string accessToken,
+        string calendarId,
+        int taskId,
+        CancellationToken cancellationToken)
+    {
+        var events = new List<GoogleEventItem>();
+        string? pageToken = null;
+        do
+        {
+            var query = new Dictionary<string, string?>
+            {
+                ["singleEvents"] = "true",
+                ["showDeleted"] = "true",
+                ["maxResults"] = "2500",
+                ["privateExtendedProperty"] = $"payPlannerTaskId={taskId.ToString(CultureInfo.InvariantCulture)}",
+            };
+            if (!string.IsNullOrWhiteSpace(pageToken))
+            {
+                query["pageToken"] = pageToken;
+            }
+
+            var url = QueryHelpers.AddQueryString($"{GoogleApiBaseUrl}/calendars/{Uri.EscapeDataString(calendarId)}/events", query!);
+            using var request = BuildGoogleRequest(HttpMethod.Get, url, accessToken);
+            var response = await SendGoogleWithRetryAsync(request, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException(ReadProviderError(response.Payload, response.ReasonPhrase) ?? "Google не вернул события задачи.");
+            }
+
+            using var document = JsonDocument.Parse(response.Payload);
+            if (document.RootElement.TryGetProperty("items", out var items) && items.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in items.EnumerateArray())
+                {
+                    var eventId = ReadString(item, "id");
+                    if (string.IsNullOrWhiteSpace(eventId))
+                    {
+                        continue;
+                    }
+
+                    events.Add(new GoogleEventItem(
+                        eventId,
+                        ReadString(item, "etag"),
+                        ReadString(item, "status"),
+                        ReadString(item, "summary"),
+                        ReadGoogleDate(item, "start"),
+                        ReadGoogleDate(item, "end"),
+                        ReadPayPlannerTaskId(item)));
+                }
+            }
+
+            pageToken = ReadString(document.RootElement, "nextPageToken");
+        } while (!string.IsNullOrWhiteSpace(pageToken));
+
+        return events;
     }
 
     private async Task<GoogleEventsResponse> ListEventsAsync(

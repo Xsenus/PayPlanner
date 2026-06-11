@@ -548,6 +548,132 @@ END:VCALENDAR
     }
 
     [Fact]
+    public async Task SyncNowAsync_DeletesStaleYandexDuplicateWithoutMovingTask()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-yandex-stale-duplicate@example.com", "user");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        var calendar = await CreateCalendarAsync(db, connection.Id, "calendar-yandex-stale-duplicate", "PayPlanner tasks");
+        var taskDueAt = new DateTime(2026, 6, 12, 6, 52, 0, DateTimeKind.Utc);
+        var task = await CreateTaskAsync(db, user.Id, "Current Yandex task", taskDueAt);
+        db.YandexCalendarTaskLinks.Add(new YandexCalendarTaskLink
+        {
+            ConnectionId = connection.Id,
+            CalendarSyncCalendarId = calendar.Id,
+            TaskJournalItemId = task.Id,
+            YandexCalendarId = calendar.YandexCalendarId,
+            YandexEventId = "current-yandex-event",
+            YandexEventUrl = $"{calendar.CalendarUrl}current-yandex-event.ics",
+            SyncStatus = "active",
+            LastCrmHash = "old-crm-hash",
+            LastYandexHash = "old-yandex-hash",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var reportResponse = BuildYandexReportResponse(
+            calendar.CalendarUrl,
+            "stale-yandex-event",
+            $"""
+BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:stale-yandex-event
+DTSTART:20260612T102000Z
+DTEND:20260612T112000Z
+SUMMARY:[New] Stale duplicate
+X-PAYPLANNER-TASK-ID:{task.Id}
+X-PAYPLANNER-HASH:stale-hash
+END:VEVENT
+END:VCALENDAR
+""");
+        var handler = new RecordingYandexHandler(reportResponse: reportResponse);
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        var result = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+
+        Assert.Equal(0, result.ErrorCount);
+        var unchangedTask = await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id);
+        Assert.Equal(taskDueAt, unchangedTask.DueAt);
+        Assert.DoesNotContain(await db.YandexCalendarSyncLogs.ToListAsync(), item =>
+            item.TaskJournalItemId == task.Id &&
+            item.Operation == "update-task");
+        Assert.Contains(await db.YandexCalendarSyncLogs.ToListAsync(), item =>
+            item.TaskJournalItemId == task.Id &&
+            item.Operation == "delete-stale-event" &&
+            item.Status == "success");
+        Assert.Contains(handler.Requests, request =>
+            request.Method == HttpMethod.Delete &&
+            request.RequestUri!.AbsoluteUri == $"{calendar.CalendarUrl}stale-yandex-event.ics");
+    }
+
+    [Fact]
+    public async Task SyncTaskForConnectedUsersAsync_DeletesDuplicateYandexEventAfterWrite()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-yandex-post-write-duplicate@example.com", "user");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        var calendar = await CreateCalendarAsync(db, connection.Id, "calendar-yandex-post-write-duplicate", "PayPlanner tasks");
+        var task = await CreateTaskAsync(db, user.Id, "Delete duplicate Yandex event after write");
+        db.YandexCalendarTaskLinks.Add(new YandexCalendarTaskLink
+        {
+            ConnectionId = connection.Id,
+            CalendarSyncCalendarId = calendar.Id,
+            TaskJournalItemId = task.Id,
+            YandexCalendarId = calendar.YandexCalendarId,
+            YandexEventId = "current-yandex-event",
+            YandexEventUrl = $"{calendar.CalendarUrl}current-yandex-event.ics",
+            SyncStatus = "active",
+            LastCrmHash = "old-crm-hash",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var reportResponse = BuildYandexReportResponseForEvents(
+            (calendar.CalendarUrl, "current-yandex-event", $"""
+BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:current-yandex-event
+DTSTART:20260612T100000Z
+DTEND:20260612T110000Z
+SUMMARY:[New] Current event
+X-PAYPLANNER-TASK-ID:{task.Id}
+X-PAYPLANNER-HASH:current-hash
+END:VEVENT
+END:VCALENDAR
+"""),
+            (calendar.CalendarUrl, "duplicate-yandex-event", $"""
+BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+UID:duplicate-yandex-event
+DTSTART:20260612T100000Z
+DTEND:20260612T110000Z
+SUMMARY:[New] Duplicate event
+X-PAYPLANNER-TASK-ID:{task.Id}
+X-PAYPLANNER-HASH:duplicate-hash
+END:VEVENT
+END:VCALENDAR
+"""));
+        var handler = new RecordingYandexHandler(reportResponse: reportResponse);
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        await service.SyncTaskForConnectedUsersAsync(task.Id, CancellationToken.None);
+
+        Assert.Contains(handler.Requests, request =>
+            request.Method == HttpMethod.Delete &&
+            request.RequestUri!.AbsoluteUri == $"{calendar.CalendarUrl}duplicate-yandex-event.ics");
+        Assert.DoesNotContain(handler.Requests, request =>
+            request.Method == HttpMethod.Delete &&
+            request.RequestUri!.AbsoluteUri == $"{calendar.CalendarUrl}current-yandex-event.ics");
+        Assert.Contains(await db.YandexCalendarSyncLogs.ToListAsync(), item =>
+            item.TaskJournalItemId == task.Id &&
+            item.Operation == "delete-duplicate-event" &&
+            item.Status == "success");
+    }
+
+    [Fact]
     public async Task SyncTaskForConnectedUsersAsync_DeletesCompletedTaskEventWhenHideModeEnabled()
     {
         await using var db = await CreateContextAsync();
@@ -784,20 +910,34 @@ END:VCALENDAR
 
     private static string BuildYandexReportResponse(string calendarUrl, string eventId, string ics)
     {
-        var href = $"{calendarUrl}{eventId}.ics";
-        return $"""
-<?xml version="1.0" encoding="utf-8"?>
-<D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+        return BuildYandexReportResponseForEvents((calendarUrl, eventId, ics));
+    }
+
+    private static string BuildYandexReportResponseForEvents(params (string CalendarUrl, string EventId, string Ics)[] events)
+    {
+        var responses = string.Join(
+            Environment.NewLine,
+            events.Select(item =>
+            {
+                var href = $"{item.CalendarUrl}{item.EventId}.ics";
+                return $"""
   <D:response>
     <D:href>{href}</D:href>
     <D:propstat>
       <D:prop>
-        <D:getetag>"etag-{eventId}"</D:getetag>
-        <C:calendar-data><![CDATA[{ics}]]></C:calendar-data>
+        <D:getetag>"etag-{item.EventId}"</D:getetag>
+        <C:calendar-data><![CDATA[{item.Ics}]]></C:calendar-data>
       </D:prop>
       <D:status>HTTP/1.1 200 OK</D:status>
     </D:propstat>
   </D:response>
+""";
+            }));
+
+        return $"""
+<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+{responses}
 </D:multistatus>
 """;
     }
