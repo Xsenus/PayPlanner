@@ -560,7 +560,7 @@ public static class ContractDocumentTemplateEngine
             ContractStatus.ApprovalRejected => "Отказ в согласовании",
             ContractStatus.NeedsCorrection => "Требует исправления",
             ContractStatus.OnSigning => "На подписании",
-            ContractStatus.Concluded => "Подписан",
+            ContractStatus.Concluded => "Подписан клиентом",
             ContractStatus.Terminated => "Расторгнут",
             ContractStatus.Cancelled => "Аннулирован",
             _ => "Черновик",

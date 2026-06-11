@@ -10,6 +10,7 @@ import type {
   ServiceDictionaryItem,
   ServiceCategoryDictionaryItem,
 } from '../../types';
+import { isDocumentStatusCodeAllowedForKind } from '../../utils/documentStatusSettings';
 
 function sortRows<T extends RowState>(rows: T[]): T[] {
   return [...rows].sort((a, b) => {
@@ -85,16 +86,18 @@ function Checkbox(props: {
   onChange: (v: boolean) => void;
   id?: string;
   label?: string;
+  disabled?: boolean;
 }) {
-  const { checked, onChange, id, label } = props;
+  const { checked, onChange, id, label, disabled = false } = props;
   return (
-    <label htmlFor={id} className="inline-flex select-none items-center gap-2">
+    <label htmlFor={id} className={`inline-flex select-none items-center gap-2 ${disabled ? 'opacity-50' : ''}`}>
       <input
         id={id}
         type="checkbox"
         className="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
-        checked={checked}
-        onChange={(e) => onChange(e.currentTarget.checked)}
+        checked={checked && !disabled}
+        disabled={disabled}
+        onChange={(e) => onChange(e.currentTarget.checked && !disabled)}
       />
       {label ? <span className="text-sm text-gray-700">{label}</span> : null}
     </label>
@@ -263,6 +266,13 @@ const makeKey = (): RowKey => `${Date.now()}-${Math.random().toString(36).slice(
 const isPersistedFullDictItem = (item: FullDictItem | Omit<FullDictItem, 'id' | 'createdAt'>): item is FullDictItem =>
   typeof (item as FullDictItem).id === 'number';
 
+function isDocumentStatusScopeCompatible(
+  item: { code?: string | null },
+  scope: 'invoice' | 'act' | 'contract',
+): boolean {
+  return !item.code || isDocumentStatusCodeAllowedForKind(item.code, scope);
+}
+
 const TABS: { value: VisibleKind; label: string }[] = [
   { value: 'deal-types', label: 'Тип сделки' },
   { value: 'income-income', label: 'Тип дохода' },
@@ -357,9 +367,9 @@ function normalize(kind: VisibleKind, x: ApiVisibleItem): FullDictItem {
     defaultPrice: 'defaultPrice' in x && typeof x.defaultPrice === 'number' ? x.defaultPrice : undefined,
     categoryId: 'categoryId' in x ? (x.categoryId as number | null | undefined) ?? null : undefined,
     code: 'code' in x && typeof x.code === 'string' ? x.code : undefined,
-    useForInvoices: 'useForInvoices' in x && typeof x.useForInvoices === 'boolean' ? x.useForInvoices : undefined,
-    useForActs: 'useForActs' in x && typeof x.useForActs === 'boolean' ? x.useForActs : undefined,
-    useForContracts: 'useForContracts' in x && typeof x.useForContracts === 'boolean' ? x.useForContracts : undefined,
+    useForInvoices: 'useForInvoices' in x && typeof x.useForInvoices === 'boolean' ? x.useForInvoices && isDocumentStatusScopeCompatible(x, 'invoice') : undefined,
+    useForActs: 'useForActs' in x && typeof x.useForActs === 'boolean' ? x.useForActs && isDocumentStatusScopeCompatible(x, 'act') : undefined,
+    useForContracts: 'useForContracts' in x && typeof x.useForContracts === 'boolean' ? x.useForContracts && isDocumentStatusScopeCompatible(x, 'contract') : undefined,
     sortOrder: 'sortOrder' in x && typeof x.sortOrder === 'number' ? x.sortOrder : undefined,
     description: x.description ?? '',
     colorHex: x.colorHex ?? defaultColor(kind),
@@ -549,6 +559,13 @@ export default function DictionariesModal({
     return kind === 'document-statuses';
   }
 
+  function isDocumentStatusScopeAllowed(
+    item: { code?: string | null },
+    scope: 'invoice' | 'act' | 'contract',
+  ): boolean {
+    return isDocumentStatusScopeCompatible(item, scope);
+  }
+
   async function saveNew(
     kind: VisibleKind,
     idx: number,
@@ -592,9 +609,9 @@ export default function DictionariesModal({
             ...(isDocumentStatusKind(kind)
               ? {
                   code: item.code,
-                  useForInvoices: !!item.useForInvoices,
-                  useForActs: !!item.useForActs,
-                  useForContracts: !!item.useForContracts,
+                  useForInvoices: !!item.useForInvoices && isDocumentStatusScopeAllowed(item, 'invoice'),
+                  useForActs: !!item.useForActs && isDocumentStatusScopeAllowed(item, 'act'),
+                  useForContracts: !!item.useForContracts && isDocumentStatusScopeAllowed(item, 'contract'),
                   sortOrder: item.sortOrder ?? 0,
                 }
               : {}),
@@ -652,9 +669,9 @@ export default function DictionariesModal({
             ...(isDocumentStatusKind(kind)
               ? {
                   code: item.code,
-                  useForInvoices: !!item.useForInvoices,
-                  useForActs: !!item.useForActs,
-                  useForContracts: !!item.useForContracts,
+                  useForInvoices: !!item.useForInvoices && isDocumentStatusScopeAllowed(item, 'invoice'),
+                  useForActs: !!item.useForActs && isDocumentStatusScopeAllowed(item, 'act'),
+                  useForContracts: !!item.useForContracts && isDocumentStatusScopeAllowed(item, 'contract'),
                   sortOrder: item.sortOrder ?? 0,
                 }
               : {}),

@@ -109,6 +109,77 @@ public class DocumentWorkflowStatusTests
         Assert.True(updated.UseForContracts);
     }
 
+    [Fact]
+    public async Task UpdateDocumentStatus_RemovesIncompatibleSigningScopes()
+    {
+        await using var db = await CreateContextAsync();
+        var status = new DocumentStatusEntity
+        {
+            Code = DocumentWorkflowStatus.SignedByClient,
+            Name = "Подписан клиентом",
+            Description = "Счет подписан клиентом",
+            ColorHex = "#10B981",
+            IsActive = true,
+            UseForInvoices = true,
+            UseForActs = false,
+            UseForContracts = false,
+            SortOrder = 90,
+        };
+        db.DocumentStatuses.Add(status);
+        await db.SaveChangesAsync();
+
+        var controller = new DictionariesAdminController(db);
+
+        var result = await controller.UpdateDocumentStatus(status.Id, new DocumentStatusEntity
+        {
+            Code = DocumentWorkflowStatus.SignedByClient,
+            Name = "Подписан клиентом",
+            Description = "Счет подписан клиентом",
+            ColorHex = "#10B981",
+            IsActive = true,
+            UseForInvoices = true,
+            UseForActs = true,
+            UseForContracts = true,
+            SortOrder = 90,
+        });
+
+        Assert.IsType<OkObjectResult>(result);
+        db.ChangeTracker.Clear();
+        var updated = await db.DocumentStatuses.AsNoTracking().SingleAsync(item => item.Id == status.Id);
+        Assert.Equal("Подписан клиентом (счет)", updated.Name);
+        Assert.True(updated.UseForInvoices);
+        Assert.False(updated.UseForActs);
+        Assert.False(updated.UseForContracts);
+    }
+
+    [Fact]
+    public async Task SeedAsync_RemovesIncompatibleSigningScopes()
+    {
+        await using var db = await CreateContextAsync();
+        db.DocumentStatuses.Add(new DocumentStatusEntity
+        {
+            Code = DocumentWorkflowStatus.SignedByClient,
+            Name = "Подписан клиентом",
+            Description = "Счет подписан клиентом",
+            ColorHex = "#10B981",
+            IsActive = true,
+            UseForInvoices = true,
+            UseForActs = true,
+            UseForContracts = true,
+            SortOrder = 90,
+        });
+        await db.SaveChangesAsync();
+
+        await SeedDataService.SeedAsync(db);
+
+        var status = await db.DocumentStatuses.AsNoTracking()
+            .SingleAsync(item => item.Code == DocumentWorkflowStatus.SignedByClient);
+        Assert.Equal("Подписан клиентом (счет)", status.Name);
+        Assert.True(status.UseForInvoices);
+        Assert.False(status.UseForActs);
+        Assert.False(status.UseForContracts);
+    }
+
     private static async Task<DocumentStatusEntity> AddRequiredStatusAsync(PaymentContext db)
     {
         var status = new DocumentStatusEntity

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { DocumentStatusEntity, InvoiceWorkflowStatus } from '../types';
-import { getDocumentStatusCodes, getDocumentStatusLabels } from './documentStatusSettings';
+import type { ActWorkflowStatus, ContractStatus, DocumentStatusEntity, InvoiceWorkflowStatus } from '../types';
+import { getDocumentStatusCodes, getDocumentStatusLabels, isDocumentStatusCodeAllowedForKind } from './documentStatusSettings';
 
 const invoiceFallback: InvoiceWorkflowStatus[] = [
   'Draft',
@@ -75,5 +75,53 @@ describe('documentStatusSettings', () => {
     );
 
     expect(labels.RequiresClientSignature).toBe('Требуется подпись клиента');
+  });
+
+  it('uses client signed label for act and contract signing statuses', () => {
+    const actLabels = getDocumentStatusLabels<ActWorkflowStatus>(
+      [documentStatus({ code: 'Signed', name: 'Подписан', useForActs: true })],
+      'act',
+      {
+        Draft: 'Черновик',
+        NotSigned: 'Не подписан',
+        RequiresClientSignature: 'Требуется подпись клиента',
+        OnApproval: 'На согласовании',
+        Approved: 'Согласован',
+        ApprovalRejected: 'Отказ в согласовании',
+        NeedsCorrection: 'Требует исправления',
+        OnSigning: 'На подписании',
+        Signed: 'Подписан',
+        Cancelled: 'Аннулирован',
+      },
+    );
+    const contractLabels = getDocumentStatusLabels<ContractStatus>(
+      [documentStatus({ code: 'Concluded', name: 'Подписан', useForContracts: true })],
+      'contract',
+      {
+        Draft: 'Черновик',
+        NotSigned: 'Не подписан',
+        RequiresClientSignature: 'Требуется подпись клиента',
+        OnApproval: 'На согласовании',
+        Approved: 'Согласован',
+        ApprovalRejected: 'Отказ в согласовании',
+        NeedsCorrection: 'Требует исправления',
+        OnSigning: 'На подписании',
+        Concluded: 'Подписан',
+        Terminated: 'Расторгнут',
+        Cancelled: 'Аннулирован',
+      },
+    );
+
+    expect(actLabels.Signed).toBe('Подписан клиентом');
+    expect(contractLabels.Concluded).toBe('Подписан клиентом');
+  });
+
+  it('marks signing status codes as available only for their document kind', () => {
+    expect(isDocumentStatusCodeAllowedForKind('SignedByClient', 'invoice')).toBe(true);
+    expect(isDocumentStatusCodeAllowedForKind('SignedByClient', 'act')).toBe(false);
+    expect(isDocumentStatusCodeAllowedForKind('Signed', 'act')).toBe(true);
+    expect(isDocumentStatusCodeAllowedForKind('Signed', 'invoice')).toBe(false);
+    expect(isDocumentStatusCodeAllowedForKind('Concluded', 'contract')).toBe(true);
+    expect(isDocumentStatusCodeAllowedForKind('Concluded', 'act')).toBe(false);
   });
 });

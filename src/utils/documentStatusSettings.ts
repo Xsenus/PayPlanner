@@ -8,11 +8,73 @@ const flagByKind: Record<DocumentStatusKind, keyof DocumentStatusEntity> = {
   contract: 'useForContracts',
 };
 
+const canonicalDocumentStatusLabels: Record<DocumentStatusKind, Record<string, string>> = {
+  invoice: {
+    RequiresClientSignature: 'Требуется подпись клиента',
+    SignedByClient: 'Подписан клиентом',
+  },
+  act: {
+    RequiresClientSignature: 'Требуется подпись клиента',
+    Signed: 'Подписан клиентом',
+  },
+  contract: {
+    RequiresClientSignature: 'Требуется подпись клиента',
+    Concluded: 'Подписан клиентом',
+  },
+};
+
 const mandatoryDocumentStatusLabels: Record<string, string> = {
   RequiresClientSignature: 'Требуется подпись клиента',
 };
 
 const mandatoryDocumentStatusCodes = Object.keys(mandatoryDocumentStatusLabels);
+
+const allowedCodesByKind: Record<DocumentStatusKind, Set<string>> = {
+  invoice: new Set([
+    'Draft',
+    'NotSigned',
+    'RequiresClientSignature',
+    'OnApproval',
+    'Approved',
+    'ApprovalRejected',
+    'NeedsCorrection',
+    'OnSigning',
+    'SignedByClient',
+    'Paid',
+    'PartiallyPaid',
+    'Overdue',
+    'Cancelled',
+  ]),
+  act: new Set([
+    'Draft',
+    'NotSigned',
+    'RequiresClientSignature',
+    'OnApproval',
+    'Approved',
+    'ApprovalRejected',
+    'NeedsCorrection',
+    'OnSigning',
+    'Signed',
+    'Cancelled',
+  ]),
+  contract: new Set([
+    'Draft',
+    'NotSigned',
+    'RequiresClientSignature',
+    'OnApproval',
+    'Approved',
+    'ApprovalRejected',
+    'NeedsCorrection',
+    'OnSigning',
+    'Concluded',
+    'Terminated',
+    'Cancelled',
+  ]),
+};
+
+export function isDocumentStatusCodeAllowedForKind(code: string | null | undefined, kind: DocumentStatusKind): boolean {
+  return !!code && allowedCodesByKind[kind].has(code);
+}
 
 function ensureMandatoryDocumentStatusCodes<T extends string>(codes: T[], fallback: readonly T[], allowed: Set<string>) {
   mandatoryDocumentStatusCodes.forEach((mandatoryCode) => {
@@ -62,13 +124,19 @@ export function getDocumentStatusLabels<T extends string>(
     .filter((status) => !!status[flag] && status.name.trim().length > 0)
     .forEach((status) => {
       if (status.code in labels) {
-        labels[status.code as T] = mandatoryDocumentStatusLabels[status.code] ?? status.name.trim();
+        labels[status.code as T] = canonicalDocumentStatusLabels[kind][status.code] ?? mandatoryDocumentStatusLabels[status.code] ?? status.name.trim();
       }
     });
 
   mandatoryDocumentStatusCodes.forEach((code) => {
     if (code in labels) {
-      labels[code as T] = mandatoryDocumentStatusLabels[code];
+      labels[code as T] = canonicalDocumentStatusLabels[kind][code] ?? mandatoryDocumentStatusLabels[code];
+    }
+  });
+
+  Object.entries(canonicalDocumentStatusLabels[kind]).forEach(([code, label]) => {
+    if (code in labels) {
+      labels[code as T] = label;
     }
   });
 

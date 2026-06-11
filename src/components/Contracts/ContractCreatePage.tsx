@@ -340,7 +340,7 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
                 <option value="ApprovalRejected">Отказ в согласовании</option>
                 <option value="NeedsCorrection">Требует исправления</option>
                 <option value="OnSigning">На подписании</option>
-                <option value="Concluded">Подписан</option>
+                <option value="Concluded">Подписан клиентом</option>
                 <option value="Terminated">Расторгнут</option>
                 <option value="Cancelled">Аннулирован</option>
               </select>

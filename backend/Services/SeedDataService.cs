@@ -1139,6 +1139,18 @@ namespace PayPlanner.Api.Services
                 }
                 else
                 {
+                    existing.UseForInvoices = existing.UseForInvoices && DocumentWorkflowStatus.SupportsInvoices(status.Code);
+                    existing.UseForActs = existing.UseForActs && DocumentWorkflowStatus.SupportsActs(status.Code);
+                    existing.UseForContracts = existing.UseForContracts && DocumentWorkflowStatus.SupportsContracts(status.Code);
+
+                    if (DocumentWorkflowStatus.UsesCanonicalMetadata(status.Code))
+                    {
+                        existing.Name = status.Name;
+                        existing.Description = status.Description;
+                        existing.ColorHex = status.ColorHex;
+                        existing.SortOrder = status.SortOrder;
+                    }
+
                     if (DocumentWorkflowStatus.IsMandatory(status.Code))
                     {
                         existing.Name = status.Name;

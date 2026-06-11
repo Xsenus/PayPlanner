@@ -40,9 +40,9 @@ public static class DocumentWorkflowStatus
         new(ApprovalRejected, "Отказ в согласовании", "По документу отказано в согласовании", "#E11D48", true, true, true, 60),
         new(NeedsCorrection, "Требует исправления", "Документ нужно исправить", "#F97316", true, true, true, 70),
         new(OnSigning, "На подписании", "Документ отправлен на подписание", "#8B5CF6", true, true, true, 80),
-        new(SignedByClient, "Подписан клиентом", "Счет подписан клиентом", "#10B981", true, false, false, 90),
-        new(Signed, "Подписан", "Акт подписан", "#10B981", false, true, false, 100),
-        new(Concluded, "Подписан", "Договор подписан и действует", "#10B981", false, false, true, 110),
+        new(SignedByClient, "Подписан клиентом (счет)", "Счет подписан клиентом", "#10B981", true, false, false, 90),
+        new(Signed, "Подписан клиентом (акт)", "Акт подписан клиентом", "#10B981", false, true, false, 100),
+        new(Concluded, "Подписан клиентом (договор)", "Договор подписан клиентом и действует", "#10B981", false, false, true, 110),
         new(Terminated, "Расторгнут", "Договор расторгнут", "#DC2626", false, false, true, 120),
         new(Cancelled, "Аннулирован", "Документ аннулирован", "#EF4444", true, true, true, 130),
     ];
@@ -93,6 +93,12 @@ public static class DocumentWorkflowStatus
     public static readonly IReadOnlySet<string> MandatoryCodes = BuildSet(
         RequiresClientSignature);
 
+    public static readonly IReadOnlySet<string> CanonicalMetadataCodes = BuildSet(
+        RequiresClientSignature,
+        SignedByClient,
+        Signed,
+        Concluded);
+
     public static string? Normalize(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -108,6 +114,30 @@ public static class DocumentWorkflowStatus
     {
         var normalized = Normalize(value);
         return normalized is not null && MandatoryCodes.Contains(normalized);
+    }
+
+    public static bool UsesCanonicalMetadata(string? value)
+    {
+        var normalized = Normalize(value);
+        return normalized is not null && CanonicalMetadataCodes.Contains(normalized);
+    }
+
+    public static bool SupportsInvoices(string? value)
+    {
+        var normalized = Normalize(value);
+        return normalized is not null && InvoiceCodes.Contains(normalized);
+    }
+
+    public static bool SupportsActs(string? value)
+    {
+        var normalized = Normalize(value);
+        return normalized is not null && ActCodes.Contains(normalized);
+    }
+
+    public static bool SupportsContracts(string? value)
+    {
+        var normalized = Normalize(value);
+        return normalized is not null && ContractCodes.Contains(normalized);
     }
 
     private static HashSet<string> BuildSet(params string[] values)

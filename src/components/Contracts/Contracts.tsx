@@ -194,7 +194,7 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
       ApprovalRejected: 'Отказ в согласовании',
       NeedsCorrection: 'Требует исправления',
       OnSigning: 'На подписании',
-      Concluded: 'Подписан',
+      Concluded: 'Подписан клиентом',
       Terminated: 'Расторгнут',
       Cancelled: 'Аннулирован',
     }),

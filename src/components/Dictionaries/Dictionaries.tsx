@@ -3,6 +3,7 @@ import { Plus, Pencil, Trash2, Check, X, ShieldAlert } from 'lucide-react';
 import { apiService, type DictKind } from '../../services/api';
 import type { ClientStatus, DealType, DocumentStatusEntity, IncomeType, PaymentSource, ServiceCategoryDictionaryItem, ServiceDictionaryItem } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
+import { isDocumentStatusCodeAllowedForKind } from '../../utils/documentStatusSettings';
 
 function sortRows<T extends RowState>(rows: T[]): T[] {
   return [...rows].sort((a, b) => {
@@ -184,9 +185,9 @@ function normalize(kind: VisibleKind, x: ApiVisibleItem): FullDictItem {
     defaultPrice: 'defaultPrice' in x && typeof x.defaultPrice === 'number' ? x.defaultPrice : undefined,
     categoryId: 'categoryId' in x ? (x.categoryId as number | null | undefined) ?? null : undefined,
     code: 'code' in x && typeof x.code === 'string' ? x.code : undefined,
-    useForInvoices: 'useForInvoices' in x && typeof x.useForInvoices === 'boolean' ? x.useForInvoices : undefined,
-    useForActs: 'useForActs' in x && typeof x.useForActs === 'boolean' ? x.useForActs : undefined,
-    useForContracts: 'useForContracts' in x && typeof x.useForContracts === 'boolean' ? x.useForContracts : undefined,
+    useForInvoices: 'useForInvoices' in x && typeof x.useForInvoices === 'boolean' ? x.useForInvoices && isDocumentStatusScopeAllowed(x, 'invoice') : undefined,
+    useForActs: 'useForActs' in x && typeof x.useForActs === 'boolean' ? x.useForActs && isDocumentStatusScopeAllowed(x, 'act') : undefined,
+    useForContracts: 'useForContracts' in x && typeof x.useForContracts === 'boolean' ? x.useForContracts && isDocumentStatusScopeAllowed(x, 'contract') : undefined,
     sortOrder: 'sortOrder' in x && typeof x.sortOrder === 'number' ? x.sortOrder : undefined,
     description,
     colorHex,
@@ -205,6 +206,13 @@ function supportsServiceCategory(kind: VisibleKind): boolean {
 
 function isDocumentStatusKind(kind: VisibleKind): boolean {
   return kind === 'document-statuses';
+}
+
+function isDocumentStatusScopeAllowed(
+  item: { code?: string | null },
+  scope: 'invoice' | 'act' | 'contract',
+): boolean {
+  return !item.code || isDocumentStatusCodeAllowedForKind(item.code, scope);
 }
 
 export const Dictionaries = () => {
@@ -369,9 +377,9 @@ export const Dictionaries = () => {
             defaultPrice: supportsInvoiceItemTemplateFields(kind) ? (item.defaultPrice ?? 0) : undefined,
             categoryId: supportsServiceCategory(kind) ? (item.categoryId ?? null) : undefined,
             code: isDocumentStatusKind(kind) ? item.code : undefined,
-            useForInvoices: isDocumentStatusKind(kind) ? !!item.useForInvoices : undefined,
-            useForActs: isDocumentStatusKind(kind) ? !!item.useForActs : undefined,
-            useForContracts: isDocumentStatusKind(kind) ? !!item.useForContracts : undefined,
+            useForInvoices: isDocumentStatusKind(kind) ? !!item.useForInvoices && isDocumentStatusScopeAllowed(item, 'invoice') : undefined,
+            useForActs: isDocumentStatusKind(kind) ? !!item.useForActs && isDocumentStatusScopeAllowed(item, 'act') : undefined,
+            useForContracts: isDocumentStatusKind(kind) ? !!item.useForContracts && isDocumentStatusScopeAllowed(item, 'contract') : undefined,
             sortOrder: isDocumentStatusKind(kind) ? (item.sortOrder ?? 0) : undefined,
           });
       const normalized = normalize(kind, created as ApiVisibleItem);
@@ -420,9 +428,9 @@ export const Dictionaries = () => {
             defaultPrice: supportsInvoiceItemTemplateFields(kind) ? (item.defaultPrice ?? 0) : undefined,
             categoryId: supportsServiceCategory(kind) ? (item.categoryId ?? null) : undefined,
             code: isDocumentStatusKind(kind) ? item.code : undefined,
-            useForInvoices: isDocumentStatusKind(kind) ? !!item.useForInvoices : undefined,
-            useForActs: isDocumentStatusKind(kind) ? !!item.useForActs : undefined,
-            useForContracts: isDocumentStatusKind(kind) ? !!item.useForContracts : undefined,
+            useForInvoices: isDocumentStatusKind(kind) ? !!item.useForInvoices && isDocumentStatusScopeAllowed(item, 'invoice') : undefined,
+            useForActs: isDocumentStatusKind(kind) ? !!item.useForActs && isDocumentStatusScopeAllowed(item, 'act') : undefined,
+            useForContracts: isDocumentStatusKind(kind) ? !!item.useForContracts && isDocumentStatusScopeAllowed(item, 'contract') : undefined,
             sortOrder: isDocumentStatusKind(kind) ? (item.sortOrder ?? 0) : undefined,
           });
       const normalized = normalize(kind, updated as ApiVisibleItem);
@@ -573,8 +581,9 @@ export const Dictionaries = () => {
                 <label className="inline-flex items-center gap-2 text-sm text-slate-700">
                   <input
                     type="checkbox"
-                    checked={!!local.useForInvoices}
-                    onChange={(e) => set({ useForInvoices: e.target.checked })}
+                    checked={!!local.useForInvoices && isDocumentStatusScopeAllowed(local, 'invoice')}
+                    disabled={!isDocumentStatusScopeAllowed(local, 'invoice')}
+                    onChange={(e) => set({ useForInvoices: e.target.checked && isDocumentStatusScopeAllowed(local, 'invoice') })}
                     className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
                   />
                   Счета
@@ -582,8 +591,9 @@ export const Dictionaries = () => {
                 <label className="inline-flex items-center gap-2 text-sm text-slate-700">
                   <input
                     type="checkbox"
-                    checked={!!local.useForActs}
-                    onChange={(e) => set({ useForActs: e.target.checked })}
+                    checked={!!local.useForActs && isDocumentStatusScopeAllowed(local, 'act')}
+                    disabled={!isDocumentStatusScopeAllowed(local, 'act')}
+                    onChange={(e) => set({ useForActs: e.target.checked && isDocumentStatusScopeAllowed(local, 'act') })}
                     className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
                   />
                   Акты
@@ -591,8 +601,9 @@ export const Dictionaries = () => {
                 <label className="inline-flex items-center gap-2 text-sm text-slate-700">
                   <input
                     type="checkbox"
-                    checked={!!local.useForContracts}
-                    onChange={(e) => set({ useForContracts: e.target.checked })}
+                    checked={!!local.useForContracts && isDocumentStatusScopeAllowed(local, 'contract')}
+                    disabled={!isDocumentStatusScopeAllowed(local, 'contract')}
+                    onChange={(e) => set({ useForContracts: e.target.checked && isDocumentStatusScopeAllowed(local, 'contract') })}
                     className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
                   />
                   Договоры
@@ -741,8 +752,9 @@ export const Dictionaries = () => {
                 <label className="inline-flex items-center gap-2 text-sm text-slate-700">
                   <input
                     type="checkbox"
-                    checked={!!local.useForInvoices}
-                    onChange={(e) => set({ useForInvoices: e.target.checked })}
+                    checked={!!local.useForInvoices && isDocumentStatusScopeAllowed(local, 'invoice')}
+                    disabled={!isDocumentStatusScopeAllowed(local, 'invoice')}
+                    onChange={(e) => set({ useForInvoices: e.target.checked && isDocumentStatusScopeAllowed(local, 'invoice') })}
                     className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
                   />
                   Счета
@@ -750,8 +762,9 @@ export const Dictionaries = () => {
                 <label className="inline-flex items-center gap-2 text-sm text-slate-700">
                   <input
                     type="checkbox"
-                    checked={!!local.useForActs}
-                    onChange={(e) => set({ useForActs: e.target.checked })}
+                    checked={!!local.useForActs && isDocumentStatusScopeAllowed(local, 'act')}
+                    disabled={!isDocumentStatusScopeAllowed(local, 'act')}
+                    onChange={(e) => set({ useForActs: e.target.checked && isDocumentStatusScopeAllowed(local, 'act') })}
                     className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
                   />
                   Акты
@@ -759,8 +772,9 @@ export const Dictionaries = () => {
                 <label className="inline-flex items-center gap-2 text-sm text-slate-700">
                   <input
                     type="checkbox"
-                    checked={!!local.useForContracts}
-                    onChange={(e) => set({ useForContracts: e.target.checked })}
+                    checked={!!local.useForContracts && isDocumentStatusScopeAllowed(local, 'contract')}
+                    disabled={!isDocumentStatusScopeAllowed(local, 'contract')}
+                    onChange={(e) => set({ useForContracts: e.target.checked && isDocumentStatusScopeAllowed(local, 'contract') })}
                     className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
                   />
                   Договоры
