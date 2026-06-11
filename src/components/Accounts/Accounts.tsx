@@ -159,8 +159,11 @@ type PaymentModalInvoiceContext = {
   number: string;
   date: string;
   clientId?: number | null;
+  legalEntityId?: number | null;
   expenseClientId?: number | null;
+  expenseLegalEntityId?: number | null;
   clientCaseId?: number | null;
+  contractId?: number | null;
   type?: PaymentKind;
 };
 
@@ -2091,8 +2094,11 @@ export function Accounts({
         number: invoice.number,
         date: invoice.date,
         clientId: invoice.clientId ?? null,
+        legalEntityId: invoice.legalEntityId ?? null,
         expenseClientId: invoice.expenseClientId ?? null,
+        expenseLegalEntityId: invoice.expenseLegalEntityId ?? null,
         clientCaseId: invoice.clientCaseId ?? null,
+        contractId: invoice.contractId ?? null,
         type: invoice.type ?? 'Income',
       };
     },

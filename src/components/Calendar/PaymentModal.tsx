@@ -52,6 +52,7 @@ type LinkedInvoiceContext = {
   expenseClientId?: number | null;
   expenseLegalEntityId?: number | null;
   clientCaseId?: number | null;
+  contractId?: number | null;
   type?: PaymentKind;
 };
 
@@ -422,6 +423,7 @@ export function PaymentModal({
   const hasLockedInvoice = Boolean(linkedInvoice?.invoiceEntityId);
   const canChangePaymentType = !hasLockedInvoice || !payment;
   const canEditExpenseAttribution = !hasLockedInvoice || (!payment && formData.type === 'Expense');
+  const canEditContract = !hasLockedInvoice || !payment;
   const caseOwnerClientId = formData.type === 'Expense'
     ? formData.expenseClientId
     : formData.clientId;
@@ -863,7 +865,7 @@ export function PaymentModal({
           paymentSourceId: p.paymentSourceId?.toString() || '',
           paymentStatusId: p.paymentStatusId?.toString() || '',
           invoiceId: (p.invoiceId ?? linkedInvoice?.invoiceEntityId)?.toString() || '',
-          contractId: p.contractId?.toString() || '',
+          contractId: (p.contractId ?? linkedInvoice?.contractId)?.toString() || '',
           type: (p.type as PaymentKind) ?? linkedInvoice?.type ?? type ?? 'Income',
           paymentOrderNumber: p.paymentOrderNumber ?? '',
           paymentDocumentDate: toDateInputValue(p.paymentDocumentDate) || '',
@@ -905,7 +907,7 @@ export function PaymentModal({
           paymentSourceId: '',
           paymentStatusId: '',
           invoiceId: linkedInvoice?.invoiceEntityId?.toString() || '',
-          contractId: '',
+          contractId: linkedInvoice?.contractId?.toString() || '',
           type: (linkedInvoice?.type ?? type ?? 'Income') as PaymentKind,
           paymentOrderNumber: '',
           paymentDocumentDate: '',
@@ -3354,7 +3356,7 @@ export function PaymentModal({
                         value={formData.contractId}
                         onChange={handleChange}
                         aria-label="Договор"
-                        disabled={hasLockedInvoice || contractsLoading || (!formData.clientId && !formData.legalEntityId)}
+                        disabled={!canEditContract || contractsLoading || (!formData.clientId && !formData.legalEntityId)}
                         className="w-full px-3 py-2 border border-gray-300 rounded-lg disabled:bg-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
                         <option value="">
                           {!formData.clientId && !formData.legalEntityId

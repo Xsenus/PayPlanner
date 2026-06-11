@@ -372,8 +372,11 @@ vi.mock('../Calendar/PaymentModal', () => ({
       number: string;
       date: string;
       clientId?: number | null;
+      legalEntityId?: number | null;
       expenseClientId?: number | null;
+      expenseLegalEntityId?: number | null;
       clientCaseId?: number | null;
+      contractId?: number | null;
       type?: 'Income' | 'Expense';
     } | null;
   }) => {
@@ -391,7 +394,11 @@ vi.mock('../Calendar/PaymentModal', () => ({
         <div>{`linked-invoice-number:${props.linkedInvoice?.number ?? ''}`}</div>
         <div>{`linked-invoice-date:${props.linkedInvoice?.date ?? ''}`}</div>
         <div>{`linked-client-id:${props.linkedInvoice?.clientId ?? ''}`}</div>
+        <div>{`linked-legal-entity-id:${props.linkedInvoice?.legalEntityId ?? ''}`}</div>
+        <div>{`linked-expense-client-id:${props.linkedInvoice?.expenseClientId ?? ''}`}</div>
+        <div>{`linked-expense-legal-entity-id:${props.linkedInvoice?.expenseLegalEntityId ?? ''}`}</div>
         <div>{`linked-case-id:${props.linkedInvoice?.clientCaseId ?? ''}`}</div>
+        <div>{`linked-contract-id:${props.linkedInvoice?.contractId ?? ''}`}</div>
         <div>{`linked-type:${props.linkedInvoice?.type ?? ''}`}</div>
         <button
           type="button"
@@ -1229,6 +1236,23 @@ describe('Accounts integration', () => {
   });
 
   it('passes the canonical linked invoice context into the payment modal opened from the accounts registry', async () => {
+    const invoice = createInvoice({
+      contractId: 321,
+      legalEntityId: 301,
+      expenseClientId: 77,
+      expenseLegalEntityId: null,
+    });
+    getAccountsRegistryResultMock.mockReturnValue({
+      items: [createAccountRow({ invoice })],
+      total: 1,
+      summary: createSummary(),
+      loading: false,
+      refreshing: false,
+      error: null,
+      refresh: refreshAccountsMock,
+    });
+    getInvoiceMock.mockResolvedValue(invoice);
+
     render(<Accounts />);
 
     fireEvent.click(await screen.findByRole('button', { name: '24' }));
@@ -1241,7 +1265,11 @@ describe('Accounts integration', () => {
     expect(screen.getByText('linked-invoice-number:24')).toBeTruthy();
     expect(screen.getByText('linked-invoice-date:2026-04-02')).toBeTruthy();
     expect(screen.getByText('linked-client-id:55')).toBeTruthy();
+    expect(screen.getByText('linked-legal-entity-id:301')).toBeTruthy();
+    expect(screen.getByText('linked-expense-client-id:77')).toBeTruthy();
+    expect(screen.getByText('linked-expense-legal-entity-id:')).toBeTruthy();
     expect(screen.getByText('linked-case-id:701')).toBeTruthy();
+    expect(screen.getByText('linked-contract-id:321')).toBeTruthy();
     expect(screen.getByText('linked-type:Income')).toBeTruthy();
   });
 

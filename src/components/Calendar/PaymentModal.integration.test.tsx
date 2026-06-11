@@ -459,6 +459,23 @@ describe('PaymentModal integration', () => {
 
   it('allows creating an expense payment from a linked income invoice', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
+    getContractsMock.mockResolvedValue({
+      items: [
+        {
+          id: 321,
+          number: '1-14/07-2025',
+          title: 'Договор для возврата клиенту',
+          date: '2025-07-14',
+          billingMode: 'Fixed',
+          isOpenEnded: true,
+          createdAt: '2025-07-14T00:00:00Z',
+          invoiceAmountTotal: 0,
+          actAmountTotal: 0,
+          paymentAmountTotal: 0,
+          clients: [{ id: 69, name: 'Test Client' }],
+        },
+      ],
+    });
 
     render(
       <PaymentModal
@@ -499,6 +516,12 @@ describe('PaymentModal integration', () => {
     const amountInput = document.body.querySelector('input[name="amount"]') as HTMLInputElement | null;
     expect(amountInput).not.toBeNull();
     fireEvent.change(amountInput!, { target: { value: '1500' } });
+
+    const contractSelect = await screen.findByLabelText('Договор');
+    await waitFor(() => expect(screen.getByRole('option', { name: /1-14\/07-2025/ })).toBeTruthy());
+    expect(contractSelect).toHaveProperty('disabled', false);
+    fireEvent.change(contractSelect, { target: { value: '321' } });
+
     fireEvent.click(screen.getByRole('button', { name: 'addPayment' }));
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
@@ -509,6 +532,55 @@ describe('PaymentModal integration', () => {
         clientId: 69,
         expenseClientId: 69,
         clientCaseId: 501,
+        contractId: 321,
+      }),
+    );
+  });
+
+  it('prefills the contract from a linked invoice when adding a payment', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        linkedInvoice={{
+          invoiceEntityId: 24,
+          invoiceRecordId: 528,
+          number: '24',
+          date: '2026-04-02',
+          clientId: 69,
+          clientCaseId: 501,
+          contractId: 321,
+          type: 'Income',
+        }}
+        casesPrefetch={[
+          {
+            id: 501,
+            title: 'Case 501',
+            status: 'Open',
+            clientId: 69,
+            createdAt: '2026-03-01T00:00:00Z',
+          },
+        ]}
+      />,
+    );
+
+    const contractSelect = await screen.findByLabelText('Договор') as HTMLSelectElement;
+    await waitFor(() => expect(contractSelect.value).toBe('321'));
+
+    const amountInput = document.body.querySelector('input[name="amount"]') as HTMLInputElement | null;
+    expect(amountInput).not.toBeNull();
+    fireEvent.change(amountInput!, { target: { value: '1500' } });
+    fireEvent.click(screen.getByRole('button', { name: 'addPayment' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'Income',
+        invoiceId: 24,
+        contractId: 321,
       }),
     );
   });
