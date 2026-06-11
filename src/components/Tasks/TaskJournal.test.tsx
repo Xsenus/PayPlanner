@@ -59,7 +59,7 @@ const legalEntitiesState = vi.hoisted(() => ({
   legalEntities: [] as LegalEntitySummary[],
 }));
 
-const authState = vi.hoisted((): { user: { id: number; fullName: string; email: string }; isAdmin: boolean } => ({
+const authState = vi.hoisted((): { user: { id: number; fullName: string; email: string; departmentId?: number | null; department?: string | null }; isAdmin: boolean } => ({
   user: { id: 7, fullName: 'Администратор', email: 'admin@example.com' },
   isAdmin: true,
 }));
@@ -69,6 +69,7 @@ const permissionsState = vi.hoisted(() => ({
   taskCanExport: true,
   caseCanExport: true,
   taskViewScope: 'all' as 'own' | 'department' | 'all',
+  calendarViewScope: 'all' as 'own' | 'department' | 'all',
 }));
 
 vi.mock('../../services/api', () => ({
@@ -125,7 +126,7 @@ vi.mock('../../hooks/useRolePermissions', () => ({
     };
 
     return {
-      calendar: { ...section, canViewAnalytics: true },
+      calendar: { ...section, canViewAnalytics: true, viewScope: permissionsState.calendarViewScope },
       tasks: {
         ...section,
         canEdit: permissionsState.taskCanEdit,
@@ -345,6 +346,7 @@ describe('TaskJournal', () => {
     permissionsState.taskCanExport = true;
     permissionsState.caseCanExport = true;
     permissionsState.taskViewScope = 'all';
+    permissionsState.calendarViewScope = 'all';
     clientsState.clients = [
       { id: 10, name: 'Иванов Иван Иванович', phone: '+7 900 000-00-00', email: 'client@example.com' } as Client,
     ];
@@ -2363,6 +2365,137 @@ describe('TaskJournal', () => {
     await waitFor(() => expect(apiMock.getCaseCalendarEvents).toHaveBeenCalledWith(expect.objectContaining({
       from: assigneeDateKey,
       to: assigneeDateKey,
+      responsibleUserId: 8,
+    })));
+  });
+
+  it('uses the selected assignee profile time zone when the role can view employee task calendars', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-06-03T13:30:00.000Z'));
+    authState.isAdmin = false;
+    permissionsState.calendarViewScope = 'all';
+    window.localStorage.setItem('pp.task_journal.filters.v1.user:7', JSON.stringify({
+      quickFilter: 'all',
+      viewMode: 'calendar',
+      periodMode: 'day',
+      assigneeFilter: '8',
+    }));
+    apiMock.getUserSetting.mockImplementation(async (key: string) => (
+      key === 'profile.timeZoneId'
+        ? { key, value: 'Europe/Moscow' }
+        : null
+    ));
+    const assigneeDateKey = toTimeZoneDateKey(new Date(), 'Asia/Kamchatka');
+    const dueAt = fromTimeZoneDateTimeInput(`${assigneeDateKey}T10:00`, 'Asia/Kamchatka');
+
+    await renderJournal([
+      createTask({
+        assigneeUserId: 8,
+        assigneeName: 'Исполнитель Камчатка',
+        dueAt,
+        participants: [
+          { userId: 8, role: 'assignee', displayName: 'Исполнитель Камчатка', approvalStatus: 'pending' },
+        ],
+      }),
+    ], {
+      initialView: 'calendar',
+      assignees: [
+        { id: 7, name: 'Секретарь', email: 'secretary@example.com', timeZoneId: 'Europe/Moscow' },
+        { id: 8, name: 'Исполнитель Камчатка', email: 'kamchatka@example.com', timeZoneId: 'Asia/Kamchatka' },
+      ],
+      waitForTitle: null,
+    });
+
+    const assigneeDay = await screen.findByTestId(`task-calendar-day-${assigneeDateKey}`);
+    expect(assigneeDay.className).toContain('border-blue-300');
+    expect(within(assigneeDay).getByTestId('task-calendar-task-101')).toBeTruthy();
+    await waitFor(() => expect(apiMock.getCaseCalendarEvents).toHaveBeenCalledWith(expect.objectContaining({
+      from: assigneeDateKey,
+      to: assigneeDateKey,
+      responsibleUserId: 8,
+    })));
+  });
+
+  it('limits task calendar rows to the current user when the calendar role scope is own', async () => {
+    authState.isAdmin = false;
+    permissionsState.taskViewScope = 'all';
+    permissionsState.calendarViewScope = 'own';
+
+    await renderJournal([
+      createTask({
+        id: 101,
+        title: 'Своя задача',
+        assigneeUserId: 7,
+        assigneeName: 'Секретарь',
+        participants: [
+          { userId: 7, role: 'assignee', displayName: 'Секретарь', approvalStatus: 'pending' },
+        ],
+      }),
+      createTask({
+        id: 102,
+        title: 'Чужая задача',
+        assigneeUserId: 8,
+        assigneeName: 'Другой исполнитель',
+        participants: [
+          { userId: 8, role: 'assignee', displayName: 'Другой исполнитель', approvalStatus: 'pending' },
+        ],
+      }),
+    ], {
+      initialView: 'calendar',
+      waitForTitle: null,
+    });
+
+    await waitFor(() => expect(screen.getByTestId('task-calendar-task-101')).toBeTruthy());
+    expect(screen.queryByTestId('task-calendar-task-102')).toBeNull();
+    await waitFor(() => expect(apiMock.getCaseCalendarEvents).toHaveBeenCalledWith(expect.objectContaining({
+      responsibleUserId: 7,
+    })));
+  });
+
+  it('limits task calendar rows to the current department when the calendar role scope is department', async () => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Секретарь', email: 'secretary@example.com', departmentId: 1, department: 'Офис' };
+    permissionsState.taskViewScope = 'all';
+    permissionsState.calendarViewScope = 'department';
+    window.localStorage.setItem('pp.task_journal.filters.v1.user:7', JSON.stringify({
+      quickFilter: 'all',
+      viewMode: 'calendar',
+      periodMode: 'day',
+      assigneeFilter: '8',
+    }));
+
+    await renderJournal([
+      createTask({
+        id: 101,
+        title: 'Задача отдела',
+        assigneeUserId: 8,
+        assigneeName: 'Сотрудник отдела',
+        participants: [
+          { userId: 8, role: 'assignee', displayName: 'Сотрудник отдела', approvalStatus: 'pending' },
+        ],
+      }),
+      createTask({
+        id: 102,
+        title: 'Задача другого отдела',
+        assigneeUserId: 9,
+        assigneeName: 'Другой отдел',
+        participants: [
+          { userId: 9, role: 'assignee', displayName: 'Другой отдел', approvalStatus: 'pending' },
+        ],
+      }),
+    ], {
+      initialView: 'calendar',
+      assignees: [
+        { id: 7, name: 'Секретарь', email: 'secretary@example.com', departmentId: 1, department: 'Офис' },
+        { id: 8, name: 'Сотрудник отдела', email: 'team@example.com', departmentId: 1, department: 'Офис' },
+        { id: 9, name: 'Другой отдел', email: 'other@example.com', departmentId: 2, department: 'Юристы' },
+      ],
+      waitForTitle: null,
+    });
+
+    await waitFor(() => expect(screen.getByTestId('task-calendar-task-101')).toBeTruthy());
+    expect(screen.queryByTestId('task-calendar-task-102')).toBeNull();
+    await waitFor(() => expect(apiMock.getCaseCalendarEvents).toHaveBeenCalledWith(expect.objectContaining({
       responsibleUserId: 8,
     })));
   });

@@ -203,6 +203,7 @@ const GROUPS: GroupConfig[] = [
 ];
 
 const DATA_SCOPE_SECTIONS = new Set<MenuSectionKey>([
+  'calendar',
   'tasks',
   'legalEntities',
   'clients',
@@ -230,6 +231,28 @@ const DATA_SCOPE_OPTIONS: Array<{ value: DataVisibilityScope; label: string; des
     description: 'Раздел открыт без ограничения по ответственному.',
   },
 ];
+
+const CALENDAR_SCOPE_OPTIONS: Array<{ value: DataVisibilityScope; label: string; description: string }> = [
+  {
+    value: 'own',
+    label: 'Только свой календарь',
+    description: 'Пользователь видит календарь задач только по себе.',
+  },
+  {
+    value: 'department',
+    label: 'Календари отдела',
+    description: 'Пользователь видит свои календарные задачи и задачи сотрудников своего отдела.',
+  },
+  {
+    value: 'all',
+    label: 'Календари всех сотрудников',
+    description: 'Пользователь может контролировать календарные задачи всех сотрудников.',
+  },
+];
+
+function getDataScopeOptions(sectionKey: MenuSectionKey) {
+  return sectionKey === 'calendar' ? CALENDAR_SCOPE_OPTIONS : DATA_SCOPE_OPTIONS;
+}
 
 const DEFAULT_PERMISSION_META: PermissionMeta[] = [
   {
@@ -852,8 +875,9 @@ export function RolePermissionsModal({
                   const enabledPermissionCount = getEnabledPermissionCount(sectionKey, permissions);
                   const totalPermissionCount = getTotalPermissionCount(sectionKey);
                   const sectionScope = normalizeDataScope(section.viewScope);
+                  const scopeOptions = getDataScopeOptions(sectionKey);
                   const sectionScopeDescription =
-                    DATA_SCOPE_OPTIONS.find((option) => option.value === sectionScope)?.description ?? '';
+                    scopeOptions.find((option) => option.value === sectionScope)?.description ?? '';
 
                   return (
                     <section
@@ -938,7 +962,9 @@ export function RolePermissionsModal({
                         {hasDataScope(sectionKey) ? (
                           <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-4 xl:col-span-2">
                             <label className="block space-y-2">
-                              <span className="text-sm font-semibold text-slate-700">Область видимости данных</span>
+                              <span className="text-sm font-semibold text-slate-700">
+                                {sectionKey === 'calendar' ? 'Видимость календарей' : 'Область видимости данных'}
+                              </span>
                               <select
                                 value={sectionScope}
                                 onChange={(event) =>
@@ -947,7 +973,7 @@ export function RolePermissionsModal({
                                 disabled={isReadOnly || saving || resetting || !section.canView}
                                 className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 disabled:bg-slate-100 disabled:text-slate-500"
                               >
-                                {DATA_SCOPE_OPTIONS.map((option) => (
+                                {scopeOptions.map((option) => (
                                   <option key={option.value} value={option.value}>
                                     {option.label}
                                   </option>

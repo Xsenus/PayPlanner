@@ -46,6 +46,7 @@ public static class RolePermissionCatalog
 
     public static readonly string[] DataScopedSections =
     [
+        Calendar,
         Tasks,
         LegalEntities,
         Clients,

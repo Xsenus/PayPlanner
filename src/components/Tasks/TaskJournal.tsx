@@ -938,6 +938,31 @@ function isTaskAuthoredByUser(task: TaskJournalItem, userId: number | null, user
   return task.authorUserId === userId || (!task.authorUserId && Boolean(userName) && task.authorName === userName);
 }
 
+function normalizeTaskCalendarViewScope(viewScope?: MenuSectionPermissions['viewScope']) {
+  return viewScope === 'department' || viewScope === 'all' ? viewScope : 'own';
+}
+
+function normalizeDepartmentName(value?: string | null) {
+  return value?.trim().toLowerCase() || '';
+}
+
+function isAssigneeInDepartment(assignee: TaskJournalAssignee, departmentId?: number | null, department?: string | null) {
+  if (departmentId && assignee.departmentId === departmentId) {
+    return true;
+  }
+
+  const currentDepartment = normalizeDepartmentName(department);
+  return Boolean(currentDepartment && normalizeDepartmentName(assignee.department) === currentDepartment);
+}
+
+function taskTouchesCalendarUsers(task: TaskJournalItem, visibleUserIds: Set<number>, currentUserId: number | null, currentUserName: string) {
+  if (task.assigneeUserId && visibleUserIds.has(task.assigneeUserId)) return true;
+  if (task.authorUserId && visibleUserIds.has(task.authorUserId)) return true;
+  if ((task.participants ?? []).some((participant) => participant.userId && visibleUserIds.has(participant.userId))) return true;
+
+  return Boolean(currentUserId && visibleUserIds.has(currentUserId) && isTaskAuthoredByUser(task, currentUserId, currentUserName));
+}
+
 function matchesQuickFilter(task: TaskJournalItem, quickFilter: QuickFilter, userId: number | null, userName: string) {
   if (quickFilter === 'assignedToMe') {
     return isTaskExecutorForUser(task, userId);
@@ -1546,6 +1571,8 @@ export function TaskJournal({
   const permissions = useRolePermissions(user?.role?.id);
   const canExportTasks = isAdminUser || permissions.tasks.canExport;
   const canExportCases = isAdminUser || permissions.cases.canExport;
+  const taskCalendarViewScope = normalizeTaskCalendarViewScope(permissions.calendar.viewScope);
+  const canViewEmployeeTaskCalendars = isAdminUser || taskCalendarViewScope === 'department' || taskCalendarViewScope === 'all';
   const isApprovalsMode = mode === 'approvals';
   const taskContextDefaults = useMemo<Partial<TaskJournalUpsertPayload>>(() => {
     if (!contextFilter) {
@@ -1800,21 +1827,62 @@ export function TaskJournal({
       });
   }, [loadAutomationCandidates, search, taskSettings]);
 
-  const assigneeOptions = useMemo(() => {
+  const assigneeById = useMemo(() => {
     const byId = new Map<number, TaskJournalAssignee>();
     assignees.forEach((assignee) => byId.set(assignee.id, assignee));
-    return Array.from(byId.values());
+    return byId;
   }, [assignees]);
 
-  const selectedAssigneeTimeZoneId = useMemo(() => {
-    if (!isAdminUser || assigneeFilter === 'all' || !/^\d+$/.test(assigneeFilter)) {
+  const assigneeOptions = useMemo(() => Array.from(assigneeById.values()), [assigneeById]);
+
+  const visibleTaskCalendarUserIds = useMemo(() => {
+    if (isAdminUser || taskCalendarViewScope === 'all') {
       return null;
     }
 
-    return assigneeOptions.find((assignee) => String(assignee.id) === assigneeFilter)?.timeZoneId ?? null;
-  }, [assigneeFilter, assigneeOptions, isAdminUser]);
+    const visibleUserIds = new Set<number>();
+    if (currentUserId) {
+      visibleUserIds.add(currentUserId);
+    }
+
+    if (taskCalendarViewScope === 'department') {
+      assigneeOptions
+        .filter((assignee) => isAssigneeInDepartment(assignee, user?.departmentId, user?.department))
+        .forEach((assignee) => visibleUserIds.add(assignee.id));
+    }
+
+    return visibleUserIds;
+  }, [assigneeOptions, currentUserId, isAdminUser, taskCalendarViewScope, user?.department, user?.departmentId]);
+
+  const selectedAssigneeTimeZoneId = useMemo(() => {
+    if (!canViewEmployeeTaskCalendars || assigneeFilter === 'all' || !/^\d+$/.test(assigneeFilter)) {
+      return null;
+    }
+
+    const assigneeId = Number(assigneeFilter);
+    if (visibleTaskCalendarUserIds && !visibleTaskCalendarUserIds.has(assigneeId)) {
+      return null;
+    }
+
+    return assigneeById.get(assigneeId)?.timeZoneId ?? null;
+  }, [assigneeById, assigneeFilter, canViewEmployeeTaskCalendars, visibleTaskCalendarUserIds]);
   const effectiveTaskJournalTimeZoneId = normalizeUserTimeZoneId(selectedAssigneeTimeZoneId ?? currentTimeZoneId);
   setActiveTaskJournalTimeZoneId(effectiveTaskJournalTimeZoneId);
+
+  const calendarResponsibleUserId = useMemo(() => {
+    if (canViewEmployeeTaskCalendars && assigneeFilter !== 'all' && /^\d+$/.test(assigneeFilter)) {
+      const assigneeId = Number(assigneeFilter);
+      return visibleTaskCalendarUserIds && !visibleTaskCalendarUserIds.has(assigneeId)
+        ? currentUserId
+        : assigneeId;
+    }
+
+    if (visibleTaskCalendarUserIds && currentUserId) {
+      return currentUserId;
+    }
+
+    return null;
+  }, [assigneeFilter, canViewEmployeeTaskCalendars, currentUserId, visibleTaskCalendarUserIds]);
 
   useEffect(() => {
     setActiveTaskJournalTimeZoneId(effectiveTaskJournalTimeZoneId);
@@ -1839,9 +1907,7 @@ export function TaskJournal({
     }
 
     const range = getCaseCalendarRange(calendarAnchorDate, viewMode === 'timeline' ? 'week' : periodMode);
-    const responsibleUserId = assigneeFilter !== 'all' && /^\d+$/.test(assigneeFilter)
-      ? Number(assigneeFilter)
-      : undefined;
+    const responsibleUserId = calendarResponsibleUserId ?? undefined;
     const params = {
       from: toLocalDateKey(range.from),
       to: toLocalDateKey(range.to),
@@ -1863,13 +1929,11 @@ export function TaskJournal({
     } finally {
       setCaseCalendarLoading(false);
     }
-  }, [assigneeFilter, calendarAnchorDate, effectiveTaskJournalTimeZoneId, periodMode, toast, viewMode]);
+  }, [calendarAnchorDate, calendarResponsibleUserId, effectiveTaskJournalTimeZoneId, periodMode, toast, viewMode]);
 
   const buildCaseCalendarParams = useCallback(() => {
     const range = getCaseCalendarRange(calendarAnchorDate, viewMode === 'timeline' ? 'week' : periodMode);
-    const responsibleUserId = assigneeFilter !== 'all' && /^\d+$/.test(assigneeFilter)
-      ? Number(assigneeFilter)
-      : undefined;
+    const responsibleUserId = calendarResponsibleUserId ?? undefined;
 
     return {
       from: toLocalDateKey(range.from),
@@ -1877,7 +1941,7 @@ export function TaskJournal({
       responsibleUserId,
       includeTasks: false,
     };
-  }, [assigneeFilter, calendarAnchorDate, effectiveTaskJournalTimeZoneId, periodMode, viewMode]);
+  }, [calendarAnchorDate, calendarResponsibleUserId, effectiveTaskJournalTimeZoneId, periodMode, viewMode]);
 
   useEffect(() => {
     void refreshCaseCalendarEvents();
@@ -2063,10 +2127,16 @@ export function TaskJournal({
   }, [effectiveTaskJournalTimeZoneId, metricFilter, statusAndPeriodFilteredTasks]);
 
   const calendarTasks = useMemo(
-    () => completedTaskCalendarAction === 'hide'
-      ? filteredTasks.filter((task) => task.status !== 'done')
-      : filteredTasks,
-    [completedTaskCalendarAction, filteredTasks],
+    () => {
+      const scopeLimitedTasks = !visibleTaskCalendarUserIds
+        ? filteredTasks
+        : filteredTasks.filter((task) => taskTouchesCalendarUsers(task, visibleTaskCalendarUserIds, currentUserId, currentUserName));
+
+      return completedTaskCalendarAction === 'hide'
+        ? scopeLimitedTasks.filter((task) => task.status !== 'done')
+        : scopeLimitedTasks;
+    },
+    [completedTaskCalendarAction, currentUserId, currentUserName, filteredTasks, visibleTaskCalendarUserIds],
   );
 
   useEffect(() => {

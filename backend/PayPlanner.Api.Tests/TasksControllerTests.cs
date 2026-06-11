@@ -45,6 +45,11 @@ public class TasksControllerTests
         await using var db = await CreateContextAsync();
         var admin = await CreateAdminUserAsync(db, "admin-assignees@example.com", "Администратор");
         var assignee = await CreateAdminUserAsync(db, "kamchatka-assignee@example.com", "Исполнитель Камчатка");
+        var department = new DepartmentDictionaryItem { Name = "Контроль", IsActive = true };
+        db.Departments.Add(department);
+        await db.SaveChangesAsync();
+        assignee.DepartmentId = department.Id;
+        assignee.Department = "Контроль";
         db.UserSettings.Add(new UserSetting
         {
             UserId = assignee.Id,
@@ -60,6 +65,8 @@ public class TasksControllerTests
         var items = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalAssigneeDto>>(ok.Value);
         var dto = Assert.Single(items, item => item.Id == assignee.Id);
         Assert.Equal("Asia/Kamchatka", dto.TimeZoneId);
+        Assert.Equal(department.Id, dto.DepartmentId);
+        Assert.Equal("Контроль", dto.Department);
     }
 
     [Fact]

@@ -255,6 +255,8 @@ public class TasksController : ControllerBase
                 Name = user.FullName == "" ? user.Email : user.FullName,
                 Email = user.Email,
                 IsExternalContractor = user.IsExternalContractor,
+                DepartmentId = user.DepartmentId,
+                Department = user.Department,
             })
             .ToListAsync(ct);
 

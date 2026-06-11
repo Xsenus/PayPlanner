@@ -120,6 +120,8 @@ export interface TaskJournalAssignee {
   name: string;
   email: string;
   isExternalContractor?: boolean;
+  departmentId?: number | null;
+  department?: string | null;
   timeZoneId?: string | null;
 }
 
