@@ -1021,7 +1021,7 @@ export function ContractDetailPage({
             className="inline-flex items-center gap-2 rounded border border-slate-200 px-3 py-2 text-sm disabled:opacity-60"
           >
             {workflowSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-            Подписан
+            Подписан клиентом
           </button>
           <button
             type="button"

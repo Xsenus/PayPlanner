@@ -100,7 +100,9 @@ describe('objectAudit utilities', () => {
     expect(formatAuditValue('true')).toBe('Да');
     expect(formatAuditValue('0', 'payment', 'Is Paid')).toBe('Нет');
     expect(formatAuditValue('Overdue')).toBe('Просрочено');
+    expect(formatAuditValue('Signed')).toBe('Подписан клиентом');
     expect(formatAuditValue('SignedByClient')).toBe('Подписан клиентом');
+    expect(formatAuditValue('Concluded')).toBe('Подписан клиентом');
     expect(formatAuditValue('RequiresClientSignature')).toBe('Требуется подпись клиента');
     expect(formatAuditValue('OnApproval')).toBe('На согласовании');
     expect(formatAuditValue('ApprovalRejected')).toBe('Отказ в согласовании');

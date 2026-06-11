@@ -1098,7 +1098,7 @@ describe('Accounts integration', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Показать все акты счета 24/i }));
 
-    expect(screen.getByText('Подписан')).toBeTruthy();
+    expect(screen.getByText('Подписан клиентом')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: /Акт №ACT-902/i }));
 

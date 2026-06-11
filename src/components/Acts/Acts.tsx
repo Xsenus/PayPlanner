@@ -240,7 +240,7 @@ export function Acts({
   const statusLabels: Record<ActStatus, string> = {
     Created: t('actStatusCreated') ?? 'Создан',
     Transferred: t('actStatusTransferred') ?? 'Передано',
-    Signed: t('actStatusSigned') ?? 'Подписано',
+    Signed: t('actStatusSigned') ?? 'Подписан клиентом',
     Terminated: t('actStatusTerminated') ?? 'Расторгнуто',
   };
 
@@ -261,7 +261,7 @@ export function Acts({
       ApprovalRejected: 'Отказ в согласовании',
       NeedsCorrection: 'Требует исправления',
       OnSigning: 'На подписании',
-      Signed: 'Подписан',
+      Signed: 'Подписан клиентом',
       Cancelled: 'Аннулирован',
     }),
     [],
@@ -297,7 +297,7 @@ export function Acts({
       ApprovalRejected: 'В журнал попадет отказ в согласовании акта.',
       NeedsCorrection: 'Акт будет возвращен на исправление.',
       OnSigning: 'Акт будет отмечен как переданный на подписание.',
-      Signed: 'Акт будет отмечен как подписанный.',
+      Signed: 'Акт будет отмечен как подписанный клиентом.',
       Cancelled: 'Акт будет аннулирован, основной статус станет расторгнутым.',
     }),
     [],
@@ -380,7 +380,7 @@ export function Acts({
       },
       {
         key: 'signed' as const,
-        title: t('actSummarySigned') ?? 'Подписано',
+        title: t('actSummarySigned') ?? 'Подписан клиентом',
         bucket: summaryBuckets.signed,
         icon: CheckCircle2,
         accent: 'text-emerald-700 bg-emerald-50 border border-emerald-100',

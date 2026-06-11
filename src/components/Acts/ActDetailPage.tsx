@@ -49,7 +49,7 @@ const DEFAULT_ACT_WORKFLOW_STATUS_LABELS: Record<ActWorkflowStatus, string> = {
   ApprovalRejected: 'Отказ в согласовании',
   NeedsCorrection: 'Требует исправления',
   OnSigning: 'На подписании',
-  Signed: 'Подписан',
+  Signed: 'Подписан клиентом',
   Cancelled: 'Аннулирован',
 };
 
@@ -75,7 +75,7 @@ const ACT_WORKFLOW_STATUS_DESCRIPTIONS: Record<ActWorkflowStatus, string> = {
   ApprovalRejected: 'В журнал попадет отказ в согласовании акта.',
   NeedsCorrection: 'Акт будет отмечен как требующий исправления.',
   OnSigning: 'Акт будет передан на подписание.',
-  Signed: 'Акт будет отмечен как подписанный.',
+  Signed: 'Акт будет отмечен как подписанный клиентом.',
   Cancelled: 'Акт будет аннулирован, будет заполнена дата аннулирования.',
 };
 
@@ -314,7 +314,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
       className: 'bg-amber-100 text-amber-800 border border-amber-200',
     },
     Signed: {
-      label: t('actStatusSigned') ?? 'Подписано',
+      label: t('actStatusSigned') ?? 'Подписан клиентом',
       className: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
     },
     Terminated: {
@@ -1061,9 +1061,9 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
                 'Signed',
                 'signed',
                 'Подписать акт',
-                'Подтвердите перевод акта в статус «Подписано».',
-                'Подписан',
-                'Статус акта обновлен: Подписано.',
+                'Подтвердите перевод акта в статус «Подписан клиентом».',
+                'Подписан клиентом',
+                'Статус акта обновлен: Подписан клиентом.',
               )}
               disabled={signedDisabled || pageActionLoading === 'signed'}
               className={`inline-flex items-center justify-center gap-2 rounded border px-3 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
@@ -1073,7 +1073,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
               }`}
             >
               {pageActionLoading === 'signed' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-              Подписан
+              Подписан клиентом
             </button>
 
             <button

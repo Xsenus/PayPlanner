@@ -136,7 +136,7 @@ const DEFAULT_ACT_WORKFLOW_STATUS_LABELS: Record<ActWorkflowStatus, string> = {
   ApprovalRejected: 'Отказ в согласовании',
   NeedsCorrection: 'Требует исправления',
   OnSigning: 'На подписании',
-  Signed: 'Подписан',
+  Signed: 'Подписан клиентом',
   Cancelled: 'Аннулирован',
 };
 

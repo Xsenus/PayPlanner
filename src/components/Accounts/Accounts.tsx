@@ -854,13 +854,13 @@ export function Accounts({
   const actStatusLabels: Record<ActStatus, string> = {
     Created: t('actStatusCreated') ?? 'Создан',
     Transferred: t('actStatusTransferred') ?? 'Передано',
-    Signed: t('actStatusSigned') ?? 'Подписано',
+    Signed: t('actStatusSigned') ?? 'Подписан клиентом',
     Terminated: t('actStatusTerminated') ?? 'Расторгнуто',
   };
   const actSigningStatusLabels: Record<ActStatus, string> = {
     Created: 'Не подписан',
     Transferred: 'На подписании',
-    Signed: 'Подписан',
+    Signed: 'Подписан клиентом',
     Terminated: 'Аннулирован',
   };
   const actSigningStatusClasses: Record<ActStatus, string> = {
@@ -879,7 +879,7 @@ export function Accounts({
       ApprovalRejected: 'Отказ в согласовании',
       NeedsCorrection: 'Требует исправления',
       OnSigning: 'На подписании',
-      Signed: 'Подписан',
+      Signed: 'Подписан клиентом',
       Cancelled: 'Аннулирован',
     }),
     [],
