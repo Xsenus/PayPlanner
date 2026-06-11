@@ -420,6 +420,8 @@ export function PaymentModal({
   const [showProcessHelp, setShowProcessHelp] = useState(false);
   const [detailsTab, setDetailsTab] = useState<'details' | 'system'>('details');
   const hasLockedInvoice = Boolean(linkedInvoice?.invoiceEntityId);
+  const canChangePaymentType = !hasLockedInvoice || !payment;
+  const canEditExpenseAttribution = !hasLockedInvoice || (!payment && formData.type === 'Expense');
   const caseOwnerClientId = formData.type === 'Expense'
     ? formData.expenseClientId
     : formData.clientId;
@@ -1602,7 +1604,7 @@ export function PaymentModal({
   };
 
   const openClientPicker = (mode: 'client' | 'expense' = 'client') => {
-    if (hasLockedInvoice) {
+    if (hasLockedInvoice && (mode !== 'expense' || !canEditExpenseAttribution)) {
       return;
     }
 
@@ -1919,9 +1921,13 @@ export function PaymentModal({
       setFormData((prev) => ({
         ...prev,
         type: value as PaymentKind,
-        expenseClientId: value === 'Expense' ? prev.expenseClientId : '',
-        expenseLegalEntityId: value === 'Expense' ? prev.expenseLegalEntityId : '',
-        clientCaseId: '',
+        expenseClientId: value === 'Expense'
+          ? prev.expenseClientId || (hasLockedInvoice && !prev.expenseLegalEntityId ? prev.clientId : '')
+          : '',
+        expenseLegalEntityId: value === 'Expense'
+          ? prev.expenseLegalEntityId || (hasLockedInvoice && !prev.expenseClientId && !prev.clientId ? prev.legalEntityId : '')
+          : '',
+        clientCaseId: hasLockedInvoice ? prev.clientCaseId : '',
         incomeTypeId: '',
         invoiceId: hasLockedInvoice ? prev.invoiceId : '',
         account: hasLockedInvoice ? prev.account : '',
@@ -2875,7 +2881,7 @@ export function PaymentModal({
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div>
                         <label className={centeredLabelClass}>{t('type') ?? 'Type'}</label>
-                        <select name="type" value={formData.type} onChange={handleChange} disabled={hasLockedInvoice} className={paymentInfoSelectClass}>
+                        <select name="type" value={formData.type} onChange={handleChange} disabled={!canChangePaymentType} className={paymentInfoSelectClass}>
                           <option value="Income">{t('income') ?? 'Income'}</option><option value="Expense">{t('expense') ?? 'Expense'}</option>
                         </select>
                       </div>
@@ -3242,7 +3248,7 @@ export function PaymentModal({
                         <button
                           type="button"
                           onClick={() => openClientPicker('expense')}
-                          disabled={hasLockedInvoice || clientsLoading || legalEntitiesLoading}
+                          disabled={!canEditExpenseAttribution || clientsLoading || legalEntitiesLoading}
                           className="inline-flex items-center rounded-lg border border-gray-300 px-3 py-2 text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
                           aria-label="Выбрать контрагента расхода">
                           <UserRoundSearch className="h-4 w-4" />
@@ -3277,7 +3283,7 @@ export function PaymentModal({
                         name="expenseClientId"
                         value={formData.expenseClientId}
                         onChange={handleChange}
-                        disabled={hasLockedInvoice}
+                        disabled={!canEditExpenseAttribution}
                         aria-hidden="true"
                         tabIndex={-1}
                         className="hidden">
@@ -3293,7 +3299,7 @@ export function PaymentModal({
                         name="expenseLegalEntityId"
                         value={formData.expenseLegalEntityId}
                         onChange={handleChange}
-                        disabled={hasLockedInvoice}
+                        disabled={!canEditExpenseAttribution}
                         aria-hidden="true"
                         tabIndex={-1}
                         className="hidden">

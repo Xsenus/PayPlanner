@@ -457,6 +457,62 @@ describe('PaymentModal integration', () => {
     expect(screen.getByRole('button', { name: 'Выбрать контрагента' })).toHaveProperty('disabled', true);
   });
 
+  it('allows creating an expense payment from a linked income invoice', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        linkedInvoice={{
+          invoiceEntityId: 24,
+          invoiceRecordId: 528,
+          number: '24',
+          date: '2026-04-02',
+          clientId: 69,
+          clientCaseId: 501,
+          type: 'Income',
+        }}
+        casesPrefetch={[
+          {
+            id: 501,
+            title: 'Case 501',
+            status: 'Open',
+            clientId: 69,
+            createdAt: '2026-03-01T00:00:00Z',
+          },
+        ]}
+      />,
+    );
+
+    const typeSelect = await waitFor(() => {
+      const select = document.body.querySelector('select[name="type"]') as HTMLSelectElement | null;
+      expect(select).not.toBeNull();
+      return select!;
+    });
+    expect(typeSelect.disabled).toBe(false);
+
+    fireEvent.change(typeSelect, { target: { value: 'Expense' } });
+    expect(typeSelect.value).toBe('Expense');
+
+    const amountInput = document.body.querySelector('input[name="amount"]') as HTMLInputElement | null;
+    expect(amountInput).not.toBeNull();
+    fireEvent.change(amountInput!, { target: { value: '1500' } });
+    fireEvent.click(screen.getByRole('button', { name: 'addPayment' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'Expense',
+        invoiceId: 24,
+        clientId: 69,
+        expenseClientId: 69,
+        clientCaseId: 501,
+      }),
+    );
+  });
+
   it('keeps payment fields while replacing stale invoice fields with the linked invoice context during edit', async () => {
     render(
       <PaymentModal
