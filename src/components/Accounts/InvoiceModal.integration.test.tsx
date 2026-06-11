@@ -1114,6 +1114,10 @@ describe('InvoiceModal integration', () => {
       />,
     );
 
+    const dateInputs = document.querySelectorAll('input[type="date"]') as NodeListOf<HTMLInputElement>;
+    expect(dateInputs[1]?.disabled).toBe(true);
+    expect(screen.getByText((content) => content.includes('корректировка срока оплаты'))).toBeTruthy();
+
     const saveButton = document.querySelector('button[type="submit"]') as HTMLButtonElement | null;
     expect(saveButton).toBeTruthy();
     fireEvent.click(saveButton!);

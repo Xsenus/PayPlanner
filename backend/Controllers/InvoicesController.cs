@@ -4348,24 +4348,42 @@ public class InvoicesController : ControllerBase
             return;
         }
 
-        var linkedPayments = await _db.Payments
+        var siblingPayments = await _db.Payments
             .Include(payment => payment.Responsibles)
             .Where(payment =>
                 payment.InvoiceId == invoiceEntityId.Value
                 && payment.Id != invoicePayment.Id
                 && (!preservedProtectedPaymentId.HasValue || payment.Id != preservedProtectedPaymentId.Value)
-                && payment.DocumentKind != DocumentKind.Invoice
-                && (payment.SystemNotes == null
-                    || !payment.SystemNotes.Contains(InstallmentPaymentMarker)))
+                && payment.DocumentKind != DocumentKind.Invoice)
             .ToListAsync(ct);
+        var hasGeneratedInstallments = siblingPayments.Any(InvoiceManagedPaymentRules.IsGeneratedInstallmentPayment);
+        var linkedPayments = siblingPayments
+            .Where(payment => !InvoiceManagedPaymentRules.IsGeneratedInstallmentPayment(payment))
+            .ToList();
 
         foreach (var linkedPayment in linkedPayments)
         {
             SyncPaymentBindingsFromInvoice(linkedPayment, invoicePayment);
             await SyncInvoiceClientCasesAsync(linkedPayment, clientCaseIds, ct);
             SyncPaymentResponsibles(linkedPayment, responsibleIds);
+        }
+
+        if (!hasGeneratedInstallments && linkedPayments.Count == 1)
+        {
+            SyncSingleLinkedPaymentDueDate(linkedPayments[0], invoicePayment);
+        }
+
+        foreach (var linkedPayment in linkedPayments)
+        {
             PaymentDomainService.Normalize(linkedPayment);
         }
+    }
+
+    private static void SyncSingleLinkedPaymentDueDate(Payment linkedPayment, Payment invoicePayment)
+    {
+        var dueDate = PaymentDomainService.NormalizeLocalDate(invoicePayment.Date);
+        linkedPayment.Date = dueDate;
+        linkedPayment.PlannedDate = dueDate;
     }
 
     private static void SyncPaymentBindingsFromInvoice(Payment payment, Payment invoicePayment)

@@ -2532,6 +2532,7 @@ export function InvoiceModal({
     () => relatedPayments.some((payment) => isGeneratedInstallmentPayment(payment)),
     [relatedPayments],
   );
+  const dueDateLockedByInstallmentPlan = Boolean(installmentPlan) || hasGeneratedRelatedPayments;
   const cancellationInstallmentStats = useMemo(() => {
     const generated = relatedPayments.filter((payment) => isGeneratedInstallmentPayment(payment));
     const active = generated.filter((payment) => payment.status !== 'Cancelled');
@@ -4998,8 +4999,14 @@ export function InvoiceModal({
                                 type="date"
                                 value={form.dueDate}
                                 onChange={handleChange('dueDate')}
-                                className="rounded-lg border border-slate-300 px-3 py-2 text-center text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                                disabled={dueDateLockedByInstallmentPlan}
+                                className={`rounded-lg border border-slate-300 px-3 py-2 text-center text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 ${dueDateLockedByInstallmentPlan ? 'bg-slate-100 text-slate-500' : ''}`}
                               />
+                              {dueDateLockedByInstallmentPlan ? (
+                                <span className="text-xs leading-5 text-amber-600">
+                                  Действует рассрочка - корректировка срока оплаты только вручную по каждому платежу.
+                                </span>
+                              ) : null}
                             </label>
 
                             <label className="flex flex-col gap-1 text-sm">
