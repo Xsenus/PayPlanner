@@ -2558,7 +2558,15 @@ export class ApiService {
 
   // ===== User settings =====
   async getUserSetting(key: string): Promise<UserSettingDto | null> {
-    return this.request<UserSettingDto>(`/user-settings/${encodeURIComponent(key)}`);
+    try {
+      return await this.request<UserSettingDto | undefined>(`/user-settings/${encodeURIComponent(key)}`) ?? null;
+    } catch (error) {
+      if (error instanceof Error && /\bHTTP 404\b/.test(error.message)) {
+        return null;
+      }
+
+      throw error;
+    }
   }
 
   async upsertUserSetting(key: string, value: string) {

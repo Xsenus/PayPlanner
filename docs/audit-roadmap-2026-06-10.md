@@ -672,7 +672,7 @@ npm audit --audit-level=moderate
   - DoD: все команды проходят.
   - Выполнено: `npm ci`, `npm run lint`, `npx tsc -p tsconfig.app.json --noEmit`, `npm run test:unit`, `npm run test:integration`, `npm run audit:dates:test`, `npm run build`, `dotnet test backend\PayPlanner.Api.sln --no-restore -c Debug`, `dotnet format backend\PayPlanner.Api.sln --verify-no-changes --no-restore --verbosity minimal`, `dotnet list backend\PayPlanner.Api.sln package --vulnerable --include-transitive`, `npm audit --audit-level=moderate`.
 
-- [ ] Прогнать visual smoke на desktop/tablet/mobile.
+- [x] Прогнать visual smoke на desktop/tablet/mobile.
   - Минимум:
     - login/auth shell;
     - calendar;
@@ -684,8 +684,8 @@ npm audit --audit-level=moderate
     - acts/contracts;
     - settings/admin pages.
   - DoD: нет горизонтального overflow, критичных console errors и broken layout.
-  - Частично выполнено: task routes, invoices, payments, acts и contracts прошли на desktop/tablet/mobile; smoke-скрипт закрывает стартовую модалку релизов и печатает подробные failures.
-  - Осталось: desktop `/` имеет horizontal overflow 55px, tablet `/clients` имеет horizontal overflow 295px, на части страниц есть 404 для optional user-settings (`money.bankStatement.autoImport`, `money.bankStatement.categoryRules`, `notifications.typePreferences.v1`).
+  - Выполнено: full visual smoke прошел на desktop/tablet/mobile по маршрутам `/`, `/tasks`, `/tasks/approvals`, `/tasks/calendar`, `/clients`, `/invoices`, `/payments`, `/acts`, `/contracts`, `/?ppTab=moneyBank`, `/?ppTab=settings`, `/?ppTab=users`.
+  - Исправлено: horizontal overflow на desktop `/` и tablet `/clients`; optional user-settings больше не создают 404 console errors для `money.bankStatement.autoImport`, `money.bankStatement.categoryRules`, `notifications.typePreferences.v1`.
 
 - [x] Проверить API auth smoke.
   - Сценарии:

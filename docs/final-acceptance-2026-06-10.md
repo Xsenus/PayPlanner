@@ -6,6 +6,7 @@
 - Локальная SQLite DB проверена на свежем старте: миграции применяются, backend стартует, `/api/health` возвращает `200`.
 - API auth smoke проверен: public health `200`, bad login `401`, protected endpoint without token `401`, forbidden role `403`, missing object `404`.
 - Targeted checks после исправлений проходят: `SqliteMigrationSmokeTests`, `authService.test.ts`, `InvoiceModal.integration.test.tsx`, `run-visual-smoke.test.mjs`.
+- Full visual smoke прошел на desktop/tablet/mobile по маршрутам `/`, `/tasks`, `/tasks/approvals`, `/tasks/calendar`, `/clients`, `/invoices`, `/payments`, `/acts`, `/contracts`, `/?ppTab=moneyBank`, `/?ppTab=settings`, `/?ppTab=users`.
 - Лишних процессов `vite`, `npm run dev` и `dotnet run` для workspace после проверки не осталось.
 
 ## Исправления
@@ -14,15 +15,14 @@
 - Получение текущего пользователя во frontend переведено на профильный endpoint, чтобы shell не падал на несовпадении auth routes.
 - Редактор счета больше не запускает бесконечные обновления состояния при открытии страницы счетов и проверке связанных платежей.
 - Visual smoke стал диагностировать failures подробнее, закрывает стартовую модалку релизов и игнорирует ожидаемый SignalR negotiation stop во время переходов.
+- Исправлен horizontal overflow на desktop `/` и tablet `/clients`.
+- Отсутствующие optional user-settings теперь обрабатываются как пустые настройки и не создают 404 console errors.
 
 ## Осталось
 
-- Full-app visual smoke пока не закрыт полностью:
-  - desktop `/` имеет horizontal overflow 55px;
-  - tablet `/clients` имеет horizontal overflow 295px;
-  - optional user-settings возвращают 404 для `money.bankStatement.autoImport`, `money.bankStatement.categoryRules`, `notifications.typePreferences.v1`.
+- Открытых пунктов roadmap не осталось.
 - Файл `docs/date-time-inventory.md` был изменен вне этой работы и оставлен нетронутым.
 
 ## Release Notes
 
-- Добавлена запись `2026-06-11-profile-and-invoice-editor-stability` в `backend/AppReleases/releases.json`.
+- Добавлены записи `2026-06-11-profile-and-invoice-editor-stability` и `2026-06-11-visual-smoke-layout-and-settings` в `backend/AppReleases/releases.json`.

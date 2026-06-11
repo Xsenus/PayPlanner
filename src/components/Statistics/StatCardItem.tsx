@@ -62,6 +62,7 @@ export function StatsCards({ items, loading = false, lgCols = 6, skeletonCount }
         const Icon = c.icon;
         const show = hovered === i;
         const interactive = typeof c.onClick === 'function';
+        const tooltipAlignClass = i >= Math.ceil(items.length / 2) ? 'right-2' : 'left-2';
 
         const commonProps = {
           onMouseEnter: () => setHovered(i),
@@ -75,7 +76,7 @@ export function StatsCards({ items, loading = false, lgCols = 6, skeletonCount }
             {c.hint ? (
               <div
                 className={[
-                  'pointer-events-none absolute left-2 -top-2 -translate-y-full z-50',
+                  `pointer-events-none absolute ${tooltipAlignClass} -top-2 -translate-y-full z-50`,
                   'w-64 sm:w-72 max-w-[85vw] rounded-xl border border-gray-200',
                   'bg-white/95 backdrop-blur shadow-lg p-3',
                   'transition-all duration-150 ease-out',

@@ -1321,7 +1321,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-[calc(100vw-2rem)] mx-auto p-4 sm:p-6">
         <div className="mb-6 sm:mb-8">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex flex-col items-center sm:items-start text-center sm:text-left gap-2">
               <div className="flex items-center gap-3">
                 <Users size={32} className="text-blue-600" />
@@ -1329,8 +1329,8 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
               </div>
               <p className="text-gray-600">{t('manageClients')}</p>
             </div>
-            <div className="w-full sm:w-auto flex flex-col sm:flex-row gap-2 sm:items-center">
-              <div className="relative w-full sm:w-64">
+            <div className="w-full lg:w-auto flex flex-col gap-2 md:grid md:grid-cols-2 lg:flex lg:flex-row lg:items-center">
+              <div className="relative w-full lg:w-64">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2" size={16} />
                 <input
                   type="text"
@@ -1355,7 +1355,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
                   </button>
                 )}
               </div>
-              <div className="w-full sm:w-56">
+              <div className="w-full lg:w-56">
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
@@ -1370,7 +1370,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
                   ))}
                 </select>
               </div>
-              <div className="w-full sm:w-40">
+              <div className="w-full lg:w-40">
                 <select
                   value={activityFilter}
                   onChange={(e) => setActivityFilter(e.target.value as 'all' | 'active' | 'inactive')}
@@ -1381,7 +1381,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
                   <option value="inactive">Неактивные</option>
                 </select>
               </div>
-              <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
+              <div className="flex w-full justify-center gap-1 rounded-lg bg-gray-100 p-1 md:w-auto md:justify-start">
                 <button
                   type="button"
                   onClick={() => handleViewModeChange('cards')}
@@ -1437,7 +1437,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
                 <button
                   type="button"
                   onClick={handleAddClient}
-                  className="w-full sm:w-auto flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium">
+                  className="w-full lg:w-auto flex items-center justify-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium">
                   <Plus size={20} />
                   {t('addClient')}
                 </button>

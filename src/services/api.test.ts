@@ -81,6 +81,26 @@ describe('resolveApiBaseUrl', () => {
 });
 
 describe('apiService auth handling', () => {
+  it('returns null for missing optional user settings', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('', {
+      status: 404,
+      statusText: 'Not Found',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(apiService.getUserSetting('money.bankStatement.autoImport')).resolves.toBeNull();
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/user-settings/money.bankStatement.autoImport');
+  });
+
+  it('returns null for empty optional user settings responses', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(apiService.getUserSetting('notifications.typePreferences.v1')).resolves.toBeNull();
+  });
+
   it('loads feature flags from the backend', async () => {
     const payload = {
       legal: {

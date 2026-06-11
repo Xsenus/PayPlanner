@@ -24,7 +24,13 @@ public class UserSettingsController : ControllerBase
         var userId = GetUserId(User);
         if (userId is null) return Unauthorized();
 
-        return await GetForUser(userId.Value, key);
+        var setting = await _db.UserSettings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.UserId == userId.Value && s.Key == key);
+
+        if (setting is null) return NoContent();
+
+        return Ok(Map(setting));
     }
 
     [HttpPut("{key}")]
