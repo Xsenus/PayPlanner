@@ -982,6 +982,7 @@ function AppContent() {
                 routeTaskId={selectedTaskId}
                 onRouteTaskChange={handleRouteTaskChange}
                 onOpenClient={handleOpenTaskClient}
+                onOpenCase={openRelatedCase}
                 onOpenLegalEntity={handleOpenTaskLegalEntity}
               />
             )
@@ -995,6 +996,7 @@ function AppContent() {
                 underControlOnly
                 onRouteTaskChange={handleRouteTaskChange}
                 onOpenClient={handleOpenTaskClient}
+                onOpenCase={openRelatedCase}
                 onOpenLegalEntity={handleOpenTaskLegalEntity}
               />
             )
@@ -1007,6 +1009,7 @@ function AppContent() {
                 key="tasks-approvals"
                 mode="approvals"
                 onOpenClient={handleOpenTaskClient}
+                onOpenCase={openRelatedCase}
                 onOpenLegalEntity={handleOpenTaskLegalEntity}
               />
             )
@@ -1020,6 +1023,7 @@ function AppContent() {
                 initialView="calendar"
                 onRouteTaskChange={handleRouteTaskChange}
                 onOpenClient={handleOpenTaskClient}
+                onOpenCase={openRelatedCase}
                 onOpenLegalEntity={handleOpenTaskLegalEntity}
               />
             )

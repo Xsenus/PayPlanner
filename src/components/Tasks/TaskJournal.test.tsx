@@ -245,6 +245,7 @@ async function renderJournal(
       title?: string | null;
     };
     onOpenClient?: (clientId: number, caseId?: number | null) => void;
+    onOpenCase?: (caseId: number, clientId?: number | null) => void;
     onOpenLegalEntity?: (legalEntityId: number) => void;
     settings?: Partial<TaskJournalSettingsDto>;
     underControlOnly?: boolean;
@@ -294,6 +295,7 @@ async function renderJournal(
         routeTaskId={routeTaskId}
         onRouteTaskChange={setRouteTaskId}
         onOpenClient={options.onOpenClient}
+        onOpenCase={options.onOpenCase}
         onOpenLegalEntity={options.onOpenLegalEntity}
         underControlOnly={options.underControlOnly}
       />
@@ -309,6 +311,7 @@ async function renderJournal(
       embedded={options.embedded}
       contextFilter={options.contextFilter}
       onOpenClient={options.onOpenClient}
+      onOpenCase={options.onOpenCase}
       onOpenLegalEntity={options.onOpenLegalEntity}
       underControlOnly={options.underControlOnly}
     />
@@ -909,6 +912,23 @@ describe('TaskJournal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Solomanin Oleg' }));
 
     expect(onOpenClient).toHaveBeenCalledWith(42, 314);
+  });
+
+  it('opens case card from the case title in the journal', async () => {
+    const onOpenCase = vi.fn();
+    const task = createTask({
+      clientId: 42,
+      clientCaseId: 314,
+      clientName: 'Solomanin Oleg',
+      clientCaseTitle: 'Bankruptcy',
+      objectName: 'Solomanin Oleg - Bankruptcy',
+    });
+
+    await renderJournal([task], { onOpenCase });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Bankruptcy' }));
+
+    expect(onOpenCase).toHaveBeenCalledWith(314, 42);
   });
 
   it('opens legal entity card from the counterparty link in the journal', async () => {

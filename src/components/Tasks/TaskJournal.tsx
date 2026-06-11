@@ -112,6 +112,7 @@ type TaskJournalProps = {
   routeTaskId?: number | null;
   onRouteTaskChange?: (taskId: number | null) => void;
   onOpenClient?: (clientId: number, caseId?: number | null) => void | Promise<void>;
+  onOpenCase?: (caseId: number, clientId?: number | null) => void | Promise<void>;
   onOpenLegalEntity?: (legalEntityId: number) => void | Promise<void>;
 };
 
@@ -1530,6 +1531,7 @@ export function TaskJournal({
   routeTaskId = null,
   onRouteTaskChange,
   onOpenClient,
+  onOpenCase,
   onOpenLegalEntity,
 }: TaskJournalProps) {
   const { user, isAdmin } = useAuth();
@@ -3232,6 +3234,7 @@ export function TaskJournal({
             selectableTaskIds={selectableTaskIds}
             allVisibleSelected={allVisibleBulkSelected}
             onOpenClient={onOpenClient}
+            onOpenCase={onOpenCase}
             onOpenLegalEntity={onOpenLegalEntity}
             onToggleTaskSelection={toggleTaskSelection}
             onToggleAllVisibleSelection={toggleAllVisibleSelection}
@@ -3720,6 +3723,7 @@ function TaskTable({
   selectableTaskIds,
   allVisibleSelected,
   onOpenClient,
+  onOpenCase,
   onOpenLegalEntity,
   onToggleTaskSelection,
   onToggleAllVisibleSelection,
@@ -3739,6 +3743,7 @@ function TaskTable({
   selectableTaskIds: Set<number>;
   allVisibleSelected: boolean;
   onOpenClient?: (clientId: number, caseId?: number | null) => void | Promise<void>;
+  onOpenCase?: (caseId: number, clientId?: number | null) => void | Promise<void>;
   onOpenLegalEntity?: (legalEntityId: number) => void | Promise<void>;
   onToggleTaskSelection: (taskId: number, checked: boolean) => void;
   onToggleAllVisibleSelection: (checked: boolean) => void;
@@ -3791,10 +3796,12 @@ function TaskTable({
               const taskObservers = getTaskParticipants(task, 'observer');
               const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
               const counterpartyName = getTaskClientName(task);
+              const caseTitle = getTaskCaseTitle(task);
               const canSelectTask = selectableTaskIds.has(task.id);
               const canOpenCounterparty = Boolean(
                 (task.clientId && onOpenClient) || (task.legalEntityId && onOpenLegalEntity),
               );
+              const canOpenCase = Boolean(task.clientCaseId && onOpenCase);
               const openCounterparty = () => {
                 if (task.clientId && onOpenClient) {
                   void onOpenClient(task.clientId, task.clientCaseId ?? null);
@@ -3803,6 +3810,11 @@ function TaskTable({
 
                 if (task.legalEntityId && onOpenLegalEntity) {
                   void onOpenLegalEntity(task.legalEntityId);
+                }
+              };
+              const openCase = () => {
+                if (task.clientCaseId && onOpenCase) {
+                  void onOpenCase(task.clientCaseId, task.clientId ?? null);
                 }
               };
 
@@ -3836,8 +3848,19 @@ function TaskTable({
                     ) : (
                       <div className="font-semibold text-slate-900">{counterpartyName}</div>
                     )}
-                    {getTaskCaseTitle(task) ? (
-                      <div className="mt-1 text-sm text-slate-500">{getTaskCaseTitle(task)}</div>
+                    {caseTitle ? (
+                      canOpenCase ? (
+                        <button
+                          type="button"
+                          onClick={openCase}
+                          className="mt-1 block max-w-full text-left text-sm text-slate-600 underline-offset-2 transition hover:text-blue-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                          title="Открыть карточку дела"
+                        >
+                          {caseTitle}
+                        </button>
+                      ) : (
+                        <div className="mt-1 text-sm text-slate-500">{caseTitle}</div>
+                      )
                     ) : null}
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {task.isUnderControl ? (
