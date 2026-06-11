@@ -412,7 +412,7 @@ describe('ContractDetailPage integration', () => {
 
   it('checks unpaid invoices before terminating a contract', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    vi.setSystemTime(new Date('2026-06-03T20:30:00.000Z'));
+    vi.setSystemTime(new Date('2026-06-04T12:00:00.000Z'));
     const promptSpy = vi
       .spyOn(window, 'prompt')
       .mockReturnValueOnce('2026-05-22')
