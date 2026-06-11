@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.FileProviders;
 using PayPlanner.Api.Services;
+using System.Text.Json;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
@@ -68,9 +69,44 @@ public class CorsPolicyConfigurationTests
         Assert.Empty(policy.Origins);
     }
 
+    [Fact]
+    public void ProductionConfiguration_AllowsPublicCrmFrontendOrigin()
+    {
+        var root = FindRepositoryRoot();
+        using var appsettings = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "backend", "appsettings.Production.json")));
+
+        var origins = appsettings.RootElement
+            .GetProperty("Cors")
+            .GetProperty("AllowedOrigins")
+            .EnumerateArray()
+            .Select(origin => origin.GetString()?.TrimEnd('/'))
+            .ToArray();
+
+        Assert.Contains("https://crm.elitpravo.com", origins);
+    }
+
     private static CorsPolicy GetDefaultPolicy(CorsOptions options)
         => options.GetPolicy(options.DefaultPolicyName)
            ?? throw new InvalidOperationException("Default CORS policy was not configured.");
+
+    private static string FindRepositoryRoot()
+    {
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+
+        while (current is not null)
+        {
+            if (File.Exists(Path.Combine(current.FullName, "package.json"))
+                && Directory.Exists(Path.Combine(current.FullName, ".github"))
+                && Directory.Exists(Path.Combine(current.FullName, "backend")))
+            {
+                return current.FullName;
+            }
+
+            current = current.Parent;
+        }
+
+        throw new DirectoryNotFoundException("Repository root was not found.");
+    }
 
     private sealed class TestWebHostEnvironment(string environmentName) : IWebHostEnvironment
     {
