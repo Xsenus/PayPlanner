@@ -464,6 +464,17 @@ function isAppliedToInvoice(item: MoneyOperation) {
   return Boolean(item.linkedInvoiceId && item.matchStatus === 'Matched');
 }
 
+function isUnallocatedAdvanceMoneyOperation(item: MoneyOperation) {
+  return (
+    item.source === 'Bank' &&
+    item.direction === 'Income' &&
+    item.accountingType === 'Fact' &&
+    item.amount > 0 &&
+    !item.linkedInvoiceId &&
+    item.matchStatus !== 'Ignored'
+  );
+}
+
 type BalanceCheckSource = Pick<MoneyOperationsSummary | MoneyOperationAccountSummary, 'startBalance' | 'income' | 'expense' | 'endBalance'>;
 type DailyBalanceCheckSource = Pick<
   MoneyOperationDailyBalance,
@@ -569,6 +580,14 @@ function getOperationOriginBadge(item: MoneyOperation) {
       label: 'Зачтено в счет',
       title: 'Операция уже зачтена в счет. Удаление и перенос заблокированы, чтобы не задвоить оплату.',
       className: 'bg-blue-50 text-blue-700',
+    };
+  }
+
+  if (item.isAdvancePayment && isUnallocatedAdvanceMoneyOperation(item)) {
+    return {
+      label: 'Аванс без счета',
+      title: 'Поступление не связано со счетом. Проверьте его как нераспределенный аванс.',
+      className: 'bg-rose-50 text-rose-700',
     };
   }
 
@@ -2234,6 +2253,7 @@ export function MoneyOperations({
   const [editingOperation, setEditingOperation] = useState<MoneyOperation | null>(null);
   const [totalTab, setTotalTab] = useState<'total' | 'cashflow'>('total');
   const [confirmDelete, setConfirmDelete] = useState<MoneyOperation | null>(null);
+  const [pendingUnallocatedAdvanceOperation, setPendingUnallocatedAdvanceOperation] = useState<MoneyOperation | null>(null);
   const [selectedOperationIds, setSelectedOperationIds] = useState<number[]>([]);
   const [confirmBulkDeleteOpen, setConfirmBulkDeleteOpen] = useState(false);
   const [page, setPage] = useState(1);
@@ -3704,29 +3724,9 @@ export function MoneyOperations({
     }
   }, [page, source, totalPages]);
 
-  const handleSave = async (payload: MoneyOperation) => {
+  const savePreparedMoneyOperation = async (prepared: MoneyOperation) => {
     setSaving(true);
     try {
-      const normalizedRecognitionDate =
-        payload.recognitionDate && payload.recognitionDate.trim() !== '' ? payload.recognitionDate : null;
-      const normalizedDate = fromInputToApiDate(payload.date) ?? payload.date;
-      const normalizedPaidAmount = Number.isFinite(payload.paidAmount ?? NaN) ? payload.paidAmount : null;
-      const normalizedLinkedInvoiceId =
-        Number.isFinite(payload.linkedInvoiceId ?? NaN) && (payload.linkedInvoiceId ?? 0) > 0
-          ? payload.linkedInvoiceId
-          : null;
-      const selectedCategory = findCategoryOption(categoryDictionaryOptions, payload.direction, payload.categoryName);
-      const prepared = {
-        ...payload,
-        source: apiSource ?? payload.source,
-        date: normalizedDate,
-        recognitionDate: normalizedRecognitionDate,
-        paidAmount: normalizedPaidAmount,
-        incomeTypeId: selectedCategory?.id ?? payload.incomeTypeId ?? null,
-        categoryName: selectedCategory ? null : payload.categoryName,
-        linkedInvoiceId: normalizedLinkedInvoiceId,
-        matchStatus: normalizedLinkedInvoiceId ? 'Matched' : payload.matchStatus ?? 'None',
-      };
       if (editingOperation) {
         await apiService.updateMoneyOperation(editingOperation.id, prepared);
         await reload();
@@ -3771,6 +3771,59 @@ export function MoneyOperations({
     } finally {
       setSaving(false);
     }
+  };
+
+  const prepareMoneyOperationForSave = (payload: MoneyOperation): MoneyOperation => {
+    const normalizedRecognitionDate =
+      payload.recognitionDate && payload.recognitionDate.trim() !== '' ? payload.recognitionDate : null;
+    const normalizedDate = fromInputToApiDate(payload.date) ?? payload.date;
+    const normalizedPaidAmount = Number.isFinite(payload.paidAmount ?? NaN) ? payload.paidAmount : null;
+    const normalizedLinkedInvoiceId =
+      Number.isFinite(payload.linkedInvoiceId ?? NaN) && (payload.linkedInvoiceId ?? 0) > 0
+        ? payload.linkedInvoiceId
+        : null;
+    const selectedCategory = findCategoryOption(categoryDictionaryOptions, payload.direction, payload.categoryName);
+
+    return {
+      ...payload,
+      source: apiSource ?? payload.source,
+      date: normalizedDate,
+      recognitionDate: normalizedRecognitionDate,
+      paidAmount: normalizedPaidAmount,
+      incomeTypeId: selectedCategory?.id ?? payload.incomeTypeId ?? null,
+      categoryName: selectedCategory ? null : payload.categoryName,
+      linkedInvoiceId: normalizedLinkedInvoiceId,
+      matchStatus: normalizedLinkedInvoiceId ? 'Matched' : payload.matchStatus ?? 'None',
+    };
+  };
+
+  const handleSave = async (payload: MoneyOperation) => {
+    const prepared = prepareMoneyOperationForSave(payload);
+    if (isUnallocatedAdvanceMoneyOperation(prepared) && !prepared.isAdvancePayment) {
+      setPendingUnallocatedAdvanceOperation(prepared);
+      return;
+    }
+
+    await savePreparedMoneyOperation(prepared);
+  };
+
+  const confirmUnallocatedAdvanceOperation = async () => {
+    if (!pendingUnallocatedAdvanceOperation) return;
+
+    const prepared = {
+      ...pendingUnallocatedAdvanceOperation,
+      isAdvancePayment: true,
+      matchStatus:
+        pendingUnallocatedAdvanceOperation.matchStatus === 'Ignored'
+          ? pendingUnallocatedAdvanceOperation.matchStatus
+          : ('ClarificationRequired' as MoneyOperation['matchStatus']),
+      matchComment:
+        pendingUnallocatedAdvanceOperation.matchComment?.trim() ||
+        'Поступление не связано со счетом. Проверьте его как возможный нераспределенный аванс.',
+    };
+
+    setPendingUnallocatedAdvanceOperation(null);
+    await savePreparedMoneyOperation(prepared);
   };
 
   const handleEdit = (item: MoneyOperation) => {
@@ -5623,6 +5676,16 @@ export function MoneyOperations({
         variant="danger"
         onConfirm={confirmBulkDeleteOperations}
         onCancel={() => setConfirmBulkDeleteOpen(false)}
+      />
+      <ConfirmDialog
+        open={Boolean(pendingUnallocatedAdvanceOperation)}
+        title="Нераспределенный аванс"
+        description="Банковское поступление не связано со счетом. Если сохранить его сейчас, оно будет отмечено как аванс без счета и останется в денежном журнале на проверке до привязки или разборки."
+        confirmLabel="Отметить как аванс"
+        cancelLabel="Вернуться к операции"
+        variant="primary"
+        onConfirm={confirmUnallocatedAdvanceOperation}
+        onCancel={() => setPendingUnallocatedAdvanceOperation(null)}
       />
         </>
       )}

@@ -5038,6 +5038,58 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task CreateBankIncomeWithoutInvoice_MarksOperationAsAdvanceRequiringClarification()
+    {
+        await using var db = await CreateContextAsync();
+        var controller = CreateController(db);
+
+        var createAction = await controller.Create(new MoneyOperation
+        {
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 7_100m,
+            Date = new DateTime(2026, 3, 2),
+            CounterpartyName = "Винокуров Валерий Витальевич",
+            Purpose = "Поступление без счета",
+        });
+
+        var created = Assert.IsType<CreatedResult>(createAction);
+        var operation = Assert.IsType<MoneyOperation>(created.Value);
+        Assert.True(operation.IsAdvancePayment);
+        Assert.Equal(MoneyOperationMatchStatus.ClarificationRequired, operation.MatchStatus);
+        Assert.Contains("не связано со счетом", operation.MatchComment);
+
+        var saved = await db.MoneyOperations.SingleAsync();
+        Assert.True(saved.IsAdvancePayment);
+        Assert.Equal(MoneyOperationMatchStatus.ClarificationRequired, saved.MatchStatus);
+    }
+
+    [Fact]
+    public async Task ImportBankStatement_UnmatchedIncomeIsMarkedAsAdvanceRequiringClarification()
+    {
+        await using var db = await CreateContextAsync();
+        var controller = CreateController(db);
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        var bytes = Encoding.GetEncoding(1251).GetBytes(
+            "Дата операции;Поступило;Списано;Плательщик;Назначение платежа;Документ\n" +
+            "02.03.2026;7100;;Винокуров Валерий Витальевич;Поступление без счета;701\n");
+
+        var action = await controller.ImportBankStatement(CreateFormFile(bytes, "advance-statement.txt"), CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var result = Assert.IsType<BankStatementImportResultDto>(ok.Value);
+        Assert.Equal(1, result.Created);
+        var createdOperation = Assert.Single(result.Operations);
+        Assert.Equal(MoneyOperationMatchStatus.ClarificationRequired, createdOperation.MatchStatus);
+
+        var saved = await db.MoneyOperations.SingleAsync();
+        Assert.True(saved.IsAdvancePayment);
+        Assert.Equal(MoneyOperationMatchStatus.ClarificationRequired, saved.MatchStatus);
+        Assert.Contains("не связано со счетом", saved.MatchComment);
+    }
+
+    [Fact]
     public async Task MoneyAccountsController_CreatesSingleDefaultPerSource()
     {
         await using var db = await CreateContextAsync();

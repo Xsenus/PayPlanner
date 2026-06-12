@@ -1287,6 +1287,73 @@ describe('MoneyOperations integration', () => {
     await screen.findByText('Новый поставщик');
   }, 15000);
 
+  it('warns and marks a bank income without invoice as an advance', async () => {
+    const user = userEvent.setup();
+
+    render(<MoneyOperations source="Bank" />);
+
+    await screen.findByText('Поставщик А');
+    await user.click(screen.getByRole('button', { name: 'Добавить' }));
+    await screen.findByText('Добавить операцию по банку');
+
+    await user.selectOptions(screen.getByLabelText('Банковский счёт'), '101');
+    await user.clear(screen.getByTestId('money-operation-counterparty'));
+    await user.type(screen.getByTestId('money-operation-counterparty'), 'Винокуров Валерий Витальевич');
+    await user.clear(screen.getByLabelText('Сумма, RUB'));
+    await user.type(screen.getByLabelText('Сумма, RUB'), '7100');
+    await user.clear(screen.getByLabelText(/^Назначение$/));
+    await user.type(screen.getByLabelText(/^Назначение$/), 'Поступление без счета');
+
+    const modalSaveButton = screen
+      .getAllByRole('button', { name: 'Сохранить' })
+      .find((button) => button.className.includes('bg-blue-600'));
+    expect(modalSaveButton).toBeTruthy();
+    await user.click(modalSaveButton as HTMLElement);
+
+    expect(await screen.findByText('Нераспределенный аванс')).toBeTruthy();
+    expect(createMoneyOperationMock).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Отметить как аванс' }));
+
+    await waitFor(() => expect(createMoneyOperationMock).toHaveBeenCalledTimes(1));
+    expect(createMoneyOperationMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 0,
+        source: 'Bank',
+        direction: 'Income',
+        moneyAccountId: 101,
+        accountName: 'Основной счёт',
+        counterpartyName: 'Винокуров Валерий Витальевич',
+        amount: 7100,
+        isAdvancePayment: true,
+        matchStatus: 'ClarificationRequired',
+        matchComment: expect.stringContaining('не связано со счетом'),
+      }),
+    );
+    expect(toastSuccessMock).toHaveBeenCalledWith('Операция создана.', 'Деньги');
+    await screen.findByText('Аванс без счета');
+  }, 15000);
+
+  it('shows an advance without invoice marker in the money journal', async () => {
+    operations = [
+      createOperation({
+        id: 51,
+        direction: 'Income',
+        amount: 7100,
+        counterpartyName: 'Винокуров Валерий Витальевич',
+        isAdvancePayment: true,
+        linkedInvoiceId: null,
+        matchStatus: 'ClarificationRequired',
+        matchComment: 'Поступление не связано со счетом.',
+      }),
+    ];
+
+    render(<MoneyOperations source="Bank" />);
+
+    expect(await screen.findByText('Винокуров Валерий Витальевич')).toBeTruthy();
+    expect(screen.getByText('Аванс без счета')).toBeTruthy();
+  });
+
   it('creates an accountable advance from the money operation form', async () => {
     const user = userEvent.setup();
 

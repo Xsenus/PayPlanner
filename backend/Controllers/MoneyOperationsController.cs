@@ -1981,6 +1981,7 @@ public class MoneyOperationsController : ControllerBase
             model.MatchStatus = MoneyOperationMatchStatus.None;
             model.MatchedAt = null;
         }
+        ApplyAdvanceReviewHint(model);
         model.CreatedAt = DateTime.UtcNow;
 
         _db.MoneyOperations.Add(model);
@@ -2695,6 +2696,7 @@ public class MoneyOperationsController : ControllerBase
                 _ => MoneyOperationMatchStatus.None,
             };
         }
+        ApplyAdvanceReviewHint(entity);
         entity.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(ct);
@@ -2825,6 +2827,32 @@ public class MoneyOperationsController : ControllerBase
         operation.VatRate = Math.Round(operation.VatRate.Value, 2, MidpointRounding.AwayFromZero);
         operation.VatAmount = Math.Round(operation.Amount * operation.VatRate.Value / (100m + operation.VatRate.Value), 2, MidpointRounding.AwayFromZero);
     }
+
+    private static void ApplyAdvanceReviewHint(MoneyOperation operation)
+    {
+        if (!IsUnallocatedAdvanceMoneyOperation(operation))
+        {
+            return;
+        }
+
+        operation.IsAdvancePayment = true;
+        if (operation.MatchStatus == MoneyOperationMatchStatus.None)
+        {
+            operation.MatchStatus = MoneyOperationMatchStatus.ClarificationRequired;
+        }
+
+        operation.MatchComment = string.IsNullOrWhiteSpace(operation.MatchComment)
+            ? "Поступление не связано со счетом. Проверьте его как возможный нераспределенный аванс."
+            : operation.MatchComment.Trim();
+    }
+
+    private static bool IsUnallocatedAdvanceMoneyOperation(MoneyOperation operation)
+        => operation.Source == MoneyOperationSource.Bank
+           && operation.Direction == MoneyOperationDirection.Income
+           && operation.AccountingType == MoneyOperationAccountingType.Fact
+           && operation.Amount > 0m
+           && !operation.LinkedInvoiceId.HasValue
+           && operation.MatchStatus != MoneyOperationMatchStatus.Ignored;
 
     private static string ToTitleSearchTerm(string value)
         => string.IsNullOrWhiteSpace(value)
@@ -3575,6 +3603,7 @@ public class MoneyOperationsController : ControllerBase
                 operation.MatchComment = BuildBankStatementAutoMatchComment(item, autoMatch);
                 importRowMessage = operation.MatchComment;
             }
+            ApplyAdvanceReviewHint(operation);
 
             _db.MoneyOperations.Add(operation);
             pendingOperations.Add(operation);
