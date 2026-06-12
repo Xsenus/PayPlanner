@@ -165,6 +165,7 @@ public static class ClientBalanceService
         }
 
         var availableBalance = balance;
+        decimal? selectedSourceBalance = null;
         if (sourcePaymentId.HasValue)
         {
             if (sourcePaymentId.Value == paymentId)
@@ -178,6 +179,7 @@ public static class ClientBalanceService
                 return (false, "Selected advance source has no available balance.", 0m);
             }
 
+            selectedSourceBalance = sourceBalance;
             availableBalance = Math.Min(balance, sourceBalance);
         }
 
@@ -225,6 +227,21 @@ public static class ClientBalanceService
             utcNow,
             actor,
             actorTimeZone);
+
+        if (sourcePaymentId.HasValue
+            && selectedSourceBalance.HasValue
+            && selectedSourceBalance.Value - applied <= AmountEpsilon)
+        {
+            var sourcePayment = await db.Payments.FirstOrDefaultAsync(item => item.Id == sourcePaymentId.Value, ct);
+            if (sourcePayment?.AdvanceReviewStatus == PaymentAdvanceReviewStatus.AcceptedAsAdvance)
+            {
+                PaymentAdvanceReviewService.MarkAllocated(
+                    sourcePayment,
+                    $"Аванс полностью распределен по платежу #{payment.Id}",
+                    utcNow,
+                    httpContext);
+            }
+        }
 
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(db, payment, utcNow, ct);
 

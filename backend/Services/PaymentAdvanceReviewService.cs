@@ -148,6 +148,17 @@ public static class PaymentAdvanceReviewService
         await ClientBalanceService.RemoveUnallocatedAdvanceAsync(db, payment.Id, ct);
     }
 
+    public static void MarkAllocated(Payment payment, string? reason, DateTime utcNow, HttpContext? httpContext)
+    {
+        ArgumentNullException.ThrowIfNull(payment);
+
+        payment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.Allocated;
+        payment.AdvanceReviewReason = NormalizeReason(reason) ?? "Аванс полностью распределен";
+        payment.AdvanceReviewedAt = utcNow;
+        payment.AdvanceReviewedByUserId = httpContext?.User.GetUserId() ?? payment.AdvanceReviewedByUserId;
+        payment.AdvanceReviewedByUserName = httpContext?.User.GetDisplayName() ?? payment.AdvanceReviewedByUserName;
+    }
+
     private static void StampReviewIfNeeded(Payment payment, DateTime utcNow, HttpContext? httpContext, string? reason)
     {
         payment.AdvanceReviewReason = NormalizeReason(reason) ?? payment.AdvanceReviewReason;

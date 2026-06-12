@@ -2815,6 +2815,15 @@ public class PaymentsControllerTests
         Assert.Equal(400m, updatedTarget!.PaidAmount);
         Assert.Equal(PaymentStatus.Overdue, updatedTarget.Status);
 
+        var updatedSource = await db.Payments.FindAsync(sourceAdvance.Id);
+        Assert.NotNull(updatedSource);
+        Assert.Equal(PaymentAdvanceReviewStatus.Allocated, updatedSource!.AdvanceReviewStatus);
+        Assert.Equal($"Аванс полностью распределен по платежу #{targetPayment.Id}", updatedSource.AdvanceReviewReason);
+
+        var untouchedAdvance = await db.Payments.FindAsync(otherAdvance.Id);
+        Assert.NotNull(untouchedAdvance);
+        Assert.Equal(PaymentAdvanceReviewStatus.AcceptedAsAdvance, untouchedAdvance!.AdvanceReviewStatus);
+
         var selectedAdvanceRemainder = await ClientBalanceService.GetUnallocatedAdvanceAvailableAmountAsync(
             db,
             sourceAdvance.Id,
@@ -2895,6 +2904,10 @@ public class PaymentsControllerTests
         Assert.NotNull(updatedTarget);
         Assert.Equal(900m, updatedTarget!.PaidAmount);
 
+        var updatedSource = await db.Payments.FindAsync(sourceAdvance.Id);
+        Assert.NotNull(updatedSource);
+        Assert.Equal(PaymentAdvanceReviewStatus.Allocated, updatedSource!.AdvanceReviewStatus);
+
         var legalEntityBalance = await ClientBalanceService.GetLegalEntityBalanceAsync(db, legalEntity.Id);
         Assert.Equal(0m, legalEntityBalance);
 
@@ -2904,6 +2917,68 @@ public class PaymentsControllerTests
         Assert.Equal(legalEntity.Id, debit.LegalEntityId);
         Assert.Null(debit.ClientId);
         Assert.StartsWith(ClientBalanceService.BuildUnallocatedAdvanceApplicationKeyPrefix(sourceAdvance.Id), debit.ExternalKey);
+    }
+
+    [Fact]
+    public async Task ApplyCredit_WithSourcePaymentId_KeepsSourceAdvanceAcceptedWhenRemainderExists()
+    {
+        await using var db = await CreateContextAsync();
+
+        var client = new Client { Name = "Клиент с частичным авансом", CreatedAt = DateTime.UtcNow };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var sourceAdvance = CreatePayment(new DateTime(2026, 5, 1), 1_000m, "Частичный аванс");
+        sourceAdvance.ClientId = client.Id;
+        sourceAdvance.PaidAmount = 1_000m;
+        sourceAdvance.Status = PaymentStatus.Completed;
+        sourceAdvance.IsPaid = true;
+        sourceAdvance.AdvanceReviewStatus = PaymentAdvanceReviewStatus.AcceptedAsAdvance;
+
+        var targetPayment = CreatePayment(new DateTime(2026, 5, 10), 400m, "Небольшой долг");
+        targetPayment.ClientId = client.Id;
+        targetPayment.PaidAmount = 0m;
+        targetPayment.Status = PaymentStatus.Pending;
+
+        db.Payments.AddRange(sourceAdvance, targetPayment);
+        await db.SaveChangesAsync();
+
+        db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
+        {
+            ClientId = client.Id,
+            PaymentId = sourceAdvance.Id,
+            Amount = 1_000m,
+            Type = ClientBalanceTransactionType.UnallocatedAdvance,
+            Direction = ClientBalanceDirection.Credit,
+            Description = "Частичный аванс",
+            ExternalKey = ClientBalanceService.BuildUnallocatedAdvanceKey(sourceAdvance.Id),
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = new ClientBalancesController(db);
+        var result = await controller.ApplyCredit(
+            client.Id,
+            new ApplyClientBalanceRequest
+            {
+                PaymentId = targetPayment.Id,
+                Amount = 400m,
+                SourcePaymentId = sourceAdvance.Id,
+            },
+            CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result);
+
+        var updatedSource = await db.Payments.FindAsync(sourceAdvance.Id);
+        Assert.NotNull(updatedSource);
+        Assert.Equal(PaymentAdvanceReviewStatus.AcceptedAsAdvance, updatedSource!.AdvanceReviewStatus);
+
+        var selectedAdvanceRemainder = await ClientBalanceService.GetUnallocatedAdvanceAvailableAmountAsync(
+            db,
+            sourceAdvance.Id,
+            client.Id,
+            null);
+        Assert.Equal(600m, selectedAdvanceRemainder);
     }
 
     [Fact]
