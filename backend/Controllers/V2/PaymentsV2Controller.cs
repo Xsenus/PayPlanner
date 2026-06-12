@@ -592,7 +592,7 @@ public class PaymentsV2Controller : ControllerBase
 
         if (advanceReviewStatus.HasValue)
         {
-            query = query.Where(payment => payment.AdvanceReviewStatus == advanceReviewStatus.Value);
+            query = ApplyAdvanceReviewFilter(query, advanceReviewStatus.Value);
         }
 
         if (minAmount.HasValue)
@@ -606,6 +606,29 @@ public class PaymentsV2Controller : ControllerBase
         }
 
         return ApplyCategoryFilters(query, categoryTokens).ApplyPaymentSort(sortBy, sortDir);
+    }
+
+    private static IQueryable<Payment> ApplyAdvanceReviewFilter(IQueryable<Payment> query, PaymentAdvanceReviewStatus status)
+    {
+        if (status != PaymentAdvanceReviewStatus.RequiresDecision)
+        {
+            return query.Where(payment => payment.AdvanceReviewStatus == status);
+        }
+
+        return query.Where(payment =>
+            payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.RequiresDecision
+            || (payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.None
+                && payment.Type == PaymentType.Income
+                && payment.DocumentKind == DocumentKind.Payment
+                && payment.Status != PaymentStatus.Cancelled
+                && ((payment.ClientId.HasValue && payment.ClientId.Value > 0 && !payment.LegalEntityId.HasValue)
+                    || (payment.LegalEntityId.HasValue && payment.LegalEntityId.Value > 0 && !payment.ClientId.HasValue))
+                && ((payment.PaidAmount > 0.009m)
+                    || ((payment.IsPaid || payment.Status == PaymentStatus.Completed) && payment.Amount > 0.009m))
+                && !payment.InvoiceId.HasValue
+                && !payment.ContractId.HasValue
+                && (payment.Account == null || payment.Account.Trim() == string.Empty)
+                && (payment.LegacyAccountNumber == null || payment.LegacyAccountNumber.Trim() == string.Empty)));
     }
 
     private Task<List<Payment>> LoadPaymentExportItemsAsync(

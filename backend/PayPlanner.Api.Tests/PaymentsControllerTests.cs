@@ -3969,6 +3969,67 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task V2RequiresDecisionFilter_IncludesLegacyUnmarkedAdvanceCandidates()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreatePaymentsUserAsync(db, canExport: false);
+        var client = new Client { Name = "Клиент со старым авансом" };
+        var ignoredClient = new Client { Name = "Клиент с проверенным платежом" };
+        db.Clients.AddRange(client, ignoredClient);
+        await db.SaveChangesAsync();
+
+        var legacyCandidate = CreatePayment(new DateTime(2026, 3, 2), 7_100m, "Старый платеж без решения");
+        legacyCandidate.ClientId = client.Id;
+        legacyCandidate.PaidAmount = 7_100m;
+        legacyCandidate.Status = PaymentStatus.Completed;
+        legacyCandidate.IsPaid = true;
+        legacyCandidate.PaidDate = legacyCandidate.Date;
+        legacyCandidate.LastPaymentDate = legacyCandidate.Date;
+        legacyCandidate.AdvanceReviewStatus = PaymentAdvanceReviewStatus.None;
+
+        var alreadyMarked = CreatePayment(new DateTime(2026, 3, 3), 2_000m, "Уже требует решения");
+        alreadyMarked.ClientId = client.Id;
+        alreadyMarked.PaidAmount = 2_000m;
+        alreadyMarked.Status = PaymentStatus.Completed;
+        alreadyMarked.IsPaid = true;
+        alreadyMarked.AdvanceReviewStatus = PaymentAdvanceReviewStatus.RequiresDecision;
+
+        var ignoredPayment = CreatePayment(new DateTime(2026, 3, 4), 3_000m, "Игнорируемый платеж");
+        ignoredPayment.ClientId = ignoredClient.Id;
+        ignoredPayment.PaidAmount = 3_000m;
+        ignoredPayment.Status = PaymentStatus.Completed;
+        ignoredPayment.IsPaid = true;
+        ignoredPayment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.Ignored;
+
+        var linkedPayment = CreatePayment(new DateTime(2026, 3, 5), 4_000m, "Платеж со счетом");
+        linkedPayment.ClientId = client.Id;
+        linkedPayment.PaidAmount = 4_000m;
+        linkedPayment.Status = PaymentStatus.Completed;
+        linkedPayment.IsPaid = true;
+        linkedPayment.Account = "INV-10";
+        linkedPayment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.None;
+
+        db.Payments.AddRange(legacyCandidate, alreadyMarked, ignoredPayment, linkedPayment);
+        await db.SaveChangesAsync();
+
+        var controller = CreatePaymentsV2Controller(db, user.Id);
+        var page = await controller.Get(
+            from: null,
+            to: null,
+            clientId: null,
+            caseId: null,
+            advanceReviewStatus: PaymentAdvanceReviewStatus.RequiresDecision,
+            sortBy: "date",
+            sortDir: "asc",
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(page.Result);
+        var response = Assert.IsType<PaymentsPageResponse>(ok.Value);
+        Assert.Equal(2, response.Total);
+        Assert.Equal([legacyCandidate.Id, alreadyMarked.Id], response.Items.Select(item => item.Id).ToArray());
+    }
+
+    [Fact]
     public async Task AcceptAdvance_CreatesClientBalanceCredit_AndV2FilterReturnsPayment()
     {
         await using var db = await CreateContextAsync();
