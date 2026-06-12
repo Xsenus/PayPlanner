@@ -243,6 +243,10 @@ public static class ClientBalanceService
             }
         }
 
+        db.SetAuditReason(sourcePaymentId.HasValue
+            ? $"Контроль аванса: аванс #{sourcePaymentId.Value} зачтен в платеж #{payment.Id} на сумму {applied:N2}."
+            : $"Зачет баланса контрагента в платеж #{payment.Id} на сумму {applied:N2}.");
+
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(db, payment, utcNow, ct);
 
         return (true, null, applied);

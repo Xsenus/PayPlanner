@@ -40,6 +40,8 @@ describe('objectAudit utilities', () => {
     expect(getObjectAuditFieldLabel('role', 'Name')).toBe('Название роли');
     expect(getObjectAuditFieldLabel('payment', 'Legal Entity Id')).toBe('Юридическое лицо');
     expect(getObjectAuditFieldLabel('payment', 'Payment Status Id')).toBe('Статус оплаты');
+    expect(getObjectAuditFieldLabel('payment', 'Advance Review Status')).toBe('Контроль аванса');
+    expect(getObjectAuditFieldLabel('payment', 'Advance Reviewed By User Name')).toBe('Кто принял решение по авансу');
     expect(getObjectAuditFieldLabel('payment', 'Client Case Reference')).toBe('Дело');
     expect(getObjectAuditFieldLabel('payment', 'Invoice Workflow Status')).toBe('Статус документа');
     expect(getObjectAuditFieldLabel('payment', 'System Notes')).toBe('Служебные заметки');
@@ -108,6 +110,10 @@ describe('objectAudit utilities', () => {
     expect(formatAuditValue('ApprovalRejected')).toBe('Отказ в согласовании');
     expect(formatAuditValue('NeedsCorrection')).toBe('Требует исправления');
     expect(formatAuditValue('PartiallyPaid')).toBe('Частично оплачен');
+    expect(formatAuditValue('RequiresDecision')).toBe('Требует решения по авансу');
+    expect(formatAuditValue('AcceptedAsAdvance')).toBe('Принят как аванс');
+    expect(formatAuditValue('Allocated')).toBe('Распределен');
+    expect(formatAuditValue('Ignored')).toBe('Исключен из контроля');
     expect(formatAuditValue('crmMaster')).toBe('CRM главная');
     expect(formatAuditValue('manualConfirmation')).toBe('Ручное подтверждение');
     expect(formatAuditValue('open_tab', 'user', 'Last Activity Action')).toBe('Открытие раздела');

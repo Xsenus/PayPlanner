@@ -462,6 +462,7 @@ public class PaymentsController : ControllerBase
             return BadRequest(new { message = result.Error });
         }
 
+        _db.SetAuditReason($"Контроль аванса: платеж принят как аванс. {payment.AdvanceReviewReason}");
         await _db.SaveChangesAsync(ct);
         PopulateAuditMetadata(_db, payment);
         return Ok(payment);
@@ -496,6 +497,7 @@ public class PaymentsController : ControllerBase
             return BadRequest(new { message = result.Error });
         }
 
+        _db.SetAuditReason($"Контроль аванса: платеж исключен из контроля. {payment.AdvanceReviewReason}");
         await _db.SaveChangesAsync(ct);
         PopulateAuditMetadata(_db, payment);
         return Ok(payment);

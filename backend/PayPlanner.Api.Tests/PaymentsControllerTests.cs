@@ -2795,6 +2795,8 @@ public class PaymentsControllerTests
                 CreatedAt = DateTime.UtcNow,
             });
         await db.SaveChangesAsync();
+        db.ObjectAuditEvents.RemoveRange(db.ObjectAuditEvents);
+        await db.SaveChangesAsync();
 
         var controller = new ClientBalancesController(db);
 
@@ -2841,6 +2843,24 @@ public class PaymentsControllerTests
         Assert.Equal(400m, newDebit.Amount);
         Assert.NotNull(newDebit.ExternalKey);
         Assert.StartsWith(ClientBalanceService.BuildUnallocatedAdvanceApplicationKeyPrefix(sourceAdvance.Id), newDebit.ExternalKey);
+
+        var allocationAuditEvents = await db.ObjectAuditEvents
+            .AsNoTracking()
+            .Where(item => item.ObjectType == "payment" && item.Action == "Updated")
+            .ToListAsync();
+        Assert.Contains(allocationAuditEvents, item =>
+        {
+            if (string.IsNullOrWhiteSpace(item.MetadataJson))
+            {
+                return false;
+            }
+
+            using var metadata = JsonDocument.Parse(item.MetadataJson);
+            return metadata.RootElement.TryGetProperty("reason", out var reasonElement)
+                && (reasonElement.GetString()?.Contains(
+                    $"Контроль аванса: аванс #{sourceAdvance.Id} зачтен в платеж #{targetPayment.Id}",
+                    StringComparison.Ordinal) ?? false);
+        });
     }
 
     [Fact]
@@ -3967,6 +3987,8 @@ public class PaymentsControllerTests
         payment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.RequiresDecision;
         db.Payments.Add(payment);
         await db.SaveChangesAsync();
+        db.ObjectAuditEvents.RemoveRange(db.ObjectAuditEvents);
+        await db.SaveChangesAsync();
 
         var controller = CreatePaymentsController(db, user.Id);
         var result = await controller.AcceptAdvance(
@@ -3985,6 +4007,16 @@ public class PaymentsControllerTests
         Assert.Equal(client.Id, transaction.ClientId);
         Assert.Equal(payment.Id, transaction.PaymentId);
 
+        var auditEvent = await db.ObjectAuditEvents
+            .AsNoTracking()
+            .SingleAsync(item => item.ObjectType == "payment" && item.ObjectId == payment.Id && item.Action == "Updated");
+        Assert.NotNull(auditEvent.MetadataJson);
+        using (var metadata = JsonDocument.Parse(auditEvent.MetadataJson!))
+        {
+            var reason = metadata.RootElement.GetProperty("reason").GetString();
+            Assert.Contains("Контроль аванса: платеж принят как аванс", reason, StringComparison.Ordinal);
+        }
+
         var v2 = CreatePaymentsV2Controller(db, user.Id);
         var page = await v2.Get(
             from: null,
@@ -3997,6 +4029,49 @@ public class PaymentsControllerTests
         var response = Assert.IsType<PaymentsPageResponse>(okPage.Value);
         Assert.Single(response.Items);
         Assert.Equal(payment.Id, response.Items[0].Id);
+    }
+
+    [Fact]
+    public async Task IgnoreAdvance_WritesReadableAuditReason()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreatePaymentsUserAsync(db, canExport: false);
+        var client = new Client { Name = "Клиент с ошибочным авансом" };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var payment = CreatePayment(new DateTime(2026, 3, 3), 3_500m, "Платеж для исключения");
+        payment.ClientId = client.Id;
+        payment.PaidAmount = 3_500m;
+        payment.Status = PaymentStatus.Completed;
+        payment.IsPaid = true;
+        payment.PaidDate = payment.Date;
+        payment.LastPaymentDate = payment.Date;
+        payment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.RequiresDecision;
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+        db.ObjectAuditEvents.RemoveRange(db.ObjectAuditEvents);
+        await db.SaveChangesAsync();
+
+        var controller = CreatePaymentsController(db, user.Id);
+        var result = await controller.IgnoreAdvance(
+            payment.Id,
+            new PaymentAdvanceReviewRequest { Reason = "Поступление уже разобрано вручную" },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var ignoredPayment = Assert.IsType<Payment>(ok.Value);
+        Assert.Equal(PaymentAdvanceReviewStatus.Ignored, ignoredPayment.AdvanceReviewStatus);
+        Assert.Empty(await db.ClientBalanceTransactions.AsNoTracking().ToListAsync());
+
+        var auditEvent = await db.ObjectAuditEvents
+            .AsNoTracking()
+            .SingleAsync(item => item.ObjectType == "payment" && item.ObjectId == payment.Id && item.Action == "Updated");
+        Assert.NotNull(auditEvent.MetadataJson);
+        using var metadata = JsonDocument.Parse(auditEvent.MetadataJson!);
+        var reason = metadata.RootElement.GetProperty("reason").GetString();
+        Assert.Contains("Контроль аванса: платеж исключен из контроля", reason, StringComparison.Ordinal);
+        Assert.Contains("Поступление уже разобрано вручную", reason, StringComparison.Ordinal);
     }
 
     private static async Task<PaymentContext> CreateContextAsync(bool useObjectAuditModel = true)
