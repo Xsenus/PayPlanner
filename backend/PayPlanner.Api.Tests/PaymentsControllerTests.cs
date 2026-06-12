@@ -4009,7 +4009,21 @@ public class PaymentsControllerTests
         linkedPayment.Account = "INV-10";
         linkedPayment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.None;
 
-        db.Payments.AddRange(legacyCandidate, alreadyMarked, ignoredPayment, linkedPayment);
+        var linkedActPayment = CreatePayment(new DateTime(2026, 3, 6), 5_000m, "Платеж с актом");
+        linkedActPayment.ClientId = client.Id;
+        linkedActPayment.PaidAmount = 5_000m;
+        linkedActPayment.Status = PaymentStatus.Completed;
+        linkedActPayment.IsPaid = true;
+        linkedActPayment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.None;
+        linkedActPayment.Acts.Add(new Act
+        {
+            Number = "ACT-10",
+            Date = linkedActPayment.Date,
+            Amount = 5_000m,
+            ClientId = client.Id,
+        });
+
+        db.Payments.AddRange(legacyCandidate, alreadyMarked, ignoredPayment, linkedPayment, linkedActPayment);
         await db.SaveChangesAsync();
 
         var controller = CreatePaymentsV2Controller(db, user.Id);

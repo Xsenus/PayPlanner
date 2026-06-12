@@ -60,6 +60,7 @@ public sealed class PaymentAdvanceReviewServiceTests
         yield return [CreateCandidate(payment => payment.Status = PaymentStatus.Cancelled)];
         yield return [CreateCandidate(payment => payment.InvoiceId = 10)];
         yield return [CreateCandidate(payment => payment.ContractId = 11)];
+        yield return [CreateCandidate(payment => payment.Acts.Add(new Act { Number = "ACT-12", Date = payment.Date }))];
         yield return [CreateCandidate(payment => payment.Account = "INV-12")];
         yield return [CreateCandidate(payment => payment.LegacyAccountNumber = "OLD-12")];
         yield return [CreateCandidate(payment => payment.DocumentKind = DocumentKind.Invoice)];

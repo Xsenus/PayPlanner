@@ -23,6 +23,7 @@ public static class PaymentAdvanceReviewService
                 || ((payment.IsPaid || payment.Status == PaymentStatus.Completed) && payment.Amount > AmountEpsilon))
             && !payment.InvoiceId.HasValue
             && !payment.ContractId.HasValue
+            && !payment.Acts.Any()
             && (payment.Account == null || payment.Account.Trim() == string.Empty)
             && (payment.LegacyAccountNumber == null || payment.LegacyAccountNumber.Trim() == string.Empty);
 
