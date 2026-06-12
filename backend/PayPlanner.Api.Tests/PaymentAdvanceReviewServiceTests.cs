@@ -39,6 +39,14 @@ public sealed class PaymentAdvanceReviewServiceTests
         Assert.Equal(4_000m, PaymentAdvanceReviewService.GetAdvanceAmount(payment));
     }
 
+    [Fact]
+    public void IsUnallocatedAdvanceCandidate_ReturnsTrue_WhenPaymentHasCaseButNoClosingDocuments()
+    {
+        var payment = CreateCandidate(payment => payment.ClientCaseId = 501);
+
+        Assert.True(PaymentAdvanceReviewService.IsUnallocatedAdvanceCandidate(payment));
+    }
+
     [Theory]
     [MemberData(nameof(NotCandidateCases))]
     public void IsUnallocatedAdvanceCandidate_ReturnsFalse_ForPaymentsOutsideRule(Payment payment)

@@ -4003,6 +4003,15 @@ public class PaymentsControllerTests
         var ignoredClient = new Client { Name = "Клиент с проверенным платежом" };
         db.Clients.AddRange(client, ignoredClient);
         await db.SaveChangesAsync();
+        var clientCase = new ClientCase
+        {
+            ClientId = client.Id,
+            Title = "Дело без закрывающих документов",
+            Status = ClientCaseStatus.Open,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
 
         var legacyCandidate = CreatePayment(new DateTime(2026, 3, 2), 7_100m, "Старый платеж без решения");
         legacyCandidate.ClientId = client.Id;
@@ -4019,6 +4028,14 @@ public class PaymentsControllerTests
         alreadyMarked.Status = PaymentStatus.Completed;
         alreadyMarked.IsPaid = true;
         alreadyMarked.AdvanceReviewStatus = PaymentAdvanceReviewStatus.RequiresDecision;
+
+        var caseLinkedCandidate = CreatePayment(new DateTime(2026, 3, 3, 12, 0, 0), 1_500m, "Платеж с делом без документов");
+        caseLinkedCandidate.ClientId = client.Id;
+        caseLinkedCandidate.ClientCaseId = clientCase.Id;
+        caseLinkedCandidate.PaidAmount = 1_500m;
+        caseLinkedCandidate.Status = PaymentStatus.Completed;
+        caseLinkedCandidate.IsPaid = true;
+        caseLinkedCandidate.AdvanceReviewStatus = PaymentAdvanceReviewStatus.None;
 
         var ignoredPayment = CreatePayment(new DateTime(2026, 3, 4), 3_000m, "Игнорируемый платеж");
         ignoredPayment.ClientId = ignoredClient.Id;
@@ -4049,7 +4066,7 @@ public class PaymentsControllerTests
             ClientId = client.Id,
         });
 
-        db.Payments.AddRange(legacyCandidate, alreadyMarked, ignoredPayment, linkedPayment, linkedActPayment);
+        db.Payments.AddRange(legacyCandidate, alreadyMarked, caseLinkedCandidate, ignoredPayment, linkedPayment, linkedActPayment);
         await db.SaveChangesAsync();
 
         var controller = CreatePaymentsV2Controller(db, user.Id);
@@ -4065,8 +4082,8 @@ public class PaymentsControllerTests
 
         var ok = Assert.IsType<OkObjectResult>(page.Result);
         var response = Assert.IsType<PaymentsPageResponse>(ok.Value);
-        Assert.Equal(2, response.Total);
-        Assert.Equal([legacyCandidate.Id, alreadyMarked.Id], response.Items.Select(item => item.Id).ToArray());
+        Assert.Equal(3, response.Total);
+        Assert.Equal([legacyCandidate.Id, alreadyMarked.Id, caseLinkedCandidate.Id], response.Items.Select(item => item.Id).ToArray());
     }
 
     [Fact]
