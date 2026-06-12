@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, EyeOff, GripVertical } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, EyeOff, GripVertical, SplitSquareHorizontal } from 'lucide-react';
 import {
   useCallback,
   useEffect,
@@ -40,6 +40,7 @@ interface PaymentsTableProps {
   onStatusChange?: (payment: Payment) => void;
   onAcceptAdvance?: (payment: Payment) => void | Promise<void>;
   onIgnoreAdvance?: (payment: Payment) => void | Promise<void>;
+  onAllocateAdvance?: (payment: Payment) => void | Promise<void>;
   canAdd: boolean;
   canEdit: boolean;
   canDelete: boolean;
@@ -75,6 +76,7 @@ export function PaymentsTable({
   onStatusChange,
   onAcceptAdvance,
   onIgnoreAdvance,
+  onAllocateAdvance,
   canAdd,
   canEdit,
   canDelete,
@@ -289,6 +291,20 @@ export function PaymentsTable({
                   Аванс на балансе
                 </span>
               ) : null}
+              {acceptedAsAdvance && canEdit ? (
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    void onAllocateAdvance?.(payment);
+                  }}
+                  className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700 transition hover:bg-blue-100"
+                  title="Распределить аванс по открытому долгу клиента"
+                >
+                  <SplitSquareHorizontal className="h-3 w-3" />
+                  Распределить
+                </button>
+              ) : null}
               {needsAdvanceDecision && canEdit ? (
                 <div className="flex flex-wrap gap-1">
                   <button
@@ -342,7 +358,7 @@ export function PaymentsTable({
           return '—';
       }
     },
-    [canEdit, formatDate, onAcceptAdvance, onIgnoreAdvance, onOpenClient, onStatusChange, statusLabels, t],
+    [canEdit, formatDate, onAcceptAdvance, onAllocateAdvance, onIgnoreAdvance, onOpenClient, onStatusChange, statusLabels, t],
   );
 
   const isEditAllowed = useCallback(

@@ -144,6 +144,7 @@ vi.mock('../Calendar/PaymentsTable', () => ({
     payments: Payment[];
     onEditPayment?: (payment: Payment) => void;
     onStatusChange?: (payment: Payment) => void;
+    onAllocateAdvance?: (payment: Payment) => void;
   }) => (
     <div data-testid="payments-table">
       {props.payments.map((payment) => (
@@ -159,6 +160,12 @@ vi.mock('../Calendar/PaymentsTable', () => ({
             onClick={() => props.onStatusChange?.(payment)}
           >
             {`status-payment-${payment.id}`}
+          </button>
+          <button
+            type="button"
+            onClick={() => props.onAllocateAdvance?.(payment)}
+          >
+            {`allocate-advance-${payment.id}`}
           </button>
         </div>
       ))}
@@ -188,6 +195,7 @@ vi.mock('../ui/StatusChangeModal', () => ({
 vi.mock('../../services/api', () => ({
   apiService: {
     getPayment: vi.fn(),
+    getPaymentsV2: vi.fn(),
     createPayment: vi.fn(),
     updatePayment: vi.fn(),
     updateInvoiceManagedPayment: vi.fn(),
@@ -208,6 +216,7 @@ describe('Payments integration', () => {
     confirmMock.mockReset();
     confirmMock.mockResolvedValue(true);
     vi.mocked(apiService.getPayment).mockReset();
+    vi.mocked(apiService.getPaymentsV2).mockReset();
     vi.mocked(apiService.createPayment).mockReset();
     vi.mocked(apiService.updatePayment).mockReset();
     vi.mocked(apiService.updateInvoiceManagedPayment).mockReset();
@@ -227,6 +236,20 @@ describe('Payments integration', () => {
       fileName: 'payments-export.xls',
     });
     vi.mocked(apiService.getClientBalance).mockResolvedValue({ clientId: 1, balance: 0 });
+    vi.mocked(apiService.getPaymentsV2).mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 100,
+      summary: {
+        income: 0,
+        expense: 0,
+        balance: 0,
+        incomeCount: 0,
+        expenseCount: 0,
+        total: 0,
+      },
+    });
     vi.mocked(apiService.applyClientBalance).mockResolvedValue({ appliedAmount: 0, balance: 0 });
     vi.mocked(apiService.getPartialPaymentRemainderCandidates).mockResolvedValue({
       items: [],
@@ -357,6 +380,96 @@ describe('Payments integration', () => {
       '2026-06-05',
       null,
     );
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('allocates an accepted advance to an open client debt from the payments journal', async () => {
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    const sourceAdvance = {
+      id: 901,
+      amount: 7_100,
+      date: '2026-03-02',
+      plannedDate: '2026-03-02',
+      type: 'Income',
+      status: 'Completed',
+      description: 'Нераспределенный аванс',
+      notes: '',
+      systemNotes: '',
+      isPaid: true,
+      paidAmount: 7_100,
+      outstandingAmount: 0,
+      hasPartialPayment: false,
+      rescheduleCount: 0,
+      documentKind: 'Payment',
+      clientId: 12,
+      client: { id: 12, name: 'Винокуров Валерий' },
+      advanceReviewStatus: 'AcceptedAsAdvance',
+    } as unknown as Payment;
+    const targetDebt = {
+      id: 902,
+      amount: 10_000,
+      date: '2026-03-10',
+      plannedDate: '2026-03-10',
+      type: 'Income',
+      status: 'Overdue',
+      description: 'Долг клиента',
+      notes: '',
+      systemNotes: '',
+      isPaid: false,
+      paidAmount: 2_000,
+      outstandingAmount: 8_000,
+      hasPartialPayment: true,
+      rescheduleCount: 0,
+      documentKind: 'Payment',
+      clientId: 12,
+      client: { id: 12, name: 'Винокуров Валерий' },
+    } as unknown as Payment;
+
+    usePaymentsPagedMock.mockReturnValue({
+      ...paymentsPagedResult,
+      payments: [sourceAdvance],
+      total: 1,
+      refresh,
+    });
+    vi.mocked(apiService.getClientBalance).mockResolvedValueOnce({ clientId: 12, balance: 7_100 });
+    vi.mocked(apiService.getPaymentsV2).mockResolvedValueOnce({
+      items: [sourceAdvance, targetDebt],
+      total: 2,
+      page: 1,
+      pageSize: 100,
+      summary: {
+        income: 17_100,
+        expense: 0,
+        balance: 17_100,
+        incomeCount: 2,
+        expenseCount: 0,
+        total: 17_100,
+      },
+    });
+    vi.mocked(apiService.applyClientBalance).mockResolvedValueOnce({ appliedAmount: 7_100, balance: 0 });
+
+    render(<Payments />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'allocate-advance-901' }));
+
+    expect(await screen.findByRole('dialog', { name: 'Распределить аванс' })).toBeTruthy();
+    expect(apiService.getClientBalance).toHaveBeenCalledWith(12);
+    expect(apiService.getPaymentsV2).toHaveBeenCalledWith(expect.objectContaining({
+      clientId: 12,
+      type: 'Income',
+      page: 1,
+      pageSize: 100,
+    }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Зачесть аванс' }));
+
+    await waitFor(() => {
+      expect(apiService.applyClientBalance).toHaveBeenCalledWith(12, {
+        paymentId: 902,
+        amount: 7_100,
+        description: 'Распределение аванса по платежу #901',
+      });
+    });
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
