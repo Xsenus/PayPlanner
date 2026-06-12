@@ -27,6 +27,21 @@ Before adding a new mechanism, look for existing modules for notifications, moda
 
 Keep changes scoped to the requested behavior. Do not rewrite unrelated release notes, permissions, migrations, or configuration unless the task explicitly requires it.
 
+## Roadmaps
+
+When the user asks to create or continue a roadmap, store it under `docs/` as a human-readable Markdown document with statuses, milestones, rationale, checks, and clear definition of done.
+
+Before implementing work that belongs to an existing roadmap, open the relevant roadmap first, check the current status of every related item, and update the roadmap as the work progresses. Use the roadmap status markers consistently:
+
+- `[ ]` not started.
+- `[~]` in progress.
+- `[x]` completed and verified.
+- `[!]` blocked, with the blocking reason written next to the item.
+- `[decision]` requires a user/business decision before implementation.
+- `[acceptance]` requires manual acceptance on real data or environment.
+
+Do not mark roadmap items as complete until code, tests, encoding checks, and local database checks required by that item have passed. If a new risk or prerequisite is discovered while working, add it to the roadmap instead of keeping it only in chat.
+
 ## UI Density
 
 For internal working sections of the CRM, keep spacing compact and consistent. Prefer page paddings around `p-3 lg:p-4`, section gaps around `gap-3` / `space-y-3`, and card paddings around `p-3` unless a form, table, or modal clearly needs more room for readability.
