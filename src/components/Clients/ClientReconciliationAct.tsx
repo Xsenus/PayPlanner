@@ -17,6 +17,7 @@ import type {
   Act,
   Client,
   ClientCase,
+  ClientBalanceTransaction,
   Contract,
   Invoice,
   LegalEntityDetail,
@@ -610,6 +611,7 @@ export function ClientReconciliationAct({
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [acts, setActs] = useState<Act[]>([]);
+  const [balanceTransactions, setBalanceTransactions] = useState<ClientBalanceTransaction[]>([]);
   const [companyProfile, setCompanyProfile] = useState<LegalEntityDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -635,6 +637,7 @@ export function ClientReconciliationAct({
         invoicesResponse,
         paymentsResponse,
         actsResponse,
+        balanceTransactionsResponse,
         companyProfileResponse,
       ] = await Promise.all([
         apiService.getCasesV1({
@@ -670,6 +673,7 @@ export function ClientReconciliationAct({
           sortBy: "date",
           sortDir: "desc",
         }),
+        apiService.getClientBalanceTransactions(clientId),
         apiService.getCompanyProfileLegalEntity().catch(() => null),
       ]);
 
@@ -678,6 +682,7 @@ export function ClientReconciliationAct({
       setInvoices(extractItems<Invoice>(invoicesResponse));
       setPayments(extractItems<Payment>(paymentsResponse));
       setActs(extractItems<Act>(actsResponse));
+      setBalanceTransactions(balanceTransactionsResponse);
       setCompanyProfile(companyProfileResponse);
     } catch (error) {
       setLoadError(
@@ -707,6 +712,8 @@ export function ClientReconciliationAct({
         includeInvoices: draft.includeInvoices,
         includeActs: draft.includeActs,
         includePayments: draft.includePayments,
+        includeAdvances: draft.includeAdvances,
+        balanceTransactions,
         timeZoneId,
       }),
     [
@@ -714,11 +721,13 @@ export function ClientReconciliationAct({
       draft.caseId,
       draft.contractId,
       draft.includeActs,
+      draft.includeAdvances,
       draft.includeInvoices,
       draft.includePayments,
       draft.periodFrom,
       draft.periodTo,
       invoices,
+      balanceTransactions,
       payments,
       timeZoneId,
     ],

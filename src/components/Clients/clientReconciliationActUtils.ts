@@ -1,8 +1,8 @@
-import type { Act, Invoice, Payment } from "../../types";
+import type { Act, ClientBalanceTransaction, Invoice, Payment } from "../../types";
 import { toDateInputValue, toRuDate } from "../../utils/dateUtils";
 import { toTimeZoneDateKey } from "../../utils/timeZoneDate";
 
-type ReconciliationSourceKind = "invoice" | "act" | "payment";
+type ReconciliationSourceKind = "invoice" | "act" | "payment" | "balance";
 
 export type ReconciliationRow = {
   index: number;
@@ -29,6 +29,8 @@ export type BuildReconciliationRowsOptions = {
   includeInvoices: boolean;
   includeActs: boolean;
   includePayments: boolean;
+  includeAdvances?: boolean;
+  balanceTransactions?: ClientBalanceTransaction[];
   timeZoneId?: string | null;
 };
 
@@ -36,6 +38,16 @@ const SOURCE_ORDER: Record<ReconciliationSourceKind, number> = {
   invoice: 1,
   act: 2,
   payment: 3,
+  balance: 4,
+};
+
+const BALANCE_TRANSACTION_LABELS: Record<ClientBalanceTransaction["type"], string> = {
+  Overpayment: "Переплата",
+  CreditApplied: "Зачет аванса",
+  ManualAdjustment: "Корректировка баланса",
+  Refund: "Возврат",
+  AdvanceFromCancelledInvoice: "Аванс по аннулированному счету",
+  UnallocatedAdvance: "Нераспределенный аванс",
 };
 
 const ZONED_DATE_TIME_RE = /^\d{4}-\d{2}-\d{2}T.+(?:Z|[+-]\d{2}:?\d{2})$/i;
@@ -137,6 +149,13 @@ function isActualPayment(payment: Payment) {
   );
 }
 
+function isPaymentBackedAdvanceTransaction(transaction: ClientBalanceTransaction) {
+  return (
+    transaction.type === "UnallocatedAdvance" ||
+    transaction.type === "AdvanceFromCancelledInvoice"
+  );
+}
+
 function createInvoiceRow(invoice: Invoice, timeZoneId?: string | null): Omit<ReconciliationRow, "index" | "balance"> {
   const amount = Number(invoice.amount ?? 0);
   const isExpense = invoice.type === "Expense";
@@ -186,6 +205,8 @@ function createPaymentRow(payment: Payment, timeZoneId?: string | null): Omit<Re
   const amount = getPaymentActualAmount(payment);
   const isExpense = payment.type === "Expense";
   const date = getPaymentActualDate(payment, timeZoneId);
+  const isAcceptedAdvance = payment.advanceReviewStatus === "AcceptedAsAdvance";
+  const needsAdvanceDecision = payment.advanceReviewStatus === "RequiresDecision";
   const documentNumber = compactText([
     payment.paymentOrderNumber ? `№${payment.paymentOrderNumber}` : null,
     payment.id ? `ID ${payment.id}` : null,
@@ -194,8 +215,10 @@ function createPaymentRow(payment: Payment, timeZoneId?: string | null): Omit<Re
   return {
     date,
     documentNumber: documentNumber || `ID ${payment.id}`,
-    documentType: "Платёж",
+    documentType: isAcceptedAdvance ? "Аванс" : "Платёж",
     description: compactText([
+      isAcceptedAdvance ? "Нераспределенный аванс" : null,
+      needsAdvanceDecision ? "Платеж требует разбора аванса" : null,
       payment.description,
       payment.paymentSource?.name,
       payment.account ? `Счёт ${payment.account}` : null,
@@ -210,6 +233,32 @@ function createPaymentRow(payment: Payment, timeZoneId?: string | null): Omit<Re
   };
 }
 
+function createBalanceTransactionRow(
+  transaction: ClientBalanceTransaction,
+  timeZoneId?: string | null,
+): Omit<ReconciliationRow, "index" | "balance"> {
+  const amount = Number(transaction.amount ?? 0);
+  const date = normalizeDate(transaction.createdAt, timeZoneId);
+  const label = BALANCE_TRANSACTION_LABELS[transaction.type] ?? "Операция баланса";
+
+  return {
+    date,
+    documentNumber: `ID ${transaction.id}`,
+    documentType: label,
+    description: compactText([
+      label,
+      transaction.description,
+      transaction.paymentId ? `Платеж ID ${transaction.paymentId}` : null,
+      transaction.invoiceId ? `Счет ID ${transaction.invoiceId}` : null,
+    ]),
+    debit: transaction.direction === "Debit" ? amount : 0,
+    credit: transaction.direction === "Credit" ? amount : 0,
+    note: transaction.createdByUserName ? `Ответственный: ${transaction.createdByUserName}` : "",
+    sourceKind: "balance",
+    sourceId: transaction.id,
+  };
+}
+
 export function buildReconciliationRows({
   invoices,
   payments,
@@ -221,11 +270,15 @@ export function buildReconciliationRows({
   includeInvoices,
   includeActs,
   includePayments,
+  includeAdvances = false,
+  balanceTransactions = [],
   timeZoneId,
 }: BuildReconciliationRowsOptions): ReconciliationRow[] {
   const selectedCaseId = selectedNumber(caseId);
   const selectedContractId = selectedNumber(contractId);
   const invoiceById = new Map(invoices.map((invoice) => [invoice.id, invoice]));
+  const paymentById = new Map(payments.map((payment) => [payment.id, payment]));
+  const includedPaymentIds = new Set<number>();
   const rows: Array<Omit<ReconciliationRow, "index" | "balance">> = [];
 
   if (includeInvoices) {
@@ -263,7 +316,38 @@ export function buildReconciliationRows({
       if (!isWithinPeriod(date, periodFrom, periodTo)) return;
       if (!paymentMatchesCase(payment, selectedCaseId, invoiceById)) return;
       if (!matchesContract(payment.contractId, selectedContractId)) return;
+      includedPaymentIds.add(payment.id);
       rows.push(createPaymentRow(payment, timeZoneId));
+    });
+  }
+
+  if (includeAdvances) {
+    balanceTransactions.forEach((transaction) => {
+      const date = normalizeDate(transaction.createdAt, timeZoneId);
+      const payment = transaction.paymentId ? paymentById.get(transaction.paymentId) : null;
+      const invoice = transaction.invoiceId ? invoiceById.get(transaction.invoiceId) : null;
+
+      if (!isWithinPeriod(date, periodFrom, periodTo)) return;
+      if (selectedCaseId) {
+        const caseMatched =
+          (payment ? paymentMatchesCase(payment, selectedCaseId, invoiceById) : false) ||
+          (invoice ? invoiceMatchesCase(invoice, selectedCaseId) : false);
+        if (!caseMatched) return;
+      }
+      if (selectedContractId) {
+        const contractMatched =
+          matchesContract(payment?.contractId, selectedContractId) ||
+          matchesContract(invoice?.contractId, selectedContractId);
+        if (!contractMatched) return;
+      }
+      if (
+        transaction.paymentId &&
+        includedPaymentIds.has(transaction.paymentId) &&
+        isPaymentBackedAdvanceTransaction(transaction)
+      ) {
+        return;
+      }
+      rows.push(createBalanceTransactionRow(transaction, timeZoneId));
     });
   }
 

@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ClientReconciliationAct } from "./ClientReconciliationAct";
 import { buildReconciliationRows } from "./clientReconciliationActUtils";
 import { apiService } from "../../services/api";
-import type { Act, Client, Contract, Invoice, Payment } from "../../types";
+import type { Act, Client, ClientBalanceTransaction, Contract, Invoice, Payment } from "../../types";
 
 vi.mock("../../services/api", () => ({
   apiService: {
@@ -13,6 +13,7 @@ vi.mock("../../services/api", () => ({
     getInvoices: vi.fn(),
     getPaymentsV2: vi.fn(),
     getActs: vi.fn(),
+    getClientBalanceTransactions: vi.fn(),
     getCompanyProfileLegalEntity: vi.fn(),
   },
 }));
@@ -76,6 +77,24 @@ function act(overrides: Partial<Act> = {}): Act {
   } as Act;
 }
 
+function balanceTransaction(
+  overrides: Partial<ClientBalanceTransaction> = {},
+): ClientBalanceTransaction {
+  return {
+    id: 40,
+    clientId: 1,
+    invoiceId: null,
+    paymentId: null,
+    amount: 3000,
+    type: "UnallocatedAdvance",
+    direction: "Credit",
+    description: "Нераспределенный аванс по платежу",
+    createdAt: "2026-01-12T08:00:00Z",
+    createdByUserName: "Администратор",
+    ...overrides,
+  } as ClientBalanceTransaction;
+}
+
 describe("buildReconciliationRows", () => {
   it("builds a running balance from invoices, acts and actual payments", () => {
     const rows = buildReconciliationRows({
@@ -93,6 +112,65 @@ describe("buildReconciliationRows", () => {
 
     expect(rows.map((row) => row.documentType)).toEqual(["Счёт", "Платёж", "Акт"]);
     expect(rows.map((row) => row.balance)).toEqual([10000, 7000, 9000]);
+  });
+
+  it("shows an accepted unallocated payment as an advance without duplicating the balance transaction", () => {
+    const rows = buildReconciliationRows({
+      invoices: [invoice()],
+      acts: [],
+      payments: [
+        payment({
+          advanceReviewStatus: "AcceptedAsAdvance",
+        }),
+      ],
+      balanceTransactions: [
+        balanceTransaction({
+          paymentId: 20,
+          amount: 3000,
+        }),
+      ],
+      periodFrom: "2026-01-01",
+      periodTo: "2026-01-31",
+      caseId: "all",
+      contractId: "all",
+      includeInvoices: true,
+      includeActs: true,
+      includePayments: true,
+      includeAdvances: true,
+    });
+
+    expect(rows.map((row) => row.documentType)).toEqual(["Счёт", "Аванс"]);
+    expect(rows.map((row) => row.balance)).toEqual([10000, 7000]);
+    expect(rows[1].description).toContain("Нераспределенный аванс");
+  });
+
+  it("includes accepted advance balance transactions when payments are hidden", () => {
+    const rows = buildReconciliationRows({
+      invoices: [invoice()],
+      acts: [],
+      payments: [
+        payment({
+          advanceReviewStatus: "AcceptedAsAdvance",
+        }),
+      ],
+      balanceTransactions: [
+        balanceTransaction({
+          paymentId: 20,
+          amount: 3000,
+        }),
+      ],
+      periodFrom: "2026-01-01",
+      periodTo: "2026-01-31",
+      caseId: "all",
+      contractId: "all",
+      includeInvoices: true,
+      includeActs: true,
+      includePayments: false,
+      includeAdvances: true,
+    });
+
+    expect(rows.map((row) => row.documentType)).toEqual(["Счёт", "Нераспределенный аванс"]);
+    expect(rows.map((row) => row.balance)).toEqual([10000, 7000]);
   });
 
   it("does not include cancelled documents and unpaid planned payments", () => {
@@ -225,6 +303,7 @@ describe("ClientReconciliationAct", () => {
       page: 1,
       pageSize: 500,
     });
+    apiMock.getClientBalanceTransactions.mockResolvedValue([]);
     apiMock.getCompanyProfileLegalEntity.mockResolvedValue({
       id: 100,
       shortName: "ЭлитПраво",

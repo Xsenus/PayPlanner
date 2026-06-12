@@ -282,6 +282,7 @@ const CLIENT_BALANCE_TRANSACTION_LABELS: Record<
   ManualAdjustment: "Корректировка",
   Refund: "Возврат",
   AdvanceFromCancelledInvoice: "Аванс по аннулированному счёту",
+  UnallocatedAdvance: "Нераспределенный аванс",
 };
 
 const PAYMENT_TABLE_COLUMNS: Array<{
