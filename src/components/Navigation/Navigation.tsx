@@ -34,6 +34,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { Tab } from '../../types/tabs';
 import { getTabHref } from '../../appRouting';
+import { apiService } from '../../services/api';
 
 interface NavigationProps {
   activeTab: Tab;
@@ -46,11 +47,16 @@ const WIDTH_COLLAPSED = '5rem';
 const STYLE_ID = 'pp-sidebar-style';
 const EXPANDED_KEY = 'pp.sidebar_expanded';
 
+function formatBadgeCount(count: number) {
+  return count > 99 ? '99+' : String(count);
+}
+
 export default function Navigation({ activeTab, onTabChange }: NavigationProps) {
   const { t } = useTranslation();
   const { user, isAdmin } = useAuth();
   const permissions = useRolePermissions(user?.role?.id);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [advanceDecisionCount, setAdvanceDecisionCount] = useState(0);
 
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try {
@@ -111,6 +117,41 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
       /** */
     }
   }, [collapsed]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!permissions.payments.canView) {
+      setAdvanceDecisionCount(0);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const loadAdvanceDecisionCount = async () => {
+      try {
+        const data = await apiService.getPaymentsV2({
+          advanceReviewStatus: 'RequiresDecision',
+          page: 1,
+          pageSize: 1,
+          sortBy: 'createdAt',
+          sortDir: 'desc',
+        });
+        if (!cancelled) {
+          setAdvanceDecisionCount(data.total ?? 0);
+        }
+      } catch {
+        if (!cancelled) {
+          setAdvanceDecisionCount(0);
+        }
+      }
+    };
+
+    void loadAdvanceDecisionCount();
+    return () => {
+      cancelled = true;
+    };
+  }, [permissions.payments.canView]);
 
   type SidebarChild = { id: Tab; label: string; icon: typeof Calendar };
   type SidebarItem = {
@@ -487,6 +528,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
               const isChildActive = childItems.some((child) => child.id === activeTab);
               const isActive = isParentActive || isChildActive;
               const isExpanded = expandedSections[item.id] ?? false;
+              const badgeCount = item.id === 'payments' ? advanceDecisionCount : 0;
 
               return (
                 <li key={item.id} className="space-y-1">
@@ -522,6 +564,18 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
                       {!collapsed && (
                         <span className="truncate font-medium text-sm">{item.label}</span>
                       )}
+                      {badgeCount > 0 ? (
+                        <span
+                          className={[
+                            'inline-flex min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 text-[11px] font-bold leading-5 text-white shadow-sm shadow-rose-950/30',
+                            collapsed ? 'absolute right-2 top-2' : 'ml-auto mr-7',
+                          ].join(' ')}
+                          title={`Платежи, требующие разбора аванса: ${badgeCount}`}
+                          aria-label={`Платежи, требующие разбора аванса: ${badgeCount}`}
+                          data-testid="advance-review-nav-badge">
+                          {formatBadgeCount(badgeCount)}
+                        </span>
+                      ) : null}
                       {isActive && !collapsed && (
                         <div className="absolute right-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-white rounded-l-full" />
                       )}

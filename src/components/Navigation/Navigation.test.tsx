@@ -1,9 +1,10 @@
 import userEvent from '@testing-library/user-event';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import Navigation from './Navigation';
 import { getTabHref } from '../../appRouting';
 import { ALL_TABS, type Tab } from '../../types/tabs';
+import { apiService } from '../../services/api';
 
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({
@@ -11,6 +12,15 @@ vi.mock('../../contexts/AuthContext', () => ({
     isAdmin: () => true,
   }),
 }));
+
+vi.mock('../../services/api', () => ({
+  apiService: {
+    getPaymentsV2: vi.fn(),
+    getRolePermissions: vi.fn(),
+  },
+}));
+
+const apiMock = vi.mocked(apiService);
 
 const expandedSections = {
   tasks: true,
@@ -53,6 +63,21 @@ describe('Navigation links', () => {
   beforeEach(() => {
     window.history.replaceState({}, '', '/');
     window.localStorage.clear();
+    apiMock.getRolePermissions.mockResolvedValue({});
+    apiMock.getPaymentsV2.mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 1,
+      summary: {
+        income: 0,
+        expense: 0,
+        balance: 0,
+        incomeCount: 0,
+        expenseCount: 0,
+        total: 0,
+      },
+    });
   });
 
   it('renders navigation destinations as real links', () => {
@@ -155,5 +180,35 @@ describe('Navigation links', () => {
     fireEvent.click(link!, { button: 1 });
 
     expect(onTabChange).not.toHaveBeenCalled();
+  });
+
+  it('shows a payments badge for advance payments that require a decision', async () => {
+    apiMock.getPaymentsV2.mockResolvedValueOnce({
+      items: [],
+      total: 5,
+      page: 1,
+      pageSize: 1,
+      summary: {
+        income: 0,
+        expense: 0,
+        balance: 0,
+        incomeCount: 0,
+        expenseCount: 0,
+        total: 5,
+      },
+    });
+
+    renderNavigation();
+
+    await waitFor(() => {
+      expect(apiMock.getPaymentsV2).toHaveBeenCalledWith({
+        advanceReviewStatus: 'RequiresDecision',
+        page: 1,
+        pageSize: 1,
+        sortBy: 'createdAt',
+        sortDir: 'desc',
+      });
+    });
+    expect((await screen.findByTestId('advance-review-nav-badge')).textContent).toBe('5');
   });
 });
