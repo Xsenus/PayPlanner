@@ -137,11 +137,13 @@ public class PaymentsController : ControllerBase
         var rawPaidAmount = model.PaidAmount;
         PaymentDomainService.Normalize(model);
         PaymentDomainService.ApplyStatusRules(model, now, paymentTimeZone);
+        PaymentAdvanceReviewService.ApplyAutomaticReviewState(model, now, HttpContext);
         var overpaymentValidationError = await ValidatePaymentOverpaymentHandlingAsync(model, rawPaidAmount, ct);
         if (overpaymentValidationError is not null) return overpaymentValidationError;
 
         _db.Payments.Add(model);
         await _db.SaveChangesAsync(ct);
+        await PaymentAdvanceReviewService.SyncBalanceAsync(_db, model, now, HttpContext, ct);
         await ApplyPaymentOverpaymentHandlingAsync(model, rawPaidAmount, now, paymentTimeZone, ct);
         await SyncPaymentCashOrderAsync(model, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, model, now, ct);
@@ -233,6 +235,8 @@ public class PaymentsController : ControllerBase
         e.OverpaymentHandling = model.OverpaymentHandling;
         e.OverpaymentTargetPaymentId = model.OverpaymentTargetPaymentId;
         e.OverpaymentComment = model.OverpaymentComment;
+        e.AdvanceReviewStatus = model.AdvanceReviewStatus;
+        e.AdvanceReviewReason = model.AdvanceReviewReason;
         var rawPaidAmount = model.PaidAmount;
         var appliedCreditAmount = await ClientBalanceService.GetAppliedCreditAmountAsync(_db, e.Id, ct);
         if (rawPaidAmount + 0.009m < appliedCreditAmount)
@@ -258,6 +262,7 @@ public class PaymentsController : ControllerBase
         }
 
         PaymentDomainService.ApplyStatusRules(e, now, paymentTimeZone);
+        PaymentAdvanceReviewService.ApplyAutomaticReviewState(e, now, HttpContext);
         SyncInstallmentScheduleMetadataDate(e);
 
         var rescheduleCount = originalRescheduleCount;
@@ -319,6 +324,7 @@ public class PaymentsController : ControllerBase
         if (overpaymentValidationError is not null) return overpaymentValidationError;
 
         await ApplyPaymentOverpaymentHandlingAsync(e, rawPaidAmount, now, paymentTimeZone, ct);
+        await PaymentAdvanceReviewService.SyncBalanceAsync(_db, e, now, HttpContext, ct);
         await SyncPaymentCashOrderAsync(e, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, e, now, ct);
         if (originalInvoiceId.HasValue
@@ -406,6 +412,7 @@ public class PaymentsController : ControllerBase
         }
 
         PaymentDomainService.Normalize(payment);
+        PaymentAdvanceReviewService.ApplyAutomaticReviewState(payment, now, HttpContext);
 
         if (originalStatus != payment.Status)
         {
@@ -418,8 +425,77 @@ public class PaymentsController : ControllerBase
         }
 
         await ClientBalanceService.UpsertPaymentOverpaymentAsync(_db, payment, payment.PaidAmount, now, HttpContext, ct);
+        await PaymentAdvanceReviewService.SyncBalanceAsync(_db, payment, now, HttpContext, ct);
         await SyncPaymentCashOrderAsync(payment, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, payment, now, ct);
+        await _db.SaveChangesAsync(ct);
+        PopulateAuditMetadata(_db, payment);
+        return Ok(payment);
+    }
+
+    [HttpPost("{id:int}/advance-review/accept")]
+    public async Task<IActionResult> AcceptAdvance(int id, [FromBody] PaymentAdvanceReviewRequest? request, CancellationToken ct)
+    {
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+        if (!await CanAccessPaymentAsync(id, visibility, ct))
+        {
+            return NotFound();
+        }
+
+        var payment = await _db.Payments.FindAsync(new object[] { id }, ct);
+        if (payment is null) return NotFound();
+
+        var now = DateTime.UtcNow;
+        var result = await PaymentAdvanceReviewService.AcceptAsAdvanceAsync(
+            _db,
+            payment,
+            request?.Reason,
+            now,
+            HttpContext,
+            ct);
+        if (!result.Success)
+        {
+            return BadRequest(new { message = result.Error });
+        }
+
+        await _db.SaveChangesAsync(ct);
+        PopulateAuditMetadata(_db, payment);
+        return Ok(payment);
+    }
+
+    [HttpPost("{id:int}/advance-review/ignore")]
+    public async Task<IActionResult> IgnoreAdvance(int id, [FromBody] PaymentAdvanceReviewRequest? request, CancellationToken ct)
+    {
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+        if (!await CanAccessPaymentAsync(id, visibility, ct))
+        {
+            return NotFound();
+        }
+
+        var payment = await _db.Payments.FindAsync(new object[] { id }, ct);
+        if (payment is null) return NotFound();
+
+        var now = DateTime.UtcNow;
+        var result = await PaymentAdvanceReviewService.IgnoreAsync(
+            _db,
+            payment,
+            request?.Reason,
+            now,
+            HttpContext,
+            ct);
+        if (!result.Success)
+        {
+            return BadRequest(new { message = result.Error });
+        }
+
         await _db.SaveChangesAsync(ct);
         PopulateAuditMetadata(_db, payment);
         return Ok(payment);

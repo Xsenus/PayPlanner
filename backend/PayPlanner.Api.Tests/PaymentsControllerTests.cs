@@ -3671,6 +3671,82 @@ public class PaymentsControllerTests
         Assert.False(refreshedParent.IsPaid);
     }
 
+    [Fact]
+    public async Task Create_UnallocatedPaidIncomePayment_MarksAdvanceAsRequiresDecision()
+    {
+        await using var db = await CreateContextAsync();
+        var client = new Client { Name = "Винокуров Валерий Витальевич" };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var controller = CreatePaymentsController(db, userId: 101);
+        var payment = CreatePayment(new DateTime(2026, 3, 2), 7_100m, "Винокуров - раздел лицевых счетов");
+        payment.ClientId = client.Id;
+        payment.PaidAmount = 7_100m;
+        payment.Status = PaymentStatus.Completed;
+        payment.IsPaid = true;
+        payment.PaidDate = payment.Date;
+        payment.LastPaymentDate = payment.Date;
+
+        var result = await controller.Create(payment, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(result);
+        var createdPayment = Assert.IsType<Payment>(created.Value);
+        Assert.Equal(PaymentAdvanceReviewStatus.RequiresDecision, createdPayment.AdvanceReviewStatus);
+        Assert.Empty(await db.ClientBalanceTransactions.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task AcceptAdvance_CreatesClientBalanceCredit_AndV2FilterReturnsPayment()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreatePaymentsUserAsync(db, canExport: false);
+        var client = new Client { Name = "Винокуров Валерий Витальевич" };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var payment = CreatePayment(new DateTime(2026, 3, 2), 7_100m, "Нераспределенный платеж");
+        payment.ClientId = client.Id;
+        payment.PaidAmount = 7_100m;
+        payment.Status = PaymentStatus.Completed;
+        payment.IsPaid = true;
+        payment.PaidDate = payment.Date;
+        payment.LastPaymentDate = payment.Date;
+        payment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.RequiresDecision;
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+
+        var controller = CreatePaymentsController(db, user.Id);
+        var result = await controller.AcceptAdvance(
+            payment.Id,
+            new PaymentAdvanceReviewRequest { Reason = "Проверено бухгалтерией" },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var acceptedPayment = Assert.IsType<Payment>(ok.Value);
+        Assert.Equal(PaymentAdvanceReviewStatus.AcceptedAsAdvance, acceptedPayment.AdvanceReviewStatus);
+
+        var transaction = await db.ClientBalanceTransactions.AsNoTracking().SingleAsync();
+        Assert.Equal(ClientBalanceTransactionType.UnallocatedAdvance, transaction.Type);
+        Assert.Equal(ClientBalanceDirection.Credit, transaction.Direction);
+        Assert.Equal(7_100m, transaction.Amount);
+        Assert.Equal(client.Id, transaction.ClientId);
+        Assert.Equal(payment.Id, transaction.PaymentId);
+
+        var v2 = CreatePaymentsV2Controller(db, user.Id);
+        var page = await v2.Get(
+            from: null,
+            to: null,
+            clientId: null,
+            caseId: null,
+            advanceReviewStatus: PaymentAdvanceReviewStatus.AcceptedAsAdvance,
+            ct: CancellationToken.None);
+        var okPage = Assert.IsType<OkObjectResult>(page.Result);
+        var response = Assert.IsType<PaymentsPageResponse>(okPage.Value);
+        Assert.Single(response.Items);
+        Assert.Equal(payment.Id, response.Items[0].Id);
+    }
+
     private static async Task<PaymentContext> CreateContextAsync(bool useObjectAuditModel = true)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
@@ -3761,6 +3837,26 @@ public class PaymentsControllerTests
         };
 
         return new PaymentsV2Controller(db)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(claims, authenticationType: "Test")),
+                },
+            },
+        };
+    }
+
+    private static PaymentsController CreatePaymentsController(PaymentContext db, int userId)
+    {
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, userId.ToString()),
+            new(ClaimTypes.Name, "Test user"),
+        };
+
+        return new PaymentsController(db, new NoopFormRequirementsService())
         {
             ControllerContext = new ControllerContext
             {

@@ -1,4 +1,4 @@
-import { GripVertical } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, EyeOff, GripVertical } from 'lucide-react';
 import {
   useCallback,
   useEffect,
@@ -38,6 +38,8 @@ interface PaymentsTableProps {
   onAddPayment?: (type: Payment['type'], payment?: Payment) => void;
   onDeletePayment?: (payment: Payment) => void | Promise<void>;
   onStatusChange?: (payment: Payment) => void;
+  onAcceptAdvance?: (payment: Payment) => void | Promise<void>;
+  onIgnoreAdvance?: (payment: Payment) => void | Promise<void>;
   canAdd: boolean;
   canEdit: boolean;
   canDelete: boolean;
@@ -71,6 +73,8 @@ export function PaymentsTable({
   onAddPayment,
   onDeletePayment,
   onStatusChange,
+  onAcceptAdvance,
+  onIgnoreAdvance,
   canAdd,
   canEdit,
   canDelete,
@@ -160,6 +164,9 @@ export function PaymentsTable({
       const amountText = formatCurrencySmart(payment.amount).full;
       const visibleNotes = getVisibleNotes(payment.notes);
       const needsRemainderTransfer = needsPartialRemainderTransfer(payment);
+      const advanceReviewStatus = payment.advanceReviewStatus ?? 'None';
+      const needsAdvanceDecision = advanceReviewStatus === 'RequiresDecision';
+      const acceptedAsAdvance = advanceReviewStatus === 'AcceptedAsAdvance';
       const category =
         payment.dealType?.name || payment.incomeType?.name || payment.paymentSource?.name || '—';
       const statusLabel = statusLabels[payment.status] ?? payment.status;
@@ -270,6 +277,46 @@ export function PaymentsTable({
                   Нужен перенос остатка
                 </span>
               ) : null}
+              {needsAdvanceDecision ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2.5 py-1 text-[11px] font-semibold text-red-700 ring-1 ring-red-200">
+                  <AlertTriangle className="h-3 w-3" />
+                  Нужен разбор аванса
+                </span>
+              ) : null}
+              {acceptedAsAdvance ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
+                  <CheckCircle2 className="h-3 w-3" />
+                  Аванс на балансе
+                </span>
+              ) : null}
+              {needsAdvanceDecision && canEdit ? (
+                <div className="flex flex-wrap gap-1">
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void onAcceptAdvance?.(payment);
+                    }}
+                    className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700 transition hover:bg-emerald-100"
+                    title="Принять деньги как аванс на баланс клиента"
+                  >
+                    <CheckCircle2 className="h-3 w-3" />
+                    Аванс
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void onIgnoreAdvance?.(payment);
+                    }}
+                    className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-50"
+                    title="Исключить платеж из контроля авансов"
+                  >
+                    <EyeOff className="h-3 w-3" />
+                    Игнор
+                  </button>
+                </div>
+              ) : null}
             </div>
           );
         case 'category':
@@ -295,7 +342,7 @@ export function PaymentsTable({
           return '—';
       }
     },
-    [canEdit, formatDate, onOpenClient, onStatusChange, statusLabels, t],
+    [canEdit, formatDate, onAcceptAdvance, onIgnoreAdvance, onOpenClient, onStatusChange, statusLabels, t],
   );
 
   const isEditAllowed = useCallback(

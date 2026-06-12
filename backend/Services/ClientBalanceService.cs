@@ -259,9 +259,86 @@ public static class ClientBalanceService
         existing.Description = description;
     }
 
+    public static async Task UpsertUnallocatedAdvanceAsync(
+        PaymentContext db,
+        Payment payment,
+        decimal requestedAmount,
+        string? reason,
+        DateTime utcNow,
+        HttpContext? httpContext,
+        CancellationToken ct = default)
+    {
+        if (!HasValidCounterpartyOwner(payment) || payment.Type != PaymentType.Income)
+        {
+            return;
+        }
+
+        var amount = NormalizeAmount(requestedAmount);
+        var externalKey = BuildUnallocatedAdvanceKey(payment.Id);
+        var existing = await db.ClientBalanceTransactions
+            .FirstOrDefaultAsync(item => item.ExternalKey == externalKey, ct);
+
+        if (amount <= AmountEpsilon)
+        {
+            if (existing is not null)
+            {
+                db.ClientBalanceTransactions.Remove(existing);
+            }
+            return;
+        }
+
+        var actor = httpContext?.User.GetDisplayName();
+        var actorUserId = httpContext?.User.GetUserId();
+        var description = string.IsNullOrWhiteSpace(reason)
+            ? $"Нераспределенный аванс по платежу #{payment.Id}"
+            : $"Нераспределенный аванс по платежу #{payment.Id}. {reason.Trim()}";
+
+        if (existing is null)
+        {
+            db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
+            {
+                ClientId = payment.ClientId,
+                LegalEntityId = payment.LegalEntityId,
+                InvoiceId = payment.InvoiceId,
+                PaymentId = payment.Id,
+                Amount = amount,
+                Type = ClientBalanceTransactionType.UnallocatedAdvance,
+                Direction = ClientBalanceDirection.Credit,
+                Description = description,
+                ExternalKey = externalKey,
+                CreatedAt = utcNow,
+                CreatedByUserId = actorUserId,
+                CreatedByUserName = actor,
+            });
+            return;
+        }
+
+        existing.ClientId = payment.ClientId;
+        existing.LegalEntityId = payment.LegalEntityId;
+        existing.InvoiceId = payment.InvoiceId;
+        existing.PaymentId = payment.Id;
+        existing.Amount = amount;
+        existing.Type = ClientBalanceTransactionType.UnallocatedAdvance;
+        existing.Direction = ClientBalanceDirection.Credit;
+        existing.Description = description;
+    }
+
+    public static async Task RemoveUnallocatedAdvanceAsync(PaymentContext db, int paymentId, CancellationToken ct = default)
+    {
+        var externalKey = BuildUnallocatedAdvanceKey(paymentId);
+        var existing = await db.ClientBalanceTransactions
+            .FirstOrDefaultAsync(item => item.ExternalKey == externalKey, ct);
+        if (existing is not null)
+        {
+            db.ClientBalanceTransactions.Remove(existing);
+        }
+    }
+
     public static string BuildPaymentOverpaymentKey(int paymentId) => $"payment-overpayment:{paymentId}";
 
     public static string BuildCancelledInvoiceAdvanceKey(int paymentId) => $"invoice-cancellation-advance:{paymentId}";
+
+    public static string BuildUnallocatedAdvanceKey(int paymentId) => $"payment-unallocated-advance:{paymentId}";
 
     private static decimal NormalizeAmount(decimal value)
         => Math.Round(value, 2, MidpointRounding.AwayFromZero);

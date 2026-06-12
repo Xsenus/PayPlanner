@@ -5261,6 +5261,27 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<DateTime?>("AccountDate")
                         .HasColumnType("date");
 
+                    b.Property<string>("AdvanceReviewReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("AdvanceReviewStatus")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("None");
+
+                    b.Property<DateTime?>("AdvanceReviewedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("AdvanceReviewedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("AdvanceReviewedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<decimal>("Amount")
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
@@ -5444,6 +5465,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("AccountDate")
                         .HasDatabaseName("IX_Payments_AccountDate");
+
+                    b.HasIndex("AdvanceReviewStatus")
+                        .HasDatabaseName("IX_Payments_AdvanceReviewStatus");
 
                     b.HasIndex("ContractId")
                         .HasDatabaseName("IX_Payments_ContractId");

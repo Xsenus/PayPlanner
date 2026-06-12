@@ -213,6 +213,16 @@ namespace PayPlanner.Api.Models
         /// </summary>
         public decimal PaidAmount { get; set; }
 
+        public PaymentAdvanceReviewStatus AdvanceReviewStatus { get; set; } = PaymentAdvanceReviewStatus.None;
+
+        public string? AdvanceReviewReason { get; set; }
+
+        public DateTime? AdvanceReviewedAt { get; set; }
+
+        public int? AdvanceReviewedByUserId { get; set; }
+
+        public string? AdvanceReviewedByUserName { get; set; }
+
         [NotMapped]
         public PaymentOverpaymentHandling? OverpaymentHandling { get; set; }
 

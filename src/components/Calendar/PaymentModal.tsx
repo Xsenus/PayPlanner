@@ -1559,7 +1559,39 @@ export function PaymentModal({
           formData.type === 'Income' && submitOverpaymentAmount > 0.005
             ? overpaymentComment.trim() || undefined
             : undefined,
+        advanceReviewStatus: payment?.advanceReviewStatus ?? 'None',
+        advanceReviewReason: payment?.advanceReviewReason ?? undefined,
       };
+
+      const paidAmountForAdvance = Number(paymentData.paidAmount ?? 0);
+      const isUnallocatedAdvanceCandidate =
+        !shouldCreateRemainder &&
+        paymentData.type === 'Income' &&
+        paymentData.status === 'Completed' &&
+        paidAmountForAdvance > 0.005 &&
+        Boolean(paymentData.clientId || paymentData.legalEntityId) &&
+        !paymentData.invoiceId &&
+        !paymentData.contractId &&
+        !paymentData.account &&
+        payment?.advanceReviewStatus !== 'Ignored' &&
+        paymentData.advanceReviewStatus !== 'AcceptedAsAdvance';
+
+      if (isUnallocatedAdvanceCandidate) {
+        const approved = await confirm({
+          title: 'Нераспределенный аванс',
+          description:
+            'Платеж не привязан к счету или договору. Если сохранить его сейчас, деньги будут приняты как авансовый платеж и добавлены на баланс клиента для дальнейшего распределения.',
+          confirmLabel: 'Принять как аванс',
+          cancelLabel: 'Вернуться к привязке',
+          variant: 'danger',
+        });
+        if (!approved) {
+          return;
+        }
+
+        paymentData.advanceReviewStatus = 'AcceptedAsAdvance';
+        paymentData.advanceReviewReason = 'Пользователь подтвердил авансовый платеж при сохранении';
+      }
 
       if (shouldCreateRemainder && payment && onTransferRemainder && normalizedRescheduleDate) {
         await onTransferRemainder({ id: payment.id, ...paymentData }, normalizedRescheduleDate);

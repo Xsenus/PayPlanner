@@ -609,6 +609,9 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Type).HasConversion<string>();
             entity.Property(e => e.Status).HasConversion<string>();
             entity.Property(e => e.DocumentKind).HasConversion<string>();
+            entity.Property(e => e.AdvanceReviewStatus).HasConversion<string>().HasMaxLength(32).HasDefaultValue(PaymentAdvanceReviewStatus.None).IsRequired();
+            entity.Property(e => e.AdvanceReviewReason).HasMaxLength(1000);
+            entity.Property(e => e.AdvanceReviewedByUserName).HasMaxLength(256);
             entity.Property(e => e.InvoiceWorkflowStatus).HasMaxLength(32).HasDefaultValue(InvoiceWorkflowStatus.Draft).IsRequired();
             entity.Property(e => e.InvoiceSentForSigningAt);
             entity.Property(e => e.InvoiceSignedAt);
@@ -733,6 +736,7 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.ExpenseLegalEntityId).HasDatabaseName("IX_Payments_ExpenseLegalEntityId");
             entity.HasIndex(e => e.DocumentKind).HasDatabaseName("IX_Payments_DocumentKind");
             entity.HasIndex(e => e.InvoiceWorkflowStatus).HasDatabaseName("IX_Payments_InvoiceWorkflowStatus");
+            entity.HasIndex(e => e.AdvanceReviewStatus).HasDatabaseName("IX_Payments_AdvanceReviewStatus");
             entity.HasIndex(e => e.InvoiceId).HasDatabaseName("IX_Payments_InvoiceId");
             entity.HasIndex(e => new { e.ClientId, e.Date }).HasDatabaseName("IX_Payments_ClientId_Date");
             entity.HasIndex(e => new { e.ExpenseClientId, e.Date }).HasDatabaseName("IX_Payments_ExpenseClientId_Date");

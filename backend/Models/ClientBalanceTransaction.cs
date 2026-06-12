@@ -8,7 +8,8 @@ public enum ClientBalanceTransactionType
     CreditApplied,
     ManualAdjustment,
     Refund,
-    AdvanceFromCancelledInvoice
+    AdvanceFromCancelledInvoice,
+    UnallocatedAdvance
 }
 
 public enum ClientBalanceDirection

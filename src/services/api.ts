@@ -1673,6 +1673,7 @@ type PaymentsExportParams = {
   categoryTokens?: string;
   type?: PaymentKind;
   status?: PaymentStatus;
+  advanceReviewStatus?: PaymentAdvanceReviewStatus;
   minAmount?: number;
   maxAmount?: number;
   search?: string;
@@ -3777,6 +3778,20 @@ export class ApiService {
     });
   }
 
+  async acceptPaymentAdvance(id: number, reason?: string | null) {
+    return this.request<Payment>(`/payments/${id}/advance-review/accept`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+  }
+
+  async ignorePaymentAdvance(id: number, reason?: string | null) {
+    return this.request<Payment>(`/payments/${id}/advance-review/ignore`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+  }
+
   async transferPaymentRemainder(id: number, payment: PaymentPayload, remainderDate: string) {
     return this.request<TransferPaymentRemainderResponse>(`/payments/${id}/partial-remainder`, {
       method: 'PUT',
@@ -3866,6 +3881,7 @@ export class ApiService {
     categoryTokens?: string;
     type?: PaymentKind;
     status?: PaymentStatus;
+    advanceReviewStatus?: PaymentAdvanceReviewStatus;
     minAmount?: number;
     maxAmount?: number;
     search?: string;
@@ -6337,6 +6353,7 @@ import type {
   MoneyOperationInvoiceCandidate,
   MoneyOperationsSummary,
   PaymentsListSummary,
+  PaymentAdvanceReviewStatus,
   ClientBalanceSummary,
   ClientBalanceTransaction,
   ApplyClientBalanceResult,

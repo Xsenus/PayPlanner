@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../services/api';
-import type { ClientRole, Payment, PaymentsListSummary, PaymentStatus } from '../types';
+import type { ClientRole, Payment, PaymentAdvanceReviewStatus, PaymentsListSummary, PaymentStatus } from '../types';
 
 type UsePaymentsPagedParams = {
   from?: string;
@@ -16,6 +16,7 @@ type UsePaymentsPagedParams = {
   categoryTokens?: string[];
   type?: Payment['type'];
   status?: PaymentStatus;
+  advanceReviewStatus?: PaymentAdvanceReviewStatus;
   minAmount?: number | null;
   maxAmount?: number | null;
   search?: string;
@@ -60,6 +61,7 @@ export function usePaymentsPaged(params: UsePaymentsPagedParams) {
       categoryTokens: params.categoryTokens?.join(',') || undefined,
       type: params.type,
       status: params.status,
+      advanceReviewStatus: params.advanceReviewStatus,
       minAmount: params.minAmount ?? undefined,
       maxAmount: params.maxAmount ?? undefined,
       search: params.search,
@@ -76,6 +78,7 @@ export function usePaymentsPaged(params: UsePaymentsPagedParams) {
       params.contractId,
       params.invoiceId,
       params.actId,
+      params.advanceReviewStatus,
       params.clientRole,
       params.clientIds,
       params.from,

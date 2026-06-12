@@ -63,6 +63,7 @@ public class PaymentsV2Controller : ControllerBase
         [FromQuery] string? categoryTokens = null,
         [FromQuery] PaymentType? type = null,
         [FromQuery] PaymentStatus? status = null,
+        [FromQuery] PaymentAdvanceReviewStatus? advanceReviewStatus = null,
         [FromQuery] decimal? minAmount = null,
         [FromQuery] decimal? maxAmount = null,
         [FromQuery] string? search = null,
@@ -94,6 +95,7 @@ public class PaymentsV2Controller : ControllerBase
             categoryTokens,
             type,
             status,
+            advanceReviewStatus,
             minAmount,
             maxAmount,
             search,
@@ -149,6 +151,7 @@ public class PaymentsV2Controller : ControllerBase
         [FromQuery] string? categoryTokens = null,
         [FromQuery] PaymentType? type = null,
         [FromQuery] PaymentStatus? status = null,
+        [FromQuery] PaymentAdvanceReviewStatus? advanceReviewStatus = null,
         [FromQuery] decimal? minAmount = null,
         [FromQuery] decimal? maxAmount = null,
         [FromQuery] string? search = null,
@@ -179,6 +182,7 @@ public class PaymentsV2Controller : ControllerBase
             categoryTokens,
             type,
             status,
+            advanceReviewStatus,
             minAmount,
             maxAmount,
             search,
@@ -209,6 +213,7 @@ public class PaymentsV2Controller : ControllerBase
         [FromQuery] string? categoryTokens = null,
         [FromQuery] PaymentType? type = null,
         [FromQuery] PaymentStatus? status = null,
+        [FromQuery] PaymentAdvanceReviewStatus? advanceReviewStatus = null,
         [FromQuery] decimal? minAmount = null,
         [FromQuery] decimal? maxAmount = null,
         [FromQuery] string? search = null,
@@ -239,6 +244,7 @@ public class PaymentsV2Controller : ControllerBase
             categoryTokens,
             type,
             status,
+            advanceReviewStatus,
             minAmount,
             maxAmount,
             search,
@@ -294,9 +300,11 @@ public class PaymentsV2Controller : ControllerBase
         if (createValidationError is not null) return createValidationError;
         PaymentDomainService.Normalize(model);
         PaymentDomainService.ApplyStatusRules(model, now, paymentTimeZone);
+        PaymentAdvanceReviewService.ApplyAutomaticReviewState(model, now, HttpContext);
 
         _db.Payments.Add(model);
         await _db.SaveChangesAsync(ct);
+        await PaymentAdvanceReviewService.SyncBalanceAsync(_db, model, now, HttpContext, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, model, now, ct);
         await _db.SaveChangesAsync(ct);
         return Created($"/api/v2/payments/{model.Id}", model);
@@ -350,16 +358,21 @@ public class PaymentsV2Controller : ControllerBase
         entity.Amount = model.Amount;
         entity.Type = model.Type;
         entity.Status = model.Status;
+        entity.DocumentKind = model.DocumentKind == default ? DocumentKind.Payment : model.DocumentKind;
         entity.Description = model.Description ?? string.Empty;
         entity.Notes = model.Notes ?? string.Empty;
         entity.ClientId = model.ClientId;
+        entity.LegalEntityId = model.LegalEntityId;
         entity.ExpenseClientId = model.ExpenseClientId;
+        entity.ExpenseLegalEntityId = model.ExpenseLegalEntityId;
         entity.ClientCaseId = model.ClientCaseId;
         entity.ContractId = model.ContractId;
         entity.DealTypeId = model.DealTypeId;
         entity.IncomeTypeId = model.IncomeTypeId;
         entity.PaymentSourceId = model.PaymentSourceId;
+        entity.ServiceId = model.ServiceId;
         entity.PaymentStatusId = model.PaymentStatusId;
+        entity.InvoiceId = model.InvoiceId;
         entity.Account = string.IsNullOrWhiteSpace(model.Account) ? null : model.Account.Trim();
         entity.AccountDate = model.AccountDate;
         entity.PaidDate = model.PaidDate;
@@ -368,6 +381,8 @@ public class PaymentsV2Controller : ControllerBase
         entity.PaidAmount = model.PaidAmount;
         entity.LastPaymentDate = model.LastPaymentDate ?? model.PaidDate ?? entity.LastPaymentDate;
         entity.SystemNotes = MergeSystemNotes(originalSystemNotes, model.SystemNotes);
+        entity.AdvanceReviewStatus = model.AdvanceReviewStatus;
+        entity.AdvanceReviewReason = model.AdvanceReviewReason;
 
         var updateValidationError = await ValidatePaymentAttributionAsync(entity, ct);
         if (updateValidationError is not null) return updateValidationError;
@@ -379,6 +394,7 @@ public class PaymentsV2Controller : ControllerBase
         }
 
         PaymentDomainService.ApplyStatusRules(entity, now, paymentTimeZone);
+        PaymentAdvanceReviewService.ApplyAutomaticReviewState(entity, now, HttpContext);
 
         var rescheduleCount = originalRescheduleCount;
         var plannedDateChanged = model.PlannedDate != default && originalPlannedDate != entity.PlannedDate.Date;
@@ -435,6 +451,7 @@ public class PaymentsV2Controller : ControllerBase
 
         entity.RescheduleCount = rescheduleCount;
 
+        await PaymentAdvanceReviewService.SyncBalanceAsync(_db, entity, now, HttpContext, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, entity, now, ct);
         if (originalInvoiceId.HasValue
             && originalInvoiceId.Value > 0
@@ -491,6 +508,7 @@ public class PaymentsV2Controller : ControllerBase
         string? categoryTokens,
         PaymentType? type,
         PaymentStatus? status,
+        PaymentAdvanceReviewStatus? advanceReviewStatus,
         decimal? minAmount,
         decimal? maxAmount,
         string? search,
@@ -572,6 +590,11 @@ public class PaymentsV2Controller : ControllerBase
             query = query.Where(payment => payment.Status == status.Value);
         }
 
+        if (advanceReviewStatus.HasValue)
+        {
+            query = query.Where(payment => payment.AdvanceReviewStatus == advanceReviewStatus.Value);
+        }
+
         if (minAmount.HasValue)
         {
             query = query.Where(payment => payment.Amount >= minAmount.Value);
@@ -602,6 +625,7 @@ public class PaymentsV2Controller : ControllerBase
         string? categoryTokens,
         PaymentType? type,
         PaymentStatus? status,
+        PaymentAdvanceReviewStatus? advanceReviewStatus,
         decimal? minAmount,
         decimal? maxAmount,
         string? search,
@@ -625,6 +649,7 @@ public class PaymentsV2Controller : ControllerBase
                 categoryTokens,
                 type,
                 status,
+                advanceReviewStatus,
                 minAmount,
                 maxAmount,
                 search,

@@ -10,7 +10,7 @@ import { useTranslation } from '../../hooks/useTranslation';
 import { usePaymentsPaged } from '../../hooks/usePaymentsPaged';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
-import type { ClientCase, ClientRole, PartialPaymentRemainderCandidate, Payment, PaymentPayload, PaymentStatus } from '../../types';
+import type { ClientCase, ClientRole, PartialPaymentRemainderCandidate, Payment, PaymentAdvanceReviewStatus, PaymentPayload, PaymentStatus } from '../../types';
 import { PaymentsTable, type PaymentTableColumnKey } from '../Calendar/PaymentsTable';
 import { PaymentModal } from '../Calendar/PaymentModal';
 import { formatCurrencySmart } from '../../utils/formatters';
@@ -30,6 +30,7 @@ import { buildCancelledPaymentPayload } from '../../utils/paymentActions';
 type TypeFilter = 'all' | Payment['type'];
 
 type StatusFilter = 'all' | PaymentStatus;
+type AdvanceReviewFilter = 'all' | PaymentAdvanceReviewStatus;
 type ClientRoleFilter = 'all' | ClientRole;
 
 interface PaymentsProps {
@@ -315,6 +316,7 @@ export function Payments({
 
   const [typeFilter, setTypeFilter] = useState<TypeFilter>(defaultType ?? 'all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [advanceReviewFilter, setAdvanceReviewFilter] = useState<AdvanceReviewFilter>('all');
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebouncedValue(search.trim(), 400);
   const [page, setPage] = useState(1);
@@ -417,6 +419,7 @@ export function Payments({
     categoryTokens: selectedCategories,
     type: appliedTypeFilter === 'all' ? undefined : appliedTypeFilter,
     status: statusFilter === 'all' ? undefined : statusFilter,
+    advanceReviewStatus: advanceReviewFilter === 'all' ? undefined : advanceReviewFilter,
     minAmount: minAmountValue,
     maxAmount: maxAmountValue,
     search: debouncedSearch || undefined,
@@ -435,6 +438,7 @@ export function Payments({
       categoryTokens: selectedCategories.join(',') || undefined,
       type: appliedTypeFilter === 'all' ? undefined : appliedTypeFilter,
       status: statusFilter === 'all' ? undefined : statusFilter,
+      advanceReviewStatus: advanceReviewFilter === 'all' ? undefined : advanceReviewFilter,
       minAmount: minAmountValue ?? undefined,
       maxAmount: maxAmountValue ?? undefined,
       search: debouncedSearch || undefined,
@@ -443,6 +447,7 @@ export function Payments({
     }),
     [
       appliedTypeFilter,
+      advanceReviewFilter,
       clientRoleFilter,
       debouncedSearch,
       fromDate,
@@ -618,6 +623,18 @@ export function Payments({
     [t],
   );
 
+  const advanceReviewLabels: Record<PaymentAdvanceReviewStatus, string> = useMemo(
+    () => ({
+      None: 'Без контроля аванса',
+      RequiresDecision: 'Требуют решения',
+      AcceptedAsAdvance: 'Приняты как аванс',
+      Allocated: 'Распределены',
+      Ignored: 'Игнорируются',
+      Refunded: 'Возвращены',
+    }),
+    [],
+  );
+
   const selectedRoutePaymentInstallment = useMemo(
     () => (routePaymentPreview ? parseInstallmentPaymentMetadata(routePaymentPreview.systemNotes) : null),
     [routePaymentPreview],
@@ -675,11 +692,13 @@ export function Payments({
         minAmount || '',
         maxAmount || '',
         statusFilter,
+        advanceReviewFilter,
         searchQuery,
         appliedTypeFilter,
       ].join('|'),
     [
       appliedTypeFilter,
+      advanceReviewFilter,
       clientRoleFilter,
       fromDate,
       maxAmount,
@@ -777,6 +796,9 @@ export function Payments({
     if (statusFilter !== 'all') {
       count += 1;
     }
+    if (advanceReviewFilter !== 'all') {
+      count += 1;
+    }
     if (searchQuery) {
       count += 1;
     }
@@ -792,6 +814,7 @@ export function Payments({
     return count;
   }, [
     clientRoleFilter,
+    advanceReviewFilter,
     fromDate,
     lockType,
     maxAmount,
@@ -900,6 +923,7 @@ export function Payments({
     setMinAmount('');
     setMaxAmount('');
     setStatusFilter('all');
+    setAdvanceReviewFilter('all');
     setSearch('');
     setTypeFilter(defaultType ?? 'all');
   }, [defaultType]);
@@ -1034,6 +1058,68 @@ export function Payments({
         const message = extractDisplayErrorMessage(error, 'Не удалось аннулировать платеж.');
         toast.error(message, t('payments') ?? 'Платежи');
         return false;
+      }
+    },
+    [confirm, paymentsPermissions.canEdit, refresh, showPermissionNotice, t, toast],
+  );
+
+  const handleAcceptAdvance = useCallback(
+    async (payment: Payment) => {
+      if (!paymentsPermissions.canEdit) {
+        showPermissionNotice(t('permissionNoEditPayment') ?? 'Недостаточно прав для редактирования платежей.');
+        return;
+      }
+
+      const confirmed = await confirm({
+        title: 'Принять платеж как аванс',
+        description:
+          'Платеж будет добавлен на баланс клиента как нераспределенный аванс. Позже эту сумму можно будет зачесть по долгу клиента.',
+        confirmLabel: 'Принять как аванс',
+        cancelLabel: 'Отмена',
+        variant: 'primary',
+      });
+      if (!confirmed) return;
+
+      try {
+        await apiService.acceptPaymentAdvance(payment.id, 'Принято как аванс из журнала платежей');
+        toast.success('Платеж принят как аванс и добавлен на баланс клиента.', 'Платежи');
+        await refresh();
+      } catch (error) {
+        toast.error(
+          extractDisplayErrorMessage(error, 'Не удалось принять платеж как аванс.'),
+          'Платежи',
+        );
+      }
+    },
+    [confirm, paymentsPermissions.canEdit, refresh, showPermissionNotice, t, toast],
+  );
+
+  const handleIgnoreAdvance = useCallback(
+    async (payment: Payment) => {
+      if (!paymentsPermissions.canEdit) {
+        showPermissionNotice(t('permissionNoEditPayment') ?? 'Недостаточно прав для редактирования платежей.');
+        return;
+      }
+
+      const confirmed = await confirm({
+        title: 'Исключить из контроля авансов',
+        description:
+          'Платеж больше не будет попадать в список нераспределенных авансов. Баланс клиента по этому платежу не изменится.',
+        confirmLabel: 'Игнорировать',
+        cancelLabel: 'Отмена',
+        variant: 'danger',
+      });
+      if (!confirmed) return;
+
+      try {
+        await apiService.ignorePaymentAdvance(payment.id, 'Исключено из контроля авансов из журнала платежей');
+        toast.success('Платеж исключен из контроля авансов.', 'Платежи');
+        await refresh();
+      } catch (error) {
+        toast.error(
+          extractDisplayErrorMessage(error, 'Не удалось исключить платеж из контроля авансов.'),
+          'Платежи',
+        );
       }
     },
     [confirm, paymentsPermissions.canEdit, refresh, showPermissionNotice, t, toast],
@@ -1456,6 +1542,22 @@ export function Payments({
                   </select>
                 </div>
 
+                <div className="flex flex-col gap-1">
+                  <label className={fieldLabelClass}>Контроль аванса</label>
+                  <select
+                    className={inputClass}
+                    value={advanceReviewFilter}
+                    onChange={(event) => setAdvanceReviewFilter(event.target.value as AdvanceReviewFilter)}
+                  >
+                    <option value="all">Все платежи</option>
+                    <option value="RequiresDecision">{advanceReviewLabels.RequiresDecision}</option>
+                    <option value="AcceptedAsAdvance">{advanceReviewLabels.AcceptedAsAdvance}</option>
+                    <option value="Allocated">{advanceReviewLabels.Allocated}</option>
+                    <option value="Ignored">{advanceReviewLabels.Ignored}</option>
+                    <option value="Refunded">{advanceReviewLabels.Refunded}</option>
+                  </select>
+                </div>
+
                 <div className="flex flex-col gap-1 md:col-span-2">
                   <LookupSelect
                     label="Клиент / поставщик"
@@ -1849,6 +1951,8 @@ export function Payments({
                   await handleDeletePayment(payment);
                 }}
                 onStatusChange={openPaymentStatusChange}
+                onAcceptAdvance={handleAcceptAdvance}
+                onIgnoreAdvance={handleIgnoreAdvance}
                 canAdd={paymentsPermissions.canCreate}
                 canEdit={paymentsPermissions.canEdit}
                 canDelete={paymentsPermissions.canDelete}

@@ -5138,6 +5138,27 @@ namespace PayPlanner.Api.Migrations
                     b.Property<DateTime?>("AccountDate")
                         .HasColumnType("date");
 
+                    b.Property<string>("AdvanceReviewReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AdvanceReviewStatus")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("None");
+
+                    b.Property<DateTime?>("AdvanceReviewedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("AdvanceReviewedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AdvanceReviewedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
                     b.Property<decimal>("Amount")
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
@@ -5321,6 +5342,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("AccountDate")
                         .HasDatabaseName("IX_Payments_AccountDate");
+
+                    b.HasIndex("AdvanceReviewStatus")
+                        .HasDatabaseName("IX_Payments_AdvanceReviewStatus");
 
                     b.HasIndex("ContractId")
                         .HasDatabaseName("IX_Payments_ContractId");

@@ -2724,7 +2724,8 @@ export type ClientBalanceTransactionType =
   | 'CreditApplied'
   | 'ManualAdjustment'
   | 'Refund'
-  | 'AdvanceFromCancelledInvoice';
+  | 'AdvanceFromCancelledInvoice'
+  | 'UnallocatedAdvance';
 
 export type ClientBalanceDirection = 'Credit' | 'Debit';
 
@@ -2844,6 +2845,13 @@ export type ActWorkflowStatus =
   | 'Cancelled';
 export type ActCreationMode = 'Manual' | 'Full' | 'Partial';
 export type DocumentKind = 'Invoice' | 'Accrual' | 'Payment';
+export type PaymentAdvanceReviewStatus =
+  | 'None'
+  | 'RequiresDecision'
+  | 'AcceptedAsAdvance'
+  | 'Allocated'
+  | 'Ignored'
+  | 'Refunded';
 
 export interface ActLineItem {
   id?: number | null;
@@ -3055,6 +3063,11 @@ export interface Payment {
   systemNotes: string;
   rescheduleCount: number;
   paidAmount: number;
+  advanceReviewStatus?: PaymentAdvanceReviewStatus;
+  advanceReviewReason?: string | null;
+  advanceReviewedAt?: string | null;
+  advanceReviewedByUserId?: number | null;
+  advanceReviewedByUserName?: string | null;
   outstandingAmount: number;
   hasPartialPayment: boolean;
   delayDays?: number | null;
