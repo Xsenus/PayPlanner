@@ -498,6 +498,58 @@ describe('PaymentModal integration', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  it('warns for a partially paid income payment without documents', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        payment={{
+          id: 783,
+          date: '2026-04-10',
+          plannedDate: '2026-04-10',
+          amount: 10_000,
+          paidAmount: 4_000,
+          outstandingAmount: 6_000,
+          hasPartialPayment: true,
+          status: 'Processing',
+          description: 'Частично оплаченный платеж без документов',
+          isPaid: false,
+          paidDate: '',
+          lastPaymentDate: '2026-04-10',
+          notes: '',
+          clientId: 69,
+          type: 'Income',
+          documentKind: 'Payment',
+          createdAt: '2026-04-10T00:00:00Z',
+          systemNotes: '',
+          rescheduleCount: 0,
+          advanceReviewStatus: 'None',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Нераспределенный аванс',
+      }),
+    ));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 783,
+        amount: 10_000,
+        paidAmount: 4_000,
+        status: 'Processing',
+        advanceReviewStatus: 'AcceptedAsAdvance',
+      }),
+    );
+  });
+
   it('does not show the advance warning for a zero paid income payment', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
 

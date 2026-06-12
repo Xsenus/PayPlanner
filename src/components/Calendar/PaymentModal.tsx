@@ -1567,7 +1567,7 @@ export function PaymentModal({
       const isUnallocatedAdvanceCandidate =
         !shouldCreateRemainder &&
         paymentData.type === 'Income' &&
-        paymentData.status === 'Completed' &&
+        paymentData.status !== 'Cancelled' &&
         paidAmountForAdvance > 0.005 &&
         Boolean(paymentData.clientId || paymentData.legalEntityId) &&
         !paymentData.invoiceId &&

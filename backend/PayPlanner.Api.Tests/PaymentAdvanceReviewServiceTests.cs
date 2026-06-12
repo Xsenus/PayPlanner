@@ -24,6 +24,21 @@ public sealed class PaymentAdvanceReviewServiceTests
         Assert.True(PaymentAdvanceReviewService.IsUnallocatedAdvanceCandidate(payment));
     }
 
+    [Fact]
+    public void IsUnallocatedAdvanceCandidate_ReturnsTrue_ForPartiallyPaidIncomePayment()
+    {
+        var payment = CreateCandidate(payment =>
+        {
+            payment.Amount = 10_000m;
+            payment.PaidAmount = 4_000m;
+            payment.IsPaid = false;
+            payment.Status = PaymentStatus.Processing;
+        });
+
+        Assert.True(PaymentAdvanceReviewService.IsUnallocatedAdvanceCandidate(payment));
+        Assert.Equal(4_000m, PaymentAdvanceReviewService.GetAdvanceAmount(payment));
+    }
+
     [Theory]
     [MemberData(nameof(NotCandidateCases))]
     public void IsUnallocatedAdvanceCandidate_ReturnsFalse_ForPaymentsOutsideRule(Payment payment)

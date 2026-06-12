@@ -3969,6 +3969,32 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task Create_PartiallyPaidUnallocatedIncomePayment_MarksAdvanceAsRequiresDecision()
+    {
+        await using var db = await CreateContextAsync();
+        var client = new Client { Name = "Клиент с частичным платежом" };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var controller = CreatePaymentsController(db, userId: 102);
+        var payment = CreatePayment(new DateTime(2026, 3, 5), 10_000m, "Частичный платеж без документов");
+        payment.ClientId = client.Id;
+        payment.PaidAmount = 4_000m;
+        payment.Status = PaymentStatus.Processing;
+        payment.IsPaid = false;
+        payment.LastPaymentDate = payment.Date;
+
+        var result = await controller.Create(payment, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(result);
+        var createdPayment = Assert.IsType<Payment>(created.Value);
+        Assert.Equal(PaymentAdvanceReviewStatus.RequiresDecision, createdPayment.AdvanceReviewStatus);
+        Assert.Equal(4_000m, createdPayment.PaidAmount);
+        Assert.Equal(PaymentStatus.Processing, createdPayment.Status);
+        Assert.Empty(await db.ClientBalanceTransactions.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
     public async Task V2RequiresDecisionFilter_IncludesLegacyUnmarkedAdvanceCandidates()
     {
         await using var db = await CreateContextAsync();
