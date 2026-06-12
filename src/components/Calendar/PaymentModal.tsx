@@ -1564,6 +1564,7 @@ export function PaymentModal({
       };
 
       const paidAmountForAdvance = Number(paymentData.paidAmount ?? 0);
+      const hasContractForAdvance = Boolean(paymentData.contractId);
       const isUnallocatedAdvanceCandidate =
         !shouldCreateRemainder &&
         paymentData.type === 'Income' &&
@@ -1571,7 +1572,6 @@ export function PaymentModal({
         paidAmountForAdvance > 0.005 &&
         Boolean(paymentData.clientId || paymentData.legalEntityId) &&
         !paymentData.invoiceId &&
-        !paymentData.contractId &&
         !paymentData.account &&
         payment?.advanceReviewStatus !== 'Ignored' &&
         paymentData.advanceReviewStatus !== 'AcceptedAsAdvance';
@@ -1579,8 +1579,9 @@ export function PaymentModal({
       if (isUnallocatedAdvanceCandidate) {
         const approved = await confirm({
           title: 'Нераспределенный аванс',
-          description:
-            'Платеж не привязан к счету, договору или акту. Если сохранить его сейчас, деньги будут приняты как авансовый платеж и добавлены на баланс клиента для дальнейшего распределения.',
+          description: hasContractForAdvance
+            ? 'Платеж привязан к договору, но не связан со счетом или актом. Если сохранить его сейчас, деньги будут приняты как авансовый платеж и добавлены на баланс клиента для дальнейшего распределения.'
+            : 'Платеж не привязан к счету, договору или акту. Если сохранить его сейчас, деньги будут приняты как авансовый платеж и добавлены на баланс клиента для дальнейшего распределения.',
           confirmLabel: 'Принять как аванс',
           cancelLabel: 'Вернуться к привязке',
           variant: 'danger',

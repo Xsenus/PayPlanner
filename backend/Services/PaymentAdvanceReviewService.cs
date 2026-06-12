@@ -22,7 +22,6 @@ public static class PaymentAdvanceReviewService
             && (payment.PaidAmount > AmountEpsilon
                 || ((payment.IsPaid || payment.Status == PaymentStatus.Completed) && payment.Amount > AmountEpsilon))
             && !payment.InvoiceId.HasValue
-            && !payment.ContractId.HasValue
             && !payment.Acts.Any()
             && (payment.Account == null || payment.Account.Trim() == string.Empty)
             && (payment.LegacyAccountNumber == null || payment.LegacyAccountNumber.Trim() == string.Empty);
@@ -76,7 +75,7 @@ public static class PaymentAdvanceReviewService
         {
             payment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.Allocated;
             payment.AdvanceReviewReason = string.IsNullOrWhiteSpace(payment.AdvanceReviewReason)
-                ? "Платеж связан со счетом, договором или документом"
+                ? "Платеж связан со счетом, актом или закрывающим документом"
                 : payment.AdvanceReviewReason;
             StampReviewIfNeeded(payment, utcNow, httpContext, payment.AdvanceReviewReason);
         }
@@ -97,7 +96,7 @@ public static class PaymentAdvanceReviewService
         if (!IsUnallocatedAdvanceCandidate(payment))
         {
             await ClientBalanceService.RemoveUnallocatedAdvanceAsync(db, payment.Id, ct);
-            return (false, "Платеж уже связан со счетом или договором, либо не является входящим оплаченным платежом.");
+            return (false, "Платеж уже связан со счетом, актом или закрывающим документом, либо не является входящим оплаченным платежом.");
         }
 
         payment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.AcceptedAsAdvance;

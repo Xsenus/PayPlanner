@@ -1121,9 +1121,19 @@ describe('PaymentModal integration', () => {
     fireEvent.change(contractSelect, { target: { value: '321' } });
     fireEvent.click(screen.getByRole('button', { name: 'save' }));
 
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Нераспределенный аванс',
+        description: expect.stringContaining('Платеж привязан к договору'),
+      }),
+    ));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(getContractsMock).toHaveBeenCalledWith(expect.objectContaining({ clientId: 69 }));
-    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ id: 778, contractId: 321 }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      id: 778,
+      contractId: 321,
+      advanceReviewStatus: 'AcceptedAsAdvance',
+    }));
   });
 
   it('submits expense attribution and payment document details for expense payments', async () => {

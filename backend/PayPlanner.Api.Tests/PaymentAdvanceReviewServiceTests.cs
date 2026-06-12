@@ -47,6 +47,14 @@ public sealed class PaymentAdvanceReviewServiceTests
         Assert.True(PaymentAdvanceReviewService.IsUnallocatedAdvanceCandidate(payment));
     }
 
+    [Fact]
+    public void IsUnallocatedAdvanceCandidate_ReturnsTrue_WhenPaymentHasContractButNoInvoiceOrAct()
+    {
+        var payment = CreateCandidate(payment => payment.ContractId = 11);
+
+        Assert.True(PaymentAdvanceReviewService.IsUnallocatedAdvanceCandidate(payment));
+    }
+
     [Theory]
     [MemberData(nameof(NotCandidateCases))]
     public void IsUnallocatedAdvanceCandidate_ReturnsFalse_ForPaymentsOutsideRule(Payment payment)
@@ -82,7 +90,6 @@ public sealed class PaymentAdvanceReviewServiceTests
         yield return [CreateCandidate(payment => payment.Type = PaymentType.Expense)];
         yield return [CreateCandidate(payment => payment.Status = PaymentStatus.Cancelled)];
         yield return [CreateCandidate(payment => payment.InvoiceId = 10)];
-        yield return [CreateCandidate(payment => payment.ContractId = 11)];
         yield return [CreateCandidate(payment => payment.Acts.Add(new Act { Number = "ACT-12", Date = payment.Date }))];
         yield return [CreateCandidate(payment => payment.Account = "INV-12")];
         yield return [CreateCandidate(payment => payment.LegacyAccountNumber = "OLD-12")];
