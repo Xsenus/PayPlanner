@@ -100,8 +100,10 @@ public static class ClientBalanceService
         decimal requestedAmount,
         DateTime utcNow,
         HttpContext? httpContext,
-        CancellationToken ct = default)
-        => await ApplyCounterpartyCreditAsync(db, clientId, null, paymentId, requestedAmount, utcNow, httpContext, ct);
+        CancellationToken ct = default,
+        string? description = null,
+        int? sourcePaymentId = null)
+        => await ApplyCounterpartyCreditAsync(db, clientId, null, paymentId, requestedAmount, utcNow, httpContext, ct, description, sourcePaymentId);
 
     public static async Task<(bool Success, string? Error, decimal AppliedAmount)> ApplyLegalEntityCreditAsync(
         PaymentContext db,
@@ -110,8 +112,10 @@ public static class ClientBalanceService
         decimal requestedAmount,
         DateTime utcNow,
         HttpContext? httpContext,
-        CancellationToken ct = default)
-        => await ApplyCounterpartyCreditAsync(db, null, legalEntityId, paymentId, requestedAmount, utcNow, httpContext, ct);
+        CancellationToken ct = default,
+        string? description = null,
+        int? sourcePaymentId = null)
+        => await ApplyCounterpartyCreditAsync(db, null, legalEntityId, paymentId, requestedAmount, utcNow, httpContext, ct, description, sourcePaymentId);
 
     public static async Task<(bool Success, string? Error, decimal AppliedAmount)> ApplyCounterpartyCreditAsync(
         PaymentContext db,
@@ -121,7 +125,9 @@ public static class ClientBalanceService
         decimal requestedAmount,
         DateTime utcNow,
         HttpContext? httpContext,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? description = null,
+        int? sourcePaymentId = null)
     {
         if (!HasSingleOwner(clientId, legalEntityId))
         {
@@ -158,7 +164,24 @@ public static class ClientBalanceService
             return (false, "Counterparty balance is empty.", 0m);
         }
 
-        var applied = Math.Min(amount, Math.Min(balance, outstanding));
+        var availableBalance = balance;
+        if (sourcePaymentId.HasValue)
+        {
+            if (sourcePaymentId.Value == paymentId)
+            {
+                return (false, "Advance source payment cannot be the target payment.", 0m);
+            }
+
+            var sourceBalance = await GetUnallocatedAdvanceAvailableAmountAsync(db, sourcePaymentId.Value, clientId, legalEntityId, ct);
+            if (sourceBalance <= AmountEpsilon)
+            {
+                return (false, "Selected advance source has no available balance.", 0m);
+            }
+
+            availableBalance = Math.Min(balance, sourceBalance);
+        }
+
+        var applied = Math.Min(amount, Math.Min(availableBalance, outstanding));
         applied = NormalizeAmount(applied);
         if (applied <= AmountEpsilon)
         {
@@ -183,7 +206,14 @@ public static class ClientBalanceService
             Amount = applied,
             Type = ClientBalanceTransactionType.CreditApplied,
             Direction = ClientBalanceDirection.Debit,
-            Description = $"Зачет баланса в платеж #{payment.Id}",
+            Description = !string.IsNullOrWhiteSpace(description)
+                ? description.Trim()
+                : sourcePaymentId.HasValue
+                    ? $"Зачет аванса по платежу #{sourcePaymentId.Value} в платеж #{payment.Id}"
+                    : $"Зачет баланса в платеж #{payment.Id}",
+            ExternalKey = sourcePaymentId.HasValue
+                ? BuildUnallocatedAdvanceApplicationKey(sourcePaymentId.Value, payment.Id, utcNow)
+                : null,
             CreatedAt = utcNow,
             CreatedByUserId = actorUserId,
             CreatedByUserName = actor,
@@ -339,6 +369,49 @@ public static class ClientBalanceService
     public static string BuildCancelledInvoiceAdvanceKey(int paymentId) => $"invoice-cancellation-advance:{paymentId}";
 
     public static string BuildUnallocatedAdvanceKey(int paymentId) => $"payment-unallocated-advance:{paymentId}";
+
+    public static string BuildUnallocatedAdvanceApplicationKeyPrefix(int sourcePaymentId)
+        => $"payment-unallocated-advance-apply:{sourcePaymentId}:";
+
+    public static string BuildUnallocatedAdvanceApplicationKey(int sourcePaymentId, int targetPaymentId, DateTime utcNow)
+        => $"{BuildUnallocatedAdvanceApplicationKeyPrefix(sourcePaymentId)}{targetPaymentId}:{utcNow.Ticks}";
+
+    public static async Task<decimal> GetUnallocatedAdvanceAvailableAmountAsync(
+        PaymentContext db,
+        int sourcePaymentId,
+        int? clientId,
+        int? legalEntityId,
+        CancellationToken ct = default)
+    {
+        if (!HasSingleOwner(clientId, legalEntityId))
+        {
+            return 0m;
+        }
+
+        var credited = await db.ClientBalanceTransactions
+            .AsNoTracking()
+            .Where(item =>
+                item.ClientId == clientId
+                && item.LegalEntityId == legalEntityId
+                && item.PaymentId == sourcePaymentId
+                && item.Type == ClientBalanceTransactionType.UnallocatedAdvance
+                && item.Direction == ClientBalanceDirection.Credit)
+            .SumAsync(item => item.Amount, ct);
+
+        var externalKeyPrefix = BuildUnallocatedAdvanceApplicationKeyPrefix(sourcePaymentId);
+        var applied = await db.ClientBalanceTransactions
+            .AsNoTracking()
+            .Where(item =>
+                item.ClientId == clientId
+                && item.LegalEntityId == legalEntityId
+                && item.Type == ClientBalanceTransactionType.CreditApplied
+                && item.Direction == ClientBalanceDirection.Debit
+                && item.ExternalKey != null
+                && item.ExternalKey.StartsWith(externalKeyPrefix))
+            .SumAsync(item => item.Amount, ct);
+
+        return NormalizeAmount(Math.Max(credited - applied, 0m));
+    }
 
     private static decimal NormalizeAmount(decimal value)
         => Math.Round(value, 2, MidpointRounding.AwayFromZero);

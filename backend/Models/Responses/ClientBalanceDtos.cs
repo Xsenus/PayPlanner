@@ -20,6 +20,7 @@ public sealed class ClientBalanceTransactionDto
     public ClientBalanceTransactionType Type { get; set; }
     public ClientBalanceDirection Direction { get; set; }
     public string Description { get; set; } = string.Empty;
+    public string? ExternalKey { get; set; }
     public DateTime CreatedAt { get; set; }
     public string? CreatedByUserName { get; set; }
 }
@@ -29,4 +30,5 @@ public sealed class ApplyClientBalanceRequest
     public int PaymentId { get; set; }
     public decimal Amount { get; set; }
     public string? Description { get; set; }
+    public int? SourcePaymentId { get; set; }
 }

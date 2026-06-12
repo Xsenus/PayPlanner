@@ -60,6 +60,7 @@ public class ClientBalancesController : ControllerBase
                 Type = item.Type,
                 Direction = item.Direction,
                 Description = item.Description,
+                ExternalKey = item.ExternalKey,
                 CreatedAt = item.CreatedAt,
                 CreatedByUserName = item.CreatedByUserName,
             })
@@ -81,7 +82,9 @@ public class ClientBalancesController : ControllerBase
             request.Amount,
             DateTime.UtcNow,
             HttpContext,
-            ct);
+            ct,
+            description: request.Description,
+            sourcePaymentId: request.SourcePaymentId);
 
         if (!result.Success)
         {

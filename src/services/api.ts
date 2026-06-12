@@ -3977,7 +3977,7 @@ export class ApiService {
     return this.request<ClientBalanceTransaction[]>(`/clients/${id}/balance/transactions`);
   }
 
-  async applyClientBalance(id: number, payload: { paymentId: number; amount: number; description?: string | null }) {
+  async applyClientBalance(id: number, payload: { paymentId: number; amount: number; description?: string | null; sourcePaymentId?: number | null }) {
     return this.request<ApplyClientBalanceResult>(`/clients/${id}/balance/apply`, {
       method: 'POST',
       body: JSON.stringify(payload),

@@ -204,6 +204,7 @@ vi.mock('../../services/api', () => ({
     exportPaymentsCsv: vi.fn(),
     exportPaymentsExcel: vi.fn(),
     getClientBalance: vi.fn(),
+    getClientBalanceTransactions: vi.fn(),
     applyClientBalance: vi.fn(),
     getPartialPaymentRemainderCandidates: vi.fn(),
   },
@@ -225,6 +226,7 @@ describe('Payments integration', () => {
     vi.mocked(apiService.exportPaymentsCsv).mockReset();
     vi.mocked(apiService.exportPaymentsExcel).mockReset();
     vi.mocked(apiService.getClientBalance).mockReset();
+    vi.mocked(apiService.getClientBalanceTransactions).mockReset();
     vi.mocked(apiService.applyClientBalance).mockReset();
     vi.mocked(apiService.getPartialPaymentRemainderCandidates).mockReset();
     vi.mocked(apiService.exportPaymentsCsv).mockResolvedValue({
@@ -236,6 +238,7 @@ describe('Payments integration', () => {
       fileName: 'payments-export.xls',
     });
     vi.mocked(apiService.getClientBalance).mockResolvedValue({ clientId: 1, balance: 0 });
+    vi.mocked(apiService.getClientBalanceTransactions).mockResolvedValue([]);
     vi.mocked(apiService.getPaymentsV2).mockResolvedValue({
       items: [],
       total: 0,
@@ -432,6 +435,19 @@ describe('Payments integration', () => {
       refresh,
     });
     vi.mocked(apiService.getClientBalance).mockResolvedValueOnce({ clientId: 12, balance: 7_100 });
+    vi.mocked(apiService.getClientBalanceTransactions).mockResolvedValueOnce([
+      {
+        id: 1,
+        clientId: 12,
+        paymentId: 901,
+        amount: 7_100,
+        type: 'UnallocatedAdvance',
+        direction: 'Credit',
+        description: 'Аванс по платежу #901',
+        externalKey: 'payment-unallocated-advance:901',
+        createdAt: '2026-03-02T00:00:00Z',
+      },
+    ]);
     vi.mocked(apiService.getPaymentsV2).mockResolvedValueOnce({
       items: [sourceAdvance, targetDebt],
       total: 2,
@@ -454,6 +470,7 @@ describe('Payments integration', () => {
 
     expect(await screen.findByRole('dialog', { name: 'Распределить аванс' })).toBeTruthy();
     expect(apiService.getClientBalance).toHaveBeenCalledWith(12);
+    expect(apiService.getClientBalanceTransactions).toHaveBeenCalledWith(12);
     expect(apiService.getPaymentsV2).toHaveBeenCalledWith(expect.objectContaining({
       clientId: 12,
       type: 'Income',
@@ -468,6 +485,7 @@ describe('Payments integration', () => {
         paymentId: 902,
         amount: 7_100,
         description: 'Распределение аванса по платежу #901',
+        sourcePaymentId: 901,
       });
     });
     expect(refresh).toHaveBeenCalledTimes(1);

@@ -10,7 +10,7 @@ import { useTranslation } from '../../hooks/useTranslation';
 import { usePaymentsPaged } from '../../hooks/usePaymentsPaged';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
-import type { ClientCase, ClientRole, PartialPaymentRemainderCandidate, Payment, PaymentAdvanceReviewStatus, PaymentPayload, PaymentStatus } from '../../types';
+import type { ClientBalanceTransaction, ClientCase, ClientRole, PartialPaymentRemainderCandidate, Payment, PaymentAdvanceReviewStatus, PaymentPayload, PaymentStatus } from '../../types';
 import { PaymentsTable, type PaymentTableColumnKey } from '../Calendar/PaymentsTable';
 import { PaymentModal } from '../Calendar/PaymentModal';
 import { formatCurrencySmart } from '../../utils/formatters';
@@ -88,6 +88,23 @@ function parseMoneyInput(value: string) {
 
 function formatMoneyInput(value: number) {
   return value > 0 ? String(Number(value.toFixed(2))) : '';
+}
+
+function resolveAdvanceSourceAvailableAmount(transactions: ClientBalanceTransaction[], sourcePaymentId: number) {
+  const appliedPrefix = `payment-unallocated-advance-apply:${sourcePaymentId}:`;
+  const credited = transactions
+    .filter((item) =>
+      item.paymentId === sourcePaymentId &&
+      item.type === 'UnallocatedAdvance' &&
+      item.direction === 'Credit')
+    .reduce((sum, item) => sum + Number(item.amount ?? 0), 0);
+  const applied = transactions
+    .filter((item) =>
+      item.type === 'CreditApplied' &&
+      item.direction === 'Debit' &&
+      Boolean(item.externalKey?.startsWith(appliedPrefix)))
+    .reduce((sum, item) => sum + Number(item.amount ?? 0), 0);
+  return Math.max(Number((credited - applied).toFixed(2)), 0);
 }
 
 const PAYMENT_COLUMN_CONFIGS = [
@@ -1190,7 +1207,7 @@ export function Payments({
       });
 
       try {
-        const [balanceResponse, paymentsResponse] = await Promise.all([
+        const [balanceResponse, paymentsResponse, balanceTransactions] = await Promise.all([
           apiService.getClientBalance(clientId),
           apiService.getPaymentsV2({
             clientId,
@@ -1200,9 +1217,12 @@ export function Payments({
             sortBy: 'date',
             sortDir: 'asc',
           }),
+          apiService.getClientBalanceTransactions(clientId),
         ]);
 
-        const balance = Math.max(Number(balanceResponse.balance ?? 0), 0);
+        const totalBalance = Math.max(Number(balanceResponse.balance ?? 0), 0);
+        const sourceBalance = resolveAdvanceSourceAvailableAmount(balanceTransactions, payment.id);
+        const balance = Math.min(totalBalance, sourceBalance);
         const targets = (paymentsResponse.items ?? [])
           .filter((item) =>
             item.id !== payment.id &&
@@ -1287,6 +1307,7 @@ export function Payments({
         paymentId: target.id,
         amount,
         description: `Распределение аванса по платежу #${advanceAllocation.source.id}`,
+        sourcePaymentId: advanceAllocation.source.id,
       });
       toast.success(
         `Аванс зачтен в платеж #${target.id} на сумму ${formatCurrencySmart(result.appliedAmount ?? amount).full}.`,

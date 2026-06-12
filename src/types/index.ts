@@ -2743,6 +2743,7 @@ export interface ClientBalanceTransaction {
   type: ClientBalanceTransactionType;
   direction: ClientBalanceDirection;
   description: string;
+  externalKey?: string | null;
   createdAt: string;
   createdByUserName?: string | null;
 }
