@@ -206,6 +206,9 @@ vi.mock('../../services/api', () => ({
     getClientBalance: vi.fn(),
     getClientBalanceTransactions: vi.fn(),
     applyClientBalance: vi.fn(),
+    getLegalEntityBalance: vi.fn(),
+    getLegalEntityBalanceTransactions: vi.fn(),
+    applyLegalEntityBalance: vi.fn(),
     getPartialPaymentRemainderCandidates: vi.fn(),
   },
 }));
@@ -228,6 +231,9 @@ describe('Payments integration', () => {
     vi.mocked(apiService.getClientBalance).mockReset();
     vi.mocked(apiService.getClientBalanceTransactions).mockReset();
     vi.mocked(apiService.applyClientBalance).mockReset();
+    vi.mocked(apiService.getLegalEntityBalance).mockReset();
+    vi.mocked(apiService.getLegalEntityBalanceTransactions).mockReset();
+    vi.mocked(apiService.applyLegalEntityBalance).mockReset();
     vi.mocked(apiService.getPartialPaymentRemainderCandidates).mockReset();
     vi.mocked(apiService.exportPaymentsCsv).mockResolvedValue({
       blob: new Blob(['csv'], { type: 'text/csv' }),
@@ -239,6 +245,8 @@ describe('Payments integration', () => {
     });
     vi.mocked(apiService.getClientBalance).mockResolvedValue({ clientId: 1, balance: 0 });
     vi.mocked(apiService.getClientBalanceTransactions).mockResolvedValue([]);
+    vi.mocked(apiService.getLegalEntityBalance).mockResolvedValue({ clientId: null, legalEntityId: 1, balance: 0 });
+    vi.mocked(apiService.getLegalEntityBalanceTransactions).mockResolvedValue([]);
     vi.mocked(apiService.getPaymentsV2).mockResolvedValue({
       items: [],
       total: 0,
@@ -254,6 +262,7 @@ describe('Payments integration', () => {
       },
     });
     vi.mocked(apiService.applyClientBalance).mockResolvedValue({ appliedAmount: 0, balance: 0 });
+    vi.mocked(apiService.applyLegalEntityBalance).mockResolvedValue({ appliedAmount: 0, balance: 0 });
     vi.mocked(apiService.getPartialPaymentRemainderCandidates).mockResolvedValue({
       items: [],
       total: 0,
@@ -488,6 +497,113 @@ describe('Payments integration', () => {
         sourcePaymentId: 901,
       });
     });
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('allocates an accepted legal entity advance through the legal entity balance api', async () => {
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    const sourceAdvance = {
+      id: 911,
+      amount: 9_000,
+      date: '2026-04-01',
+      plannedDate: '2026-04-01',
+      type: 'Income',
+      status: 'Completed',
+      description: 'Аванс юридического лица',
+      notes: '',
+      systemNotes: '',
+      isPaid: true,
+      paidAmount: 9_000,
+      outstandingAmount: 0,
+      hasPartialPayment: false,
+      rescheduleCount: 0,
+      documentKind: 'Payment',
+      legalEntityId: 77,
+      legalEntityName: 'ООО Вектор',
+      advanceReviewStatus: 'AcceptedAsAdvance',
+    } as unknown as Payment;
+    const targetDebt = {
+      id: 912,
+      amount: 12_000,
+      date: '2026-04-15',
+      plannedDate: '2026-04-15',
+      type: 'Income',
+      status: 'Pending',
+      description: 'Долг юридического лица',
+      notes: '',
+      systemNotes: '',
+      isPaid: false,
+      paidAmount: 0,
+      outstandingAmount: 12_000,
+      hasPartialPayment: false,
+      rescheduleCount: 0,
+      documentKind: 'Payment',
+      legalEntityId: 77,
+      legalEntityName: 'ООО Вектор',
+    } as unknown as Payment;
+
+    usePaymentsPagedMock.mockReturnValue({
+      ...paymentsPagedResult,
+      payments: [sourceAdvance],
+      total: 1,
+      refresh,
+    });
+    vi.mocked(apiService.getLegalEntityBalance).mockResolvedValueOnce({ clientId: null, legalEntityId: 77, balance: 9_000 });
+    vi.mocked(apiService.getLegalEntityBalanceTransactions).mockResolvedValueOnce([
+      {
+        id: 2,
+        clientId: null,
+        legalEntityId: 77,
+        paymentId: 911,
+        amount: 9_000,
+        type: 'UnallocatedAdvance',
+        direction: 'Credit',
+        description: 'Аванс по платежу #911',
+        externalKey: 'payment-unallocated-advance:911',
+        createdAt: '2026-04-01T00:00:00Z',
+      },
+    ]);
+    vi.mocked(apiService.getPaymentsV2).mockResolvedValueOnce({
+      items: [sourceAdvance, targetDebt],
+      total: 2,
+      page: 1,
+      pageSize: 100,
+      summary: {
+        income: 21_000,
+        expense: 0,
+        balance: 21_000,
+        incomeCount: 2,
+        expenseCount: 0,
+        total: 21_000,
+      },
+    });
+    vi.mocked(apiService.applyLegalEntityBalance).mockResolvedValueOnce({ appliedAmount: 9_000, balance: 0 });
+
+    render(<Payments />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'allocate-advance-911' }));
+
+    expect(await screen.findByRole('dialog', { name: 'Распределить аванс' })).toBeTruthy();
+    expect(apiService.getLegalEntityBalance).toHaveBeenCalledWith(77);
+    expect(apiService.getLegalEntityBalanceTransactions).toHaveBeenCalledWith(77);
+    expect(apiService.getPaymentsV2).toHaveBeenCalledWith(expect.objectContaining({
+      legalEntityId: 77,
+      type: 'Income',
+      page: 1,
+      pageSize: 100,
+    }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Зачесть аванс' }));
+
+    await waitFor(() => {
+      expect(apiService.applyLegalEntityBalance).toHaveBeenCalledWith(77, {
+        paymentId: 912,
+        amount: 9_000,
+        description: 'Распределение аванса по платежу #911',
+        sourcePaymentId: 911,
+      });
+    });
+    expect(apiService.applyClientBalance).not.toHaveBeenCalled();
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 

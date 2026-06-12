@@ -3984,6 +3984,21 @@ export class ApiService {
     });
   }
 
+  async getLegalEntityBalance(id: number) {
+    return this.request<ClientBalanceSummary>(`/legal-entities/${id}/balance`);
+  }
+
+  async getLegalEntityBalanceTransactions(id: number) {
+    return this.request<ClientBalanceTransaction[]>(`/legal-entities/${id}/balance/transactions`);
+  }
+
+  async applyLegalEntityBalance(id: number, payload: { paymentId: number; amount: number; description?: string | null; sourcePaymentId?: number | null }) {
+    return this.request<ApplyClientBalanceResult>(`/legal-entities/${id}/balance/apply`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async getClientCaseExpenseDetails(
     id: number,
     params?: { caseId?: number; clientRole?: ClientRole },

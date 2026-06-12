@@ -2835,6 +2835,78 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task LegalEntityBalance_ApplyCredit_UsesSelectedAdvanceRemainder()
+    {
+        await using var db = await CreateContextAsync();
+
+        var legalEntity = new LegalEntity { ShortName = "ООО Аванс", Inn = "5400000000" };
+        db.LegalEntities.Add(legalEntity);
+        await db.SaveChangesAsync();
+
+        var sourceAdvance = CreatePayment(new DateTime(2026, 4, 1), 900m, "Аванс юрлица");
+        sourceAdvance.ClientId = null;
+        sourceAdvance.LegalEntityId = legalEntity.Id;
+        sourceAdvance.PaidAmount = 900m;
+        sourceAdvance.Status = PaymentStatus.Completed;
+        sourceAdvance.IsPaid = true;
+        sourceAdvance.AdvanceReviewStatus = PaymentAdvanceReviewStatus.AcceptedAsAdvance;
+
+        var targetPayment = CreatePayment(new DateTime(2026, 4, 15), 1_200m, "Долг юрлица");
+        targetPayment.ClientId = null;
+        targetPayment.LegalEntityId = legalEntity.Id;
+        targetPayment.PaidAmount = 0m;
+        targetPayment.Status = PaymentStatus.Pending;
+
+        db.Payments.AddRange(sourceAdvance, targetPayment);
+        await db.SaveChangesAsync();
+
+        db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
+        {
+            LegalEntityId = legalEntity.Id,
+            PaymentId = sourceAdvance.Id,
+            Amount = 900m,
+            Type = ClientBalanceTransactionType.UnallocatedAdvance,
+            Direction = ClientBalanceDirection.Credit,
+            Description = "Аванс юрлица",
+            ExternalKey = ClientBalanceService.BuildUnallocatedAdvanceKey(sourceAdvance.Id),
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = new LegalEntityBalancesController(db);
+
+        var summaryResult = await controller.GetSummary(legalEntity.Id, CancellationToken.None);
+        var summaryOk = Assert.IsType<OkObjectResult>(summaryResult);
+        Assert.Equal(900m, Assert.IsType<ClientBalanceSummaryDto>(summaryOk.Value).Balance);
+
+        var actionResult = await controller.ApplyCredit(
+            legalEntity.Id,
+            new ApplyClientBalanceRequest
+            {
+                PaymentId = targetPayment.Id,
+                Amount = 1_200m,
+                SourcePaymentId = sourceAdvance.Id,
+            },
+            CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(actionResult);
+
+        var updatedTarget = await db.Payments.FindAsync(targetPayment.Id);
+        Assert.NotNull(updatedTarget);
+        Assert.Equal(900m, updatedTarget!.PaidAmount);
+
+        var legalEntityBalance = await ClientBalanceService.GetLegalEntityBalanceAsync(db, legalEntity.Id);
+        Assert.Equal(0m, legalEntityBalance);
+
+        var debit = await db.ClientBalanceTransactions
+            .AsNoTracking()
+            .SingleAsync(item => item.Type == ClientBalanceTransactionType.CreditApplied);
+        Assert.Equal(legalEntity.Id, debit.LegalEntityId);
+        Assert.Null(debit.ClientId);
+        Assert.StartsWith(ClientBalanceService.BuildUnallocatedAdvanceApplicationKeyPrefix(sourceAdvance.Id), debit.ExternalKey);
+    }
+
+    [Fact]
     public async Task Update_WithAppliedClientBalance_RejectsLowerPaidAmount()
     {
         await using var db = await CreateContextAsync();

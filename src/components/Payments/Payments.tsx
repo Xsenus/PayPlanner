@@ -57,6 +57,9 @@ type AdvanceAllocationState = {
   loading: boolean;
   submitting: boolean;
   error: string | null;
+  ownerKind: 'client' | 'legalEntity';
+  ownerId: number;
+  ownerName: string;
 };
 
 const STATUS_ORDER: PaymentStatus[] = ['Pending', 'Processing', 'Overdue', 'Completed', 'Cancelled'];
@@ -105,6 +108,28 @@ function resolveAdvanceSourceAvailableAmount(transactions: ClientBalanceTransact
       Boolean(item.externalKey?.startsWith(appliedPrefix)))
     .reduce((sum, item) => sum + Number(item.amount ?? 0), 0);
   return Math.max(Number((credited - applied).toFixed(2)), 0);
+}
+
+function resolveAdvanceOwner(payment: Payment) {
+  const clientId = payment.clientId ?? payment.client?.id ?? 0;
+  if (clientId > 0) {
+    return {
+      kind: 'client' as const,
+      id: clientId,
+      name: payment.client?.name ?? payment.counterpartyName ?? 'Клиент не указан',
+    };
+  }
+
+  const legalEntityId = payment.legalEntityId ?? 0;
+  if (legalEntityId > 0) {
+    return {
+      kind: 'legalEntity' as const,
+      id: legalEntityId,
+      name: payment.legalEntityName ?? payment.counterpartyName ?? 'Юридическое лицо не указано',
+    };
+  }
+
+  return null;
 }
 
 const PAYMENT_COLUMN_CONFIGS = [
@@ -1189,9 +1214,9 @@ export function Payments({
         return;
       }
 
-      const clientId = payment.clientId ?? payment.client?.id ?? 0;
-      if (!clientId) {
-        toast.error('Автоматическое распределение сейчас доступно только для авансов физического клиента.', 'Платежи');
+      const owner = resolveAdvanceOwner(payment);
+      if (!owner) {
+        toast.error('Автоматическое распределение доступно только для авансов клиента или юридического лица.', 'Платежи');
         return;
       }
 
@@ -1204,20 +1229,27 @@ export function Payments({
         loading: true,
         submitting: false,
         error: null,
+        ownerKind: owner.kind,
+        ownerId: owner.id,
+        ownerName: owner.name,
       });
 
       try {
         const [balanceResponse, paymentsResponse, balanceTransactions] = await Promise.all([
-          apiService.getClientBalance(clientId),
+          owner.kind === 'client'
+            ? apiService.getClientBalance(owner.id)
+            : apiService.getLegalEntityBalance(owner.id),
           apiService.getPaymentsV2({
-            clientId,
+            ...(owner.kind === 'client' ? { clientId: owner.id } : { legalEntityId: owner.id }),
             type: 'Income',
             page: 1,
             pageSize: 100,
             sortBy: 'date',
             sortDir: 'asc',
           }),
-          apiService.getClientBalanceTransactions(clientId),
+          owner.kind === 'client'
+            ? apiService.getClientBalanceTransactions(owner.id)
+            : apiService.getLegalEntityBalanceTransactions(owner.id),
         ]);
 
         const totalBalance = Math.max(Number(balanceResponse.balance ?? 0), 0);
@@ -1245,6 +1277,9 @@ export function Payments({
           loading: false,
           submitting: false,
           error: null,
+          ownerKind: owner.kind,
+          ownerId: owner.id,
+          ownerName: owner.name,
         });
       } catch (error) {
         setAdvanceAllocation((current) =>
@@ -1302,13 +1337,15 @@ export function Payments({
 
     try {
       setAdvanceAllocation((current) => current ? { ...current, submitting: true, error: null } : current);
-      const clientId = advanceAllocation.source.clientId ?? advanceAllocation.source.client?.id ?? 0;
-      const result = await apiService.applyClientBalance(clientId, {
+      const applyPayload = {
         paymentId: target.id,
         amount,
         description: `Распределение аванса по платежу #${advanceAllocation.source.id}`,
         sourcePaymentId: advanceAllocation.source.id,
-      });
+      };
+      const result = advanceAllocation.ownerKind === 'client'
+        ? await apiService.applyClientBalance(advanceAllocation.ownerId, applyPayload)
+        : await apiService.applyLegalEntityBalance(advanceAllocation.ownerId, applyPayload);
       toast.success(
         `Аванс зачтен в платеж #${target.id} на сумму ${formatCurrencySmart(result.appliedAmount ?? amount).full}.`,
         'Платежи',
@@ -2240,10 +2277,10 @@ export function Payments({
                 </div>
                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Клиент
+                    Контрагент
                   </div>
                   <div className="mt-1 text-sm font-semibold text-slate-900">
-                    {advanceAllocation.source.client?.name ?? 'Клиент не указан'}
+                    {advanceAllocation.ownerName}
                   </div>
                 </div>
               </div>

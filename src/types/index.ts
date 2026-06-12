@@ -2730,13 +2730,15 @@ export type ClientBalanceTransactionType =
 export type ClientBalanceDirection = 'Credit' | 'Debit';
 
 export interface ClientBalanceSummary {
-  clientId: number;
+  clientId?: number | null;
+  legalEntityId?: number | null;
   balance: number;
 }
 
 export interface ClientBalanceTransaction {
   id: number;
-  clientId: number;
+  clientId?: number | null;
+  legalEntityId?: number | null;
   invoiceId?: number | null;
   paymentId?: number | null;
   amount: number;

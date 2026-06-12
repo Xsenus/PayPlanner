@@ -5,7 +5,8 @@ namespace PayPlanner.Api.Models.Responses;
 
 public sealed class ClientBalanceSummaryDto
 {
-    public int ClientId { get; set; }
+    public int? ClientId { get; set; }
+    public int? LegalEntityId { get; set; }
     public decimal Balance { get; set; }
 }
 
