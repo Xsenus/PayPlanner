@@ -4186,6 +4186,120 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task BackfillAdvanceReviewCandidates_RequiresExplicitConfirmation()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreatePaymentsUserAsync(db, canExport: false);
+        var client = new Client { Name = "Backfill confirmation client" };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var payment = CreatePayment(new DateTime(2026, 3, 2), 7_100m, "Candidate without confirmation");
+        payment.ClientId = client.Id;
+        payment.PaidAmount = 7_100m;
+        payment.Status = PaymentStatus.Completed;
+        payment.IsPaid = true;
+        payment.PaidDate = payment.Date;
+        payment.LastPaymentDate = payment.Date;
+        payment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.None;
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+
+        var controller = CreatePaymentsController(db, user.Id);
+        var result = await controller.BackfillAdvanceReviewCandidates(confirm: false, limit: 10, ct: CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result);
+        db.ChangeTracker.Clear();
+        var status = await db.Payments
+            .AsNoTracking()
+            .Where(item => item.Id == payment.Id)
+            .Select(item => item.AdvanceReviewStatus)
+            .SingleAsync();
+        Assert.Equal(PaymentAdvanceReviewStatus.None, status);
+    }
+
+    [Fact]
+    public async Task BackfillAdvanceReviewCandidates_MarksOnlyLegacyCandidatesWithoutChangingBalance()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreatePaymentsUserAsync(db, canExport: false);
+        var client = new Client { Name = "Backfill client" };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var legacyCandidate = CreatePayment(new DateTime(2026, 3, 2), 7_100m, "Legacy candidate");
+        legacyCandidate.ClientId = client.Id;
+        legacyCandidate.PaidAmount = 7_100m;
+        legacyCandidate.Status = PaymentStatus.Completed;
+        legacyCandidate.IsPaid = true;
+        legacyCandidate.PaidDate = legacyCandidate.Date;
+        legacyCandidate.LastPaymentDate = legacyCandidate.Date;
+        legacyCandidate.AdvanceReviewStatus = PaymentAdvanceReviewStatus.None;
+
+        var markedCandidate = CreatePayment(new DateTime(2026, 3, 3), 2_500m, "Already marked candidate");
+        markedCandidate.ClientId = client.Id;
+        markedCandidate.PaidAmount = 2_500m;
+        markedCandidate.Status = PaymentStatus.Completed;
+        markedCandidate.IsPaid = true;
+        markedCandidate.AdvanceReviewStatus = PaymentAdvanceReviewStatus.RequiresDecision;
+
+        var acceptedAdvance = CreatePayment(new DateTime(2026, 3, 4), 3_000m, "Accepted advance");
+        acceptedAdvance.ClientId = client.Id;
+        acceptedAdvance.PaidAmount = 3_000m;
+        acceptedAdvance.Status = PaymentStatus.Completed;
+        acceptedAdvance.IsPaid = true;
+        acceptedAdvance.AdvanceReviewStatus = PaymentAdvanceReviewStatus.AcceptedAsAdvance;
+
+        var linkedPayment = CreatePayment(new DateTime(2026, 3, 5), 4_000m, "Linked invoice payment");
+        linkedPayment.ClientId = client.Id;
+        linkedPayment.PaidAmount = 4_000m;
+        linkedPayment.Status = PaymentStatus.Completed;
+        linkedPayment.IsPaid = true;
+        linkedPayment.Account = "INV-BACKFILL-1";
+        linkedPayment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.None;
+
+        db.Payments.AddRange(legacyCandidate, markedCandidate, acceptedAdvance, linkedPayment);
+        await db.SaveChangesAsync();
+        db.ObjectAuditEvents.RemoveRange(db.ObjectAuditEvents);
+        await db.SaveChangesAsync();
+
+        var controller = CreatePaymentsController(db, user.Id);
+        var result = await controller.BackfillAdvanceReviewCandidates(confirm: true, limit: 10, ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var response = Assert.IsType<PaymentAdvanceReviewBackfillResponseDto>(ok.Value);
+        Assert.Equal(1, response.Eligible);
+        Assert.Equal(1, response.Updated);
+        Assert.Equal(7_100m, response.TotalAmount);
+        Assert.Equal([legacyCandidate.Id], response.Items.Select(item => item.Id).ToArray());
+        Assert.Equal(PaymentAdvanceReviewStatus.RequiresDecision, response.Items[0].AdvanceReviewStatus);
+
+        db.ChangeTracker.Clear();
+        var statuses = await db.Payments
+            .AsNoTracking()
+            .OrderBy(payment => payment.Id)
+            .Select(payment => payment.AdvanceReviewStatus)
+            .ToListAsync();
+        Assert.Equal(
+            [
+                PaymentAdvanceReviewStatus.RequiresDecision,
+                PaymentAdvanceReviewStatus.RequiresDecision,
+                PaymentAdvanceReviewStatus.AcceptedAsAdvance,
+                PaymentAdvanceReviewStatus.None,
+            ],
+            statuses);
+        Assert.Empty(await db.ClientBalanceTransactions.AsNoTracking().ToListAsync());
+
+        var auditEvent = await db.ObjectAuditEvents
+            .AsNoTracking()
+            .SingleAsync(item => item.ObjectType == "payment" && item.ObjectId == legacyCandidate.Id && item.Action == "Updated");
+        Assert.NotNull(auditEvent.MetadataJson);
+        using var metadata = JsonDocument.Parse(auditEvent.MetadataJson!);
+        var reason = metadata.RootElement.GetProperty("reason").GetString();
+        Assert.Contains("Backfill контроля авансов", reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AcceptAdvance_CreatesClientBalanceCredit_AndV2FilterReturnsPayment()
     {
         await using var db = await CreateContextAsync();

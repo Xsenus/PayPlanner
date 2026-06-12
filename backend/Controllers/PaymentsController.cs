@@ -562,6 +562,90 @@ public class PaymentsController : ControllerBase
         });
     }
 
+    [HttpPost("advance-review/backfill")]
+    public async Task<IActionResult> BackfillAdvanceReviewCandidates(
+        [FromQuery] bool confirm = false,
+        [FromQuery] int limit = 100,
+        CancellationToken ct = default)
+    {
+        if (!confirm)
+        {
+            return BadRequest(new { message = "Backfill requires confirm=true." });
+        }
+
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        limit = Math.Clamp(limit, 1, 500);
+        var candidatePredicate = PaymentAdvanceReviewService.UnallocatedAdvanceCandidatePredicate();
+        var query = _db.Payments
+            .ApplyPaymentVisibility(visibility)
+            .Where(candidatePredicate)
+            .Where(payment => payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.None);
+
+        var eligible = await query.CountAsync(ct);
+        var totalAmount = await query
+            .SumAsync(payment => payment.PaidAmount > 0.009m ? payment.PaidAmount : payment.Amount, ct);
+
+        var payments = await query
+            .Include(payment => payment.Client)
+            .Include(payment => payment.LegalEntity)
+            .OrderBy(payment => payment.Date)
+            .ThenBy(payment => payment.Id)
+            .Take(limit)
+            .ToListAsync(ct);
+
+        foreach (var payment in payments)
+        {
+            payment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.RequiresDecision;
+            payment.AdvanceReviewReason = null;
+            payment.AdvanceReviewedAt = null;
+            payment.AdvanceReviewedByUserId = null;
+            payment.AdvanceReviewedByUserName = null;
+        }
+
+        if (payments.Count > 0)
+        {
+            _db.SetAuditReason($"Backfill контроля авансов: {payments.Count} старых платежей поставлены на разбор без изменения денежных проводок.");
+            await _db.SaveChangesAsync(ct);
+        }
+
+        var items = payments
+            .Select(payment => new PaymentAdvanceReviewCandidateDto
+            {
+                Id = payment.Id,
+                Date = payment.Date,
+                Amount = payment.Amount,
+                PaidAmount = payment.PaidAmount,
+                AdvanceAmount = payment.PaidAmount > 0.009m ? payment.PaidAmount : payment.Amount,
+                Description = payment.Description,
+                ClientId = payment.ClientId,
+                LegalEntityId = payment.LegalEntityId,
+                CounterpartyName = payment.Client?.Name
+                    ?? (!string.IsNullOrWhiteSpace(payment.LegalEntity?.ShortName)
+                        ? payment.LegalEntity.ShortName
+                        : payment.LegalEntity?.FullName)
+                    ?? payment.CounterpartyName,
+                ClientCaseId = payment.ClientCaseId,
+                ContractId = payment.ContractId,
+                Status = payment.Status,
+                AdvanceReviewStatus = payment.AdvanceReviewStatus,
+            })
+            .ToList();
+
+        return Ok(new PaymentAdvanceReviewBackfillResponseDto
+        {
+            Eligible = eligible,
+            Updated = payments.Count,
+            TotalAmount = totalAmount,
+            Limit = limit,
+            Items = items,
+        });
+    }
+
     [HttpPut("{id:int}/invoice-managed")]
     public async Task<IActionResult> UpdateInvoiceManaged(int id, [FromBody] Payment model, CancellationToken ct)
     {
