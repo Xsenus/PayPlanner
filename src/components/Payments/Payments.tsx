@@ -846,6 +846,26 @@ export function Payments({
     [pageSize, total],
   );
 
+  const advanceReviewPageSummary = useMemo(() => {
+    const requiresDecision = payments.filter((payment) => payment.advanceReviewStatus === 'RequiresDecision');
+    const accepted = payments.filter((payment) => payment.advanceReviewStatus === 'AcceptedAsAdvance');
+    const requiresDecisionAmount = requiresDecision.reduce(
+      (sum, payment) => sum + Math.max(Number(payment.paidAmount || payment.amount || 0), 0),
+      0,
+    );
+    const acceptedAmount = accepted.reduce(
+      (sum, payment) => sum + Math.max(Number(payment.paidAmount || payment.amount || 0), 0),
+      0,
+    );
+
+    return {
+      requiresDecisionCount: requiresDecision.length,
+      requiresDecisionAmount,
+      acceptedCount: accepted.length,
+      acceptedAmount,
+    };
+  }, [payments]);
+
   useEffect(() => {
     if (page > totalPages) {
       setPage(totalPages);
@@ -899,6 +919,12 @@ export function Payments({
     toDate,
     typeFilter,
   ]);
+
+  const showAdvanceReviewMonitoring = useCallback((status: PaymentAdvanceReviewStatus) => {
+    setAdvanceReviewFilter(status);
+    setStatusFilter('all');
+    setPage(1);
+  }, []);
 
   const summaryCards: JSX.Element[] = [];
   if (appliedTypeFilter === 'all' || appliedTypeFilter === 'Income') {
@@ -2182,6 +2208,68 @@ export function Payments({
             </div>
           ) : (
             <>
+              <section
+                className="rounded-xl border border-rose-100 bg-white p-3 shadow-sm"
+                aria-label="Мониторинг нераспределенных авансов"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex min-w-0 flex-col gap-1">
+                    <div className="inline-flex items-center gap-2 text-sm font-semibold text-slate-900">
+                      <AlertTriangle className="h-4 w-4 text-rose-600" />
+                      Нераспределенные авансы
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      Платежи без закрывающих документов нужно принять как аванс, распределить, привязать или исключить с причиной.
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => showAdvanceReviewMonitoring('RequiresDecision')}
+                      className={[
+                        'inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold transition-colors',
+                        advanceReviewFilter === 'RequiresDecision'
+                          ? 'border-rose-200 bg-rose-600 text-white'
+                          : 'border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100',
+                      ].join(' ')}
+                    >
+                      На разбор
+                      <span className="rounded-full bg-white/80 px-2 py-0.5 text-xs font-bold text-rose-700">
+                        {advanceReviewPageSummary.requiresDecisionCount}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => showAdvanceReviewMonitoring('AcceptedAsAdvance')}
+                      className={[
+                        'inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold transition-colors',
+                        advanceReviewFilter === 'AcceptedAsAdvance'
+                          ? 'border-emerald-200 bg-emerald-600 text-white'
+                          : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
+                      ].join(' ')}
+                    >
+                      Принятые авансы
+                      <span className="rounded-full bg-white/80 px-2 py-0.5 text-xs font-bold text-emerald-700">
+                        {advanceReviewPageSummary.acceptedCount}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <div className="rounded-lg border border-rose-100 bg-rose-50 px-3 py-2">
+                    <div className="text-xs font-medium uppercase text-rose-700/70">Требуют решения на странице</div>
+                    <div className="mt-1 text-base font-semibold text-rose-700">
+                      {advanceReviewPageSummary.requiresDecisionCount} на {formatCurrencySmart(advanceReviewPageSummary.requiresDecisionAmount).full}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2">
+                    <div className="text-xs font-medium uppercase text-emerald-700/70">Приняты как аванс на странице</div>
+                    <div className="mt-1 text-base font-semibold text-emerald-700">
+                      {advanceReviewPageSummary.acceptedCount} на {formatCurrencySmart(advanceReviewPageSummary.acceptedAmount).full}
+                    </div>
+                  </div>
+                </div>
+              </section>
               <PaymentsTable
                 payments={payments}
                 onEditPayment={handleEditPayment}

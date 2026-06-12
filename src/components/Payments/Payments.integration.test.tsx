@@ -347,6 +347,57 @@ describe('Payments integration', () => {
     expect(within(toolbar).getByRole('button', { name: 'Частичные без остатка' })).toBeTruthy();
   });
 
+  it('shows advance monitoring summary and switches to required decisions', async () => {
+    const requiredPayment = {
+      id: 801,
+      amount: 7_100,
+      paidAmount: 7_100,
+      date: '2026-03-02',
+      plannedDate: '2026-03-02',
+      type: 'Income',
+      status: 'Completed',
+      description: 'Поступление без счета',
+      notes: '',
+      systemNotes: '',
+      isPaid: true,
+      outstandingAmount: 0,
+      hasPartialPayment: false,
+      rescheduleCount: 0,
+      documentKind: 'Payment',
+      advanceReviewStatus: 'RequiresDecision',
+    } as unknown as Payment;
+    const acceptedPayment = {
+      ...requiredPayment,
+      id: 802,
+      amount: 3_000,
+      paidAmount: 3_000,
+      description: 'Принятый аванс',
+      advanceReviewStatus: 'AcceptedAsAdvance',
+    } as unknown as Payment;
+
+    usePaymentsPagedMock.mockReturnValue({
+      ...paymentsPagedResult,
+      payments: [requiredPayment, acceptedPayment],
+      total: 2,
+    });
+
+    render(<Payments />);
+
+    const monitoring = screen.getByRole('region', { name: 'Мониторинг нераспределенных авансов' });
+    expect(within(monitoring).getByText('Нераспределенные авансы')).toBeTruthy();
+    expect(within(monitoring).getByText(/1 на 7 100/)).toBeTruthy();
+    expect(within(monitoring).getByText(/1 на 3 000/)).toBeTruthy();
+
+    fireEvent.click(within(monitoring).getByRole('button', { name: /На разбор/ }));
+
+    await waitFor(() => {
+      const lastCall = usePaymentsPagedMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastCall.advanceReviewStatus).toBe('RequiresDecision');
+      expect(lastCall.status).toBeUndefined();
+      expect(lastCall.page).toBe(1);
+    });
+  });
+
   it('uses the profile time zone for the paid date when completing a payment', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-06-04T22:30:00.000Z'));
