@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
@@ -9,20 +10,27 @@ namespace PayPlanner.Api.Services;
 public static class PaymentAdvanceReviewService
 {
     private const decimal AmountEpsilon = 0.009m;
+    private static readonly Func<Payment, bool> UnallocatedAdvanceCandidateEvaluator =
+        UnallocatedAdvanceCandidatePredicate().Compile();
+
+    public static Expression<Func<Payment, bool>> UnallocatedAdvanceCandidatePredicate()
+        => payment => payment.Type == PaymentType.Income
+            && payment.DocumentKind == DocumentKind.Payment
+            && payment.Status != PaymentStatus.Cancelled
+            && ((payment.ClientId.HasValue && payment.ClientId.Value > 0 && !payment.LegalEntityId.HasValue)
+                || (payment.LegalEntityId.HasValue && payment.LegalEntityId.Value > 0 && !payment.ClientId.HasValue))
+            && (payment.PaidAmount > AmountEpsilon
+                || ((payment.IsPaid || payment.Status == PaymentStatus.Completed) && payment.Amount > AmountEpsilon))
+            && !payment.InvoiceId.HasValue
+            && !payment.ContractId.HasValue
+            && (payment.Account == null || payment.Account.Trim() == string.Empty)
+            && (payment.LegacyAccountNumber == null || payment.LegacyAccountNumber.Trim() == string.Empty);
 
     public static bool IsUnallocatedAdvanceCandidate(Payment payment)
     {
         ArgumentNullException.ThrowIfNull(payment);
 
-        return payment.Type == PaymentType.Income
-            && payment.DocumentKind == DocumentKind.Payment
-            && payment.Status != PaymentStatus.Cancelled
-            && HasSingleCounterpartyOwner(payment)
-            && GetAdvanceAmount(payment) > AmountEpsilon
-            && !payment.InvoiceId.HasValue
-            && !payment.ContractId.HasValue
-            && string.IsNullOrWhiteSpace(payment.Account)
-            && string.IsNullOrWhiteSpace(payment.LegacyAccountNumber);
+        return UnallocatedAdvanceCandidateEvaluator(payment);
     }
 
     public static decimal GetAdvanceAmount(Payment payment)
@@ -166,10 +174,6 @@ public static class PaymentAdvanceReviewService
         payment.AdvanceReviewedByUserId ??= httpContext?.User.GetUserId();
         payment.AdvanceReviewedByUserName ??= httpContext?.User.GetDisplayName();
     }
-
-    private static bool HasSingleCounterpartyOwner(Payment payment)
-        => (payment.ClientId.HasValue && payment.ClientId.Value > 0 && !payment.LegalEntityId.HasValue)
-            || (payment.LegalEntityId.HasValue && payment.LegalEntityId.Value > 0 && !payment.ClientId.HasValue);
 
     private static string? NormalizeReason(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

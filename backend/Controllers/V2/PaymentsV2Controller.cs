@@ -615,20 +615,10 @@ public class PaymentsV2Controller : ControllerBase
             return query.Where(payment => payment.AdvanceReviewStatus == status);
         }
 
-        return query.Where(payment =>
-            payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.RequiresDecision
-            || (payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.None
-                && payment.Type == PaymentType.Income
-                && payment.DocumentKind == DocumentKind.Payment
-                && payment.Status != PaymentStatus.Cancelled
-                && ((payment.ClientId.HasValue && payment.ClientId.Value > 0 && !payment.LegalEntityId.HasValue)
-                    || (payment.LegalEntityId.HasValue && payment.LegalEntityId.Value > 0 && !payment.ClientId.HasValue))
-                && ((payment.PaidAmount > 0.009m)
-                    || ((payment.IsPaid || payment.Status == PaymentStatus.Completed) && payment.Amount > 0.009m))
-                && !payment.InvoiceId.HasValue
-                && !payment.ContractId.HasValue
-                && (payment.Account == null || payment.Account.Trim() == string.Empty)
-                && (payment.LegacyAccountNumber == null || payment.LegacyAccountNumber.Trim() == string.Empty)));
+        var candidatePredicate = PaymentAdvanceReviewService.UnallocatedAdvanceCandidatePredicate();
+        return query.Where(payment => payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.RequiresDecision)
+            .Concat(query.Where(payment => payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.None)
+                .Where(candidatePredicate));
     }
 
     private Task<List<Payment>> LoadPaymentExportItemsAsync(
