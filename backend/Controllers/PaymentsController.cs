@@ -503,6 +503,65 @@ public class PaymentsController : ControllerBase
         return Ok(payment);
     }
 
+    [HttpGet("advance-review/candidates")]
+    public async Task<IActionResult> GetAdvanceReviewCandidates([FromQuery] int limit = 50, CancellationToken ct = default)
+    {
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        limit = Math.Clamp(limit, 1, 500);
+        var candidatePredicate = PaymentAdvanceReviewService.UnallocatedAdvanceCandidatePredicate();
+        var query = _db.Payments
+            .AsNoTracking()
+            .ApplyPaymentVisibility(visibility)
+            .Where(candidatePredicate)
+            .Where(payment => payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.None
+                || payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.RequiresDecision);
+
+        var total = await query.CountAsync(ct);
+        var totalAmount = await query
+            .SumAsync(payment => payment.PaidAmount > 0.009m ? payment.PaidAmount : payment.Amount, ct);
+
+        var items = await query
+            .OrderBy(payment => payment.Date)
+            .ThenBy(payment => payment.Id)
+            .Take(limit)
+            .Select(payment => new PaymentAdvanceReviewCandidateDto
+            {
+                Id = payment.Id,
+                Date = payment.Date,
+                Amount = payment.Amount,
+                PaidAmount = payment.PaidAmount,
+                AdvanceAmount = payment.PaidAmount > 0.009m ? payment.PaidAmount : payment.Amount,
+                Description = payment.Description,
+                ClientId = payment.ClientId,
+                LegalEntityId = payment.LegalEntityId,
+                CounterpartyName = payment.Client != null
+                    ? payment.Client.Name
+                    : payment.LegalEntity != null
+                        ? payment.LegalEntity.ShortName != string.Empty
+                            ? payment.LegalEntity.ShortName
+                            : payment.LegalEntity.FullName
+                        : payment.CounterpartyName,
+                ClientCaseId = payment.ClientCaseId,
+                ContractId = payment.ContractId,
+                Status = payment.Status,
+                AdvanceReviewStatus = payment.AdvanceReviewStatus,
+            })
+            .ToListAsync(ct);
+
+        return Ok(new PaymentAdvanceReviewCandidateReportDto
+        {
+            Total = total,
+            TotalAmount = totalAmount,
+            Limit = limit,
+            Items = items,
+        });
+    }
+
     [HttpPut("{id:int}/invoice-managed")]
     public async Task<IActionResult> UpdateInvoiceManaged(int id, [FromBody] Payment model, CancellationToken ct)
     {
