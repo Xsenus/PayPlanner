@@ -400,6 +400,149 @@ describe('PaymentModal integration', () => {
     );
   });
 
+  it('warns and marks a paid income payment without documents as an advance', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        payment={{
+          id: 780,
+          date: '2026-04-10',
+          plannedDate: '2026-04-10',
+          amount: 7_100,
+          paidAmount: 7_100,
+          outstandingAmount: 0,
+          hasPartialPayment: false,
+          status: 'Completed',
+          description: 'Платеж без закрывающих документов',
+          isPaid: true,
+          paidDate: '2026-04-10',
+          lastPaymentDate: '2026-04-10',
+          notes: '',
+          clientId: 69,
+          type: 'Income',
+          documentKind: 'Payment',
+          createdAt: '2026-04-10T00:00:00Z',
+          systemNotes: '',
+          rescheduleCount: 0,
+          advanceReviewStatus: 'None',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(1));
+    expect(confirmMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Нераспределенный аванс',
+        description: expect.stringContaining('счету, договору или акту'),
+        confirmLabel: 'Принять как аванс',
+      }),
+    );
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 780,
+        advanceReviewStatus: 'AcceptedAsAdvance',
+        advanceReviewReason: 'Пользователь подтвердил авансовый платеж при сохранении',
+      }),
+    );
+  });
+
+  it('returns to document linking when the advance warning is cancelled', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    confirmMock.mockResolvedValueOnce(false);
+
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        payment={{
+          id: 782,
+          date: '2026-04-10',
+          plannedDate: '2026-04-10',
+          amount: 7_100,
+          paidAmount: 7_100,
+          outstandingAmount: 0,
+          hasPartialPayment: false,
+          status: 'Completed',
+          description: 'Платеж без закрывающих документов',
+          isPaid: true,
+          paidDate: '2026-04-10',
+          lastPaymentDate: '2026-04-10',
+          notes: '',
+          clientId: 69,
+          type: 'Income',
+          documentKind: 'Payment',
+          createdAt: '2026-04-10T00:00:00Z',
+          systemNotes: '',
+          rescheduleCount: 0,
+          advanceReviewStatus: 'None',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+
+    await waitFor(() => expect(confirmMock).toHaveBeenCalledTimes(1));
+    expect(confirmMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cancelLabel: 'Вернуться к привязке',
+      }),
+    );
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('does not show the advance warning for a zero paid income payment', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        payment={{
+          id: 781,
+          date: '2026-04-10',
+          plannedDate: '2026-04-10',
+          amount: 0,
+          paidAmount: 0,
+          outstandingAmount: 0,
+          hasPartialPayment: false,
+          status: 'Completed',
+          description: 'Нулевой технический платеж',
+          isPaid: true,
+          paidDate: '2026-04-10',
+          lastPaymentDate: '2026-04-10',
+          notes: '',
+          clientId: 69,
+          type: 'Income',
+          documentKind: 'Payment',
+          createdAt: '2026-04-10T00:00:00Z',
+          systemNotes: '',
+          rescheduleCount: 0,
+          advanceReviewStatus: 'None',
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(confirmMock).not.toHaveBeenCalled();
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 781,
+        advanceReviewStatus: 'None',
+      }),
+    );
+  });
+
   it('uses the profile timezone day when marking a payment as paid', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-06-04T20:30:00.000Z'));
