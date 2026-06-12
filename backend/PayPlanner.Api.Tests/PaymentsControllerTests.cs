@@ -4300,6 +4300,97 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task RollbackAdvanceReviewBackfill_RequiresExplicitConfirmation()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreatePaymentsUserAsync(db, canExport: false);
+
+        var controller = CreatePaymentsController(db, user.Id);
+        var result = await controller.RollbackAdvanceReviewBackfill(confirm: false, limit: 10, ct: CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task RollbackAdvanceReviewBackfill_RevertsOnlyBackfilledPayments()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreatePaymentsUserAsync(db, canExport: false);
+        var client = new Client { Name = "Rollback client" };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var legacyCandidate = CreatePayment(new DateTime(2026, 3, 2), 7_100m, "Legacy candidate for rollback");
+        legacyCandidate.ClientId = client.Id;
+        legacyCandidate.PaidAmount = 7_100m;
+        legacyCandidate.Status = PaymentStatus.Completed;
+        legacyCandidate.IsPaid = true;
+        legacyCandidate.PaidDate = legacyCandidate.Date;
+        legacyCandidate.LastPaymentDate = legacyCandidate.Date;
+        legacyCandidate.AdvanceReviewStatus = PaymentAdvanceReviewStatus.None;
+
+        var markedCandidate = CreatePayment(new DateTime(2026, 3, 3), 2_500m, "Already marked candidate");
+        markedCandidate.ClientId = client.Id;
+        markedCandidate.PaidAmount = 2_500m;
+        markedCandidate.Status = PaymentStatus.Completed;
+        markedCandidate.IsPaid = true;
+        markedCandidate.AdvanceReviewStatus = PaymentAdvanceReviewStatus.RequiresDecision;
+
+        var acceptedAdvance = CreatePayment(new DateTime(2026, 3, 4), 3_000m, "Accepted advance");
+        acceptedAdvance.ClientId = client.Id;
+        acceptedAdvance.PaidAmount = 3_000m;
+        acceptedAdvance.Status = PaymentStatus.Completed;
+        acceptedAdvance.IsPaid = true;
+        acceptedAdvance.AdvanceReviewStatus = PaymentAdvanceReviewStatus.AcceptedAsAdvance;
+
+        db.Payments.AddRange(legacyCandidate, markedCandidate, acceptedAdvance);
+        await db.SaveChangesAsync();
+        db.ObjectAuditEvents.RemoveRange(db.ObjectAuditEvents);
+        await db.SaveChangesAsync();
+
+        var controller = CreatePaymentsController(db, user.Id);
+        var backfillResult = await controller.BackfillAdvanceReviewCandidates(confirm: true, limit: 10, ct: CancellationToken.None);
+        var backfillOk = Assert.IsType<OkObjectResult>(backfillResult);
+        var backfill = Assert.IsType<PaymentAdvanceReviewBackfillResponseDto>(backfillOk.Value);
+        Assert.Equal(1, backfill.Updated);
+
+        var rollbackResult = await controller.RollbackAdvanceReviewBackfill(confirm: true, limit: 10, ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(rollbackResult);
+        var rollback = Assert.IsType<PaymentAdvanceReviewBackfillRollbackResponseDto>(ok.Value);
+        Assert.Equal(1, rollback.Eligible);
+        Assert.Equal(1, rollback.Updated);
+        Assert.Equal(7_100m, rollback.TotalAmount);
+        Assert.Equal([legacyCandidate.Id], rollback.Items.Select(item => item.Id).ToArray());
+        Assert.Equal(PaymentAdvanceReviewStatus.None, rollback.Items[0].AdvanceReviewStatus);
+
+        db.ChangeTracker.Clear();
+        var statuses = await db.Payments
+            .AsNoTracking()
+            .OrderBy(payment => payment.Id)
+            .Select(payment => payment.AdvanceReviewStatus)
+            .ToListAsync();
+        Assert.Equal(
+            [
+                PaymentAdvanceReviewStatus.None,
+                PaymentAdvanceReviewStatus.RequiresDecision,
+                PaymentAdvanceReviewStatus.AcceptedAsAdvance,
+            ],
+            statuses);
+        Assert.Empty(await db.ClientBalanceTransactions.AsNoTracking().ToListAsync());
+
+        var rollbackAudit = await db.ObjectAuditEvents
+            .AsNoTracking()
+            .Where(item => item.ObjectType == "payment" && item.ObjectId == legacyCandidate.Id && item.Action == "Updated")
+            .OrderByDescending(item => item.CreatedAt)
+            .FirstAsync();
+        Assert.NotNull(rollbackAudit.MetadataJson);
+        using var metadata = JsonDocument.Parse(rollbackAudit.MetadataJson!);
+        var reason = metadata.RootElement.GetProperty("reason").GetString();
+        Assert.Contains("Rollback backfill контроля авансов", reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AcceptAdvance_CreatesClientBalanceCredit_AndV2FilterReturnsPayment()
     {
         await using var db = await CreateContextAsync();

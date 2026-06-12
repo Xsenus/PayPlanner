@@ -19,6 +19,15 @@ public sealed class PaymentAdvanceReviewBackfillResponseDto
     public IReadOnlyList<PaymentAdvanceReviewCandidateDto> Items { get; init; } = [];
 }
 
+public sealed class PaymentAdvanceReviewBackfillRollbackResponseDto
+{
+    public int Eligible { get; init; }
+    public int Updated { get; init; }
+    public decimal TotalAmount { get; init; }
+    public int Limit { get; init; }
+    public IReadOnlyList<PaymentAdvanceReviewCandidateDto> Items { get; init; } = [];
+}
+
 public sealed class PaymentAdvanceReviewCandidateDto
 {
     public int Id { get; init; }
