@@ -4186,6 +4186,48 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task GetAdvanceReviewCandidates_WithOwnScope_ReturnsOnlyVisiblePayments()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreatePaymentsUserAsync(db, canExport: false, viewScope: DataVisibilityScope.Own);
+        var otherUser = await CreatePaymentsUserAsync(db, canExport: false, viewScope: DataVisibilityScope.Own);
+        var visibleClient = new Client { Name = "Visible advance client", ResponsibleUserId = user.Id };
+        var hiddenClient = new Client { Name = "Hidden advance client", ResponsibleUserId = otherUser.Id };
+        db.Clients.AddRange(visibleClient, hiddenClient);
+        await db.SaveChangesAsync();
+
+        var visiblePayment = CreatePayment(new DateTime(2026, 3, 2), 7_100m, "Visible unallocated advance");
+        visiblePayment.ClientId = visibleClient.Id;
+        visiblePayment.PaidAmount = 7_100m;
+        visiblePayment.Status = PaymentStatus.Completed;
+        visiblePayment.IsPaid = true;
+        visiblePayment.PaidDate = visiblePayment.Date;
+        visiblePayment.LastPaymentDate = visiblePayment.Date;
+        visiblePayment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.None;
+
+        var hiddenPayment = CreatePayment(new DateTime(2026, 3, 3), 2_500m, "Hidden unallocated advance");
+        hiddenPayment.ClientId = hiddenClient.Id;
+        hiddenPayment.PaidAmount = 2_500m;
+        hiddenPayment.Status = PaymentStatus.Completed;
+        hiddenPayment.IsPaid = true;
+        hiddenPayment.PaidDate = hiddenPayment.Date;
+        hiddenPayment.LastPaymentDate = hiddenPayment.Date;
+        hiddenPayment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.None;
+
+        db.Payments.AddRange(visiblePayment, hiddenPayment);
+        await db.SaveChangesAsync();
+
+        var controller = CreatePaymentsController(db, user.Id);
+        var result = await controller.GetAdvanceReviewCandidates(limit: 10, ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var report = Assert.IsType<PaymentAdvanceReviewCandidateReportDto>(ok.Value);
+        Assert.Equal(1, report.Total);
+        Assert.Equal(7_100m, report.TotalAmount);
+        Assert.Equal([visiblePayment.Id], report.Items.Select(item => item.Id).ToArray());
+    }
+
+    [Fact]
     public async Task BackfillAdvanceReviewCandidates_RequiresExplicitConfirmation()
     {
         await using var db = await CreateContextAsync();
@@ -4249,6 +4291,62 @@ public class PaymentsControllerTests
             .Select(item => item.AdvanceReviewStatus)
             .SingleAsync();
         Assert.Equal(PaymentAdvanceReviewStatus.None, status);
+        Assert.Empty(await db.ClientBalanceTransactions.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task BackfillAdvanceReviewCandidates_WithOwnScope_MarksOnlyVisiblePayments()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreatePaymentsUserAsync(db, canExport: false, viewScope: DataVisibilityScope.Own);
+        var otherUser = await CreatePaymentsUserAsync(db, canExport: false, viewScope: DataVisibilityScope.Own);
+        var visibleClient = new Client { Name = "Visible backfill client", ResponsibleUserId = user.Id };
+        var hiddenClient = new Client { Name = "Hidden backfill client", ResponsibleUserId = otherUser.Id };
+        db.Clients.AddRange(visibleClient, hiddenClient);
+        await db.SaveChangesAsync();
+
+        var visiblePayment = CreatePayment(new DateTime(2026, 3, 2), 7_100m, "Visible backfill candidate");
+        visiblePayment.ClientId = visibleClient.Id;
+        visiblePayment.PaidAmount = 7_100m;
+        visiblePayment.Status = PaymentStatus.Completed;
+        visiblePayment.IsPaid = true;
+        visiblePayment.PaidDate = visiblePayment.Date;
+        visiblePayment.LastPaymentDate = visiblePayment.Date;
+        visiblePayment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.None;
+
+        var hiddenPayment = CreatePayment(new DateTime(2026, 3, 3), 2_500m, "Hidden backfill candidate");
+        hiddenPayment.ClientId = hiddenClient.Id;
+        hiddenPayment.PaidAmount = 2_500m;
+        hiddenPayment.Status = PaymentStatus.Completed;
+        hiddenPayment.IsPaid = true;
+        hiddenPayment.PaidDate = hiddenPayment.Date;
+        hiddenPayment.LastPaymentDate = hiddenPayment.Date;
+        hiddenPayment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.None;
+
+        db.Payments.AddRange(visiblePayment, hiddenPayment);
+        await db.SaveChangesAsync();
+
+        var controller = CreatePaymentsController(db, user.Id);
+        var result = await controller.BackfillAdvanceReviewCandidates(confirm: true, limit: 10, ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var response = Assert.IsType<PaymentAdvanceReviewBackfillResponseDto>(ok.Value);
+        Assert.Equal(1, response.Eligible);
+        Assert.Equal(1, response.Updated);
+        Assert.Equal([visiblePayment.Id], response.Items.Select(item => item.Id).ToArray());
+
+        db.ChangeTracker.Clear();
+        var statuses = await db.Payments
+            .AsNoTracking()
+            .OrderBy(payment => payment.Id)
+            .Select(payment => payment.AdvanceReviewStatus)
+            .ToListAsync();
+        Assert.Equal(
+            [
+                PaymentAdvanceReviewStatus.RequiresDecision,
+                PaymentAdvanceReviewStatus.None,
+            ],
+            statuses);
         Assert.Empty(await db.ClientBalanceTransactions.AsNoTracking().ToListAsync());
     }
 
@@ -4537,6 +4635,44 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task AcceptAdvance_WithOwnScope_ForHiddenPaymentReturnsNotFoundAndDoesNotCreateBalance()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreatePaymentsUserAsync(db, canExport: false, viewScope: DataVisibilityScope.Own);
+        var otherUser = await CreatePaymentsUserAsync(db, canExport: false, viewScope: DataVisibilityScope.Own);
+        var hiddenClient = new Client { Name = "Hidden accepted advance client", ResponsibleUserId = otherUser.Id };
+        db.Clients.Add(hiddenClient);
+        await db.SaveChangesAsync();
+
+        var hiddenPayment = CreatePayment(new DateTime(2026, 3, 2), 7_100m, "Hidden accepted advance");
+        hiddenPayment.ClientId = hiddenClient.Id;
+        hiddenPayment.PaidAmount = 7_100m;
+        hiddenPayment.Status = PaymentStatus.Completed;
+        hiddenPayment.IsPaid = true;
+        hiddenPayment.PaidDate = hiddenPayment.Date;
+        hiddenPayment.LastPaymentDate = hiddenPayment.Date;
+        hiddenPayment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.RequiresDecision;
+        db.Payments.Add(hiddenPayment);
+        await db.SaveChangesAsync();
+
+        var controller = CreatePaymentsController(db, user.Id);
+        var result = await controller.AcceptAdvance(
+            hiddenPayment.Id,
+            new PaymentAdvanceReviewRequest { Reason = "Hidden payment" },
+            CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(result);
+        db.ChangeTracker.Clear();
+        var status = await db.Payments
+            .AsNoTracking()
+            .Where(payment => payment.Id == hiddenPayment.Id)
+            .Select(payment => payment.AdvanceReviewStatus)
+            .SingleAsync();
+        Assert.Equal(PaymentAdvanceReviewStatus.RequiresDecision, status);
+        Assert.Empty(await db.ClientBalanceTransactions.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
     public async Task IgnoreAdvance_WritesReadableAuditReason()
     {
         await using var db = await CreateContextAsync();
@@ -4737,7 +4873,11 @@ public class PaymentsControllerTests
         };
     }
 
-    private static async Task<User> CreatePaymentsUserAsync(PaymentContext db, bool canExport, bool canEdit = true)
+    private static async Task<User> CreatePaymentsUserAsync(
+        PaymentContext db,
+        bool canExport,
+        bool canEdit = true,
+        string viewScope = DataVisibilityScope.All)
     {
         var role = new Role
         {
@@ -4754,7 +4894,7 @@ public class PaymentsControllerTests
             CanView = true,
             CanEdit = canEdit,
             CanExport = canExport,
-            ViewScope = DataVisibilityScope.All,
+            ViewScope = viewScope,
         });
 
         var user = new User
