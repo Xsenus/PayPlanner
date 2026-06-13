@@ -533,6 +533,22 @@ public class ReportsController : ControllerBase
                     return (BuildProjectExportDocument(reportDto), null);
                 }
 
+            case "directions":
+                {
+                    var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+                    if (paymentsVisibility is null)
+                    {
+                        return (null, Unauthorized());
+                    }
+
+                    var (start, end) = ResolveReportPeriod(from, to, reportToday);
+                    var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                        cancellationToken => BuildDirectionReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        _logger,
+                        ct);
+                    return (BuildDirectionExportDocument(reportDto), null);
+                }
+
             case "case-success":
                 {
                     var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
@@ -2019,6 +2035,30 @@ public class ReportsController : ControllerBase
             [
                 new("Проекты", ["Проект", "Поступило", "Списано", "Итог", "Оборот", "Приходов", "Расходов", "Доля оборота"], report.Projects.Select(item => new ReportExportRow([
                     item.ProjectName,
+                    MoneyCell(item.Income),
+                    MoneyCell(item.Expense),
+                    MoneyCell(item.NetTotal),
+                    MoneyCell(item.TotalAmount),
+                    item.IncomeCount.ToString(CultureInfo.InvariantCulture),
+                    item.ExpenseCount.ToString(CultureInfo.InvariantCulture),
+                    PercentCell(item.Share),
+                ])).ToList()),
+            ]);
+
+    private static ReportExportDocument BuildDirectionExportDocument(DirectionReportDto report)
+        => new(
+            "direction-report",
+            "Отчет по направлениям",
+            $"Период: {DateCell(report.From)} - {DateCell(report.To)}{(report.Source.HasValue ? $" · Источник: {MoneyOperationSourceCell(report.Source.Value)}" : string.Empty)}",
+            [
+                new("Поступило", MoneyCell(report.IncomeTotal)),
+                new("Списано", MoneyCell(report.ExpenseTotal)),
+                new("Итог", MoneyCell(report.NetTotal)),
+                new("Направлений", report.Directions.Count.ToString(CultureInfo.InvariantCulture)),
+            ],
+            [
+                new("Направления", ["Направление", "Поступило", "Списано", "Итог", "Оборот", "Приходов", "Расходов", "Доля оборота"], report.Directions.Select(item => new ReportExportRow([
+                    item.DirectionName,
                     MoneyCell(item.Income),
                     MoneyCell(item.Expense),
                     MoneyCell(item.NetTotal),

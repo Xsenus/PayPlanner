@@ -473,6 +473,37 @@ function exportProjectReport(report: ProjectReport, timeZoneId?: string | null) 
   downloadCsv('project-report.csv', rows);
 }
 
+function exportDirectionReport(report: DirectionReport, timeZoneId?: string | null) {
+  const rows: unknown[][] = [
+    ['Показатель', 'Значение'],
+    ['Период с', formatDate(report.from, timeZoneId)],
+    ['Период по', formatDate(report.to, timeZoneId)],
+    ['Источник', report.source ? sourceLabel(report.source) : 'Все источники'],
+    ['Поступило', report.incomeTotal],
+    ['Списано', report.expenseTotal],
+    ['Итог', report.netTotal],
+    ['Направлений', report.directions.length],
+    [],
+    ['Направления'],
+    ['Направление', 'Поступило', 'Списано', 'Итог', 'Оборот', 'Приходов', 'Расходов', 'Доля оборота'],
+  ];
+
+  report.directions.forEach((item) => {
+    rows.push([
+      item.directionName,
+      item.income,
+      item.expense,
+      item.netTotal,
+      item.totalAmount,
+      item.incomeCount,
+      item.expenseCount,
+      `${item.share}%`,
+    ]);
+  });
+
+  downloadCsv('direction-report.csv', rows);
+}
+
 function exportCashFlowForecastReport(report: CashFlowForecastReport, timeZoneId?: string | null) {
   const rows: unknown[][] = [
     ['Показатель', 'Значение'],
@@ -1718,7 +1749,7 @@ function ProjectReportSection({
 
 type LegalWorkExportFormat = 'csv' | 'excel' | 'pdf';
 type ManagementReportExportFormat = 'excel' | 'pdf';
-type ManagementReportKind = 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast' | 'categories' | 'counterparties' | 'projects';
+type ManagementReportKind = 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast' | 'categories' | 'counterparties' | 'projects' | 'directions';
 type ReportCaseSection = 'tasks' | 'documents' | 'court' | 'workOrder';
 
 type LegalWorkReportFilters = {
@@ -3729,11 +3760,15 @@ function DirectionReportSection({
   loading,
   error,
   onReload,
+  filters,
+  profileTimeZoneId,
 }: {
   report: DirectionReport | null;
   loading: boolean;
   error: string | null;
   onReload: () => void;
+  filters?: ManagementReportExportFilters;
+  profileTimeZoneId?: string | null;
 }) {
   const rows = (report?.directions ?? []).slice(0, 10);
 
@@ -3750,14 +3785,26 @@ function DirectionReportSection({
             Разрез фактических денежных операций по направлениям бизнеса: доходы, расходы, итог и доля в обороте.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onReload}
-          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-        >
-          <RefreshCcw className="h-4 w-4" />
-          Обновить
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => report && exportDirectionReport(report, profileTimeZoneId)}
+            disabled={!report || loading}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            CSV
+          </button>
+          <ManagementReportExportButtons reportKind="directions" filters={filters} disabled={!report || loading} />
+          <button
+            type="button"
+            onClick={onReload}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            <RefreshCcw className="h-4 w-4" />
+            Обновить
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -6854,6 +6901,8 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={directionReportLoading}
               error={directionReportError}
               onReload={reloadDirectionReport}
+              filters={cashFlowDates}
+              profileTimeZoneId={profileTimeZoneId}
             />
 
             <SalesPointReportSection
