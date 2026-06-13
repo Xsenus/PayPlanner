@@ -266,6 +266,7 @@ public class ReportsControllerTests
             "cash-flow",
             "categories",
             "counterparties",
+            "projects",
             "case-success",
             "current-cases",
             "lawyer-workload",

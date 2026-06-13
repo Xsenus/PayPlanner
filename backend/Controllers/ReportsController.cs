@@ -517,6 +517,22 @@ public class ReportsController : ControllerBase
                     return (BuildCounterpartyExportDocument(reportDto), null);
                 }
 
+            case "projects":
+                {
+                    var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+                    if (paymentsVisibility is null)
+                    {
+                        return (null, Unauthorized());
+                    }
+
+                    var (start, end) = ResolveReportPeriod(from, to, reportToday);
+                    var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                        cancellationToken => BuildProjectReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        _logger,
+                        ct);
+                    return (BuildProjectExportDocument(reportDto), null);
+                }
+
             case "case-success":
                 {
                     var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
@@ -1979,6 +1995,30 @@ public class ReportsController : ControllerBase
             [
                 new("Контрагенты", ["Контрагент", "Поступило", "Списано", "Итог", "Оборот", "Приходов", "Расходов", "Доля оборота"], report.Counterparties.Select(item => new ReportExportRow([
                     item.CounterpartyName,
+                    MoneyCell(item.Income),
+                    MoneyCell(item.Expense),
+                    MoneyCell(item.NetTotal),
+                    MoneyCell(item.TotalAmount),
+                    item.IncomeCount.ToString(CultureInfo.InvariantCulture),
+                    item.ExpenseCount.ToString(CultureInfo.InvariantCulture),
+                    PercentCell(item.Share),
+                ])).ToList()),
+            ]);
+
+    private static ReportExportDocument BuildProjectExportDocument(ProjectReportDto report)
+        => new(
+            "project-report",
+            "Отчет по проектам",
+            $"Период: {DateCell(report.From)} - {DateCell(report.To)}{(report.Source.HasValue ? $" · Источник: {MoneyOperationSourceCell(report.Source.Value)}" : string.Empty)}",
+            [
+                new("Поступило", MoneyCell(report.IncomeTotal)),
+                new("Списано", MoneyCell(report.ExpenseTotal)),
+                new("Итог", MoneyCell(report.NetTotal)),
+                new("Проектов", report.Projects.Count.ToString(CultureInfo.InvariantCulture)),
+            ],
+            [
+                new("Проекты", ["Проект", "Поступило", "Списано", "Итог", "Оборот", "Приходов", "Расходов", "Доля оборота"], report.Projects.Select(item => new ReportExportRow([
+                    item.ProjectName,
                     MoneyCell(item.Income),
                     MoneyCell(item.Expense),
                     MoneyCell(item.NetTotal),
