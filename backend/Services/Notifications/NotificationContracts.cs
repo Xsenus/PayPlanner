@@ -107,6 +107,7 @@ public static class UserNotificationTypes
     public const string CaseProceduralDeadline = "caseProceduralDeadline";
     public const string CaseDocument = "caseDocument";
     public const string CaseInactivityReminder = "caseInactivityReminder";
+    public const string PaymentAdvanceReviewRequired = "paymentAdvanceReviewRequired";
     public const string SystemAdminWarning = "systemAdminWarning";
 
     public static readonly IReadOnlyList<UserNotificationTypeDefinition> All =
@@ -131,6 +132,7 @@ public static class UserNotificationTypes
         new(CaseProceduralDeadline, "Процессуальный срок", "По делу добавлен, перенесен, закрыт или приближается процессуальный срок.", "amber", "high", NotificationChannels.All, false, false),
         new(CaseDocument, "Документы дела", "По делу загружен, сформирован, обновлен или удален документ.", "emerald", "normal", NotificationChannels.All, false, false),
         new(CaseInactivityReminder, "Напоминание о неактивности", "По делу давно не было значимой активности, требуется проверка ответственного.", "amber", "high", NotificationChannels.All, true, false),
+        new(PaymentAdvanceReviewRequired, "Контроль аванса", "Входящий оплаченный платеж не привязан к счету или акту и требует решения по авансу.", "rose", "high", NotificationChannels.All, true, false),
         new(SystemAdminWarning, "Системное предупреждение", "Администраторам требуется обратить внимание на фоновый процесс, интеграцию или настройку.", "rose", "high", NotificationChannels.All, true, false)
     ];
 

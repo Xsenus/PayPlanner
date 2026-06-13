@@ -13,6 +13,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Notifications;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
@@ -4075,6 +4076,127 @@ public class PaymentsControllerTests
         var createdPayment = Assert.IsType<Payment>(created.Value);
         Assert.Equal(PaymentAdvanceReviewStatus.RequiresDecision, createdPayment.AdvanceReviewStatus);
         Assert.Empty(await db.ClientBalanceTransactions.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task Create_UnallocatedPaidIncomePayment_AddsAdvanceReviewNotificationForResponsibleUser()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreatePaymentsUserAsync(db, canExport: false);
+        var client = new Client
+        {
+            Name = "Клиент с авансом",
+            ResponsibleUserId = user.Id,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var controller = CreatePaymentsController(db, user.Id);
+        var payment = CreatePayment(new DateTime(2026, 3, 2), 7_100m, "Платеж без документов");
+        payment.ClientId = client.Id;
+        payment.PaidAmount = 7_100m;
+        payment.Status = PaymentStatus.Completed;
+        payment.IsPaid = true;
+        payment.PaidDate = payment.Date;
+        payment.LastPaymentDate = payment.Date;
+
+        var result = await controller.Create(payment, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(result);
+        var createdPayment = Assert.IsType<Payment>(created.Value);
+        var notification = Assert.Single(await db.UserNotifications.AsNoTracking().ToListAsync());
+        Assert.Equal(user.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.PaymentAdvanceReviewRequired, notification.Type);
+        Assert.Equal(PaymentAdvanceReviewService.BuildAdvanceReviewRequiredEventKey(createdPayment.Id), notification.EventKey);
+        Assert.Equal("payment", notification.ObjectType);
+        Assert.Equal(createdPayment.Id, notification.ObjectId);
+        Assert.Equal("rose", notification.Tone);
+        Assert.Contains("Платеж требует решения", notification.Title);
+
+        using var metadata = JsonDocument.Parse(notification.MetadataJson);
+        Assert.Equal(createdPayment.Id, metadata.RootElement.GetProperty("paymentId").GetInt32());
+        Assert.Equal(7_100m, metadata.RootElement.GetProperty("advanceAmount").GetDecimal());
+    }
+
+    [Fact]
+    public async Task Update_UnallocatedPaidIncomePayment_DoesNotDuplicateAdvanceReviewNotification()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreatePaymentsUserAsync(db, canExport: false);
+        var client = new Client
+        {
+            Name = "Клиент без дублей уведомлений",
+            ResponsibleUserId = user.Id,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var controller = CreatePaymentsController(db, user.Id);
+        var payment = CreatePayment(new DateTime(2026, 3, 3), 5_000m, "Первичная оплата без документов");
+        payment.ClientId = client.Id;
+        payment.PaidAmount = 5_000m;
+        payment.Status = PaymentStatus.Completed;
+        payment.IsPaid = true;
+        payment.PaidDate = payment.Date;
+        payment.LastPaymentDate = payment.Date;
+
+        var createResult = await controller.Create(payment, CancellationToken.None);
+        var createdPayment = Assert.IsType<Payment>(Assert.IsType<CreatedResult>(createResult).Value);
+
+        var update = CreatePayment(createdPayment.Date, createdPayment.Amount, "Уточненная оплата без документов");
+        update.ClientId = client.Id;
+        update.PaidAmount = createdPayment.PaidAmount;
+        update.Status = PaymentStatus.Completed;
+        update.IsPaid = true;
+        update.PaidDate = createdPayment.PaidDate;
+        update.LastPaymentDate = createdPayment.LastPaymentDate;
+        update.AdvanceReviewStatus = createdPayment.AdvanceReviewStatus;
+
+        var updateResult = await controller.Update(createdPayment.Id, update, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(updateResult);
+        Assert.Single(await db.UserNotifications.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task Create_UnallocatedPaidIncomePayment_SkipsAdvanceReviewNotificationWhenTypeDisabled()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreatePaymentsUserAsync(db, canExport: false);
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = user.Id,
+            Key = UserNotificationPreferenceSettings.SettingKey,
+            Value = UserNotificationPreferenceSettings.Serialize(new UserNotificationPreferenceSnapshot(
+                [UserNotificationTypes.PaymentAdvanceReviewRequired],
+                new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase))),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        var client = new Client
+        {
+            Name = "Клиент с отключенным типом",
+            ResponsibleUserId = user.Id,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var controller = CreatePaymentsController(db, user.Id);
+        var payment = CreatePayment(new DateTime(2026, 3, 4), 3_000m, "Оплата без уведомления");
+        payment.ClientId = client.Id;
+        payment.PaidAmount = 3_000m;
+        payment.Status = PaymentStatus.Completed;
+        payment.IsPaid = true;
+        payment.PaidDate = payment.Date;
+        payment.LastPaymentDate = payment.Date;
+
+        var result = await controller.Create(payment, CancellationToken.None);
+
+        Assert.IsType<CreatedResult>(result);
+        Assert.Empty(await db.UserNotifications.AsNoTracking().ToListAsync());
     }
 
     [Fact]

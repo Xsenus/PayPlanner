@@ -305,6 +305,7 @@ public class PaymentsV2Controller : ControllerBase
         _db.Payments.Add(model);
         await _db.SaveChangesAsync(ct);
         await PaymentAdvanceReviewService.SyncBalanceAsync(_db, model, now, HttpContext, ct);
+        await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, model, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, model, now, ct);
         await _db.SaveChangesAsync(ct);
         return Created($"/api/v2/payments/{model.Id}", model);
@@ -452,6 +453,7 @@ public class PaymentsV2Controller : ControllerBase
         entity.RescheduleCount = rescheduleCount;
 
         await PaymentAdvanceReviewService.SyncBalanceAsync(_db, entity, now, HttpContext, ct);
+        await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, entity, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, entity, now, ct);
         if (originalInvoiceId.HasValue
             && originalInvoiceId.Value > 0

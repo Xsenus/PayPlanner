@@ -1,15 +1,20 @@
+using System.Globalization;
 using System.Linq.Expressions;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services.Notifications;
 
 namespace PayPlanner.Api.Services;
 
 public static class PaymentAdvanceReviewService
 {
     private const decimal AmountEpsilon = 0.009m;
+    private const string AdvanceReviewRequiredEventKeyPrefix = "payment-advance-review-required:";
+    private static readonly JsonSerializerOptions NotificationJsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly Func<Payment, bool> UnallocatedAdvanceCandidateEvaluator =
         UnallocatedAdvanceCandidatePredicate().Compile();
 
@@ -156,6 +161,92 @@ public static class PaymentAdvanceReviewService
         await ClientBalanceService.RemoveUnallocatedAdvanceAsync(db, payment.Id, ct);
     }
 
+    public static string BuildAdvanceReviewRequiredEventKey(int paymentId)
+        => $"{AdvanceReviewRequiredEventKeyPrefix}{paymentId}";
+
+    public static async Task EnsureReviewRequiredNotificationAsync(
+        PaymentContext db,
+        Payment payment,
+        DateTime utcNow,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(payment);
+
+        if (payment.Id <= 0
+            || payment.AdvanceReviewStatus != PaymentAdvanceReviewStatus.RequiresDecision
+            || !IsUnallocatedAdvanceCandidate(payment))
+        {
+            return;
+        }
+
+        var recipientUserId = await ResolveReviewRecipientUserIdAsync(db, payment, ct);
+        if (!recipientUserId.HasValue)
+        {
+            return;
+        }
+
+        var eventKey = BuildAdvanceReviewRequiredEventKey(payment.Id);
+        var alreadyExists = await db.UserNotifications
+            .AsNoTracking()
+            .AnyAsync(item => item.RecipientUserId == recipientUserId.Value && item.EventKey == eventKey, ct);
+        if (alreadyExists)
+        {
+            return;
+        }
+
+        var recipientExists = await db.Users
+            .AsNoTracking()
+            .AnyAsync(item => item.Id == recipientUserId.Value && item.IsActive, ct);
+        if (!recipientExists)
+        {
+            return;
+        }
+
+        var disabledTypes = await db.UserSettings
+            .AsNoTracking()
+            .Where(item => item.UserId == recipientUserId.Value
+                && item.Key == UserNotificationPreferenceSettings.SettingKey)
+            .Select(item => item.Value)
+            .FirstOrDefaultAsync(ct);
+        if (UserNotificationPreferenceSettings.ParseDisabledTypes(disabledTypes)
+            .Contains(UserNotificationTypes.PaymentAdvanceReviewRequired, StringComparer.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var counterpartyName = await ResolveCounterpartyNameAsync(db, payment, ct);
+        var advanceAmount = GetAdvanceAmount(payment);
+        var formattedAmount = advanceAmount.ToString("N2", CultureInfo.GetCultureInfo("ru-RU"));
+        var title = $"Платеж требует решения по авансу: {counterpartyName}";
+        var body = $"Поступил платеж на {formattedAmount} ₽ без счета и акта. Проверьте его в разделе «Платежи» → «Контроль аванса».";
+
+        db.UserNotifications.Add(new UserNotification
+        {
+            RecipientUserId = recipientUserId.Value,
+            Type = UserNotificationTypes.PaymentAdvanceReviewRequired,
+            EventKey = eventKey,
+            Title = Truncate(title, 300),
+            BodyPreview = Truncate(body, 1000),
+            Tone = "rose",
+            ObjectType = "payment",
+            ObjectId = payment.Id,
+            MetadataJson = JsonSerializer.Serialize(new
+            {
+                paymentId = payment.Id,
+                paymentDate = payment.Date,
+                paymentType = payment.Type.ToString(),
+                clientId = payment.ClientId,
+                legalEntityId = payment.LegalEntityId,
+                clientCaseId = payment.ClientCaseId,
+                contractId = payment.ContractId,
+                advanceAmount,
+                advanceReviewStatus = payment.AdvanceReviewStatus.ToString(),
+            }, NotificationJsonOptions),
+            CreatedAt = utcNow,
+        });
+    }
+
     public static void MarkAllocated(Payment payment, string? reason, DateTime utcNow, HttpContext? httpContext)
     {
         ArgumentNullException.ThrowIfNull(payment);
@@ -180,4 +271,115 @@ public static class PaymentAdvanceReviewService
 
     private static decimal NormalizeAmount(decimal value)
         => Math.Round(value, 2, MidpointRounding.AwayFromZero);
+
+    private static async Task<int?> ResolveReviewRecipientUserIdAsync(
+        PaymentContext db,
+        Payment payment,
+        CancellationToken ct)
+    {
+        var clientResponsibleUserId = payment.Client?.ResponsibleUserId ?? 0;
+        if (clientResponsibleUserId > 0)
+        {
+            return clientResponsibleUserId;
+        }
+
+        var legalResponsibleUserId = payment.LegalEntity?.ResponsibleUserId ?? 0;
+        if (legalResponsibleUserId > 0)
+        {
+            return legalResponsibleUserId;
+        }
+
+        var caseResponsibleUserId = payment.ClientCase?.ResponsibleUserId ?? 0;
+        if (caseResponsibleUserId > 0)
+        {
+            return caseResponsibleUserId;
+        }
+
+        if (payment.ClientId.HasValue)
+        {
+            var clientUserId = await db.Clients
+                .AsNoTracking()
+                .Where(item => item.Id == payment.ClientId.Value)
+                .Select(item => item.ResponsibleUserId)
+                .FirstOrDefaultAsync(ct);
+            if (clientUserId is > 0)
+            {
+                return clientUserId;
+            }
+        }
+
+        if (payment.LegalEntityId.HasValue)
+        {
+            var legalEntityUserId = await db.LegalEntities
+                .AsNoTracking()
+                .Where(item => item.Id == payment.LegalEntityId.Value)
+                .Select(item => item.ResponsibleUserId)
+                .FirstOrDefaultAsync(ct);
+            if (legalEntityUserId is > 0)
+            {
+                return legalEntityUserId;
+            }
+        }
+
+        if (payment.ClientCaseId.HasValue)
+        {
+            var caseUserId = await db.ClientCases
+                .AsNoTracking()
+                .Where(item => item.Id == payment.ClientCaseId.Value)
+                .Select(item => item.ResponsibleUserId)
+                .FirstOrDefaultAsync(ct);
+            if (caseUserId is > 0)
+            {
+                return caseUserId;
+            }
+        }
+
+        return null;
+    }
+
+    private static async Task<string> ResolveCounterpartyNameAsync(
+        PaymentContext db,
+        Payment payment,
+        CancellationToken ct)
+    {
+        var name = payment.Client?.Name
+            ?? (!string.IsNullOrWhiteSpace(payment.LegalEntity?.ShortName)
+                ? payment.LegalEntity.ShortName
+                : payment.LegalEntity?.FullName)
+            ?? payment.CounterpartyName;
+
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            return name.Trim();
+        }
+
+        if (payment.ClientId.HasValue)
+        {
+            name = await db.Clients
+                .AsNoTracking()
+                .Where(item => item.Id == payment.ClientId.Value)
+                .Select(item => item.Name)
+                .FirstOrDefaultAsync(ct);
+        }
+        else if (payment.LegalEntityId.HasValue)
+        {
+            name = await db.LegalEntities
+                .AsNoTracking()
+                .Where(item => item.Id == payment.LegalEntityId.Value)
+                .Select(item => string.IsNullOrWhiteSpace(item.ShortName) ? item.FullName : item.ShortName)
+                .FirstOrDefaultAsync(ct);
+        }
+
+        return string.IsNullOrWhiteSpace(name) ? "контрагент не указан" : name.Trim();
+    }
+
+    private static string Truncate(string value, int maxLength)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
+        {
+            return value;
+        }
+
+        return value[..maxLength];
+    }
 }

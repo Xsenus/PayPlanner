@@ -164,6 +164,7 @@ public class PaymentsController : ControllerBase
         _db.Payments.Add(model);
         await _db.SaveChangesAsync(ct);
         await PaymentAdvanceReviewService.SyncBalanceAsync(_db, model, now, HttpContext, ct);
+        await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, model, now, ct);
         await ApplyPaymentOverpaymentHandlingAsync(model, rawPaidAmount, now, paymentTimeZone, ct);
         await SyncPaymentCashOrderAsync(model, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, model, now, ct);
@@ -345,6 +346,7 @@ public class PaymentsController : ControllerBase
 
         await ApplyPaymentOverpaymentHandlingAsync(e, rawPaidAmount, now, paymentTimeZone, ct);
         await PaymentAdvanceReviewService.SyncBalanceAsync(_db, e, now, HttpContext, ct);
+        await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, e, now, ct);
         await SyncPaymentCashOrderAsync(e, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, e, now, ct);
         if (originalInvoiceId.HasValue
@@ -446,6 +448,7 @@ public class PaymentsController : ControllerBase
 
         await ClientBalanceService.UpsertPaymentOverpaymentAsync(_db, payment, payment.PaidAmount, now, HttpContext, ct);
         await PaymentAdvanceReviewService.SyncBalanceAsync(_db, payment, now, HttpContext, ct);
+        await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, payment, now, ct);
         await SyncPaymentCashOrderAsync(payment, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, payment, now, ct);
         await _db.SaveChangesAsync(ct);
@@ -637,6 +640,7 @@ public class PaymentsController : ControllerBase
             payment.AdvanceReviewedAt = null;
             payment.AdvanceReviewedByUserId = null;
             payment.AdvanceReviewedByUserName = null;
+            await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, payment, DateTime.UtcNow, ct);
         }
 
         if (payments.Count > 0)
