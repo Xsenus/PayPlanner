@@ -54,6 +54,26 @@ public class PaymentsController : ControllerBase
             .ApplyPaymentVisibility(visibility)
             .AnyAsync(payment => payment.Id == id, ct);
 
+    private async Task<bool> CanEditPaymentsAsync(CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return User?.IsInRole("admin") == true || User?.Identity?.IsAuthenticated != true;
+        }
+
+        if (User.IsInRole("admin") || await _db.IsUserAdminAsync(userId.Value, ct))
+        {
+            return true;
+        }
+
+        var permission = await _db.GetUserSectionPermissionAsync(userId.Value, RolePermissionCatalog.Payments, ct);
+        return permission?.CanEdit == true;
+    }
+
+    private async Task<IActionResult?> RequirePaymentsEditAsync(CancellationToken ct)
+        => await CanEditPaymentsAsync(ct) ? null : Forbid();
+
     [HttpGet]
     public async Task<IActionResult> Get(
         [FromQuery] DateTime? from,
@@ -441,6 +461,10 @@ public class PaymentsController : ControllerBase
         {
             return Unauthorized();
         }
+        if (await RequirePaymentsEditAsync(ct) is { } forbidden)
+        {
+            return forbidden;
+        }
         if (!await CanAccessPaymentAsync(id, visibility, ct))
         {
             return NotFound();
@@ -475,6 +499,10 @@ public class PaymentsController : ControllerBase
         if (visibility is null)
         {
             return Unauthorized();
+        }
+        if (await RequirePaymentsEditAsync(ct) is { } forbidden)
+        {
+            return forbidden;
         }
         if (!await CanAccessPaymentAsync(id, visibility, ct))
         {
@@ -578,6 +606,10 @@ public class PaymentsController : ControllerBase
         {
             return Unauthorized();
         }
+        if (await RequirePaymentsEditAsync(ct) is { } forbidden)
+        {
+            return forbidden;
+        }
 
         limit = Math.Clamp(limit, 1, 500);
         var candidatePredicate = PaymentAdvanceReviewService.UnallocatedAdvanceCandidatePredicate();
@@ -661,6 +693,10 @@ public class PaymentsController : ControllerBase
         if (visibility is null)
         {
             return Unauthorized();
+        }
+        if (await RequirePaymentsEditAsync(ct) is { } forbidden)
+        {
+            return forbidden;
         }
 
         limit = Math.Clamp(limit, 1, 500);

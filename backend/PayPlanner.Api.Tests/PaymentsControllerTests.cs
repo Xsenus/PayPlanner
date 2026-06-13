@@ -4219,6 +4219,40 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task BackfillAdvanceReviewCandidates_WithoutEditPermission_ReturnsForbidAndDoesNotChangePayments()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreatePaymentsUserAsync(db, canExport: false, canEdit: false);
+        var client = new Client { Name = "Backfill no edit client" };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var payment = CreatePayment(new DateTime(2026, 3, 2), 7_100m, "Candidate without edit permission");
+        payment.ClientId = client.Id;
+        payment.PaidAmount = 7_100m;
+        payment.Status = PaymentStatus.Completed;
+        payment.IsPaid = true;
+        payment.PaidDate = payment.Date;
+        payment.LastPaymentDate = payment.Date;
+        payment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.None;
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+
+        var controller = CreatePaymentsController(db, user.Id);
+        var result = await controller.BackfillAdvanceReviewCandidates(confirm: true, limit: 10, ct: CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result);
+        db.ChangeTracker.Clear();
+        var status = await db.Payments
+            .AsNoTracking()
+            .Where(item => item.Id == payment.Id)
+            .Select(item => item.AdvanceReviewStatus)
+            .SingleAsync();
+        Assert.Equal(PaymentAdvanceReviewStatus.None, status);
+        Assert.Empty(await db.ClientBalanceTransactions.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
     public async Task BackfillAdvanceReviewCandidates_MarksOnlyLegacyCandidatesWithoutChangingBalance()
     {
         await using var db = await CreateContextAsync();
@@ -4309,6 +4343,18 @@ public class PaymentsControllerTests
         var result = await controller.RollbackAdvanceReviewBackfill(confirm: false, limit: 10, ct: CancellationToken.None);
 
         Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task RollbackAdvanceReviewBackfill_WithoutEditPermission_ReturnsForbid()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreatePaymentsUserAsync(db, canExport: false, canEdit: false);
+
+        var controller = CreatePaymentsController(db, user.Id);
+        var result = await controller.RollbackAdvanceReviewBackfill(confirm: true, limit: 10, ct: CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result);
     }
 
     [Fact]
@@ -4454,6 +4500,43 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task AcceptAdvance_WithoutEditPermission_ReturnsForbidAndDoesNotCreateBalance()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreatePaymentsUserAsync(db, canExport: false, canEdit: false);
+        var client = new Client { Name = "Advance no edit client" };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var payment = CreatePayment(new DateTime(2026, 3, 2), 7_100m, "Advance without edit permission");
+        payment.ClientId = client.Id;
+        payment.PaidAmount = 7_100m;
+        payment.Status = PaymentStatus.Completed;
+        payment.IsPaid = true;
+        payment.PaidDate = payment.Date;
+        payment.LastPaymentDate = payment.Date;
+        payment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.RequiresDecision;
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+
+        var controller = CreatePaymentsController(db, user.Id);
+        var result = await controller.AcceptAdvance(
+            payment.Id,
+            new PaymentAdvanceReviewRequest { Reason = "No edit permission" },
+            CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result);
+        db.ChangeTracker.Clear();
+        var status = await db.Payments
+            .AsNoTracking()
+            .Where(item => item.Id == payment.Id)
+            .Select(item => item.AdvanceReviewStatus)
+            .SingleAsync();
+        Assert.Equal(PaymentAdvanceReviewStatus.RequiresDecision, status);
+        Assert.Empty(await db.ClientBalanceTransactions.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
     public async Task IgnoreAdvance_WritesReadableAuditReason()
     {
         await using var db = await CreateContextAsync();
@@ -4494,6 +4577,43 @@ public class PaymentsControllerTests
         var reason = metadata.RootElement.GetProperty("reason").GetString();
         Assert.Contains("Контроль аванса: платеж исключен из контроля", reason, StringComparison.Ordinal);
         Assert.Contains("Поступление уже разобрано вручную", reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task IgnoreAdvance_WithoutEditPermission_ReturnsForbidAndDoesNotChangePayment()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreatePaymentsUserAsync(db, canExport: false, canEdit: false);
+        var client = new Client { Name = "Ignore no edit client" };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var payment = CreatePayment(new DateTime(2026, 3, 3), 3_500m, "Ignore without edit permission");
+        payment.ClientId = client.Id;
+        payment.PaidAmount = 3_500m;
+        payment.Status = PaymentStatus.Completed;
+        payment.IsPaid = true;
+        payment.PaidDate = payment.Date;
+        payment.LastPaymentDate = payment.Date;
+        payment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.RequiresDecision;
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+
+        var controller = CreatePaymentsController(db, user.Id);
+        var result = await controller.IgnoreAdvance(
+            payment.Id,
+            new PaymentAdvanceReviewRequest { Reason = "No edit permission" },
+            CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result);
+        db.ChangeTracker.Clear();
+        var status = await db.Payments
+            .AsNoTracking()
+            .Where(item => item.Id == payment.Id)
+            .Select(item => item.AdvanceReviewStatus)
+            .SingleAsync();
+        Assert.Equal(PaymentAdvanceReviewStatus.RequiresDecision, status);
+        Assert.Empty(await db.ClientBalanceTransactions.AsNoTracking().ToListAsync());
     }
 
     private static async Task<PaymentContext> CreateContextAsync(bool useObjectAuditModel = true)
@@ -4617,7 +4737,7 @@ public class PaymentsControllerTests
         };
     }
 
-    private static async Task<User> CreatePaymentsUserAsync(PaymentContext db, bool canExport)
+    private static async Task<User> CreatePaymentsUserAsync(PaymentContext db, bool canExport, bool canEdit = true)
     {
         var role = new Role
         {
@@ -4632,6 +4752,7 @@ public class PaymentsControllerTests
             RoleId = role.Id,
             Section = RolePermissionCatalog.Payments,
             CanView = true,
+            CanEdit = canEdit,
             CanExport = canExport,
             ViewScope = DataVisibilityScope.All,
         });
