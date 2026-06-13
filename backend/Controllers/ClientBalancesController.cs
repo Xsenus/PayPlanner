@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
@@ -20,12 +21,48 @@ public class ClientBalancesController : ControllerBase
         _db = db;
     }
 
+    private Task<DataVisibilityAccess?> ResolveClientVisibilityAsync(CancellationToken ct)
+        => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Clients, ct);
+
+    private async Task<bool> CanEditPaymentsAsync(CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return User?.IsInRole("admin") == true || User?.Identity?.IsAuthenticated != true;
+        }
+
+        if (User.IsInRole("admin") || await _db.IsUserAdminAsync(userId.Value, ct))
+        {
+            return true;
+        }
+
+        var permission = await _db.GetUserSectionPermissionAsync(userId.Value, RolePermissionCatalog.Payments, ct);
+        return permission?.CanEdit == true;
+    }
+
+    private async Task<IActionResult?> RequireVisibleClientAsync(int clientId, CancellationToken ct)
+    {
+        var visibility = await ResolveClientVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var isVisible = await _db.Clients
+            .AsNoTracking()
+            .ApplyClientVisibility(visibility)
+            .AnyAsync(client => client.Id == clientId, ct);
+
+        return isVisible ? null : NotFound();
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetSummary(int clientId, CancellationToken ct)
     {
-        if (!await _db.Clients.AsNoTracking().AnyAsync(client => client.Id == clientId, ct))
+        if (await RequireVisibleClientAsync(clientId, ct) is { } forbidden)
         {
-            return NotFound();
+            return forbidden;
         }
 
         var balance = await ClientBalanceService.GetBalanceAsync(_db, clientId, ct);
@@ -39,9 +76,9 @@ public class ClientBalancesController : ControllerBase
     [HttpGet("transactions")]
     public async Task<IActionResult> GetTransactions(int clientId, CancellationToken ct)
     {
-        if (!await _db.Clients.AsNoTracking().AnyAsync(client => client.Id == clientId, ct))
+        if (await RequireVisibleClientAsync(clientId, ct) is { } forbidden)
         {
-            return NotFound();
+            return forbidden;
         }
 
         var items = await _db.ClientBalanceTransactions
@@ -75,6 +112,16 @@ public class ClientBalancesController : ControllerBase
         [FromBody] ApplyClientBalanceRequest request,
         CancellationToken ct)
     {
+        if (await RequireVisibleClientAsync(clientId, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        if (!await CanEditPaymentsAsync(ct))
+        {
+            return Forbid();
+        }
+
         var result = await ClientBalanceService.ApplyCreditAsync(
             _db,
             clientId,

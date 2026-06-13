@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
+using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 
@@ -19,12 +21,48 @@ public class LegalEntityBalancesController : ControllerBase
         _db = db;
     }
 
+    private Task<DataVisibilityAccess?> ResolveLegalEntityVisibilityAsync(CancellationToken ct)
+        => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.LegalEntities, ct);
+
+    private async Task<bool> CanEditPaymentsAsync(CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return User?.IsInRole("admin") == true || User?.Identity?.IsAuthenticated != true;
+        }
+
+        if (User.IsInRole("admin") || await _db.IsUserAdminAsync(userId.Value, ct))
+        {
+            return true;
+        }
+
+        var permission = await _db.GetUserSectionPermissionAsync(userId.Value, RolePermissionCatalog.Payments, ct);
+        return permission?.CanEdit == true;
+    }
+
+    private async Task<IActionResult?> RequireVisibleLegalEntityAsync(int legalEntityId, CancellationToken ct)
+    {
+        var visibility = await ResolveLegalEntityVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var isVisible = await _db.LegalEntities
+            .AsNoTracking()
+            .ApplyLegalEntityVisibility(visibility)
+            .AnyAsync(entity => entity.Id == legalEntityId, ct);
+
+        return isVisible ? null : NotFound();
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetSummary(int legalEntityId, CancellationToken ct)
     {
-        if (!await _db.LegalEntities.AsNoTracking().AnyAsync(entity => entity.Id == legalEntityId, ct))
+        if (await RequireVisibleLegalEntityAsync(legalEntityId, ct) is { } forbidden)
         {
-            return NotFound();
+            return forbidden;
         }
 
         var balance = await ClientBalanceService.GetLegalEntityBalanceAsync(_db, legalEntityId, ct);
@@ -38,9 +76,9 @@ public class LegalEntityBalancesController : ControllerBase
     [HttpGet("transactions")]
     public async Task<IActionResult> GetTransactions(int legalEntityId, CancellationToken ct)
     {
-        if (!await _db.LegalEntities.AsNoTracking().AnyAsync(entity => entity.Id == legalEntityId, ct))
+        if (await RequireVisibleLegalEntityAsync(legalEntityId, ct) is { } forbidden)
         {
-            return NotFound();
+            return forbidden;
         }
 
         var items = await _db.ClientBalanceTransactions
@@ -74,6 +112,16 @@ public class LegalEntityBalancesController : ControllerBase
         [FromBody] ApplyClientBalanceRequest request,
         CancellationToken ct)
     {
+        if (await RequireVisibleLegalEntityAsync(legalEntityId, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        if (!await CanEditPaymentsAsync(ct))
+        {
+            return Forbid();
+        }
+
         var result = await ClientBalanceService.ApplyLegalEntityCreditAsync(
             _db,
             legalEntityId,

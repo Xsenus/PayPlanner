@@ -2730,6 +2730,68 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task ClientBalanceApplyCredit_WithoutPaymentEditPermission_ReturnsForbidAndDoesNotChangePayment()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateBalanceUserAsync(db, canEditPayments: false, viewScope: DataVisibilityScope.All);
+
+        var client = new Client { Name = "Balance apply no edit client", CreatedAt = DateTime.UtcNow };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var payment = CreatePayment(new DateTime(2026, 4, 28), 1_000m, "Debt without edit permission");
+        payment.ClientId = client.Id;
+        payment.PaidAmount = 0m;
+        payment.Status = PaymentStatus.Pending;
+        db.Payments.Add(payment);
+        db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
+        {
+            ClientId = client.Id,
+            Amount = 800m,
+            Type = ClientBalanceTransactionType.Overpayment,
+            Direction = ClientBalanceDirection.Credit,
+            Description = "Balance credit",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateClientBalancesController(db, user.Id);
+        var actionResult = await controller.ApplyCredit(
+            client.Id,
+            new ApplyClientBalanceRequest { PaymentId = payment.Id, Amount = 800m },
+            CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(actionResult);
+        db.ChangeTracker.Clear();
+        var unchangedPayment = await db.Payments.AsNoTracking().SingleAsync(item => item.Id == payment.Id);
+        Assert.Equal(0m, unchangedPayment.PaidAmount);
+        Assert.Equal(PaymentStatus.Pending, unchangedPayment.Status);
+        Assert.Single(await db.ClientBalanceTransactions.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task ClientBalanceSummary_WithOwnScope_ForHiddenClientReturnsNotFound()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateBalanceUserAsync(db, canEditPayments: true, viewScope: DataVisibilityScope.Own);
+        var otherUser = await CreateBalanceUserAsync(db, canEditPayments: true, viewScope: DataVisibilityScope.Own);
+
+        var hiddenClient = new Client
+        {
+            Name = "Hidden balance client",
+            ResponsibleUserId = otherUser.Id,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Clients.Add(hiddenClient);
+        await db.SaveChangesAsync();
+
+        var controller = CreateClientBalancesController(db, user.Id);
+        var actionResult = await controller.GetSummary(hiddenClient.Id, CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(actionResult);
+    }
+
+    [Fact]
     public async Task ApplyCredit_WithSourcePaymentId_UsesOnlySelectedAdvanceRemainder()
     {
         await using var db = await CreateContextAsync();
@@ -2937,6 +2999,53 @@ public class PaymentsControllerTests
         Assert.Equal(legalEntity.Id, debit.LegalEntityId);
         Assert.Null(debit.ClientId);
         Assert.StartsWith(ClientBalanceService.BuildUnallocatedAdvanceApplicationKeyPrefix(sourceAdvance.Id), debit.ExternalKey);
+    }
+
+    [Fact]
+    public async Task LegalEntityBalanceApplyCredit_WithOwnScope_ForHiddenEntityReturnsNotFoundAndDoesNotChangePayment()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateBalanceUserAsync(db, canEditPayments: true, viewScope: DataVisibilityScope.Own);
+        var otherUser = await CreateBalanceUserAsync(db, canEditPayments: true, viewScope: DataVisibilityScope.Own);
+
+        var hiddenLegalEntity = new LegalEntity
+        {
+            ShortName = "ООО Скрытый аванс",
+            Inn = "5400000011",
+            ResponsibleUserId = otherUser.Id,
+        };
+        db.LegalEntities.Add(hiddenLegalEntity);
+        await db.SaveChangesAsync();
+
+        var payment = CreatePayment(new DateTime(2026, 4, 15), 1_200m, "Hidden legal entity debt");
+        payment.ClientId = null;
+        payment.LegalEntityId = hiddenLegalEntity.Id;
+        payment.PaidAmount = 0m;
+        payment.Status = PaymentStatus.Pending;
+        db.Payments.Add(payment);
+        db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
+        {
+            LegalEntityId = hiddenLegalEntity.Id,
+            Amount = 900m,
+            Type = ClientBalanceTransactionType.UnallocatedAdvance,
+            Direction = ClientBalanceDirection.Credit,
+            Description = "Hidden legal entity advance",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateLegalEntityBalancesController(db, user.Id);
+        var actionResult = await controller.ApplyCredit(
+            hiddenLegalEntity.Id,
+            new ApplyClientBalanceRequest { PaymentId = payment.Id, Amount = 900m },
+            CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(actionResult);
+        db.ChangeTracker.Clear();
+        var unchangedPayment = await db.Payments.AsNoTracking().SingleAsync(item => item.Id == payment.Id);
+        Assert.Equal(0m, unchangedPayment.PaidAmount);
+        Assert.Equal(PaymentStatus.Pending, unchangedPayment.Status);
+        Assert.Single(await db.ClientBalanceTransactions.AsNoTracking().ToListAsync());
     }
 
     [Fact]
@@ -4873,6 +4982,46 @@ public class PaymentsControllerTests
         };
     }
 
+    private static ClientBalancesController CreateClientBalancesController(PaymentContext db, int userId)
+    {
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, userId.ToString()),
+            new(ClaimTypes.Name, "Test user"),
+        };
+
+        return new ClientBalancesController(db)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(claims, authenticationType: "Test")),
+                },
+            },
+        };
+    }
+
+    private static LegalEntityBalancesController CreateLegalEntityBalancesController(PaymentContext db, int userId)
+    {
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, userId.ToString()),
+            new(ClaimTypes.Name, "Test user"),
+        };
+
+        return new LegalEntityBalancesController(db)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(claims, authenticationType: "Test")),
+                },
+            },
+        };
+    }
+
     private static async Task<User> CreatePaymentsUserAsync(
         PaymentContext db,
         bool canExport,
@@ -4902,6 +5051,60 @@ public class PaymentsControllerTests
             Email = $"payments-export-{Guid.NewGuid():N}@example.com",
             PasswordHash = "hash",
             FullName = "Payments Export User",
+            RoleId = role.Id,
+            IsActive = true,
+            IsApproved = true,
+            IsEmployee = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        return user;
+    }
+
+    private static async Task<User> CreateBalanceUserAsync(
+        PaymentContext db,
+        bool canEditPayments,
+        string viewScope)
+    {
+        var role = new Role
+        {
+            Name = $"balance-{Guid.NewGuid():N}",
+            Description = "Balance permission test role",
+        };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Clients,
+                CanView = true,
+                ViewScope = viewScope,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.LegalEntities,
+                CanView = true,
+                ViewScope = viewScope,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Payments,
+                CanView = true,
+                CanEdit = canEditPayments,
+                ViewScope = viewScope,
+            });
+
+        var user = new User
+        {
+            Email = $"balance-{Guid.NewGuid():N}@example.com",
+            PasswordHash = "hash",
+            FullName = "Balance Permission User",
             RoleId = role.Id,
             IsActive = true,
             IsApproved = true,
