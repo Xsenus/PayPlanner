@@ -782,6 +782,30 @@ public class ReportsController : ControllerBase
             ct);
     }
 
+    [HttpGet("cash-flow-forecast")]
+    public async Task<ActionResult<CashFlowForecastReportDto>> CashFlowForecast(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] string? accountName,
+        CancellationToken ct)
+    {
+        var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
+
+        var normalizedAccountName = string.IsNullOrWhiteSpace(accountName)
+            ? null
+            : accountName.Trim();
+
+        return await ExecuteVisibleReportAsync(
+            RolePermissionCatalog.Payments,
+            (visibility, cancellationToken) => BuildCashFlowForecastReportAsync(
+                start,
+                end,
+                normalizedAccountName,
+                visibility,
+                cancellationToken),
+            ct);
+    }
+
     [HttpGet("categories")]
     public async Task<ActionResult<MoneyCategoryReportDto>> Categories(
         [FromQuery] DateTime? from,
@@ -4037,6 +4061,97 @@ public class ReportsController : ControllerBase
         return ApplyMoneyOperationVisibility(query, paymentsVisibility);
     }
 
+    private async Task<CashFlowForecastReportDto> BuildCashFlowForecastReportAsync(
+        DateTime from,
+        DateTime to,
+        string? accountName,
+        DataVisibilityAccess paymentsVisibility,
+        CancellationToken ct)
+    {
+        var openingRows = await BuildFactQuery(null, from.AddDays(-1), null, accountName, paymentsVisibility)
+            .GroupBy(_ => 1)
+            .Select(group => new
+            {
+                Income = group
+                    .Where(item => item.Direction == MoneyOperationDirection.Income)
+                    .Sum(item => item.Amount),
+                Expense = group
+                    .Where(item => item.Direction == MoneyOperationDirection.Expense)
+                    .Sum(item => item.Amount),
+            })
+            .ToListAsync(ct);
+
+        var openingBalance = openingRows.Sum(item => item.Income - item.Expense);
+
+        var forecastQuery = _db.Payments
+            .AsNoTracking()
+            .ApplyPaymentVisibility(paymentsVisibility)
+            .ExcludeInstallmentParentInvoices(_db)
+            .Where(item => item.Status != PaymentStatus.Completed && item.Status != PaymentStatus.Cancelled)
+            .Where(item => item.Amount > item.PaidAmount);
+
+        if (!string.IsNullOrWhiteSpace(accountName))
+        {
+            forecastQuery = forecastQuery.Where(item => item.Account == accountName);
+        }
+
+        var dailyRows = await forecastQuery
+            .Where(item => item.Date.Date >= from.Date && item.Date.Date <= to.Date)
+            .GroupBy(item => item.Date.Date)
+            .Select(group => new CashFlowForecastDayQueryRow
+            {
+                Date = group.Key,
+                ExpectedIncome = group
+                    .Where(item => item.Type == PaymentType.Income)
+                    .Sum(item => item.Amount - item.PaidAmount),
+                ExpectedExpense = group
+                    .Where(item => item.Type == PaymentType.Expense)
+                    .Sum(item => item.Amount - item.PaidAmount),
+                IncomeCount = group.Count(item => item.Type == PaymentType.Income),
+                ExpenseCount = group.Count(item => item.Type == PaymentType.Expense),
+            })
+            .OrderBy(item => item.Date)
+            .ToListAsync(ct);
+
+        var runningBalance = openingBalance;
+        var days = dailyRows
+            .Select(row =>
+            {
+                runningBalance += row.ExpectedIncome - row.ExpectedExpense;
+
+                return new CashFlowForecastDayDto
+                {
+                    Date = row.Date,
+                    ExpectedIncome = row.ExpectedIncome,
+                    ExpectedExpense = row.ExpectedExpense,
+                    NetProjectedFlow = row.ExpectedIncome - row.ExpectedExpense,
+                    ProjectedClosingBalance = runningBalance,
+                    IncomeCount = row.IncomeCount,
+                    ExpenseCount = row.ExpenseCount,
+                };
+            })
+            .ToList();
+
+        var expectedIncome = dailyRows.Sum(item => item.ExpectedIncome);
+        var expectedExpense = dailyRows.Sum(item => item.ExpectedExpense);
+        var netProjectedFlow = expectedIncome - expectedExpense;
+
+        return new CashFlowForecastReportDto
+        {
+            From = from,
+            To = to,
+            AccountName = accountName,
+            OpeningBalance = openingBalance,
+            ExpectedIncome = expectedIncome,
+            ExpectedExpense = expectedExpense,
+            NetProjectedFlow = netProjectedFlow,
+            ProjectedClosingBalance = openingBalance + netProjectedFlow,
+            IncomeCount = dailyRows.Sum(item => item.IncomeCount),
+            ExpenseCount = dailyRows.Sum(item => item.ExpenseCount),
+            Days = days,
+        };
+    }
+
     private IQueryable<MoneyOperation> ApplyMoneyOperationVisibility(
         IQueryable<MoneyOperation> query,
         DataVisibilityAccess paymentsVisibility)
@@ -6143,6 +6258,15 @@ public class ReportsController : ControllerBase
         public DateTime Date { get; init; }
         public decimal Income { get; init; }
         public decimal Expense { get; init; }
+        public int IncomeCount { get; init; }
+        public int ExpenseCount { get; init; }
+    }
+
+    private sealed class CashFlowForecastDayQueryRow
+    {
+        public DateTime Date { get; init; }
+        public decimal ExpectedIncome { get; init; }
+        public decimal ExpectedExpense { get; init; }
         public int IncomeCount { get; init; }
         public int ExpenseCount { get; init; }
     }

@@ -1153,6 +1153,40 @@ describe('apiService reports', () => {
     expect(String(url)).toContain('accountName=');
   });
 
+  it('loads cash flow forecast report with filters', async () => {
+    const payload = {
+      from: '2026-05-01T00:00:00',
+      to: '2026-05-31T00:00:00',
+      accountName: 'Основной банк',
+      openingBalance: 8000,
+      expectedIncome: 10000,
+      expectedExpense: 4000,
+      netProjectedFlow: 6000,
+      projectedClosingBalance: 14000,
+      incomeCount: 1,
+      expenseCount: 1,
+      days: [],
+    };
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.getCashFlowForecastReport({
+      from: '2026-05-01',
+      to: '2026-05-31',
+      accountName: 'Основной банк',
+    });
+
+    expect(result).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/reports/cash-flow-forecast?');
+    expect(String(url)).toContain('from=2026-05-01');
+    expect(String(url)).toContain('to=2026-05-31');
+    expect(String(url)).toContain('accountName=');
+  });
+
   it('loads cash book report with filters', async () => {
     const payload = {
       from: '2026-05-01T00:00:00',

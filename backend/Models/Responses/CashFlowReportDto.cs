@@ -56,3 +56,29 @@ public sealed class CashFlowDayDto
     public int IncomeCount { get; init; }
     public int ExpenseCount { get; init; }
 }
+
+public sealed class CashFlowForecastReportDto
+{
+    public DateTime From { get; init; }
+    public DateTime To { get; init; }
+    public string? AccountName { get; init; }
+    public decimal OpeningBalance { get; init; }
+    public decimal ExpectedIncome { get; init; }
+    public decimal ExpectedExpense { get; init; }
+    public decimal NetProjectedFlow { get; init; }
+    public decimal ProjectedClosingBalance { get; init; }
+    public int IncomeCount { get; init; }
+    public int ExpenseCount { get; init; }
+    public IReadOnlyList<CashFlowForecastDayDto> Days { get; init; } = [];
+}
+
+public sealed class CashFlowForecastDayDto
+{
+    public DateTime Date { get; init; }
+    public decimal ExpectedIncome { get; init; }
+    public decimal ExpectedExpense { get; init; }
+    public decimal NetProjectedFlow { get; init; }
+    public decimal ProjectedClosingBalance { get; init; }
+    public int IncomeCount { get; init; }
+    public int ExpenseCount { get; init; }
+}

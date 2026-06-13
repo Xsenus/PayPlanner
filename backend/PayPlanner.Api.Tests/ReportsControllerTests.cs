@@ -2370,6 +2370,99 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task CashFlowForecast_UsesOpenPaymentRemaindersAndOpeningBalance()
+    {
+        await using var db = await CreateContextAsync();
+        db.MoneyOperations.AddRange(
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 10_000m, new DateTime(2026, 4, 25), "Основной банк"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 2_000m, new DateTime(2026, 4, 28), "Основной банк"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 99_999m, new DateTime(2026, 5, 1), "Другой счет"));
+        db.Payments.AddRange(
+            new Payment
+            {
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Pending,
+                Amount = 12_000m,
+                PaidAmount = 2_000m,
+                Account = "Основной банк",
+                Date = new DateTime(2026, 5, 5),
+                PlannedDate = new DateTime(2026, 5, 5),
+                CreatedAt = DateTime.UtcNow,
+            },
+            new Payment
+            {
+                Type = PaymentType.Expense,
+                Status = PaymentStatus.Processing,
+                Amount = 5_000m,
+                PaidAmount = 1_000m,
+                Account = "Основной банк",
+                Date = new DateTime(2026, 5, 6),
+                PlannedDate = new DateTime(2026, 5, 6),
+                CreatedAt = DateTime.UtcNow,
+            },
+            new Payment
+            {
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Completed,
+                Amount = 20_000m,
+                PaidAmount = 20_000m,
+                Account = "Основной банк",
+                Date = new DateTime(2026, 5, 7),
+                PlannedDate = new DateTime(2026, 5, 7),
+                CreatedAt = DateTime.UtcNow,
+            },
+            new Payment
+            {
+                Type = PaymentType.Expense,
+                Status = PaymentStatus.Cancelled,
+                Amount = 8_000m,
+                PaidAmount = 0m,
+                Account = "Основной банк",
+                Date = new DateTime(2026, 5, 8),
+                PlannedDate = new DateTime(2026, 5, 8),
+                CreatedAt = DateTime.UtcNow,
+            });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.CashFlowForecast(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            "Основной банк",
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<CashFlowForecastReportDto>(ok.Value);
+        Assert.Equal(new DateTime(2026, 5, 1), report.From);
+        Assert.Equal(new DateTime(2026, 5, 31), report.To);
+        Assert.Equal("Основной банк", report.AccountName);
+        Assert.Equal(8_000m, report.OpeningBalance);
+        Assert.Equal(10_000m, report.ExpectedIncome);
+        Assert.Equal(4_000m, report.ExpectedExpense);
+        Assert.Equal(6_000m, report.NetProjectedFlow);
+        Assert.Equal(14_000m, report.ProjectedClosingBalance);
+        Assert.Equal(1, report.IncomeCount);
+        Assert.Equal(1, report.ExpenseCount);
+
+        Assert.Collection(
+            report.Days,
+            day =>
+            {
+                Assert.Equal(new DateTime(2026, 5, 5), day.Date);
+                Assert.Equal(10_000m, day.ExpectedIncome);
+                Assert.Equal(0m, day.ExpectedExpense);
+                Assert.Equal(18_000m, day.ProjectedClosingBalance);
+            },
+            day =>
+            {
+                Assert.Equal(new DateTime(2026, 5, 6), day.Date);
+                Assert.Equal(0m, day.ExpectedIncome);
+                Assert.Equal(4_000m, day.ExpectedExpense);
+                Assert.Equal(14_000m, day.ProjectedClosingBalance);
+            });
+    }
+
+    [Fact]
     public async Task CashFlow_FiltersBySourceAndAccountName()
     {
         await using var db = await CreateContextAsync();

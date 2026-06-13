@@ -1602,6 +1602,30 @@ export interface CashFlowReport {
   days: CashFlowDay[];
 }
 
+export interface CashFlowForecastDay {
+  date: string;
+  expectedIncome: number;
+  expectedExpense: number;
+  netProjectedFlow: number;
+  projectedClosingBalance: number;
+  incomeCount: number;
+  expenseCount: number;
+}
+
+export interface CashFlowForecastReport {
+  from: string;
+  to: string;
+  accountName?: string | null;
+  openingBalance: number;
+  expectedIncome: number;
+  expectedExpense: number;
+  netProjectedFlow: number;
+  projectedClosingBalance: number;
+  incomeCount: number;
+  expenseCount: number;
+  days: CashFlowForecastDay[];
+}
+
 export interface MoneyCategoryReportItem {
   categoryName: string;
   amount: number;

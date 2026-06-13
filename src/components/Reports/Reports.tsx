@@ -26,6 +26,7 @@ import {
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { usePeriodStats } from '../../hooks/usePeriodStats';
 import { useCashFlowReport } from '../../hooks/useCashFlowReport';
+import { useCashFlowForecastReport } from '../../hooks/useCashFlowForecastReport';
 import { useCashReport } from '../../hooks/useCashReport';
 import { useMoneyCategoryReport } from '../../hooks/useMoneyCategoryReport';
 import { useCounterpartyReport } from '../../hooks/useCounterpartyReport';
@@ -73,7 +74,7 @@ import {
   monthRangeToDates,
   normalizeYmRange,
 } from '../../utils/reportPresentation';
-import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CaseFinanceReport, CaseSuccessReport, CashBookSummary, CashFlowReport, CashOrderReport, ContractStatusReport, CounterpartyReport, CurrencyReport, CurrentCasesReport, DirectionReport, InvoiceStatusReport, JournalStatusReport, LawyerWorkloadReport, LegalWorkReport, MatchStatusReport, MoneyCategoryReport, MoneyOperationSource, OverdueProceduralDeadlinesReport, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, TaskReport, VatReport } from '../../types';
+import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CaseFinanceReport, CaseSuccessReport, CashBookSummary, CashFlowForecastReport, CashFlowReport, CashOrderReport, ContractStatusReport, CounterpartyReport, CurrencyReport, CurrentCasesReport, DirectionReport, InvoiceStatusReport, JournalStatusReport, LawyerWorkloadReport, LegalWorkReport, MatchStatusReport, MoneyCategoryReport, MoneyOperationSource, OverdueProceduralDeadlinesReport, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, TaskReport, VatReport } from '../../types';
 
 const statusMeta: Record<
   'Completed' | 'Pending' | 'Overdue',
@@ -651,6 +652,140 @@ function CashFlowReportSection({
                   </div>
                 )}
               </div>
+            </div>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function CashFlowForecastReportSection({
+  report,
+  loading,
+  error,
+  onReload,
+}: {
+  report: CashFlowForecastReport | null;
+  loading: boolean;
+  error: string | null;
+  onReload: () => void;
+}) {
+  const forecastDays = (report?.days ?? []).slice(0, 10);
+
+  return (
+    <section className="mt-8 rounded-[32px] border border-white/70 bg-white/92 p-6 shadow-[0_18px_45px_-24px_rgba(15,23,42,0.35)] backdrop-blur">
+      <div className="flex flex-col gap-4 border-b border-slate-100 pb-5 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <div className="inline-flex items-center gap-2 rounded-full border border-sky-100 bg-sky-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-sky-700">
+            <CalendarRange className="h-3.5 w-3.5" />
+            Прогноз
+          </div>
+          <h2 className="mt-3 text-xl font-semibold text-slate-950">Прогноз денежных потоков</h2>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
+            Ожидаемые поступления и списания по незакрытым платежам за выбранный период с расчетом прогнозного остатка.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onReload}
+          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+        >
+          <RefreshCcw className="h-4 w-4" />
+          Обновить
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="mt-6 rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-sm text-slate-500">
+          Загрузка прогноза денежных потоков...
+        </div>
+      ) : error || !report ? (
+        <div className="mt-6 rounded-3xl border border-rose-100 bg-rose-50/70 p-6">
+          <div className="font-semibold text-rose-700">Не удалось загрузить прогноз денежных потоков</div>
+          <div className="mt-2 text-sm text-rose-600">{error ?? 'Нет данных для выбранного периода.'}</div>
+        </div>
+      ) : (
+        <>
+          <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-5">
+            <MetricCard
+              title="Стартовый остаток"
+              value={formatCurrency(report.openingBalance)}
+              icon={Wallet}
+              tone="rate"
+              subtitle="Факт на начало периода"
+            />
+            <MetricCard
+              title="Ожидаем поступления"
+              value={formatCurrency(report.expectedIncome)}
+              icon={TrendingUp}
+              tone="income"
+              subtitle={`Незакрытых приходов: ${report.incomeCount}`}
+            />
+            <MetricCard
+              title="Ожидаем списания"
+              value={formatCurrency(report.expectedExpense)}
+              icon={TrendingDown}
+              tone="expense"
+              subtitle={`Незакрытых расходов: ${report.expenseCount}`}
+            />
+            <MetricCard
+              title="Чистый прогноз"
+              value={formatCurrency(report.netProjectedFlow)}
+              icon={ArrowUpRight}
+              tone="profit"
+              subtitle={report.netProjectedFlow >= 0 ? 'Прогнозный приток' : 'Прогнозный отток'}
+            />
+            <MetricCard
+              title="Прогнозный остаток"
+              value={formatCurrency(report.projectedClosingBalance)}
+              icon={Banknote}
+              tone="rate"
+              subtitle="Если все платежи будут закрыты в срок"
+            />
+          </div>
+
+          <div className="mt-6 rounded-3xl border border-slate-100 bg-slate-50/70 p-5">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-950">Ожидаемое движение по дням</h3>
+                <p className="mt-1 text-sm text-slate-500">Дни, в которые запланированы незакрытые платежи.</p>
+              </div>
+              <div className="text-sm text-slate-500">{report.days.length} дней</div>
+            </div>
+
+            <div className="mt-5 overflow-hidden rounded-2xl border border-slate-100 bg-white">
+              {forecastDays.length > 0 ? (
+                <div className="divide-y divide-slate-100">
+                  {forecastDays.map((day) => (
+                    <div key={day.date} className="grid gap-3 px-4 py-3 text-sm sm:grid-cols-[110px_1fr_1fr_1fr_1fr] sm:items-center">
+                      <div className="font-semibold text-slate-900">{formatDate(day.date)}</div>
+                      <div>
+                        <div className="text-xs text-slate-500">Поступления</div>
+                        <div className="font-medium text-emerald-700">{formatCurrency(day.expectedIncome)}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-slate-500">Списания</div>
+                        <div className="font-medium text-rose-700">{formatCurrency(day.expectedExpense)}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-slate-500">Чистый поток</div>
+                        <div className={day.netProjectedFlow >= 0 ? 'font-medium text-emerald-700' : 'font-medium text-rose-700'}>
+                          {formatCurrency(day.netProjectedFlow)}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-slate-500">Остаток</div>
+                        <div className="font-semibold text-slate-950">{formatCurrency(day.projectedClosingBalance)}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-8 text-center text-sm text-slate-500">
+                  В выбранном периоде нет незакрытых платежей для прогноза.
+                </div>
+              )}
             </div>
           </div>
         </>
@@ -5780,6 +5915,12 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     reload: reloadCashFlow,
   } = useCashFlowReport(cashFlowDates);
   const {
+    report: cashFlowForecastReport,
+    loading: cashFlowForecastLoading,
+    error: cashFlowForecastError,
+    reload: reloadCashFlowForecast,
+  } = useCashFlowForecastReport(cashFlowDates);
+  const {
     report: cashReport,
     loading: cashReportLoading,
     error: cashReportError,
@@ -6284,6 +6425,13 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={cashFlowLoading}
               error={cashFlowError}
               onReload={reloadCashFlow}
+            />
+
+            <CashFlowForecastReportSection
+              report={cashFlowForecastReport}
+              loading={cashFlowForecastLoading}
+              error={cashFlowForecastError}
+              onReload={reloadCashFlowForecast}
             />
 
             <CashReportSection

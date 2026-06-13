@@ -5335,6 +5335,15 @@ export class ApiService {
     return this.request<CashFlowReport>(`/reports/cash-flow${q}`);
   }
 
+  async getCashFlowForecastReport(params?: {
+    from?: string;
+    to?: string;
+    accountName?: string;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<CashFlowForecastReport>(`/reports/cash-flow-forecast${q}`);
+  }
+
   async getMoneyCategoryReport(params?: {
     from?: string;
     to?: string;
@@ -6362,6 +6371,7 @@ import type {
   MoneyOperationTransferRequest,
   MoneyOperationTransferResponse,
   CashFlowReport,
+  CashFlowForecastReport,
   MoneyCategoryReport,
   CounterpartyReport,
   ProjectReport,
