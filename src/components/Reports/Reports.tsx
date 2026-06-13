@@ -384,6 +384,33 @@ function exportCashFlowReport(report: CashFlowReport, timeZoneId?: string | null
   downloadCsv('cash-flow-report.csv', rows);
 }
 
+function exportCategoryReport(report: MoneyCategoryReport, timeZoneId?: string | null) {
+  const rows: unknown[][] = [
+    ['Показатель', 'Значение'],
+    ['Период с', formatDate(report.from, timeZoneId)],
+    ['Период по', formatDate(report.to, timeZoneId)],
+    ['Доходы по статьям', report.incomeTotal],
+    ['Расходы по статьям', report.expenseTotal],
+    ['Итог по статьям', report.netTotal],
+    ['Статей доходов', report.income.length],
+    ['Статей расходов', report.expense.length],
+    [],
+    ['Статьи доходов'],
+    ['Статья', 'Сумма', 'Операций', 'Доля'],
+  ];
+
+  report.income.forEach((item) => {
+    rows.push([item.categoryName, item.amount, item.count, `${item.share}%`]);
+  });
+
+  rows.push([], ['Статьи расходов'], ['Статья', 'Сумма', 'Операций', 'Доля']);
+  report.expense.forEach((item) => {
+    rows.push([item.categoryName, item.amount, item.count, `${item.share}%`]);
+  });
+
+  downloadCsv('money-category-report.csv', rows);
+}
+
 function exportCashFlowForecastReport(report: CashFlowForecastReport, timeZoneId?: string | null) {
   const rows: unknown[][] = [
     ['Показатель', 'Значение'],
@@ -1209,11 +1236,15 @@ function CategoryReportSection({
   loading,
   error,
   onReload,
+  filters,
+  profileTimeZoneId,
 }: {
   report: MoneyCategoryReport | null;
   loading: boolean;
   error: string | null;
   onReload: () => void;
+  filters?: ManagementReportExportFilters;
+  profileTimeZoneId?: string | null;
 }) {
   const renderRows = (rows: MoneyCategoryReport['income'], tone: 'income' | 'expense') => (
     <div className="space-y-3">
@@ -1256,14 +1287,26 @@ function CategoryReportSection({
             Группировка фактического движения денег по статьям: видно, какие направления дают основной приход и расход.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onReload}
-          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-        >
-          <RefreshCcw className="h-4 w-4" />
-          Обновить
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => report && exportCategoryReport(report, profileTimeZoneId)}
+            disabled={!report || loading}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            CSV
+          </button>
+          <ManagementReportExportButtons reportKind="categories" filters={filters} disabled={!report || loading} />
+          <button
+            type="button"
+            onClick={onReload}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            <RefreshCcw className="h-4 w-4" />
+            Обновить
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -1581,7 +1624,7 @@ function ProjectReportSection({
 
 type LegalWorkExportFormat = 'csv' | 'excel' | 'pdf';
 type ManagementReportExportFormat = 'excel' | 'pdf';
-type ManagementReportKind = 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast';
+type ManagementReportKind = 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast' | 'categories';
 type ReportCaseSection = 'tasks' | 'documents' | 'court' | 'workOrder';
 
 type LegalWorkReportFilters = {
@@ -6593,6 +6636,8 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={categoryReportLoading}
               error={categoryReportError}
               onReload={reloadCategoryReport}
+              filters={cashFlowDates}
+              profileTimeZoneId={profileTimeZoneId}
             />
 
             <CounterpartyReportSection

@@ -264,6 +264,7 @@ public class ReportsControllerTests
         {
             "case-finance",
             "cash-flow",
+            "categories",
             "case-success",
             "current-cases",
             "lawyer-workload",

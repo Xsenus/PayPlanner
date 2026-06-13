@@ -485,6 +485,22 @@ public class ReportsController : ControllerBase
                     return (BuildCashFlowExportDocument(reportDto), null);
                 }
 
+            case "categories":
+                {
+                    var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+                    if (paymentsVisibility is null)
+                    {
+                        return (null, Unauthorized());
+                    }
+
+                    var (start, end) = ResolveReportPeriod(from, to, reportToday);
+                    var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                        cancellationToken => BuildCategoryReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        _logger,
+                        ct);
+                    return (BuildCategoryExportDocument(reportDto), null);
+                }
+
             case "case-success":
                 {
                     var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
@@ -1903,6 +1919,33 @@ public class ReportsController : ControllerBase
                     MoneyCell(source.ClosingBalance),
                     source.IncomeCount.ToString(CultureInfo.InvariantCulture),
                     source.ExpenseCount.ToString(CultureInfo.InvariantCulture),
+                ])).ToList()),
+            ]);
+
+    private static ReportExportDocument BuildCategoryExportDocument(MoneyCategoryReportDto report)
+        => new(
+            "money-category-report",
+            "Отчет по статьям доходов и расходов",
+            $"Период: {DateCell(report.From)} - {DateCell(report.To)}",
+            [
+                new("Доходы по статьям", MoneyCell(report.IncomeTotal)),
+                new("Расходы по статьям", MoneyCell(report.ExpenseTotal)),
+                new("Итог по статьям", MoneyCell(report.NetTotal)),
+                new("Статей доходов", report.Income.Count.ToString(CultureInfo.InvariantCulture)),
+                new("Статей расходов", report.Expense.Count.ToString(CultureInfo.InvariantCulture)),
+            ],
+            [
+                new("Статьи доходов", ["Статья", "Сумма", "Операций", "Доля"], report.Income.Select(item => new ReportExportRow([
+                    item.CategoryName,
+                    MoneyCell(item.Amount),
+                    item.Count.ToString(CultureInfo.InvariantCulture),
+                    PercentCell(item.Share),
+                ])).ToList()),
+                new("Статьи расходов", ["Статья", "Сумма", "Операций", "Доля"], report.Expense.Select(item => new ReportExportRow([
+                    item.CategoryName,
+                    MoneyCell(item.Amount),
+                    item.Count.ToString(CultureInfo.InvariantCulture),
+                    PercentCell(item.Share),
                 ])).ToList()),
             ]);
 
