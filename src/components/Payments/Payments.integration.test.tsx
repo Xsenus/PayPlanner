@@ -3,8 +3,9 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import type { Payment } from '../../types';
 import { Payments } from './Payments';
 
-const { confirmMock, usePaymentsPagedMock } = vi.hoisted(() => ({
+const { confirmMock, rolePermissionsMock, usePaymentsPagedMock } = vi.hoisted(() => ({
   confirmMock: vi.fn(),
+  rolePermissionsMock: vi.fn(),
   usePaymentsPagedMock: vi.fn(),
 }));
 
@@ -72,15 +73,7 @@ vi.mock('../../hooks/useDialog', () => ({
 }));
 
 vi.mock('../../hooks/useRolePermissions', () => ({
-  useRolePermissions: () => ({
-    payments: {
-      canView: true,
-      canCreate: true,
-      canEdit: true,
-      canDelete: true,
-      canExport: true,
-    },
-  }),
+  useRolePermissions: () => rolePermissionsMock(),
 }));
 
 vi.mock('../../hooks/useTranslation', () => ({
@@ -235,6 +228,16 @@ describe('Payments integration', () => {
   beforeEach(() => {
     confirmMock.mockReset();
     confirmMock.mockResolvedValue(true);
+    rolePermissionsMock.mockReset();
+    rolePermissionsMock.mockReturnValue({
+      payments: {
+        canView: true,
+        canCreate: true,
+        canEdit: true,
+        canDelete: true,
+        canExport: true,
+      },
+    });
     vi.mocked(apiService.getPayment).mockReset();
     vi.mocked(apiService.getPaymentsV2).mockReset();
     vi.mocked(apiService.createPayment).mockReset();
@@ -494,6 +497,64 @@ describe('Payments integration', () => {
       );
     });
     expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it('blocks advance review actions when the user cannot edit payments', async () => {
+    rolePermissionsMock.mockReturnValue({
+      payments: {
+        canView: true,
+        canCreate: false,
+        canEdit: false,
+        canDelete: false,
+        canExport: false,
+      },
+    });
+
+    const requiredPayment = {
+      id: 831,
+      amount: 7_100,
+      paidAmount: 7_100,
+      date: '2026-03-02',
+      plannedDate: '2026-03-02',
+      type: 'Income',
+      status: 'Completed',
+      description: 'Advance requiring review',
+      notes: '',
+      systemNotes: '',
+      isPaid: true,
+      outstandingAmount: 0,
+      hasPartialPayment: false,
+      rescheduleCount: 0,
+      documentKind: 'Payment',
+      advanceReviewStatus: 'RequiresDecision',
+    } as unknown as Payment;
+    const acceptedPayment = {
+      ...requiredPayment,
+      id: 832,
+      advanceReviewStatus: 'AcceptedAsAdvance',
+      clientId: 12,
+      client: { id: 12, name: 'Client with advance' },
+    } as unknown as Payment;
+
+    usePaymentsPagedMock.mockReturnValue({
+      ...paymentsPagedResult,
+      payments: [requiredPayment, acceptedPayment],
+      total: 2,
+    });
+
+    render(<Payments />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'accept-advance-831' }));
+    fireEvent.click(screen.getByRole('button', { name: 'ignore-advance-831' }));
+    fireEvent.click(screen.getByRole('button', { name: 'allocate-advance-832' }));
+
+    await waitFor(() => {
+      expect(confirmMock).not.toHaveBeenCalled();
+      expect(apiService.acceptPaymentAdvance).not.toHaveBeenCalled();
+      expect(apiService.ignorePaymentAdvance).not.toHaveBeenCalled();
+      expect(apiService.getClientBalance).not.toHaveBeenCalled();
+      expect(apiService.applyClientBalance).not.toHaveBeenCalled();
+    });
   });
 
   it('uses the profile time zone for the paid date when completing a payment', async () => {
