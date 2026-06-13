@@ -5711,6 +5711,133 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task WorkOrder_CreateActCreatesDraftActForUnactedItemsOnly()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "work-order-act-owner@example.com", "Владелец акта");
+        var executor = await CreateUserAsync(db, "work-order-act-executor@example.com", "Исполнитель акта");
+        var client = new Client
+        {
+            Name = "Клиент акта",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело для акта",
+            CaseNumber = "ACT-77",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+        };
+        var workOrder = new ClientCaseWorkOrder
+        {
+            ClientCase = clientCase,
+            Title = "Расчет для акта",
+            Status = "invoice_created",
+            Currency = "RUB",
+            CreatedAt = DateTime.UtcNow,
+            Items =
+            [
+                new ClientCaseWorkOrderItem
+                {
+                    ServiceName = "Уже актированная услуга",
+                    ExecutorUserId = executor.Id,
+                    ExecutorName = executor.FullName,
+                    Quantity = 1,
+                    UnitPrice = 10000,
+                    TotalAmount = 10000,
+                    SortOrder = 1,
+                },
+                new ClientCaseWorkOrderItem
+                {
+                    ServiceName = "Новая услуга для акта",
+                    ExecutorUserId = executor.Id,
+                    ExecutorName = executor.FullName,
+                    Quantity = 2,
+                    UnitPrice = 7000,
+                    TotalAmount = 14000,
+                    SortOrder = 2,
+                },
+            ],
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.ClientCaseWorkOrders.Add(workOrder);
+        await db.SaveChangesAsync();
+
+        var alreadyActedItem = workOrder.Items.Single(item => item.ServiceName == "Уже актированная услуга");
+        db.Acts.Add(new Act
+        {
+            Number = "ACT-OLD",
+            Title = "Старый акт",
+            Date = new DateTime(2026, 06, 01),
+            Amount = 10000,
+            ClientId = client.Id,
+            ResponsibleId = executor.Id,
+            Status = ActStatus.Created,
+            WorkflowStatus = ActWorkflowStatus.Draft,
+            CreationMode = ActCreationMode.Manual,
+            LineItems =
+            [
+                new ActLineItem
+                {
+                    SourceKey = $"work-order:{workOrder.Id}:item:{alreadyActedItem.Id}",
+                    SourceSortOrder = alreadyActedItem.SortOrder,
+                    Name = alreadyActedItem.ServiceName,
+                    Quantity = alreadyActedItem.Quantity,
+                    Unit = "шт",
+                    Price = alreadyActedItem.UnitPrice,
+                    SortOrder = 1,
+                },
+            ],
+        });
+        await db.SaveChangesAsync();
+        var targetItem = workOrder.Items.Single(item => item.ServiceName == "Новая услуга для акта");
+        var controller = CreateController(db, owner);
+
+        var result = await controller.CreateActFromWorkOrder(clientCase.Id, new CasesV2Controller.CreateClientCaseWorkOrderActRequest
+        {
+            Number = "WO-ACT-77",
+            Date = new DateTime(2026, 06, 03),
+        }, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(result.Result);
+        var dto = Assert.IsType<CasesV2Controller.ClientCaseWorkOrderActDto>(created.Value);
+        Assert.Equal("WO-ACT-77", dto.Number);
+        Assert.Equal(new DateTime(2026, 06, 03), dto.Date);
+        Assert.Equal(14000, dto.Amount);
+        Assert.Equal(1, dto.LineItemCount);
+        Assert.Equal("invoice_created", dto.WorkOrder.Status);
+        Assert.NotNull(dto.DocumentId);
+
+        var act = await db.Acts
+            .Include(item => item.LineItems)
+            .SingleAsync(item => item.Id == dto.ActId);
+        Assert.Equal(ActCreationMode.Manual, act.CreationMode);
+        Assert.Equal(ActStatus.Created, act.Status);
+        Assert.Equal(ActWorkflowStatus.Draft, act.WorkflowStatus);
+        Assert.Equal(client.Id, act.ClientId);
+        Assert.Equal(executor.Id, act.ResponsibleId);
+        Assert.Single(act.LineItems);
+        Assert.Contains(act.LineItems, item =>
+            item.Name == "Новая услуга для акта"
+            && item.Quantity == 2
+            && item.Price == 7000
+            && item.SourceKey == $"work-order:{workOrder.Id}:item:{targetItem.Id}");
+
+        var actDocument = await db.ClientCaseDocuments.SingleAsync(item => item.Id == dto.DocumentId);
+        Assert.Equal($"act-{act.Id}", actDocument.DocumentKey);
+        Assert.Equal("Акт", actDocument.DocumentType);
+        Assert.Equal("text/html; charset=utf-8", actDocument.ContentType);
+
+        await db.Entry(workOrder).ReloadAsync();
+        await db.Entry(clientCase).ReloadAsync();
+        Assert.Equal("invoice_created", workOrder.Status);
+        Assert.Contains("создан акт", clientCase.EventHistory, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task WorkOrder_CreateInvoiceDefaultsDateToUserTimeZone()
     {
         await using var db = await CreateContextAsync();

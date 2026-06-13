@@ -5728,6 +5728,126 @@ public class CasesV2Controller : ControllerBase
         });
     }
 
+    [HttpPost("{id:int}/work-order/create-act")]
+    public async Task<ActionResult<ClientCaseWorkOrderActDto>> CreateActFromWorkOrder(
+        int id,
+        [FromBody] CreateClientCaseWorkOrderActRequest? request,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var loadResult = await LoadEditableWorkOrderAsync(id, ct);
+        if (loadResult.Result is not null)
+        {
+            return loadResult.Result;
+        }
+
+        var (clientCase, workOrder) = loadResult.Value;
+        RecalculateWorkOrder(workOrder);
+        if (workOrder.TotalAmount <= 0m || workOrder.Items.Count == 0)
+        {
+            return BadRequest(new { message = "Добавьте услуги с ненулевой стоимостью перед созданием акта." });
+        }
+
+        var workOrderStatus = NormalizeWorkOrderStatus(workOrder.Status);
+        if (workOrderStatus is not ("approved" or "invoice_created"))
+        {
+            return BadRequest(new { message = "Перед созданием акта согласуйте заказ-наряд." });
+        }
+
+        var candidateItems = workOrder.Items
+            .OrderBy(item => item.SortOrder)
+            .ThenBy(item => item.Id)
+            .ToList();
+        var candidateSourceKeys = candidateItems
+            .Select(item => BuildWorkOrderActLineSourceKey(workOrder.Id, item.Id))
+            .ToList();
+        var usedSourceKeys = await _db.Set<ActLineItem>()
+            .AsNoTracking()
+            .Where(item => candidateSourceKeys.Contains(item.SourceKey)
+                && item.Act.WorkflowStatus != ActWorkflowStatus.Cancelled
+                && item.Act.Status != ActStatus.Terminated)
+            .Select(item => item.SourceKey)
+            .ToListAsync(ct);
+        var usedSourceKeySet = usedSourceKeys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var actItems = candidateItems
+            .Where(item => !usedSourceKeySet.Contains(BuildWorkOrderActLineSourceKey(workOrder.Id, item.Id)))
+            .ToList();
+        if (actItems.Count == 0)
+        {
+            return BadRequest(new { message = "Все услуги заказ-наряда уже актированы." });
+        }
+
+        var statusClock = await ResolveCaseStatusClockAsync(ct);
+        var actDate = request?.Date?.Date ?? statusClock.TodayDate;
+        var number = await BuildWorkOrderActNumberAsync(id, workOrder.Id, actDate, request?.Number, ct);
+        var amount = decimal.Round(actItems.Sum(item => item.Quantity * item.UnitPrice), 2, MidpointRounding.AwayFromZero);
+        var now = DateTime.UtcNow;
+        var act = new Act
+        {
+            Number = number,
+            Title = NormalizeOptional(request?.Title) ?? $"Акт по заказ-наряду «{workOrder.Title}»",
+            Date = actDate,
+            Amount = amount,
+            CreationMode = ActCreationMode.Manual,
+            Status = ActStatus.Created,
+            WorkflowStatus = ActWorkflowStatus.Draft,
+            ClientId = clientCase.ClientId,
+            LegalEntityId = clientCase.LegalEntityId,
+            ResponsibleId = actItems.FirstOrDefault(item => item.ExecutorUserId.HasValue)?.ExecutorUserId,
+            Comment = NormalizeOptional(request?.Comment)
+                ?? $"Сформирован из заказ-наряда «{workOrder.Title}» по делу {clientCase.Title}.",
+            CreatedAt = now,
+        };
+
+        var sortOrder = 1;
+        foreach (var item in actItems)
+        {
+            act.LineItems.Add(new ActLineItem
+            {
+                SourceKey = BuildWorkOrderActLineSourceKey(workOrder.Id, item.Id),
+                SourceSortOrder = item.SortOrder,
+                Name = item.ServiceName,
+                Quantity = item.Quantity,
+                Unit = "шт",
+                Price = item.UnitPrice,
+                SortOrder = sortOrder++,
+                CreatedAt = now,
+            });
+        }
+
+        _db.Acts.Add(act);
+        _db.SetAuditReason($"По предварительному расчету дела #{id} создан акт №{number}.");
+        AppendCaseEvent(clientCase, $"По предварительному расчету «{workOrder.Title}» создан акт №{number} на сумму {amount:0.##} {workOrder.Currency}. Создал: {User.GetDisplayName()}.");
+        await _db.SaveChangesAsync(ct);
+
+        var actDocument = await SaveGeneratedCaseDocumentAsync(
+            clientCase,
+            BuildWorkOrderActDocumentKey(act.Id),
+            "Акт",
+            "Черновик",
+            $"case-{id}-act-{act.Id}.html",
+            BuildWorkOrderActDocumentHtml(clientCase, workOrder, act, statusClock.NowLocal),
+            "Generated",
+            $"Сформирован документ акта №{number} из заказ-наряда «{workOrder.Title}».",
+            $"Акт №{number} из заказ-наряда «{workOrder.Title}» сохранен в документы дела. Автор: {User.GetDisplayName()}.",
+            ct);
+
+        return Created($"/acts/{act.Id}", new ClientCaseWorkOrderActDto
+        {
+            ActId = act.Id,
+            Number = number,
+            Date = actDate,
+            Amount = act.Amount,
+            DocumentId = actDocument.Id,
+            LineItemCount = act.LineItems.Count,
+            WorkOrder = MapWorkOrder(workOrder),
+        });
+    }
+
     [HttpPost("{id:int}/work-order/submit-approval")]
     public async Task<ActionResult<ClientCaseWorkOrderDto>> SubmitWorkOrderApproval(
         int id,
@@ -8319,6 +8439,12 @@ public class CasesV2Controller : ControllerBase
     private static string BuildInvoiceDocumentKey(int paymentId)
         => $"invoice-{paymentId}";
 
+    private static string BuildWorkOrderActDocumentKey(int actId)
+        => $"act-{actId}";
+
+    private static string BuildWorkOrderActLineSourceKey(int workOrderId, int workOrderItemId)
+        => $"work-order:{workOrderId}:item:{workOrderItemId}";
+
     private static string BuildCourtEventDocumentKey(int courtEventId)
         => $"court-event-{courtEventId}";
 
@@ -9064,6 +9190,90 @@ public class CasesV2Controller : ControllerBase
       </tbody>
     </table>
     <div class="total">Итого: {{Html(FormatMoney(payment.Amount))}}</div>
+  </main>
+</body>
+</html>
+""";
+    }
+
+    private static string BuildWorkOrderActDocumentHtml(
+        ClientCase clientCase,
+        ClientCaseWorkOrder workOrder,
+        Act act,
+        DateTime generatedAtLocal)
+    {
+        var generatedAt = FormatUserGeneratedAt(generatedAtLocal);
+        var rows = string.Join(Environment.NewLine, act.LineItems
+            .OrderBy(item => item.SortOrder)
+            .ThenBy(item => item.Id)
+            .Select((item, index) => $"""
+              <tr>
+                <td>{index + 1}</td>
+                <td>{Html(item.Name)}</td>
+                <td class="num">{Html(item.Quantity.ToString("N2", CultureInfo.GetCultureInfo("ru-RU")))}</td>
+                <td>{Html(item.Unit)}</td>
+                <td class="num">{Html(FormatMoney(item.Price))}</td>
+                <td class="num">{Html(FormatMoney(item.Quantity * item.Price))}</td>
+              </tr>
+            """));
+        if (string.IsNullOrWhiteSpace(rows))
+        {
+            rows = """<tr><td colspan="6" class="empty">Позиции акта пока не добавлены.</td></tr>""";
+        }
+
+        return $$"""
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>Акт №{{Html(act.Number)}}</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, Arial, sans-serif; color: #0f172a; }
+    body { margin: 0; padding: 32px; background: #f8fafc; }
+    main { max-width: 1000px; margin: 0 auto; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 28px; }
+    h1 { margin: 0; font-size: 28px; line-height: 1.2; }
+    .meta { margin-top: 8px; color: #64748b; font-size: 13px; }
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 20px; }
+    .stat { border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; background: #f8fafc; }
+    .stat span { display: block; color: #64748b; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+    .stat strong { display: block; margin-top: 6px; font-size: 18px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 18px; font-size: 13px; }
+    th, td { border-bottom: 1px solid #e2e8f0; padding: 10px 8px; text-align: left; vertical-align: top; }
+    th { color: #475569; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; background: #f8fafc; }
+    .num { text-align: right; white-space: nowrap; }
+    .empty { text-align: center; color: #64748b; padding: 24px; }
+    .total { margin-top: 18px; display: flex; justify-content: flex-end; font-size: 20px; font-weight: 700; }
+    @media print { body { padding: 0; background: #fff; } main { border: 0; border-radius: 0; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Акт №{{Html(act.Number)}}</h1>
+    <div class="meta">Сформировано: {{Html(generatedAt)}}</div>
+    <div class="grid">
+      <div class="stat"><span>Дело</span><strong>{{Html(clientCase.Title)}}</strong><div class="meta">{{Html(clientCase.CaseNumber)}}</div></div>
+      <div class="stat"><span>Клиент</span><strong>{{Html(GetOwnerName(clientCase))}}</strong></div>
+      <div class="stat"><span>Основание</span><strong>{{Html(workOrder.Title)}}</strong></div>
+      <div class="stat"><span>Дата акта</span><strong>{{Html(FormatRuDate(act.Date))}}</strong></div>
+      <div class="stat"><span>Статус</span><strong>Черновик</strong></div>
+      <div class="stat"><span>Сумма</span><strong>{{Html(FormatMoney(act.Amount))}}</strong></div>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>№</th>
+          <th>Услуга</th>
+          <th class="num">Кол-во</th>
+          <th>Ед.</th>
+          <th class="num">Цена</th>
+          <th class="num">Сумма</th>
+        </tr>
+      </thead>
+      <tbody>
+{{rows}}
+      </tbody>
+    </table>
+    <div class="total">Итого: {{Html(FormatMoney(act.Amount))}}</div>
   </main>
 </body>
 </html>
@@ -9966,6 +10176,30 @@ public class CasesV2Controller : ControllerBase
         return candidate;
     }
 
+    private async Task<string> BuildWorkOrderActNumberAsync(
+        int clientCaseId,
+        int workOrderId,
+        DateTime actDate,
+        string? requestedNumber,
+        CancellationToken ct)
+    {
+        var baseNumber = NormalizeOptional(requestedNumber) ?? $"WO-ACT-{clientCaseId}-{workOrderId}";
+        var candidate = baseNumber.Length > 120 ? baseNumber[..120] : baseNumber;
+        var suffix = 1;
+        while (await _db.Acts.AsNoTracking().AnyAsync(
+            act => act.Number == candidate && act.Date.Date == actDate.Date,
+            ct))
+        {
+            suffix++;
+            var suffixText = $"-{suffix}";
+            var maxBaseLength = Math.Max(1, 120 - suffixText.Length);
+            var truncatedBase = baseNumber.Length > maxBaseLength ? baseNumber[..maxBaseLength] : baseNumber;
+            candidate = $"{truncatedBase}{suffixText}";
+        }
+
+        return candidate;
+    }
+
     private static string NormalizeCurrency(string? value)
     {
         var normalized = NormalizeOptional(value)?.ToUpperInvariant();
@@ -10612,6 +10846,14 @@ public class CasesV2Controller : ControllerBase
         public string? Description { get; set; }
     }
 
+    public sealed class CreateClientCaseWorkOrderActRequest
+    {
+        public string? Number { get; set; }
+        public DateTime? Date { get; set; }
+        public string? Title { get; set; }
+        public string? Comment { get; set; }
+    }
+
     public sealed class ClientCaseWorkOrderApprovalRequest
     {
         public string? Comment { get; set; }
@@ -10626,6 +10868,17 @@ public class CasesV2Controller : ControllerBase
         public DateTime DueDate { get; set; }
         public decimal Amount { get; set; }
         public int? DocumentId { get; set; }
+        public ClientCaseWorkOrderDto WorkOrder { get; set; } = new();
+    }
+
+    public sealed class ClientCaseWorkOrderActDto
+    {
+        public int ActId { get; set; }
+        public string Number { get; set; } = string.Empty;
+        public DateTime Date { get; set; }
+        public decimal Amount { get; set; }
+        public int? DocumentId { get; set; }
+        public int LineItemCount { get; set; }
         public ClientCaseWorkOrderDto WorkOrder { get; set; } = new();
     }
 
