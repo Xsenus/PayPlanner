@@ -2909,6 +2909,7 @@ public class CasesV2ControllerTests
             Priority = "urgent",
             IsHiddenFromExecutor = true,
             InactivityRemindersEnabled = false,
+            IsUnderControl = true,
         }, CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(result);
@@ -2925,6 +2926,7 @@ public class CasesV2ControllerTests
         Assert.Equal("urgent", visibleByClient.Priority);
         Assert.True(visibleByClient.IsHiddenFromExecutor);
         Assert.False(visibleByClient.InactivityRemindersEnabled);
+        Assert.True(visibleByClient.IsUnderControl);
         Assert.Equal(owner.Id, visibleByClient.HiddenFromExecutorByUserId);
         Assert.Equal("Владелец", visibleByClient.HiddenFromExecutorByUserName);
         Assert.Equal(ClientCaseStatus.OnHold, visibleByCaseResponsible.Status);
@@ -2933,10 +2935,12 @@ public class CasesV2ControllerTests
         Assert.Equal("urgent", visibleByCaseResponsible.Priority);
         Assert.True(visibleByCaseResponsible.IsHiddenFromExecutor);
         Assert.False(visibleByCaseResponsible.InactivityRemindersEnabled);
+        Assert.True(visibleByCaseResponsible.IsUnderControl);
         Assert.Equal(ClientCaseStatus.Open, hiddenCase.Status);
         Assert.Equal(otherResponsible.Id, hiddenCase.ResponsibleUserId);
         Assert.False(hiddenCase.IsHiddenFromExecutor);
         Assert.True(hiddenCase.InactivityRemindersEnabled);
+        Assert.False(hiddenCase.IsUnderControl);
         Assert.Contains("Массовое изменение", visibleByClient.EventHistory, StringComparison.Ordinal);
         Assert.Contains("статус «В работе» → «Приостановлено»", visibleByClient.EventHistory, StringComparison.Ordinal);
         Assert.Contains("ответственный «Ответственный владельца» → «Новый ответственный»", visibleByClient.EventHistory, StringComparison.Ordinal);
@@ -2944,6 +2948,7 @@ public class CasesV2ControllerTests
         Assert.Contains("приоритет «Обычный» → «Критический»", visibleByClient.EventHistory, StringComparison.Ordinal);
         Assert.Contains("доступ: скрыто от исполнителя", visibleByClient.EventHistory, StringComparison.Ordinal);
         Assert.Contains("автоконтроль: выключен", visibleByClient.EventHistory, StringComparison.Ordinal);
+        Assert.Contains("контроль: включен", visibleByClient.EventHistory, StringComparison.Ordinal);
         Assert.Contains("ответственный «Владелец» → «Новый ответственный»", visibleByCaseResponsible.EventHistory, StringComparison.Ordinal);
         Assert.DoesNotContain("Массовое изменение", hiddenCase.EventHistory, StringComparison.Ordinal);
 
@@ -2967,10 +2972,12 @@ public class CasesV2ControllerTests
             Assert.Contains("ответственный: Новый ответственный", reason, StringComparison.Ordinal);
             Assert.Contains("доступ: скрыто от исполнителя", reason, StringComparison.Ordinal);
             Assert.Contains("автоконтроль: выключен", reason, StringComparison.Ordinal);
+            Assert.Contains("контроль: включен", reason, StringComparison.Ordinal);
             Assert.Contains("Status", auditEvent.MetadataJson, StringComparison.Ordinal);
             Assert.Contains("ResponsibleUserId", auditEvent.MetadataJson, StringComparison.Ordinal);
             Assert.Contains("IsHiddenFromExecutor", auditEvent.MetadataJson, StringComparison.Ordinal);
             Assert.Contains("InactivityRemindersEnabled", auditEvent.MetadataJson, StringComparison.Ordinal);
+            Assert.Contains("IsUnderControl", auditEvent.MetadataJson, StringComparison.Ordinal);
         }
     }
 

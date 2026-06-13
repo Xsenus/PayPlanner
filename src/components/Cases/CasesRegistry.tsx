@@ -411,6 +411,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
   const [bulkResponsibleUserId, setBulkResponsibleUserId] = useState('');
   const [bulkStage, setBulkStage] = useState('');
   const [bulkPriority, setBulkPriority] = useState('');
+  const [bulkControlState, setBulkControlState] = useState<'keep' | 'on' | 'off'>('keep');
   const [bulkSaving, setBulkSaving] = useState(false);
   const [creatingTaskCaseId, setCreatingTaskCaseId] = useState<number | null>(null);
   const [controlCaseId, setControlCaseId] = useState<number | null>(null);
@@ -793,12 +794,16 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
   };
 
   const applyBulkUpdate = async () => {
-    if (selectedIds.length === 0 || (!bulkStatus && !bulkResponsibleUserId && !bulkStage.trim() && !bulkPriority)) {
+    if (
+      selectedIds.length === 0
+      || (!bulkStatus && !bulkResponsibleUserId && !bulkStage.trim() && !bulkPriority && bulkControlState === 'keep')
+    ) {
       return;
     }
 
     setBulkSaving(true);
     setError(null);
+    setNotice(null);
     try {
       await apiService.bulkUpdateCases({
         ids: selectedIds,
@@ -806,12 +811,16 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
         responsibleUserId: bulkResponsibleUserId ? Number(bulkResponsibleUserId) : undefined,
         stage: bulkStage.trim() || undefined,
         priority: bulkPriority || undefined,
+        isUnderControl: bulkControlState === 'keep' ? undefined : bulkControlState === 'on',
       });
+      const selectedCount = selectedIds.length;
       setSelectedIds([]);
       setBulkStatus('');
       setBulkResponsibleUserId('');
       setBulkStage('');
       setBulkPriority('');
+      setBulkControlState('keep');
+      setNotice(`Массовое изменение применено: обновлено дел ${selectedCount}.`);
       setReloadToken((value) => value + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось выполнить групповое изменение дел.');
@@ -827,16 +836,20 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
 
     setBulkSaving(true);
     setError(null);
+    setNotice(null);
     try {
       await apiService.bulkUpdateCases({
         ids: selectedIds,
         status: 'Closed',
       });
+      const selectedCount = selectedIds.length;
       setSelectedIds([]);
       setBulkStatus('');
       setBulkResponsibleUserId('');
       setBulkStage('');
       setBulkPriority('');
+      setBulkControlState('keep');
+      setNotice(`В архив отправлено дел: ${selectedCount}.`);
       setReloadToken((value) => value + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось отправить выбранные дела в архив.');
@@ -854,6 +867,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
         status: 'Closed',
       });
       setSelectedIds((current) => current.filter((itemId) => itemId !== id));
+      setNotice('Дело отправлено в архив.');
       setReloadToken((value) => value + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось отправить дело в архив.');
@@ -1625,10 +1639,19 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
               </select>
+              <select
+                value={bulkControlState}
+                onChange={(event) => setBulkControlState(event.target.value as 'keep' | 'on' | 'off')}
+                aria-label="Массово изменить контроль"
+                className="h-10 rounded-lg border border-blue-100 bg-white px-3 text-sm">
+                <option value="keep">Не менять контроль</option>
+                <option value="on">Поставить на контроль</option>
+                <option value="off">Снять с контроля</option>
+              </select>
               <button
                 type="button"
                 onClick={() => void applyBulkUpdate()}
-                disabled={bulkSaving || (!bulkStatus && !bulkResponsibleUserId && !bulkStage.trim() && !bulkPriority)}
+                disabled={bulkSaving || (!bulkStatus && !bulkResponsibleUserId && !bulkStage.trim() && !bulkPriority && bulkControlState === 'keep')}
                 className="h-10 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
                 {bulkSaving ? 'Сохраняем...' : 'Применить'}
               </button>

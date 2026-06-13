@@ -486,6 +486,9 @@ describe('CasesRegistry', () => {
     fireEvent.change(screen.getByLabelText('Массово сменить приоритет'), {
       target: { value: 'urgent' },
     });
+    fireEvent.change(screen.getByLabelText('Массово изменить контроль'), {
+      target: { value: 'on' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Применить' }));
 
     await waitFor(() => {
@@ -495,8 +498,10 @@ describe('CasesRegistry', () => {
         responsibleUserId: 8,
         stage: 'Судебное производство',
         priority: 'urgent',
+        isUnderControl: true,
       });
     });
+    expect(await screen.findByText('Массовое изменение применено: обновлено дел 1.')).toBeTruthy();
   });
 
   it('archives selected cases through the bulk actions panel', async () => {
