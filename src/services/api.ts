@@ -5415,7 +5415,7 @@ export class ApiService {
   }
 
   async downloadManagementReport(params: {
-    report: 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow-forecast';
+    report: 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast';
     format: 'excel' | 'pdf';
     from?: string;
     to?: string;

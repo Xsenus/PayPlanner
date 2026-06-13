@@ -263,6 +263,7 @@ public class ReportsControllerTests
         var reportKinds = new[]
         {
             "case-finance",
+            "cash-flow",
             "case-success",
             "current-cases",
             "lawyer-workload",

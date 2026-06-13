@@ -312,6 +312,78 @@ function exportOverdueProceduralDeadlinesReport(report: OverdueProceduralDeadlin
   downloadCsv('overdue-procedural-deadlines-report.csv', rows);
 }
 
+function exportCashFlowReport(report: CashFlowReport, timeZoneId?: string | null) {
+  const rows: unknown[][] = [
+    ['Показатель', 'Значение'],
+    ['Период с', formatDate(report.from, timeZoneId)],
+    ['Период по', formatDate(report.to, timeZoneId)],
+    ['Источник', report.source ? sourceLabel(report.source) : 'Все источники'],
+    ['Счет', report.accountName ?? 'Все счета'],
+    ['Начальный остаток', report.openingBalance],
+    ['Поступления', report.income],
+    ['Списания', report.expense],
+    ['Чистый поток', report.netCashFlow],
+    ['Конечный остаток', report.closingBalance],
+    ['Фактические приходы', report.incomeCount],
+    ['Фактические расходы', report.expenseCount],
+    [],
+    ['Динамика по дням'],
+    ['Дата', 'Начальный остаток', 'Поступления', 'Списания', 'Чистый поток', 'Конечный остаток', 'Приходов', 'Расходов'],
+  ];
+
+  report.days.forEach((day) => {
+    rows.push([
+      formatDate(day.date, timeZoneId),
+      day.openingBalance,
+      day.income,
+      day.expense,
+      day.netCashFlow,
+      day.closingBalance,
+      day.incomeCount,
+      day.expenseCount,
+    ]);
+  });
+
+  rows.push(
+    [],
+    ['Счета и источники'],
+    ['Источник', 'Счет', 'Начальный остаток', 'Поступления', 'Списания', 'Чистый поток', 'Конечный остаток', 'Приходов', 'Расходов'],
+  );
+  report.byAccount.forEach((account) => {
+    rows.push([
+      sourceLabel(account.source),
+      account.accountName,
+      account.openingBalance,
+      account.income,
+      account.expense,
+      account.netCashFlow,
+      account.closingBalance,
+      account.incomeCount,
+      account.expenseCount,
+    ]);
+  });
+
+  rows.push(
+    [],
+    ['Итоги по источникам'],
+    ['Источник', 'Начальный остаток', 'Поступления', 'Списания', 'Чистый поток', 'Конечный остаток', 'Приходов', 'Расходов'],
+  );
+  report.bySource.forEach((source) => {
+    rows.push([
+      sourceLabel(source.source),
+      source.openingBalance,
+      source.income,
+      source.expense,
+      source.netCashFlow,
+      source.closingBalance,
+      source.incomeCount,
+      source.expenseCount,
+    ]);
+  });
+
+  downloadCsv('cash-flow-report.csv', rows);
+}
+
 function exportCashFlowForecastReport(report: CashFlowForecastReport, timeZoneId?: string | null) {
   const rows: unknown[][] = [
     ['Показатель', 'Значение'],
@@ -533,11 +605,15 @@ function CashFlowReportSection({
   loading,
   error,
   onReload,
+  filters,
+  profileTimeZoneId,
 }: {
   report: CashFlowReport | null;
   loading: boolean;
   error: string | null;
   onReload: () => void;
+  filters?: ManagementReportExportFilters;
+  profileTimeZoneId?: string | null;
 }) {
   const topAccounts = (report?.byAccount ?? []).slice(0, 6);
   const recentDays = (report?.days ?? []).slice(-8);
@@ -555,14 +631,26 @@ function CashFlowReportSection({
             Фактические денежные операции за период: начальный остаток, поступления, списания, чистый поток и конечный остаток.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onReload}
-          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-        >
-          <RefreshCcw className="h-4 w-4" />
-          Обновить
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => report && exportCashFlowReport(report, profileTimeZoneId)}
+            disabled={!report || loading}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            CSV
+          </button>
+          <ManagementReportExportButtons reportKind="cash-flow" filters={filters} disabled={!report || loading} />
+          <button
+            type="button"
+            onClick={onReload}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            <RefreshCcw className="h-4 w-4" />
+            Обновить
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -1493,7 +1581,7 @@ function ProjectReportSection({
 
 type LegalWorkExportFormat = 'csv' | 'excel' | 'pdf';
 type ManagementReportExportFormat = 'excel' | 'pdf';
-type ManagementReportKind = 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow-forecast';
+type ManagementReportKind = 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast';
 type ReportCaseSection = 'tasks' | 'documents' | 'court' | 'workOrder';
 
 type LegalWorkReportFilters = {
@@ -6473,6 +6561,8 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={cashFlowLoading}
               error={cashFlowError}
               onReload={reloadCashFlow}
+              filters={cashFlowDates}
+              profileTimeZoneId={profileTimeZoneId}
             />
 
             <CashFlowForecastReportSection

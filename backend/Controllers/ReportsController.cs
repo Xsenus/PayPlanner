@@ -469,6 +469,22 @@ public class ReportsController : ControllerBase
                     return (BuildCaseFinanceExportDocument(reportDto), null);
                 }
 
+            case "cash-flow":
+                {
+                    var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+                    if (paymentsVisibility is null)
+                    {
+                        return (null, Unauthorized());
+                    }
+
+                    var (start, end) = ResolveReportPeriod(from, to, reportToday);
+                    var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                        cancellationToken => BuildCashFlowReportAsync(start, end, null, null, paymentsVisibility, cancellationToken),
+                        _logger,
+                        ct);
+                    return (BuildCashFlowExportDocument(reportDto), null);
+                }
+
             case "case-success":
                 {
                     var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
@@ -1842,6 +1858,54 @@ public class ReportsController : ControllerBase
                 ])).ToList()),
             ]);
 
+    private static ReportExportDocument BuildCashFlowExportDocument(CashFlowReportDto report)
+        => new(
+            "cash-flow-report",
+            "Отчет движения денежных средств",
+            $"Период: {DateCell(report.From)} - {DateCell(report.To)}{BuildCashFlowFilterSuffix(report)}",
+            [
+                new("Начальный остаток", MoneyCell(report.OpeningBalance)),
+                new("Поступления", MoneyCell(report.Income)),
+                new("Списания", MoneyCell(report.Expense)),
+                new("Чистый поток", MoneyCell(report.NetCashFlow)),
+                new("Конечный остаток", MoneyCell(report.ClosingBalance)),
+                new("Фактические приходы", report.IncomeCount.ToString(CultureInfo.InvariantCulture)),
+                new("Фактические расходы", report.ExpenseCount.ToString(CultureInfo.InvariantCulture)),
+            ],
+            [
+                new("Динамика по дням", ["Дата", "Начальный остаток", "Поступления", "Списания", "Чистый поток", "Конечный остаток", "Приходов", "Расходов"], report.Days.Select(day => new ReportExportRow([
+                    DateCell(day.Date),
+                    MoneyCell(day.OpeningBalance),
+                    MoneyCell(day.Income),
+                    MoneyCell(day.Expense),
+                    MoneyCell(day.NetCashFlow),
+                    MoneyCell(day.ClosingBalance),
+                    day.IncomeCount.ToString(CultureInfo.InvariantCulture),
+                    day.ExpenseCount.ToString(CultureInfo.InvariantCulture),
+                ])).ToList()),
+                new("Счета и источники", ["Источник", "Счет", "Начальный остаток", "Поступления", "Списания", "Чистый поток", "Конечный остаток", "Приходов", "Расходов"], report.ByAccount.Select(account => new ReportExportRow([
+                    MoneyOperationSourceCell(account.Source),
+                    account.AccountName,
+                    MoneyCell(account.OpeningBalance),
+                    MoneyCell(account.Income),
+                    MoneyCell(account.Expense),
+                    MoneyCell(account.NetCashFlow),
+                    MoneyCell(account.ClosingBalance),
+                    account.IncomeCount.ToString(CultureInfo.InvariantCulture),
+                    account.ExpenseCount.ToString(CultureInfo.InvariantCulture),
+                ])).ToList()),
+                new("Итоги по источникам", ["Источник", "Начальный остаток", "Поступления", "Списания", "Чистый поток", "Конечный остаток", "Приходов", "Расходов"], report.BySource.Select(source => new ReportExportRow([
+                    MoneyOperationSourceCell(source.Source),
+                    MoneyCell(source.OpeningBalance),
+                    MoneyCell(source.Income),
+                    MoneyCell(source.Expense),
+                    MoneyCell(source.NetCashFlow),
+                    MoneyCell(source.ClosingBalance),
+                    source.IncomeCount.ToString(CultureInfo.InvariantCulture),
+                    source.ExpenseCount.ToString(CultureInfo.InvariantCulture),
+                ])).ToList()),
+            ]);
+
     private static ReportExportDocument BuildCaseSuccessExportDocument(CaseSuccessReportDto report)
         => new(
             "case-success-report",
@@ -2526,6 +2590,32 @@ public class ReportsController : ControllerBase
 
     private static string MoneyCell(decimal value)
         => value.ToString("0.00", CultureInfo.InvariantCulture);
+
+    private static string MoneyOperationSourceCell(MoneyOperationSource source)
+        => source switch
+        {
+            MoneyOperationSource.Bank => "Банк",
+            MoneyOperationSource.Cash => "Касса",
+            MoneyOperationSource.Card => "Карты",
+            MoneyOperationSource.EMoney => "E-money",
+            _ => source.ToString(),
+        };
+
+    private static string BuildCashFlowFilterSuffix(CashFlowReportDto report)
+    {
+        var parts = new List<string>();
+        if (report.Source.HasValue)
+        {
+            parts.Add($"Источник: {MoneyOperationSourceCell(report.Source.Value)}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(report.AccountName))
+        {
+            parts.Add($"Счет: {report.AccountName}");
+        }
+
+        return parts.Count == 0 ? string.Empty : $" · {string.Join(" · ", parts)}";
+    }
 
     private static string PercentCell(decimal value)
         => $"{value.ToString("0.##", CultureInfo.InvariantCulture)}%";
