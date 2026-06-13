@@ -270,6 +270,7 @@ public class ReportsControllerTests
             "directions",
             "sales-points",
             "vat",
+            "payment-orders",
             "case-success",
             "current-cases",
             "lawyer-workload",

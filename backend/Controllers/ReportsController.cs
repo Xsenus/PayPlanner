@@ -581,6 +581,22 @@ public class ReportsController : ControllerBase
                     return (BuildVatExportDocument(reportDto), null);
                 }
 
+            case "payment-orders":
+                {
+                    var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+                    if (paymentsVisibility is null)
+                    {
+                        return (null, Unauthorized());
+                    }
+
+                    var (start, end) = ResolveReportPeriod(from, to, reportToday);
+                    var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                        cancellationToken => BuildPaymentOrderReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        _logger,
+                        ct);
+                    return (BuildPaymentOrderExportDocument(reportDto), null);
+                }
+
             case "case-success":
                 {
                     var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
@@ -2150,6 +2166,30 @@ public class ReportsController : ControllerBase
                     MoneyCell(item.NetVat),
                     item.IncomeCount.ToString(CultureInfo.InvariantCulture),
                     item.ExpenseCount.ToString(CultureInfo.InvariantCulture),
+                ])).ToList()),
+            ]);
+
+    private static ReportExportDocument BuildPaymentOrderExportDocument(PaymentOrderReportDto report)
+        => new(
+            "payment-order-report",
+            "Отчет по платежным поручениям",
+            $"Период: {DateCell(report.From)} - {DateCell(report.To)}{(report.Source.HasValue ? $" · Источник: {MoneyOperationSourceCell(report.Source.Value)}" : string.Empty)}",
+            [
+                new("Поступило", MoneyCell(report.IncomeTotal)),
+                new("Списано", MoneyCell(report.ExpenseTotal)),
+                new("Итог", MoneyCell(report.NetTotal)),
+                new("Платежных поручений", report.Orders.Count.ToString(CultureInfo.InvariantCulture)),
+            ],
+            [
+                new("Платежные поручения", ["Номер платежки", "Поступило", "Списано", "Итог", "Оборот", "Приходов", "Расходов", "Доля оборота"], report.Orders.Select(item => new ReportExportRow([
+                    item.PaymentOrderNumber,
+                    MoneyCell(item.Income),
+                    MoneyCell(item.Expense),
+                    MoneyCell(item.NetTotal),
+                    MoneyCell(item.TotalAmount),
+                    item.IncomeCount.ToString(CultureInfo.InvariantCulture),
+                    item.ExpenseCount.ToString(CultureInfo.InvariantCulture),
+                    PercentCell(item.Share),
                 ])).ToList()),
             ]);
 
