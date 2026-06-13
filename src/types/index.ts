@@ -1779,8 +1779,11 @@ export interface CaseFinanceStatusItem {
   caseCount: number;
   feeTotal: number;
   paidTotal: number;
+  expenseTotal: number;
   outstandingTotal: number;
+  marginTotal: number;
   collectionRate: number;
+  marginRate: number;
 }
 
 export interface CaseFinanceResponsibleItem {
@@ -1789,8 +1792,11 @@ export interface CaseFinanceResponsibleItem {
   caseCount: number;
   feeTotal: number;
   paidTotal: number;
+  expenseTotal: number;
   outstandingTotal: number;
+  marginTotal: number;
   collectionRate: number;
+  marginRate: number;
 }
 
 export interface CaseFinanceItem {
@@ -1808,8 +1814,11 @@ export interface CaseFinanceItem {
   dueDate?: string | null;
   feeAmount: number;
   paidTotal: number;
+  expenseTotal: number;
   outstandingTotal: number;
+  marginTotal: number;
   paymentRate: number;
+  marginRate: number;
   financeState: string;
   financeStateLabel: string;
 }
@@ -1827,8 +1836,11 @@ export interface CaseFinanceReport {
   closedCases: number;
   feeTotal: number;
   paidTotal: number;
+  expenseTotal: number;
   outstandingTotal: number;
+  marginTotal: number;
   collectionRate: number;
+  marginRate: number;
   fullyPaidCaseCount: number;
   partiallyPaidCaseCount: number;
   unpaidCaseCount: number;

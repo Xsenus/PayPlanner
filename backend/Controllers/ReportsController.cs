@@ -1194,7 +1194,7 @@ public class ReportsController : ControllerBase
                     item.PlannedDurationMinutes))
                 .ToListAsync(ct);
 
-        var payments = await BuildLegalWorkPaymentRowsAsync(caseIds, accountsVisibility, ct);
+        var payments = await BuildLegalWorkPaymentRowsAsync(caseIds, accountsVisibility, PaymentType.Income, ct);
         var paidByCase = payments
             .GroupBy(item => item.CaseId)
             .ToDictionary(
@@ -1374,15 +1374,21 @@ public class ReportsController : ControllerBase
 
         var cases = await caseQuery.ToListAsync(ct);
         var caseIds = cases.Select(item => item.Id).Distinct().ToArray();
-        var payments = await BuildLegalWorkPaymentRowsAsync(caseIds, accountsVisibility, ct);
-        var paidByCase = payments
+        var incomePayments = await BuildLegalWorkPaymentRowsAsync(caseIds, accountsVisibility, PaymentType.Income, ct);
+        var expensePayments = await BuildLegalWorkPaymentRowsAsync(caseIds, accountsVisibility, PaymentType.Expense, ct);
+        var paidByCase = incomePayments
+            .GroupBy(item => item.CaseId)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Sum(item => ResolvePaidAmount(item.Amount, item.PaidAmount, item.Status)));
+        var expenseByCase = expensePayments
             .GroupBy(item => item.CaseId)
             .ToDictionary(
                 group => group.Key,
                 group => group.Sum(item => ResolvePaidAmount(item.Amount, item.PaidAmount, item.Status)));
 
         var rows = cases
-            .Select(item => BuildCaseFinanceItem(item, paidByCase.GetValueOrDefault(item.Id)))
+            .Select(item => BuildCaseFinanceItem(item, paidByCase.GetValueOrDefault(item.Id), expenseByCase.GetValueOrDefault(item.Id)))
             .OrderByDescending(item => item.OutstandingTotal)
             .ThenBy(item => item.DueDate ?? DateTime.MaxValue)
             .ThenBy(item => item.CaseTitle)
@@ -1390,7 +1396,9 @@ public class ReportsController : ControllerBase
 
         var feeTotal = rows.Sum(item => item.FeeAmount);
         var paidTotal = rows.Sum(item => item.PaidTotal);
+        var expenseTotal = rows.Sum(item => item.ExpenseTotal);
         var outstandingTotal = rows.Sum(item => item.OutstandingTotal);
+        var marginTotal = rows.Sum(item => item.MarginTotal);
 
         return new CaseFinanceReportDto
         {
@@ -1406,8 +1414,11 @@ public class ReportsController : ControllerBase
             ClosedCases = rows.Count(item => item.Status == nameof(ClientCaseStatus.Closed) || item.Status == nameof(ClientCaseStatus.Lost)),
             FeeTotal = feeTotal,
             PaidTotal = paidTotal,
+            ExpenseTotal = expenseTotal,
             OutstandingTotal = outstandingTotal,
+            MarginTotal = marginTotal,
             CollectionRate = CalculatePercent(paidTotal, feeTotal),
+            MarginRate = CalculatePercent(marginTotal, paidTotal),
             FullyPaidCaseCount = rows.Count(item => item.FinanceState == "paid"),
             PartiallyPaidCaseCount = rows.Count(item => item.FinanceState == "partial"),
             UnpaidCaseCount = rows.Count(item => item.FinanceState == "unpaid"),
@@ -1419,6 +1430,8 @@ public class ReportsController : ControllerBase
                 {
                     var groupFee = group.Sum(item => item.FeeAmount);
                     var groupPaid = group.Sum(item => item.PaidTotal);
+                    var groupExpense = group.Sum(item => item.ExpenseTotal);
+                    var groupMargin = group.Sum(item => item.MarginTotal);
                     return new CaseFinanceStatusItemDto
                     {
                         Status = group.Key.Status,
@@ -1426,8 +1439,11 @@ public class ReportsController : ControllerBase
                         CaseCount = group.Count(),
                         FeeTotal = groupFee,
                         PaidTotal = groupPaid,
+                        ExpenseTotal = groupExpense,
                         OutstandingTotal = group.Sum(item => item.OutstandingTotal),
+                        MarginTotal = groupMargin,
                         CollectionRate = CalculatePercent(groupPaid, groupFee),
+                        MarginRate = CalculatePercent(groupMargin, groupPaid),
                     };
                 })
                 .ToList(),
@@ -1439,6 +1455,8 @@ public class ReportsController : ControllerBase
                 {
                     var groupFee = group.Sum(item => item.FeeAmount);
                     var groupPaid = group.Sum(item => item.PaidTotal);
+                    var groupExpense = group.Sum(item => item.ExpenseTotal);
+                    var groupMargin = group.Sum(item => item.MarginTotal);
                     return new CaseFinanceResponsibleItemDto
                     {
                         ResponsibleUserId = group.Key.ResponsibleUserId,
@@ -1446,8 +1464,11 @@ public class ReportsController : ControllerBase
                         CaseCount = group.Count(),
                         FeeTotal = groupFee,
                         PaidTotal = groupPaid,
+                        ExpenseTotal = groupExpense,
                         OutstandingTotal = group.Sum(item => item.OutstandingTotal),
+                        MarginTotal = groupMargin,
                         CollectionRate = CalculatePercent(groupPaid, groupFee),
+                        MarginRate = CalculatePercent(groupMargin, groupPaid),
                     };
                 })
                 .Take(25)
@@ -1624,11 +1645,14 @@ public class ReportsController : ControllerBase
             _ => ("inProgress", "В работе"),
         };
 
-    private static CaseFinanceItemDto BuildCaseFinanceItem(ClientCase clientCase, decimal paid)
+    private static CaseFinanceItemDto BuildCaseFinanceItem(ClientCase clientCase, decimal paid, decimal expense)
     {
         var fee = Math.Max(0m, clientCase.FeeAmount);
         var outstanding = Math.Max(0m, fee - paid);
+        var normalizedExpense = Math.Max(0m, expense);
+        var margin = paid - normalizedExpense;
         var paymentRate = CalculatePercent(paid, fee);
+        var marginRate = CalculatePercent(margin, paid);
         var (financeState, financeStateLabel) = ResolveCaseFinanceState(fee, paid, outstanding);
 
         return new CaseFinanceItemDto
@@ -1647,8 +1671,11 @@ public class ReportsController : ControllerBase
             DueDate = NormalizeReportDate(clientCase.DueDate),
             FeeAmount = fee,
             PaidTotal = paid,
+            ExpenseTotal = normalizedExpense,
             OutstandingTotal = outstanding,
+            MarginTotal = margin,
             PaymentRate = paymentRate,
+            MarginRate = marginRate,
             FinanceState = financeState,
             FinanceStateLabel = financeStateLabel,
         };
@@ -1728,12 +1755,15 @@ public class ReportsController : ControllerBase
                 new("Закрыто", report.ClosedCases.ToString(CultureInfo.InvariantCulture)),
                 new("Гонорар", MoneyCell(report.FeeTotal)),
                 new("Оплачено", MoneyCell(report.PaidTotal)),
+                new("Расходы", MoneyCell(report.ExpenseTotal)),
                 new("Остаток", MoneyCell(report.OutstandingTotal)),
+                new("Маржа", MoneyCell(report.MarginTotal)),
                 new("Сбор оплат", PercentCell(report.CollectionRate)),
+                new("Маржинальность", PercentCell(report.MarginRate)),
                 new("Полностью оплачено", report.FullyPaidCaseCount.ToString(CultureInfo.InvariantCulture)),
             ],
             [
-                new("Дела", ["Дело", "Клиент", "Ответственный", "Тип", "Статус", "Гонорар", "Оплачено", "Остаток", "Оплата", "Финансовое состояние"], report.Items.Select(item => new ReportExportRow([
+                new("Дела", ["Дело", "Клиент", "Ответственный", "Тип", "Статус", "Гонорар", "Оплачено", "Расходы", "Остаток", "Маржа", "Оплата", "Маржинальность", "Финансовое состояние"], report.Items.Select(item => new ReportExportRow([
                     BuildCaseTitle(item.CaseNumber, item.CaseTitle),
                     item.ClientName,
                     item.ResponsibleName,
@@ -1741,25 +1771,34 @@ public class ReportsController : ControllerBase
                     item.StatusLabel,
                     MoneyCell(item.FeeAmount),
                     MoneyCell(item.PaidTotal),
+                    MoneyCell(item.ExpenseTotal),
                     MoneyCell(item.OutstandingTotal),
+                    MoneyCell(item.MarginTotal),
                     PercentCell(item.PaymentRate),
+                    PercentCell(item.MarginRate),
                     item.FinanceStateLabel,
                 ])).ToList()),
-                new("По ответственным", ["Ответственный", "Дел", "Гонорар", "Оплачено", "Остаток", "Сбор оплат"], report.ByResponsible.Select(item => new ReportExportRow([
+                new("По ответственным", ["Ответственный", "Дел", "Гонорар", "Оплачено", "Расходы", "Остаток", "Маржа", "Сбор оплат", "Маржинальность"], report.ByResponsible.Select(item => new ReportExportRow([
                     item.ResponsibleName,
                     item.CaseCount.ToString(CultureInfo.InvariantCulture),
                     MoneyCell(item.FeeTotal),
                     MoneyCell(item.PaidTotal),
+                    MoneyCell(item.ExpenseTotal),
                     MoneyCell(item.OutstandingTotal),
+                    MoneyCell(item.MarginTotal),
                     PercentCell(item.CollectionRate),
+                    PercentCell(item.MarginRate),
                 ])).ToList()),
-                new("По статусам", ["Статус", "Дел", "Гонорар", "Оплачено", "Остаток", "Сбор оплат"], report.ByStatus.Select(item => new ReportExportRow([
+                new("По статусам", ["Статус", "Дел", "Гонорар", "Оплачено", "Расходы", "Остаток", "Маржа", "Сбор оплат", "Маржинальность"], report.ByStatus.Select(item => new ReportExportRow([
                     item.StatusLabel,
                     item.CaseCount.ToString(CultureInfo.InvariantCulture),
                     MoneyCell(item.FeeTotal),
                     MoneyCell(item.PaidTotal),
+                    MoneyCell(item.ExpenseTotal),
                     MoneyCell(item.OutstandingTotal),
+                    MoneyCell(item.MarginTotal),
                     PercentCell(item.CollectionRate),
+                    PercentCell(item.MarginRate),
                 ])).ToList()),
             ]);
 
@@ -2510,6 +2549,7 @@ public class ReportsController : ControllerBase
     private async Task<IReadOnlyList<LegalWorkPaymentRow>> BuildLegalWorkPaymentRowsAsync(
         IReadOnlyCollection<int> caseIds,
         DataVisibilityAccess accountsVisibility,
+        PaymentType paymentType,
         CancellationToken ct)
     {
         if (caseIds.Count == 0)
@@ -2521,7 +2561,7 @@ public class ReportsController : ControllerBase
             .AsNoTracking()
             .ApplyPaymentVisibility(accountsVisibility)
             .ExcludeInstallmentParentInvoices(_db)
-            .Where(item => item.Type == PaymentType.Income && item.Status != PaymentStatus.Cancelled);
+            .Where(item => item.Type == paymentType && item.Status != PaymentStatus.Cancelled);
 
         var directRows = await paymentQuery
             .Where(item => item.ClientCaseId.HasValue && caseIds.Contains(item.ClientCaseId.Value))

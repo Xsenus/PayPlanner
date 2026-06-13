@@ -14,8 +14,11 @@ public sealed class CaseFinanceReportDto
     public int ClosedCases { get; init; }
     public decimal FeeTotal { get; init; }
     public decimal PaidTotal { get; init; }
+    public decimal ExpenseTotal { get; init; }
     public decimal OutstandingTotal { get; init; }
+    public decimal MarginTotal { get; init; }
     public decimal CollectionRate { get; init; }
+    public decimal MarginRate { get; init; }
     public int FullyPaidCaseCount { get; init; }
     public int PartiallyPaidCaseCount { get; init; }
     public int UnpaidCaseCount { get; init; }
@@ -32,8 +35,11 @@ public sealed class CaseFinanceStatusItemDto
     public int CaseCount { get; init; }
     public decimal FeeTotal { get; init; }
     public decimal PaidTotal { get; init; }
+    public decimal ExpenseTotal { get; init; }
     public decimal OutstandingTotal { get; init; }
+    public decimal MarginTotal { get; init; }
     public decimal CollectionRate { get; init; }
+    public decimal MarginRate { get; init; }
 }
 
 public sealed class CaseFinanceResponsibleItemDto
@@ -43,8 +49,11 @@ public sealed class CaseFinanceResponsibleItemDto
     public int CaseCount { get; init; }
     public decimal FeeTotal { get; init; }
     public decimal PaidTotal { get; init; }
+    public decimal ExpenseTotal { get; init; }
     public decimal OutstandingTotal { get; init; }
+    public decimal MarginTotal { get; init; }
     public decimal CollectionRate { get; init; }
+    public decimal MarginRate { get; init; }
 }
 
 public sealed class CaseFinanceItemDto
@@ -63,8 +72,11 @@ public sealed class CaseFinanceItemDto
     public DateTime? DueDate { get; init; }
     public decimal FeeAmount { get; init; }
     public decimal PaidTotal { get; init; }
+    public decimal ExpenseTotal { get; init; }
     public decimal OutstandingTotal { get; init; }
+    public decimal MarginTotal { get; init; }
     public decimal PaymentRate { get; init; }
+    public decimal MarginRate { get; init; }
     public string FinanceState { get; init; } = string.Empty;
     public string FinanceStateLabel { get; init; } = string.Empty;
 }

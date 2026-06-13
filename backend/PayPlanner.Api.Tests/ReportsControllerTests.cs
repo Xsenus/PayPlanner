@@ -1812,6 +1812,19 @@ public class ReportsControllerTests
             CreatedAt = today,
         };
         visiblePayment.Responsibles.Add(new PaymentResponsible { UserId = visibleUser.Id });
+        var visibleExpense = new Payment
+        {
+            ExpenseClientId = visibleClient.Id,
+            ClientCaseId = visibleCase.Id,
+            Type = PaymentType.Expense,
+            Status = PaymentStatus.Completed,
+            Amount = 3_000m,
+            PaidAmount = 3_000m,
+            Date = today,
+            PlannedDate = today,
+            CreatedAt = today,
+        };
+        visibleExpense.Responsibles.Add(new PaymentResponsible { UserId = visibleUser.Id });
         var hiddenPayment = new Payment
         {
             ClientId = hiddenClient.Id,
@@ -1825,7 +1838,7 @@ public class ReportsControllerTests
             CreatedAt = today,
         };
         hiddenPayment.Responsibles.Add(new PaymentResponsible { UserId = hiddenUser.Id });
-        db.Payments.AddRange(visiblePayment, hiddenPayment);
+        db.Payments.AddRange(visiblePayment, visibleExpense, hiddenPayment);
         await db.SaveChangesAsync();
 
         var controller = CreateController(db, CreateUserPrincipal(visibleUser.Id));
@@ -1846,8 +1859,11 @@ public class ReportsControllerTests
         Assert.Equal(0, report.ClosedCases);
         Assert.Equal(30_000m, report.FeeTotal);
         Assert.Equal(12_000m, report.PaidTotal);
+        Assert.Equal(3_000m, report.ExpenseTotal);
         Assert.Equal(18_000m, report.OutstandingTotal);
+        Assert.Equal(9_000m, report.MarginTotal);
         Assert.Equal(40m, report.CollectionRate);
+        Assert.Equal(75m, report.MarginRate);
         Assert.Equal(1, report.PartiallyPaidCaseCount);
         Assert.Equal(0, report.UnpaidCaseCount);
         Assert.Equal(nameof(ClientCaseStatus.Open), report.StatusFilter);
@@ -1859,15 +1875,24 @@ public class ReportsControllerTests
         Assert.Equal("FIN-VISIBLE", item.CaseNumber);
         Assert.Equal("Частично оплачено", item.FinanceStateLabel);
         Assert.Equal(40m, item.PaymentRate);
+        Assert.Equal(3_000m, item.ExpenseTotal);
+        Assert.Equal(18_000m, item.OutstandingTotal);
+        Assert.Equal(9_000m, item.MarginTotal);
+        Assert.Equal(75m, item.MarginRate);
 
         var status = Assert.Single(report.ByStatus);
         Assert.Equal(30_000m, status.FeeTotal);
         Assert.Equal(12_000m, status.PaidTotal);
+        Assert.Equal(3_000m, status.ExpenseTotal);
         Assert.Equal(18_000m, status.OutstandingTotal);
+        Assert.Equal(9_000m, status.MarginTotal);
+        Assert.Equal(75m, status.MarginRate);
 
         var responsible = Assert.Single(report.ByResponsible);
         Assert.Equal(visibleUser.Id, responsible.ResponsibleUserId);
+        Assert.Equal(3_000m, responsible.ExpenseTotal);
         Assert.Equal(18_000m, responsible.OutstandingTotal);
+        Assert.Equal(9_000m, responsible.MarginTotal);
         Assert.DoesNotContain(report.Items, row => row.CaseId == hiddenCase.Id);
     }
 

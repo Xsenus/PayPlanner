@@ -1,9 +1,10 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { Fragment, useMemo, useState, type ReactNode } from 'react';
 import {
   AlertTriangle,
   ArrowUpRight,
   Banknote,
   CalendarRange,
+  ChevronDown,
   CheckCircle2,
   Clock3,
   Compass,
@@ -166,7 +167,7 @@ function downloadBlob(filename: string, blob: Blob) {
 
 function exportCaseFinanceReport(report: CaseFinanceReport, timeZoneId?: string | null) {
   const rows: unknown[][] = [
-    ['Дело', 'Клиент / юрлицо', 'Ответственный', 'Тип', 'Статус дела', 'Финансовый статус', 'Гонорар', 'Оплачено', 'Остаток', 'Оплачено %', 'Срок дела'],
+    ['Дело', 'Клиент / юрлицо', 'Ответственный', 'Тип', 'Статус дела', 'Финансовый статус', 'Гонорар', 'Доходы', 'Расходы', 'Долг', 'Маржа', 'Оплачено %', 'Маржинальность %', 'Срок дела'],
   ];
 
   report.items.forEach((item) => {
@@ -179,8 +180,11 @@ function exportCaseFinanceReport(report: CaseFinanceReport, timeZoneId?: string 
       item.financeStateLabel,
       item.feeAmount,
       item.paidTotal,
+      item.expenseTotal,
       item.outstandingTotal,
+      item.marginTotal,
       item.paymentRate,
+      item.marginRate,
       item.dueDate ? formatDate(item.dueDate, timeZoneId) : '',
     ]);
   });
@@ -1826,6 +1830,7 @@ function CaseFinanceReportSection({
   const rows = report?.items ?? [];
   const responsibleRows = report?.byResponsible ?? [];
   const statusRows = report?.byStatus ?? [];
+  const [expandedCaseId, setExpandedCaseId] = useState<number | null>(null);
 
   return (
     <section className="mt-8 rounded-[32px] border border-white/70 bg-white/92 p-6 shadow-[0_18px_45px_-24px_rgba(15,23,42,0.35)] backdrop-blur">
@@ -1873,7 +1878,7 @@ function CaseFinanceReportSection({
         </div>
       ) : (
         <>
-          <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-4">
+          <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-5">
             <MetricCard
               title="Гонорар"
               value={formatCurrency(report.feeTotal)}
@@ -1882,25 +1887,32 @@ function CaseFinanceReportSection({
               subtitle={`${report.totalCases} дел, активных: ${report.activeCases}`}
             />
             <MetricCard
-              title="Оплачено"
+              title="Доходы"
               value={formatCurrency(report.paidTotal)}
               icon={CheckCircle2}
               tone="profit"
               subtitle={`Собрано: ${report.collectionRate}%`}
             />
             <MetricCard
-              title="Остаток"
+              title="Расходы"
+              value={formatCurrency(report.expenseTotal)}
+              icon={TrendingDown}
+              tone="expense"
+              subtitle={`Учитываются видимые расходные платежи`}
+            />
+            <MetricCard
+              title="Долг"
               value={formatCurrency(report.outstandingTotal)}
               icon={AlertTriangle}
               tone="expense"
               subtitle={`Без оплаты: ${report.unpaidCaseCount}, частично: ${report.partiallyPaidCaseCount}`}
             />
             <MetricCard
-              title="Оплачено дел"
-              value={String(report.fullyPaidCaseCount)}
+              title="Маржа"
+              value={formatCurrency(report.marginTotal)}
               icon={Percent}
-              tone="rate"
-              subtitle={report.overpaidCaseCount > 0 ? `С переплатой: ${report.overpaidCaseCount}` : `Лимит строк: ${report.limit}`}
+              tone="profit"
+              subtitle={`Маржинальность: ${report.marginRate}% · оплачено дел: ${report.fullyPaidCaseCount}`}
             />
           </div>
 
@@ -1914,7 +1926,7 @@ function CaseFinanceReportSection({
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <div className="font-medium text-slate-900">{item.responsibleName}</div>
-                          <div className="mt-1 text-xs text-slate-500">{item.caseCount} дел · собрано {item.collectionRate}%</div>
+                          <div className="mt-1 text-xs text-slate-500">{item.caseCount} дел · собрано {item.collectionRate}% · маржа {formatCurrency(item.marginTotal)}</div>
                         </div>
                         <div className="text-right text-sm">
                           <div className="font-semibold text-slate-900">{formatCurrency(item.outstandingTotal)}</div>
@@ -1937,7 +1949,7 @@ function CaseFinanceReportSection({
                     <div key={item.status} className="flex items-center justify-between gap-3 rounded-2xl bg-white px-4 py-3 shadow-sm">
                       <div>
                         <div className="font-medium text-slate-900">{item.statusLabel}</div>
-                        <div className="mt-1 text-xs text-slate-500">{item.caseCount} дел · собрано {item.collectionRate}%</div>
+                        <div className="mt-1 text-xs text-slate-500">{item.caseCount} дел · собрано {item.collectionRate}% · маржа {formatCurrency(item.marginTotal)}</div>
                       </div>
                       <div className="text-right text-sm">
                         <div className="font-semibold text-slate-900">{formatCurrency(item.outstandingTotal)}</div>
@@ -1960,42 +1972,90 @@ function CaseFinanceReportSection({
                     <th className="px-4 py-3 font-semibold">Дело</th>
                     <th className="px-4 py-3 font-semibold">Ответственный</th>
                     <th className="px-4 py-3 text-right font-semibold">Гонорар</th>
-                    <th className="px-4 py-3 text-right font-semibold">Оплачено</th>
-                    <th className="px-4 py-3 text-right font-semibold">Остаток</th>
+                    <th className="px-4 py-3 text-right font-semibold">Доходы</th>
+                    <th className="px-4 py-3 text-right font-semibold">Расходы</th>
+                    <th className="px-4 py-3 text-right font-semibold">Долг</th>
+                    <th className="px-4 py-3 text-right font-semibold">Маржа</th>
                     <th className="px-4 py-3 font-semibold">Статус</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 bg-white/80">
-                  {rows.length > 0 ? rows.map((row) => (
-                    <tr key={row.caseId} className="align-top">
-                      <td className="px-4 py-3">
-                        <div className="font-medium text-slate-900">{row.clientName}</div>
-                        <button
-                          type="button"
-                          onClick={() => onOpenCase?.(row.caseId)}
-                          className="mt-1 inline-flex items-center gap-1 text-left font-semibold text-blue-700 transition hover:text-blue-900 hover:underline"
-                        >
-                          {row.caseNumber ? `${row.caseNumber} · ` : ''}{row.caseTitle}
-                          <ArrowUpRight className="h-3.5 w-3.5" />
-                        </button>
-                        <div className="mt-1 text-xs text-slate-500">{row.caseType} · {row.statusLabel}</div>
-                      </td>
-                      <td className="px-4 py-3 text-slate-600">{row.responsibleName}</td>
-                      <td className="px-4 py-3 text-right text-slate-600">{formatCurrency(row.feeAmount)}</td>
-                      <td className="px-4 py-3 text-right text-slate-600">
-                        <div>{formatCurrency(row.paidTotal)}</div>
-                        <div className="text-xs text-slate-500">{row.paymentRate}%</div>
-                      </td>
-                      <td className="px-4 py-3 text-right font-semibold text-slate-900">{formatCurrency(row.outstandingTotal)}</td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${row.financeState === 'paid' ? 'bg-emerald-50 text-emerald-700' : row.financeState === 'unpaid' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'}`}>
-                          {row.financeStateLabel}
-                        </span>
-                      </td>
-                    </tr>
-                  )) : (
+                  {rows.length > 0 ? rows.map((row) => {
+                    const expanded = expandedCaseId === row.caseId;
+                    return (
+                      <Fragment key={row.caseId}>
+                        <tr className="align-top">
+                          <td className="px-4 py-3">
+                            <div className="font-medium text-slate-900">{row.clientName}</div>
+                            <button
+                              type="button"
+                              onClick={() => onOpenCase?.(row.caseId)}
+                              className="mt-1 inline-flex items-center gap-1 text-left font-semibold text-blue-700 transition hover:text-blue-900 hover:underline"
+                            >
+                              {row.caseNumber ? `${row.caseNumber} · ` : ''}{row.caseTitle}
+                              <ArrowUpRight className="h-3.5 w-3.5" />
+                            </button>
+                            <div className="mt-1 text-xs text-slate-500">{row.caseType} · {row.statusLabel}</div>
+                            <button
+                              type="button"
+                              onClick={() => setExpandedCaseId(expanded ? null : row.caseId)}
+                              className="mt-2 inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 transition hover:bg-slate-50"
+                            >
+                              <ChevronDown className={`h-3.5 w-3.5 transition ${expanded ? 'rotate-180' : ''}`} />
+                              Расшифровка
+                            </button>
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">{row.responsibleName}</td>
+                          <td className="px-4 py-3 text-right text-slate-600">{formatCurrency(row.feeAmount)}</td>
+                          <td className="px-4 py-3 text-right text-slate-600">
+                            <div>{formatCurrency(row.paidTotal)}</div>
+                            <div className="text-xs text-slate-500">{row.paymentRate}%</div>
+                          </td>
+                          <td className="px-4 py-3 text-right text-slate-600">{formatCurrency(row.expenseTotal)}</td>
+                          <td className="px-4 py-3 text-right font-semibold text-slate-900">{formatCurrency(row.outstandingTotal)}</td>
+                          <td className={`px-4 py-3 text-right font-semibold ${row.marginTotal >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                            <div>{formatCurrency(row.marginTotal)}</div>
+                            <div className="text-xs font-normal text-slate-500">{row.marginRate}%</div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${row.financeState === 'paid' ? 'bg-emerald-50 text-emerald-700' : row.financeState === 'unpaid' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'}`}>
+                              {row.financeStateLabel}
+                            </span>
+                          </td>
+                        </tr>
+                        {expanded ? (
+                          <tr>
+                            <td colSpan={8} className="bg-slate-50 px-4 py-3">
+                              <div className="grid grid-cols-1 gap-3 text-sm md:grid-cols-4">
+                                <div className="rounded-2xl border border-slate-100 bg-white p-3">
+                                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Доходы</div>
+                                  <div className="mt-1 font-semibold text-slate-900">{formatCurrency(row.paidTotal)}</div>
+                                  <div className="mt-1 text-xs text-slate-500">Полученные оплаты по делу</div>
+                                </div>
+                                <div className="rounded-2xl border border-slate-100 bg-white p-3">
+                                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Расходы</div>
+                                  <div className="mt-1 font-semibold text-slate-900">{formatCurrency(row.expenseTotal)}</div>
+                                  <div className="mt-1 text-xs text-slate-500">Видимые расходные платежи</div>
+                                </div>
+                                <div className="rounded-2xl border border-slate-100 bg-white p-3">
+                                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Долг</div>
+                                  <div className="mt-1 font-semibold text-slate-900">{formatCurrency(row.outstandingTotal)}</div>
+                                  <div className="mt-1 text-xs text-slate-500">Гонорар минус доходы</div>
+                                </div>
+                                <div className="rounded-2xl border border-slate-100 bg-white p-3">
+                                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Маржа</div>
+                                  <div className={`mt-1 font-semibold ${row.marginTotal >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>{formatCurrency(row.marginTotal)}</div>
+                                  <div className="mt-1 text-xs text-slate-500">Доходы минус расходы</div>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        ) : null}
+                      </Fragment>
+                    );
+                  }) : (
                     <tr>
-                      <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                      <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
                         Финансовые строки по выбранным условиям не найдены.
                       </td>
                     </tr>
