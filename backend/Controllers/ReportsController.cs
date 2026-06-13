@@ -501,6 +501,22 @@ public class ReportsController : ControllerBase
                     return (BuildCategoryExportDocument(reportDto), null);
                 }
 
+            case "counterparties":
+                {
+                    var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+                    if (paymentsVisibility is null)
+                    {
+                        return (null, Unauthorized());
+                    }
+
+                    var (start, end) = ResolveReportPeriod(from, to, reportToday);
+                    var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                        cancellationToken => BuildCounterpartyReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        _logger,
+                        ct);
+                    return (BuildCounterpartyExportDocument(reportDto), null);
+                }
+
             case "case-success":
                 {
                     var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
@@ -1945,6 +1961,30 @@ public class ReportsController : ControllerBase
                     item.CategoryName,
                     MoneyCell(item.Amount),
                     item.Count.ToString(CultureInfo.InvariantCulture),
+                    PercentCell(item.Share),
+                ])).ToList()),
+            ]);
+
+    private static ReportExportDocument BuildCounterpartyExportDocument(CounterpartyReportDto report)
+        => new(
+            "counterparty-report",
+            "Отчет по контрагентам",
+            $"Период: {DateCell(report.From)} - {DateCell(report.To)}{(report.Source.HasValue ? $" · Источник: {MoneyOperationSourceCell(report.Source.Value)}" : string.Empty)}",
+            [
+                new("Поступило", MoneyCell(report.IncomeTotal)),
+                new("Списано", MoneyCell(report.ExpenseTotal)),
+                new("Итог", MoneyCell(report.NetTotal)),
+                new("Контрагентов", report.Counterparties.Count.ToString(CultureInfo.InvariantCulture)),
+            ],
+            [
+                new("Контрагенты", ["Контрагент", "Поступило", "Списано", "Итог", "Оборот", "Приходов", "Расходов", "Доля оборота"], report.Counterparties.Select(item => new ReportExportRow([
+                    item.CounterpartyName,
+                    MoneyCell(item.Income),
+                    MoneyCell(item.Expense),
+                    MoneyCell(item.NetTotal),
+                    MoneyCell(item.TotalAmount),
+                    item.IncomeCount.ToString(CultureInfo.InvariantCulture),
+                    item.ExpenseCount.ToString(CultureInfo.InvariantCulture),
                     PercentCell(item.Share),
                 ])).ToList()),
             ]);

@@ -411,6 +411,37 @@ function exportCategoryReport(report: MoneyCategoryReport, timeZoneId?: string |
   downloadCsv('money-category-report.csv', rows);
 }
 
+function exportCounterpartyReport(report: CounterpartyReport, timeZoneId?: string | null) {
+  const rows: unknown[][] = [
+    ['Показатель', 'Значение'],
+    ['Период с', formatDate(report.from, timeZoneId)],
+    ['Период по', formatDate(report.to, timeZoneId)],
+    ['Источник', report.source ? sourceLabel(report.source) : 'Все источники'],
+    ['Поступило', report.incomeTotal],
+    ['Списано', report.expenseTotal],
+    ['Итог', report.netTotal],
+    ['Контрагентов', report.counterparties.length],
+    [],
+    ['Контрагенты'],
+    ['Контрагент', 'Поступило', 'Списано', 'Итог', 'Оборот', 'Приходов', 'Расходов', 'Доля оборота'],
+  ];
+
+  report.counterparties.forEach((item) => {
+    rows.push([
+      item.counterpartyName,
+      item.income,
+      item.expense,
+      item.netTotal,
+      item.totalAmount,
+      item.incomeCount,
+      item.expenseCount,
+      `${item.share}%`,
+    ]);
+  });
+
+  downloadCsv('counterparty-report.csv', rows);
+}
+
 function exportCashFlowForecastReport(report: CashFlowForecastReport, timeZoneId?: string | null) {
   const rows: unknown[][] = [
     ['Показатель', 'Значение'],
@@ -1365,11 +1396,15 @@ function CounterpartyReportSection({
   loading,
   error,
   onReload,
+  filters,
+  profileTimeZoneId,
 }: {
   report: CounterpartyReport | null;
   loading: boolean;
   error: string | null;
   onReload: () => void;
+  filters?: ManagementReportExportFilters;
+  profileTimeZoneId?: string | null;
 }) {
   const rows = (report?.counterparties ?? []).slice(0, 10);
 
@@ -1386,14 +1421,26 @@ function CounterpartyReportSection({
             Сводка фактических поступлений и списаний по каждому контрагенту с долей в общем обороте периода.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onReload}
-          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-        >
-          <RefreshCcw className="h-4 w-4" />
-          Обновить
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => report && exportCounterpartyReport(report, profileTimeZoneId)}
+            disabled={!report || loading}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            CSV
+          </button>
+          <ManagementReportExportButtons reportKind="counterparties" filters={filters} disabled={!report || loading} />
+          <button
+            type="button"
+            onClick={onReload}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            <RefreshCcw className="h-4 w-4" />
+            Обновить
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -1624,7 +1671,7 @@ function ProjectReportSection({
 
 type LegalWorkExportFormat = 'csv' | 'excel' | 'pdf';
 type ManagementReportExportFormat = 'excel' | 'pdf';
-type ManagementReportKind = 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast' | 'categories';
+type ManagementReportKind = 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast' | 'categories' | 'counterparties';
 type ReportCaseSection = 'tasks' | 'documents' | 'court' | 'workOrder';
 
 type LegalWorkReportFilters = {
@@ -6645,6 +6692,8 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={counterpartyReportLoading}
               error={counterpartyReportError}
               onReload={reloadCounterpartyReport}
+              filters={cashFlowDates}
+              profileTimeZoneId={profileTimeZoneId}
             />
 
             <ProjectReportSection
