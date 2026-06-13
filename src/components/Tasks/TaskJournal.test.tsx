@@ -1185,6 +1185,69 @@ describe('TaskJournal', () => {
     });
   });
 
+  it('saves, applies and deletes custom task journal views', async () => {
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('Срочные задачи');
+
+    try {
+      await renderJournal([
+        createTask({
+          id: 101,
+          title: 'Обычная задача',
+          priority: 'normal',
+        }),
+        createTask({
+          id: 102,
+          title: 'Срочная задача',
+          priority: 'urgent',
+        }),
+      ], { waitForTitle: null });
+
+      const searchInput = screen.getByPlaceholderText('Поиск по контрагенту, делу или наименованию задачи') as HTMLInputElement;
+      fireEvent.change(screen.getByTestId('task-priority-filter'), { target: { value: 'urgent' } });
+      fireEvent.change(searchInput, { target: { value: 'Срочная' } });
+      fireEvent.click(screen.getByTestId('task-save-view'));
+
+      await waitFor(() => expect(toastMock.success).toHaveBeenCalledWith(
+        'Представление «Срочные задачи» сохранено.',
+        'Журнал задач',
+      ));
+
+      const rawSavedViews = window.localStorage.getItem('pp.task_journal.views.v1.user:7');
+      expect(rawSavedViews).toBeTruthy();
+      const savedViews = JSON.parse(rawSavedViews ?? '[]') as Array<{
+        id: string;
+        name: string;
+        filters: { priorityFilter?: string; search?: string };
+      }>;
+      expect(savedViews).toHaveLength(1);
+      expect(savedViews[0]).toMatchObject({
+        name: 'Срочные задачи',
+        filters: {
+          priorityFilter: 'urgent',
+          search: 'Срочная',
+        },
+      });
+
+      fireEvent.change(screen.getByTestId('task-priority-filter'), { target: { value: 'all' } });
+      fireEvent.change(searchInput, { target: { value: '' } });
+
+      fireEvent.change(screen.getByTestId('task-saved-view-select'), { target: { value: savedViews[0].id } });
+
+      await waitFor(() => {
+        expect((screen.getByTestId('task-priority-filter') as HTMLSelectElement).value).toBe('urgent');
+        expect(searchInput.value).toBe('Срочная');
+      });
+
+      fireEvent.click(screen.getByTestId('task-delete-view'));
+
+      await waitFor(() => {
+        expect(JSON.parse(window.localStorage.getItem('pp.task_journal.views.v1.user:7') ?? '[]')).toHaveLength(0);
+      });
+    } finally {
+      promptSpy.mockRestore();
+    }
+  });
+
   it('keeps date filters in a separate responsive row from view controls', async () => {
     await renderJournal();
 

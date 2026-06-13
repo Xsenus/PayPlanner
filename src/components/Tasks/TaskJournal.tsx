@@ -3,6 +3,7 @@ import {
   AlarmClock,
   ArrowLeft,
   Bell,
+  Bookmark,
   CalendarDays,
   CalendarClock,
   ChevronLeft,
@@ -139,6 +140,12 @@ type TaskJournalFilterPreferences = {
   priorityFilter: TaskJournalPriority | 'all';
   periodMode: PeriodMode;
 };
+type TaskJournalSavedView = {
+  id: string;
+  name: string;
+  filters: TaskJournalFilterPreferences;
+  updatedAt: string;
+};
 
 const DEFAULT_TASK_JOURNAL_SETTINGS: TaskJournalSettingsDto = {
   restrictExecutorEditing: true,
@@ -217,6 +224,7 @@ const CHANNEL_OPTIONS: Array<{ value: TaskJournalChannel; label: string; icon: t
 ];
 
 const TASK_JOURNAL_FILTERS_STORAGE_PREFIX = 'pp.task_journal.filters.v1';
+const TASK_JOURNAL_SAVED_VIEWS_STORAGE_PREFIX = 'pp.task_journal.views.v1';
 
 const QUICK_FILTER_OPTIONS: Array<{ value: QuickFilter; label: string; icon: typeof ClipboardList }> = [
   { value: 'all', label: 'Все', icon: ListFilter },
@@ -243,6 +251,13 @@ function getTaskJournalFilterStorageKey(userId: number | null, mode: TaskJournal
   return mode === 'journal'
     ? `${TASK_JOURNAL_FILTERS_STORAGE_PREFIX}.${ownerKey}`
     : `${TASK_JOURNAL_FILTERS_STORAGE_PREFIX}.${mode}.${ownerKey}`;
+}
+
+function getTaskJournalSavedViewsStorageKey(userId: number | null, mode: TaskJournalMode = 'journal') {
+  const ownerKey = userId ? `user:${userId}` : 'guest';
+  return mode === 'journal'
+    ? `${TASK_JOURNAL_SAVED_VIEWS_STORAGE_PREFIX}.${ownerKey}`
+    : `${TASK_JOURNAL_SAVED_VIEWS_STORAGE_PREFIX}.${mode}.${ownerKey}`;
 }
 
 function getDefaultQuickFilter(_userId: number | null, mode: TaskJournalMode = 'journal'): QuickFilter {
@@ -363,6 +378,29 @@ function getTaskDateRangeBounds(dateFrom: string, dateTo: string) {
   return { from, to };
 }
 
+function normalizeTaskJournalFilterPreferences(
+  parsed: Partial<TaskJournalFilterPreferences> | null | undefined,
+  defaults: TaskJournalFilterPreferences,
+): TaskJournalFilterPreferences {
+  return {
+    viewMode: isViewMode(parsed?.viewMode) ? parsed.viewMode : defaults.viewMode,
+    calendarColorMode: isTaskCalendarColorMode(parsed?.calendarColorMode) ? parsed.calendarColorMode : defaults.calendarColorMode,
+    calendarConflictPolicy: isTaskCalendarConflictPolicy(parsed?.calendarConflictPolicy) ? parsed.calendarConflictPolicy : defaults.calendarConflictPolicy,
+    calendarLoadWarningMode: isTaskCalendarLoadWarningMode(parsed?.calendarLoadWarningMode) ? parsed.calendarLoadWarningMode : defaults.calendarLoadWarningMode,
+    icsReminderPreset: isIcsReminderPreset(parsed?.icsReminderPreset) ? parsed.icsReminderPreset : defaults.icsReminderPreset,
+    quickFilter: isQuickFilter(parsed?.quickFilter) ? parsed.quickFilter : defaults.quickFilter,
+    metricFilter: isMetricFilter(parsed?.metricFilter) ? parsed.metricFilter : defaults.metricFilter,
+    search: typeof parsed?.search === 'string' ? parsed.search : defaults.search,
+    dateFrom: isDateFilterValue(parsed?.dateFrom) ? parsed.dateFrom : defaults.dateFrom,
+    dateTo: isDateFilterValue(parsed?.dateTo) ? parsed.dateTo : defaults.dateTo,
+    statusFilter: isStatusFilter(parsed?.statusFilter) ? parsed.statusFilter : defaults.statusFilter,
+    assigneeFilter: typeof parsed?.assigneeFilter === 'string' && parsed.assigneeFilter ? parsed.assigneeFilter : defaults.assigneeFilter,
+    typeFilter: isTypeFilter(parsed?.typeFilter) ? parsed.typeFilter : defaults.typeFilter,
+    priorityFilter: isPriorityFilter(parsed?.priorityFilter) ? parsed.priorityFilter : defaults.priorityFilter,
+    periodMode: isPeriodMode(parsed?.periodMode) ? parsed.periodMode : defaults.periodMode,
+  };
+}
+
 function readTaskJournalFilterPreferences(userId: number | null, mode: TaskJournalMode = 'journal', viewMode: ViewMode = 'list'): TaskJournalFilterPreferences {
   const defaults = createDefaultFilterPreferences(userId, mode, viewMode);
   if (typeof window === 'undefined') {
@@ -376,23 +414,7 @@ function readTaskJournalFilterPreferences(userId: number | null, mode: TaskJourn
     }
 
     const parsed = JSON.parse(raw) as Partial<TaskJournalFilterPreferences>;
-    return {
-      viewMode: isViewMode(parsed.viewMode) ? parsed.viewMode : defaults.viewMode,
-      calendarColorMode: isTaskCalendarColorMode(parsed.calendarColorMode) ? parsed.calendarColorMode : defaults.calendarColorMode,
-      calendarConflictPolicy: isTaskCalendarConflictPolicy(parsed.calendarConflictPolicy) ? parsed.calendarConflictPolicy : defaults.calendarConflictPolicy,
-      calendarLoadWarningMode: isTaskCalendarLoadWarningMode(parsed.calendarLoadWarningMode) ? parsed.calendarLoadWarningMode : defaults.calendarLoadWarningMode,
-      icsReminderPreset: isIcsReminderPreset(parsed.icsReminderPreset) ? parsed.icsReminderPreset : defaults.icsReminderPreset,
-      quickFilter: isQuickFilter(parsed.quickFilter) ? parsed.quickFilter : defaults.quickFilter,
-      metricFilter: isMetricFilter(parsed.metricFilter) ? parsed.metricFilter : defaults.metricFilter,
-      search: typeof parsed.search === 'string' ? parsed.search : defaults.search,
-      dateFrom: isDateFilterValue(parsed.dateFrom) ? parsed.dateFrom : defaults.dateFrom,
-      dateTo: isDateFilterValue(parsed.dateTo) ? parsed.dateTo : defaults.dateTo,
-      statusFilter: isStatusFilter(parsed.statusFilter) ? parsed.statusFilter : defaults.statusFilter,
-      assigneeFilter: typeof parsed.assigneeFilter === 'string' && parsed.assigneeFilter ? parsed.assigneeFilter : defaults.assigneeFilter,
-      typeFilter: isTypeFilter(parsed.typeFilter) ? parsed.typeFilter : defaults.typeFilter,
-      priorityFilter: isPriorityFilter(parsed.priorityFilter) ? parsed.priorityFilter : defaults.priorityFilter,
-      periodMode: isPeriodMode(parsed.periodMode) ? parsed.periodMode : defaults.periodMode,
-    };
+    return normalizeTaskJournalFilterPreferences(parsed, defaults);
   } catch {
     return defaults;
   }
@@ -407,6 +429,55 @@ function writeTaskJournalFilterPreferences(userId: number | null, preferences: T
     window.localStorage.setItem(getTaskJournalFilterStorageKey(userId, mode), JSON.stringify(preferences));
   } catch {
     // Если браузер запретил localStorage, журнал продолжит работать без сохранения фильтров.
+  }
+}
+
+function readTaskJournalSavedViews(userId: number | null, mode: TaskJournalMode = 'journal', viewMode: ViewMode = 'list'): TaskJournalSavedView[] {
+  if (typeof window === 'undefined') {
+    return [];
+  }
+
+  try {
+    const raw = window.localStorage.getItem(getTaskJournalSavedViewsStorageKey(userId, mode));
+    if (!raw) {
+      return [];
+    }
+
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    const defaults = createDefaultFilterPreferences(userId, mode, viewMode);
+    return parsed
+      .filter((item): item is TaskJournalSavedView => (
+        Boolean(item)
+        && typeof item === 'object'
+        && typeof (item as TaskJournalSavedView).id === 'string'
+        && typeof (item as TaskJournalSavedView).name === 'string'
+        && Boolean((item as TaskJournalSavedView).filters)
+      ))
+      .map((item) => ({
+        id: item.id,
+        name: item.name,
+        filters: normalizeTaskJournalFilterPreferences(item.filters, defaults),
+        updatedAt: typeof item.updatedAt === 'string' ? item.updatedAt : '',
+      }))
+      .slice(0, 20);
+  } catch {
+    return [];
+  }
+}
+
+function writeTaskJournalSavedViews(userId: number | null, mode: TaskJournalMode, views: TaskJournalSavedView[]) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(getTaskJournalSavedViewsStorageKey(userId, mode), JSON.stringify(views.slice(0, 20)));
+  } catch {
+    // Если браузер запретил localStorage, журнал продолжит работать без сохраненных представлений.
   }
 }
 
@@ -1612,6 +1683,7 @@ export function TaskJournal({
   const automationCandidatesRequestRef = useRef(0);
   const [loading, setLoading] = useState(true);
   const [filterOwnerKey, setFilterOwnerKey] = useState(() => getTaskJournalFilterStorageKey(currentUserId, mode));
+  const [savedViewOwnerKey, setSavedViewOwnerKey] = useState(() => getTaskJournalSavedViewsStorageKey(currentUserId, mode));
 
   const [quickFilter, setQuickFilter] = useState<QuickFilter>(initialPreferences.quickFilter);
   const [metricFilter, setMetricFilter] = useState<MetricFilter>(initialPreferences.metricFilter);
@@ -1629,6 +1701,8 @@ export function TaskJournal({
   const [assigneeFilter, setAssigneeFilter] = useState(initialPreferences.assigneeFilter);
   const [typeFilter, setTypeFilter] = useState<TaskJournalType | 'all'>(initialPreferences.typeFilter);
   const [priorityFilter, setPriorityFilter] = useState<TaskJournalPriority | 'all'>(initialPreferences.priorityFilter);
+  const [savedViews, setSavedViews] = useState<TaskJournalSavedView[]>(() => readTaskJournalSavedViews(currentUserId, mode, initialPreferences.viewMode));
+  const [selectedSavedViewId, setSelectedSavedViewId] = useState('');
   const [modal, setModal] = useState<ModalState>(null);
   const [completionPromptTask, setCompletionPromptTask] = useState<TaskJournalItem | null>(null);
   const [completionPromptResult, setCompletionPromptResult] = useState('');
@@ -1692,6 +1766,17 @@ export function TaskJournal({
   }, [currentUserId, filterOwnerKey, initialView, mode]);
 
   useEffect(() => {
+    const nextOwnerKey = getTaskJournalSavedViewsStorageKey(currentUserId, mode);
+    if (nextOwnerKey === savedViewOwnerKey) {
+      return;
+    }
+
+    setSavedViewOwnerKey(nextOwnerKey);
+    setSavedViews(readTaskJournalSavedViews(currentUserId, mode, initialView));
+    setSelectedSavedViewId('');
+  }, [currentUserId, initialView, mode, savedViewOwnerKey]);
+
+  useEffect(() => {
     if (skipNextFilterSaveRef.current) {
       skipNextFilterSaveRef.current = false;
       return;
@@ -1715,6 +1800,89 @@ export function TaskJournal({
       periodMode,
     }, mode);
   }, [assigneeFilter, calendarColorMode, calendarConflictPolicy, calendarLoadWarningMode, currentUserId, dateFromFilter, dateToFilter, icsReminderPreset, metricFilter, mode, periodMode, priorityFilter, quickFilter, search, statusFilter, typeFilter, viewMode]);
+
+  const captureSavedViewFilters = (): TaskJournalFilterPreferences => ({
+    viewMode,
+    calendarColorMode,
+    calendarConflictPolicy,
+    calendarLoadWarningMode,
+    icsReminderPreset,
+    quickFilter,
+    metricFilter,
+    search,
+    dateFrom: dateFromFilter,
+    dateTo: dateToFilter,
+    statusFilter,
+    assigneeFilter,
+    typeFilter,
+    priorityFilter,
+    periodMode,
+  });
+
+  const applySavedViewFilters = (filters: TaskJournalFilterPreferences) => {
+    setViewMode(filters.viewMode);
+    setCalendarColorMode(filters.calendarColorMode);
+    setCalendarConflictPolicy(filters.calendarConflictPolicy);
+    setCalendarLoadWarningMode(filters.calendarLoadWarningMode);
+    setIcsReminderPreset(filters.icsReminderPreset);
+    setQuickFilter(filters.quickFilter);
+    setMetricFilter(filters.metricFilter);
+    setSearch(filters.search);
+    setDateFromFilter(filters.dateFrom);
+    setDateToFilter(filters.dateTo);
+    setStatusFilter(filters.statusFilter);
+    setAssigneeFilter(filters.assigneeFilter);
+    setTypeFilter(filters.typeFilter);
+    setPriorityFilter(filters.priorityFilter);
+    setPeriodMode(filters.periodMode);
+  };
+
+  const handleSavedViewSelect = (viewId: string) => {
+    setSelectedSavedViewId(viewId);
+    const view = savedViews.find((item) => item.id === viewId);
+    if (!view) {
+      return;
+    }
+
+    applySavedViewFilters(view.filters);
+  };
+
+  const handleSaveCurrentView = () => {
+    const currentView = savedViews.find((item) => item.id === selectedSavedViewId);
+    const name = window.prompt('Название представления', currentView?.name ?? '')?.trim();
+    if (!name) {
+      return;
+    }
+
+    const nextView: TaskJournalSavedView = {
+      id: currentView?.id ?? `view-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name,
+      filters: captureSavedViewFilters(),
+      updatedAt: new Date().toISOString(),
+    };
+    const nextViews = [nextView, ...savedViews.filter((item) => item.id !== nextView.id)].slice(0, 20);
+
+    setSavedViews(nextViews);
+    setSelectedSavedViewId(nextView.id);
+    writeTaskJournalSavedViews(currentUserId, mode, nextViews);
+    toast.success(`Представление «${name}» сохранено.`, 'Журнал задач');
+  };
+
+  const handleDeleteCurrentView = () => {
+    if (!selectedSavedViewId) {
+      return;
+    }
+
+    const deletedView = savedViews.find((item) => item.id === selectedSavedViewId);
+    const nextViews = savedViews.filter((item) => item.id !== selectedSavedViewId);
+    setSavedViews(nextViews);
+    setSelectedSavedViewId('');
+    writeTaskJournalSavedViews(currentUserId, mode, nextViews);
+    toast.success(
+      deletedView ? `Представление «${deletedView.name}» удалено.` : 'Представление удалено.',
+      'Журнал задач',
+    );
+  };
 
   const openTaskEditor = useCallback(
     (task: TaskJournalItem, options?: { syncRoute?: boolean }) => {
@@ -3053,16 +3221,52 @@ export function TaskJournal({
             ))}
           </div>
 
-          {metricFilter !== 'none' ? (
+          <div className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
+            <select
+              value={selectedSavedViewId}
+              onChange={(event) => handleSavedViewSelect(event.target.value)}
+              aria-label="Сохраненные представления задач"
+              data-testid="task-saved-view-select"
+              className="h-10 min-w-[220px] max-w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+            >
+              <option value="">Сохраненные представления</option>
+              {savedViews.map((view) => (
+                <option key={view.id} value={view.id}>{view.name}</option>
+              ))}
+            </select>
+
             <button
               type="button"
-              onClick={() => setMetricFilter('none')}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+              onClick={handleSaveCurrentView}
+              data-testid="task-save-view"
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 text-sm font-semibold text-blue-700 transition hover:bg-blue-100"
             >
-              <X className="h-4 w-4" />
-              {METRIC_FILTER_LABELS[metricFilter]}
+              <Bookmark className="h-4 w-4" />
+              Сохранить вид
             </button>
-          ) : null}
+
+            <button
+              type="button"
+              onClick={handleDeleteCurrentView}
+              disabled={!selectedSavedViewId}
+              data-testid="task-delete-view"
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Trash2 className="h-4 w-4" />
+              Удалить
+            </button>
+
+            {metricFilter !== 'none' ? (
+              <button
+                type="button"
+                onClick={() => setMetricFilter('none')}
+                className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+              >
+                <X className="h-4 w-4" />
+                {METRIC_FILTER_LABELS[metricFilter]}
+              </button>
+            ) : null}
+          </div>
         </section>
 
         <section className="mb-6 space-y-3" data-testid="task-filters-panel">
