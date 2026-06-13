@@ -271,6 +271,7 @@ public class ReportsControllerTests
             "sales-points",
             "vat",
             "payment-orders",
+            "payment-purposes",
             "case-success",
             "current-cases",
             "lawyer-workload",

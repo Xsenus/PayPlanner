@@ -601,6 +601,37 @@ function exportPaymentOrderReport(report: PaymentOrderReport, timeZoneId?: strin
   downloadCsv('payment-order-report.csv', rows);
 }
 
+function exportPaymentPurposeReport(report: PaymentPurposeReport, timeZoneId?: string | null) {
+  const rows: unknown[][] = [
+    ['Показатель', 'Значение'],
+    ['Период с', formatDate(report.from, timeZoneId)],
+    ['Период по', formatDate(report.to, timeZoneId)],
+    ['Источник', report.source ? sourceLabel(report.source) : 'Все источники'],
+    ['Поступило', report.incomeTotal],
+    ['Списано', report.expenseTotal],
+    ['Итог', report.netTotal],
+    ['Назначений платежей', report.purposes.length],
+    [],
+    ['Назначения платежей'],
+    ['Назначение', 'Поступило', 'Списано', 'Итог', 'Оборот', 'Приходов', 'Расходов', 'Доля оборота'],
+  ];
+
+  report.purposes.forEach((item) => {
+    rows.push([
+      item.purpose,
+      item.income,
+      item.expense,
+      item.netTotal,
+      item.totalAmount,
+      item.incomeCount,
+      item.expenseCount,
+      `${item.share}%`,
+    ]);
+  });
+
+  downloadCsv('payment-purpose-report.csv', rows);
+}
+
 function exportCashFlowForecastReport(report: CashFlowForecastReport, timeZoneId?: string | null) {
   const rows: unknown[][] = [
     ['Показатель', 'Значение'],
@@ -1846,7 +1877,7 @@ function ProjectReportSection({
 
 type LegalWorkExportFormat = 'csv' | 'excel' | 'pdf';
 type ManagementReportExportFormat = 'excel' | 'pdf';
-type ManagementReportKind = 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast' | 'categories' | 'counterparties' | 'projects' | 'directions' | 'sales-points' | 'vat' | 'payment-orders';
+type ManagementReportKind = 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast' | 'categories' | 'counterparties' | 'projects' | 'directions' | 'sales-points' | 'vat' | 'payment-orders' | 'payment-purposes';
 type ReportCaseSection = 'tasks' | 'documents' | 'court' | 'workOrder';
 
 type LegalWorkReportFilters = {
@@ -5474,11 +5505,15 @@ function PaymentPurposeReportSection({
   loading,
   error,
   onReload,
+  filters,
+  profileTimeZoneId,
 }: {
   report: PaymentPurposeReport | null;
   loading: boolean;
   error: string | null;
   onReload: () => void;
+  filters?: ManagementReportExportFilters;
+  profileTimeZoneId?: string | null;
 }) {
   const rows = (report?.purposes ?? []).slice(0, 10);
 
@@ -5495,14 +5530,26 @@ function PaymentPurposeReportSection({
             Фактические операции по тексту назначения платежа: помогает увидеть повторяющиеся основания оплат и их оборот.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onReload}
-          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-        >
-          <RefreshCcw className="h-4 w-4" />
-          Обновить
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => report && exportPaymentPurposeReport(report, profileTimeZoneId)}
+            disabled={!report || loading}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            CSV
+          </button>
+          <ManagementReportExportButtons reportKind="payment-purposes" filters={filters} disabled={!report || loading} />
+          <button
+            type="button"
+            onClick={onReload}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            <RefreshCcw className="h-4 w-4" />
+            Обновить
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -7138,6 +7185,8 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={paymentPurposeReportLoading}
               error={paymentPurposeReportError}
               onReload={reloadPaymentPurposeReport}
+              filters={cashFlowDates}
+              profileTimeZoneId={profileTimeZoneId}
             />
 
             <MatchStatusReportSection
