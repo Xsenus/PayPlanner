@@ -156,6 +156,13 @@ function isPaymentBackedAdvanceTransaction(transaction: ClientBalanceTransaction
   );
 }
 
+function isAdvanceReviewPayment(payment: Payment) {
+  return (
+    payment.advanceReviewStatus === "AcceptedAsAdvance" ||
+    payment.advanceReviewStatus === "RequiresDecision"
+  );
+}
+
 function createInvoiceRow(invoice: Invoice, timeZoneId?: string | null): Omit<ReconciliationRow, "index" | "balance"> {
   const amount = Number(invoice.amount ?? 0);
   const isExpense = invoice.type === "Expense";
@@ -310,6 +317,9 @@ export function buildReconciliationRows({
   if (includePayments) {
     payments.forEach((payment) => {
       if (isCancelledWorkflow(payment.status) || !isActualPayment(payment)) {
+        return;
+      }
+      if (!includeAdvances && isAdvanceReviewPayment(payment)) {
         return;
       }
       const date = getPaymentActualDate(payment, timeZoneId);

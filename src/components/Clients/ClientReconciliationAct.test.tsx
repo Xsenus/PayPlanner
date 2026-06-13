@@ -173,6 +173,35 @@ describe("buildReconciliationRows", () => {
     expect(rows.map((row) => row.balance)).toEqual([10000, 7000]);
   });
 
+  it("hides advance review payments when advances are disabled", () => {
+    const rows = buildReconciliationRows({
+      invoices: [invoice()],
+      acts: [],
+      payments: [
+        payment({
+          advanceReviewStatus: "AcceptedAsAdvance",
+        }),
+      ],
+      balanceTransactions: [
+        balanceTransaction({
+          paymentId: 20,
+          amount: 3000,
+        }),
+      ],
+      periodFrom: "2026-01-01",
+      periodTo: "2026-01-31",
+      caseId: "all",
+      contractId: "all",
+      includeInvoices: true,
+      includeActs: true,
+      includePayments: true,
+      includeAdvances: false,
+    });
+
+    expect(rows.map((row) => row.documentType)).toEqual(["Счёт"]);
+    expect(rows.map((row) => row.balance)).toEqual([10000]);
+  });
+
   it("does not include cancelled documents and unpaid planned payments", () => {
     const rows = buildReconciliationRows({
       invoices: [
@@ -395,6 +424,90 @@ describe("ClientReconciliationAct", () => {
     expect(html).toContain("По данным ООО ЭлитПраво");
     expect(html).toContain("Продажа (№15 от 10.01.2026)");
     expect(downloadedFileName).toMatch(/akt-sverki-.+\.xls/);
+
+    clickSpy.mockRestore();
+    createObjectUrl.mockRestore();
+    revokeObjectUrl.mockRestore();
+  });
+
+  it("toggles advance rows in the reconciliation act and exports them when enabled", async () => {
+    apiMock.getPaymentsV2.mockResolvedValueOnce({
+      items: [
+        payment({
+          advanceReviewStatus: "AcceptedAsAdvance",
+          description: "Аванс клиента без счета",
+        }),
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 500,
+      summary: {
+        income: 3000,
+        expense: 0,
+        balance: 3000,
+        incomeCount: 1,
+        expenseCount: 0,
+        total: 1,
+      },
+    });
+    apiMock.getClientBalanceTransactions.mockResolvedValueOnce([
+      balanceTransaction({
+        paymentId: 20,
+        amount: 3000,
+        description: "Аванс клиента без счета",
+      }),
+    ]);
+
+    const createObjectUrl = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:advance-act");
+    const revokeObjectUrl = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
+
+    render(
+      <ClientReconciliationAct
+        clientId={1}
+        clientName="ООО Ромашка"
+        client={
+          {
+            id: 1,
+            name: "ООО Ромашка",
+            legalEntity: {
+              id: 2,
+              shortName: "ООО Ромашка",
+              inn: "9876543210",
+              clientsCount: 1,
+            },
+          } as Client
+        }
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Аванс (от 12.01.2026)").length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getByLabelText("Авансы и корректировки"));
+
+    await waitFor(() => {
+      expect(screen.queryByText("Аванс (от 12.01.2026)")).toBeNull();
+    });
+
+    fireEvent.click(screen.getByLabelText("Авансы и корректировки"));
+    await waitFor(() => {
+      expect(screen.getAllByText("Аванс (от 12.01.2026)").length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Excel/i }));
+
+    const blob = createObjectUrl.mock.calls
+      .map(([value]) => value)
+      .find((value): value is Blob => value instanceof Blob);
+    if (!blob) {
+      throw new Error("Excel export blob was not created");
+    }
+    const html = await blob.text();
+    expect(html).toContain("Аванс (от 12.01.2026)");
 
     clickSpy.mockRestore();
     createObjectUrl.mockRestore();

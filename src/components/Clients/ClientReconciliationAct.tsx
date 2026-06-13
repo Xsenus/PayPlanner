@@ -250,7 +250,12 @@ function getCleanDocumentNumber(row: ReconciliationRow) {
 }
 
 function getOperationName(row: ReconciliationRow, side: "executor" | "client") {
-  if (row.sourceKind === "payment") return "Оплата";
+  if (row.sourceKind === "payment") {
+    return row.documentType === "Аванс" ? "Аванс" : "Оплата";
+  }
+  if (row.sourceKind === "balance") {
+    return row.documentType;
+  }
 
   const isExecutorSale = row.debit >= row.credit;
   if (side === "executor") {
