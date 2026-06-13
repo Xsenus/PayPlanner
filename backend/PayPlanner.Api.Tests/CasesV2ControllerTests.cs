@@ -5838,6 +5838,107 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task WorkOrder_CreateContractCreatesDraftContractWithOwnerLinksAndServices()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "work-order-contract-owner@example.com", "Владелец договора");
+        var client = new Client
+        {
+            Name = "Клиент договора",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var legalEntity = new LegalEntity
+        {
+            ShortName = "ООО Договор",
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            LegalEntity = legalEntity,
+            Title = "Дело для договора",
+            CaseNumber = "CONTRACT-77",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = owner.Id,
+        };
+        var workOrder = new ClientCaseWorkOrder
+        {
+            ClientCase = clientCase,
+            Title = "Расчет договора",
+            Status = "approved",
+            Currency = "RUB",
+            CreatedAt = DateTime.UtcNow,
+            Items =
+            [
+                new ClientCaseWorkOrderItem
+                {
+                    ServiceName = "Подготовка договора",
+                    Quantity = 1,
+                    UnitPrice = 12000,
+                    TotalAmount = 12000,
+                    SortOrder = 1,
+                },
+                new ClientCaseWorkOrderItem
+                {
+                    ServiceName = "Юридическое сопровождение",
+                    Quantity = 2,
+                    UnitPrice = 9000,
+                    TotalAmount = 18000,
+                    SortOrder = 2,
+                },
+            ],
+        };
+        db.Clients.Add(client);
+        db.LegalEntities.Add(legalEntity);
+        db.ClientCases.Add(clientCase);
+        db.ClientCaseWorkOrders.Add(workOrder);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var result = await controller.CreateContractFromWorkOrder(clientCase.Id, new CasesV2Controller.CreateClientCaseWorkOrderContractRequest
+        {
+            Number = "WO-CONTRACT-77",
+            Date = new DateTime(2026, 06, 04),
+            StartDate = new DateTime(2026, 06, 05),
+        }, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(result.Result);
+        var dto = Assert.IsType<CasesV2Controller.ClientCaseWorkOrderContractDto>(created.Value);
+        Assert.Equal("WO-CONTRACT-77", dto.Number);
+        Assert.Equal(new DateTime(2026, 06, 04), dto.Date);
+        Assert.Equal(new DateTime(2026, 06, 05), dto.StartDate);
+        Assert.Equal(30000, dto.Amount);
+        Assert.Equal(client.Id, dto.ClientId);
+        Assert.Equal(legalEntity.Id, dto.LegalEntityId);
+        Assert.Equal("approved", dto.WorkOrder.Status);
+        Assert.NotNull(dto.DocumentId);
+
+        var contract = await db.Contracts
+            .Include(item => item.ClientContracts)
+            .Include(item => item.LegalEntityContracts)
+            .SingleAsync(item => item.Id == dto.ContractId);
+        Assert.Equal(ContractStatus.Draft, contract.Status);
+        Assert.Equal(ContractBillingMode.Fixed, contract.BillingMode);
+        Assert.True(contract.IsOpenEnded);
+        Assert.Equal(30000, contract.Amount);
+        Assert.Contains("Подготовка договора", contract.Description);
+        Assert.Contains("Юридическое сопровождение", contract.Description);
+        Assert.Contains(contract.ClientContracts, item => item.ClientId == client.Id);
+        Assert.Contains(contract.LegalEntityContracts, item => item.LegalEntityId == legalEntity.Id);
+
+        var contractDocument = await db.ClientCaseDocuments.SingleAsync(item => item.Id == dto.DocumentId);
+        Assert.Equal($"contract-{contract.Id}", contractDocument.DocumentKey);
+        Assert.Equal("Договор", contractDocument.DocumentType);
+        Assert.Equal("text/html; charset=utf-8", contractDocument.ContentType);
+
+        await db.Entry(workOrder).ReloadAsync();
+        await db.Entry(clientCase).ReloadAsync();
+        Assert.Equal("approved", workOrder.Status);
+        Assert.Contains("создан договор", clientCase.EventHistory, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task WorkOrder_CreateInvoiceDefaultsDateToUserTimeZone()
     {
         await using var db = await CreateContextAsync();

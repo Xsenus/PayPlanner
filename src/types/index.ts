@@ -1092,6 +1092,18 @@ export interface ClientCaseWorkOrderAct {
   workOrder: ClientCaseWorkOrder;
 }
 
+export interface ClientCaseWorkOrderContract {
+  contractId: number;
+  number: string;
+  date: string;
+  startDate: string;
+  amount?: number | null;
+  documentId?: number | null;
+  clientId?: number | null;
+  legalEntityId?: number | null;
+  workOrder: ClientCaseWorkOrder;
+}
+
 export interface ClientCaseWorkOrderItem {
   id: number;
   clientCaseWorkOrderId: number;

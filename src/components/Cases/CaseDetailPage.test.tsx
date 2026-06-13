@@ -66,6 +66,7 @@ vi.mock('../../services/api', () => ({
     deleteCaseWorkOrderItem: vi.fn(),
     createCaseWorkOrderInvoice: vi.fn(),
     createCaseWorkOrderAct: vi.fn(),
+    createCaseWorkOrderContract: vi.fn(),
     submitCaseWorkOrderApproval: vi.fn(),
     approveCaseWorkOrder: vi.fn(),
     requestCaseWorkOrderRevision: vi.fn(),
@@ -777,6 +778,7 @@ describe('CaseDetailPage', () => {
     vi.mocked(apiService.deleteCaseWorkOrderItem).mockReset();
     vi.mocked(apiService.createCaseWorkOrderInvoice).mockReset();
     vi.mocked(apiService.createCaseWorkOrderAct).mockReset();
+    vi.mocked(apiService.createCaseWorkOrderContract).mockReset();
     vi.mocked(apiService.submitCaseWorkOrderApproval).mockReset();
     vi.mocked(apiService.approveCaseWorkOrder).mockReset();
     vi.mocked(apiService.requestCaseWorkOrderRevision).mockReset();
@@ -1082,7 +1084,7 @@ describe('CaseDetailPage', () => {
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
 
     await screen.findByText('ЗЕМЦОВ - банкротство');
-    expect(await screen.findByText('Согласованный заказ-наряд нельзя редактировать. Можно создать счет, акт или вернуть расчет на доработку.')).toBeTruthy();
+    expect(await screen.findByText('Согласованный заказ-наряд нельзя редактировать. Можно создать счет, акт, договор или вернуть расчет на доработку.')).toBeTruthy();
 
     const saveButtons = screen.getAllByRole('button', { name: 'Сохранить' }) as HTMLButtonElement[];
     expect(saveButtons.some((button) => button.disabled)).toBe(true);

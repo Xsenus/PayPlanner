@@ -1066,6 +1066,7 @@ export function CaseDetailPage({
   const [deletingWorkOrderItemId, setDeletingWorkOrderItemId] = useState<number | null>(null);
   const [creatingWorkOrderInvoice, setCreatingWorkOrderInvoice] = useState(false);
   const [creatingWorkOrderAct, setCreatingWorkOrderAct] = useState(false);
+  const [creatingWorkOrderContract, setCreatingWorkOrderContract] = useState(false);
   const [printingWorkOrder, setPrintingWorkOrder] = useState(false);
   const [generatingWorkOrderDocument, setGeneratingWorkOrderDocument] = useState(false);
   const [workOrderApprovalAction, setWorkOrderApprovalAction] = useState<'submit' | 'approve' | 'revision' | null>(null);
@@ -2581,6 +2582,24 @@ export function CaseDetailPage({
     }
   };
 
+  const createContractFromWorkOrder = async () => {
+    if (!caseItem || !workOrder?.id) return;
+
+    setCreatingWorkOrderContract(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await apiService.createCaseWorkOrderContract(caseItem.id);
+      applyLoadedWorkOrder(result.workOrder);
+      setNotice(`Договор №${result.number} создан на сумму ${formatMoney(result.amount ?? 0)}.`);
+      setReloadToken((value) => value + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось создать договор на основе заказ-наряда.');
+    } finally {
+      setCreatingWorkOrderContract(false);
+    }
+  };
+
   const printWorkOrder = async () => {
     if (!caseItem || !workOrder?.id) return;
 
@@ -3190,6 +3209,7 @@ export function CaseDetailPage({
               deletingItemId={deletingWorkOrderItemId}
               creatingInvoice={creatingWorkOrderInvoice}
               creatingAct={creatingWorkOrderAct}
+              creatingContract={creatingWorkOrderContract}
               printing={printingWorkOrder}
               generatingDocument={generatingWorkOrderDocument}
               approvalAction={workOrderApprovalAction}
@@ -3202,6 +3222,7 @@ export function CaseDetailPage({
               onDeleteHeader={() => void deleteWorkOrder()}
               onCreateInvoice={() => void createInvoiceFromWorkOrder()}
               onCreateAct={() => void createActFromWorkOrder()}
+              onCreateContract={() => void createContractFromWorkOrder()}
               onPrint={() => void printWorkOrder()}
               onGenerateDocument={() => void generateWorkOrderDocument()}
               onSubmitApproval={() => void runWorkOrderApprovalAction('submit')}
@@ -3929,6 +3950,7 @@ function WorkOrderPanel({
   deletingItemId,
   creatingInvoice,
   creatingAct,
+  creatingContract,
   printing,
   generatingDocument,
   approvalAction,
@@ -3941,6 +3963,7 @@ function WorkOrderPanel({
   onDeleteHeader,
   onCreateInvoice,
   onCreateAct,
+  onCreateContract,
   onPrint,
   onGenerateDocument,
   onSubmitApproval,
@@ -3962,6 +3985,7 @@ function WorkOrderPanel({
   deletingItemId: number | null;
   creatingInvoice: boolean;
   creatingAct: boolean;
+  creatingContract: boolean;
   printing: boolean;
   generatingDocument: boolean;
   approvalAction: 'submit' | 'approve' | 'revision' | null;
@@ -3974,6 +3998,7 @@ function WorkOrderPanel({
   onDeleteHeader: () => void;
   onCreateInvoice: () => void;
   onCreateAct: () => void;
+  onCreateContract: () => void;
   onPrint: () => void;
   onGenerateDocument: () => void;
   onSubmitApproval: () => void;
@@ -3993,13 +4018,14 @@ function WorkOrderPanel({
   const canRequestRevision = hasWorkOrder && (status === 'pending_approval' || status === 'approved');
   const canCreateInvoice = hasWorkOrder && status === 'approved' && items.length > 0 && (workOrder?.totalAmount ?? 0) > 0;
   const canCreateAct = hasWorkOrder && (status === 'approved' || status === 'invoice_created') && items.length > 0 && (workOrder?.totalAmount ?? 0) > 0;
+  const canCreateContract = hasWorkOrder && (status === 'approved' || status === 'invoice_created') && items.length > 0 && (workOrder?.totalAmount ?? 0) > 0;
   const addDisabled = savingItem || !hasWorkOrder || isWorkOrderLocked || !newItemDraft.serviceName.trim();
   const lockMessage = status === 'pending_approval'
     ? 'Заказ-наряд на согласовании: редактирование доступно после возврата на доработку.'
     : status === 'approved'
-      ? 'Согласованный заказ-наряд нельзя редактировать. Можно создать счет, акт или вернуть расчет на доработку.'
+      ? 'Согласованный заказ-наряд нельзя редактировать. Можно создать счет, акт, договор или вернуть расчет на доработку.'
       : status === 'invoice_created'
-        ? 'По заказ-наряду уже создан счет: редактирование заблокировано, можно создать акт.'
+        ? 'По заказ-наряду уже создан счет: редактирование заблокировано, можно создать акт или договор.'
         : '';
 
   const renderExecutorOptions = () => (
@@ -4080,6 +4106,15 @@ function WorkOrderPanel({
               disabled={!canCreateAct || creatingAct}
               className="inline-flex items-center gap-2 rounded-lg border border-cyan-200 px-4 py-2 text-sm font-semibold text-cyan-700 hover:bg-cyan-50 disabled:opacity-50">
               {creatingAct ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Создать акт
+            </button>
+          ) : null}
+          {hasWorkOrder ? (
+            <button
+              type="button"
+              onClick={onCreateContract}
+              disabled={!canCreateContract || creatingContract}
+              className="inline-flex items-center gap-2 rounded-lg border border-violet-200 px-4 py-2 text-sm font-semibold text-violet-700 hover:bg-violet-50 disabled:opacity-50">
+              {creatingContract ? <Loader2 className="h-4 w-4 animate-spin" /> : <Briefcase className="h-4 w-4" />} Создать договор
             </button>
           ) : null}
           {hasWorkOrder ? (

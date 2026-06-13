@@ -5848,6 +5848,117 @@ public class CasesV2Controller : ControllerBase
         });
     }
 
+    [HttpPost("{id:int}/work-order/create-contract")]
+    public async Task<ActionResult<ClientCaseWorkOrderContractDto>> CreateContractFromWorkOrder(
+        int id,
+        [FromBody] CreateClientCaseWorkOrderContractRequest? request,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var loadResult = await LoadEditableWorkOrderAsync(id, ct);
+        if (loadResult.Result is not null)
+        {
+            return loadResult.Result;
+        }
+
+        var (clientCase, workOrder) = loadResult.Value;
+        RecalculateWorkOrder(workOrder);
+        if (workOrder.TotalAmount <= 0m || workOrder.Items.Count == 0)
+        {
+            return BadRequest(new { message = "Добавьте услуги с ненулевой стоимостью перед созданием договора." });
+        }
+
+        var workOrderStatus = NormalizeWorkOrderStatus(workOrder.Status);
+        if (workOrderStatus is not ("approved" or "invoice_created"))
+        {
+            return BadRequest(new { message = "Перед созданием договора согласуйте заказ-наряд." });
+        }
+
+        if (!clientCase.ClientId.HasValue && !clientCase.LegalEntityId.HasValue)
+        {
+            return BadRequest(new { message = "Для создания договора у дела должен быть указан клиент или юридическое лицо." });
+        }
+
+        var statusClock = await ResolveCaseStatusClockAsync(ct);
+        var contractDate = request?.Date?.Date ?? statusClock.TodayDate;
+        var startDate = request?.StartDate?.Date ?? contractDate;
+        var number = await BuildWorkOrderContractNumberAsync(id, workOrder.Id, contractDate, request?.Number, ct);
+        var items = workOrder.Items
+            .OrderBy(item => item.SortOrder)
+            .ThenBy(item => item.Id)
+            .ToList();
+        var description = NormalizeOptional(request?.Description)
+            ?? BuildWorkOrderContractDescription(clientCase, workOrder, items);
+        var now = DateTime.UtcNow;
+        var isOpenEnded = request?.IsOpenEnded ?? (request?.ValidUntil is null);
+        var contract = new Contract
+        {
+            Number = number,
+            Title = NormalizeOptional(request?.Title) ?? $"Договор по заказ-наряду «{workOrder.Title}»",
+            Date = contractDate,
+            StartDate = startDate,
+            ValidUntil = request?.ValidUntil?.Date,
+            Description = description,
+            BillingMode = ContractBillingMode.Fixed,
+            Status = ContractStatus.Draft,
+            IsOpenEnded = isOpenEnded,
+            Amount = workOrder.TotalAmount,
+            CreatedAt = now,
+        };
+
+        if (clientCase.ClientId.HasValue)
+        {
+            contract.ClientContracts.Add(new ClientContract
+            {
+                ClientId = clientCase.ClientId.Value,
+                Comment = $"Создан из заказ-наряда «{workOrder.Title}» по делу {clientCase.Title}.",
+            });
+        }
+
+        if (clientCase.LegalEntityId.HasValue)
+        {
+            contract.LegalEntityContracts.Add(new LegalEntityContract
+            {
+                LegalEntityId = clientCase.LegalEntityId.Value,
+                Comment = $"Создан из заказ-наряда «{workOrder.Title}» по делу {clientCase.Title}.",
+            });
+        }
+
+        _db.Contracts.Add(contract);
+        _db.SetAuditReason($"По предварительному расчету дела #{id} создан договор №{number}.");
+        AppendCaseEvent(clientCase, $"По предварительному расчету «{workOrder.Title}» создан договор №{number} на сумму {workOrder.TotalAmount:0.##} {workOrder.Currency}. Создал: {User.GetDisplayName()}.");
+        await _db.SaveChangesAsync(ct);
+
+        var contractDocument = await SaveGeneratedCaseDocumentAsync(
+            clientCase,
+            BuildWorkOrderContractDocumentKey(contract.Id),
+            "Договор",
+            "Черновик",
+            $"case-{id}-contract-{contract.Id}.html",
+            BuildWorkOrderContractDocumentHtml(clientCase, workOrder, contract, items, statusClock.NowLocal),
+            "Generated",
+            $"Сформирован документ договора №{number} из заказ-наряда «{workOrder.Title}».",
+            $"Договор №{number} из заказ-наряда «{workOrder.Title}» сохранен в документы дела. Автор: {User.GetDisplayName()}.",
+            ct);
+
+        return Created($"/contracts/{contract.Id}", new ClientCaseWorkOrderContractDto
+        {
+            ContractId = contract.Id,
+            Number = number,
+            Date = contractDate,
+            StartDate = startDate,
+            Amount = contract.Amount,
+            DocumentId = contractDocument.Id,
+            ClientId = clientCase.ClientId,
+            LegalEntityId = clientCase.LegalEntityId,
+            WorkOrder = MapWorkOrder(workOrder),
+        });
+    }
+
     [HttpPost("{id:int}/work-order/submit-approval")]
     public async Task<ActionResult<ClientCaseWorkOrderDto>> SubmitWorkOrderApproval(
         int id,
@@ -8445,6 +8556,9 @@ public class CasesV2Controller : ControllerBase
     private static string BuildWorkOrderActLineSourceKey(int workOrderId, int workOrderItemId)
         => $"work-order:{workOrderId}:item:{workOrderItemId}";
 
+    private static string BuildWorkOrderContractDocumentKey(int contractId)
+        => $"contract-{contractId}";
+
     private static string BuildCourtEventDocumentKey(int courtEventId)
         => $"court-event-{courtEventId}";
 
@@ -9274,6 +9388,121 @@ public class CasesV2Controller : ControllerBase
       </tbody>
     </table>
     <div class="total">Итого: {{Html(FormatMoney(act.Amount))}}</div>
+  </main>
+</body>
+</html>
+""";
+    }
+
+    private static string BuildWorkOrderContractDescription(
+        ClientCase clientCase,
+        ClientCaseWorkOrder workOrder,
+        IReadOnlyCollection<ClientCaseWorkOrderItem> items)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine($"Договор сформирован из заказ-наряда «{workOrder.Title}» по делу {clientCase.Title}.");
+        if (!string.IsNullOrWhiteSpace(clientCase.CaseNumber))
+        {
+            builder.AppendLine($"Номер дела: {clientCase.CaseNumber}.");
+        }
+
+        builder.AppendLine();
+        builder.AppendLine("Услуги:");
+        foreach (var item in items.OrderBy(item => item.SortOrder).ThenBy(item => item.Id))
+        {
+            builder.AppendLine($"- {item.ServiceName}: {item.Quantity:N2} шт. x {FormatMoney(item.UnitPrice)} = {FormatMoney(item.Quantity * item.UnitPrice)}");
+        }
+
+        builder.AppendLine();
+        builder.AppendLine($"Итого: {FormatMoney(workOrder.TotalAmount)}.");
+        return builder.ToString().Trim();
+    }
+
+    private static string BuildWorkOrderContractDocumentHtml(
+        ClientCase clientCase,
+        ClientCaseWorkOrder workOrder,
+        Contract contract,
+        IReadOnlyCollection<ClientCaseWorkOrderItem> items,
+        DateTime generatedAtLocal)
+    {
+        var generatedAt = FormatUserGeneratedAt(generatedAtLocal);
+        var rows = string.Join(Environment.NewLine, items
+            .OrderBy(item => item.SortOrder)
+            .ThenBy(item => item.Id)
+            .Select((item, index) => $"""
+              <tr>
+                <td>{index + 1}</td>
+                <td>{Html(item.ServiceName)}</td>
+                <td class="num">{Html(item.Quantity.ToString("N2", CultureInfo.GetCultureInfo("ru-RU")))}</td>
+                <td>шт</td>
+                <td class="num">{Html(FormatMoney(item.UnitPrice))}</td>
+                <td class="num">{Html(FormatMoney(item.Quantity * item.UnitPrice))}</td>
+              </tr>
+            """));
+        if (string.IsNullOrWhiteSpace(rows))
+        {
+            rows = """<tr><td colspan="6" class="empty">Услуги договора пока не добавлены.</td></tr>""";
+        }
+
+        var validUntil = contract.IsOpenEnded
+            ? "Бессрочно"
+            : FormatRuDate(contract.ValidUntil);
+
+        return $$"""
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <title>Договор №{{Html(contract.Number)}}</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, Arial, sans-serif; color: #0f172a; }
+    body { margin: 0; padding: 32px; background: #f8fafc; }
+    main { max-width: 1000px; margin: 0 auto; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 28px; }
+    h1 { margin: 0; font-size: 28px; line-height: 1.2; }
+    .meta { margin-top: 8px; color: #64748b; font-size: 13px; }
+    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 20px; }
+    .stat { border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px; background: #f8fafc; }
+    .stat span { display: block; color: #64748b; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+    .stat strong { display: block; margin-top: 6px; font-size: 18px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 18px; font-size: 13px; }
+    th, td { border-bottom: 1px solid #e2e8f0; padding: 10px 8px; text-align: left; vertical-align: top; }
+    th { color: #475569; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; background: #f8fafc; }
+    .num { text-align: right; white-space: nowrap; }
+    .empty { text-align: center; color: #64748b; padding: 24px; }
+    .total { margin-top: 18px; display: flex; justify-content: flex-end; font-size: 20px; font-weight: 700; }
+    .description { margin-top: 18px; white-space: pre-wrap; color: #334155; font-size: 13px; line-height: 1.55; }
+    @media print { body { padding: 0; background: #fff; } main { border: 0; border-radius: 0; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Договор №{{Html(contract.Number)}}</h1>
+    <div class="meta">Сформировано: {{Html(generatedAt)}}</div>
+    <div class="grid">
+      <div class="stat"><span>Дело</span><strong>{{Html(clientCase.Title)}}</strong><div class="meta">{{Html(clientCase.CaseNumber)}}</div></div>
+      <div class="stat"><span>Клиент</span><strong>{{Html(GetOwnerName(clientCase))}}</strong></div>
+      <div class="stat"><span>Основание</span><strong>{{Html(workOrder.Title)}}</strong></div>
+      <div class="stat"><span>Дата договора</span><strong>{{Html(FormatRuDate(contract.Date))}}</strong></div>
+      <div class="stat"><span>Действует до</span><strong>{{Html(validUntil)}}</strong></div>
+      <div class="stat"><span>Сумма</span><strong>{{Html(FormatMoney(contract.Amount ?? 0m))}}</strong></div>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>№</th>
+          <th>Услуга</th>
+          <th class="num">Кол-во</th>
+          <th>Ед.</th>
+          <th class="num">Цена</th>
+          <th class="num">Сумма</th>
+        </tr>
+      </thead>
+      <tbody>
+{{rows}}
+      </tbody>
+    </table>
+    <div class="total">Итого: {{Html(FormatMoney(contract.Amount ?? 0m))}}</div>
+    <div class="description">{{Html(contract.Description)}}</div>
   </main>
 </body>
 </html>
@@ -10200,6 +10429,30 @@ public class CasesV2Controller : ControllerBase
         return candidate;
     }
 
+    private async Task<string> BuildWorkOrderContractNumberAsync(
+        int clientCaseId,
+        int workOrderId,
+        DateTime contractDate,
+        string? requestedNumber,
+        CancellationToken ct)
+    {
+        var baseNumber = NormalizeOptional(requestedNumber) ?? $"WO-CONTRACT-{clientCaseId}-{workOrderId}";
+        var candidate = baseNumber.Length > 120 ? baseNumber[..120] : baseNumber;
+        var suffix = 1;
+        while (await _db.Contracts.AsNoTracking().AnyAsync(
+            contract => contract.Number == candidate && contract.Date.Date == contractDate.Date,
+            ct))
+        {
+            suffix++;
+            var suffixText = $"-{suffix}";
+            var maxBaseLength = Math.Max(1, 120 - suffixText.Length);
+            var truncatedBase = baseNumber.Length > maxBaseLength ? baseNumber[..maxBaseLength] : baseNumber;
+            candidate = $"{truncatedBase}{suffixText}";
+        }
+
+        return candidate;
+    }
+
     private static string NormalizeCurrency(string? value)
     {
         var normalized = NormalizeOptional(value)?.ToUpperInvariant();
@@ -10854,6 +11107,17 @@ public class CasesV2Controller : ControllerBase
         public string? Comment { get; set; }
     }
 
+    public sealed class CreateClientCaseWorkOrderContractRequest
+    {
+        public string? Number { get; set; }
+        public DateTime? Date { get; set; }
+        public DateTime? StartDate { get; set; }
+        public DateTime? ValidUntil { get; set; }
+        public bool? IsOpenEnded { get; set; }
+        public string? Title { get; set; }
+        public string? Description { get; set; }
+    }
+
     public sealed class ClientCaseWorkOrderApprovalRequest
     {
         public string? Comment { get; set; }
@@ -10879,6 +11143,19 @@ public class CasesV2Controller : ControllerBase
         public decimal Amount { get; set; }
         public int? DocumentId { get; set; }
         public int LineItemCount { get; set; }
+        public ClientCaseWorkOrderDto WorkOrder { get; set; } = new();
+    }
+
+    public sealed class ClientCaseWorkOrderContractDto
+    {
+        public int ContractId { get; set; }
+        public string Number { get; set; } = string.Empty;
+        public DateTime Date { get; set; }
+        public DateTime StartDate { get; set; }
+        public decimal? Amount { get; set; }
+        public int? DocumentId { get; set; }
+        public int? ClientId { get; set; }
+        public int? LegalEntityId { get; set; }
         public ClientCaseWorkOrderDto WorkOrder { get; set; } = new();
     }
 

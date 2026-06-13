@@ -4628,6 +4628,21 @@ export class ApiService {
     });
   }
 
+  async createCaseWorkOrderContract(caseId: number, payload: {
+    number?: string;
+    date?: string | null;
+    startDate?: string | null;
+    validUntil?: string | null;
+    isOpenEnded?: boolean | null;
+    title?: string;
+    description?: string;
+  } = {}) {
+    return this.request<ClientCaseWorkOrderContract>(`/v2/cases/${caseId}/work-order/create-contract`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async submitCaseWorkOrderApproval(caseId: number, payload: { comment?: string } = {}) {
     return this.request<ClientCaseWorkOrder>(`/v2/cases/${caseId}/work-order/submit-approval`, {
       method: 'POST',
@@ -6320,6 +6335,7 @@ import type {
   ClientCaseTimelineEntry,
   ClientCaseWorkOrder,
   ClientCaseWorkOrderAct,
+  ClientCaseWorkOrderContract,
   ClientCaseWorkOrderInvoice,
   AccountSuggestion,
   SummaryStats,
