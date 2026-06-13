@@ -60,6 +60,14 @@ describe('objectAudit utilities', () => {
     expect(getObjectAuditFieldLabel('client-case', 'Last Viewed At')).toBe('Последний просмотр');
     expect(getObjectAuditFieldLabel('client-case', 'Last Viewed By User Id')).toBe('Кто просматривал');
     expect(getObjectAuditFieldLabel('client-case', 'Last Viewed By User Name')).toBe('Кто просматривал');
+    expect(getObjectAuditFieldLabel('client-case', 'Priority')).toBe('Приоритет дела');
+    expect(getObjectAuditFieldLabel('client-case', 'Is Under Control')).toBe('На контроле');
+    expect(getObjectAuditFieldLabel('client-case', 'Inactivity Reminders Enabled')).toBe('Автоконтроль');
+    expect(getObjectAuditFieldLabel('client-case', 'Is Hidden From Executor')).toBe('Скрыто от исполнителя');
+    expect(getObjectAuditFieldLabel('client-case', 'Activity Confirmed By User Name')).toBe('Кто подтвердил активность');
+    expect(getObjectAuditFieldLabel('task-journal-item', 'Approval Due At')).toBe('Срок согласования');
+    expect(getObjectAuditFieldLabel('task-journal-item', 'Planned Duration Minutes')).toBe('Плановая длительность');
+    expect(getObjectAuditFieldLabel('task-journal-item', 'Control Marked By User Name')).toBe('Кто поставил на контроль');
     expect(getObjectAuditFieldLabel('calendar-sync', 'External Calendar Sync Enabled')).toBe('Внешняя синхронизация календарей');
     expect(getObjectAuditFieldLabel('calendar-sync', 'Google Calendar Sync Enabled')).toBe('Синхронизация Google Calendar');
     expect(getObjectAuditFieldLabel('calendar-sync', 'Yandex Calendar Sync Enabled')).toBe('Синхронизация Яндекс.Календаря');
@@ -124,6 +132,15 @@ describe('objectAudit utilities', () => {
     expect(formatAuditValue('done', 'task-journal-item', 'Status')).toBe('Выполнена');
     expect(formatAuditValue('new', 'task-journal-item', 'Status')).toBe('Новая');
     expect(formatAuditValue('waiting', 'task-journal-item', 'Status')).toBe('Ожидает');
+    expect(formatAuditValue('urgent', 'task-journal-item', 'Priority')).toBe('Срочно');
+    expect(formatAuditValue('normal', 'client-case', 'Priority')).toBe('Обычный');
+    expect(formatAuditValue('true', 'client-case', 'Is Under Control')).toBe('На контроле');
+    expect(formatAuditValue('0', 'client-case', 'Inactivity Reminders Enabled')).toBe('Автоконтроль выключен');
+    expect(formatAuditValue('false', 'client-case', 'Is Hidden From Executor')).toBe('Открыто исполнителю');
+    expect(formatAuditValue('["inApp","email"]', 'task-journal-item', 'Channels Json')).toBe('В системе, Email');
+    expect(formatAuditValue('["before1h","atDue","dailyOverdue"]', 'task-journal-item', 'Reminders Json')).toBe(
+      'За час, В срок, Каждый день просрочки',
+    );
     expect(formatAuditValue('task', 'task-journal-item', 'Type')).toBe('Задача');
     expect(formatAuditValue('courtHearing', 'task-journal-item', 'Type')).toBe('Судебное заседание');
     expect(formatAuditValue('2026-04-27 00:00:00', 'payment', 'Date')).toBe('27.04.2026');

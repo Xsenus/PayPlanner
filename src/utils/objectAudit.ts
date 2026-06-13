@@ -14,6 +14,7 @@ const COMMON_FIELD_LABELS: Record<string, string> = {
   Amount: 'Сумма',
   Number: 'Номер',
   Date: 'Дата',
+  Priority: 'Приоритет',
   Email: 'Email',
   Phone: 'Телефон',
   Phones: 'Телефоны',
@@ -63,6 +64,10 @@ const COMMON_FIELD_LABELS: Record<string, string> = {
   InvoiceCancelledReason: 'Причина отмены счета',
   SentForSigningAt: 'Дата отправки на подписание',
   SignedAt: 'Дата подписания',
+  SignedByClientAt: 'Дата подписи клиента',
+  ConcludedAt: 'Дата заключения',
+  TerminatedAt: 'Дата расторжения',
+  TerminationReason: 'Причина расторжения',
   CancelledAt: 'Дата отмены',
   CancelledByUserId: 'Отменил',
   CancelledReason: 'Причина отмены',
@@ -90,7 +95,10 @@ const COMMON_FIELD_LABELS: Record<string, string> = {
   AdvanceReviewedAt: 'Дата решения по авансу',
   AdvanceReviewedByUserId: 'Кто принял решение по авансу',
   AdvanceReviewedByUserName: 'Кто принял решение по авансу',
+  DocumentStatusId: 'Статус документа',
+  DocumentStatusName: 'Статус документа',
   DueDate: 'Срок оплаты',
+  DueAt: 'Срок',
   IssueDate: 'Дата выставления',
   PaymentDate: 'Дата оплаты',
   PaidDate: 'Дата оплаты',
@@ -141,6 +149,19 @@ const COMMON_FIELD_LABELS: Record<string, string> = {
   LastViewedByResponsibleAt: 'Последний просмотр ответственным',
   LastViewedByResponsibleUserId: 'Ответственный, который просматривал',
   LastViewedByResponsibleUserName: 'Ответственный, который просматривал',
+  ActivityConfirmedAt: 'Активность подтверждена',
+  ActivityConfirmedByUserId: 'Кто подтвердил активность',
+  ActivityConfirmedByUserName: 'Кто подтвердил активность',
+  InactivityRemindersEnabled: 'Автоконтроль',
+  IsUnderControl: 'На контроле',
+  ControlMarkedAt: 'Дата постановки на контроль',
+  ControlMarkedByUserId: 'Кто поставил на контроль',
+  ControlMarkedByUserName: 'Кто поставил на контроль',
+  IsHiddenFromExecutor: 'Скрыто от исполнителя',
+  HiddenFromExecutorAt: 'Дата скрытия от исполнителя',
+  HiddenFromExecutorByUserId: 'Кто изменил видимость для исполнителя',
+  HiddenFromExecutorByUserName: 'Кто изменил видимость для исполнителя',
+  HiddenFromExecutorReason: 'Причина скрытия от исполнителя',
   IsDeleted: 'Состояние удаления',
 };
 
@@ -153,6 +174,7 @@ const OBJECT_TYPE_FIELD_OVERRIDES: Record<string, Record<string, string>> = {
     Name: 'Название дела',
     Description: 'Описание дела',
     Status: 'Статус дела',
+    Priority: 'Приоритет дела',
     EventHistory: 'История событий',
   },
   'client-case-document': {
@@ -297,9 +319,16 @@ const OBJECT_TYPE_FIELD_OVERRIDES: Record<string, Record<string, string>> = {
     Result: 'Результат задачи',
     Priority: 'Приоритет',
     DueAt: 'Срок выполнения',
+    ApprovalDueAt: 'Срок согласования',
+    PlannedDurationMinutes: 'Плановая длительность',
     AssigneeUserId: 'Исполнитель',
     AssigneeName: 'Исполнитель',
     AuthorUserId: 'Автор',
+    AuthorName: 'Автор',
+    IsUnderControl: 'На контроле',
+    ControlMarkedAt: 'Дата постановки на контроль',
+    ControlMarkedByUserId: 'Кто поставил на контроль',
+    ControlMarkedByUserName: 'Кто поставил на контроль',
     ChannelsJson: 'Каналы уведомлений',
     RemindersJson: 'Напоминания',
     ContractorPaymentId: 'Платеж подрядчику',
@@ -419,6 +448,64 @@ const VALUE_LABELS: Record<string, string> = {
   auth: 'Авторизация',
 };
 
+const FIELD_VALUE_LABELS: Record<string, Record<string, string>> = {
+  priority: {
+    low: 'Низкий',
+    normal: 'Обычный',
+    high: 'Высокий',
+    urgent: 'Срочно',
+  },
+  status: {
+    inprogress: 'В работе',
+    done: 'Выполнена',
+    new: 'Новая',
+    waiting: 'Ожидает',
+    cancelled: 'Отменена',
+    canceled: 'Отменена',
+    onapproval: 'На согласовании',
+  },
+};
+
+const BOOLEAN_FIELD_VALUE_LABELS: Record<string, { true: string; false: string }> = {
+  isundercontrol: {
+    true: 'На контроле',
+    false: 'Без контроля',
+  },
+  inactivityremindersenabled: {
+    true: 'Автоконтроль включен',
+    false: 'Автоконтроль выключен',
+  },
+  ishiddenfromexecutor: {
+    true: 'Скрыто от исполнителя',
+    false: 'Открыто исполнителю',
+  },
+  isdeleted: {
+    true: 'Удалено',
+    false: 'Активно',
+  },
+  isactive: {
+    true: 'Активно',
+    false: 'Неактивно',
+  },
+};
+
+const JSON_ARRAY_VALUE_LABELS: Record<string, Record<string, string>> = {
+  channelsjson: {
+    inapp: 'В системе',
+    email: 'Email',
+    telegram: 'Telegram',
+  },
+  remindersjson: {
+    before7d: 'За 7 дней',
+    before3d: 'За 3 дня',
+    before1d: 'За день',
+    before1h: 'За час',
+    before15m: 'За 15 минут',
+    atdue: 'В срок',
+    dailyoverdue: 'Каждый день просрочки',
+  },
+};
+
 export interface ParsedAuditFieldChange {
   field: string;
   oldValue: string | null;
@@ -491,6 +578,31 @@ function shouldFormatAsBoolean(fieldName?: string | null): boolean {
   return lookupKey.startsWith('is') || lookupKey.startsWith('has') || lookupKey.startsWith('can');
 }
 
+function getFieldValueLabel(value: string, fieldName?: string | null): string | null {
+  const fieldLookupKey = normalizeLookupKey(fieldName ?? '');
+  if (!fieldLookupKey) return null;
+
+  const valueLookupKey = normalizeLookupKey(value);
+  const directLabels = FIELD_VALUE_LABELS[fieldLookupKey];
+  if (directLabels?.[valueLookupKey]) {
+    return directLabels[valueLookupKey];
+  }
+
+  return null;
+}
+
+function getBooleanFieldValueLabel(value: string, fieldName?: string | null): string | null {
+  const fieldLookupKey = normalizeLookupKey(fieldName ?? '');
+  const labels = BOOLEAN_FIELD_VALUE_LABELS[fieldLookupKey];
+  if (!labels) return null;
+
+  const valueLookupKey = normalizeLookupKey(value);
+  if (valueLookupKey === 'true' || valueLookupKey === '1') return labels.true;
+  if (valueLookupKey === 'false' || valueLookupKey === '0') return labels.false;
+
+  return null;
+}
+
 function shouldFormatAsIdentifier(fieldName?: string | null): boolean {
   const lookupKey = normalizeLookupKey(fieldName ?? '');
   return lookupKey.endsWith('id') && lookupKey !== 'id';
@@ -509,7 +621,7 @@ function formatMoneyLikeValue(value: string): string | null {
   }).format(amount);
 }
 
-function formatJsonValue(value: string): string | null {
+function formatJsonValue(value: string, fieldName?: string | null): string | null {
   const trimmed = value.trim();
   if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return null;
 
@@ -517,6 +629,15 @@ function formatJsonValue(value: string): string | null {
     const parsed = JSON.parse(trimmed);
     if (Array.isArray(parsed)) {
       if (parsed.length === 0) return 'Пустой список';
+
+      const fieldLookupKey = normalizeLookupKey(fieldName ?? '');
+      const arrayLabels = JSON_ARRAY_VALUE_LABELS[fieldLookupKey];
+      if (arrayLabels && parsed.every((item) => typeof item === 'string')) {
+        return parsed
+          .map((item) => arrayLabels[normalizeLookupKey(item)] ?? translateTechnicalWords(item))
+          .join(', ');
+      }
+
       return `Список: ${parsed.length}`;
     }
 
@@ -779,6 +900,16 @@ export function formatAuditValue(
   const trimmed = value?.trim();
   if (!trimmed) return '—';
 
+  const fieldValueLabel = getFieldValueLabel(trimmed, fieldName);
+  if (fieldValueLabel) {
+    return fieldValueLabel;
+  }
+
+  const booleanFieldValueLabel = getBooleanFieldValueLabel(trimmed, fieldName);
+  if (booleanFieldValueLabel) {
+    return booleanFieldValueLabel;
+  }
+
   const normalizedValueKey = normalizeLookupKey(trimmed);
   if (VALUE_LABELS[normalizedValueKey]) {
     return VALUE_LABELS[normalizedValueKey];
@@ -801,7 +932,7 @@ export function formatAuditValue(
     return `ID ${trimmed}`;
   }
 
-  return formatJsonValue(trimmed) ?? translateTechnicalWords(trimmed);
+  return formatJsonValue(trimmed, fieldName) ?? translateTechnicalWords(trimmed);
 }
 
 export function formatAuditChangeSummary(objectType: string | null | undefined, metadataJson: string | null | undefined): string | null {
