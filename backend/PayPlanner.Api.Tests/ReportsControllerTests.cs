@@ -269,6 +269,7 @@ public class ReportsControllerTests
             "projects",
             "directions",
             "sales-points",
+            "vat",
             "case-success",
             "current-cases",
             "lawyer-workload",

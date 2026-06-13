@@ -565,6 +565,22 @@ public class ReportsController : ControllerBase
                     return (BuildSalesPointExportDocument(reportDto), null);
                 }
 
+            case "vat":
+                {
+                    var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+                    if (paymentsVisibility is null)
+                    {
+                        return (null, Unauthorized());
+                    }
+
+                    var (start, end) = ResolveReportPeriod(from, to, reportToday);
+                    var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                        cancellationToken => BuildVatReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        _logger,
+                        ct);
+                    return (BuildVatExportDocument(reportDto), null);
+                }
+
             case "case-success":
                 {
                     var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
@@ -2106,6 +2122,34 @@ public class ReportsController : ControllerBase
                     item.IncomeCount.ToString(CultureInfo.InvariantCulture),
                     item.ExpenseCount.ToString(CultureInfo.InvariantCulture),
                     PercentCell(item.Share),
+                ])).ToList()),
+            ]);
+
+    private static ReportExportDocument BuildVatExportDocument(VatReportDto report)
+        => new(
+            "vat-report",
+            "Отчет по НДС",
+            $"Период: {DateCell(report.From)} - {DateCell(report.To)}{(report.Source.HasValue ? $" · Источник: {MoneyOperationSourceCell(report.Source.Value)}" : string.Empty)}",
+            [
+                new("Поступления с НДС", MoneyCell(report.IncomeAmountTotal)),
+                new("НДС с поступлений", MoneyCell(report.IncomeVatTotal)),
+                new("Расходы с НДС", MoneyCell(report.ExpenseAmountTotal)),
+                new("Входящий НДС", MoneyCell(report.ExpenseVatTotal)),
+                new("Баланс НДС", MoneyCell(report.VatBalance)),
+                new("Ставок НДС", report.Rates.Count.ToString(CultureInfo.InvariantCulture)),
+            ],
+            [
+                new("Ставки НДС", ["Ставка НДС", "База доходов", "НДС доходов", "Доходы с НДС", "База расходов", "НДС расходов", "Расходы с НДС", "Итог НДС", "Приходов", "Расходов"], report.Rates.Select(item => new ReportExportRow([
+                    item.VatRateLabel,
+                    MoneyCell(item.IncomeBase),
+                    MoneyCell(item.IncomeVat),
+                    MoneyCell(item.IncomeGross),
+                    MoneyCell(item.ExpenseBase),
+                    MoneyCell(item.ExpenseVat),
+                    MoneyCell(item.ExpenseGross),
+                    MoneyCell(item.NetVat),
+                    item.IncomeCount.ToString(CultureInfo.InvariantCulture),
+                    item.ExpenseCount.ToString(CultureInfo.InvariantCulture),
                 ])).ToList()),
             ]);
 

@@ -535,6 +535,41 @@ function exportSalesPointReport(report: SalesPointReport, timeZoneId?: string | 
   downloadCsv('sales-point-report.csv', rows);
 }
 
+function exportVatReport(report: VatReport, timeZoneId?: string | null) {
+  const rows: unknown[][] = [
+    ['Показатель', 'Значение'],
+    ['Период с', formatDate(report.from, timeZoneId)],
+    ['Период по', formatDate(report.to, timeZoneId)],
+    ['Источник', report.source ? sourceLabel(report.source) : 'Все источники'],
+    ['Поступления с НДС', report.incomeAmountTotal],
+    ['НДС с поступлений', report.incomeVatTotal],
+    ['Расходы с НДС', report.expenseAmountTotal],
+    ['Входящий НДС', report.expenseVatTotal],
+    ['Баланс НДС', report.vatBalance],
+    ['Ставок НДС', report.rates.length],
+    [],
+    ['Ставки НДС'],
+    ['Ставка НДС', 'База доходов', 'НДС доходов', 'Доходы с НДС', 'База расходов', 'НДС расходов', 'Расходы с НДС', 'Итог НДС', 'Приходов', 'Расходов'],
+  ];
+
+  report.rates.forEach((item) => {
+    rows.push([
+      item.vatRateLabel,
+      item.incomeBase,
+      item.incomeVat,
+      item.incomeGross,
+      item.expenseBase,
+      item.expenseVat,
+      item.expenseGross,
+      item.netVat,
+      item.incomeCount,
+      item.expenseCount,
+    ]);
+  });
+
+  downloadCsv('vat-report.csv', rows);
+}
+
 function exportCashFlowForecastReport(report: CashFlowForecastReport, timeZoneId?: string | null) {
   const rows: unknown[][] = [
     ['Показатель', 'Значение'],
@@ -1780,7 +1815,7 @@ function ProjectReportSection({
 
 type LegalWorkExportFormat = 'csv' | 'excel' | 'pdf';
 type ManagementReportExportFormat = 'excel' | 'pdf';
-type ManagementReportKind = 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast' | 'categories' | 'counterparties' | 'projects' | 'directions' | 'sales-points';
+type ManagementReportKind = 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast' | 'categories' | 'counterparties' | 'projects' | 'directions' | 'sales-points' | 'vat';
 type ReportCaseSection = 'tasks' | 'documents' | 'court' | 'workOrder';
 
 type LegalWorkReportFilters = {
@@ -4080,11 +4115,15 @@ function VatReportSection({
   loading,
   error,
   onReload,
+  filters,
+  profileTimeZoneId,
 }: {
   report: VatReport | null;
   loading: boolean;
   error: string | null;
   onReload: () => void;
+  filters?: ManagementReportExportFilters;
+  profileTimeZoneId?: string | null;
 }) {
   const rows = report?.rates ?? [];
 
@@ -4101,14 +4140,26 @@ function VatReportSection({
             Сводка фактических операций по ставкам НДС: начисленный налог с поступлений, входящий НДС по расходам и итог к уплате или возмещению.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onReload}
-          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-        >
-          <RefreshCcw className="h-4 w-4" />
-          Обновить
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => report && exportVatReport(report, profileTimeZoneId)}
+            disabled={!report || loading}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            CSV
+          </button>
+          <ManagementReportExportButtons reportKind="vat" filters={filters} disabled={!report || loading} />
+          <button
+            type="button"
+            onClick={onReload}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            <RefreshCcw className="h-4 w-4" />
+            Обновить
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -6966,6 +7017,8 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={vatReportLoading}
               error={vatReportError}
               onReload={reloadVatReport}
+              filters={cashFlowDates}
+              profileTimeZoneId={profileTimeZoneId}
             />
 
             <PlanFactReportSection

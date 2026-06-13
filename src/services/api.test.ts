@@ -1360,13 +1360,13 @@ describe('apiService reports', () => {
   it('downloads management report exports with filters', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response('pdf-data', {
       headers: {
-        'content-disposition': 'attachment; filename="sales-point-report.pdf"',
+        'content-disposition': 'attachment; filename="vat-report.pdf"',
       },
     }));
     vi.stubGlobal('fetch', fetchMock);
 
     const result = await apiService.downloadManagementReport({
-      report: 'sales-points',
+      report: 'vat',
       format: 'pdf',
       from: '2026-05-01',
       to: '2026-05-31',
@@ -1374,12 +1374,12 @@ describe('apiService reports', () => {
       limit: 100,
     });
 
-    expect(result.fileName).toBe('sales-point-report.pdf');
+    expect(result.fileName).toBe('vat-report.pdf');
     expect(await result.blob.text()).toBe('pdf-data');
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url] = fetchMock.mock.calls[0];
     expect(String(url)).toContain('/reports/management.pdf?');
-    expect(String(url)).toContain('report=sales-points');
+    expect(String(url)).toContain('report=vat');
     expect(String(url)).toContain('from=2026-05-01');
     expect(String(url)).toContain('to=2026-05-31');
     expect(String(url)).toContain('responsibleUserId=7');
