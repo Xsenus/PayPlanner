@@ -272,6 +272,7 @@ public class ReportsControllerTests
             "vat",
             "payment-orders",
             "payment-purposes",
+            "match-statuses",
             "case-success",
             "current-cases",
             "lawyer-workload",
