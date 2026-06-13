@@ -268,6 +268,7 @@ public class ReportsControllerTests
             "lawyer-workload",
             "overdue-deadlines",
             "case-activity",
+            "cash-flow-forecast",
         };
 
         foreach (var reportKind in reportKinds)
@@ -295,7 +296,7 @@ public class ReportsControllerTests
         }
 
         var pdfAction = await controller.ExportManagementReportPdf(
-            "case-success",
+            "cash-flow-forecast",
             today.AddDays(-30),
             today.AddDays(30),
             today,
@@ -313,7 +314,7 @@ public class ReportsControllerTests
         var pdf = Assert.IsType<FileContentResult>(pdfAction);
         Assert.Equal("application/pdf", pdf.ContentType);
         Assert.Equal([0x25, 0x50, 0x44, 0x46], pdf.FileContents);
-        Assert.Contains("Статистика успешности дел", pdfService.LastHtml, StringComparison.Ordinal);
+        Assert.Contains("Прогноз денежных потоков", pdfService.LastHtml, StringComparison.Ordinal);
     }
 
     [Fact]

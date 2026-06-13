@@ -555,6 +555,22 @@ public class ReportsController : ControllerBase
                     return (BuildCaseActivityExportDocument(reportDto, timeZone), null);
                 }
 
+            case "cash-flow-forecast":
+                {
+                    var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+                    if (paymentsVisibility is null)
+                    {
+                        return (null, Unauthorized());
+                    }
+
+                    var (start, end) = ResolveReportPeriod(from, to, reportToday);
+                    var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                        cancellationToken => BuildCashFlowForecastReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        _logger,
+                        ct);
+                    return (BuildCashFlowForecastExportDocument(reportDto), null);
+                }
+
             default:
                 return (null, BadRequest("Неизвестный управленческий отчет для выгрузки."));
         }
@@ -2013,6 +2029,32 @@ public class ReportsController : ControllerBase
                     item.IsInactive ? "Да" : "Нет",
                     item.IsEscalated ? "Да" : "Нет",
                     item.Reason,
+                ])).ToList()),
+            ]);
+
+    private static ReportExportDocument BuildCashFlowForecastExportDocument(CashFlowForecastReportDto report)
+        => new(
+            "cash-flow-forecast-report",
+            "Прогноз денежных потоков",
+            $"Период: {DateCell(report.From)} - {DateCell(report.To)}{(string.IsNullOrWhiteSpace(report.AccountName) ? string.Empty : $" · Счет: {report.AccountName}")}",
+            [
+                new("Стартовый остаток", MoneyCell(report.OpeningBalance)),
+                new("Ожидаемые поступления", MoneyCell(report.ExpectedIncome)),
+                new("Ожидаемые списания", MoneyCell(report.ExpectedExpense)),
+                new("Чистый прогноз", MoneyCell(report.NetProjectedFlow)),
+                new("Прогнозный остаток", MoneyCell(report.ProjectedClosingBalance)),
+                new("Незакрытые приходы", report.IncomeCount.ToString(CultureInfo.InvariantCulture)),
+                new("Незакрытые расходы", report.ExpenseCount.ToString(CultureInfo.InvariantCulture)),
+            ],
+            [
+                new("Ожидаемое движение по дням", ["Дата", "Ожидаемые поступления", "Ожидаемые списания", "Чистый поток", "Прогнозный остаток", "Приходов", "Расходов"], report.Days.Select(day => new ReportExportRow([
+                    DateCell(day.Date),
+                    MoneyCell(day.ExpectedIncome),
+                    MoneyCell(day.ExpectedExpense),
+                    MoneyCell(day.NetProjectedFlow),
+                    MoneyCell(day.ProjectedClosingBalance),
+                    day.IncomeCount.ToString(CultureInfo.InvariantCulture),
+                    day.ExpenseCount.ToString(CultureInfo.InvariantCulture),
                 ])).ToList()),
             ]);
 

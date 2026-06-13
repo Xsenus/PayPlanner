@@ -312,6 +312,38 @@ function exportOverdueProceduralDeadlinesReport(report: OverdueProceduralDeadlin
   downloadCsv('overdue-procedural-deadlines-report.csv', rows);
 }
 
+function exportCashFlowForecastReport(report: CashFlowForecastReport, timeZoneId?: string | null) {
+  const rows: unknown[][] = [
+    ['Показатель', 'Значение'],
+    ['Период с', formatDate(report.from, timeZoneId)],
+    ['Период по', formatDate(report.to, timeZoneId)],
+    ['Счет', report.accountName ?? 'Все счета'],
+    ['Стартовый остаток', report.openingBalance],
+    ['Ожидаемые поступления', report.expectedIncome],
+    ['Ожидаемые списания', report.expectedExpense],
+    ['Чистый прогноз', report.netProjectedFlow],
+    ['Прогнозный остаток', report.projectedClosingBalance],
+    ['Незакрытые приходы', report.incomeCount],
+    ['Незакрытые расходы', report.expenseCount],
+    [],
+    ['Дата', 'Ожидаемые поступления', 'Ожидаемые списания', 'Чистый поток', 'Прогнозный остаток', 'Приходов', 'Расходов'],
+  ];
+
+  report.days.forEach((day) => {
+    rows.push([
+      formatDate(day.date, timeZoneId),
+      day.expectedIncome,
+      day.expectedExpense,
+      day.netProjectedFlow,
+      day.projectedClosingBalance,
+      day.incomeCount,
+      day.expenseCount,
+    ]);
+  });
+
+  downloadCsv('cash-flow-forecast-report.csv', rows);
+}
+
 function sourceLabel(source: MoneyOperationSource) {
   switch (source) {
     case 'Bank':
@@ -665,11 +697,15 @@ function CashFlowForecastReportSection({
   loading,
   error,
   onReload,
+  filters,
+  profileTimeZoneId,
 }: {
   report: CashFlowForecastReport | null;
   loading: boolean;
   error: string | null;
   onReload: () => void;
+  filters?: ManagementReportExportFilters;
+  profileTimeZoneId?: string | null;
 }) {
   const forecastDays = (report?.days ?? []).slice(0, 10);
 
@@ -686,14 +722,26 @@ function CashFlowForecastReportSection({
             Ожидаемые поступления и списания по незакрытым платежам за выбранный период с расчетом прогнозного остатка.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onReload}
-          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-        >
-          <RefreshCcw className="h-4 w-4" />
-          Обновить
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => report && exportCashFlowForecastReport(report, profileTimeZoneId)}
+            disabled={!report || loading}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            CSV
+          </button>
+          <ManagementReportExportButtons reportKind="cash-flow-forecast" filters={filters} disabled={!report || loading} />
+          <button
+            type="button"
+            onClick={onReload}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            <RefreshCcw className="h-4 w-4" />
+            Обновить
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -1445,7 +1493,7 @@ function ProjectReportSection({
 
 type LegalWorkExportFormat = 'csv' | 'excel' | 'pdf';
 type ManagementReportExportFormat = 'excel' | 'pdf';
-type ManagementReportKind = 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity';
+type ManagementReportKind = 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow-forecast';
 type ReportCaseSection = 'tasks' | 'documents' | 'court' | 'workOrder';
 
 type LegalWorkReportFilters = {
@@ -6432,6 +6480,8 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={cashFlowForecastLoading}
               error={cashFlowForecastError}
               onReload={reloadCashFlowForecast}
+              filters={cashFlowDates}
+              profileTimeZoneId={profileTimeZoneId}
             />
 
             <CashReportSection
