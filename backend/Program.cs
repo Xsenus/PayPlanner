@@ -146,6 +146,8 @@ builder.Services.AddSingleton<NotificationRetrySchedulerService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<NotificationRetrySchedulerService>());
 builder.Services.AddSingleton<NotificationDeliveryRetentionService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<NotificationDeliveryRetentionService>());
+builder.Services.AddSingleton<PaymentAdvanceReviewMonitoringService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<PaymentAdvanceReviewMonitoringService>());
 builder.Services.AddSingleton<CalendarSyncSchedulerService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<CalendarSyncSchedulerService>());
 builder.Services.AddSingleton<GoogleCalendarBackgroundSyncService>();

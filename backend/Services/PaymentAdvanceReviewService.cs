@@ -164,7 +164,7 @@ public static class PaymentAdvanceReviewService
     public static string BuildAdvanceReviewRequiredEventKey(int paymentId)
         => $"{AdvanceReviewRequiredEventKeyPrefix}{paymentId}";
 
-    public static async Task EnsureReviewRequiredNotificationAsync(
+    public static async Task<bool> EnsureReviewRequiredNotificationAsync(
         PaymentContext db,
         Payment payment,
         DateTime utcNow,
@@ -177,13 +177,13 @@ public static class PaymentAdvanceReviewService
             || payment.AdvanceReviewStatus != PaymentAdvanceReviewStatus.RequiresDecision
             || !IsUnallocatedAdvanceCandidate(payment))
         {
-            return;
+            return false;
         }
 
         var recipientUserId = await ResolveReviewRecipientUserIdAsync(db, payment, ct);
         if (!recipientUserId.HasValue)
         {
-            return;
+            return false;
         }
 
         var eventKey = BuildAdvanceReviewRequiredEventKey(payment.Id);
@@ -192,7 +192,7 @@ public static class PaymentAdvanceReviewService
             .AnyAsync(item => item.RecipientUserId == recipientUserId.Value && item.EventKey == eventKey, ct);
         if (alreadyExists)
         {
-            return;
+            return false;
         }
 
         var recipientExists = await db.Users
@@ -200,7 +200,7 @@ public static class PaymentAdvanceReviewService
             .AnyAsync(item => item.Id == recipientUserId.Value && item.IsActive, ct);
         if (!recipientExists)
         {
-            return;
+            return false;
         }
 
         var disabledTypes = await db.UserSettings
@@ -212,7 +212,7 @@ public static class PaymentAdvanceReviewService
         if (UserNotificationPreferenceSettings.ParseDisabledTypes(disabledTypes)
             .Contains(UserNotificationTypes.PaymentAdvanceReviewRequired, StringComparer.OrdinalIgnoreCase))
         {
-            return;
+            return false;
         }
 
         var counterpartyName = await ResolveCounterpartyNameAsync(db, payment, ct);
@@ -245,6 +245,7 @@ public static class PaymentAdvanceReviewService
             }, NotificationJsonOptions),
             CreatedAt = utcNow,
         });
+        return true;
     }
 
     public static void MarkAllocated(Payment payment, string? reason, DateTime utcNow, HttpContext? httpContext)

@@ -41,6 +41,9 @@ public class SystemJobsControllerTests
             new SystemSetting { Key = NotificationDeliveryRetentionService.RetentionDaysSettingKey, Value = "30", CreatedAt = now, UpdatedAt = now },
             new SystemSetting { Key = NotificationDeliveryRetentionService.IntervalHoursSettingKey, Value = "12", CreatedAt = now, UpdatedAt = now },
             new SystemSetting { Key = NotificationDeliveryRetentionService.BatchSizeSettingKey, Value = "25", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = PaymentAdvanceReviewMonitoringService.EnabledSettingKey, Value = "true", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = PaymentAdvanceReviewMonitoringService.IntervalHoursSettingKey, Value = "6", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = PaymentAdvanceReviewMonitoringService.BatchSizeSettingKey, Value = "15", CreatedAt = now, UpdatedAt = now },
             new SystemSetting { Key = CalendarSyncSchedulerService.EnabledSettingKey, Value = "true", CreatedAt = now, UpdatedAt = now },
             new SystemSetting { Key = CalendarSyncSchedulerService.IntervalMinutesSettingKey, Value = "30", CreatedAt = now, UpdatedAt = now },
             new SystemSetting { Key = CalendarSyncSchedulerService.BatchSizeSettingKey, Value = "50", CreatedAt = now, UpdatedAt = now },
@@ -62,6 +65,22 @@ public class SystemJobsControllerTests
         scope.Db.Users.Add(user);
         scope.Db.Clients.Add(client);
         await scope.Db.SaveChangesAsync();
+        scope.Db.Payments.Add(new Payment
+        {
+            ClientId = client.Id,
+            Type = PaymentType.Income,
+            DocumentKind = DocumentKind.Payment,
+            Amount = 7_100m,
+            PaidAmount = 7_100m,
+            Status = PaymentStatus.Completed,
+            IsPaid = true,
+            Date = now.Date,
+            PlannedDate = now.Date,
+            PaidDate = now.Date,
+            LastPaymentDate = now.Date,
+            Description = "Advance candidate",
+            AdvanceReviewStatus = PaymentAdvanceReviewStatus.None,
+        });
         scope.Db.ClientCases.Add(new ClientCase
         {
             ClientId = client.Id,
@@ -183,12 +202,13 @@ public class SystemJobsControllerTests
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var dto = Assert.IsType<SystemJobDiagnosticsDto>(ok.Value);
 
-        Assert.Equal(10, dto.Items.Count);
+        Assert.Equal(11, dto.Items.Count);
         Assert.Contains(dto.Items, item => item.Key == "database-backup" && item.Enabled && item.IntervalText.Contains("02:00"));
         Assert.Contains(dto.Items, item => item.Key == "task-reminders" && item.PendingCount == 1 && item.LastActivityDescription == "Reminder sent");
         Assert.Contains(dto.Items, item => item.Key == "notification-retry" && item.PendingCount == 1 && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == SystemJobKeys.YandexDiskCrmSync && item.PendingCount == 1 && item.LastProcessedCount == 20 && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "notification-delivery-retention" && item.PendingCount == 1 && item.LastProcessedCount == 25 && item.ManualRunEnabled);
+        Assert.Contains(dto.Items, item => item.Key == SystemJobKeys.PaymentAdvanceReviewMonitoring && item.PendingCount == 1 && item.LastProcessedCount == 15 && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "external-calendar-sync" && item.Status == "warning" && item.LastProcessedCount == 50 && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "case-inactivity-control" && item.PendingCount == 1 && item.LastProcessedCount == 7);
         Assert.Contains(dto.Items, item => item.Key == "court-sync" && item.Status == "active" && item.PendingCount == 1 && item.LastProcessedCount == 12);
@@ -419,6 +439,141 @@ public class SystemJobsControllerTests
         var saved = Assert.Single(await scope.Db.MoneyBalanceReconciliationResults.AsNoTracking().ToListAsync());
         Assert.Equal(targetDate, saved.Date);
         Assert.Equal(750m, saved.Income);
+    }
+
+    [Fact]
+    public async Task PaymentAdvanceReviewMonitoringService_MarksOldCandidatesAndCreatesNotification()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var now = DateTime.UtcNow;
+        var role = new Role { Name = $"advance-monitor-role-{Guid.NewGuid():N}", Description = "Advance monitor role" };
+        scope.Db.Roles.Add(role);
+        await scope.Db.SaveChangesAsync();
+        var responsible = new User
+        {
+            Email = $"advance-monitor-{Guid.NewGuid():N}@example.com",
+            FullName = "Advance Monitor",
+            PasswordHash = "hash",
+            RoleId = role.Id,
+            IsApproved = true,
+            IsActive = true,
+        };
+        scope.Db.Users.Add(responsible);
+        await scope.Db.SaveChangesAsync();
+        var client = new Client
+        {
+            Name = "Advance Monitor Client",
+            ResponsibleUserId = responsible.Id,
+            CreatedAt = now,
+        };
+        scope.Db.Clients.Add(client);
+        await scope.Db.SaveChangesAsync();
+        var candidate = new Payment
+        {
+            ClientId = client.Id,
+            Type = PaymentType.Income,
+            DocumentKind = DocumentKind.Payment,
+            Amount = 12_500m,
+            PaidAmount = 12_500m,
+            Status = PaymentStatus.Completed,
+            IsPaid = true,
+            Date = now.Date.AddDays(-2),
+            PlannedDate = now.Date.AddDays(-2),
+            PaidDate = now.Date.AddDays(-2),
+            LastPaymentDate = now.Date.AddDays(-2),
+            Description = "Old unallocated advance candidate",
+            AdvanceReviewStatus = PaymentAdvanceReviewStatus.None,
+        };
+        scope.Db.Payments.Add(candidate);
+        await scope.Db.SaveChangesAsync();
+
+        var services = new ServiceCollection();
+        services.AddScoped(_ => new PaymentContext(scope.Options, useObjectAuditModel: false));
+        await using var provider = services.BuildServiceProvider();
+        var service = new PaymentAdvanceReviewMonitoringService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new ConfigurationBuilder().Build(),
+            NullLogger<PaymentAdvanceReviewMonitoringService>.Instance);
+
+        var result = await service.RunOnceAsync(CancellationToken.None);
+
+        Assert.True(result.Enabled);
+        Assert.Equal(1, result.ProcessedCount);
+        Assert.Equal(1, result.MarkedCount);
+        Assert.Equal(1, result.NotifiedCount);
+        var refreshed = await scope.Db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == candidate.Id);
+        Assert.Equal(PaymentAdvanceReviewStatus.RequiresDecision, refreshed.AdvanceReviewStatus);
+        var notification = Assert.Single(await scope.Db.UserNotifications.AsNoTracking().ToListAsync());
+        Assert.Equal(responsible.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.PaymentAdvanceReviewRequired, notification.Type);
+    }
+
+    [Fact]
+    public async Task RunJob_AdvanceReviewMonitoring_UsesRunnerAndReturnsDiagnostics()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var now = DateTime.UtcNow;
+        var role = new Role { Name = $"advance-manual-role-{Guid.NewGuid():N}", Description = "Advance manual role" };
+        scope.Db.Roles.Add(role);
+        await scope.Db.SaveChangesAsync();
+        var responsible = new User
+        {
+            Email = $"advance-manual-{Guid.NewGuid():N}@example.com",
+            FullName = "Advance Manual",
+            PasswordHash = "hash",
+            RoleId = role.Id,
+            IsApproved = true,
+            IsActive = true,
+        };
+        scope.Db.Users.Add(responsible);
+        await scope.Db.SaveChangesAsync();
+        var client = new Client
+        {
+            Name = "Advance Manual Client",
+            ResponsibleUserId = responsible.Id,
+            CreatedAt = now,
+        };
+        scope.Db.Clients.Add(client);
+        await scope.Db.SaveChangesAsync();
+        scope.Db.Payments.Add(new Payment
+        {
+            ClientId = client.Id,
+            Type = PaymentType.Income,
+            DocumentKind = DocumentKind.Payment,
+            Amount = 9_000m,
+            PaidAmount = 9_000m,
+            Status = PaymentStatus.Completed,
+            IsPaid = true,
+            Date = now.Date.AddDays(-1),
+            PlannedDate = now.Date.AddDays(-1),
+            PaidDate = now.Date.AddDays(-1),
+            LastPaymentDate = now.Date.AddDays(-1),
+            Description = "Manual monitoring candidate",
+            AdvanceReviewStatus = PaymentAdvanceReviewStatus.None,
+        });
+        await scope.Db.SaveChangesAsync();
+
+        var services = new ServiceCollection();
+        services.AddScoped(_ => new PaymentContext(scope.Options, useObjectAuditModel: false));
+        await using var provider = services.BuildServiceProvider();
+        var runner = new PaymentAdvanceReviewMonitoringService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new ConfigurationBuilder().Build(),
+            NullLogger<PaymentAdvanceReviewMonitoringService>.Instance);
+        var controller = new SystemJobsController(
+            scope.Db,
+            new ConfigurationBuilder().Build(),
+            new TestOptionsMonitor<AppFeatureFlagsOptions>(new AppFeatureFlagsOptions()),
+            advanceReviewMonitoringRunner: runner);
+
+        var result = await controller.RunJob(SystemJobKeys.PaymentAdvanceReviewMonitoring, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<SystemJobManualRunResultDto>(ok.Value);
+        Assert.Equal(SystemJobKeys.PaymentAdvanceReviewMonitoring, dto.JobKey);
+        Assert.Equal(2, dto.ProcessedCount);
+        Assert.Contains("поставил на контроль: 1", dto.Summary);
+        Assert.Single(await scope.Db.UserNotifications.AsNoTracking().ToListAsync());
     }
 
     [Fact]

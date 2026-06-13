@@ -45,6 +45,7 @@ public sealed class SystemJobsController : ControllerBase
     private readonly TaskJournalReminderNotificationService? _taskReminderRunner;
     private readonly NotificationRetrySchedulerService? _notificationRetryRunner;
     private readonly NotificationDeliveryRetentionService? _notificationDeliveryRetentionRunner;
+    private readonly PaymentAdvanceReviewMonitoringService? _advanceReviewMonitoringRunner;
     private readonly CalendarSyncSchedulerService? _calendarSyncRunner;
     private readonly TaskJournalAutomationSchedulerService? _caseControlRunner;
     private readonly ClientCaseCourtSyncSchedulerService? _courtSyncRunner;
@@ -61,6 +62,7 @@ public sealed class SystemJobsController : ControllerBase
         TaskJournalReminderNotificationService? taskReminderRunner = null,
         NotificationRetrySchedulerService? notificationRetryRunner = null,
         NotificationDeliveryRetentionService? notificationDeliveryRetentionRunner = null,
+        PaymentAdvanceReviewMonitoringService? advanceReviewMonitoringRunner = null,
         CalendarSyncSchedulerService? calendarSyncRunner = null,
         TaskJournalAutomationSchedulerService? caseControlRunner = null,
         ClientCaseCourtSyncSchedulerService? courtSyncRunner = null,
@@ -76,6 +78,7 @@ public sealed class SystemJobsController : ControllerBase
         _taskReminderRunner = taskReminderRunner;
         _notificationRetryRunner = notificationRetryRunner;
         _notificationDeliveryRetentionRunner = notificationDeliveryRetentionRunner;
+        _advanceReviewMonitoringRunner = advanceReviewMonitoringRunner;
         _calendarSyncRunner = calendarSyncRunner;
         _caseControlRunner = caseControlRunner;
         _courtSyncRunner = courtSyncRunner;
@@ -113,6 +116,9 @@ public sealed class SystemJobsController : ControllerBase
                 item.Key == NotificationDeliveryRetentionService.RetentionDaysSettingKey ||
                 item.Key == NotificationDeliveryRetentionService.IntervalHoursSettingKey ||
                 item.Key == NotificationDeliveryRetentionService.BatchSizeSettingKey ||
+                item.Key == PaymentAdvanceReviewMonitoringService.EnabledSettingKey ||
+                item.Key == PaymentAdvanceReviewMonitoringService.IntervalHoursSettingKey ||
+                item.Key == PaymentAdvanceReviewMonitoringService.BatchSizeSettingKey ||
                 item.Key == CalendarSyncSchedulerService.EnabledSettingKey ||
                 item.Key == CalendarSyncSchedulerService.IntervalMinutesSettingKey ||
                 item.Key == CalendarSyncSchedulerService.BatchSizeSettingKey ||
@@ -134,6 +140,7 @@ public sealed class SystemJobsController : ControllerBase
             await BuildNotificationRetryJobAsync(settings, ct),
             await BuildYandexDiskCrmSyncJobAsync(settings, ct),
             await BuildNotificationDeliveryRetentionJobAsync(settings, timeZone, ct),
+            await BuildAdvanceReviewMonitoringJobAsync(settings, ct),
             await BuildExternalCalendarSyncJobAsync(settings, timeZone, ct),
             await BuildCaseControlJobAsync(settings, now, ct),
             await BuildCourtSyncJobAsync(settings, ct),
@@ -228,6 +235,18 @@ public sealed class SystemJobsController : ControllerBase
                             ? $"Удалено устаревших технических записей доставки уведомлений: {processedCount}."
                             : "Проверка срока хранения технических логов уведомлений выполнена, удаление не требовалось."
                         : "Очистка технических логов уведомлений выключена в настройках.";
+                    break;
+
+                case SystemJobKeys.PaymentAdvanceReviewMonitoring:
+                    EnsureRunner(_advanceReviewMonitoringRunner);
+                    var advanceReviewResult = await _advanceReviewMonitoringRunner!.RunOnceAsync(ct);
+                    processedCount = advanceReviewResult.MarkedCount + advanceReviewResult.NotifiedCount;
+                    skippedCount = advanceReviewResult.ProcessedCount - advanceReviewResult.MarkedCount;
+                    summary = advanceReviewResult.Enabled
+                        ? processedCount > 0
+                            ? $"Мониторинг авансов проверил платежей: {advanceReviewResult.ProcessedCount}, поставил на контроль: {advanceReviewResult.MarkedCount}, создал уведомлений: {advanceReviewResult.NotifiedCount}."
+                            : "Мониторинг авансов выполнен, новых платежей для разбора не найдено."
+                        : "Мониторинг нераспределенных авансов выключен в настройках.";
                     break;
 
                 case SystemJobKeys.ExternalCalendarSync:
@@ -593,6 +612,51 @@ public sealed class SystemJobsController : ControllerBase
         };
     }
 
+    private async Task<SystemJobDiagnosticsItemDto> BuildAdvanceReviewMonitoringJobAsync(
+        IReadOnlyDictionary<string, string> settings,
+        CancellationToken ct)
+    {
+        var enabled = ParseBool(
+            settings.GetValueOrDefault(PaymentAdvanceReviewMonitoringService.EnabledSettingKey),
+            _configuration.GetValue("Payments:AdvanceReview:Monitoring:Enabled", true));
+        var intervalHours = PaymentAdvanceReviewMonitoringService.NormalizeIntervalHours(ParseInt(
+            settings.GetValueOrDefault(PaymentAdvanceReviewMonitoringService.IntervalHoursSettingKey),
+            _configuration.GetValue("Payments:AdvanceReview:Monitoring:IntervalHours", PaymentAdvanceReviewMonitoringService.DefaultIntervalHours)));
+        var batchSize = PaymentAdvanceReviewMonitoringService.NormalizeBatchSize(ParseInt(
+            settings.GetValueOrDefault(PaymentAdvanceReviewMonitoringService.BatchSizeSettingKey),
+            _configuration.GetValue("Payments:AdvanceReview:Monitoring:BatchSize", PaymentAdvanceReviewMonitoringService.DefaultBatchSize)));
+        var pendingCount = _advanceReviewMonitoringRunner is null
+            ? await CountPendingAdvanceReviewCandidatesAsync(enabled, ct)
+            : await _advanceReviewMonitoringRunner.CountPendingCandidatesAsync(ct);
+
+        var lastNotification = await _db.UserNotifications
+            .AsNoTracking()
+            .Where(item => item.Type == UserNotificationTypes.PaymentAdvanceReviewRequired)
+            .OrderByDescending(item => item.CreatedAt)
+            .Select(item => new { item.CreatedAt, item.Title })
+            .FirstOrDefaultAsync(ct);
+
+        return new SystemJobDiagnosticsItemDto
+        {
+            Key = SystemJobKeys.PaymentAdvanceReviewMonitoring,
+            Name = "Мониторинг нераспределенных авансов",
+            Description = "Находит входящие оплаченные платежи без счета и акта, ставит их на контроль аванса и уведомляет ответственного пользователя.",
+            Enabled = enabled,
+            Status = enabled ? "active" : "disabled",
+            StatusText = enabled ? "Включено" : "Выключено",
+            IntervalText = $"Каждые {intervalHours} ч.",
+            PendingCount = pendingCount,
+            LastProcessedCount = batchSize,
+            LastActivityAt = lastNotification?.CreatedAt,
+            LastActivityDescription = lastNotification?.Title,
+            NextRunHint = enabled
+                ? $"За один запуск проверяется до {batchSize} платежей, ожидают разбора: {pendingCount}."
+                : "Автоматический мониторинг авансов выключен.",
+            ManualRunEnabled = enabled,
+            ManualRunHint = enabled ? "Можно вручную проверить платежи и создать уведомления ответственным." : "Ручной запуск недоступен, пока мониторинг авансов выключен.",
+        };
+    }
+
     private async Task<SystemJobDiagnosticsItemDto> BuildExternalCalendarSyncJobAsync(
         IReadOnlyDictionary<string, string> settings,
         TimeZoneInfo timeZone,
@@ -886,6 +950,9 @@ public sealed class SystemJobsController : ControllerBase
                 item.Key == NotificationDeliveryRetentionService.RetentionDaysSettingKey ||
                 item.Key == NotificationDeliveryRetentionService.IntervalHoursSettingKey ||
                 item.Key == NotificationDeliveryRetentionService.BatchSizeSettingKey ||
+                item.Key == PaymentAdvanceReviewMonitoringService.EnabledSettingKey ||
+                item.Key == PaymentAdvanceReviewMonitoringService.IntervalHoursSettingKey ||
+                item.Key == PaymentAdvanceReviewMonitoringService.BatchSizeSettingKey ||
                 item.Key == CalendarSyncSchedulerService.EnabledSettingKey ||
                 item.Key == CalendarSyncSchedulerService.IntervalMinutesSettingKey ||
                 item.Key == CalendarSyncSchedulerService.BatchSizeSettingKey ||
@@ -907,6 +974,7 @@ public sealed class SystemJobsController : ControllerBase
             SystemJobKeys.NotificationRetry => await BuildNotificationRetryJobAsync(settings, ct),
             SystemJobKeys.YandexDiskCrmSync => await BuildYandexDiskCrmSyncJobAsync(settings, ct),
             SystemJobKeys.NotificationDeliveryRetention => await BuildNotificationDeliveryRetentionJobAsync(settings, timeZone, ct),
+            SystemJobKeys.PaymentAdvanceReviewMonitoring => await BuildAdvanceReviewMonitoringJobAsync(settings, ct),
             SystemJobKeys.ExternalCalendarSync => await BuildExternalCalendarSyncJobAsync(settings, timeZone, ct),
             SystemJobKeys.CaseInactivityControl => await BuildCaseControlJobAsync(settings, DateTime.UtcNow, ct),
             SystemJobKeys.CourtSync => await BuildCourtSyncJobAsync(settings, ct),
@@ -934,6 +1002,22 @@ public sealed class SystemJobsController : ControllerBase
                 item.CreatedAt <= cutoff &&
                 (item.Channel == NotificationChannels.Email || item.Channel == NotificationChannels.Telegram),
                 ct);
+    }
+
+    private async Task<int> CountPendingAdvanceReviewCandidatesAsync(bool enabled, CancellationToken ct)
+    {
+        if (!enabled)
+        {
+            return 0;
+        }
+
+        var candidatePredicate = PaymentAdvanceReviewService.UnallocatedAdvanceCandidatePredicate();
+        return await _db.Payments
+            .AsNoTracking()
+            .Where(candidatePredicate)
+            .Where(payment => payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.None
+                || payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.RequiresDecision)
+            .CountAsync(ct);
     }
 
     private async Task<int> CountPendingYandexDiskCrmSyncItemsAsync(
