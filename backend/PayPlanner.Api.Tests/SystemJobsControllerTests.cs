@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using System.Globalization;
 using System.Security.Claims;
 using System.Text.Json;
 using PayPlanner.Api.Controllers;
@@ -506,6 +507,89 @@ public class SystemJobsControllerTests
         var notification = Assert.Single(await scope.Db.UserNotifications.AsNoTracking().ToListAsync());
         Assert.Equal(responsible.Id, notification.RecipientUserId);
         Assert.Equal(UserNotificationTypes.PaymentAdvanceReviewRequired, notification.Type);
+    }
+
+    [Fact]
+    public async Task PaymentAdvanceReviewMonitoringService_EscalatesCriticalCandidatesToAdmins()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var now = DateTime.UtcNow;
+        var responsibleRole = new Role { Name = $"advance-critical-role-{Guid.NewGuid():N}", Description = "Advance critical role" };
+        var adminRole = new Role { Name = "admin", Description = "Administrator" };
+        scope.Db.Roles.AddRange(responsibleRole, adminRole);
+        await scope.Db.SaveChangesAsync();
+        var responsible = new User
+        {
+            Email = $"advance-critical-responsible-{Guid.NewGuid():N}@example.com",
+            FullName = "Advance Critical Responsible",
+            PasswordHash = "hash",
+            RoleId = responsibleRole.Id,
+            IsApproved = true,
+            IsActive = true,
+        };
+        var admin = new User
+        {
+            Email = $"advance-critical-admin-{Guid.NewGuid():N}@example.com",
+            FullName = "Advance Critical Admin",
+            PasswordHash = "hash",
+            RoleId = adminRole.Id,
+            IsApproved = true,
+            IsActive = true,
+        };
+        scope.Db.Users.AddRange(responsible, admin);
+        await scope.Db.SaveChangesAsync();
+        var client = new Client
+        {
+            Name = "Critical Advance Client",
+            ResponsibleUserId = responsible.Id,
+            CreatedAt = now,
+        };
+        scope.Db.Clients.Add(client);
+        await scope.Db.SaveChangesAsync();
+        var candidate = new Payment
+        {
+            ClientId = client.Id,
+            Type = PaymentType.Income,
+            DocumentKind = DocumentKind.Payment,
+            Amount = 18_400m,
+            PaidAmount = 18_400m,
+            Status = PaymentStatus.Completed,
+            IsPaid = true,
+            Date = now.Date.AddDays(-5),
+            PlannedDate = now.Date.AddDays(-5),
+            PaidDate = now.Date.AddDays(-5),
+            LastPaymentDate = now.Date.AddDays(-5),
+            Description = "Critical unallocated advance candidate",
+            AdvanceReviewStatus = PaymentAdvanceReviewStatus.None,
+        };
+        scope.Db.Payments.Add(candidate);
+        await scope.Db.SaveChangesAsync();
+
+        var services = new ServiceCollection();
+        services.AddScoped(_ => new PaymentContext(scope.Options, useObjectAuditModel: false));
+        await using var provider = services.BuildServiceProvider();
+        var service = new PaymentAdvanceReviewMonitoringService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new ConfigurationBuilder().Build(),
+            NullLogger<PaymentAdvanceReviewMonitoringService>.Instance);
+
+        var result = await service.RunOnceAsync(CancellationToken.None);
+
+        Assert.True(result.Enabled);
+        Assert.Equal(1, result.ProcessedCount);
+        Assert.Equal(1, result.MarkedCount);
+        Assert.Equal(1, result.NotifiedCount);
+        Assert.Equal(1, result.EscalatedCount);
+        var notifications = await scope.Db.UserNotifications
+            .AsNoTracking()
+            .OrderBy(item => item.Type)
+            .ToListAsync();
+        Assert.Contains(notifications, item =>
+            item.RecipientUserId == responsible.Id &&
+            item.Type == UserNotificationTypes.PaymentAdvanceReviewRequired);
+        var escalation = Assert.Single(notifications, item => item.Type == UserNotificationTypes.PaymentAdvanceReviewEscalation);
+        Assert.Equal(admin.Id, escalation.RecipientUserId);
+        Assert.Contains(candidate.Id.ToString(CultureInfo.InvariantCulture), escalation.EventKey);
     }
 
     [Fact]

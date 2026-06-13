@@ -9,9 +9,13 @@ public sealed class PaymentAdvanceReviewMonitoringService : BackgroundService
     public const string EnabledSettingKey = "payments.advanceReview.monitoring.enabled";
     public const string IntervalHoursSettingKey = "payments.advanceReview.monitoring.intervalHours";
     public const string BatchSizeSettingKey = "payments.advanceReview.monitoring.batchSize";
+    public const string WarningAgeDaysSettingKey = "payments.advanceReview.monitoring.warningAgeDays";
+    public const string CriticalAgeDaysSettingKey = "payments.advanceReview.monitoring.criticalAgeDays";
 
     public const int DefaultIntervalHours = 24;
     public const int DefaultBatchSize = 100;
+    public const int DefaultWarningAgeDays = 1;
+    public const int DefaultCriticalAgeDays = 3;
 
     private static readonly TimeSpan StartupDelay = TimeSpan.FromMinutes(7);
 
@@ -86,10 +90,10 @@ public sealed class PaymentAdvanceReviewMonitoringService : BackgroundService
         {
             await RecordSuccessAsync(
                 startedAt,
-                new PaymentAdvanceReviewMonitoringResult(0, 0, 0, false),
+                new PaymentAdvanceReviewMonitoringResult(0, 0, 0, 0, false),
                 "Мониторинг нераспределенных авансов выключен в настройках.",
                 cancellationToken);
-            return new PaymentAdvanceReviewMonitoringResult(0, 0, 0, false);
+            return new PaymentAdvanceReviewMonitoringResult(0, 0, 0, 0, false);
         }
 
         await _runLock.WaitAsync(cancellationToken);
@@ -112,6 +116,7 @@ public sealed class PaymentAdvanceReviewMonitoringService : BackgroundService
 
             var markedCount = 0;
             var notifiedCount = 0;
+            var escalatedCount = 0;
             var now = DateTime.UtcNow;
             foreach (var payment in payments)
             {
@@ -129,6 +134,13 @@ public sealed class PaymentAdvanceReviewMonitoringService : BackgroundService
                 {
                     notifiedCount++;
                 }
+
+                escalatedCount += await PaymentAdvanceReviewService.EnsureReviewEscalationNotificationsAsync(
+                    db,
+                    payment,
+                    now,
+                    settings.CriticalAgeDays,
+                    cancellationToken);
             }
 
             if (markedCount > 0)
@@ -136,17 +148,17 @@ public sealed class PaymentAdvanceReviewMonitoringService : BackgroundService
                 db.SetAuditReason($"Мониторинг авансов: {markedCount} платежей поставлены на контроль без изменения денежных проводок.");
             }
 
-            if (payments.Count > 0 || notifiedCount > 0)
+            if (payments.Count > 0 || notifiedCount > 0 || escalatedCount > 0)
             {
                 await db.SaveChangesAsync(cancellationToken);
             }
 
-            var result = new PaymentAdvanceReviewMonitoringResult(payments.Count, markedCount, notifiedCount, true);
+            var result = new PaymentAdvanceReviewMonitoringResult(payments.Count, markedCount, notifiedCount, escalatedCount, true);
             await RecordSuccessAsync(
                 startedAt,
                 result,
-                result.ProcessedCount > 0 || result.NotifiedCount > 0
-                    ? $"Мониторинг авансов проверил платежей: {result.ProcessedCount}, поставил на контроль: {result.MarkedCount}, создал уведомлений: {result.NotifiedCount}."
+                result.ProcessedCount > 0 || result.NotifiedCount > 0 || result.EscalatedCount > 0
+                    ? $"Мониторинг авансов проверил платежей: {result.ProcessedCount}, поставил на контроль: {result.MarkedCount}, создал уведомлений: {result.NotifiedCount}, эскалаций: {result.EscalatedCount}."
                     : "Мониторинг авансов выполнен, новых платежей для разбора не найдено.",
                 cancellationToken);
             return result;
@@ -176,10 +188,23 @@ public sealed class PaymentAdvanceReviewMonitoringService : BackgroundService
             .CountAsync(cancellationToken);
     }
 
+    public async Task<int> CountCriticalPendingCandidatesAsync(CancellationToken cancellationToken = default)
+    {
+        var settings = await ResolveSettingsAsync(cancellationToken);
+        if (!settings.Enabled)
+        {
+            return 0;
+        }
+
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
+        return await CountCriticalPendingCandidatesAsync(db, settings.CriticalAgeDays, cancellationToken);
+    }
+
     public async Task<PaymentAdvanceReviewMonitoringSettingsSnapshot> GetSettingsSnapshotAsync(CancellationToken cancellationToken = default)
     {
         var settings = await ResolveSettingsAsync(cancellationToken);
-        return new PaymentAdvanceReviewMonitoringSettingsSnapshot(settings.Enabled, settings.IntervalHours, settings.BatchSize);
+        return new PaymentAdvanceReviewMonitoringSettingsSnapshot(settings.Enabled, settings.IntervalHours, settings.BatchSize, settings.WarningAgeDays, settings.CriticalAgeDays);
     }
 
     private async Task<PaymentAdvanceReviewMonitoringSettings> ResolveSettingsAsync(CancellationToken cancellationToken)
@@ -191,13 +216,25 @@ public sealed class PaymentAdvanceReviewMonitoringService : BackgroundService
             .Where(item =>
                 item.Key == EnabledSettingKey ||
                 item.Key == IntervalHoursSettingKey ||
-                item.Key == BatchSizeSettingKey)
+                item.Key == BatchSizeSettingKey ||
+                item.Key == WarningAgeDaysSettingKey ||
+                item.Key == CriticalAgeDaysSettingKey)
             .ToDictionaryAsync(item => item.Key, item => item.Value, cancellationToken);
+
+        var warningAgeDays = NormalizeWarningAgeDays(ParseInt(
+            settings.GetValueOrDefault(WarningAgeDaysSettingKey),
+            _configuration.GetValue("Payments:AdvanceReview:Monitoring:WarningAgeDays", DefaultWarningAgeDays)));
+        var criticalAgeDays = NormalizeCriticalAgeDays(ParseInt(
+            settings.GetValueOrDefault(CriticalAgeDaysSettingKey),
+            _configuration.GetValue("Payments:AdvanceReview:Monitoring:CriticalAgeDays", DefaultCriticalAgeDays)),
+            warningAgeDays);
 
         return new PaymentAdvanceReviewMonitoringSettings(
             ParseBool(settings.GetValueOrDefault(EnabledSettingKey), _configuration.GetValue("Payments:AdvanceReview:Monitoring:Enabled", true)),
             NormalizeIntervalHours(ParseInt(settings.GetValueOrDefault(IntervalHoursSettingKey), _configuration.GetValue("Payments:AdvanceReview:Monitoring:IntervalHours", DefaultIntervalHours))),
-            NormalizeBatchSize(ParseInt(settings.GetValueOrDefault(BatchSizeSettingKey), _configuration.GetValue("Payments:AdvanceReview:Monitoring:BatchSize", DefaultBatchSize))));
+            NormalizeBatchSize(ParseInt(settings.GetValueOrDefault(BatchSizeSettingKey), _configuration.GetValue("Payments:AdvanceReview:Monitoring:BatchSize", DefaultBatchSize))),
+            warningAgeDays,
+            criticalAgeDays);
     }
 
     private async Task RecordSuccessAsync(
@@ -211,7 +248,7 @@ public sealed class PaymentAdvanceReviewMonitoringService : BackgroundService
             await _jobRunState.RecordSuccessAsync(
                 SystemJobKeys.PaymentAdvanceReviewMonitoring,
                 startedAt,
-                result.MarkedCount + result.NotifiedCount,
+                result.MarkedCount + result.NotifiedCount + result.EscalatedCount,
                 result.ProcessedCount - result.MarkedCount,
                 summary,
                 cancellationToken);
@@ -228,19 +265,48 @@ public sealed class PaymentAdvanceReviewMonitoringService : BackgroundService
 
     public static int NormalizeBatchSize(int value) => Math.Clamp(value, 1, 500);
 
+    public static int NormalizeWarningAgeDays(int value) => Math.Clamp(value, 1, 365);
+
+    public static int NormalizeCriticalAgeDays(int value, int warningAgeDays)
+        => Math.Clamp(value, Math.Max(1, warningAgeDays), 365);
+
+    public static async Task<int> CountCriticalPendingCandidatesAsync(
+        PaymentContext db,
+        int criticalAgeDays,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedCriticalAgeDays = Math.Max(1, criticalAgeDays);
+        var cutoff = DateTime.UtcNow.Date.AddDays(-normalizedCriticalAgeDays);
+        var candidatePredicate = PaymentAdvanceReviewService.UnallocatedAdvanceCandidatePredicate();
+
+        return await db.Payments
+            .AsNoTracking()
+            .Where(candidatePredicate)
+            .Where(payment => payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.None
+                || payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.RequiresDecision)
+            .Where(payment =>
+                (payment.LastPaymentDate ?? payment.PaidDate ?? (payment.Date == default ? payment.CreatedAt : payment.Date)).Date <= cutoff)
+            .CountAsync(cancellationToken);
+    }
+
     private readonly record struct PaymentAdvanceReviewMonitoringSettings(
         bool Enabled,
         int IntervalHours,
-        int BatchSize);
+        int BatchSize,
+        int WarningAgeDays,
+        int CriticalAgeDays);
 }
 
 public sealed record PaymentAdvanceReviewMonitoringResult(
     int ProcessedCount,
     int MarkedCount,
     int NotifiedCount,
+    int EscalatedCount,
     bool Enabled);
 
 public sealed record PaymentAdvanceReviewMonitoringSettingsSnapshot(
     bool Enabled,
     int IntervalHours,
-    int BatchSize);
+    int BatchSize,
+    int WarningAgeDays,
+    int CriticalAgeDays);

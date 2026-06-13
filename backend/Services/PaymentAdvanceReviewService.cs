@@ -14,6 +14,7 @@ public static class PaymentAdvanceReviewService
 {
     private const decimal AmountEpsilon = 0.009m;
     private const string AdvanceReviewRequiredEventKeyPrefix = "payment-advance-review-required:";
+    private const string AdvanceReviewEscalationEventKeyPrefix = "payment-advance-review-escalation:";
     private static readonly JsonSerializerOptions NotificationJsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly Func<Payment, bool> UnallocatedAdvanceCandidateEvaluator =
         UnallocatedAdvanceCandidatePredicate().Compile();
@@ -164,6 +165,17 @@ public static class PaymentAdvanceReviewService
     public static string BuildAdvanceReviewRequiredEventKey(int paymentId)
         => $"{AdvanceReviewRequiredEventKeyPrefix}{paymentId}";
 
+    public static string BuildAdvanceReviewEscalationEventKey(int paymentId, int criticalAgeDays)
+        => $"{AdvanceReviewEscalationEventKeyPrefix}{paymentId}:{criticalAgeDays}";
+
+    public static int GetAdvanceReviewAgeDays(Payment payment, DateTime utcNow)
+    {
+        ArgumentNullException.ThrowIfNull(payment);
+
+        var start = ResolveAdvanceReviewAgeStart(payment).Date;
+        return Math.Max(0, (utcNow.Date - start).Days);
+    }
+
     public static async Task<bool> EnsureReviewRequiredNotificationAsync(
         PaymentContext db,
         Payment payment,
@@ -248,6 +260,114 @@ public static class PaymentAdvanceReviewService
         return true;
     }
 
+    public static async Task<int> EnsureReviewEscalationNotificationsAsync(
+        PaymentContext db,
+        Payment payment,
+        DateTime utcNow,
+        int criticalAgeDays,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(payment);
+
+        if (payment.Id <= 0
+            || payment.AdvanceReviewStatus != PaymentAdvanceReviewStatus.RequiresDecision
+            || !IsUnallocatedAdvanceCandidate(payment))
+        {
+            return 0;
+        }
+
+        var normalizedCriticalAgeDays = Math.Max(1, criticalAgeDays);
+        var ageDays = GetAdvanceReviewAgeDays(payment, utcNow);
+        if (ageDays < normalizedCriticalAgeDays)
+        {
+            return 0;
+        }
+
+        var adminUserIds = await db.Users
+            .AsNoTracking()
+            .Where(user => user.IsActive
+                && user.IsApproved
+                && user.Role != null
+                && user.Role.Name == "admin")
+            .Select(user => user.Id)
+            .ToListAsync(ct);
+        if (adminUserIds.Count == 0)
+        {
+            return 0;
+        }
+
+        var disabledSettings = await db.UserSettings
+            .AsNoTracking()
+            .Where(item => adminUserIds.Contains(item.UserId)
+                && item.Key == UserNotificationPreferenceSettings.SettingKey)
+            .Select(item => new { item.UserId, item.Value })
+            .ToListAsync(ct);
+        var disabledByUserId = disabledSettings.ToDictionary(item => item.UserId, item => item.Value);
+
+        var eventKey = BuildAdvanceReviewEscalationEventKey(payment.Id, normalizedCriticalAgeDays);
+        var existingRecipientIds = await db.UserNotifications
+            .AsNoTracking()
+            .Where(item => item.EventKey == eventKey && adminUserIds.Contains(item.RecipientUserId))
+            .Select(item => item.RecipientUserId)
+            .ToListAsync(ct);
+        var existingRecipients = existingRecipientIds.ToHashSet();
+
+        var counterpartyName = await ResolveCounterpartyNameAsync(db, payment, ct);
+        var advanceAmount = GetAdvanceAmount(payment);
+        var formattedAmount = advanceAmount.ToString("N2", CultureInfo.GetCultureInfo("ru-RU"));
+        var title = $"Просроченный аванс без решения: {counterpartyName}";
+        var body = $"Платеж на {formattedAmount} ₽ ожидает решения по авансу уже {ageDays} дн. Проверьте его в разделе «Платежи» → «Контроль аванса».";
+        var metadataJson = JsonSerializer.Serialize(new
+        {
+            paymentId = payment.Id,
+            paymentDate = payment.Date,
+            paidDate = payment.PaidDate,
+            lastPaymentDate = payment.LastPaymentDate,
+            clientId = payment.ClientId,
+            legalEntityId = payment.LegalEntityId,
+            clientCaseId = payment.ClientCaseId,
+            contractId = payment.ContractId,
+            advanceAmount,
+            ageDays,
+            criticalAgeDays = normalizedCriticalAgeDays,
+            advanceReviewStatus = payment.AdvanceReviewStatus.ToString(),
+        }, NotificationJsonOptions);
+
+        var createdCount = 0;
+        foreach (var adminUserId in adminUserIds)
+        {
+            if (existingRecipients.Contains(adminUserId))
+            {
+                continue;
+            }
+
+            if (disabledByUserId.TryGetValue(adminUserId, out var disabledTypes)
+                && UserNotificationPreferenceSettings.ParseDisabledTypes(disabledTypes)
+                    .Contains(UserNotificationTypes.PaymentAdvanceReviewEscalation, StringComparer.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            db.UserNotifications.Add(new UserNotification
+            {
+                RecipientUserId = adminUserId,
+                Type = UserNotificationTypes.PaymentAdvanceReviewEscalation,
+                EventKey = eventKey,
+                Title = Truncate(title, 300),
+                BodyPreview = Truncate(body, 1000),
+                Tone = "rose",
+                ObjectType = "payment",
+                ObjectId = payment.Id,
+                MetadataJson = metadataJson,
+                CreatedAt = utcNow,
+            });
+            createdCount++;
+        }
+
+        return createdCount;
+    }
+
     public static void MarkAllocated(Payment payment, string? reason, DateTime utcNow, HttpContext? httpContext)
     {
         ArgumentNullException.ThrowIfNull(payment);
@@ -272,6 +392,15 @@ public static class PaymentAdvanceReviewService
 
     private static decimal NormalizeAmount(decimal value)
         => Math.Round(value, 2, MidpointRounding.AwayFromZero);
+
+    private static DateTime ResolveAdvanceReviewAgeStart(Payment payment)
+    {
+        var date = payment.LastPaymentDate
+            ?? payment.PaidDate
+            ?? (payment.Date == default ? payment.CreatedAt : payment.Date);
+
+        return date == default ? DateTime.UtcNow : date;
+    }
 
     private static async Task<int?> ResolveReviewRecipientUserIdAsync(
         PaymentContext db,

@@ -119,6 +119,8 @@ public sealed class SystemJobsController : ControllerBase
                 item.Key == PaymentAdvanceReviewMonitoringService.EnabledSettingKey ||
                 item.Key == PaymentAdvanceReviewMonitoringService.IntervalHoursSettingKey ||
                 item.Key == PaymentAdvanceReviewMonitoringService.BatchSizeSettingKey ||
+                item.Key == PaymentAdvanceReviewMonitoringService.WarningAgeDaysSettingKey ||
+                item.Key == PaymentAdvanceReviewMonitoringService.CriticalAgeDaysSettingKey ||
                 item.Key == CalendarSyncSchedulerService.EnabledSettingKey ||
                 item.Key == CalendarSyncSchedulerService.IntervalMinutesSettingKey ||
                 item.Key == CalendarSyncSchedulerService.BatchSizeSettingKey ||
@@ -240,11 +242,11 @@ public sealed class SystemJobsController : ControllerBase
                 case SystemJobKeys.PaymentAdvanceReviewMonitoring:
                     EnsureRunner(_advanceReviewMonitoringRunner);
                     var advanceReviewResult = await _advanceReviewMonitoringRunner!.RunOnceAsync(ct);
-                    processedCount = advanceReviewResult.MarkedCount + advanceReviewResult.NotifiedCount;
+                    processedCount = advanceReviewResult.MarkedCount + advanceReviewResult.NotifiedCount + advanceReviewResult.EscalatedCount;
                     skippedCount = advanceReviewResult.ProcessedCount - advanceReviewResult.MarkedCount;
                     summary = advanceReviewResult.Enabled
                         ? processedCount > 0
-                            ? $"Мониторинг авансов проверил платежей: {advanceReviewResult.ProcessedCount}, поставил на контроль: {advanceReviewResult.MarkedCount}, создал уведомлений: {advanceReviewResult.NotifiedCount}."
+                            ? $"Мониторинг авансов проверил платежей: {advanceReviewResult.ProcessedCount}, поставил на контроль: {advanceReviewResult.MarkedCount}, создал уведомлений: {advanceReviewResult.NotifiedCount}, эскалаций: {advanceReviewResult.EscalatedCount}."
                             : "Мониторинг авансов выполнен, новых платежей для разбора не найдено."
                         : "Мониторинг нераспределенных авансов выключен в настройках.";
                     break;
@@ -625,13 +627,24 @@ public sealed class SystemJobsController : ControllerBase
         var batchSize = PaymentAdvanceReviewMonitoringService.NormalizeBatchSize(ParseInt(
             settings.GetValueOrDefault(PaymentAdvanceReviewMonitoringService.BatchSizeSettingKey),
             _configuration.GetValue("Payments:AdvanceReview:Monitoring:BatchSize", PaymentAdvanceReviewMonitoringService.DefaultBatchSize)));
+        var warningAgeDays = PaymentAdvanceReviewMonitoringService.NormalizeWarningAgeDays(ParseInt(
+            settings.GetValueOrDefault(PaymentAdvanceReviewMonitoringService.WarningAgeDaysSettingKey),
+            _configuration.GetValue("Payments:AdvanceReview:Monitoring:WarningAgeDays", PaymentAdvanceReviewMonitoringService.DefaultWarningAgeDays)));
+        var criticalAgeDays = PaymentAdvanceReviewMonitoringService.NormalizeCriticalAgeDays(ParseInt(
+            settings.GetValueOrDefault(PaymentAdvanceReviewMonitoringService.CriticalAgeDaysSettingKey),
+            _configuration.GetValue("Payments:AdvanceReview:Monitoring:CriticalAgeDays", PaymentAdvanceReviewMonitoringService.DefaultCriticalAgeDays)),
+            warningAgeDays);
         var pendingCount = _advanceReviewMonitoringRunner is null
             ? await CountPendingAdvanceReviewCandidatesAsync(enabled, ct)
             : await _advanceReviewMonitoringRunner.CountPendingCandidatesAsync(ct);
+        var criticalPendingCount = _advanceReviewMonitoringRunner is null
+            ? await CountCriticalAdvanceReviewCandidatesAsync(enabled, criticalAgeDays, ct)
+            : await _advanceReviewMonitoringRunner.CountCriticalPendingCandidatesAsync(ct);
 
         var lastNotification = await _db.UserNotifications
             .AsNoTracking()
-            .Where(item => item.Type == UserNotificationTypes.PaymentAdvanceReviewRequired)
+            .Where(item => item.Type == UserNotificationTypes.PaymentAdvanceReviewRequired
+                || item.Type == UserNotificationTypes.PaymentAdvanceReviewEscalation)
             .OrderByDescending(item => item.CreatedAt)
             .Select(item => new { item.CreatedAt, item.Title })
             .FirstOrDefaultAsync(ct);
@@ -640,20 +653,20 @@ public sealed class SystemJobsController : ControllerBase
         {
             Key = SystemJobKeys.PaymentAdvanceReviewMonitoring,
             Name = "Мониторинг нераспределенных авансов",
-            Description = "Находит входящие оплаченные платежи без счета и акта, ставит их на контроль аванса и уведомляет ответственного пользователя.",
+            Description = "Находит входящие оплаченные платежи без счета и акта, ставит их на контроль аванса, уведомляет ответственного пользователя и эскалирует просроченные авансы руководителям.",
             Enabled = enabled,
-            Status = enabled ? "active" : "disabled",
-            StatusText = enabled ? "Включено" : "Выключено",
+            Status = enabled ? criticalPendingCount > 0 ? "warning" : "active" : "disabled",
+            StatusText = enabled ? criticalPendingCount > 0 ? "Есть просроченные авансы" : "Включено" : "Выключено",
             IntervalText = $"Каждые {intervalHours} ч.",
             PendingCount = pendingCount,
             LastProcessedCount = batchSize,
             LastActivityAt = lastNotification?.CreatedAt,
             LastActivityDescription = lastNotification?.Title,
             NextRunHint = enabled
-                ? $"За один запуск проверяется до {batchSize} платежей, ожидают разбора: {pendingCount}."
+                ? $"За один запуск проверяется до {batchSize} платежей, ожидают разбора: {pendingCount}, критичных старше {criticalAgeDays} дн.: {criticalPendingCount}. Предупреждение начинается с {warningAgeDays} дн."
                 : "Автоматический мониторинг авансов выключен.",
             ManualRunEnabled = enabled,
-            ManualRunHint = enabled ? "Можно вручную проверить платежи и создать уведомления ответственным." : "Ручной запуск недоступен, пока мониторинг авансов выключен.",
+            ManualRunHint = enabled ? "Можно вручную проверить платежи, создать уведомления ответственным и эскалации по просроченным авансам." : "Ручной запуск недоступен, пока мониторинг авансов выключен.",
         };
     }
 
@@ -953,6 +966,8 @@ public sealed class SystemJobsController : ControllerBase
                 item.Key == PaymentAdvanceReviewMonitoringService.EnabledSettingKey ||
                 item.Key == PaymentAdvanceReviewMonitoringService.IntervalHoursSettingKey ||
                 item.Key == PaymentAdvanceReviewMonitoringService.BatchSizeSettingKey ||
+                item.Key == PaymentAdvanceReviewMonitoringService.WarningAgeDaysSettingKey ||
+                item.Key == PaymentAdvanceReviewMonitoringService.CriticalAgeDaysSettingKey ||
                 item.Key == CalendarSyncSchedulerService.EnabledSettingKey ||
                 item.Key == CalendarSyncSchedulerService.IntervalMinutesSettingKey ||
                 item.Key == CalendarSyncSchedulerService.BatchSizeSettingKey ||
@@ -1018,6 +1033,16 @@ public sealed class SystemJobsController : ControllerBase
             .Where(payment => payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.None
                 || payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.RequiresDecision)
             .CountAsync(ct);
+    }
+
+    private async Task<int> CountCriticalAdvanceReviewCandidatesAsync(bool enabled, int criticalAgeDays, CancellationToken ct)
+    {
+        if (!enabled)
+        {
+            return 0;
+        }
+
+        return await PaymentAdvanceReviewMonitoringService.CountCriticalPendingCandidatesAsync(_db, criticalAgeDays, ct);
     }
 
     private async Task<int> CountPendingYandexDiskCrmSyncItemsAsync(
