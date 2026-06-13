@@ -16,6 +16,7 @@ const {
   getLegalEntitiesMock,
   getLegalEntitiesPagedMock,
   getClientBalanceMock,
+  getLegalEntityBalanceMock,
   applyClientBalanceMock,
   getPaymentsV2Mock,
   getNextCashOrderNumberMock,
@@ -35,6 +36,7 @@ const {
   getLegalEntitiesMock: vi.fn(),
   getLegalEntitiesPagedMock: vi.fn(),
   getClientBalanceMock: vi.fn(),
+  getLegalEntityBalanceMock: vi.fn(),
   applyClientBalanceMock: vi.fn(),
   getPaymentsV2Mock: vi.fn(),
   getNextCashOrderNumberMock: vi.fn(),
@@ -132,6 +134,7 @@ vi.mock('../../services/api', () => ({
     getLegalEntities: getLegalEntitiesMock,
     getLegalEntitiesPaged: getLegalEntitiesPagedMock,
     getClientBalance: getClientBalanceMock,
+    getLegalEntityBalance: getLegalEntityBalanceMock,
     applyClientBalance: applyClientBalanceMock,
     getPaymentsV2: getPaymentsV2Mock,
     getNextCashOrderNumber: getNextCashOrderNumberMock,
@@ -261,6 +264,7 @@ describe('PaymentModal integration', () => {
     getLegalEntitiesMock.mockReset();
     getLegalEntitiesPagedMock.mockReset();
     getClientBalanceMock.mockReset();
+    getLegalEntityBalanceMock.mockReset();
     applyClientBalanceMock.mockReset();
     getPaymentsV2Mock.mockReset();
     getNextCashOrderNumberMock.mockReset();
@@ -326,6 +330,7 @@ describe('PaymentModal integration', () => {
       pageSize: 25,
     });
     getClientBalanceMock.mockResolvedValue({ clientId: 69, balance: 0 });
+    getLegalEntityBalanceMock.mockResolvedValue({ clientId: null, legalEntityId: 301, balance: 0 });
     applyClientBalanceMock.mockResolvedValue({ appliedAmount: 0, balance: 0 });
     getPaymentsV2Mock.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 100, summary: {} });
     getNextCashOrderNumberMock.mockResolvedValue({
@@ -1777,6 +1782,25 @@ describe('PaymentModal integration', () => {
     fireEvent.change(paidAmountInput!, { target: { value: '100' } });
     fireEvent.blur(paidAmountInput!);
     expect(paidAmountInput!.value).toBe('750.00');
+  });
+
+  it('shows available legal entity balance before saving an income payment', async () => {
+    getLegalEntityBalanceMock.mockResolvedValue({ clientId: null, legalEntityId: 301, balance: 9_000 });
+
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        type="Income"
+        defaultLegalEntityId={301}
+      />,
+    );
+
+    expect(await screen.findByText('Доступно на балансе юрлица')).toBeTruthy();
+    expect(await screen.findByText('9 000.00')).toBeTruthy();
+    expect(getLegalEntityBalanceMock).toHaveBeenCalledWith(301);
+    expect(getClientBalanceMock).not.toHaveBeenCalled();
   });
 
   it('restores existing balance credit as minimum paid amount', async () => {

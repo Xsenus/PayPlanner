@@ -1000,15 +1000,19 @@ export function PaymentModal({
   useEffect(() => {
     if (!isOpen || availableClientBalance !== undefined) return;
     const clientId = Number(formData.clientId || 0);
-    if (!clientId || formData.type !== 'Income') {
+    const legalEntityId = Number(formData.legalEntityId || 0);
+    if (formData.type !== 'Income' || (!clientId && !legalEntityId)) {
       setFetchedClientBalance(0);
       return;
     }
 
     let cancelled = false;
     setClientBalanceLoading(true);
-    apiService
-      .getClientBalance(clientId)
+    const request = clientId > 0
+      ? apiService.getClientBalance(clientId)
+      : apiService.getLegalEntityBalance(legalEntityId);
+
+    request
       .then((summary) => {
         if (!cancelled) setFetchedClientBalance(summary.balance ?? 0);
       })
@@ -1022,7 +1026,7 @@ export function PaymentModal({
     return () => {
       cancelled = true;
     };
-  }, [availableClientBalance, formData.clientId, formData.type, isOpen]);
+  }, [availableClientBalance, formData.clientId, formData.legalEntityId, formData.type, isOpen]);
 
   useEffect(() => {
     if (!isOpen || !formData.invoiceId) {
@@ -2554,6 +2558,11 @@ export function PaymentModal({
   const hasPartial = paidAmountNum > 0 && remainingAmount > 0;
   const effectiveClientBalance =
     localClientBalance ?? availableClientBalance ?? fetchedClientBalance;
+  const visibleAvailableBalance = Math.max(Number(effectiveClientBalance || 0), 0);
+  const selectedBalanceOwnerLabel = formData.legalEntityId ? 'юрлица' : 'клиента';
+  const showAvailableBalanceNotice = formData.type === 'Income'
+    && Boolean(formData.clientId || formData.legalEntityId)
+    && (clientBalanceLoading || visibleAvailableBalance > 0);
   const canApplyClientBalanceToCurrent = Boolean(payment && effectiveClientBalance > 0 && remainingAmount > 0 && formData.type === 'Income');
   const canApplyClientBalance = Boolean(
     payment &&
@@ -3087,6 +3096,25 @@ export function PaymentModal({
                         {installmentPaymentsError && (
                           <div className="mt-2 text-xs text-rose-600">{installmentPaymentsError}</div>
                         )}
+                      </div>
+                    )}
+                    {showAvailableBalanceNotice && !canApplyClientBalanceToCurrent && (
+                      <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                          <div>
+                            <div className="font-medium text-emerald-900">Доступно на балансе {selectedBalanceOwnerLabel}</div>
+                            <div className="mt-0.5 text-xs text-emerald-700">
+                              {payment
+                                ? formData.legalEntityId
+                                  ? 'Аванс можно зачесть через баланс юридического лица.'
+                                  : 'Аванс можно зачесть в этот платеж, когда по нему есть остаток к оплате.'
+                                : 'После сохранения платежа эту сумму можно будет зачесть в оплату.'}
+                            </div>
+                          </div>
+                          <div className="text-base font-semibold tabular-nums text-emerald-800">
+                            {clientBalanceLoading ? 'проверяем...' : formatMoneyDisplayValue(visibleAvailableBalance)}
+                          </div>
+                        </div>
                       </div>
                     )}
                     {canApplyClientBalanceToCurrent && (

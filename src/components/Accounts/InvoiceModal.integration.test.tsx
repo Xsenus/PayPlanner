@@ -125,6 +125,8 @@ vi.mock('../../services/api', () => ({
     getActs: vi.fn().mockResolvedValue({ items: [] }),
     getLegalEntities: vi.fn().mockResolvedValue([]),
     getLegalEntitiesPaged: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 25 }),
+    getClientBalance: vi.fn().mockResolvedValue({ clientId: 1, balance: 0 }),
+    getLegalEntityBalance: vi.fn().mockResolvedValue({ clientId: null, legalEntityId: 1, balance: 0 }),
     getNextInvoiceNumber: vi.fn().mockResolvedValue('24'),
     getPayment: vi.fn(),
     getMoneyOperationsPaged: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20, summary: createEmptyMoneyOperationsSummary() }),
@@ -339,6 +341,10 @@ describe('InvoiceModal integration', () => {
     vi.mocked(apiService.getLegalEntitiesPaged).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 25 });
     vi.mocked(apiService.getLegalEntities).mockReset();
     vi.mocked(apiService.getLegalEntities).mockResolvedValue([]);
+    vi.mocked(apiService.getClientBalance).mockReset();
+    vi.mocked(apiService.getClientBalance).mockResolvedValue({ clientId: 1, balance: 0 });
+    vi.mocked(apiService.getLegalEntityBalance).mockReset();
+    vi.mocked(apiService.getLegalEntityBalance).mockResolvedValue({ clientId: null, legalEntityId: 1, balance: 0 });
     vi.mocked(apiService.getPayment).mockReset();
     vi.mocked(apiService.getMoneyOperationsPaged).mockReset();
     vi.mocked(apiService.getMoneyOperationsPaged).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20, summary: createEmptyMoneyOperationsSummary() });
@@ -372,6 +378,31 @@ describe('InvoiceModal integration', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('shows available client balance in the invoice form', async () => {
+    vi.mocked(apiService.getClientBalance).mockResolvedValue({ clientId: 69, balance: 7_100 });
+
+    render(
+      <InvoiceModal
+        open
+        mode="create"
+        invoice={null}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[createTestClient(69, 'Клиент с авансом')]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[]}
+        defaultClientId={69}
+        defaultType="Income"
+      />,
+    );
+
+    expect(await screen.findByText('Доступно на балансе клиента')).toBeTruthy();
+    expect(await screen.findByText('7 100.00')).toBeTruthy();
+    expect(apiService.getClientBalance).toHaveBeenCalledWith(69);
   });
 
   it('keeps the linked contract selected after invoice data is reopened and contracts finish loading', async () => {

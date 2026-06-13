@@ -989,6 +989,8 @@ export function InvoiceModal({
   const [linkedMoneyOperations, setLinkedMoneyOperations] = useState<MoneyOperation[]>([]);
   const [linkedMoneyOperationsLoading, setLinkedMoneyOperationsLoading] = useState(false);
   const [linkedMoneyOperationsError, setLinkedMoneyOperationsError] = useState<string | null>(null);
+  const [counterpartyBalance, setCounterpartyBalance] = useState<number | null>(null);
+  const [counterpartyBalanceLoading, setCounterpartyBalanceLoading] = useState(false);
   const [installmentPlan, setInstallmentPlan] = useState<InstallmentPlanInput | null>(() => cloneInstallmentPlan(deriveInstallmentPlanFromPayments(visibleRelatedPayments)));
   const [installmentModalOpen, setInstallmentModalOpen] = useState(false);
   const [installmentPlanTouched, setInstallmentPlanTouched] = useState(false);
@@ -1388,9 +1390,58 @@ export function InvoiceModal({
   const selectedResponsibleSourceClient = isIncome
     ? selectedClient
     : (selectedExpenseClient ?? selectedClient);
+  const positiveCounterpartyBalance = Math.max(Number(counterpartyBalance ?? 0), 0);
+  const showCounterpartyBalanceNotice = isIncome
+    && Boolean(form.clientId || form.legalEntityId)
+    && (counterpartyBalanceLoading || positiveCounterpartyBalance > 0);
+  const counterpartyBalanceOwnerLabel = form.legalEntityId ? 'юрлица' : 'клиента';
   const selectedCounterpartyName = selectedClient?.name ?? (selectedLegalEntity ? getLegalEntityDisplayName(selectedLegalEntity) : '');
   const selectedExpenseCounterpartyName = selectedExpenseClient?.name
     ?? (selectedExpenseLegalEntity ? getLegalEntityDisplayName(selectedExpenseLegalEntity) : '');
+
+  useEffect(() => {
+    if (!open || !isIncome || (!form.clientId && !form.legalEntityId)) {
+      setCounterpartyBalance(null);
+      setCounterpartyBalanceLoading(false);
+      return;
+    }
+
+    const clientId = Number(form.clientId || 0);
+    const legalEntityId = Number(form.legalEntityId || 0);
+    if (!clientId && !legalEntityId) {
+      setCounterpartyBalance(null);
+      setCounterpartyBalanceLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setCounterpartyBalanceLoading(true);
+    const request = clientId > 0
+      ? apiService.getClientBalance(clientId)
+      : apiService.getLegalEntityBalance(legalEntityId);
+
+    request
+      .then((summary) => {
+        if (!cancelled) {
+          setCounterpartyBalance(summary.balance ?? 0);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCounterpartyBalance(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setCounterpartyBalanceLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [form.clientId, form.legalEntityId, isIncome, open]);
+
   const selectedCounterpartyPickerValue = useMemo<CounterpartySelection[]>(() => {
     if (clientPickerMode === 'expense') {
       if (selectedExpenseClient) {
@@ -4869,6 +4920,21 @@ export function InvoiceModal({
                                   {selectedClient?.clientStatus?.description && (
                                     <p className="text-xs text-slate-500">{selectedClient.clientStatus.description}</p>
                                   )}
+                                </div>
+                              )}
+                              {showCounterpartyBalanceNotice && (
+                                <div className="mt-2 rounded-xl border border-emerald-100 bg-emerald-50 p-3">
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div>
+                                      <div className="text-sm font-medium text-emerald-900">Доступно на балансе {counterpartyBalanceOwnerLabel}</div>
+                                      <div className="mt-0.5 text-xs text-emerald-700">
+                                        Эти деньги можно зачесть в счет оплаты после создания связанного платежа.
+                                      </div>
+                                    </div>
+                                    <div className="text-base font-semibold tabular-nums text-emerald-800">
+                                      {counterpartyBalanceLoading ? 'проверяем...' : formatMoneyDisplayValue(positiveCounterpartyBalance)}
+                                    </div>
+                                  </div>
                                 </div>
                               )}
                               {selectedClient && onOpenClient && (
