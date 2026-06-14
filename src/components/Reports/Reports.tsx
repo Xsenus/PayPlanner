@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -74,7 +74,7 @@ import {
   monthRangeToDates,
   normalizeYmRange,
 } from '../../utils/reportPresentation';
-import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CaseFinanceReport, CaseSuccessReport, CashBookSummary, CashFlowForecastReport, CashFlowReport, CashOrderReport, ContractStatusReport, CounterpartyReport, CurrencyReport, CurrentCasesReport, DirectionReport, InvoiceStatusReport, JournalStatusReport, LawyerWorkloadReport, LegalWorkReport, MatchStatusReport, MoneyCategoryReport, MoneyOperationSource, OverdueProceduralDeadlinesReport, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, TaskReport, VatReport } from '../../types';
+import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CaseFinanceReport, CaseSuccessReport, CashBookSummary, CashFlowForecastReport, CashFlowReport, CashOrderReport, ContractStatusReport, CounterpartyReport, CurrencyReport, CurrentCasesReport, DirectionReport, InvoiceStatusReport, JournalStatusReport, LawyerWorkloadReport, LegalWorkReport, MatchStatusReport, MoneyAccount, MoneyCategoryReport, MoneyOperationSource, OverdueProceduralDeadlinesReport, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, TaskReport, VatReport } from '../../types';
 
 const statusMeta: Record<
   'Completed' | 'Pending' | 'Overdue',
@@ -2500,6 +2500,7 @@ type ManagementReportExportFilters = {
   from?: string;
   to?: string;
   source?: MoneyOperationSource;
+  accountName?: string;
   asOf?: string;
   status?: string;
   responsibleUserId?: number;
@@ -7219,6 +7220,9 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
   const [activeGroup, setActiveGroup] = useState<ReportGroupId>('payments');
   const [taskReportScope, setTaskReportScope] = useState<TaskReportScope>('open');
   const [moneySource, setMoneySource] = useState<'all' | MoneyOperationSource>('all');
+  const [moneyAccountName, setMoneyAccountName] = useState('');
+  const [moneyAccounts, setMoneyAccounts] = useState<MoneyAccount[]>([]);
+  const [moneyAccountsError, setMoneyAccountsError] = useState<string | null>(null);
 
   const normalizedRange = useMemo(
     () => normalizeYmRange((range.from ?? ymNow) as `${number}-${string}`, (range.to ?? range.from ?? ymNow) as `${number}-${string}`),
@@ -7231,12 +7235,28 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     [normalizedRange.fromYM, normalizedRange.toYM],
   );
   const selectedMoneySource = moneySource === 'all' ? undefined : moneySource;
+  const selectedMoneyAccountName = moneyAccountName.trim() || undefined;
+  const visibleMoneyAccounts = useMemo(
+    () =>
+      moneyAccounts
+        .filter((account) => !selectedMoneySource || account.source === selectedMoneySource)
+        .sort((left, right) => left.name.localeCompare(right.name, 'ru')),
+    [moneyAccounts, selectedMoneySource],
+  );
   const moneyOperationReportFilters = useMemo(
     () => ({
       ...cashFlowDates,
       ...(selectedMoneySource ? { source: selectedMoneySource } : {}),
+      ...(selectedMoneyAccountName ? { accountName: selectedMoneyAccountName } : {}),
     }),
-    [cashFlowDates, selectedMoneySource],
+    [cashFlowDates, selectedMoneyAccountName, selectedMoneySource],
+  );
+  const moneyAccountReportFilters = useMemo(
+    () => ({
+      ...cashFlowDates,
+      ...(selectedMoneyAccountName ? { accountName: selectedMoneyAccountName } : {}),
+    }),
+    [cashFlowDates, selectedMoneyAccountName],
   );
   const casePeriodReportFilters = useMemo(
     () => ({ ...cashFlowDates, limit: 100 }),
@@ -7262,6 +7282,33 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     () => ({ asOf: cashFlowDates.to, scope: taskReportScope, limit: 200 }),
     [cashFlowDates.to, taskReportScope],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    apiService.getMoneyAccounts({ activeOnly: true })
+      .then((items) => {
+        if (cancelled) return;
+        setMoneyAccounts(items);
+        setMoneyAccountsError(null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setMoneyAccounts([]);
+        setMoneyAccountsError(extractDisplayErrorMessage(err, 'Не удалось загрузить денежные счета.'));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!moneyAccountName) return;
+    if (visibleMoneyAccounts.some((account) => account.name === moneyAccountName)) return;
+    setMoneyAccountName('');
+  }, [moneyAccountName, visibleMoneyAccounts]);
+
   const {
     report: cashFlowReport,
     loading: cashFlowLoading,
@@ -7273,7 +7320,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     loading: cashFlowForecastLoading,
     error: cashFlowForecastError,
     reload: reloadCashFlowForecast,
-  } = useCashFlowForecastReport(cashFlowDates);
+  } = useCashFlowForecastReport(moneyAccountReportFilters);
   const {
     report: cashReport,
     loading: cashReportLoading,
@@ -7603,6 +7650,31 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
                   ))}
                 </select>
               </div>
+              <div className="mt-4">
+                <label
+                  className="text-xs font-semibold uppercase tracking-wide text-slate-500"
+                  htmlFor="reports-money-account"
+                >
+                  Денежный счет
+                </label>
+                <select
+                  id="reports-money-account"
+                  value={moneyAccountName}
+                  onChange={(event) => setMoneyAccountName(event.target.value)}
+                  disabled={visibleMoneyAccounts.length === 0}
+                  className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                >
+                  <option value="">Все счета</option>
+                  {visibleMoneyAccounts.map((account) => (
+                    <option key={account.id} value={account.name}>
+                      {account.name}
+                    </option>
+                  ))}
+                </select>
+                {moneyAccountsError ? (
+                  <div className="mt-2 text-xs text-rose-600">{moneyAccountsError}</div>
+                ) : null}
+              </div>
               <div className="mt-5 grid grid-cols-2 gap-3">
                 <div className="rounded-2xl bg-white p-4 shadow-sm">
                   <div className="text-xs uppercase tracking-wide text-slate-500">От</div>
@@ -7808,7 +7880,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={cashFlowForecastLoading}
               error={cashFlowForecastError}
               onReload={reloadCashFlowForecast}
-              filters={cashFlowDates}
+              filters={moneyAccountReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 

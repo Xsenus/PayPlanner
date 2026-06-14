@@ -229,6 +229,7 @@ public class ReportsController : ControllerBase
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         [FromQuery] MoneyOperationSource? source,
+        [FromQuery] string? accountName,
         [FromQuery] DateTime? asOf,
         [FromQuery] string? status,
         [FromQuery] int? responsibleUserId,
@@ -247,6 +248,7 @@ public class ReportsController : ControllerBase
             from,
             to,
             source,
+            accountName,
             asOf,
             status,
             responsibleUserId,
@@ -277,6 +279,7 @@ public class ReportsController : ControllerBase
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         [FromQuery] MoneyOperationSource? source,
+        [FromQuery] string? accountName,
         [FromQuery] DateTime? asOf,
         [FromQuery] string? status,
         [FromQuery] int? responsibleUserId,
@@ -300,6 +303,7 @@ public class ReportsController : ControllerBase
             from,
             to,
             source,
+            accountName,
             asOf,
             status,
             responsibleUserId,
@@ -430,6 +434,7 @@ public class ReportsController : ControllerBase
         DateTime? from,
         DateTime? to,
         MoneyOperationSource? source,
+        string? accountName,
         DateTime? asOf,
         string? status,
         int? responsibleUserId,
@@ -449,6 +454,7 @@ public class ReportsController : ControllerBase
         }
 
         var normalizedReport = (NormalizeOptional(report) ?? string.Empty).ToLowerInvariant();
+        var normalizedAccountName = NormalizeOptional(accountName);
         var reportToday = await ResolveReportTodayAsync(ct);
         var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
         var effectiveAsOf = asOf?.Date ?? reportToday;
@@ -484,7 +490,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildCashFlowReportAsync(start, end, source, null, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildCashFlowReportAsync(start, end, source, normalizedAccountName, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildCashFlowExportDocument(reportDto), null);
@@ -526,7 +532,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildPlanFactReportAsync(start, end, source, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildPlanFactReportAsync(start, end, source, normalizedAccountName, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildPlanFactExportDocument(reportDto), null);
@@ -542,7 +548,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildAdvanceReportAsync(start, end, source, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildAdvanceReportAsync(start, end, source, normalizedAccountName, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildAdvanceExportDocument(reportDto), null);
@@ -558,7 +564,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildPaymentPriorityReportAsync(start, end, source, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildPaymentPriorityReportAsync(start, end, source, normalizedAccountName, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildPaymentPriorityExportDocument(reportDto), null);
@@ -574,7 +580,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildPaidAccountReportAsync(start, end, source, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildPaidAccountReportAsync(start, end, source, normalizedAccountName, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildPaidAccountExportDocument(reportDto), null);
@@ -590,7 +596,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildPaidInvoiceReportAsync(start, end, source, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildPaidInvoiceReportAsync(start, end, source, normalizedAccountName, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildPaidInvoiceExportDocument(reportDto), null);
@@ -654,7 +660,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildCategoryReportAsync(start, end, source, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildCategoryReportAsync(start, end, source, normalizedAccountName, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildCategoryExportDocument(reportDto), null);
@@ -670,7 +676,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildCounterpartyReportAsync(start, end, source, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildCounterpartyReportAsync(start, end, source, normalizedAccountName, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildCounterpartyExportDocument(reportDto), null);
@@ -686,7 +692,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildProjectReportAsync(start, end, source, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildProjectReportAsync(start, end, source, normalizedAccountName, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildProjectExportDocument(reportDto), null);
@@ -702,7 +708,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildDirectionReportAsync(start, end, source, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildDirectionReportAsync(start, end, source, normalizedAccountName, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildDirectionExportDocument(reportDto), null);
@@ -718,7 +724,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildSalesPointReportAsync(start, end, source, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildSalesPointReportAsync(start, end, source, normalizedAccountName, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildSalesPointExportDocument(reportDto), null);
@@ -734,7 +740,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildVatReportAsync(start, end, source, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildVatReportAsync(start, end, source, normalizedAccountName, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildVatExportDocument(reportDto), null);
@@ -750,7 +756,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildPaymentOrderReportAsync(start, end, source, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildPaymentOrderReportAsync(start, end, source, normalizedAccountName, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildPaymentOrderExportDocument(reportDto), null);
@@ -766,7 +772,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildPaymentPurposeReportAsync(start, end, source, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildPaymentPurposeReportAsync(start, end, source, normalizedAccountName, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildPaymentPurposeExportDocument(reportDto), null);
@@ -782,7 +788,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildMatchStatusReportAsync(start, end, source, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildMatchStatusReportAsync(start, end, source, normalizedAccountName, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildMatchStatusExportDocument(reportDto), null);
@@ -798,7 +804,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildJournalStatusReportAsync(start, end, source, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildJournalStatusReportAsync(start, end, source, normalizedAccountName, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildJournalStatusExportDocument(reportDto), null);
@@ -814,7 +820,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildCurrencyReportAsync(start, end, source, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildCurrencyReportAsync(start, end, source, normalizedAccountName, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildCurrencyExportDocument(reportDto), null);
@@ -946,7 +952,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildCashFlowForecastReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildCashFlowForecastReportAsync(start, end, normalizedAccountName, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildCashFlowForecastExportDocument(reportDto), null);
@@ -1208,13 +1214,14 @@ public class ReportsController : ControllerBase
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         [FromQuery] MoneyOperationSource? source,
+        [FromQuery] string? accountName,
         CancellationToken ct)
     {
         var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
-            (visibility, cancellationToken) => BuildCategoryReportAsync(start, end, source, visibility, cancellationToken),
+            (visibility, cancellationToken) => BuildCategoryReportAsync(start, end, source, NormalizeOptional(accountName), visibility, cancellationToken),
             ct);
     }
 
@@ -1223,13 +1230,14 @@ public class ReportsController : ControllerBase
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         [FromQuery] MoneyOperationSource? source,
+        [FromQuery] string? accountName,
         CancellationToken ct)
     {
         var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
-            (visibility, cancellationToken) => BuildCounterpartyReportAsync(start, end, source, visibility, cancellationToken),
+            (visibility, cancellationToken) => BuildCounterpartyReportAsync(start, end, source, NormalizeOptional(accountName), visibility, cancellationToken),
             ct);
     }
 
@@ -1238,13 +1246,14 @@ public class ReportsController : ControllerBase
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         [FromQuery] MoneyOperationSource? source,
+        [FromQuery] string? accountName,
         CancellationToken ct)
     {
         var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
-            (visibility, cancellationToken) => BuildProjectReportAsync(start, end, source, visibility, cancellationToken),
+            (visibility, cancellationToken) => BuildProjectReportAsync(start, end, source, NormalizeOptional(accountName), visibility, cancellationToken),
             ct);
     }
 
@@ -1253,13 +1262,14 @@ public class ReportsController : ControllerBase
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         [FromQuery] MoneyOperationSource? source,
+        [FromQuery] string? accountName,
         CancellationToken ct)
     {
         var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
-            (visibility, cancellationToken) => BuildDirectionReportAsync(start, end, source, visibility, cancellationToken),
+            (visibility, cancellationToken) => BuildDirectionReportAsync(start, end, source, NormalizeOptional(accountName), visibility, cancellationToken),
             ct);
     }
 
@@ -1268,13 +1278,14 @@ public class ReportsController : ControllerBase
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         [FromQuery] MoneyOperationSource? source,
+        [FromQuery] string? accountName,
         CancellationToken ct)
     {
         var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
-            (visibility, cancellationToken) => BuildSalesPointReportAsync(start, end, source, visibility, cancellationToken),
+            (visibility, cancellationToken) => BuildSalesPointReportAsync(start, end, source, NormalizeOptional(accountName), visibility, cancellationToken),
             ct);
     }
 
@@ -1283,13 +1294,14 @@ public class ReportsController : ControllerBase
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         [FromQuery] MoneyOperationSource? source,
+        [FromQuery] string? accountName,
         CancellationToken ct)
     {
         var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
-            (visibility, cancellationToken) => BuildVatReportAsync(start, end, source, visibility, cancellationToken),
+            (visibility, cancellationToken) => BuildVatReportAsync(start, end, source, NormalizeOptional(accountName), visibility, cancellationToken),
             ct);
     }
 
@@ -1298,13 +1310,14 @@ public class ReportsController : ControllerBase
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         [FromQuery] MoneyOperationSource? source,
+        [FromQuery] string? accountName,
         CancellationToken ct)
     {
         var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
-            (visibility, cancellationToken) => BuildPlanFactReportAsync(start, end, source, visibility, cancellationToken),
+            (visibility, cancellationToken) => BuildPlanFactReportAsync(start, end, source, NormalizeOptional(accountName), visibility, cancellationToken),
             ct);
     }
 
@@ -1313,13 +1326,14 @@ public class ReportsController : ControllerBase
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         [FromQuery] MoneyOperationSource? source,
+        [FromQuery] string? accountName,
         CancellationToken ct)
     {
         var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
-            (visibility, cancellationToken) => BuildAdvanceReportAsync(start, end, source, visibility, cancellationToken),
+            (visibility, cancellationToken) => BuildAdvanceReportAsync(start, end, source, NormalizeOptional(accountName), visibility, cancellationToken),
             ct);
     }
 
@@ -1328,13 +1342,14 @@ public class ReportsController : ControllerBase
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         [FromQuery] MoneyOperationSource? source,
+        [FromQuery] string? accountName,
         CancellationToken ct)
     {
         var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
-            (visibility, cancellationToken) => BuildPaymentPriorityReportAsync(start, end, source, visibility, cancellationToken),
+            (visibility, cancellationToken) => BuildPaymentPriorityReportAsync(start, end, source, NormalizeOptional(accountName), visibility, cancellationToken),
             ct);
     }
 
@@ -1343,13 +1358,14 @@ public class ReportsController : ControllerBase
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         [FromQuery] MoneyOperationSource? source,
+        [FromQuery] string? accountName,
         CancellationToken ct)
     {
         var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
-            (visibility, cancellationToken) => BuildPaidAccountReportAsync(start, end, source, visibility, cancellationToken),
+            (visibility, cancellationToken) => BuildPaidAccountReportAsync(start, end, source, NormalizeOptional(accountName), visibility, cancellationToken),
             ct);
     }
 
@@ -1358,13 +1374,14 @@ public class ReportsController : ControllerBase
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         [FromQuery] MoneyOperationSource? source,
+        [FromQuery] string? accountName,
         CancellationToken ct)
     {
         var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
-            (visibility, cancellationToken) => BuildPaidInvoiceReportAsync(start, end, source, visibility, cancellationToken),
+            (visibility, cancellationToken) => BuildPaidInvoiceReportAsync(start, end, source, NormalizeOptional(accountName), visibility, cancellationToken),
             ct);
     }
 
@@ -1415,13 +1432,14 @@ public class ReportsController : ControllerBase
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         [FromQuery] MoneyOperationSource? source,
+        [FromQuery] string? accountName,
         CancellationToken ct)
     {
         var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
-            (visibility, cancellationToken) => BuildPaymentOrderReportAsync(start, end, source, visibility, cancellationToken),
+            (visibility, cancellationToken) => BuildPaymentOrderReportAsync(start, end, source, NormalizeOptional(accountName), visibility, cancellationToken),
             ct);
     }
 
@@ -1430,13 +1448,14 @@ public class ReportsController : ControllerBase
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         [FromQuery] MoneyOperationSource? source,
+        [FromQuery] string? accountName,
         CancellationToken ct)
     {
         var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
-            (visibility, cancellationToken) => BuildPaymentPurposeReportAsync(start, end, source, visibility, cancellationToken),
+            (visibility, cancellationToken) => BuildPaymentPurposeReportAsync(start, end, source, NormalizeOptional(accountName), visibility, cancellationToken),
             ct);
     }
 
@@ -1445,13 +1464,14 @@ public class ReportsController : ControllerBase
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         [FromQuery] MoneyOperationSource? source,
+        [FromQuery] string? accountName,
         CancellationToken ct)
     {
         var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
-            (visibility, cancellationToken) => BuildMatchStatusReportAsync(start, end, source, visibility, cancellationToken),
+            (visibility, cancellationToken) => BuildMatchStatusReportAsync(start, end, source, NormalizeOptional(accountName), visibility, cancellationToken),
             ct);
     }
 
@@ -1460,13 +1480,14 @@ public class ReportsController : ControllerBase
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         [FromQuery] MoneyOperationSource? source,
+        [FromQuery] string? accountName,
         CancellationToken ct)
     {
         var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
-            (visibility, cancellationToken) => BuildJournalStatusReportAsync(start, end, source, visibility, cancellationToken),
+            (visibility, cancellationToken) => BuildJournalStatusReportAsync(start, end, source, NormalizeOptional(accountName), visibility, cancellationToken),
             ct);
     }
 
@@ -1475,13 +1496,14 @@ public class ReportsController : ControllerBase
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         [FromQuery] MoneyOperationSource? source,
+        [FromQuery] string? accountName,
         CancellationToken ct)
     {
         var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Payments,
-            (visibility, cancellationToken) => BuildCurrencyReportAsync(start, end, source, visibility, cancellationToken),
+            (visibility, cancellationToken) => BuildCurrencyReportAsync(start, end, source, NormalizeOptional(accountName), visibility, cancellationToken),
             ct);
     }
 
@@ -5326,10 +5348,11 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        string? accountName,
         DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var query = BuildFactQuery(from, to, source, null, paymentsVisibility)
+        var query = BuildFactQuery(from, to, source, accountName, paymentsVisibility)
             .Include(item => item.IncomeType);
 
         var rows = await query
@@ -5407,10 +5430,11 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        string? accountName,
         DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var rows = await BuildFactQuery(from, to, source, null, paymentsVisibility)
+        var rows = await BuildFactQuery(from, to, source, accountName, paymentsVisibility)
             .Select(item => new
             {
                 item.Direction,
@@ -5484,10 +5508,11 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        string? accountName,
         DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var rows = await BuildFactQuery(from, to, source, null, paymentsVisibility)
+        var rows = await BuildFactQuery(from, to, source, accountName, paymentsVisibility)
             .Select(item => new
             {
                 item.Direction,
@@ -5561,10 +5586,11 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        string? accountName,
         DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var rows = await BuildFactQuery(from, to, source, null, paymentsVisibility)
+        var rows = await BuildFactQuery(from, to, source, accountName, paymentsVisibility)
             .Select(item => new
             {
                 item.Direction,
@@ -5638,10 +5664,11 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        string? accountName,
         DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var rows = await BuildFactQuery(from, to, source, null, paymentsVisibility)
+        var rows = await BuildFactQuery(from, to, source, accountName, paymentsVisibility)
             .Select(item => new
             {
                 item.Direction,
@@ -5715,10 +5742,11 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        string? accountName,
         DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var rows = await BuildFactQuery(from, to, source, null, paymentsVisibility)
+        var rows = await BuildFactQuery(from, to, source, accountName, paymentsVisibility)
             .Select(item => new
             {
                 item.Direction,
@@ -5794,10 +5822,11 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        string? accountName,
         DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var rows = await BuildPlanFactQuery(from, to, source, paymentsVisibility)
+        var rows = await BuildPlanFactQuery(from, to, source, accountName, paymentsVisibility)
             .Select(item => new PlanFactQueryRow
             {
                 Date = item.Date,
@@ -5862,6 +5891,7 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        string? accountName,
         DataVisibilityAccess paymentsVisibility)
     {
         var query = _db.MoneyOperations
@@ -5876,6 +5906,11 @@ public class ReportsController : ControllerBase
         if (source.HasValue)
         {
             query = query.Where(item => item.Source == source.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(accountName))
+        {
+            query = query.Where(item => item.AccountName == accountName);
         }
 
         return ApplyMoneyOperationVisibility(query, paymentsVisibility);
@@ -5896,10 +5931,11 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        string? accountName,
         DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var rows = await BuildFactQuery(from, to, source, null, paymentsVisibility)
+        var rows = await BuildFactQuery(from, to, source, accountName, paymentsVisibility)
             .Where(item => item.IsAdvancePayment)
             .Select(item => new
             {
@@ -5973,10 +6009,11 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        string? accountName,
         DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var rows = await BuildFactQuery(from, to, source, null, paymentsVisibility)
+        var rows = await BuildFactQuery(from, to, source, accountName, paymentsVisibility)
             .Select(item => new
             {
                 item.Direction,
@@ -6050,10 +6087,11 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        string? accountName,
         DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var rows = await BuildFactQuery(from, to, source, null, paymentsVisibility)
+        var rows = await BuildFactQuery(from, to, source, accountName, paymentsVisibility)
             .Select(item => new
             {
                 item.Direction,
@@ -6127,10 +6165,11 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        string? accountName,
         DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var rows = await BuildFactQuery(from, to, source, null, paymentsVisibility)
+        var rows = await BuildFactQuery(from, to, source, accountName, paymentsVisibility)
             .Select(item => new
             {
                 item.Direction,
@@ -6586,10 +6625,11 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        string? accountName,
         DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var rows = await BuildFactQuery(from, to, source, null, paymentsVisibility)
+        var rows = await BuildFactQuery(from, to, source, accountName, paymentsVisibility)
             .Select(item => new
             {
                 item.Direction,
@@ -6663,10 +6703,11 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        string? accountName,
         DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var rows = await BuildFactQuery(from, to, source, null, paymentsVisibility)
+        var rows = await BuildFactQuery(from, to, source, accountName, paymentsVisibility)
             .Select(item => new
             {
                 item.Direction,
@@ -6740,10 +6781,11 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        string? accountName,
         DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var rows = await BuildFactQuery(from, to, source, null, paymentsVisibility)
+        var rows = await BuildFactQuery(from, to, source, accountName, paymentsVisibility)
             .Select(item => new
             {
                 item.Direction,
@@ -6833,10 +6875,11 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        string? accountName,
         DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var rows = await BuildFactQuery(from, to, source, null, paymentsVisibility)
+        var rows = await BuildFactQuery(from, to, source, accountName, paymentsVisibility)
             .Select(item => new
             {
                 item.Source,
@@ -6960,10 +7003,11 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         MoneyOperationSource? source,
+        string? accountName,
         DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var rows = await BuildFactQuery(from, to, source, null, paymentsVisibility)
+        var rows = await BuildFactQuery(from, to, source, accountName, paymentsVisibility)
             .Select(item => new
             {
                 item.Direction,

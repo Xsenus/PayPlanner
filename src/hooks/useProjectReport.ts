@@ -6,6 +6,7 @@ export interface ProjectReportFilters {
   from?: string;
   to?: string;
   source?: MoneyOperationSource;
+  accountName?: string;
 }
 
 export function useProjectReport(filters: ProjectReportFilters) {
@@ -19,8 +20,9 @@ export function useProjectReport(filters: ProjectReportFilters) {
       from: filters.from,
       to: filters.to,
       source: filters.source,
+      accountName: filters.accountName,
     }),
-    [filters.from, filters.source, filters.to],
+    [filters.accountName, filters.from, filters.source, filters.to],
   );
 
   const load = useCallback(async () => {

@@ -6,6 +6,7 @@ export interface PlanFactReportFilters {
   from?: string;
   to?: string;
   source?: MoneyOperationSource;
+  accountName?: string;
 }
 
 export function usePlanFactReport(filters: PlanFactReportFilters) {
@@ -19,8 +20,9 @@ export function usePlanFactReport(filters: PlanFactReportFilters) {
       from: filters.from,
       to: filters.to,
       source: filters.source,
+      accountName: filters.accountName,
     }),
-    [filters.from, filters.source, filters.to],
+    [filters.accountName, filters.from, filters.source, filters.to],
   );
 
   const load = useCallback(async () => {

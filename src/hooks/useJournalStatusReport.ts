@@ -6,6 +6,7 @@ export interface JournalStatusReportFilters {
   from?: string;
   to?: string;
   source?: MoneyOperationSource;
+  accountName?: string;
 }
 
 export function useJournalStatusReport(filters: JournalStatusReportFilters) {
@@ -19,8 +20,9 @@ export function useJournalStatusReport(filters: JournalStatusReportFilters) {
       from: filters.from,
       to: filters.to,
       source: filters.source,
+      accountName: filters.accountName,
     }),
-    [filters.from, filters.source, filters.to],
+    [filters.accountName, filters.from, filters.source, filters.to],
   );
 
   const load = useCallback(async () => {

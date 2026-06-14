@@ -6,6 +6,7 @@ export interface PaymentPriorityReportFilters {
   from?: string;
   to?: string;
   source?: MoneyOperationSource;
+  accountName?: string;
 }
 
 export function usePaymentPriorityReport(filters: PaymentPriorityReportFilters) {
@@ -19,8 +20,9 @@ export function usePaymentPriorityReport(filters: PaymentPriorityReportFilters) 
       from: filters.from,
       to: filters.to,
       source: filters.source,
+      accountName: filters.accountName,
     }),
-    [filters.from, filters.source, filters.to],
+    [filters.accountName, filters.from, filters.source, filters.to],
   );
 
   const load = useCallback(async () => {

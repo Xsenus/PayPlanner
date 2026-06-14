@@ -303,6 +303,7 @@ public class ReportsControllerTests
                 today.AddDays(-30),
                 today.AddDays(30),
                 null,
+                null,
                 today,
                 null,
                 null,
@@ -325,6 +326,7 @@ public class ReportsControllerTests
             "cash-flow-forecast",
             today.AddDays(-30),
             today.AddDays(30),
+            null,
             null,
             today,
             null,
@@ -416,6 +418,7 @@ public class ReportsControllerTests
             "case-success",
             today.AddDays(-30),
             today.AddDays(30),
+            null,
             null,
             today,
             null,
@@ -685,8 +688,8 @@ public class ReportsControllerTests
         Assert.IsType<ForbidResult>(await controller.ExportLegalWorkCsv(null, null, null, null, null, CancellationToken.None));
         Assert.IsType<ForbidResult>(await controller.ExportLegalWorkExcel(null, null, null, null, null, CancellationToken.None));
         Assert.IsType<ForbidResult>(await controller.ExportLegalWorkPdf(null, null, null, null, null, CancellationToken.None));
-        Assert.IsType<ForbidResult>(await controller.ExportManagementReportExcel("case-finance", null, null, null, null, null, null, null, null, null, null, null, null, null, null, CancellationToken.None));
-        Assert.IsType<ForbidResult>(await controller.ExportManagementReportPdf("case-finance", null, null, null, null, null, null, null, null, null, null, null, null, null, null, CancellationToken.None));
+        Assert.IsType<ForbidResult>(await controller.ExportManagementReportExcel("case-finance", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, CancellationToken.None));
+        Assert.IsType<ForbidResult>(await controller.ExportManagementReportPdf("case-finance", null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, CancellationToken.None));
     }
 
     [Fact]
@@ -2558,6 +2561,7 @@ public class ReportsControllerTests
             new DateTime(2026, 5, 1),
             new DateTime(2026, 5, 31),
             null,
+            null,
             CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
@@ -2597,6 +2601,21 @@ public class ReportsControllerTests
                 Assert.Equal(1_000m, item.Amount);
                 Assert.Equal(20.0m, item.Share);
             });
+
+        var accountAction = await controller.Categories(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            null,
+            "Касса",
+            CancellationToken.None);
+
+        var accountOk = Assert.IsType<OkObjectResult>(accountAction.Result);
+        var accountReport = Assert.IsType<MoneyCategoryReportDto>(accountOk.Value);
+        Assert.Equal(3_000m, accountReport.IncomeTotal);
+        Assert.Equal(0m, accountReport.ExpenseTotal);
+        var incomeItem = Assert.Single(accountReport.Income);
+        Assert.Equal("Розница", incomeItem.CategoryName);
+        Assert.Equal(3_000m, incomeItem.Amount);
     }
 
     [Fact]
@@ -2616,6 +2635,7 @@ public class ReportsControllerTests
         var action = await controller.Counterparties(
             new DateTime(2026, 5, 1),
             new DateTime(2026, 5, 31),
+            null,
             null,
             CancellationToken.None);
 
@@ -2671,6 +2691,7 @@ public class ReportsControllerTests
             new DateTime(2026, 5, 1),
             new DateTime(2026, 5, 31),
             null,
+            null,
             CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
@@ -2724,6 +2745,7 @@ public class ReportsControllerTests
             new DateTime(2026, 5, 1),
             new DateTime(2026, 5, 31),
             null,
+            null,
             CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
@@ -2775,6 +2797,7 @@ public class ReportsControllerTests
         var action = await controller.SalesPoints(
             new DateTime(2026, 5, 1),
             new DateTime(2026, 5, 31),
+            null,
             null,
             CancellationToken.None);
 
@@ -2828,6 +2851,7 @@ public class ReportsControllerTests
         var action = await controller.Vat(
             new DateTime(2026, 5, 1),
             new DateTime(2026, 5, 31),
+            null,
             null,
             CancellationToken.None);
 
@@ -2890,6 +2914,7 @@ public class ReportsControllerTests
             new DateTime(2026, 5, 1),
             new DateTime(2026, 5, 31),
             MoneyOperationSource.Bank,
+            null,
             CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
@@ -2947,6 +2972,7 @@ public class ReportsControllerTests
             new DateTime(2026, 5, 1),
             new DateTime(2026, 5, 31),
             null,
+            null,
             CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
@@ -3002,6 +3028,7 @@ public class ReportsControllerTests
         var action = await controller.PaymentPriorities(
             new DateTime(2026, 5, 1),
             new DateTime(2026, 5, 31),
+            null,
             null,
             CancellationToken.None);
 
@@ -3059,6 +3086,7 @@ public class ReportsControllerTests
             new DateTime(2026, 5, 1),
             new DateTime(2026, 5, 31),
             null,
+            null,
             CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
@@ -3111,6 +3139,7 @@ public class ReportsControllerTests
         var action = await controller.PaidInvoices(
             new DateTime(2026, 5, 1),
             new DateTime(2026, 5, 31),
+            null,
             null,
             CancellationToken.None);
 
@@ -3523,6 +3552,7 @@ public class ReportsControllerTests
             new DateTime(2026, 5, 1),
             new DateTime(2026, 5, 31),
             null,
+            null,
             CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
@@ -3575,6 +3605,7 @@ public class ReportsControllerTests
         var action = await controller.PaymentPurposes(
             new DateTime(2026, 5, 1),
             new DateTime(2026, 5, 31),
+            null,
             null,
             CancellationToken.None);
 
@@ -3629,6 +3660,7 @@ public class ReportsControllerTests
         var action = await controller.MatchStatuses(
             new DateTime(2026, 5, 1),
             new DateTime(2026, 5, 31),
+            null,
             null,
             CancellationToken.None);
 
@@ -3697,6 +3729,7 @@ public class ReportsControllerTests
             new DateTime(2026, 5, 1),
             new DateTime(2026, 5, 31),
             null,
+            null,
             CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
@@ -3755,6 +3788,7 @@ public class ReportsControllerTests
         var action = await controller.Currencies(
             new DateTime(2026, 5, 1),
             new DateTime(2026, 5, 31),
+            null,
             null,
             CancellationToken.None);
 
