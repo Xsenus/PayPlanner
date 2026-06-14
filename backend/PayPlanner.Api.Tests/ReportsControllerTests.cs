@@ -2406,6 +2406,51 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task ReportViewEndpoints_ReturnForbidWhenReportsAreHiddenForRole()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role
+        {
+            Name = "reports-hidden",
+            Description = "Reports hidden",
+        };
+        var user = new User
+        {
+            Email = "reports-hidden@example.test",
+            FullName = "Reports Hidden User",
+            IsActive = true,
+            Role = role,
+        };
+
+        db.Roles.Add(role);
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = role.Id,
+            Section = RolePermissionCatalog.Reports,
+            CanView = false,
+            ViewScope = DataVisibilityScope.All,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateUserPrincipal(user.Id));
+
+        var legalWork = await controller.LegalWork(null, null, null, null, null, CancellationToken.None);
+        var caseFinance = await controller.CaseFinance(null, null, null, null, null, null, CancellationToken.None);
+        var currentCases = await controller.CurrentCases(null, null, null, null, null, CancellationToken.None);
+        var taskReport = await controller.Tasks(null, null, null, null, CancellationToken.None);
+        var cashFlowForecast = await controller.CashFlowForecast(null, null, null, null, null, null, null, null, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(legalWork.Result);
+        Assert.IsType<ForbidResult>(caseFinance.Result);
+        Assert.IsType<ForbidResult>(currentCases.Result);
+        Assert.IsType<ForbidResult>(taskReport.Result);
+        Assert.IsType<ForbidResult>(cashFlowForecast.Result);
+    }
+
+    [Fact]
     public async Task CashFlow_ReturnsOpeningPeriodAndDailyBalances()
     {
         await using var db = await CreateContextAsync();
