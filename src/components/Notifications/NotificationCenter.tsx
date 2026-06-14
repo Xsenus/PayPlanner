@@ -47,6 +47,10 @@ type NotificationTaskRoleFilter = 'all' | 'assignee' | 'author' | 'observer' | '
 type NotificationCenterProps = {
   onOpenTask?: (taskId: number) => void;
   onOpenCase?: (caseId: number) => void;
+  onOpenPayment?: (paymentId: number) => void;
+  onOpenInvoice?: (invoiceId: number) => void;
+  onOpenAct?: (actId: number) => void;
+  onOpenContract?: (contractId: number) => void;
 };
 
 const STATUS_FILTERS: Array<{ value: NotificationStatusFilter; label: string }> = [
@@ -114,7 +118,14 @@ function formatDateTime(value?: string | null) {
   }).format(date);
 }
 
-export function NotificationCenter({ onOpenTask, onOpenCase }: NotificationCenterProps) {
+export function NotificationCenter({
+  onOpenTask,
+  onOpenCase,
+  onOpenPayment,
+  onOpenInvoice,
+  onOpenAct,
+  onOpenContract,
+}: NotificationCenterProps) {
   const toast = useToast();
   const [itemsPage, setItemsPage] = useState<PagedResult<UserNotificationDto>>(EMPTY_PAGE);
   const [types, setTypes] = useState<UserNotificationTypeDto[]>([]);
@@ -414,6 +425,37 @@ export function NotificationCenter({ onOpenTask, onOpenCase }: NotificationCente
       onOpenCase(item.objectId);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Не удалось открыть дело.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const openLinkedObjectHandlers: Record<string, ((objectId: number) => void) | undefined> = {
+    payment: onOpenPayment,
+    invoice: onOpenInvoice,
+    act: onOpenAct,
+    contract: onOpenContract,
+  };
+
+  const openLinkedObjectLabels: Record<string, string> = {
+    payment: 'К платежу',
+    invoice: 'К счету',
+    act: 'К акту',
+    contract: 'К договору',
+  };
+
+  const handleOpenLinkedObject = async (item: UserNotificationDto) => {
+    const handler = openLinkedObjectHandlers[item.objectType];
+    if (!handler || !item.objectId) {
+      return;
+    }
+
+    try {
+      setBusyId(item.id);
+      await markRead(item);
+      handler(item.objectId);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось открыть связанный документ.');
     } finally {
       setBusyId(null);
     }
@@ -923,6 +965,8 @@ export function NotificationCenter({ onOpenTask, onOpenCase }: NotificationCente
           <div className="divide-y divide-slate-100">
             {itemsPage.items.map((item) => {
               const itemBusy = busyId === item.id;
+              const linkedObjectLabel = item.objectId ? openLinkedObjectLabels[item.objectType] : undefined;
+              const canOpenLinkedObject = Boolean(linkedObjectLabel && openLinkedObjectHandlers[item.objectType]);
               return (
                 <article
                   key={item.id}
@@ -971,6 +1015,7 @@ export function NotificationCenter({ onOpenTask, onOpenCase }: NotificationCente
                           <span>{formatDateTime(item.createdAt)}</span>
                           {item.taskId ? <span>Задача #{item.taskId}</span> : null}
                           {item.objectType === 'case' && item.objectId ? <span>Дело #{item.objectId}</span> : null}
+                          {linkedObjectLabel && item.objectId ? <span>{linkedObjectLabel.replace('К ', '')} #{item.objectId}</span> : null}
                           <span>{item.eventKey}</span>
                         </div>
                       </div>
@@ -1010,6 +1055,20 @@ export function NotificationCenter({ onOpenTask, onOpenCase }: NotificationCente
                       >
                         <ExternalLink className="h-4 w-4" />
                         К делу
+                      </button>
+                    ) : null}
+                    {canOpenLinkedObject ? (
+                      <button
+                        type="button"
+                        disabled={itemBusy}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void handleOpenLinkedObject(item);
+                        }}
+                        className="inline-flex h-9 items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-wait disabled:opacity-60"
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                        {linkedObjectLabel}
                       </button>
                     ) : null}
                     <button

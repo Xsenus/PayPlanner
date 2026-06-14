@@ -126,4 +126,34 @@ describe('NotificationCenter', () => {
     expect(apiMock.deleteUserNotifications).not.toHaveBeenCalledWith([20, 21]);
     expect(toastMock.success).toHaveBeenCalledWith('Удалено уведомлений: 1.');
   });
+
+  it.each([
+    ['payment', 'К платежу', 'onOpenPayment'],
+    ['invoice', 'К счету', 'onOpenInvoice'],
+    ['act', 'К акту', 'onOpenAct'],
+    ['contract', 'К договору', 'onOpenContract'],
+  ] as const)('opens linked %s notification object', async (objectType, buttonLabel, handlerName) => {
+    const handlers = {
+      onOpenPayment: vi.fn(),
+      onOpenInvoice: vi.fn(),
+      onOpenAct: vi.fn(),
+      onOpenContract: vi.fn(),
+    };
+    const item = createNotification({
+      id: 30,
+      title: `Связанный объект ${objectType}`,
+      objectType,
+      objectId: 777,
+      taskId: null,
+    });
+    apiMock.getUserNotifications.mockResolvedValue(createPage([item]));
+
+    render(<NotificationCenter {...handlers} />);
+
+    expect(await screen.findByText(`Связанный объект ${objectType}`)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: buttonLabel }));
+
+    await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(30));
+    expect(handlers[handlerName]).toHaveBeenCalledWith(777);
+  });
 });

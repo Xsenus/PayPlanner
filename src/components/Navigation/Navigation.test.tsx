@@ -5,6 +5,7 @@ import Navigation from './Navigation';
 import { getTabHref } from '../../appRouting';
 import { ALL_TABS, type Tab } from '../../types/tabs';
 import { apiService } from '../../services/api';
+import { defaultRolePermissions } from '../../types/permissions';
 
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({
@@ -63,7 +64,7 @@ describe('Navigation links', () => {
   beforeEach(() => {
     window.history.replaceState({}, '', '/');
     window.localStorage.clear();
-    apiMock.getRolePermissions.mockResolvedValue({});
+    apiMock.getRolePermissions.mockResolvedValue(defaultRolePermissions);
     apiMock.getPaymentsV2.mockResolvedValue({
       items: [],
       total: 0,

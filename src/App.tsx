@@ -972,7 +972,16 @@ function AppContent() {
           : renderNoAccess('Раздел календаря недоступен для вашей роли.');
 
       case 'notifications':
-        return <NotificationCenter onOpenTask={(taskId) => openTaskDetail(taskId, { returnTo: 'notifications' })} onOpenCase={openRelatedCase} />;
+        return (
+          <NotificationCenter
+            onOpenTask={(taskId) => openTaskDetail(taskId, { returnTo: 'notifications' })}
+            onOpenCase={openRelatedCase}
+            onOpenPayment={(paymentId) => openPaymentPage(paymentId)}
+            onOpenInvoice={(invoiceId) => openInvoicePage(invoiceId, { returnTo: { tab: 'notifications' } })}
+            onOpenAct={(actId) => openActDetail(actId, { tab: 'notifications' })}
+            onOpenContract={(contractId) => openContractDetail(contractId, { returnTo: 'notifications' })}
+          />
+        );
 
       case 'tasks':
         return permissions.tasks.canView
