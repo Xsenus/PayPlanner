@@ -546,7 +546,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildCashFlowReportAsync(start, end, MoneyOperationSource.Bank, null, null, null, null, null, null, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildCashFlowReportAsync(start, end, MoneyOperationSource.Bank, normalizedAccountName, normalizedCounterpartyName, effectiveClientId, effectiveCaseId, effectiveContractId, effectiveIncomeTypeId, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildBankExportDocument(reportDto), null);
@@ -2462,7 +2462,7 @@ public class ReportsController : ControllerBase
         => new(
             "bank-report",
             "Отчет по банку",
-            $"Период: {DateCell(report.From)} - {DateCell(report.To)} · Источник: Банк",
+            $"Период: {DateCell(report.From)} - {DateCell(report.To)} · Источник: Банк{BuildCashFlowFilterSuffix(report)}",
             [
                 new("Начальный остаток", MoneyCell(report.OpeningBalance)),
                 new("Поступления", MoneyCell(report.Income)),

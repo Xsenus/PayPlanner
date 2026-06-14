@@ -357,6 +357,80 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task ManagementBankExport_UsesCurrentMoneyFilters()
+    {
+        await using var db = await CreateContextAsync();
+        db.MoneyOperations.AddRange(
+            Operation(
+                MoneyOperationSource.Bank,
+                MoneyOperationDirection.Income,
+                MoneyOperationAccountingType.Fact,
+                3_000m,
+                new DateTime(2026, 4, 25),
+                "Target bank",
+                counterpartyName: "Acme LLC"),
+            Operation(
+                MoneyOperationSource.Bank,
+                MoneyOperationDirection.Income,
+                MoneyOperationAccountingType.Fact,
+                7_000m,
+                new DateTime(2026, 5, 4),
+                "Target bank",
+                counterpartyName: "Acme LLC"),
+            Operation(
+                MoneyOperationSource.Bank,
+                MoneyOperationDirection.Income,
+                MoneyOperationAccountingType.Fact,
+                99_000m,
+                new DateTime(2026, 5, 4),
+                "Other bank",
+                counterpartyName: "Acme LLC"),
+            Operation(
+                MoneyOperationSource.Bank,
+                MoneyOperationDirection.Expense,
+                MoneyOperationAccountingType.Fact,
+                12_000m,
+                new DateTime(2026, 5, 5),
+                "Target bank",
+                counterpartyName: "Beta LLC"));
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateAdminPrincipal());
+
+        var excelAction = await controller.ExportManagementReportExcel(
+            "bank",
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            null,
+            "Target bank",
+            "Acme LLC",
+            null,
+            null,
+            null,
+            null,
+            new DateTime(2026, 5, 31),
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            50,
+            CancellationToken.None);
+
+        var excel = Assert.IsType<FileContentResult>(excelAction);
+        var text = System.Text.Encoding.UTF8.GetString(excel.FileContents);
+        Assert.Contains("Target bank", text, StringComparison.Ordinal);
+        Assert.Contains("10000.00", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Other bank", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("99000.00", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("12000.00", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ManagementReportExcel_UsesProfileTimeZoneForGeneratedAt()
     {
         await using var db = await CreateContextAsync();
