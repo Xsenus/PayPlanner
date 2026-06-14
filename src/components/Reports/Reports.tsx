@@ -74,7 +74,7 @@ import {
   monthRangeToDates,
   normalizeYmRange,
 } from '../../utils/reportPresentation';
-import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CaseFinanceReport, CaseSuccessReport, CashBookSummary, CashFlowForecastReport, CashFlowReport, CashOrderReport, ContractStatusReport, CounterpartyReport, CurrencyReport, CurrentCasesReport, DirectionReport, InvoiceStatusReport, JournalStatusReport, LawyerWorkloadReport, LegalWorkReport, MatchStatusReport, MoneyAccount, MoneyCategoryReport, MoneyOperationSource, OverdueProceduralDeadlinesReport, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, TaskReport, VatReport } from '../../types';
+import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CaseFinanceReport, CaseSuccessReport, CashBookSummary, CashFlowForecastReport, CashFlowReport, CashOrderReport, Client, ContractStatusReport, CounterpartyReport, CurrencyReport, CurrentCasesReport, DirectionReport, InvoiceStatusReport, JournalStatusReport, LawyerWorkloadReport, LegalWorkReport, MatchStatusReport, MoneyAccount, MoneyCategoryReport, MoneyOperationSource, OverdueProceduralDeadlinesReport, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, TaskReport, VatReport } from '../../types';
 
 const statusMeta: Record<
   'Completed' | 'Pending' | 'Overdue',
@@ -2502,6 +2502,7 @@ type ManagementReportExportFilters = {
   source?: MoneyOperationSource;
   accountName?: string;
   counterpartyName?: string;
+  clientId?: number;
   asOf?: string;
   status?: string;
   responsibleUserId?: number;
@@ -7223,8 +7224,11 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
   const [moneySource, setMoneySource] = useState<'all' | MoneyOperationSource>('all');
   const [moneyAccountName, setMoneyAccountName] = useState('');
   const [counterpartyName, setCounterpartyName] = useState('');
+  const [clientId, setClientId] = useState('');
   const [moneyAccounts, setMoneyAccounts] = useState<MoneyAccount[]>([]);
   const [moneyAccountsError, setMoneyAccountsError] = useState<string | null>(null);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [clientsError, setClientsError] = useState<string | null>(null);
 
   const normalizedRange = useMemo(
     () => normalizeYmRange((range.from ?? ymNow) as `${number}-${string}`, (range.to ?? range.from ?? ymNow) as `${number}-${string}`),
@@ -7239,6 +7243,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
   const selectedMoneySource = moneySource === 'all' ? undefined : moneySource;
   const selectedMoneyAccountName = moneyAccountName.trim() || undefined;
   const selectedCounterpartyName = counterpartyName.trim() || undefined;
+  const selectedClientId = clientId ? Number(clientId) : undefined;
   const visibleMoneyAccounts = useMemo(
     () =>
       moneyAccounts
@@ -7246,22 +7251,31 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
         .sort((left, right) => left.name.localeCompare(right.name, 'ru')),
     [moneyAccounts, selectedMoneySource],
   );
+  const visibleClients = useMemo(
+    () =>
+      clients
+        .filter((client) => client.id > 0)
+        .sort((left, right) => left.name.localeCompare(right.name, 'ru')),
+    [clients],
+  );
   const moneyOperationReportFilters = useMemo(
     () => ({
       ...cashFlowDates,
       ...(selectedMoneySource ? { source: selectedMoneySource } : {}),
       ...(selectedMoneyAccountName ? { accountName: selectedMoneyAccountName } : {}),
       ...(selectedCounterpartyName ? { counterpartyName: selectedCounterpartyName } : {}),
+      ...(selectedClientId ? { clientId: selectedClientId } : {}),
     }),
-    [cashFlowDates, selectedCounterpartyName, selectedMoneyAccountName, selectedMoneySource],
+    [cashFlowDates, selectedClientId, selectedCounterpartyName, selectedMoneyAccountName, selectedMoneySource],
   );
   const moneyAccountReportFilters = useMemo(
     () => ({
       ...cashFlowDates,
       ...(selectedMoneyAccountName ? { accountName: selectedMoneyAccountName } : {}),
       ...(selectedCounterpartyName ? { counterpartyName: selectedCounterpartyName } : {}),
+      ...(selectedClientId ? { clientId: selectedClientId } : {}),
     }),
-    [cashFlowDates, selectedCounterpartyName, selectedMoneyAccountName],
+    [cashFlowDates, selectedClientId, selectedCounterpartyName, selectedMoneyAccountName],
   );
   const casePeriodReportFilters = useMemo(
     () => ({ ...cashFlowDates, limit: 100 }),
@@ -7301,6 +7315,26 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
         if (cancelled) return;
         setMoneyAccounts([]);
         setMoneyAccountsError(extractDisplayErrorMessage(err, 'Не удалось загрузить денежные счета.'));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    apiService.getClients()
+      .then((items) => {
+        if (cancelled) return;
+        setClients(items);
+        setClientsError(null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setClients([]);
+        setClientsError(extractDisplayErrorMessage(err, 'Не удалось загрузить клиентов.'));
       });
 
     return () => {
@@ -7695,6 +7729,31 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
                   placeholder="Название или часть названия"
                   className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
                 />
+              </div>
+              <div className="mt-4">
+                <label
+                  className="text-xs font-semibold uppercase tracking-wide text-slate-500"
+                  htmlFor="reports-client"
+                >
+                  Клиент
+                </label>
+                <select
+                  id="reports-client"
+                  value={clientId}
+                  onChange={(event) => setClientId(event.target.value)}
+                  disabled={visibleClients.length === 0}
+                  className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                >
+                  <option value="">Все клиенты</option>
+                  {visibleClients.map((client) => (
+                    <option key={client.id} value={client.id}>
+                      {client.name}
+                    </option>
+                  ))}
+                </select>
+                {clientsError ? (
+                  <div className="mt-2 text-xs text-rose-600">{clientsError}</div>
+                ) : null}
               </div>
               <div className="mt-5 grid grid-cols-2 gap-3">
                 <div className="rounded-2xl bg-white p-4 shadow-sm">

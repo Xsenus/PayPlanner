@@ -8,6 +8,7 @@ export interface MoneyCategoryReportFilters {
   source?: MoneyOperationSource;
   accountName?: string;
   counterpartyName?: string;
+  clientId?: number;
 }
 
 export function useMoneyCategoryReport(filters: MoneyCategoryReportFilters) {
@@ -23,8 +24,9 @@ export function useMoneyCategoryReport(filters: MoneyCategoryReportFilters) {
       source: filters.source,
       accountName: filters.accountName,
       counterpartyName: filters.counterpartyName,
+      clientId: filters.clientId,
     }),
-    [filters.accountName, filters.counterpartyName, filters.from, filters.source, filters.to],
+    [filters.accountName, filters.clientId, filters.counterpartyName, filters.from, filters.source, filters.to],
   );
 
   const load = useCallback(async () => {
