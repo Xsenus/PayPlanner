@@ -468,6 +468,109 @@ function exportBankReport(report: CashFlowReport, timeZoneId?: string | null) {
   downloadCsv('bank-report.csv', rows);
 }
 
+function exportPlanFactReport(report: PlanFactReport, timeZoneId?: string | null) {
+  const rows: unknown[][] = [
+    ['Показатель', 'Значение'],
+    ['Период с', formatDate(report.from, timeZoneId)],
+    ['Период по', formatDate(report.to, timeZoneId)],
+    ['Источник', report.source ? sourceLabel(report.source) : 'Все источники'],
+    ['План доходов', report.planIncome],
+    ['Факт доходов', report.factIncome],
+    ['Отклонение доходов', report.incomeVariance],
+    ['Выполнение доходов', `${report.incomeCompletionPercent}%`],
+    ['План расходов', report.planExpense],
+    ['Факт расходов', report.factExpense],
+    ['Отклонение расходов', report.expenseVariance],
+    ['Исполнение расходов', `${report.expenseExecutionPercent}%`],
+    ['Итоговое отклонение', report.netVariance],
+    [],
+    ['Динамика по дням'],
+    ['Дата', 'План доходов', 'Факт доходов', 'Отклонение доходов', 'План расходов', 'Факт расходов', 'Отклонение расходов', 'План итог', 'Факт итог', 'Итоговое отклонение'],
+  ];
+
+  report.days.forEach((day) => {
+    rows.push([
+      formatDate(day.date, timeZoneId),
+      day.planIncome,
+      day.factIncome,
+      day.incomeVariance,
+      day.planExpense,
+      day.factExpense,
+      day.expenseVariance,
+      day.planNetTotal,
+      day.factNetTotal,
+      day.netVariance,
+    ]);
+  });
+
+  downloadCsv('plan-fact-report.csv', rows);
+}
+
+function exportAdvanceReport(report: AdvanceReport, timeZoneId?: string | null) {
+  const rows: unknown[][] = [
+    ['Показатель', 'Значение'],
+    ['Период с', formatDate(report.from, timeZoneId)],
+    ['Период по', formatDate(report.to, timeZoneId)],
+    ['Источник', report.source ? sourceLabel(report.source) : 'Все источники'],
+    ['Полученные авансы', report.incomeTotal],
+    ['Выданные авансы', report.expenseTotal],
+    ['Признано', report.recognizedTotal],
+    ['К признанию', report.unrecognizedTotal],
+    ['Признанных операций', report.recognizedCount],
+    ['Непризнанных операций', report.unrecognizedCount],
+    [],
+    ['Контрагенты по авансам'],
+    ['Контрагент', 'Получено', 'Выдано', 'Признано', 'К признанию', 'Приходов', 'Расходов', 'Признанных операций', 'Непризнанных операций'],
+  ];
+
+  report.counterparties.forEach((item) => {
+    rows.push([
+      item.counterpartyName,
+      item.incomeTotal,
+      item.expenseTotal,
+      item.recognizedTotal,
+      item.unrecognizedTotal,
+      item.incomeCount,
+      item.expenseCount,
+      item.recognizedCount,
+      item.unrecognizedCount,
+    ]);
+  });
+
+  downloadCsv('advance-report.csv', rows);
+}
+
+function exportPaymentPriorityReport(report: PaymentPriorityReport, timeZoneId?: string | null) {
+  const rows: unknown[][] = [
+    ['Показатель', 'Значение'],
+    ['Период с', formatDate(report.from, timeZoneId)],
+    ['Период по', formatDate(report.to, timeZoneId)],
+    ['Источник', report.source ? sourceLabel(report.source) : 'Все источники'],
+    ['Поступило', report.incomeTotal],
+    ['Списано', report.expenseTotal],
+    ['Итог', report.netTotal],
+    ['Групп приоритета', report.priorities.length],
+    [],
+    ['Приоритеты'],
+    ['Приоритет', 'Поступления', 'Списания', 'Итог', 'Оборот', 'Приходов', 'Расходов', 'Доля оборота'],
+  ];
+
+  report.priorities.forEach((item) => {
+    rows.push([
+      item.priorityLabel,
+      item.income,
+      item.expense,
+      item.netTotal,
+      item.totalAmount,
+      item.incomeCount,
+      item.expenseCount,
+      `${item.share}%`,
+    ]);
+  });
+
+  downloadCsv('payment-priority-report.csv', rows);
+}
+
 function exportCategoryReport(report: MoneyCategoryReport, timeZoneId?: string | null) {
   const rows: unknown[][] = [
     ['Показатель', 'Значение'],
@@ -2203,7 +2306,7 @@ function ProjectReportSection({
 
 type LegalWorkExportFormat = 'csv' | 'excel' | 'pdf';
 type ManagementReportExportFormat = 'excel' | 'pdf';
-type ManagementReportKind = 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast' | 'cash' | 'bank' | 'categories' | 'counterparties' | 'projects' | 'directions' | 'sales-points' | 'vat' | 'payment-orders' | 'payment-purposes' | 'match-statuses' | 'journal-statuses' | 'currencies' | 'cash-orders' | 'bank-statement-imports' | 'spreadsheet-imports';
+type ManagementReportKind = 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast' | 'cash' | 'bank' | 'plan-fact' | 'advances' | 'payment-priorities' | 'categories' | 'counterparties' | 'projects' | 'directions' | 'sales-points' | 'vat' | 'payment-orders' | 'payment-purposes' | 'match-statuses' | 'journal-statuses' | 'currencies' | 'cash-orders' | 'bank-statement-imports' | 'spreadsheet-imports';
 type ReportCaseSection = 'tasks' | 'documents' | 'court' | 'workOrder';
 
 type LegalWorkReportFilters = {
@@ -4666,11 +4769,15 @@ function PlanFactReportSection({
   loading,
   error,
   onReload,
+  filters,
+  profileTimeZoneId,
 }: {
   report: PlanFactReport | null;
   loading: boolean;
   error: string | null;
   onReload: () => void;
+  filters?: ManagementReportExportFilters;
+  profileTimeZoneId?: string | null;
 }) {
   const rows = (report?.days ?? []).slice(-10);
 
@@ -4687,14 +4794,26 @@ function PlanFactReportSection({
             Сравнение плановых и фактических денежных операций: выполнение доходов, превышение расходов и итоговое отклонение.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onReload}
-          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-        >
-          <RefreshCcw className="h-4 w-4" />
-          Обновить
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => report && exportPlanFactReport(report, profileTimeZoneId)}
+            disabled={!report || loading}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            CSV
+          </button>
+          <ManagementReportExportButtons reportKind="plan-fact" filters={filters} disabled={!report || loading} />
+          <button
+            type="button"
+            onClick={onReload}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            <RefreshCcw className="h-4 w-4" />
+            Обновить
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -4799,11 +4918,15 @@ function AdvanceReportSection({
   loading,
   error,
   onReload,
+  filters,
+  profileTimeZoneId,
 }: {
   report: AdvanceReport | null;
   loading: boolean;
   error: string | null;
   onReload: () => void;
+  filters?: ManagementReportExportFilters;
+  profileTimeZoneId?: string | null;
 }) {
   const rows = (report?.counterparties ?? []).slice(0, 10);
 
@@ -4820,14 +4943,26 @@ function AdvanceReportSection({
             Фактические авансовые платежи за период: полученные и выданные авансы, признанные суммы и остаток к признанию.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onReload}
-          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-        >
-          <RefreshCcw className="h-4 w-4" />
-          Обновить
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => report && exportAdvanceReport(report, profileTimeZoneId)}
+            disabled={!report || loading}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            CSV
+          </button>
+          <ManagementReportExportButtons reportKind="advances" filters={filters} disabled={!report || loading} />
+          <button
+            type="button"
+            onClick={onReload}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            <RefreshCcw className="h-4 w-4" />
+            Обновить
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -4934,11 +5069,15 @@ function PaymentPriorityReportSection({
   loading,
   error,
   onReload,
+  filters,
+  profileTimeZoneId,
 }: {
   report: PaymentPriorityReport | null;
   loading: boolean;
   error: string | null;
   onReload: () => void;
+  filters?: ManagementReportExportFilters;
+  profileTimeZoneId?: string | null;
 }) {
   const rows = report?.priorities ?? [];
 
@@ -4955,14 +5094,26 @@ function PaymentPriorityReportSection({
             Фактические поступления и списания по приоритетам: видно, какой объем денег прошел по срочным и обычным платежам.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onReload}
-          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-        >
-          <RefreshCcw className="h-4 w-4" />
-          Обновить
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => report && exportPaymentPriorityReport(report, profileTimeZoneId)}
+            disabled={!report || loading}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            CSV
+          </button>
+          <ManagementReportExportButtons reportKind="payment-priorities" filters={filters} disabled={!report || loading} />
+          <button
+            type="button"
+            onClick={onReload}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            <RefreshCcw className="h-4 w-4" />
+            Обновить
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -7546,6 +7697,8 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={planFactReportLoading}
               error={planFactReportError}
               onReload={reloadPlanFactReport}
+              filters={cashFlowDates}
+              profileTimeZoneId={profileTimeZoneId}
             />
 
             <AdvanceReportSection
@@ -7553,6 +7706,8 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={advanceReportLoading}
               error={advanceReportError}
               onReload={reloadAdvanceReport}
+              filters={cashFlowDates}
+              profileTimeZoneId={profileTimeZoneId}
             />
 
             <PaymentPriorityReportSection
@@ -7560,6 +7715,8 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={paymentPriorityReportLoading}
               error={paymentPriorityReportError}
               onReload={reloadPaymentPriorityReport}
+              filters={cashFlowDates}
+              profileTimeZoneId={profileTimeZoneId}
             />
 
             <PaidAccountReportSection

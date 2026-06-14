@@ -511,6 +511,54 @@ public class ReportsController : ControllerBase
                     return (BuildBankExportDocument(reportDto), null);
                 }
 
+            case "plan-fact":
+                {
+                    var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+                    if (paymentsVisibility is null)
+                    {
+                        return (null, Unauthorized());
+                    }
+
+                    var (start, end) = ResolveReportPeriod(from, to, reportToday);
+                    var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                        cancellationToken => BuildPlanFactReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        _logger,
+                        ct);
+                    return (BuildPlanFactExportDocument(reportDto), null);
+                }
+
+            case "advances":
+                {
+                    var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+                    if (paymentsVisibility is null)
+                    {
+                        return (null, Unauthorized());
+                    }
+
+                    var (start, end) = ResolveReportPeriod(from, to, reportToday);
+                    var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                        cancellationToken => BuildAdvanceReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        _logger,
+                        ct);
+                    return (BuildAdvanceExportDocument(reportDto), null);
+                }
+
+            case "payment-priorities":
+                {
+                    var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+                    if (paymentsVisibility is null)
+                    {
+                        return (null, Unauthorized());
+                    }
+
+                    var (start, end) = ResolveReportPeriod(from, to, reportToday);
+                    var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                        cancellationToken => BuildPaymentPriorityReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        _logger,
+                        ct);
+                    return (BuildPaymentPriorityExportDocument(reportDto), null);
+                }
+
             case "categories":
                 {
                     var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
@@ -2197,6 +2245,88 @@ public class ReportsController : ControllerBase
                     MoneyCell(account.ClosingBalance),
                     account.IncomeCount.ToString(CultureInfo.InvariantCulture),
                     account.ExpenseCount.ToString(CultureInfo.InvariantCulture),
+                ])).ToList()),
+            ]);
+
+    private static ReportExportDocument BuildPlanFactExportDocument(PlanFactReportDto report)
+        => new(
+            "plan-fact-report",
+            "План-факт отчет",
+            $"Период: {DateCell(report.From)} - {DateCell(report.To)}{(report.Source.HasValue ? $" · Источник: {MoneyOperationSourceCell(report.Source.Value)}" : string.Empty)}",
+            [
+                new("План доходов", MoneyCell(report.PlanIncome)),
+                new("Факт доходов", MoneyCell(report.FactIncome)),
+                new("Отклонение доходов", MoneyCell(report.IncomeVariance)),
+                new("Выполнение доходов", PercentCell(report.IncomeCompletionPercent)),
+                new("План расходов", MoneyCell(report.PlanExpense)),
+                new("Факт расходов", MoneyCell(report.FactExpense)),
+                new("Отклонение расходов", MoneyCell(report.ExpenseVariance)),
+                new("Исполнение расходов", PercentCell(report.ExpenseExecutionPercent)),
+                new("Итоговое отклонение", MoneyCell(report.NetVariance)),
+            ],
+            [
+                new("Динамика по дням", ["Дата", "План доходов", "Факт доходов", "Отклонение доходов", "План расходов", "Факт расходов", "Отклонение расходов", "План итог", "Факт итог", "Итоговое отклонение"], report.Days.Select(day => new ReportExportRow([
+                    DateCell(day.Date),
+                    MoneyCell(day.PlanIncome),
+                    MoneyCell(day.FactIncome),
+                    MoneyCell(day.IncomeVariance),
+                    MoneyCell(day.PlanExpense),
+                    MoneyCell(day.FactExpense),
+                    MoneyCell(day.ExpenseVariance),
+                    MoneyCell(day.PlanNetTotal),
+                    MoneyCell(day.FactNetTotal),
+                    MoneyCell(day.NetVariance),
+                ])).ToList()),
+            ]);
+
+    private static ReportExportDocument BuildAdvanceExportDocument(AdvanceReportDto report)
+        => new(
+            "advance-report",
+            "Отчет по авансам",
+            $"Период: {DateCell(report.From)} - {DateCell(report.To)}{(report.Source.HasValue ? $" · Источник: {MoneyOperationSourceCell(report.Source.Value)}" : string.Empty)}",
+            [
+                new("Полученные авансы", MoneyCell(report.IncomeTotal)),
+                new("Выданные авансы", MoneyCell(report.ExpenseTotal)),
+                new("Признано", MoneyCell(report.RecognizedTotal)),
+                new("К признанию", MoneyCell(report.UnrecognizedTotal)),
+                new("Признанных операций", report.RecognizedCount.ToString(CultureInfo.InvariantCulture)),
+                new("Непризнанных операций", report.UnrecognizedCount.ToString(CultureInfo.InvariantCulture)),
+            ],
+            [
+                new("Контрагенты по авансам", ["Контрагент", "Получено", "Выдано", "Признано", "К признанию", "Приходов", "Расходов", "Признанных операций", "Непризнанных операций"], report.Counterparties.Select(item => new ReportExportRow([
+                    item.CounterpartyName,
+                    MoneyCell(item.IncomeTotal),
+                    MoneyCell(item.ExpenseTotal),
+                    MoneyCell(item.RecognizedTotal),
+                    MoneyCell(item.UnrecognizedTotal),
+                    item.IncomeCount.ToString(CultureInfo.InvariantCulture),
+                    item.ExpenseCount.ToString(CultureInfo.InvariantCulture),
+                    item.RecognizedCount.ToString(CultureInfo.InvariantCulture),
+                    item.UnrecognizedCount.ToString(CultureInfo.InvariantCulture),
+                ])).ToList()),
+            ]);
+
+    private static ReportExportDocument BuildPaymentPriorityExportDocument(PaymentPriorityReportDto report)
+        => new(
+            "payment-priority-report",
+            "Отчет по приоритетам платежей",
+            $"Период: {DateCell(report.From)} - {DateCell(report.To)}{(report.Source.HasValue ? $" · Источник: {MoneyOperationSourceCell(report.Source.Value)}" : string.Empty)}",
+            [
+                new("Поступило", MoneyCell(report.IncomeTotal)),
+                new("Списано", MoneyCell(report.ExpenseTotal)),
+                new("Итог", MoneyCell(report.NetTotal)),
+                new("Групп приоритета", report.Priorities.Count.ToString(CultureInfo.InvariantCulture)),
+            ],
+            [
+                new("Приоритеты", ["Приоритет", "Поступления", "Списания", "Итог", "Оборот", "Приходов", "Расходов", "Доля оборота"], report.Priorities.Select(item => new ReportExportRow([
+                    item.PriorityLabel,
+                    MoneyCell(item.Income),
+                    MoneyCell(item.Expense),
+                    MoneyCell(item.NetTotal),
+                    MoneyCell(item.TotalAmount),
+                    item.IncomeCount.ToString(CultureInfo.InvariantCulture),
+                    item.ExpenseCount.ToString(CultureInfo.InvariantCulture),
+                    PercentCell(item.Share),
                 ])).ToList()),
             ]);
 
