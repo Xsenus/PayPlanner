@@ -645,6 +645,22 @@ public class ReportsController : ControllerBase
                     return (BuildJournalStatusExportDocument(reportDto), null);
                 }
 
+            case "currencies":
+                {
+                    var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+                    if (paymentsVisibility is null)
+                    {
+                        return (null, Unauthorized());
+                    }
+
+                    var (start, end) = ResolveReportPeriod(from, to, reportToday);
+                    var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                        cancellationToken => BuildCurrencyReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        _logger,
+                        ct);
+                    return (BuildCurrencyExportDocument(reportDto), null);
+                }
+
             case "case-success":
                 {
                     var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
@@ -2314,6 +2330,30 @@ public class ReportsController : ControllerBase
                     MoneyCell(item.NetTotal),
                     MoneyCell(item.TotalAmount),
                     item.OperationCount.ToString(CultureInfo.InvariantCulture),
+                    item.IncomeCount.ToString(CultureInfo.InvariantCulture),
+                    item.ExpenseCount.ToString(CultureInfo.InvariantCulture),
+                    PercentCell(item.Share),
+                ])).ToList()),
+            ]);
+
+    private static ReportExportDocument BuildCurrencyExportDocument(CurrencyReportDto report)
+        => new(
+            "currency-report",
+            "Отчет по валютам операций",
+            $"Период: {DateCell(report.From)} - {DateCell(report.To)}{(report.Source.HasValue ? $" · Источник: {MoneyOperationSourceCell(report.Source.Value)}" : string.Empty)}",
+            [
+                new("Поступило", MoneyCell(report.IncomeTotal)),
+                new("Списано", MoneyCell(report.ExpenseTotal)),
+                new("Итог", MoneyCell(report.NetTotal)),
+                new("Валют", report.Currencies.Count.ToString(CultureInfo.InvariantCulture)),
+            ],
+            [
+                new("Валюты", ["Валюта", "Поступило", "Списано", "Итог", "Оборот", "Приходов", "Расходов", "Доля оборота"], report.Currencies.Select(item => new ReportExportRow([
+                    item.Currency,
+                    MoneyCell(item.Income),
+                    MoneyCell(item.Expense),
+                    MoneyCell(item.NetTotal),
+                    MoneyCell(item.TotalAmount),
                     item.IncomeCount.ToString(CultureInfo.InvariantCulture),
                     item.ExpenseCount.ToString(CultureInfo.InvariantCulture),
                     PercentCell(item.Share),
