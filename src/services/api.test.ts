@@ -1370,6 +1370,7 @@ describe('apiService reports', () => {
       format: 'pdf',
       from: '2026-05-01',
       to: '2026-05-31',
+      source: 'Card',
       responsibleUserId: 7,
       limit: 100,
     });
@@ -1382,6 +1383,7 @@ describe('apiService reports', () => {
     expect(String(url)).toContain('report=contract-statuses');
     expect(String(url)).toContain('from=2026-05-01');
     expect(String(url)).toContain('to=2026-05-31');
+    expect(String(url)).toContain('source=Card');
     expect(String(url)).toContain('responsibleUserId=7');
     expect(String(url)).toContain('limit=100');
   });

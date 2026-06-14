@@ -302,6 +302,7 @@ public class ReportsControllerTests
                 reportKind,
                 today.AddDays(-30),
                 today.AddDays(30),
+                null,
                 today,
                 null,
                 null,
@@ -324,6 +325,7 @@ public class ReportsControllerTests
             "cash-flow-forecast",
             today.AddDays(-30),
             today.AddDays(30),
+            null,
             today,
             null,
             null,
@@ -414,6 +416,7 @@ public class ReportsControllerTests
             "case-success",
             today.AddDays(-30),
             today.AddDays(30),
+            null,
             today,
             null,
             null,
@@ -682,8 +685,8 @@ public class ReportsControllerTests
         Assert.IsType<ForbidResult>(await controller.ExportLegalWorkCsv(null, null, null, null, null, CancellationToken.None));
         Assert.IsType<ForbidResult>(await controller.ExportLegalWorkExcel(null, null, null, null, null, CancellationToken.None));
         Assert.IsType<ForbidResult>(await controller.ExportLegalWorkPdf(null, null, null, null, null, CancellationToken.None));
-        Assert.IsType<ForbidResult>(await controller.ExportManagementReportExcel("case-finance", null, null, null, null, null, null, null, null, null, null, null, null, null, CancellationToken.None));
-        Assert.IsType<ForbidResult>(await controller.ExportManagementReportPdf("case-finance", null, null, null, null, null, null, null, null, null, null, null, null, null, CancellationToken.None));
+        Assert.IsType<ForbidResult>(await controller.ExportManagementReportExcel("case-finance", null, null, null, null, null, null, null, null, null, null, null, null, null, null, CancellationToken.None));
+        Assert.IsType<ForbidResult>(await controller.ExportManagementReportPdf("case-finance", null, null, null, null, null, null, null, null, null, null, null, null, null, null, CancellationToken.None));
     }
 
     [Fact]

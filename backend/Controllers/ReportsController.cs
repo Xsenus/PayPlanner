@@ -228,6 +228,7 @@ public class ReportsController : ControllerBase
         [FromQuery] string report,
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
+        [FromQuery] MoneyOperationSource? source,
         [FromQuery] DateTime? asOf,
         [FromQuery] string? status,
         [FromQuery] int? responsibleUserId,
@@ -245,6 +246,7 @@ public class ReportsController : ControllerBase
             report,
             from,
             to,
+            source,
             asOf,
             status,
             responsibleUserId,
@@ -274,6 +276,7 @@ public class ReportsController : ControllerBase
         [FromQuery] string report,
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
+        [FromQuery] MoneyOperationSource? source,
         [FromQuery] DateTime? asOf,
         [FromQuery] string? status,
         [FromQuery] int? responsibleUserId,
@@ -296,6 +299,7 @@ public class ReportsController : ControllerBase
             report,
             from,
             to,
+            source,
             asOf,
             status,
             responsibleUserId,
@@ -425,6 +429,7 @@ public class ReportsController : ControllerBase
         string? report,
         DateTime? from,
         DateTime? to,
+        MoneyOperationSource? source,
         DateTime? asOf,
         string? status,
         int? responsibleUserId,
@@ -479,7 +484,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildCashFlowReportAsync(start, end, null, null, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildCashFlowReportAsync(start, end, source, null, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildCashFlowExportDocument(reportDto), null);
@@ -521,7 +526,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildPlanFactReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildPlanFactReportAsync(start, end, source, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildPlanFactExportDocument(reportDto), null);
@@ -537,7 +542,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildAdvanceReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildAdvanceReportAsync(start, end, source, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildAdvanceExportDocument(reportDto), null);
@@ -553,7 +558,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildPaymentPriorityReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildPaymentPriorityReportAsync(start, end, source, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildPaymentPriorityExportDocument(reportDto), null);
@@ -569,7 +574,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildPaidAccountReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildPaidAccountReportAsync(start, end, source, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildPaidAccountExportDocument(reportDto), null);
@@ -585,7 +590,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildPaidInvoiceReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildPaidInvoiceReportAsync(start, end, source, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildPaidInvoiceExportDocument(reportDto), null);
@@ -649,7 +654,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildCategoryReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildCategoryReportAsync(start, end, source, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildCategoryExportDocument(reportDto), null);
@@ -665,7 +670,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildCounterpartyReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildCounterpartyReportAsync(start, end, source, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildCounterpartyExportDocument(reportDto), null);
@@ -681,7 +686,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildProjectReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildProjectReportAsync(start, end, source, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildProjectExportDocument(reportDto), null);
@@ -697,7 +702,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildDirectionReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildDirectionReportAsync(start, end, source, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildDirectionExportDocument(reportDto), null);
@@ -713,7 +718,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildSalesPointReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildSalesPointReportAsync(start, end, source, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildSalesPointExportDocument(reportDto), null);
@@ -729,7 +734,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildVatReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildVatReportAsync(start, end, source, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildVatExportDocument(reportDto), null);
@@ -745,7 +750,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildPaymentOrderReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildPaymentOrderReportAsync(start, end, source, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildPaymentOrderExportDocument(reportDto), null);
@@ -761,7 +766,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildPaymentPurposeReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildPaymentPurposeReportAsync(start, end, source, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildPaymentPurposeExportDocument(reportDto), null);
@@ -777,7 +782,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildMatchStatusReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildMatchStatusReportAsync(start, end, source, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildMatchStatusExportDocument(reportDto), null);
@@ -793,7 +798,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildJournalStatusReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildJournalStatusReportAsync(start, end, source, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildJournalStatusExportDocument(reportDto), null);
@@ -809,7 +814,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildCurrencyReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildCurrencyReportAsync(start, end, source, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildCurrencyExportDocument(reportDto), null);

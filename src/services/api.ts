@@ -5419,6 +5419,7 @@ export class ApiService {
     format: 'excel' | 'pdf';
     from?: string;
     to?: string;
+    source?: MoneyOperationSource;
     asOf?: string;
     status?: string;
     responsibleUserId?: number;

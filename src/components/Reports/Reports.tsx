@@ -100,6 +100,14 @@ const statusMeta: Record<
   },
 };
 
+const moneySourceOptions: Array<{ value: 'all' | MoneyOperationSource; label: string }> = [
+  { value: 'all', label: 'Все источники' },
+  { value: 'Bank', label: 'Банк' },
+  { value: 'Cash', label: 'Касса' },
+  { value: 'Card', label: 'Карта' },
+  { value: 'EMoney', label: 'Электронные деньги' },
+];
+
 type PieTooltipProps = {
   active?: boolean;
   payload?: Array<{
@@ -2491,6 +2499,7 @@ type LegalWorkReportFilters = {
 type ManagementReportExportFilters = {
   from?: string;
   to?: string;
+  source?: MoneyOperationSource;
   asOf?: string;
   status?: string;
   responsibleUserId?: number;
@@ -7209,6 +7218,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
   const [range, setRange] = useState<MonthRange>({ from: ymNow, to: ymNow });
   const [activeGroup, setActiveGroup] = useState<ReportGroupId>('payments');
   const [taskReportScope, setTaskReportScope] = useState<TaskReportScope>('open');
+  const [moneySource, setMoneySource] = useState<'all' | MoneyOperationSource>('all');
 
   const normalizedRange = useMemo(
     () => normalizeYmRange((range.from ?? ymNow) as `${number}-${string}`, (range.to ?? range.from ?? ymNow) as `${number}-${string}`),
@@ -7219,6 +7229,14 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
   const cashFlowDates = useMemo(
     () => monthRangeToDates(normalizedRange.fromYM, normalizedRange.toYM),
     [normalizedRange.fromYM, normalizedRange.toYM],
+  );
+  const selectedMoneySource = moneySource === 'all' ? undefined : moneySource;
+  const moneyOperationReportFilters = useMemo(
+    () => ({
+      ...cashFlowDates,
+      ...(selectedMoneySource ? { source: selectedMoneySource } : {}),
+    }),
+    [cashFlowDates, selectedMoneySource],
   );
   const casePeriodReportFilters = useMemo(
     () => ({ ...cashFlowDates, limit: 100 }),
@@ -7249,7 +7267,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     loading: cashFlowLoading,
     error: cashFlowError,
     reload: reloadCashFlow,
-  } = useCashFlowReport(cashFlowDates);
+  } = useCashFlowReport(moneyOperationReportFilters);
   const {
     report: cashFlowForecastReport,
     loading: cashFlowForecastLoading,
@@ -7277,19 +7295,19 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     loading: categoryReportLoading,
     error: categoryReportError,
     reload: reloadCategoryReport,
-  } = useMoneyCategoryReport(cashFlowDates);
+  } = useMoneyCategoryReport(moneyOperationReportFilters);
   const {
     report: counterpartyReport,
     loading: counterpartyReportLoading,
     error: counterpartyReportError,
     reload: reloadCounterpartyReport,
-  } = useCounterpartyReport(cashFlowDates);
+  } = useCounterpartyReport(moneyOperationReportFilters);
   const {
     report: projectReport,
     loading: projectReportLoading,
     error: projectReportError,
     reload: reloadProjectReport,
-  } = useProjectReport(cashFlowDates);
+  } = useProjectReport(moneyOperationReportFilters);
   const {
     report: legalWorkReport,
     loading: legalWorkReportLoading,
@@ -7357,49 +7375,49 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     loading: directionReportLoading,
     error: directionReportError,
     reload: reloadDirectionReport,
-  } = useDirectionReport(cashFlowDates);
+  } = useDirectionReport(moneyOperationReportFilters);
   const {
     report: salesPointReport,
     loading: salesPointReportLoading,
     error: salesPointReportError,
     reload: reloadSalesPointReport,
-  } = useSalesPointReport(cashFlowDates);
+  } = useSalesPointReport(moneyOperationReportFilters);
   const {
     report: vatReport,
     loading: vatReportLoading,
     error: vatReportError,
     reload: reloadVatReport,
-  } = useVatReport(cashFlowDates);
+  } = useVatReport(moneyOperationReportFilters);
   const {
     report: planFactReport,
     loading: planFactReportLoading,
     error: planFactReportError,
     reload: reloadPlanFactReport,
-  } = usePlanFactReport(cashFlowDates);
+  } = usePlanFactReport(moneyOperationReportFilters);
   const {
     report: advanceReport,
     loading: advanceReportLoading,
     error: advanceReportError,
     reload: reloadAdvanceReport,
-  } = useAdvanceReport(cashFlowDates);
+  } = useAdvanceReport(moneyOperationReportFilters);
   const {
     report: paymentPriorityReport,
     loading: paymentPriorityReportLoading,
     error: paymentPriorityReportError,
     reload: reloadPaymentPriorityReport,
-  } = usePaymentPriorityReport(cashFlowDates);
+  } = usePaymentPriorityReport(moneyOperationReportFilters);
   const {
     report: paidAccountReport,
     loading: paidAccountReportLoading,
     error: paidAccountReportError,
     reload: reloadPaidAccountReport,
-  } = usePaidAccountReport(cashFlowDates);
+  } = usePaidAccountReport(moneyOperationReportFilters);
   const {
     report: paidInvoiceReport,
     loading: paidInvoiceReportLoading,
     error: paidInvoiceReportError,
     reload: reloadPaidInvoiceReport,
-  } = usePaidInvoiceReport(cashFlowDates);
+  } = usePaidInvoiceReport(moneyOperationReportFilters);
   const {
     report: invoiceStatusReport,
     loading: invoiceStatusReportLoading,
@@ -7423,31 +7441,31 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     loading: paymentOrderReportLoading,
     error: paymentOrderReportError,
     reload: reloadPaymentOrderReport,
-  } = usePaymentOrderReport(cashFlowDates);
+  } = usePaymentOrderReport(moneyOperationReportFilters);
   const {
     report: paymentPurposeReport,
     loading: paymentPurposeReportLoading,
     error: paymentPurposeReportError,
     reload: reloadPaymentPurposeReport,
-  } = usePaymentPurposeReport(cashFlowDates);
+  } = usePaymentPurposeReport(moneyOperationReportFilters);
   const {
     report: matchStatusReport,
     loading: matchStatusReportLoading,
     error: matchStatusReportError,
     reload: reloadMatchStatusReport,
-  } = useMatchStatusReport(cashFlowDates);
+  } = useMatchStatusReport(moneyOperationReportFilters);
   const {
     report: journalStatusReport,
     loading: journalStatusReportLoading,
     error: journalStatusReportError,
     reload: reloadJournalStatusReport,
-  } = useJournalStatusReport(cashFlowDates);
+  } = useJournalStatusReport(moneyOperationReportFilters);
   const {
     report: currencyReport,
     loading: currencyReportLoading,
     error: currencyReportError,
     reload: reloadCurrencyReport,
-  } = useCurrencyReport(cashFlowDates);
+  } = useCurrencyReport(moneyOperationReportFilters);
   const {
     report: cashOrderReport,
     loading: cashOrderReportLoading,
@@ -7564,6 +7582,26 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               <div className="mt-2 text-2xl font-semibold text-slate-950">{titleSuffix}</div>
               <div className="mt-4">
                 <MonthRangePicker value={range} onChange={setRange} className="w-full" />
+              </div>
+              <div className="mt-4">
+                <label
+                  className="text-xs font-semibold uppercase tracking-wide text-slate-500"
+                  htmlFor="reports-money-source"
+                >
+                  Источник денег
+                </label>
+                <select
+                  id="reports-money-source"
+                  value={moneySource}
+                  onChange={(event) => setMoneySource(event.target.value as 'all' | MoneyOperationSource)}
+                  className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+                >
+                  {moneySourceOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="mt-5 grid grid-cols-2 gap-3">
                 <div className="rounded-2xl bg-white p-4 shadow-sm">
@@ -7761,7 +7799,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={cashFlowLoading}
               error={cashFlowError}
               onReload={reloadCashFlow}
-              filters={cashFlowDates}
+              filters={moneyOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -7797,7 +7835,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={categoryReportLoading}
               error={categoryReportError}
               onReload={reloadCategoryReport}
-              filters={cashFlowDates}
+              filters={moneyOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -7806,7 +7844,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={counterpartyReportLoading}
               error={counterpartyReportError}
               onReload={reloadCounterpartyReport}
-              filters={cashFlowDates}
+              filters={moneyOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -7815,7 +7853,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={projectReportLoading}
               error={projectReportError}
               onReload={reloadProjectReport}
-              filters={cashFlowDates}
+              filters={moneyOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
               </>
@@ -7921,7 +7959,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={directionReportLoading}
               error={directionReportError}
               onReload={reloadDirectionReport}
-              filters={cashFlowDates}
+              filters={moneyOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -7930,7 +7968,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={salesPointReportLoading}
               error={salesPointReportError}
               onReload={reloadSalesPointReport}
-              filters={cashFlowDates}
+              filters={moneyOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -7939,7 +7977,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={vatReportLoading}
               error={vatReportError}
               onReload={reloadVatReport}
-              filters={cashFlowDates}
+              filters={moneyOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -7948,7 +7986,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={planFactReportLoading}
               error={planFactReportError}
               onReload={reloadPlanFactReport}
-              filters={cashFlowDates}
+              filters={moneyOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -7957,7 +7995,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={advanceReportLoading}
               error={advanceReportError}
               onReload={reloadAdvanceReport}
-              filters={cashFlowDates}
+              filters={moneyOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -7966,7 +8004,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={paymentPriorityReportLoading}
               error={paymentPriorityReportError}
               onReload={reloadPaymentPriorityReport}
-              filters={cashFlowDates}
+              filters={moneyOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -7975,7 +8013,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={paidAccountReportLoading}
               error={paidAccountReportError}
               onReload={reloadPaidAccountReport}
-              filters={cashFlowDates}
+              filters={moneyOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -7984,7 +8022,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={paidInvoiceReportLoading}
               error={paidInvoiceReportError}
               onReload={reloadPaidInvoiceReport}
-              filters={cashFlowDates}
+              filters={moneyOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -8020,7 +8058,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={paymentOrderReportLoading}
               error={paymentOrderReportError}
               onReload={reloadPaymentOrderReport}
-              filters={cashFlowDates}
+              filters={moneyOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -8029,7 +8067,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={paymentPurposeReportLoading}
               error={paymentPurposeReportError}
               onReload={reloadPaymentPurposeReport}
-              filters={cashFlowDates}
+              filters={moneyOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -8038,7 +8076,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={matchStatusReportLoading}
               error={matchStatusReportError}
               onReload={reloadMatchStatusReport}
-              filters={cashFlowDates}
+              filters={moneyOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -8047,7 +8085,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={journalStatusReportLoading}
               error={journalStatusReportError}
               onReload={reloadJournalStatusReport}
-              filters={cashFlowDates}
+              filters={moneyOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -8056,7 +8094,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={currencyReportLoading}
               error={currencyReportError}
               onReload={reloadCurrencyReport}
-              filters={cashFlowDates}
+              filters={moneyOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
