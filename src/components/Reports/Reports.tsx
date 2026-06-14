@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { usePeriodStats } from '../../hooks/usePeriodStats';
-import { useCashFlowReport } from '../../hooks/useCashFlowReport';
+import { useCashFlowReport, type CashFlowReportFilters } from '../../hooks/useCashFlowReport';
 import { useCashFlowForecastReport } from '../../hooks/useCashFlowForecastReport';
 import { useCashReport } from '../../hooks/useCashReport';
 import { useMoneyCategoryReport } from '../../hooks/useMoneyCategoryReport';
@@ -107,6 +107,13 @@ const moneySourceOptions: Array<{ value: 'all' | MoneyOperationSource; label: st
   { value: 'Card', label: 'Карта' },
   { value: 'EMoney', label: 'Электронные деньги' },
 ];
+
+export function buildBankReportFilters(filters: CashFlowReportFilters): CashFlowReportFilters {
+  return {
+    ...filters,
+    source: 'Bank',
+  };
+}
 
 type PieTooltipProps = {
   active?: boolean;
@@ -7508,8 +7515,8 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     reload: reloadCashReport,
   } = useCashReport(cashFlowDates);
   const bankReportFilters = useMemo(
-    () => ({ ...cashFlowDates, source: 'Bank' as const }),
-    [cashFlowDates],
+    () => buildBankReportFilters(moneyOperationReportFilters),
+    [moneyOperationReportFilters],
   );
   const {
     report: bankReport,
