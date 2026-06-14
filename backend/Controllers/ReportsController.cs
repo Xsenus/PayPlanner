@@ -671,6 +671,16 @@ public class ReportsController : ControllerBase
                     return (BuildCashOrderExportDocument(reportDto), null);
                 }
 
+            case "bank-statement-imports":
+                {
+                    var (start, end) = ResolveReportPeriod(from, to, reportToday);
+                    var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                        cancellationToken => BuildBankStatementImportReportAsync(start, end, timeZone, cancellationToken),
+                        _logger,
+                        ct);
+                    return (BuildBankStatementImportExportDocument(reportDto), null);
+                }
+
             case "case-success":
                 {
                     var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
@@ -2394,6 +2404,36 @@ public class ReportsController : ControllerBase
                     item.OrderCount.ToString(CultureInfo.InvariantCulture),
                     item.IncomingCount.ToString(CultureInfo.InvariantCulture),
                     item.OutgoingCount.ToString(CultureInfo.InvariantCulture),
+                    PercentCell(item.Share),
+                ])).ToList()),
+            ]);
+
+    private static ReportExportDocument BuildBankStatementImportExportDocument(BankStatementImportReportDto report)
+        => new(
+            "bank-statement-import-report",
+            "Отчет по импортам банковских выписок",
+            $"Период: {DateCell(report.From)} - {DateCell(report.To)}",
+            [
+                new("Импортов", report.BatchCount.ToString(CultureInfo.InvariantCulture)),
+                new("Прочитано строк", report.RowsReadTotal.ToString(CultureInfo.InvariantCulture)),
+                new("Создано операций", report.CreatedRowsTotal.ToString(CultureInfo.InvariantCulture)),
+                new("Пропущено строк", report.SkippedRowsTotal.ToString(CultureInfo.InvariantCulture)),
+                new("Ошибок", report.ErrorRowsTotal.ToString(CultureInfo.InvariantCulture)),
+                new("Строк отката", report.RollbackRowsTotal.ToString(CultureInfo.InvariantCulture)),
+                new("Применено", report.AppliedCount.ToString(CultureInfo.InvariantCulture)),
+                new("Применено с ошибками", report.AppliedWithErrorsCount.ToString(CultureInfo.InvariantCulture)),
+                new("Откатано", report.RolledBackCount.ToString(CultureInfo.InvariantCulture)),
+                new("Откат заблокирован", report.RollbackBlockedCount.ToString(CultureInfo.InvariantCulture)),
+            ],
+            [
+                new("Статусы импортов", ["Статус", "Импортов", "Прочитано строк", "Создано", "Пропущено", "Ошибки", "Откатано строк", "Доля импортов"], report.Statuses.Select(item => new ReportExportRow([
+                    item.StatusLabel,
+                    item.BatchCount.ToString(CultureInfo.InvariantCulture),
+                    item.RowsRead.ToString(CultureInfo.InvariantCulture),
+                    item.CreatedRows.ToString(CultureInfo.InvariantCulture),
+                    item.SkippedRows.ToString(CultureInfo.InvariantCulture),
+                    item.ErrorRows.ToString(CultureInfo.InvariantCulture),
+                    item.RollbackRows.ToString(CultureInfo.InvariantCulture),
                     PercentCell(item.Share),
                 ])).ToList()),
             ]);
