@@ -1224,6 +1224,42 @@ export function Payments({
     [confirm, paymentsPermissions.canEdit, refresh, showPermissionNotice, t, toast],
   );
 
+  const handleRefundAdvance = useCallback(
+    async (payment: Payment) => {
+      if (!paymentsPermissions.canEdit) {
+        showPermissionNotice(t('permissionNoEditPayment') ?? 'Недостаточно прав для редактирования платежей.');
+        return;
+      }
+
+      if (payment.advanceReviewStatus !== 'AcceptedAsAdvance') {
+        toast.error('Вернуть можно только платеж, принятый как аванс.', 'Платежи');
+        return;
+      }
+
+      const confirmed = await confirm({
+        title: 'Вернуть аванс клиенту',
+        description:
+          'Доступный остаток аванса будет списан с баланса клиента, в денежном журнале появится расходная операция возврата, а платеж получит статус контроля «Возвращен».',
+        confirmLabel: 'Вернуть аванс',
+        cancelLabel: 'Отмена',
+        variant: 'danger',
+      });
+      if (!confirmed) return;
+
+      try {
+        await apiService.refundPaymentAdvance(payment.id, 'Возврат аванса из журнала платежей');
+        toast.success('Аванс возвращен клиенту и списан с баланса.', 'Платежи');
+        await refresh();
+      } catch (error) {
+        toast.error(
+          extractDisplayErrorMessage(error, 'Не удалось вернуть аванс клиенту.'),
+          'Платежи',
+        );
+      }
+    },
+    [confirm, paymentsPermissions.canEdit, refresh, showPermissionNotice, t, toast],
+  );
+
   const closeAdvanceAllocation = useCallback(() => {
     setAdvanceAllocation(null);
   }, []);
@@ -2282,6 +2318,7 @@ export function Payments({
                 onAcceptAdvance={handleAcceptAdvance}
                 onIgnoreAdvance={handleIgnoreAdvance}
                 onAllocateAdvance={handleAllocateAdvance}
+                onRefundAdvance={handleRefundAdvance}
                 canAdd={paymentsPermissions.canCreate}
                 canEdit={paymentsPermissions.canEdit}
                 canDelete={paymentsPermissions.canDelete}

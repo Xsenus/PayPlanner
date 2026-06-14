@@ -4866,6 +4866,91 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task RefundAdvance_AddsBalanceDebitAndMoneyOperation()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreatePaymentsUserAsync(db, canExport: false);
+        var client = new Client { Name = "Клиент для возврата аванса" };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var payment = CreatePayment(new DateTime(2026, 3, 2), 7_100m, "Аванс к возврату");
+        payment.ClientId = client.Id;
+        payment.PaidAmount = 7_100m;
+        payment.Status = PaymentStatus.Completed;
+        payment.IsPaid = true;
+        payment.PaidDate = payment.Date;
+        payment.LastPaymentDate = payment.Date;
+        payment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.AcceptedAsAdvance;
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+
+        db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
+        {
+            ClientId = client.Id,
+            PaymentId = payment.Id,
+            Amount = 7_100m,
+            Type = ClientBalanceTransactionType.UnallocatedAdvance,
+            Direction = ClientBalanceDirection.Credit,
+            Description = "Нераспределенный аванс",
+            ExternalKey = ClientBalanceService.BuildUnallocatedAdvanceKey(payment.Id),
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        db.ObjectAuditEvents.RemoveRange(db.ObjectAuditEvents);
+        await db.SaveChangesAsync();
+
+        var controller = CreatePaymentsController(db, user.Id);
+        var result = await controller.RefundAdvance(
+            payment.Id,
+            new PaymentAdvanceReviewRequest { Reason = "Клиент попросил вернуть деньги" },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var refundedPayment = Assert.IsType<Payment>(ok.Value);
+        Assert.Equal(PaymentAdvanceReviewStatus.Refunded, refundedPayment.AdvanceReviewStatus);
+
+        var transactions = await db.ClientBalanceTransactions
+            .AsNoTracking()
+            .OrderBy(item => item.Direction)
+            .ThenBy(item => item.Id)
+            .ToListAsync();
+        Assert.Equal(2, transactions.Count);
+        Assert.Contains(transactions, item =>
+            item.Type == ClientBalanceTransactionType.UnallocatedAdvance
+            && item.Direction == ClientBalanceDirection.Credit
+            && item.Amount == 7_100m);
+        Assert.Contains(transactions, item =>
+            item.Type == ClientBalanceTransactionType.Refund
+            && item.Direction == ClientBalanceDirection.Debit
+            && item.Amount == 7_100m
+            && item.ExternalKey == ClientBalanceService.BuildUnallocatedAdvanceRefundKey(payment.Id));
+
+        var available = await ClientBalanceService.GetUnallocatedAdvanceAvailableAmountAsync(db, payment.Id, client.Id, null);
+        Assert.Equal(0m, available);
+        var balance = await ClientBalanceService.GetBalanceAsync(db, client.Id);
+        Assert.Equal(0m, balance);
+
+        var operation = await db.MoneyOperations.AsNoTracking().SingleAsync();
+        Assert.Equal(MoneyOperationDirection.Expense, operation.Direction);
+        Assert.Equal(MoneyOperationAccountingType.Fact, operation.AccountingType);
+        Assert.Equal(7_100m, operation.Amount);
+        Assert.Equal("Возврат клиенту", operation.CategoryName);
+        Assert.Contains("Возврат нераспределенного аванса", operation.Purpose, StringComparison.Ordinal);
+
+        var auditEvent = await db.ObjectAuditEvents
+            .AsNoTracking()
+            .Where(item => item.ObjectType == "payment" && item.ObjectId == payment.Id && item.Action == "Updated")
+            .OrderByDescending(item => item.CreatedAt)
+            .FirstAsync();
+        Assert.NotNull(auditEvent.MetadataJson);
+        using var metadata = JsonDocument.Parse(auditEvent.MetadataJson!);
+        var reason = metadata.RootElement.GetProperty("reason").GetString();
+        Assert.Contains("Контроль аванса: аванс", reason, StringComparison.Ordinal);
+        Assert.Contains("возвращен клиенту", reason, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AcceptAdvance_WithOwnScope_ForHiddenPaymentReturnsNotFoundAndDoesNotCreateBalance()
     {
         await using var db = await CreateContextAsync();

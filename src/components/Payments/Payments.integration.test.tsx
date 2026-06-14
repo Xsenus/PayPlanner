@@ -140,6 +140,7 @@ vi.mock('../Calendar/PaymentsTable', () => ({
     onAcceptAdvance?: (payment: Payment) => void;
     onIgnoreAdvance?: (payment: Payment) => void;
     onAllocateAdvance?: (payment: Payment) => void;
+    onRefundAdvance?: (payment: Payment) => void;
   }) => (
     <div data-testid="payments-table">
       {props.payments.map((payment) => (
@@ -173,6 +174,12 @@ vi.mock('../Calendar/PaymentsTable', () => ({
             onClick={() => props.onAllocateAdvance?.(payment)}
           >
             {`allocate-advance-${payment.id}`}
+          </button>
+          <button
+            type="button"
+            onClick={() => props.onRefundAdvance?.(payment)}
+          >
+            {`refund-advance-${payment.id}`}
           </button>
         </div>
       ))}
@@ -210,6 +217,7 @@ vi.mock('../../services/api', () => ({
     deletePayment: vi.fn(),
     acceptPaymentAdvance: vi.fn(),
     ignorePaymentAdvance: vi.fn(),
+    refundPaymentAdvance: vi.fn(),
     exportPaymentsCsv: vi.fn(),
     exportPaymentsExcel: vi.fn(),
     getClientBalance: vi.fn(),
@@ -247,6 +255,7 @@ describe('Payments integration', () => {
     vi.mocked(apiService.deletePayment).mockReset();
     vi.mocked(apiService.acceptPaymentAdvance).mockReset();
     vi.mocked(apiService.ignorePaymentAdvance).mockReset();
+    vi.mocked(apiService.refundPaymentAdvance).mockReset();
     vi.mocked(apiService.exportPaymentsCsv).mockReset();
     vi.mocked(apiService.exportPaymentsExcel).mockReset();
     vi.mocked(apiService.getClientBalance).mockReset();
@@ -284,6 +293,7 @@ describe('Payments integration', () => {
     });
     vi.mocked(apiService.acceptPaymentAdvance).mockResolvedValue({ id: 1, advanceReviewStatus: 'AcceptedAsAdvance' } as Payment);
     vi.mocked(apiService.ignorePaymentAdvance).mockResolvedValue({ id: 1, advanceReviewStatus: 'Ignored' } as Payment);
+    vi.mocked(apiService.refundPaymentAdvance).mockResolvedValue({ id: 1, advanceReviewStatus: 'Refunded' } as Payment);
     vi.mocked(apiService.applyClientBalance).mockResolvedValue({ appliedAmount: 0, balance: 0 });
     vi.mocked(apiService.applyLegalEntityBalance).mockResolvedValue({ appliedAmount: 0, balance: 0 });
     vi.mocked(apiService.getPartialPaymentRemainderCandidates).mockResolvedValue({
@@ -448,11 +458,19 @@ describe('Payments integration', () => {
       paidAmount: 2_500,
       description: 'Служебный платеж',
     } as unknown as Payment;
+    const acceptedPayment = {
+      ...requiredPayment,
+      id: 823,
+      amount: 3_000,
+      paidAmount: 3_000,
+      description: 'Принятый аванс',
+      advanceReviewStatus: 'AcceptedAsAdvance',
+    } as unknown as Payment;
 
     usePaymentsPagedMock.mockReturnValue({
       ...paymentsPagedResult,
-      payments: [requiredPayment, ignoredPayment],
-      total: 2,
+      payments: [requiredPayment, ignoredPayment, acceptedPayment],
+      total: 3,
       refresh,
     });
     vi.mocked(apiService.acceptPaymentAdvance).mockResolvedValueOnce({
@@ -462,6 +480,10 @@ describe('Payments integration', () => {
     vi.mocked(apiService.ignorePaymentAdvance).mockResolvedValueOnce({
       ...ignoredPayment,
       advanceReviewStatus: 'Ignored',
+    } as Payment);
+    vi.mocked(apiService.refundPaymentAdvance).mockResolvedValueOnce({
+      ...acceptedPayment,
+      advanceReviewStatus: 'Refunded',
     } as Payment);
 
     render(<Payments />);
@@ -497,6 +519,22 @@ describe('Payments integration', () => {
       );
     });
     expect(refresh).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(screen.getByRole('button', { name: 'refund-advance-823' }));
+
+    await waitFor(() => {
+      expect(confirmMock).toHaveBeenCalledWith(expect.objectContaining({
+        title: 'Вернуть аванс клиенту',
+        confirmLabel: 'Вернуть аванс',
+      }));
+    });
+    await waitFor(() => {
+      expect(apiService.refundPaymentAdvance).toHaveBeenCalledWith(
+        823,
+        'Возврат аванса из журнала платежей',
+      );
+    });
+    expect(refresh).toHaveBeenCalledTimes(3);
   });
 
   it('blocks advance review actions when the user cannot edit payments', async () => {
@@ -547,11 +585,13 @@ describe('Payments integration', () => {
     fireEvent.click(screen.getByRole('button', { name: 'accept-advance-831' }));
     fireEvent.click(screen.getByRole('button', { name: 'ignore-advance-831' }));
     fireEvent.click(screen.getByRole('button', { name: 'allocate-advance-832' }));
+    fireEvent.click(screen.getByRole('button', { name: 'refund-advance-832' }));
 
     await waitFor(() => {
       expect(confirmMock).not.toHaveBeenCalled();
       expect(apiService.acceptPaymentAdvance).not.toHaveBeenCalled();
       expect(apiService.ignorePaymentAdvance).not.toHaveBeenCalled();
+      expect(apiService.refundPaymentAdvance).not.toHaveBeenCalled();
       expect(apiService.getClientBalance).not.toHaveBeenCalled();
       expect(apiService.applyClientBalance).not.toHaveBeenCalled();
     });

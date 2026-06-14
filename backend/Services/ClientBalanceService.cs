@@ -385,6 +385,69 @@ public static class ClientBalanceService
         }
     }
 
+    public static async Task<(bool Success, string? Error, decimal RefundedAmount)> RefundUnallocatedAdvanceAsync(
+        PaymentContext db,
+        Payment payment,
+        string? description,
+        DateTime utcNow,
+        HttpContext? httpContext,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(payment);
+
+        if (!HasValidCounterpartyOwner(payment) || payment.AdvanceReviewStatus != PaymentAdvanceReviewStatus.AcceptedAsAdvance)
+        {
+            return (false, "Вернуть можно только платеж, принятый как нераспределенный аванс.", 0m);
+        }
+
+        var available = await GetUnallocatedAdvanceAvailableAmountAsync(db, payment.Id, payment.ClientId, payment.LegalEntityId, ct);
+        if (available <= AmountEpsilon)
+        {
+            return (false, "У выбранного аванса нет доступного остатка для возврата.", 0m);
+        }
+
+        var externalKey = BuildUnallocatedAdvanceRefundKey(payment.Id);
+        var existing = await db.ClientBalanceTransactions
+            .FirstOrDefaultAsync(item => item.ExternalKey == externalKey, ct);
+
+        var actor = httpContext?.User.GetDisplayName();
+        var actorUserId = httpContext?.User.GetUserId();
+        var refundDescription = string.IsNullOrWhiteSpace(description)
+            ? $"Возврат нераспределенного аванса по платежу #{payment.Id}"
+            : description.Trim();
+
+        if (existing is null)
+        {
+            db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
+            {
+                ClientId = payment.ClientId,
+                LegalEntityId = payment.LegalEntityId,
+                PaymentId = payment.Id,
+                Amount = available,
+                Type = ClientBalanceTransactionType.Refund,
+                Direction = ClientBalanceDirection.Debit,
+                Description = refundDescription,
+                ExternalKey = externalKey,
+                CreatedAt = utcNow,
+                CreatedByUserId = actorUserId,
+                CreatedByUserName = actor,
+            });
+        }
+        else
+        {
+            existing.ClientId = payment.ClientId;
+            existing.LegalEntityId = payment.LegalEntityId;
+            existing.PaymentId = payment.Id;
+            existing.Amount = available;
+            existing.Type = ClientBalanceTransactionType.Refund;
+            existing.Direction = ClientBalanceDirection.Debit;
+            existing.Description = refundDescription;
+        }
+
+        return (true, null, available);
+    }
+
     public static string BuildPaymentOverpaymentKey(int paymentId) => $"payment-overpayment:{paymentId}";
 
     public static string BuildCancelledInvoiceAdvanceKey(int paymentId) => $"invoice-cancellation-advance:{paymentId}";
@@ -396,6 +459,9 @@ public static class ClientBalanceService
 
     public static string BuildUnallocatedAdvanceApplicationKey(int sourcePaymentId, int targetPaymentId, DateTime utcNow)
         => $"{BuildUnallocatedAdvanceApplicationKeyPrefix(sourcePaymentId)}{targetPaymentId}:{utcNow.Ticks}";
+
+    public static string BuildUnallocatedAdvanceRefundKey(int sourcePaymentId)
+        => $"payment-unallocated-advance-refund:{sourcePaymentId}";
 
     public static async Task<decimal> GetUnallocatedAdvanceAvailableAmountAsync(
         PaymentContext db,
@@ -431,7 +497,18 @@ public static class ClientBalanceService
                 && item.ExternalKey.StartsWith(externalKeyPrefix))
             .SumAsync(item => item.Amount, ct);
 
-        return NormalizeAmount(Math.Max(credited - applied, 0m));
+        var refundKey = BuildUnallocatedAdvanceRefundKey(sourcePaymentId);
+        var refunded = await db.ClientBalanceTransactions
+            .AsNoTracking()
+            .Where(item =>
+                item.ClientId == clientId
+                && item.LegalEntityId == legalEntityId
+                && item.Type == ClientBalanceTransactionType.Refund
+                && item.Direction == ClientBalanceDirection.Debit
+                && item.ExternalKey == refundKey)
+            .SumAsync(item => item.Amount, ct);
+
+        return NormalizeAmount(Math.Max(credited - applied - refunded, 0m));
     }
 
     private static decimal NormalizeAmount(decimal value)

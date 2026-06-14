@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, EyeOff, GripVertical, SplitSquareHorizontal } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, EyeOff, GripVertical, RotateCcw, SplitSquareHorizontal } from 'lucide-react';
 import {
   useCallback,
   useEffect,
@@ -41,6 +41,7 @@ interface PaymentsTableProps {
   onAcceptAdvance?: (payment: Payment) => void | Promise<void>;
   onIgnoreAdvance?: (payment: Payment) => void | Promise<void>;
   onAllocateAdvance?: (payment: Payment) => void | Promise<void>;
+  onRefundAdvance?: (payment: Payment) => void | Promise<void>;
   canAdd: boolean;
   canEdit: boolean;
   canDelete: boolean;
@@ -77,6 +78,7 @@ export function PaymentsTable({
   onAcceptAdvance,
   onIgnoreAdvance,
   onAllocateAdvance,
+  onRefundAdvance,
   canAdd,
   canEdit,
   canDelete,
@@ -292,18 +294,32 @@ export function PaymentsTable({
                 </span>
               ) : null}
               {acceptedAsAdvance && canEdit ? (
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void onAllocateAdvance?.(payment);
-                  }}
-                  className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700 transition hover:bg-blue-100"
-                  title="Распределить аванс по открытому долгу клиента"
-                >
-                  <SplitSquareHorizontal className="h-3 w-3" />
-                  Распределить
-                </button>
+                <div className="flex flex-wrap gap-1">
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void onAllocateAdvance?.(payment);
+                    }}
+                    className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700 transition hover:bg-blue-100"
+                    title="Распределить аванс по открытому долгу клиента"
+                  >
+                    <SplitSquareHorizontal className="h-3 w-3" />
+                    Распределить
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void onRefundAdvance?.(payment);
+                    }}
+                    className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] font-semibold text-rose-700 transition hover:bg-rose-100"
+                    title="Оформить возврат доступного остатка аванса клиенту"
+                  >
+                    <RotateCcw className="h-3 w-3" />
+                    Вернуть
+                  </button>
+                </div>
               ) : null}
               {needsAdvanceDecision && canEdit ? (
                 <div className="flex flex-wrap gap-1">
@@ -358,7 +374,7 @@ export function PaymentsTable({
           return '—';
       }
     },
-    [canEdit, formatDate, onAcceptAdvance, onAllocateAdvance, onIgnoreAdvance, onOpenClient, onStatusChange, statusLabels, t],
+    [canEdit, formatDate, onAcceptAdvance, onAllocateAdvance, onIgnoreAdvance, onOpenClient, onRefundAdvance, onStatusChange, statusLabels, t],
   );
 
   const isEditAllowed = useCallback(

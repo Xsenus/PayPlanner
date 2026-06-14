@@ -534,6 +534,67 @@ public class PaymentsController : ControllerBase
         return Ok(payment);
     }
 
+    [HttpPost("{id:int}/advance-review/refund")]
+    public async Task<IActionResult> RefundAdvance(int id, [FromBody] PaymentAdvanceReviewRequest? request, CancellationToken ct)
+    {
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+        if (await RequirePaymentsEditAsync(ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+        if (!await CanAccessPaymentAsync(id, visibility, ct))
+        {
+            return NotFound();
+        }
+
+        var payment = await _db.Payments
+            .Include(item => item.PaymentSource)
+            .Include(item => item.CashOrders)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (payment is null) return NotFound();
+
+        var now = DateTime.UtcNow;
+        var reason = string.IsNullOrWhiteSpace(request?.Reason)
+            ? "Возврат нераспределенного аванса клиенту"
+            : request!.Reason.Trim();
+        var result = await ClientBalanceService.RefundUnallocatedAdvanceAsync(
+            _db,
+            payment,
+            $"Возврат нераспределенного аванса по платежу #{payment.Id}. {reason}",
+            now,
+            HttpContext,
+            ct);
+        if (!result.Success)
+        {
+            return BadRequest(new { message = result.Error });
+        }
+
+        await UpsertUnallocatedAdvanceRefundOperationAsync(payment, result.RefundedAmount, reason, now, ct);
+
+        payment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.Refunded;
+        payment.AdvanceReviewReason = reason;
+        payment.AdvanceReviewedAt = now;
+        payment.AdvanceReviewedByUserId = HttpContext.User.GetUserId();
+        payment.AdvanceReviewedByUserName = HttpContext.User.GetDisplayName();
+
+        var paymentTimeZone = await ResolvePaymentTimeZoneAsync(ct);
+        PaymentDomainService.AppendSystemNote(
+            payment,
+            $"Нераспределенный аванс возвращен клиенту: {result.RefundedAmount:N2}. Причина: {reason}",
+            now,
+            HttpContext.User.GetDisplayName(),
+            paymentTimeZone);
+
+        _db.SetAuditReason($"Контроль аванса: аванс #{payment.Id} возвращен клиенту на сумму {result.RefundedAmount:N2}. {reason}");
+        await _db.SaveChangesAsync(ct);
+        PopulateAuditMetadata(_db, payment);
+        return Ok(payment);
+    }
+
     [HttpGet("advance-review/candidates")]
     public async Task<IActionResult> GetAdvanceReviewCandidates([FromQuery] int limit = 50, CancellationToken ct = default)
     {
@@ -2062,6 +2123,59 @@ public class PaymentsController : ControllerBase
             paymentTimeZone);
     }
 
+    private async Task UpsertUnallocatedAdvanceRefundOperationAsync(
+        Payment payment,
+        decimal refundAmount,
+        string reason,
+        DateTime now,
+        CancellationToken ct)
+    {
+        var key = BuildUnallocatedAdvanceRefundMoneyOperationKey(payment.Id);
+        var paymentSourceName = await ResolvePaymentSourceNameAsync(payment, ct);
+        var source = ResolveMoneyOperationSource(paymentSourceName);
+        var refundDate = (payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date).Date;
+        var counterpartyName = await ResolvePaymentCounterpartyNameAsync(payment, ct);
+        var purpose = $"Возврат нераспределенного аванса по платежу #{payment.Id}. Причина: {reason}";
+
+        var existing = await _db.MoneyOperations
+            .Include(operation => operation.CashOrders)
+            .FirstOrDefaultAsync(operation =>
+                operation.MatchComment != null &&
+                operation.MatchComment.Contains(key), ct);
+
+        if (existing is null)
+        {
+            existing = new MoneyOperation
+            {
+                CreatedAt = now,
+                MatchStatus = MoneyOperationMatchStatus.Matched,
+                MatchedAt = now,
+                MatchComment = $"Возврат нераспределенного аванса по платежу #{payment.Id}. {key}",
+            };
+            _db.MoneyOperations.Add(existing);
+        }
+
+        existing.Source = source;
+        existing.Direction = MoneyOperationDirection.Expense;
+        existing.AccountingType = MoneyOperationAccountingType.Fact;
+        existing.AccountName = paymentSourceName;
+        existing.CounterpartyName = counterpartyName;
+        existing.CategoryName = "Возврат клиенту";
+        existing.Amount = refundAmount;
+        existing.Currency = "RUB";
+        existing.Date = refundDate;
+        existing.RecognitionDate = refundDate;
+        existing.Purpose = purpose;
+        existing.PaidInvoiceNumber = payment.Account;
+        existing.PaidAmount = refundAmount;
+        existing.PaidAccountName = payment.Account;
+        existing.LinkedInvoiceId = payment.InvoiceId;
+        existing.UpdatedAt = existing.Id > 0 ? now : null;
+
+        await _db.SaveChangesAsync(ct);
+        await SyncRefundCashOrderAsync(existing, payment, source, refundDate, refundAmount, purpose, reason, now, ct);
+    }
+
     private async Task SyncRefundCashOrderAsync(
         MoneyOperation operation,
         Payment payment,
@@ -2374,6 +2488,9 @@ public class PaymentsController : ControllerBase
     }
 
     private static string BuildPaymentOverpaymentRefundKey(int paymentId) => $"payment-overpayment-refund:{paymentId}";
+
+    private static string BuildUnallocatedAdvanceRefundMoneyOperationKey(int paymentId)
+        => $"payment-unallocated-advance-refund-operation:{paymentId}";
 
     private static decimal CalculateOverpaymentAmount(Payment payment, decimal rawPaidAmount)
         => Math.Round(Math.Max(rawPaidAmount - payment.Amount, 0m), 2, MidpointRounding.AwayFromZero);

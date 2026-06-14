@@ -80,6 +80,25 @@ describe('resolveApiBaseUrl', () => {
   });
 });
 
+describe('payments advance review API', () => {
+  it('refunds an accepted advance with reason', async () => {
+    const payload = { id: 77, advanceReviewStatus: 'Refunded' };
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.refundPaymentAdvance(77, 'Возврат клиенту');
+
+    expect(result).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/payments/77/advance-review/refund');
+    expect(init?.method).toBe('POST');
+    expect(init?.body).toBe(JSON.stringify({ reason: 'Возврат клиенту' }));
+  });
+});
+
 describe('apiService auth handling', () => {
   it('returns null for missing optional user settings', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response('', {

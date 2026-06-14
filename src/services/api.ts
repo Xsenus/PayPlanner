@@ -3792,6 +3792,13 @@ export class ApiService {
     });
   }
 
+  async refundPaymentAdvance(id: number, reason?: string | null) {
+    return this.request<Payment>(`/payments/${id}/advance-review/refund`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+  }
+
   async transferPaymentRemainder(id: number, payment: PaymentPayload, remainderDate: string) {
     return this.request<TransferPaymentRemainderResponse>(`/payments/${id}/partial-remainder`, {
       method: 'PUT',
