@@ -11,6 +11,8 @@ public class Act
     public string? InvoiceNumber { get; set; }
     public int? InvoiceId { get; set; }
     public Payment? Invoice { get; set; }
+    public int? OriginalActId { get; set; }
+    public Act? OriginalAct { get; set; }
     public string? CounterpartyInn { get; set; }
     public ActStatus Status { get; set; } = ActStatus.Created;
     public string WorkflowStatus { get; set; } = ActWorkflowStatus.Draft;
@@ -27,6 +29,7 @@ public class Act
     public User? Responsible { get; set; }
     public string? Comment { get; set; }
     public ICollection<ActLineItem> LineItems { get; set; } = new List<ActLineItem>();
+    public ICollection<Act> CorrectionActs { get; set; } = new List<Act>();
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }
 }

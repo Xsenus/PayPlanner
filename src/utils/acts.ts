@@ -1,4 +1,4 @@
-import type { Act, ActLineItem, ActResponsible, ActStatus, ActsSummary, Client } from '../types';
+import type { Act, ActCorrectionLink, ActLineItem, ActResponsible, ActStatus, ActsSummary, Client } from '../types';
 
 const ACT_STATUSES: ActStatus[] = ['Created', 'Transferred', 'Signed', 'Terminated'];
 
@@ -68,6 +68,25 @@ function normalizeActLineItem(value: unknown): ActLineItem | null {
   };
 }
 
+function normalizeActCorrectionLink(value: unknown): ActCorrectionLink | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const id = toFiniteNumber(value.id);
+  if (id <= 0) {
+    return null;
+  }
+
+  return {
+    id,
+    number: typeof value.number === 'string' ? value.number : '',
+    date: typeof value.date === 'string' ? value.date : '',
+    amount: toFiniteNumber(value.amount),
+    workflowStatus: typeof value.workflowStatus === 'string' ? (value.workflowStatus as ActCorrectionLink['workflowStatus']) : undefined,
+  };
+}
+
 export function normalizeActsSummary(value: unknown): ActsSummary {
   if (!isRecord(value)) {
     return { ...EMPTY_SUMMARY };
@@ -99,11 +118,15 @@ export function normalizeAct(value: unknown): Act | null {
   const lineItems = getItemsArray<unknown>(value.lineItems)
     .map((item) => normalizeActLineItem(item))
     .filter((item): item is ActLineItem => item !== null);
+  const correctionActs = getItemsArray<unknown>(value.correctionActs)
+    .map((item) => normalizeActCorrectionLink(item))
+    .filter((item): item is ActCorrectionLink => item !== null);
 
   return {
     ...(value as unknown as Act),
     status: isActStatus(value.status) ? value.status : 'Created',
     lineItems,
+    correctionActs,
   };
 }
 

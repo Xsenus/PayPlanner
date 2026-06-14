@@ -106,6 +106,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<int?>("OriginalActId")
+                        .HasColumnType("integer");
+
                     b.Property<int?>("ResponsibleId")
                         .HasColumnType("integer");
 
@@ -162,6 +165,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("Number")
                         .HasDatabaseName("IX_Acts_Number");
+
+                    b.HasIndex("OriginalActId")
+                        .HasDatabaseName("IX_Acts_OriginalActId");
 
                     b.HasIndex("ResponsibleId")
                         .HasDatabaseName("IX_Acts_ResponsibleId");
@@ -7962,6 +7968,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasForeignKey("LegalEntityId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("PayPlanner.Api.Models.Act", "OriginalAct")
+                        .WithMany("CorrectionActs")
+                        .HasForeignKey("OriginalActId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("PayPlanner.Api.Models.User", "Responsible")
                         .WithMany("Acts")
                         .HasForeignKey("ResponsibleId")
@@ -7972,6 +7983,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("Invoice");
 
                     b.Navigation("LegalEntity");
+
+                    b.Navigation("OriginalAct");
 
                     b.Navigation("Responsible");
                 });
@@ -9228,6 +9241,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
             modelBuilder.Entity("PayPlanner.Api.Models.Act", b =>
                 {
+                    b.Navigation("CorrectionActs");
+
                     b.Navigation("LineItems");
                 });
 

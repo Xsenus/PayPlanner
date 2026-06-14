@@ -353,6 +353,64 @@ public class ActsControllerTests
     }
 
     [Fact]
+    public async Task CreateCorrection_CopiesOriginalActAndShowsCorrectionChain()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        await CreateUserAsync(db, "Администратор", "admin-correction@example.com", isActive: true, isApproved: true);
+        var original = await CreateManualActAsync(db, client.Id, "ACT-COR-1", 12_500m, ActStatus.Signed);
+        var contract = await CreateContractAsync(db, "CON-COR-1");
+        db.Set<ActLineItem>().Add(new ActLineItem
+        {
+            ActId = original.Id,
+            SortOrder = 10,
+            SourceKey = "manual-1",
+            Name = "Представительство в суде",
+            Quantity = 1,
+            Unit = "усл.",
+            Price = 12_500m,
+        });
+        db.ContractActs.Add(new ContractAct
+        {
+            ContractId = contract.Id,
+            ActId = original.Id,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateAdminController(db);
+
+        var action = await controller.CreateCorrection(
+            original.Id,
+            new CreateActCorrectionRequest { Reason = "Изменился объем услуг" },
+            CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(action.Result);
+        var correction = Assert.IsType<ActDto>(created.Value);
+        Assert.Equal(original.Id, correction.OriginalActId);
+        Assert.Equal(original.Number, correction.OriginalActNumber);
+        Assert.Equal("ACT-COR-1-К1", correction.Number);
+        Assert.Equal(ActStatus.Created, correction.Status);
+        Assert.Equal(ActWorkflowStatus.Draft, correction.WorkflowStatus);
+        Assert.Equal(original.Amount, correction.Amount);
+        Assert.Contains("Изменился объем услуг", correction.Comment, StringComparison.Ordinal);
+
+        var line = Assert.Single(correction.LineItems);
+        Assert.Equal("manual-1", line.SourceKey);
+        Assert.Equal("Представительство в суде", line.Name);
+        Assert.Equal(12_500m, line.Price);
+
+        Assert.True(await db.ContractActs.AsNoTracking().AnyAsync(link =>
+            link.ContractId == contract.Id && link.ActId == correction.Id));
+
+        var originalAction = await controller.GetById(original.Id, CancellationToken.None);
+        var ok = Assert.IsType<OkObjectResult>(originalAction.Result);
+        var originalDto = Assert.IsType<ActDto>(ok.Value);
+        var correctionLink = Assert.Single(originalDto.CorrectionActs);
+        Assert.Equal(correction.Id, correctionLink.Id);
+        Assert.Equal(correction.Number, correctionLink.Number);
+    }
+
+    [Fact]
     public async Task Create_FullAct_UsesAllRemainingInvoiceLineItems()
     {
         await using var db = await CreateContextAsync();

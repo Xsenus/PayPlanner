@@ -10,6 +10,7 @@ const {
   getActResponsiblesMock,
   getDocumentStatusesMock,
   updateActWorkflowStatusMock,
+  createActCorrectionMock,
   downloadActDocumentMock,
   sendActByEmailMock,
 } = vi.hoisted(() => ({
@@ -19,6 +20,7 @@ const {
   getActResponsiblesMock: vi.fn(),
   getDocumentStatusesMock: vi.fn(),
   updateActWorkflowStatusMock: vi.fn(),
+  createActCorrectionMock: vi.fn(),
   downloadActDocumentMock: vi.fn(),
   sendActByEmailMock: vi.fn(),
 }));
@@ -63,6 +65,7 @@ vi.mock('../../services/api', () => ({
     getDocumentStatuses: getDocumentStatusesMock,
     updateAct: vi.fn(),
     updateActWorkflowStatus: updateActWorkflowStatusMock,
+    createActCorrection: createActCorrectionMock,
     deleteAct: vi.fn(),
     downloadActDocument: downloadActDocumentMock,
     sendActByEmail: sendActByEmailMock,
@@ -88,6 +91,15 @@ describe('ActDetailPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getDocumentStatusesMock.mockResolvedValue([]);
+    createActCorrectionMock.mockResolvedValue({
+      id: 40,
+      number: '40-К1',
+      date: '2026-04-12',
+      amount: 10_000,
+      status: 'Created',
+      workflowStatus: 'Draft',
+      lineItems: [],
+    });
     downloadActDocumentMock.mockResolvedValue(new Blob(['<html><body><div>Preview</div></body></html>'], { type: 'text/html' }));
     sendActByEmailMock.mockResolvedValue({
       sent: true,
@@ -238,6 +250,75 @@ describe('ActDetailPage', () => {
         format: 'word',
         email: 'client@example.com',
       });
+    });
+  });
+
+  it('creates a correction act and reloads the correction chain', async () => {
+    getActMock
+      .mockResolvedValueOnce({
+        id: 34,
+        number: '34',
+        date: '2026-04-12',
+        amount: 10_000,
+        status: 'Signed',
+        workflowStatus: 'Signed',
+        type: 'Income',
+        clientId: 7,
+        lineItems: [],
+        correctionActs: [],
+      })
+      .mockResolvedValueOnce({
+        id: 34,
+        number: '34',
+        date: '2026-04-12',
+        amount: 10_000,
+        status: 'Signed',
+        workflowStatus: 'Signed',
+        type: 'Income',
+        clientId: 7,
+        lineItems: [],
+        correctionActs: [
+          {
+            id: 40,
+            number: '34-К1',
+            date: '2026-04-13',
+            amount: 10_000,
+            workflowStatus: 'Draft',
+          },
+        ],
+      });
+    getClientsMock.mockResolvedValue({
+      items: [
+        {
+          id: 7,
+          name: 'Клиент с корректировкой',
+          email: '',
+          phone: '',
+          company: '',
+          address: '',
+          notes: '',
+          createdAt: '2026-04-01T00:00:00Z',
+          isActive: true,
+        },
+      ],
+    });
+    getActResponsiblesMock.mockResolvedValue({ items: [] });
+    vi.spyOn(window, 'prompt').mockReturnValueOnce('Уточнение суммы');
+
+    render(<ActDetailPage actId={34} onBack={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Клиент с корректировкой')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Корректировка' }));
+
+    await waitFor(() => {
+      expect(createActCorrectionMock).toHaveBeenCalledWith(34, 'Уточнение суммы');
+    });
+    await waitFor(() => {
+      expect(screen.getByText('Корректировочные акты')).toBeTruthy();
+      expect(screen.getByText(/№34-К1/)).toBeTruthy();
     });
   });
 

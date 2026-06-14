@@ -2348,6 +2348,13 @@ export class ApiService {
     return this.request<Act>(`/acts/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
   }
 
+  async createActCorrection(id: number, reason?: string | null) {
+    return this.request<Act>(`/acts/${id}/correction`, {
+      method: 'POST',
+      body: JSON.stringify({ reason: reason?.trim() ? reason.trim() : null }),
+    });
+  }
+
   async sendActToSigning(id: number) {
     return this.request<Act>(`/acts/${id}/send-to-signing`, { method: 'POST' });
   }

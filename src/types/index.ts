@@ -2925,6 +2925,14 @@ export interface ActLineItem {
   price: number;
 }
 
+export interface ActCorrectionLink {
+  id: number;
+  number: string;
+  date: string;
+  amount: number;
+  workflowStatus?: ActWorkflowStatus;
+}
+
 export interface Act {
   id: number;
   number: string;
@@ -2934,6 +2942,8 @@ export interface Act {
   creationMode?: ActCreationMode;
   invoiceNumber?: string | null;
   invoiceId?: number | null;
+  originalActId?: number | null;
+  originalActNumber?: string | null;
   type?: PaymentKind | null;
   contractId?: number | null;
   counterpartyInn?: string | null;
@@ -2954,6 +2964,7 @@ export interface Act {
   responsibles?: InvoiceResponsible[];
   comment?: string | null;
   lineItems?: ActLineItem[];
+  correctionActs?: ActCorrectionLink[];
   createdAt: string;
   updatedAt?: string | null;
   auditCreatedByUserId?: number | null;

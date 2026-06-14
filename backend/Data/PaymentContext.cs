@@ -252,6 +252,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.CounterpartyInn).HasMaxLength(32);
             entity.Property(e => e.Comment);
             entity.Property(e => e.Amount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.OriginalActId);
             entity.Property(e => e.Status).HasConversion<string>();
             entity.Property(e => e.WorkflowStatus).HasMaxLength(32).HasDefaultValue(ActWorkflowStatus.Draft).IsRequired();
             entity.Property(e => e.SentForSigningAt);
@@ -282,6 +283,11 @@ public class PaymentContext : DbContext
                   .HasForeignKey(e => e.InvoiceId)
                   .OnDelete(DeleteBehavior.SetNull);
 
+            entity.HasOne(e => e.OriginalAct)
+                  .WithMany(e => e.CorrectionActs)
+                  .HasForeignKey(e => e.OriginalActId)
+                  .OnDelete(DeleteBehavior.Restrict);
+
             entity.HasMany(e => e.LineItems)
                   .WithOne(item => item.Act)
                   .HasForeignKey(item => item.ActId)
@@ -295,6 +301,7 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.ResponsibleId).HasDatabaseName("IX_Acts_ResponsibleId");
             entity.HasIndex(e => e.Number).HasDatabaseName("IX_Acts_Number");
             entity.HasIndex(e => e.InvoiceId).HasDatabaseName("IX_Acts_InvoiceId");
+            entity.HasIndex(e => e.OriginalActId).HasDatabaseName("IX_Acts_OriginalActId");
         });
 
         modelBuilder.Entity<ActLineItem>(entity =>

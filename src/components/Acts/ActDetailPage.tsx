@@ -1,4 +1,4 @@
-import { ArrowLeft, Ban, Check, ChevronDown, Download, Link2, List, Loader2, Pencil, Printer, Send, Trash2, UploadCloud, UserRound } from 'lucide-react';
+import { ArrowLeft, Ban, Check, ChevronDown, Download, FilePlus2, Link2, List, Loader2, Pencil, Printer, Send, Trash2, UploadCloud, UserRound } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
@@ -25,7 +25,7 @@ interface ActDetailPageProps {
 }
 
 type DocumentFormat = 'word' | 'pdf';
-type PageAction = 'send' | 'yandexDisk' | 'notSigned' | 'transferred' | 'signed' | 'cancel' | 'delete';
+type PageAction = 'send' | 'yandexDisk' | 'correction' | 'notSigned' | 'transferred' | 'signed' | 'cancel' | 'delete';
 
 const ACT_WORKFLOW_STATUS_ORDER: ActWorkflowStatus[] = [
   'Draft',
@@ -626,6 +626,37 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
     }
   }, [act, toast]);
 
+  const handleCreateCorrection = useCallback(async () => {
+    if (!act) return;
+
+    const accepted = await confirm({
+      title: 'Создать корректировочный акт',
+      description: `Будет создан черновик корректировочного акта на основании акта №${act.number || act.id}. Позиции, сумма, счет и связь с договором будут скопированы.`,
+      confirmLabel: 'Создать корректировку',
+      cancelLabel: 'Отмена',
+      variant: 'primary',
+    });
+    if (!accepted) return;
+
+    const reason = window.prompt('Укажите причину корректировки акта')?.trim() || null;
+
+    setPageActionLoading('correction');
+    try {
+      const correction = normalizeAct(await apiService.createActCorrection(act.id, reason));
+      if (!correction) {
+        throw new Error('Не удалось прочитать корректировочный акт.');
+      }
+
+      setError(null);
+      toast.success(`Создан корректировочный акт №${correction.number || correction.id}.`);
+      await loadActBundle();
+    } catch (correctionError) {
+      setError(extractDisplayErrorMessage(correctionError, 'Не удалось создать корректировочный акт.'));
+    } finally {
+      setPageActionLoading(null);
+    }
+  }, [act, confirm, loadActBundle, toast]);
+
   const handleSend = useCallback(async () => {
     if (!act) return;
 
@@ -663,6 +694,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
   const notSignedDisabled = !canEdit || currentWorkflowStatus === 'NotSigned' || act?.status === 'Terminated';
   const transferredDisabled = !canEdit || currentWorkflowStatus === 'OnSigning' || act?.status === 'Signed' || act?.status === 'Terminated';
   const signedDisabled = !canEdit || currentWorkflowStatus === 'Signed' || act?.status === 'Terminated';
+  const correctionDisabled = !canEdit || Boolean(act?.originalActId) || act?.status === 'Terminated';
   const cancelDisabled = !canEdit || act?.status === 'Terminated';
   const workflowStatusBadgeClass = 'inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold transition';
   const renderWorkflowStatusControl = () => {
@@ -873,6 +905,29 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
                   </div>
 
                   <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm leading-6">
+                    {act.originalActId ? (
+                      <p>
+                        <span className="text-slate-500">Корректировка к акту:</span>{' '}
+                        №{act.originalActNumber || act.originalActId}
+                      </p>
+                    ) : null}
+                    {!act.originalActId && act.correctionActs?.length ? (
+                      <div className="mb-2 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 leading-5">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-blue-700">
+                          Корректировочные акты
+                        </div>
+                        <div className="mt-1 space-y-1">
+                          {act.correctionActs.map((correction) => (
+                            <div key={correction.id} className="flex items-center justify-between gap-3 text-sm">
+                              <span className="font-medium text-blue-800">
+                                №{correction.number || correction.id} от {formatDate(correction.date)}
+                              </span>
+                              <span className="shrink-0 text-blue-700">{formatMoney(correction.amount)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
                     <p><span className="text-slate-500">Тип:</span> {typeMeta.label}</p>
                     <p><span className="text-slate-500">Режим:</span> {creationModeLabel}</p>
                     <p><span className="text-slate-500">Дата акта:</span> {formatDate(act.date)}</p>
@@ -934,7 +989,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
             </aside>
           </div>
 
-          <div className={`grid gap-2 rounded-lg border border-slate-300 bg-white p-2 ${canDelete ? 'grid-cols-2 md:grid-cols-3 xl:grid-cols-8' : 'grid-cols-2 md:grid-cols-3 xl:grid-cols-7'}`}>
+          <div className={`grid gap-2 rounded-lg border border-slate-300 bg-white p-2 ${canDelete ? 'grid-cols-2 md:grid-cols-3 xl:grid-cols-9' : 'grid-cols-2 md:grid-cols-3 xl:grid-cols-8'}`}>
             <button
               type="button"
               onClick={() => void handleSend()}
@@ -962,6 +1017,17 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
             >
               {pageActionLoading === 'yandexDisk' ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
               Я.Диск
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void handleCreateCorrection()}
+              disabled={correctionDisabled || pageActionLoading === 'correction'}
+              className="inline-flex items-center justify-center gap-2 rounded border border-blue-200 px-3 py-2 text-sm text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+              title={act.originalActId ? 'Корректировка создается только от исходного акта' : 'Создать корректировочный акт'}
+            >
+              {pageActionLoading === 'correction' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FilePlus2 className="h-4 w-4" />}
+              Корректировка
             </button>
 
             <div className="relative" ref={downloadMenuRef}>

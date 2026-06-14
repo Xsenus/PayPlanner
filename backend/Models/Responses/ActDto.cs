@@ -13,6 +13,8 @@ public class ActDto
     public string CreationMode { get; set; } = ActCreationMode.Manual;
     public string? InvoiceNumber { get; set; }
     public int? InvoiceId { get; set; }
+    public int? OriginalActId { get; set; }
+    public string? OriginalActNumber { get; set; }
     public PaymentType? Type { get; set; }
     public int? ContractId { get; set; }
     public string? CounterpartyInn { get; set; }
@@ -32,6 +34,7 @@ public class ActDto
     public string? ResponsibleName { get; set; }
     public string? Comment { get; set; }
     public IReadOnlyCollection<ActLineItemDto> LineItems { get; set; } = Array.Empty<ActLineItemDto>();
+    public IReadOnlyCollection<ActCorrectionLinkDto> CorrectionActs { get; set; } = Array.Empty<ActCorrectionLinkDto>();
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
     public int? AuditCreatedByUserId { get; set; }
@@ -43,6 +46,15 @@ public class ActDto
     public DateTime? AuditDeletedAt { get; set; }
     public int? AuditDeletedByUserId { get; set; }
     public string? AuditDeletedByUserName { get; set; }
+}
+
+public class ActCorrectionLinkDto
+{
+    public int Id { get; set; }
+    public string Number { get; set; } = string.Empty;
+    public DateTime Date { get; set; }
+    public decimal Amount { get; set; }
+    public string WorkflowStatus { get; set; } = ActWorkflowStatus.Draft;
 }
 
 public class ActLineItemDto

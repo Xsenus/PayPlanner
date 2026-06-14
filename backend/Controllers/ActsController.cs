@@ -405,6 +405,111 @@ public class ActsController : ControllerBase
         return Ok(Map(act));
     }
 
+    [HttpPost("{id:int}/correction")]
+    public async Task<ActionResult<ActDto>> CreateCorrection(int id, [FromBody] CreateActCorrectionRequest? request, CancellationToken ct)
+    {
+        if (!ModelState.IsValid)
+        {
+            return ValidationProblem(ModelState);
+        }
+
+        var visibility = await ResolveActsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var original = await _db.Acts
+            .ApplyActVisibility(visibility)
+            .Include(act => act.Client)
+            .Include(act => act.LegalEntity)
+            .Include(act => act.Responsible)
+            .Include(act => act.Invoice)
+            .Include(act => act.LineItems)
+            .Include(act => act.OriginalAct)
+            .Include(act => act.CorrectionActs)
+            .FirstOrDefaultAsync(act => act.Id == id, ct);
+        if (original is null)
+        {
+            return NotFound();
+        }
+
+        if (original.OriginalActId.HasValue)
+        {
+            return BadRequest("Корректировочный акт можно создать только от исходного акта.");
+        }
+
+        var reason = Normalize(request?.Reason);
+        ApplyAuditReason(reason);
+
+        var now = DateTime.UtcNow;
+        var correction = new Act
+        {
+            Number = await BuildCorrectionActNumberAsync(original.Id, original.Number, ct),
+            Title = $"Корректировка к акту №{original.Number}",
+            Date = ActDomainService.NormalizeLocalDate(now),
+            Amount = original.Amount,
+            CreationMode = ActCreationMode.Manual,
+            InvoiceNumber = original.InvoiceNumber,
+            InvoiceId = original.InvoiceId,
+            OriginalActId = original.Id,
+            CounterpartyInn = original.CounterpartyInn,
+            Status = ActStatus.Created,
+            WorkflowStatus = ActWorkflowStatus.Draft,
+            ClientId = original.ClientId,
+            LegalEntityId = original.LegalEntityId,
+            ResponsibleId = original.ResponsibleId ?? User.GetUserId(),
+            Comment = BuildCorrectionComment(original, reason),
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+
+        foreach (var item in original.LineItems.OrderBy(item => item.SortOrder).ThenBy(item => item.Id))
+        {
+            correction.LineItems.Add(new ActLineItem
+            {
+                SortOrder = item.SortOrder,
+                InvoiceLineItemId = item.InvoiceLineItemId,
+                SourceKey = item.SourceKey,
+                SourceSortOrder = item.SourceSortOrder,
+                Name = item.Name,
+                Quantity = item.Quantity,
+                Unit = item.Unit,
+                Price = item.Price,
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+        }
+
+        _db.Acts.Add(correction);
+        await _db.SaveChangesAsync(ct);
+
+        var contractIds = await _db.ContractActs
+            .AsNoTracking()
+            .Where(link => link.ActId == original.Id)
+            .Select(link => link.ContractId)
+            .ToListAsync(ct);
+        if (contractIds.Count > 0)
+        {
+            _db.ContractActs.AddRange(contractIds.Select(contractId => new ContractAct
+            {
+                ContractId = contractId,
+                ActId = correction.Id,
+            }));
+            await _db.SaveChangesAsync(ct);
+        }
+
+        await _db.Entry(correction).Reference(act => act.Client).LoadAsync(ct);
+        await _db.Entry(correction).Reference(act => act.LegalEntity).LoadAsync(ct);
+        await _db.Entry(correction).Reference(act => act.Responsible).LoadAsync(ct);
+        await _db.Entry(correction).Reference(act => act.Invoice).LoadAsync(ct);
+        await _db.Entry(correction).Reference(act => act.OriginalAct).LoadAsync(ct);
+        await _db.Entry(correction).Collection(act => act.LineItems).LoadAsync(ct);
+        await _db.Entry(correction).Collection(act => act.CorrectionActs).LoadAsync(ct);
+
+        return Created($"/api/acts/{correction.Id}", Map(correction));
+    }
+
     [HttpGet("summary")]
     public async Task<IActionResult> GetSummary(
         [FromQuery] DateTime? from,
@@ -1000,6 +1105,8 @@ public class ActsController : ControllerBase
         CreationMode = act.CreationMode,
         InvoiceNumber = act.InvoiceNumber,
         InvoiceId = act.InvoiceId,
+        OriginalActId = act.OriginalActId,
+        OriginalActNumber = act.OriginalAct != null ? act.OriginalAct.Number : null,
         Type = act.Invoice != null ? act.Invoice.Type : null,
         ContractId = act.Invoice != null ? act.Invoice.ContractId : null,
         CounterpartyInn = act.CounterpartyInn,
@@ -1033,6 +1140,18 @@ public class ActsController : ControllerBase
                 Price = item.Price,
             })
             .ToList(),
+        CorrectionActs = act.CorrectionActs
+            .OrderBy(item => item.Date)
+            .ThenBy(item => item.Id)
+            .Select(item => new ActCorrectionLinkDto
+            {
+                Id = item.Id,
+                Number = item.Number,
+                Date = ActDomainService.NormalizeLocalDate(item.Date),
+                Amount = item.Amount,
+                WorkflowStatus = item.WorkflowStatus,
+            })
+            .ToList(),
         CreatedAt = ActDomainService.NormalizeUtcInstant(act.CreatedAt),
         UpdatedAt = ActDomainService.NormalizeUtcInstant(act.UpdatedAt),
         AuditCreatedByUserId = EF.Property<int?>(act, "CreatedByUserId"),
@@ -1056,6 +1175,8 @@ public class ActsController : ControllerBase
         CreationMode = act.CreationMode,
         InvoiceNumber = act.InvoiceNumber,
         InvoiceId = act.InvoiceId,
+        OriginalActId = act.OriginalActId,
+        OriginalActNumber = act.OriginalAct != null ? act.OriginalAct.Number : null,
         Type = act.Invoice != null ? act.Invoice.Type : null,
         ContractId = act.Invoice != null ? act.Invoice.ContractId : null,
         CounterpartyInn = act.CounterpartyInn,
@@ -1626,6 +1747,41 @@ public class ActsController : ControllerBase
             : $"{comment.Trim()}{Environment.NewLine}{note}";
     }
 
+    private async Task<string> BuildCorrectionActNumberAsync(int originalActId, string originalNumber, CancellationToken ct)
+    {
+        var baseNumber = string.IsNullOrWhiteSpace(originalNumber)
+            ? $"Акт-{originalActId}"
+            : originalNumber.Trim();
+
+        var existingNumbers = await _db.Acts
+            .AsNoTracking()
+            .Where(act => act.OriginalActId == originalActId)
+            .Select(act => act.Number)
+            .ToListAsync(ct);
+
+        for (var index = existingNumbers.Count + 1; index < existingNumbers.Count + 1000; index++)
+        {
+            var candidate = $"{baseNumber}-К{index}";
+            if (!existingNumbers.Any(number => string.Equals(number, candidate, StringComparison.OrdinalIgnoreCase)))
+            {
+                return candidate;
+            }
+        }
+
+        return $"{baseNumber}-К{DateTime.UtcNow:yyyyMMddHHmmss}";
+    }
+
+    private static string BuildCorrectionComment(Act original, string? reason)
+    {
+        var note = $"Корректировочный акт к акту №{original.Number} от {ActDomainService.NormalizeLocalDate(original.Date):dd.MM.yyyy}.";
+        if (!string.IsNullOrWhiteSpace(reason))
+        {
+            note = $"{note} Причина: {reason.Trim()}";
+        }
+
+        return note;
+    }
+
     private ActDto Map(Act act)
     {
         var audit = _db.ReadAuditSnapshot(act);
@@ -1639,6 +1795,8 @@ public class ActsController : ControllerBase
             CreationMode = act.CreationMode,
             InvoiceNumber = act.InvoiceNumber,
             InvoiceId = act.InvoiceId,
+            OriginalActId = act.OriginalActId,
+            OriginalActNumber = act.OriginalAct?.Number,
             Type = act.Invoice?.Type,
             ContractId = act.Invoice?.ContractId,
             CounterpartyInn = act.CounterpartyInn,
@@ -1670,6 +1828,18 @@ public class ActsController : ControllerBase
                     Quantity = item.Quantity,
                     Unit = item.Unit,
                     Price = item.Price,
+                })
+                .ToList(),
+            CorrectionActs = act.CorrectionActs
+                .OrderBy(item => item.Date)
+                .ThenBy(item => item.Id)
+                .Select(item => new ActCorrectionLinkDto
+                {
+                    Id = item.Id,
+                    Number = item.Number,
+                    Date = ActDomainService.NormalizeLocalDate(item.Date),
+                    Amount = item.Amount,
+                    WorkflowStatus = item.WorkflowStatus,
                 })
                 .ToList(),
             CreatedAt = ActDomainService.NormalizeUtcInstant(act.CreatedAt),

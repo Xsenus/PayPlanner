@@ -99,6 +99,9 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("OriginalActId")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int?>("ResponsibleId")
                         .HasColumnType("INTEGER");
 
@@ -155,6 +158,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("Number")
                         .HasDatabaseName("IX_Acts_Number");
+
+                    b.HasIndex("OriginalActId")
+                        .HasDatabaseName("IX_Acts_OriginalActId");
 
                     b.HasIndex("ResponsibleId")
                         .HasDatabaseName("IX_Acts_ResponsibleId");
@@ -7776,6 +7782,11 @@ namespace PayPlanner.Api.Migrations
                         .HasForeignKey("LegalEntityId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("PayPlanner.Api.Models.Act", "OriginalAct")
+                        .WithMany("CorrectionActs")
+                        .HasForeignKey("OriginalActId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("PayPlanner.Api.Models.User", "Responsible")
                         .WithMany("Acts")
                         .HasForeignKey("ResponsibleId")
@@ -7786,6 +7797,8 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Invoice");
 
                     b.Navigation("LegalEntity");
+
+                    b.Navigation("OriginalAct");
 
                     b.Navigation("Responsible");
                 });
@@ -9042,6 +9055,8 @@ namespace PayPlanner.Api.Migrations
 
             modelBuilder.Entity("PayPlanner.Api.Models.Act", b =>
                 {
+                    b.Navigation("CorrectionActs");
+
                     b.Navigation("LineItems");
                 });
 
