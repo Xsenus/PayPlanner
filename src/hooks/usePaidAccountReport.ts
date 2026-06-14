@@ -10,6 +10,7 @@ export interface PaidAccountReportFilters {
   counterpartyName?: string;
   clientId?: number;
   caseId?: number;
+  incomeTypeId?: number;
 }
 
 export function usePaidAccountReport(filters: PaidAccountReportFilters) {
@@ -27,8 +28,9 @@ export function usePaidAccountReport(filters: PaidAccountReportFilters) {
       counterpartyName: filters.counterpartyName,
       clientId: filters.clientId,
       caseId: filters.caseId,
+      incomeTypeId: filters.incomeTypeId,
     }),
-    [filters.accountName, filters.caseId, filters.clientId, filters.counterpartyName, filters.from, filters.source, filters.to],
+    [filters.accountName, filters.caseId, filters.clientId, filters.incomeTypeId, filters.counterpartyName, filters.from, filters.source, filters.to],
   );
 
   const load = useCallback(async () => {

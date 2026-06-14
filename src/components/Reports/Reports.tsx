@@ -74,7 +74,7 @@ import {
   monthRangeToDates,
   normalizeYmRange,
 } from '../../utils/reportPresentation';
-import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CaseFinanceReport, CaseSuccessReport, CashBookSummary, CashFlowForecastReport, CashFlowReport, CashOrderReport, Client, ClientCase, ContractStatusReport, CounterpartyReport, CurrencyReport, CurrentCasesReport, DirectionReport, InvoiceStatusReport, JournalStatusReport, LawyerWorkloadReport, LegalWorkReport, MatchStatusReport, MoneyAccount, MoneyCategoryReport, MoneyOperationSource, OverdueProceduralDeadlinesReport, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, TaskReport, VatReport } from '../../types';
+import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CaseFinanceReport, CaseSuccessReport, CashBookSummary, CashFlowForecastReport, CashFlowReport, CashOrderReport, Client, ClientCase, ContractStatusReport, CounterpartyReport, CurrencyReport, CurrentCasesReport, DirectionReport, IncomeType, InvoiceStatusReport, JournalStatusReport, LawyerWorkloadReport, LegalWorkReport, MatchStatusReport, MoneyAccount, MoneyCategoryReport, MoneyOperationSource, OverdueProceduralDeadlinesReport, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, TaskReport, VatReport } from '../../types';
 
 const statusMeta: Record<
   'Completed' | 'Pending' | 'Overdue',
@@ -7234,12 +7234,15 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
   const [counterpartyName, setCounterpartyName] = useState('');
   const [clientId, setClientId] = useState('');
   const [caseId, setCaseId] = useState('');
+  const [incomeTypeId, setIncomeTypeId] = useState('');
   const [moneyAccounts, setMoneyAccounts] = useState<MoneyAccount[]>([]);
   const [moneyAccountsError, setMoneyAccountsError] = useState<string | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
   const [clientsError, setClientsError] = useState<string | null>(null);
   const [cases, setCases] = useState<ClientCase[]>([]);
   const [casesError, setCasesError] = useState<string | null>(null);
+  const [incomeTypes, setIncomeTypes] = useState<IncomeType[]>([]);
+  const [incomeTypesError, setIncomeTypesError] = useState<string | null>(null);
 
   const normalizedRange = useMemo(
     () => normalizeYmRange((range.from ?? ymNow) as `${number}-${string}`, (range.to ?? range.from ?? ymNow) as `${number}-${string}`),
@@ -7256,6 +7259,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
   const selectedCounterpartyName = counterpartyName.trim() || undefined;
   const selectedClientId = clientId ? Number(clientId) : undefined;
   const selectedCaseId = caseId ? Number(caseId) : undefined;
+  const selectedIncomeTypeId = incomeTypeId ? Number(incomeTypeId) : undefined;
   const visibleMoneyAccounts = useMemo(
     () =>
       moneyAccounts
@@ -7282,6 +7286,13 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
         }),
     [cases, selectedClientId],
   );
+  const visibleIncomeTypes = useMemo(
+    () =>
+      incomeTypes
+        .filter((item) => item.id > 0 && item.isActive)
+        .sort((left, right) => left.name.localeCompare(right.name, 'ru')),
+    [incomeTypes],
+  );
   const moneyOperationReportFilters = useMemo(
     () => ({
       ...cashFlowDates,
@@ -7290,8 +7301,9 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
       ...(selectedCounterpartyName ? { counterpartyName: selectedCounterpartyName } : {}),
       ...(selectedClientId ? { clientId: selectedClientId } : {}),
       ...(selectedCaseId ? { caseId: selectedCaseId } : {}),
+      ...(selectedIncomeTypeId ? { incomeTypeId: selectedIncomeTypeId } : {}),
     }),
-    [cashFlowDates, selectedCaseId, selectedClientId, selectedCounterpartyName, selectedMoneyAccountName, selectedMoneySource],
+    [cashFlowDates, selectedCaseId, selectedClientId, selectedCounterpartyName, selectedIncomeTypeId, selectedMoneyAccountName, selectedMoneySource],
   );
   const moneyAccountReportFilters = useMemo(
     () => ({
@@ -7300,8 +7312,9 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
       ...(selectedCounterpartyName ? { counterpartyName: selectedCounterpartyName } : {}),
       ...(selectedClientId ? { clientId: selectedClientId } : {}),
       ...(selectedCaseId ? { caseId: selectedCaseId } : {}),
+      ...(selectedIncomeTypeId ? { incomeTypeId: selectedIncomeTypeId } : {}),
     }),
-    [cashFlowDates, selectedCaseId, selectedClientId, selectedCounterpartyName, selectedMoneyAccountName],
+    [cashFlowDates, selectedCaseId, selectedClientId, selectedCounterpartyName, selectedIncomeTypeId, selectedMoneyAccountName],
   );
   const casePeriodReportFilters = useMemo(
     () => ({ ...cashFlowDates, limit: 100 }),
@@ -7389,10 +7402,37 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+
+    apiService.getIncomeTypes(undefined, true)
+      .then((items) => {
+        if (cancelled) return;
+        setIncomeTypes(items);
+        setIncomeTypesError(null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setIncomeTypes([]);
+        setIncomeTypesError(extractDisplayErrorMessage(err, 'Не удалось загрузить статьи доходов и расходов.'));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!moneyAccountName) return;
     if (visibleMoneyAccounts.some((account) => account.name === moneyAccountName)) return;
     setMoneyAccountName('');
   }, [moneyAccountName, visibleMoneyAccounts]);
+
+  useEffect(() => {
+    if (!incomeTypeId) return;
+    const numericIncomeTypeId = Number(incomeTypeId);
+    if (visibleIncomeTypes.some((item) => item.id === numericIncomeTypeId)) return;
+    setIncomeTypeId('');
+  }, [incomeTypeId, visibleIncomeTypes]);
 
   useEffect(() => {
     if (!caseId) return;
@@ -7831,6 +7871,31 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
                 </select>
                 {casesError ? (
                   <div className="mt-2 text-xs text-rose-600">{casesError}</div>
+                ) : null}
+              </div>
+              <div className="mt-4">
+                <label
+                  className="text-xs font-semibold uppercase tracking-wide text-slate-500"
+                  htmlFor="reports-income-type"
+                >
+                  Статья
+                </label>
+                <select
+                  id="reports-income-type"
+                  value={incomeTypeId}
+                  onChange={(event) => setIncomeTypeId(event.target.value)}
+                  disabled={visibleIncomeTypes.length === 0}
+                  className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                >
+                  <option value="">Все статьи</option>
+                  {visibleIncomeTypes.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+                {incomeTypesError ? (
+                  <div className="mt-2 text-xs text-rose-600">{incomeTypesError}</div>
                 ) : null}
               </div>
               <div className="mt-5 grid grid-cols-2 gap-3">

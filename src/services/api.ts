@@ -5347,6 +5347,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<CashFlowReport>(`/reports/cash-flow${q}`);
@@ -5359,6 +5360,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<CashFlowForecastReport>(`/reports/cash-flow-forecast${q}`);
@@ -5372,6 +5374,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<MoneyCategoryReport>(`/reports/categories${q}`);
@@ -5385,6 +5388,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<CounterpartyReport>(`/reports/counterparties${q}`);
@@ -5398,6 +5402,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<ProjectReport>(`/reports/projects${q}`);
@@ -5456,6 +5461,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    incomeTypeId?: number;
     asOf?: string;
     status?: string;
     responsibleUserId?: number;
@@ -5575,6 +5581,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<DirectionReport>(`/reports/directions${q}`);
@@ -5588,6 +5595,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<SalesPointReport>(`/reports/sales-points${q}`);
@@ -5601,6 +5609,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<VatReport>(`/reports/vat${q}`);
@@ -5614,6 +5623,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<PlanFactReport>(`/reports/plan-fact${q}`);
@@ -5627,6 +5637,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<AdvanceReport>(`/reports/advances${q}`);
@@ -5640,6 +5651,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<PaymentPriorityReport>(`/reports/payment-priorities${q}`);
@@ -5653,6 +5665,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<PaidAccountReport>(`/reports/paid-accounts${q}`);
@@ -5666,6 +5679,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<PaidInvoiceReport>(`/reports/paid-invoices${q}`);
@@ -5703,6 +5717,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<PaymentOrderReport>(`/reports/payment-orders${q}`);
@@ -5716,6 +5731,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<PaymentPurposeReport>(`/reports/payment-purposes${q}`);
@@ -5729,6 +5745,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<MatchStatusReport>(`/reports/match-statuses${q}`);
@@ -5742,6 +5759,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<JournalStatusReport>(`/reports/journal-statuses${q}`);
@@ -5755,6 +5773,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<CurrencyReport>(`/reports/currencies${q}`);

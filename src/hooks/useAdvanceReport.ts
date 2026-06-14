@@ -10,6 +10,7 @@ export interface AdvanceReportFilters {
   counterpartyName?: string;
   clientId?: number;
   caseId?: number;
+  incomeTypeId?: number;
 }
 
 export function useAdvanceReport(filters: AdvanceReportFilters) {
@@ -27,8 +28,9 @@ export function useAdvanceReport(filters: AdvanceReportFilters) {
       counterpartyName: filters.counterpartyName,
       clientId: filters.clientId,
       caseId: filters.caseId,
+      incomeTypeId: filters.incomeTypeId,
     }),
-    [filters.accountName, filters.caseId, filters.clientId, filters.counterpartyName, filters.from, filters.source, filters.to],
+    [filters.accountName, filters.caseId, filters.clientId, filters.incomeTypeId, filters.counterpartyName, filters.from, filters.source, filters.to],
   );
 
   const load = useCallback(async () => {
