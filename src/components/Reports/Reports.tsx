@@ -384,6 +384,90 @@ function exportCashFlowReport(report: CashFlowReport, timeZoneId?: string | null
   downloadCsv('cash-flow-report.csv', rows);
 }
 
+function exportCashReport(report: CashBookSummary, timeZoneId?: string | null) {
+  const rows: unknown[][] = [
+    ['Показатель', 'Значение'],
+    ['Период с', formatDate(report.from, timeZoneId)],
+    ['Период по', formatDate(report.to, timeZoneId)],
+    ['Касса', report.accountName ?? 'Все кассы'],
+    ['Остаток на начало', report.openingBalance],
+    ['Приход по кассе', report.income],
+    ['Расход по кассе', report.expense],
+    ['Остаток на конец', report.closingBalance],
+    ['ПКО за период', report.incomingCount],
+    ['РКО за период', report.outgoingCount],
+    [],
+    ['Дневное движение кассы'],
+    ['Дата', 'Остаток на начало', 'Приход', 'Расход', 'Остаток на конец', 'ПКО', 'РКО'],
+  ];
+
+  report.days.forEach((day) => {
+    rows.push([
+      formatDate(day.date, timeZoneId),
+      day.openingBalance,
+      day.income,
+      day.expense,
+      day.closingBalance,
+      day.incomingCount,
+      day.outgoingCount,
+    ]);
+  });
+
+  downloadCsv('cash-book-report.csv', rows);
+}
+
+function exportBankReport(report: CashFlowReport, timeZoneId?: string | null) {
+  const rows: unknown[][] = [
+    ['Показатель', 'Значение'],
+    ['Период с', formatDate(report.from, timeZoneId)],
+    ['Период по', formatDate(report.to, timeZoneId)],
+    ['Источник', 'Банк'],
+    ['Начальный остаток', report.openingBalance],
+    ['Поступления', report.income],
+    ['Списания', report.expense],
+    ['Чистый поток', report.netCashFlow],
+    ['Конечный остаток', report.closingBalance],
+    ['Фактические приходы', report.incomeCount],
+    ['Фактические расходы', report.expenseCount],
+    [],
+    ['Динамика по дням'],
+    ['Дата', 'Начальный остаток', 'Поступления', 'Списания', 'Чистый поток', 'Конечный остаток', 'Приходов', 'Расходов'],
+  ];
+
+  report.days.forEach((day) => {
+    rows.push([
+      formatDate(day.date, timeZoneId),
+      day.openingBalance,
+      day.income,
+      day.expense,
+      day.netCashFlow,
+      day.closingBalance,
+      day.incomeCount,
+      day.expenseCount,
+    ]);
+  });
+
+  rows.push(
+    [],
+    ['Расчетные счета'],
+    ['Счет', 'Начальный остаток', 'Поступления', 'Списания', 'Чистый поток', 'Конечный остаток', 'Приходов', 'Расходов'],
+  );
+  report.byAccount.forEach((account) => {
+    rows.push([
+      account.accountName,
+      account.openingBalance,
+      account.income,
+      account.expense,
+      account.netCashFlow,
+      account.closingBalance,
+      account.incomeCount,
+      account.expenseCount,
+    ]);
+  });
+
+  downloadCsv('bank-report.csv', rows);
+}
+
 function exportCategoryReport(report: MoneyCategoryReport, timeZoneId?: string | null) {
   const rows: unknown[][] = [
     ['Показатель', 'Значение'],
@@ -1393,11 +1477,15 @@ function CashReportSection({
   loading,
   error,
   onReload,
+  filters,
+  profileTimeZoneId,
 }: {
   report: CashBookSummary | null;
   loading: boolean;
   error: string | null;
   onReload: () => void;
+  filters?: ManagementReportExportFilters;
+  profileTimeZoneId?: string | null;
 }) {
   const recentDays = (report?.days ?? []).slice(-8);
 
@@ -1414,14 +1502,26 @@ function CashReportSection({
             Кассовая книга за выбранный период: остатки, приходные и расходные ордера, дневное закрытие кассы.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onReload}
-          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-        >
-          <RefreshCcw className="h-4 w-4" />
-          Обновить
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => report && exportCashReport(report, profileTimeZoneId)}
+            disabled={!report || loading}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            CSV
+          </button>
+          <ManagementReportExportButtons reportKind="cash" filters={filters} disabled={!report || loading} />
+          <button
+            type="button"
+            onClick={onReload}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            <RefreshCcw className="h-4 w-4" />
+            Обновить
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -1518,11 +1618,15 @@ function BankReportSection({
   loading,
   error,
   onReload,
+  filters,
+  profileTimeZoneId,
 }: {
   report: CashFlowReport | null;
   loading: boolean;
   error: string | null;
   onReload: () => void;
+  filters?: ManagementReportExportFilters;
+  profileTimeZoneId?: string | null;
 }) {
   const recentDays = (report?.days ?? []).slice(-8);
   const accounts = report?.byAccount ?? [];
@@ -1540,14 +1644,26 @@ function BankReportSection({
             Банковские фактические операции отдельно от других источников: остаток, поступления, списания и движение по расчетным счетам.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onReload}
-          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-        >
-          <RefreshCcw className="h-4 w-4" />
-          Обновить
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => report && exportBankReport(report, profileTimeZoneId)}
+            disabled={!report || loading}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            CSV
+          </button>
+          <ManagementReportExportButtons reportKind="bank" filters={filters} disabled={!report || loading} />
+          <button
+            type="button"
+            onClick={onReload}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            <RefreshCcw className="h-4 w-4" />
+            Обновить
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -2087,7 +2203,7 @@ function ProjectReportSection({
 
 type LegalWorkExportFormat = 'csv' | 'excel' | 'pdf';
 type ManagementReportExportFormat = 'excel' | 'pdf';
-type ManagementReportKind = 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast' | 'categories' | 'counterparties' | 'projects' | 'directions' | 'sales-points' | 'vat' | 'payment-orders' | 'payment-purposes' | 'match-statuses' | 'journal-statuses' | 'currencies' | 'cash-orders' | 'bank-statement-imports' | 'spreadsheet-imports';
+type ManagementReportKind = 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast' | 'cash' | 'bank' | 'categories' | 'counterparties' | 'projects' | 'directions' | 'sales-points' | 'vat' | 'payment-orders' | 'payment-purposes' | 'match-statuses' | 'journal-statuses' | 'currencies' | 'cash-orders' | 'bank-statement-imports' | 'spreadsheet-imports';
 type ReportCaseSection = 'tasks' | 'documents' | 'court' | 'workOrder';
 
 type LegalWorkReportFilters = {
@@ -7261,6 +7377,8 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={cashReportLoading}
               error={cashReportError}
               onReload={reloadCashReport}
+              filters={cashFlowDates}
+              profileTimeZoneId={profileTimeZoneId}
             />
 
             <BankReportSection
@@ -7268,6 +7386,8 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={bankReportLoading}
               error={bankReportError}
               onReload={reloadBankReport}
+              filters={cashFlowDates}
+              profileTimeZoneId={profileTimeZoneId}
             />
 
             <CategoryReportSection

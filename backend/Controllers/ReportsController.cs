@@ -485,6 +485,32 @@ public class ReportsController : ControllerBase
                     return (BuildCashFlowExportDocument(reportDto), null);
                 }
 
+            case "cash":
+                {
+                    var (start, end) = ResolveReportPeriod(from, to, reportToday);
+                    var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                        cancellationToken => BuildCashBookReportAsync(start, end, cancellationToken),
+                        _logger,
+                        ct);
+                    return (BuildCashBookExportDocument(reportDto), null);
+                }
+
+            case "bank":
+                {
+                    var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+                    if (paymentsVisibility is null)
+                    {
+                        return (null, Unauthorized());
+                    }
+
+                    var (start, end) = ResolveReportPeriod(from, to, reportToday);
+                    var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                        cancellationToken => BuildCashFlowReportAsync(start, end, MoneyOperationSource.Bank, null, paymentsVisibility, cancellationToken),
+                        _logger,
+                        ct);
+                    return (BuildBankExportDocument(reportDto), null);
+                }
+
             case "categories":
                 {
                     var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
@@ -2109,6 +2135,68 @@ public class ReportsController : ControllerBase
                     MoneyCell(source.ClosingBalance),
                     source.IncomeCount.ToString(CultureInfo.InvariantCulture),
                     source.ExpenseCount.ToString(CultureInfo.InvariantCulture),
+                ])).ToList()),
+            ]);
+
+    private static ReportExportDocument BuildCashBookExportDocument(CashBookResponseDto report)
+        => new(
+            "cash-book-report",
+            "Отчет по кассе",
+            $"Период: {DateCell(report.From)} - {DateCell(report.To)}{(string.IsNullOrWhiteSpace(report.AccountName) ? string.Empty : $" · Касса: {report.AccountName}")}",
+            [
+                new("Остаток на начало", MoneyCell(report.OpeningBalance)),
+                new("Приход по кассе", MoneyCell(report.Income)),
+                new("Расход по кассе", MoneyCell(report.Expense)),
+                new("Остаток на конец", MoneyCell(report.ClosingBalance)),
+                new("ПКО за период", report.IncomingCount.ToString(CultureInfo.InvariantCulture)),
+                new("РКО за период", report.OutgoingCount.ToString(CultureInfo.InvariantCulture)),
+            ],
+            [
+                new("Дневное движение кассы", ["Дата", "Остаток на начало", "Приход", "Расход", "Остаток на конец", "ПКО", "РКО"], report.Days.Select(day => new ReportExportRow([
+                    DateCell(day.Date),
+                    MoneyCell(day.OpeningBalance),
+                    MoneyCell(day.Income),
+                    MoneyCell(day.Expense),
+                    MoneyCell(day.ClosingBalance),
+                    day.IncomingCount.ToString(CultureInfo.InvariantCulture),
+                    day.OutgoingCount.ToString(CultureInfo.InvariantCulture),
+                ])).ToList()),
+            ]);
+
+    private static ReportExportDocument BuildBankExportDocument(CashFlowReportDto report)
+        => new(
+            "bank-report",
+            "Отчет по банку",
+            $"Период: {DateCell(report.From)} - {DateCell(report.To)} · Источник: Банк",
+            [
+                new("Начальный остаток", MoneyCell(report.OpeningBalance)),
+                new("Поступления", MoneyCell(report.Income)),
+                new("Списания", MoneyCell(report.Expense)),
+                new("Чистый поток", MoneyCell(report.NetCashFlow)),
+                new("Конечный остаток", MoneyCell(report.ClosingBalance)),
+                new("Фактические приходы", report.IncomeCount.ToString(CultureInfo.InvariantCulture)),
+                new("Фактические расходы", report.ExpenseCount.ToString(CultureInfo.InvariantCulture)),
+            ],
+            [
+                new("Динамика по дням", ["Дата", "Начальный остаток", "Поступления", "Списания", "Чистый поток", "Конечный остаток", "Приходов", "Расходов"], report.Days.Select(day => new ReportExportRow([
+                    DateCell(day.Date),
+                    MoneyCell(day.OpeningBalance),
+                    MoneyCell(day.Income),
+                    MoneyCell(day.Expense),
+                    MoneyCell(day.NetCashFlow),
+                    MoneyCell(day.ClosingBalance),
+                    day.IncomeCount.ToString(CultureInfo.InvariantCulture),
+                    day.ExpenseCount.ToString(CultureInfo.InvariantCulture),
+                ])).ToList()),
+                new("Расчетные счета", ["Счет", "Начальный остаток", "Поступления", "Списания", "Чистый поток", "Конечный остаток", "Приходов", "Расходов"], report.ByAccount.Select(account => new ReportExportRow([
+                    account.AccountName,
+                    MoneyCell(account.OpeningBalance),
+                    MoneyCell(account.Income),
+                    MoneyCell(account.Expense),
+                    MoneyCell(account.NetCashFlow),
+                    MoneyCell(account.ClosingBalance),
+                    account.IncomeCount.ToString(CultureInfo.InvariantCulture),
+                    account.ExpenseCount.ToString(CultureInfo.InvariantCulture),
                 ])).ToList()),
             ]);
 
@@ -6590,6 +6678,73 @@ public class ReportsController : ControllerBase
         => string.IsNullOrWhiteSpace(currency)
             ? "RUB"
             : currency.Trim().ToUpperInvariant();
+
+    private async Task<CashBookResponseDto> BuildCashBookReportAsync(
+        DateTime from,
+        DateTime to,
+        CancellationToken ct)
+    {
+        var postedOrders = _db.CashOrders
+            .AsNoTracking()
+            .Where(order => order.Status == CashOrderStatus.Posted);
+
+        var openingBalance = await postedOrders
+            .Where(order => order.Date < from)
+            .SumAsync(order => order.Type == CashOrderType.Incoming ? order.Amount : -order.Amount, ct);
+
+        var periodGroups = await postedOrders
+            .Where(order => order.Date >= from && order.Date <= to)
+            .GroupBy(order => order.Date.Date)
+            .Select(group => new
+            {
+                Date = group.Key,
+                Income = group.Where(order => order.Type == CashOrderType.Incoming).Sum(order => order.Amount),
+                Expense = group.Where(order => order.Type == CashOrderType.Outgoing).Sum(order => order.Amount),
+                IncomingCount = group.Count(order => order.Type == CashOrderType.Incoming),
+                OutgoingCount = group.Count(order => order.Type == CashOrderType.Outgoing),
+            })
+            .OrderBy(group => group.Date)
+            .ToListAsync(ct);
+        var periodGroupsByDate = periodGroups.ToDictionary(group => group.Date);
+
+        var runningBalance = openingBalance;
+        var days = new List<CashBookDayDto>((to - from).Days + 1);
+        for (var date = from; date <= to; date = date.AddDays(1))
+        {
+            periodGroupsByDate.TryGetValue(date, out var group);
+            var dayOpening = runningBalance;
+            var dayIncome = group?.Income ?? 0m;
+            var dayExpense = group?.Expense ?? 0m;
+            runningBalance += dayIncome - dayExpense;
+
+            days.Add(new CashBookDayDto
+            {
+                Date = date,
+                OpeningBalance = dayOpening,
+                Income = dayIncome,
+                Expense = dayExpense,
+                ClosingBalance = runningBalance,
+                IncomingCount = group?.IncomingCount ?? 0,
+                OutgoingCount = group?.OutgoingCount ?? 0,
+            });
+        }
+
+        var income = periodGroups.Sum(group => group.Income);
+        var expense = periodGroups.Sum(group => group.Expense);
+
+        return new CashBookResponseDto
+        {
+            From = from,
+            To = to,
+            OpeningBalance = openingBalance,
+            Income = income,
+            Expense = expense,
+            ClosingBalance = openingBalance + income - expense,
+            IncomingCount = periodGroups.Sum(group => group.IncomingCount),
+            OutgoingCount = periodGroups.Sum(group => group.OutgoingCount),
+            Days = days,
+        };
+    }
 
     private async Task<CashOrderReportDto> BuildCashOrderReportAsync(
         DateTime from,

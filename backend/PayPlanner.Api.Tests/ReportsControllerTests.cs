@@ -264,6 +264,8 @@ public class ReportsControllerTests
         {
             "case-finance",
             "cash-flow",
+            "cash",
+            "bank",
             "categories",
             "counterparties",
             "projects",
