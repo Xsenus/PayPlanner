@@ -5347,6 +5347,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    contractId?: number;
     incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
@@ -5360,6 +5361,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    contractId?: number;
     incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
@@ -5374,6 +5376,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    contractId?: number;
     incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
@@ -5388,6 +5391,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    contractId?: number;
     incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
@@ -5402,6 +5406,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    contractId?: number;
     incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
@@ -5461,6 +5466,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    contractId?: number;
     incomeTypeId?: number;
     asOf?: string;
     status?: string;
@@ -5581,6 +5587,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    contractId?: number;
     incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
@@ -5595,6 +5602,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    contractId?: number;
     incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
@@ -5609,6 +5617,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    contractId?: number;
     incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
@@ -5623,6 +5632,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    contractId?: number;
     incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
@@ -5637,6 +5647,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    contractId?: number;
     incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
@@ -5651,6 +5662,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    contractId?: number;
     incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
@@ -5665,6 +5677,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    contractId?: number;
     incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
@@ -5679,6 +5692,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    contractId?: number;
     incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
@@ -5717,6 +5731,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    contractId?: number;
     incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
@@ -5731,6 +5746,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    contractId?: number;
     incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
@@ -5745,6 +5761,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    contractId?: number;
     incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
@@ -5759,6 +5776,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    contractId?: number;
     incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
@@ -5773,6 +5791,7 @@ export class ApiService {
     counterpartyName?: string;
     clientId?: number;
     caseId?: number;
+    contractId?: number;
     incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});

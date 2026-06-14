@@ -10,6 +10,7 @@ export interface VatReportFilters {
   counterpartyName?: string;
   clientId?: number;
   caseId?: number;
+  contractId?: number;
   incomeTypeId?: number;
 }
 
@@ -28,9 +29,10 @@ export function useVatReport(filters: VatReportFilters) {
       counterpartyName: filters.counterpartyName,
       clientId: filters.clientId,
       caseId: filters.caseId,
+      contractId: filters.contractId,
       incomeTypeId: filters.incomeTypeId,
     }),
-    [filters.accountName, filters.caseId, filters.clientId, filters.incomeTypeId, filters.counterpartyName, filters.from, filters.source, filters.to],
+    [filters.accountName, filters.caseId, filters.clientId, filters.contractId, filters.incomeTypeId, filters.counterpartyName, filters.from, filters.source, filters.to],
   );
 
   const load = useCallback(async () => {
