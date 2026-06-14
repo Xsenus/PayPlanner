@@ -7,6 +7,7 @@ export interface SalesPointReportFilters {
   to?: string;
   source?: MoneyOperationSource;
   accountName?: string;
+  counterpartyName?: string;
 }
 
 export function useSalesPointReport(filters: SalesPointReportFilters) {
@@ -21,8 +22,9 @@ export function useSalesPointReport(filters: SalesPointReportFilters) {
       to: filters.to,
       source: filters.source,
       accountName: filters.accountName,
+      counterpartyName: filters.counterpartyName,
     }),
-    [filters.accountName, filters.from, filters.source, filters.to],
+    [filters.accountName, filters.counterpartyName, filters.from, filters.source, filters.to],
   );
 
   const load = useCallback(async () => {

@@ -7,6 +7,7 @@ export interface PlanFactReportFilters {
   to?: string;
   source?: MoneyOperationSource;
   accountName?: string;
+  counterpartyName?: string;
 }
 
 export function usePlanFactReport(filters: PlanFactReportFilters) {
@@ -21,8 +22,9 @@ export function usePlanFactReport(filters: PlanFactReportFilters) {
       to: filters.to,
       source: filters.source,
       accountName: filters.accountName,
+      counterpartyName: filters.counterpartyName,
     }),
-    [filters.accountName, filters.from, filters.source, filters.to],
+    [filters.accountName, filters.counterpartyName, filters.from, filters.source, filters.to],
   );
 
   const load = useCallback(async () => {

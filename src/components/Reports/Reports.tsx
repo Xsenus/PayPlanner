@@ -2501,6 +2501,7 @@ type ManagementReportExportFilters = {
   to?: string;
   source?: MoneyOperationSource;
   accountName?: string;
+  counterpartyName?: string;
   asOf?: string;
   status?: string;
   responsibleUserId?: number;
@@ -7221,6 +7222,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
   const [taskReportScope, setTaskReportScope] = useState<TaskReportScope>('open');
   const [moneySource, setMoneySource] = useState<'all' | MoneyOperationSource>('all');
   const [moneyAccountName, setMoneyAccountName] = useState('');
+  const [counterpartyName, setCounterpartyName] = useState('');
   const [moneyAccounts, setMoneyAccounts] = useState<MoneyAccount[]>([]);
   const [moneyAccountsError, setMoneyAccountsError] = useState<string | null>(null);
 
@@ -7236,6 +7238,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
   );
   const selectedMoneySource = moneySource === 'all' ? undefined : moneySource;
   const selectedMoneyAccountName = moneyAccountName.trim() || undefined;
+  const selectedCounterpartyName = counterpartyName.trim() || undefined;
   const visibleMoneyAccounts = useMemo(
     () =>
       moneyAccounts
@@ -7248,15 +7251,17 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
       ...cashFlowDates,
       ...(selectedMoneySource ? { source: selectedMoneySource } : {}),
       ...(selectedMoneyAccountName ? { accountName: selectedMoneyAccountName } : {}),
+      ...(selectedCounterpartyName ? { counterpartyName: selectedCounterpartyName } : {}),
     }),
-    [cashFlowDates, selectedMoneyAccountName, selectedMoneySource],
+    [cashFlowDates, selectedCounterpartyName, selectedMoneyAccountName, selectedMoneySource],
   );
   const moneyAccountReportFilters = useMemo(
     () => ({
       ...cashFlowDates,
       ...(selectedMoneyAccountName ? { accountName: selectedMoneyAccountName } : {}),
+      ...(selectedCounterpartyName ? { counterpartyName: selectedCounterpartyName } : {}),
     }),
-    [cashFlowDates, selectedMoneyAccountName],
+    [cashFlowDates, selectedCounterpartyName, selectedMoneyAccountName],
   );
   const casePeriodReportFilters = useMemo(
     () => ({ ...cashFlowDates, limit: 100 }),
@@ -7674,6 +7679,22 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
                 {moneyAccountsError ? (
                   <div className="mt-2 text-xs text-rose-600">{moneyAccountsError}</div>
                 ) : null}
+              </div>
+              <div className="mt-4">
+                <label
+                  className="text-xs font-semibold uppercase tracking-wide text-slate-500"
+                  htmlFor="reports-counterparty"
+                >
+                  Контрагент
+                </label>
+                <input
+                  id="reports-counterparty"
+                  type="search"
+                  value={counterpartyName}
+                  onChange={(event) => setCounterpartyName(event.target.value)}
+                  placeholder="Название или часть названия"
+                  className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+                />
               </div>
               <div className="mt-5 grid grid-cols-2 gap-3">
                 <div className="rounded-2xl bg-white p-4 shadow-sm">

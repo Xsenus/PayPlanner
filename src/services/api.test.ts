@@ -1278,6 +1278,7 @@ describe('apiService reports', () => {
       from: '2026-05-01',
       to: '2026-05-31',
       source: 'Bank',
+      counterpartyName: 'ООО Ромашка',
     });
 
     expect(result).toEqual(payload);
@@ -1287,6 +1288,7 @@ describe('apiService reports', () => {
     expect(String(url)).toContain('from=2026-05-01');
     expect(String(url)).toContain('to=2026-05-31');
     expect(String(url)).toContain('source=Bank');
+    expect(String(url)).toContain('counterpartyName=%D0%9E%D0%9E%D0%9E+%D0%A0%D0%BE%D0%BC%D0%B0%D1%88%D0%BA%D0%B0');
   });
 
   it('loads project report with filters', async () => {
@@ -1372,6 +1374,7 @@ describe('apiService reports', () => {
       to: '2026-05-31',
       source: 'Card',
       accountName: 'Основная карта',
+      counterpartyName: 'ООО Ромашка',
       responsibleUserId: 7,
       limit: 100,
     });
@@ -1386,6 +1389,7 @@ describe('apiService reports', () => {
     expect(String(url)).toContain('to=2026-05-31');
     expect(String(url)).toContain('source=Card');
     expect(String(url)).toContain('accountName=%D0%9E%D1%81%D0%BD%D0%BE%D0%B2%D0%BD%D0%B0%D1%8F+%D0%BA%D0%B0%D1%80%D1%82%D0%B0');
+    expect(String(url)).toContain('counterpartyName=%D0%9E%D0%9E%D0%9E+%D0%A0%D0%BE%D0%BC%D0%B0%D1%88%D0%BA%D0%B0');
     expect(String(url)).toContain('responsibleUserId=7');
     expect(String(url)).toContain('limit=100');
   });
