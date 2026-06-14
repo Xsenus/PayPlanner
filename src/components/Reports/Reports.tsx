@@ -802,6 +802,46 @@ function exportBankStatementImportReport(report: BankStatementImportReport, time
   downloadCsv('bank-statement-import-report.csv', rows);
 }
 
+function exportSpreadsheetImportReport(report: SpreadsheetImportReport, timeZoneId?: string | null) {
+  const rows: unknown[][] = [
+    ['Показатель', 'Значение'],
+    ['Период с', formatDate(report.from, timeZoneId)],
+    ['Период по', formatDate(report.to, timeZoneId)],
+    ['Пакетов', report.batchCount],
+    ['Файлов', report.fileCount],
+    ['Строк', report.totalRows],
+    ['Создано', report.createdRows],
+    ['Обновлено', report.updatedRows],
+    ['Пропущено', report.skippedRows],
+    ['Ошибок', report.errorRows],
+    ['Строк отката', report.rollbackRows],
+    ['Применено', report.appliedCount],
+    ['Применено с ошибками', report.appliedWithErrorsCount],
+    ['Откатано', report.rolledBackCount],
+    ['Откатано с конфликтами', report.rolledBackWithConflictsCount],
+    [],
+    ['Статусы импортов'],
+    ['Статус', 'Пакетов', 'Файлов', 'Строк', 'Создано', 'Обновлено', 'Пропущено', 'Ошибки', 'Откатано строк', 'Доля пакетов'],
+  ];
+
+  report.statuses.forEach((item) => {
+    rows.push([
+      item.statusLabel,
+      item.batchCount,
+      item.fileCount,
+      item.totalRows,
+      item.createdRows,
+      item.updatedRows,
+      item.skippedRows,
+      item.errorRows,
+      item.rollbackRows,
+      `${item.share}%`,
+    ]);
+  });
+
+  downloadCsv('spreadsheet-import-report.csv', rows);
+}
+
 function exportCashFlowForecastReport(report: CashFlowForecastReport, timeZoneId?: string | null) {
   const rows: unknown[][] = [
     ['Показатель', 'Значение'],
@@ -2047,7 +2087,7 @@ function ProjectReportSection({
 
 type LegalWorkExportFormat = 'csv' | 'excel' | 'pdf';
 type ManagementReportExportFormat = 'excel' | 'pdf';
-type ManagementReportKind = 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast' | 'categories' | 'counterparties' | 'projects' | 'directions' | 'sales-points' | 'vat' | 'payment-orders' | 'payment-purposes' | 'match-statuses' | 'journal-statuses' | 'currencies' | 'cash-orders' | 'bank-statement-imports';
+type ManagementReportKind = 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast' | 'categories' | 'counterparties' | 'projects' | 'directions' | 'sales-points' | 'vat' | 'payment-orders' | 'payment-purposes' | 'match-statuses' | 'journal-statuses' | 'currencies' | 'cash-orders' | 'bank-statement-imports' | 'spreadsheet-imports';
 type ReportCaseSection = 'tasks' | 'documents' | 'court' | 'workOrder';
 
 type LegalWorkReportFilters = {
@@ -6497,11 +6537,15 @@ function SpreadsheetImportReportSection({
   loading,
   error,
   onReload,
+  filters,
+  profileTimeZoneId,
 }: {
   report: SpreadsheetImportReport | null;
   loading: boolean;
   error: string | null;
   onReload: () => void;
+  filters?: ManagementReportExportFilters;
+  profileTimeZoneId?: string | null;
 }) {
   const rows = report?.statuses ?? [];
 
@@ -6518,14 +6562,26 @@ function SpreadsheetImportReportSection({
             Сводка Excel/XML/ZIP-загрузок: пакеты, файлы, строки, изменения, ошибки и откаты.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onReload}
-          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-        >
-          <RefreshCcw className="h-4 w-4" />
-          Обновить
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => report && exportSpreadsheetImportReport(report, profileTimeZoneId)}
+            disabled={!report || loading}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            CSV
+          </button>
+          <ManagementReportExportButtons reportKind="spreadsheet-imports" filters={filters} disabled={!report || loading} />
+          <button
+            type="button"
+            onClick={onReload}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            <RefreshCcw className="h-4 w-4" />
+            Обновить
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -7489,6 +7545,8 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={spreadsheetImportReportLoading}
               error={spreadsheetImportReportError}
               onReload={reloadSpreadsheetImportReport}
+              filters={cashFlowDates}
+              profileTimeZoneId={profileTimeZoneId}
             />
               </>
             ) : null}

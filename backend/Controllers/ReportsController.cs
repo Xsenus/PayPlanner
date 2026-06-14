@@ -681,6 +681,16 @@ public class ReportsController : ControllerBase
                     return (BuildBankStatementImportExportDocument(reportDto), null);
                 }
 
+            case "spreadsheet-imports":
+                {
+                    var (start, end) = ResolveReportPeriod(from, to, reportToday);
+                    var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                        cancellationToken => BuildSpreadsheetImportReportAsync(start, end, timeZone, cancellationToken),
+                        _logger,
+                        ct);
+                    return (BuildSpreadsheetImportExportDocument(reportDto), null);
+                }
+
             case "case-success":
                 {
                     var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
@@ -2431,6 +2441,40 @@ public class ReportsController : ControllerBase
                     item.BatchCount.ToString(CultureInfo.InvariantCulture),
                     item.RowsRead.ToString(CultureInfo.InvariantCulture),
                     item.CreatedRows.ToString(CultureInfo.InvariantCulture),
+                    item.SkippedRows.ToString(CultureInfo.InvariantCulture),
+                    item.ErrorRows.ToString(CultureInfo.InvariantCulture),
+                    item.RollbackRows.ToString(CultureInfo.InvariantCulture),
+                    PercentCell(item.Share),
+                ])).ToList()),
+            ]);
+
+    private static ReportExportDocument BuildSpreadsheetImportExportDocument(SpreadsheetImportReportDto report)
+        => new(
+            "spreadsheet-import-report",
+            "Отчет по импортам из таблиц",
+            $"Период: {DateCell(report.From)} - {DateCell(report.To)}",
+            [
+                new("Пакетов", report.BatchCount.ToString(CultureInfo.InvariantCulture)),
+                new("Файлов", report.FileCount.ToString(CultureInfo.InvariantCulture)),
+                new("Строк", report.TotalRows.ToString(CultureInfo.InvariantCulture)),
+                new("Создано", report.CreatedRows.ToString(CultureInfo.InvariantCulture)),
+                new("Обновлено", report.UpdatedRows.ToString(CultureInfo.InvariantCulture)),
+                new("Пропущено", report.SkippedRows.ToString(CultureInfo.InvariantCulture)),
+                new("Ошибок", report.ErrorRows.ToString(CultureInfo.InvariantCulture)),
+                new("Строк отката", report.RollbackRows.ToString(CultureInfo.InvariantCulture)),
+                new("Применено", report.AppliedCount.ToString(CultureInfo.InvariantCulture)),
+                new("Применено с ошибками", report.AppliedWithErrorsCount.ToString(CultureInfo.InvariantCulture)),
+                new("Откатано", report.RolledBackCount.ToString(CultureInfo.InvariantCulture)),
+                new("Откатано с конфликтами", report.RolledBackWithConflictsCount.ToString(CultureInfo.InvariantCulture)),
+            ],
+            [
+                new("Статусы импортов", ["Статус", "Пакетов", "Файлов", "Строк", "Создано", "Обновлено", "Пропущено", "Ошибки", "Откатано строк", "Доля пакетов"], report.Statuses.Select(item => new ReportExportRow([
+                    item.StatusLabel,
+                    item.BatchCount.ToString(CultureInfo.InvariantCulture),
+                    item.FileCount.ToString(CultureInfo.InvariantCulture),
+                    item.TotalRows.ToString(CultureInfo.InvariantCulture),
+                    item.CreatedRows.ToString(CultureInfo.InvariantCulture),
+                    item.UpdatedRows.ToString(CultureInfo.InvariantCulture),
                     item.SkippedRows.ToString(CultureInfo.InvariantCulture),
                     item.ErrorRows.ToString(CultureInfo.InvariantCulture),
                     item.RollbackRows.ToString(CultureInfo.InvariantCulture),

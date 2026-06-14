@@ -277,6 +277,7 @@ public class ReportsControllerTests
             "currencies",
             "cash-orders",
             "bank-statement-imports",
+            "spreadsheet-imports",
             "case-success",
             "current-cases",
             "lawyer-workload",
