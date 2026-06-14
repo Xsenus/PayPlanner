@@ -661,6 +661,16 @@ public class ReportsController : ControllerBase
                     return (BuildCurrencyExportDocument(reportDto), null);
                 }
 
+            case "cash-orders":
+                {
+                    var (start, end) = ResolveReportPeriod(from, to, reportToday);
+                    var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                        cancellationToken => BuildCashOrderReportAsync(start, end, cancellationToken),
+                        _logger,
+                        ct);
+                    return (BuildCashOrderExportDocument(reportDto), null);
+                }
+
             case "case-success":
                 {
                     var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
@@ -2356,6 +2366,34 @@ public class ReportsController : ControllerBase
                     MoneyCell(item.TotalAmount),
                     item.IncomeCount.ToString(CultureInfo.InvariantCulture),
                     item.ExpenseCount.ToString(CultureInfo.InvariantCulture),
+                    PercentCell(item.Share),
+                ])).ToList()),
+            ]);
+
+    private static ReportExportDocument BuildCashOrderExportDocument(CashOrderReportDto report)
+        => new(
+            "cash-order-report",
+            "Отчет по кассовым ордерам",
+            $"Период: {DateCell(report.From)} - {DateCell(report.To)}",
+            [
+                new("Приход проведен", MoneyCell(report.PostedIncomingTotal)),
+                new("Расход проведен", MoneyCell(report.PostedOutgoingTotal)),
+                new("Итог проведенных ордеров", MoneyCell(report.PostedNetTotal)),
+                new("Всего ордеров", report.OrderCount.ToString(CultureInfo.InvariantCulture)),
+                new("Черновиков", report.DraftCount.ToString(CultureInfo.InvariantCulture)),
+                new("Проведено", report.PostedCount.ToString(CultureInfo.InvariantCulture)),
+                new("Отменено", report.CancelledCount.ToString(CultureInfo.InvariantCulture)),
+            ],
+            [
+                new("Статусы кассовых ордеров", ["Статус", "Приход", "Расход", "Итог", "Оборот", "Ордеров", "ПКО", "РКО", "Доля оборота"], report.Statuses.Select(item => new ReportExportRow([
+                    item.StatusLabel,
+                    MoneyCell(item.IncomingTotal),
+                    MoneyCell(item.OutgoingTotal),
+                    MoneyCell(item.NetTotal),
+                    MoneyCell(item.TotalAmount),
+                    item.OrderCount.ToString(CultureInfo.InvariantCulture),
+                    item.IncomingCount.ToString(CultureInfo.InvariantCulture),
+                    item.OutgoingCount.ToString(CultureInfo.InvariantCulture),
                     PercentCell(item.Share),
                 ])).ToList()),
             ]);

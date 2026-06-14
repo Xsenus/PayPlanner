@@ -275,6 +275,7 @@ public class ReportsControllerTests
             "match-statuses",
             "journal-statuses",
             "currencies",
+            "cash-orders",
             "case-success",
             "current-cases",
             "lawyer-workload",
