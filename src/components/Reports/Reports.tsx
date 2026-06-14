@@ -571,6 +571,177 @@ function exportPaymentPriorityReport(report: PaymentPriorityReport, timeZoneId?:
   downloadCsv('payment-priority-report.csv', rows);
 }
 
+function exportPaidAccountReport(report: PaidAccountReport, timeZoneId?: string | null) {
+  const rows: unknown[][] = [
+    ['Показатель', 'Значение'],
+    ['Период с', formatDate(report.from, timeZoneId)],
+    ['Период по', formatDate(report.to, timeZoneId)],
+    ['Источник', report.source ? sourceLabel(report.source) : 'Все источники'],
+    ['Поступило', report.incomeTotal],
+    ['Списано', report.expenseTotal],
+    ['Итог', report.netTotal],
+    ['Счетов оплаты', report.accounts.length],
+    [],
+    ['Счета оплаты'],
+    ['Счет оплаты', 'Поступления', 'Списания', 'Итог', 'Оборот', 'Приходов', 'Расходов', 'Доля оборота'],
+  ];
+
+  report.accounts.forEach((item) => {
+    rows.push([
+      item.paidAccountName,
+      item.income,
+      item.expense,
+      item.netTotal,
+      item.totalAmount,
+      item.incomeCount,
+      item.expenseCount,
+      `${item.share}%`,
+    ]);
+  });
+
+  downloadCsv('paid-account-report.csv', rows);
+}
+
+function exportPaidInvoiceReport(report: PaidInvoiceReport, timeZoneId?: string | null) {
+  const rows: unknown[][] = [
+    ['Показатель', 'Значение'],
+    ['Период с', formatDate(report.from, timeZoneId)],
+    ['Период по', formatDate(report.to, timeZoneId)],
+    ['Источник', report.source ? sourceLabel(report.source) : 'Все источники'],
+    ['Поступило', report.incomeTotal],
+    ['Списано', report.expenseTotal],
+    ['Итог', report.netTotal],
+    ['Оплачено по счетам', report.paidAmountTotal],
+    ['Счетов', report.invoices.length],
+    [],
+    ['Оплаченные счета'],
+    ['Счет', 'Поступления', 'Списания', 'Итог', 'Оборот операций', 'Оплачено', 'Приходов', 'Расходов', 'Доля оборота'],
+  ];
+
+  report.invoices.forEach((item) => {
+    rows.push([
+      item.paidInvoiceNumber,
+      item.income,
+      item.expense,
+      item.netTotal,
+      item.operationTotal,
+      item.paidAmountTotal,
+      item.incomeCount,
+      item.expenseCount,
+      `${item.share}%`,
+    ]);
+  });
+
+  downloadCsv('paid-invoice-report.csv', rows);
+}
+
+function exportInvoiceStatusReport(report: InvoiceStatusReport, timeZoneId?: string | null) {
+  const rows: unknown[][] = [
+    ['Показатель', 'Значение'],
+    ['Период с', formatDate(report.from, timeZoneId)],
+    ['Период по', formatDate(report.to, timeZoneId)],
+    ['Счетов', report.invoiceCount],
+    ['Входящих', report.incomeCount],
+    ['Исходящих', report.expenseCount],
+    ['Оплачено счетов', report.paidCount],
+    ['Просрочено счетов', report.overdueCount],
+    ['Сумма счетов', report.totalAmount],
+    ['Оплачено', report.paidAmount],
+    ['Остаток', report.outstandingAmount],
+    [],
+    ['Статусы счетов'],
+    ['Статус', 'Счетов', 'Входящих', 'Исходящих', 'Оплачено счетов', 'Просрочено', 'Сумма', 'Оплачено', 'Остаток', 'Доля'],
+  ];
+
+  report.statuses.forEach((item) => {
+    rows.push([
+      item.statusLabel,
+      item.invoiceCount,
+      item.incomeCount,
+      item.expenseCount,
+      item.paidCount,
+      item.overdueCount,
+      item.totalAmount,
+      item.paidAmount,
+      item.outstandingAmount,
+      `${item.share}%`,
+    ]);
+  });
+
+  downloadCsv('invoice-status-report.csv', rows);
+}
+
+function exportActStatusReport(report: ActStatusReport, timeZoneId?: string | null) {
+  const rows: unknown[][] = [
+    ['Показатель', 'Значение'],
+    ['Период с', formatDate(report.from, timeZoneId)],
+    ['Период по', formatDate(report.to, timeZoneId)],
+    ['Актов', report.actCount],
+    ['Создано', report.createdCount],
+    ['Передано', report.transferredCount],
+    ['Подписано', report.signedCount],
+    ['Расторгнуто', report.terminatedCount],
+    ['Сумма актов', report.totalAmount],
+    ['Подписано на сумму', report.signedAmount],
+    ['В работе', report.pendingAmount],
+    [],
+    ['Статусы актов'],
+    ['Статус', 'Актов', 'Создано', 'Передано', 'Подписано', 'Расторгнуто', 'Сумма', 'Подписано на сумму', 'В работе', 'Доля'],
+  ];
+
+  report.statuses.forEach((item) => {
+    rows.push([
+      item.workflowStatusLabel,
+      item.actCount,
+      item.createdCount,
+      item.transferredCount,
+      item.signedCount,
+      item.terminatedCount,
+      item.totalAmount,
+      item.signedAmount,
+      item.pendingAmount,
+      `${item.share}%`,
+    ]);
+  });
+
+  downloadCsv('act-status-report.csv', rows);
+}
+
+function exportContractStatusReport(report: ContractStatusReport, timeZoneId?: string | null) {
+  const rows: unknown[][] = [
+    ['Показатель', 'Значение'],
+    ['Период с', formatDate(report.from, timeZoneId)],
+    ['Период по', formatDate(report.to, timeZoneId)],
+    ['Договоров', report.contractCount],
+    ['Черновиков', report.draftCount],
+    ['Не подписано', report.notSignedCount],
+    ['На подписании', report.onSigningCount],
+    ['Подписано', report.concludedCount],
+    ['Расторгнуто', report.terminatedCount],
+    ['Аннулировано', report.cancelledCount],
+    ['Бессрочно', report.openEndedCount],
+    ['Сумма договоров', report.totalAmount],
+    ['Активно', report.activeAmount],
+    ['Закрыто', report.closedAmount],
+    [],
+    ['Статусы договоров'],
+    ['Статус', 'Договоров', 'Бессрочно', 'Истекает в периоде', 'Сумма', 'Доля'],
+  ];
+
+  report.statuses.forEach((item) => {
+    rows.push([
+      item.statusLabel,
+      item.contractCount,
+      item.openEndedCount,
+      item.expiringCount,
+      item.totalAmount,
+      `${item.share}%`,
+    ]);
+  });
+
+  downloadCsv('contract-status-report.csv', rows);
+}
+
 function exportCategoryReport(report: MoneyCategoryReport, timeZoneId?: string | null) {
   const rows: unknown[][] = [
     ['Показатель', 'Значение'],
@@ -2306,7 +2477,7 @@ function ProjectReportSection({
 
 type LegalWorkExportFormat = 'csv' | 'excel' | 'pdf';
 type ManagementReportExportFormat = 'excel' | 'pdf';
-type ManagementReportKind = 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast' | 'cash' | 'bank' | 'plan-fact' | 'advances' | 'payment-priorities' | 'categories' | 'counterparties' | 'projects' | 'directions' | 'sales-points' | 'vat' | 'payment-orders' | 'payment-purposes' | 'match-statuses' | 'journal-statuses' | 'currencies' | 'cash-orders' | 'bank-statement-imports' | 'spreadsheet-imports';
+type ManagementReportKind = 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast' | 'cash' | 'bank' | 'plan-fact' | 'advances' | 'payment-priorities' | 'paid-accounts' | 'paid-invoices' | 'invoice-statuses' | 'act-statuses' | 'contract-statuses' | 'categories' | 'counterparties' | 'projects' | 'directions' | 'sales-points' | 'vat' | 'payment-orders' | 'payment-purposes' | 'match-statuses' | 'journal-statuses' | 'currencies' | 'cash-orders' | 'bank-statement-imports' | 'spreadsheet-imports';
 type ReportCaseSection = 'tasks' | 'documents' | 'court' | 'workOrder';
 
 type LegalWorkReportFilters = {
@@ -5213,11 +5384,15 @@ function PaidAccountReportSection({
   loading,
   error,
   onReload,
+  filters,
+  profileTimeZoneId,
 }: {
   report: PaidAccountReport | null;
   loading: boolean;
   error: string | null;
   onReload: () => void;
+  filters?: ManagementReportExportFilters;
+  profileTimeZoneId?: string | null;
 }) {
   const rows = (report?.accounts ?? []).slice(0, 10);
 
@@ -5234,14 +5409,26 @@ function PaidAccountReportSection({
             Фактические платежи по указанным счетам оплаты: какие счета дают основной оборот, приход и расход.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onReload}
-          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-        >
-          <RefreshCcw className="h-4 w-4" />
-          Обновить
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => report && exportPaidAccountReport(report, profileTimeZoneId)}
+            disabled={!report || loading}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            CSV
+          </button>
+          <ManagementReportExportButtons reportKind="paid-accounts" filters={filters} disabled={!report || loading} />
+          <button
+            type="button"
+            onClick={onReload}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            <RefreshCcw className="h-4 w-4" />
+            Обновить
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -5337,11 +5524,15 @@ function PaidInvoiceReportSection({
   loading,
   error,
   onReload,
+  filters,
+  profileTimeZoneId,
 }: {
   report: PaidInvoiceReport | null;
   loading: boolean;
   error: string | null;
   onReload: () => void;
+  filters?: ManagementReportExportFilters;
+  profileTimeZoneId?: string | null;
 }) {
   const rows = (report?.invoices ?? []).slice(0, 10);
 
@@ -5358,14 +5549,26 @@ function PaidInvoiceReportSection({
             Фактические операции, сгруппированные по номеру оплаченного счета, с отдельным итогом по сумме оплаты.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onReload}
-          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-        >
-          <RefreshCcw className="h-4 w-4" />
-          Обновить
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => report && exportPaidInvoiceReport(report, profileTimeZoneId)}
+            disabled={!report || loading}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            CSV
+          </button>
+          <ManagementReportExportButtons reportKind="paid-invoices" filters={filters} disabled={!report || loading} />
+          <button
+            type="button"
+            onClick={onReload}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            <RefreshCcw className="h-4 w-4" />
+            Обновить
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -5458,11 +5661,15 @@ function InvoiceStatusReportSection({
   loading,
   error,
   onReload,
+  filters,
+  profileTimeZoneId,
 }: {
   report: InvoiceStatusReport | null;
   loading: boolean;
   error: string | null;
   onReload: () => void;
+  filters?: ManagementReportExportFilters;
+  profileTimeZoneId?: string | null;
 }) {
   const rows = report?.statuses ?? [];
 
@@ -5479,14 +5686,26 @@ function InvoiceStatusReportSection({
             Сводка счетов по этапам документооборота: сумма, оплачено, остаток, просрочка и распределение входящих и исходящих счетов.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onReload}
-          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-        >
-          <RefreshCcw className="h-4 w-4" />
-          Обновить
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => report && exportInvoiceStatusReport(report, profileTimeZoneId)}
+            disabled={!report || loading}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            CSV
+          </button>
+          <ManagementReportExportButtons reportKind="invoice-statuses" filters={filters} disabled={!report || loading} />
+          <button
+            type="button"
+            onClick={onReload}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            <RefreshCcw className="h-4 w-4" />
+            Обновить
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -5589,11 +5808,15 @@ function ActStatusReportSection({
   loading,
   error,
   onReload,
+  filters,
+  profileTimeZoneId,
 }: {
   report: ActStatusReport | null;
   loading: boolean;
   error: string | null;
   onReload: () => void;
+  filters?: ManagementReportExportFilters;
+  profileTimeZoneId?: string | null;
 }) {
   const rows = report?.statuses ?? [];
 
@@ -5610,14 +5833,26 @@ function ActStatusReportSection({
             Контроль актов по этапам подписания: создано, передано, подписано, отменено и сумма в каждом статусе.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onReload}
-          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-        >
-          <RefreshCcw className="h-4 w-4" />
-          Обновить
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => report && exportActStatusReport(report, profileTimeZoneId)}
+            disabled={!report || loading}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            CSV
+          </button>
+          <ManagementReportExportButtons reportKind="act-statuses" filters={filters} disabled={!report || loading} />
+          <button
+            type="button"
+            onClick={onReload}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            <RefreshCcw className="h-4 w-4" />
+            Обновить
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -5720,11 +5955,15 @@ function ContractStatusReportSection({
   loading,
   error,
   onReload,
+  filters,
+  profileTimeZoneId,
 }: {
   report: ContractStatusReport | null;
   loading: boolean;
   error: string | null;
   onReload: () => void;
+  filters?: ManagementReportExportFilters;
+  profileTimeZoneId?: string | null;
 }) {
   const rows = report?.statuses ?? [];
 
@@ -5741,14 +5980,26 @@ function ContractStatusReportSection({
             Сводка договоров по этапам: черновики, не подписанные, на подписании, подписанные, расторгнутые и аннулированные договоры.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onReload}
-          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-        >
-          <RefreshCcw className="h-4 w-4" />
-          Обновить
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => report && exportContractStatusReport(report, profileTimeZoneId)}
+            disabled={!report || loading}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            CSV
+          </button>
+          <ManagementReportExportButtons reportKind="contract-statuses" filters={filters} disabled={!report || loading} />
+          <button
+            type="button"
+            onClick={onReload}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            <RefreshCcw className="h-4 w-4" />
+            Обновить
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -7724,6 +7975,8 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={paidAccountReportLoading}
               error={paidAccountReportError}
               onReload={reloadPaidAccountReport}
+              filters={cashFlowDates}
+              profileTimeZoneId={profileTimeZoneId}
             />
 
             <PaidInvoiceReportSection
@@ -7731,6 +7984,8 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={paidInvoiceReportLoading}
               error={paidInvoiceReportError}
               onReload={reloadPaidInvoiceReport}
+              filters={cashFlowDates}
+              profileTimeZoneId={profileTimeZoneId}
             />
 
             <InvoiceStatusReportSection
@@ -7738,6 +7993,8 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={invoiceStatusReportLoading}
               error={invoiceStatusReportError}
               onReload={reloadInvoiceStatusReport}
+              filters={cashFlowDates}
+              profileTimeZoneId={profileTimeZoneId}
             />
 
             <ActStatusReportSection
@@ -7745,6 +8002,8 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={actStatusReportLoading}
               error={actStatusReportError}
               onReload={reloadActStatusReport}
+              filters={cashFlowDates}
+              profileTimeZoneId={profileTimeZoneId}
             />
 
             <ContractStatusReportSection
@@ -7752,6 +8011,8 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={contractStatusReportLoading}
               error={contractStatusReportError}
               onReload={reloadContractStatusReport}
+              filters={cashFlowDates}
+              profileTimeZoneId={profileTimeZoneId}
             />
 
             <PaymentOrderReportSection

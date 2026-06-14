@@ -559,6 +559,86 @@ public class ReportsController : ControllerBase
                     return (BuildPaymentPriorityExportDocument(reportDto), null);
                 }
 
+            case "paid-accounts":
+                {
+                    var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+                    if (paymentsVisibility is null)
+                    {
+                        return (null, Unauthorized());
+                    }
+
+                    var (start, end) = ResolveReportPeriod(from, to, reportToday);
+                    var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                        cancellationToken => BuildPaidAccountReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        _logger,
+                        ct);
+                    return (BuildPaidAccountExportDocument(reportDto), null);
+                }
+
+            case "paid-invoices":
+                {
+                    var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+                    if (paymentsVisibility is null)
+                    {
+                        return (null, Unauthorized());
+                    }
+
+                    var (start, end) = ResolveReportPeriod(from, to, reportToday);
+                    var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                        cancellationToken => BuildPaidInvoiceReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        _logger,
+                        ct);
+                    return (BuildPaidInvoiceExportDocument(reportDto), null);
+                }
+
+            case "invoice-statuses":
+                {
+                    var accountsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+                    if (accountsVisibility is null)
+                    {
+                        return (null, Unauthorized());
+                    }
+
+                    var (start, end) = ResolveReportPeriod(from, to, reportToday);
+                    var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                        cancellationToken => BuildInvoiceStatusReportAsync(start, end, accountsVisibility, cancellationToken),
+                        _logger,
+                        ct);
+                    return (BuildInvoiceStatusExportDocument(reportDto), null);
+                }
+
+            case "act-statuses":
+                {
+                    var actsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Acts, ct);
+                    if (actsVisibility is null)
+                    {
+                        return (null, Unauthorized());
+                    }
+
+                    var (start, end) = ResolveReportPeriod(from, to, reportToday);
+                    var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                        cancellationToken => BuildActStatusReportAsync(start, end, actsVisibility, cancellationToken),
+                        _logger,
+                        ct);
+                    return (BuildActStatusExportDocument(reportDto), null);
+                }
+
+            case "contract-statuses":
+                {
+                    var contractsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Contracts, ct);
+                    if (contractsVisibility is null)
+                    {
+                        return (null, Unauthorized());
+                    }
+
+                    var (start, end) = ResolveReportPeriod(from, to, reportToday);
+                    var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                        cancellationToken => BuildContractStatusReportAsync(start, end, contractsVisibility, cancellationToken),
+                        _logger,
+                        ct);
+                    return (BuildContractStatusExportDocument(reportDto), null);
+                }
+
             case "categories":
                 {
                     var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
@@ -2326,6 +2406,145 @@ public class ReportsController : ControllerBase
                     MoneyCell(item.TotalAmount),
                     item.IncomeCount.ToString(CultureInfo.InvariantCulture),
                     item.ExpenseCount.ToString(CultureInfo.InvariantCulture),
+                    PercentCell(item.Share),
+                ])).ToList()),
+            ]);
+
+    private static ReportExportDocument BuildPaidAccountExportDocument(PaidAccountReportDto report)
+        => new(
+            "paid-account-report",
+            "Отчет по счетам оплаты",
+            $"Период: {DateCell(report.From)} - {DateCell(report.To)}{(report.Source.HasValue ? $" · Источник: {MoneyOperationSourceCell(report.Source.Value)}" : string.Empty)}",
+            [
+                new("Поступило", MoneyCell(report.IncomeTotal)),
+                new("Списано", MoneyCell(report.ExpenseTotal)),
+                new("Итог", MoneyCell(report.NetTotal)),
+                new("Счетов оплаты", report.Accounts.Count.ToString(CultureInfo.InvariantCulture)),
+            ],
+            [
+                new("Счета оплаты", ["Счет оплаты", "Поступления", "Списания", "Итог", "Оборот", "Приходов", "Расходов", "Доля оборота"], report.Accounts.Select(item => new ReportExportRow([
+                    item.PaidAccountName,
+                    MoneyCell(item.Income),
+                    MoneyCell(item.Expense),
+                    MoneyCell(item.NetTotal),
+                    MoneyCell(item.TotalAmount),
+                    item.IncomeCount.ToString(CultureInfo.InvariantCulture),
+                    item.ExpenseCount.ToString(CultureInfo.InvariantCulture),
+                    PercentCell(item.Share),
+                ])).ToList()),
+            ]);
+
+    private static ReportExportDocument BuildPaidInvoiceExportDocument(PaidInvoiceReportDto report)
+        => new(
+            "paid-invoice-report",
+            "Отчет по оплаченным счетам",
+            $"Период: {DateCell(report.From)} - {DateCell(report.To)}{(report.Source.HasValue ? $" · Источник: {MoneyOperationSourceCell(report.Source.Value)}" : string.Empty)}",
+            [
+                new("Поступило", MoneyCell(report.IncomeTotal)),
+                new("Списано", MoneyCell(report.ExpenseTotal)),
+                new("Итог", MoneyCell(report.NetTotal)),
+                new("Оплачено по счетам", MoneyCell(report.PaidAmountTotal)),
+                new("Счетов", report.Invoices.Count.ToString(CultureInfo.InvariantCulture)),
+            ],
+            [
+                new("Оплаченные счета", ["Счет", "Поступления", "Списания", "Итог", "Оборот операций", "Оплачено", "Приходов", "Расходов", "Доля оборота"], report.Invoices.Select(item => new ReportExportRow([
+                    item.PaidInvoiceNumber,
+                    MoneyCell(item.Income),
+                    MoneyCell(item.Expense),
+                    MoneyCell(item.NetTotal),
+                    MoneyCell(item.OperationTotal),
+                    MoneyCell(item.PaidAmountTotal),
+                    item.IncomeCount.ToString(CultureInfo.InvariantCulture),
+                    item.ExpenseCount.ToString(CultureInfo.InvariantCulture),
+                    PercentCell(item.Share),
+                ])).ToList()),
+            ]);
+
+    private static ReportExportDocument BuildInvoiceStatusExportDocument(InvoiceStatusReportDto report)
+        => new(
+            "invoice-status-report",
+            "Отчет по статусам счетов",
+            $"Период: {DateCell(report.From)} - {DateCell(report.To)}",
+            [
+                new("Счетов", report.InvoiceCount.ToString(CultureInfo.InvariantCulture)),
+                new("Входящих", report.IncomeCount.ToString(CultureInfo.InvariantCulture)),
+                new("Исходящих", report.ExpenseCount.ToString(CultureInfo.InvariantCulture)),
+                new("Оплачено счетов", report.PaidCount.ToString(CultureInfo.InvariantCulture)),
+                new("Просрочено счетов", report.OverdueCount.ToString(CultureInfo.InvariantCulture)),
+                new("Сумма счетов", MoneyCell(report.TotalAmount)),
+                new("Оплачено", MoneyCell(report.PaidAmount)),
+                new("Остаток", MoneyCell(report.OutstandingAmount)),
+            ],
+            [
+                new("Статусы счетов", ["Статус", "Счетов", "Входящих", "Исходящих", "Оплачено счетов", "Просрочено", "Сумма", "Оплачено", "Остаток", "Доля"], report.Statuses.Select(item => new ReportExportRow([
+                    item.StatusLabel,
+                    item.InvoiceCount.ToString(CultureInfo.InvariantCulture),
+                    item.IncomeCount.ToString(CultureInfo.InvariantCulture),
+                    item.ExpenseCount.ToString(CultureInfo.InvariantCulture),
+                    item.PaidCount.ToString(CultureInfo.InvariantCulture),
+                    item.OverdueCount.ToString(CultureInfo.InvariantCulture),
+                    MoneyCell(item.TotalAmount),
+                    MoneyCell(item.PaidAmount),
+                    MoneyCell(item.OutstandingAmount),
+                    PercentCell(item.Share),
+                ])).ToList()),
+            ]);
+
+    private static ReportExportDocument BuildActStatusExportDocument(ActStatusReportDto report)
+        => new(
+            "act-status-report",
+            "Отчет по статусам актов",
+            $"Период: {DateCell(report.From)} - {DateCell(report.To)}",
+            [
+                new("Актов", report.ActCount.ToString(CultureInfo.InvariantCulture)),
+                new("Создано", report.CreatedCount.ToString(CultureInfo.InvariantCulture)),
+                new("Передано", report.TransferredCount.ToString(CultureInfo.InvariantCulture)),
+                new("Подписано", report.SignedCount.ToString(CultureInfo.InvariantCulture)),
+                new("Расторгнуто", report.TerminatedCount.ToString(CultureInfo.InvariantCulture)),
+                new("Сумма актов", MoneyCell(report.TotalAmount)),
+                new("Подписано на сумму", MoneyCell(report.SignedAmount)),
+                new("В работе", MoneyCell(report.PendingAmount)),
+            ],
+            [
+                new("Статусы актов", ["Статус", "Актов", "Создано", "Передано", "Подписано", "Расторгнуто", "Сумма", "Подписано на сумму", "В работе", "Доля"], report.Statuses.Select(item => new ReportExportRow([
+                    item.WorkflowStatusLabel,
+                    item.ActCount.ToString(CultureInfo.InvariantCulture),
+                    item.CreatedCount.ToString(CultureInfo.InvariantCulture),
+                    item.TransferredCount.ToString(CultureInfo.InvariantCulture),
+                    item.SignedCount.ToString(CultureInfo.InvariantCulture),
+                    item.TerminatedCount.ToString(CultureInfo.InvariantCulture),
+                    MoneyCell(item.TotalAmount),
+                    MoneyCell(item.SignedAmount),
+                    MoneyCell(item.PendingAmount),
+                    PercentCell(item.Share),
+                ])).ToList()),
+            ]);
+
+    private static ReportExportDocument BuildContractStatusExportDocument(ContractStatusReportDto report)
+        => new(
+            "contract-status-report",
+            "Отчет по статусам договоров",
+            $"Период: {DateCell(report.From)} - {DateCell(report.To)}",
+            [
+                new("Договоров", report.ContractCount.ToString(CultureInfo.InvariantCulture)),
+                new("Черновиков", report.DraftCount.ToString(CultureInfo.InvariantCulture)),
+                new("Не подписано", report.NotSignedCount.ToString(CultureInfo.InvariantCulture)),
+                new("На подписании", report.OnSigningCount.ToString(CultureInfo.InvariantCulture)),
+                new("Подписано", report.ConcludedCount.ToString(CultureInfo.InvariantCulture)),
+                new("Расторгнуто", report.TerminatedCount.ToString(CultureInfo.InvariantCulture)),
+                new("Аннулировано", report.CancelledCount.ToString(CultureInfo.InvariantCulture)),
+                new("Бессрочно", report.OpenEndedCount.ToString(CultureInfo.InvariantCulture)),
+                new("Сумма договоров", MoneyCell(report.TotalAmount)),
+                new("Активно", MoneyCell(report.ActiveAmount)),
+                new("Закрыто", MoneyCell(report.ClosedAmount)),
+            ],
+            [
+                new("Статусы договоров", ["Статус", "Договоров", "Бессрочно", "Истекает в периоде", "Сумма", "Доля"], report.Statuses.Select(item => new ReportExportRow([
+                    item.StatusLabel,
+                    item.ContractCount.ToString(CultureInfo.InvariantCulture),
+                    item.OpenEndedCount.ToString(CultureInfo.InvariantCulture),
+                    item.ExpiringCount.ToString(CultureInfo.InvariantCulture),
+                    MoneyCell(item.TotalAmount),
                     PercentCell(item.Share),
                 ])).ToList()),
             ]);
