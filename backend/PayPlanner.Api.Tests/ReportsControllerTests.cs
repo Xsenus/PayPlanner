@@ -306,6 +306,7 @@ public class ReportsControllerTests
                 null,
                 null,
                 null,
+                null,
                 today,
                 null,
                 null,
@@ -328,6 +329,7 @@ public class ReportsControllerTests
             "cash-flow-forecast",
             today.AddDays(-30),
             today.AddDays(30),
+            null,
             null,
             null,
             null,
@@ -422,6 +424,7 @@ public class ReportsControllerTests
             "case-success",
             today.AddDays(-30),
             today.AddDays(30),
+            null,
             null,
             null,
             null,
@@ -694,10 +697,48 @@ public class ReportsControllerTests
         Assert.IsType<ForbidResult>(await controller.ExportLegalWorkCsv(null, null, null, null, null, CancellationToken.None));
         Assert.IsType<ForbidResult>(await controller.ExportLegalWorkExcel(null, null, null, null, null, CancellationToken.None));
         Assert.IsType<ForbidResult>(await controller.ExportLegalWorkPdf(null, null, null, null, null, CancellationToken.None));
-        Assert.IsType<ForbidResult>(await controller.ExportManagementReportExcel("case-finance", null, null, null, null, null, null,
-            null, null, null, null, null, null, null, null, null, null, null, CancellationToken.None));
-        Assert.IsType<ForbidResult>(await controller.ExportManagementReportPdf("case-finance", null, null, null, null, null, null,
-            null, null, null, null, null, null, null, null, null, null, null, CancellationToken.None));
+        Assert.IsType<ForbidResult>(await controller.ExportManagementReportExcel(
+            "case-finance",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            CancellationToken.None));
+        Assert.IsType<ForbidResult>(await controller.ExportManagementReportPdf(
+            "case-finance",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            CancellationToken.None));
     }
 
     [Fact]
@@ -2294,6 +2335,7 @@ public class ReportsControllerTests
             null,
             null,
             null,
+            null,
             CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
@@ -2343,6 +2385,7 @@ public class ReportsControllerTests
             null,
             null,
             null,
+            null,
             CancellationToken.None);
 
         Assert.IsType<ForbidResult>(action.Result);
@@ -2366,6 +2409,7 @@ public class ReportsControllerTests
         var action = await controller.CashFlow(
             new DateTime(2026, 5, 1),
             new DateTime(2026, 5, 31),
+            null,
             null,
             null,
             null,
@@ -2477,6 +2521,7 @@ public class ReportsControllerTests
             "Основной банк",
             null,
             null,
+            null,
             CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
@@ -2529,6 +2574,7 @@ public class ReportsControllerTests
             "  Основной банк  ",
             null,
             null,
+            null,
             CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
@@ -2578,6 +2624,7 @@ public class ReportsControllerTests
             null,
             null,
             targetClient.Id,
+            null,
             CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
@@ -2588,6 +2635,214 @@ public class ReportsControllerTests
         Assert.Equal(15_000m, report.ClosingBalance);
         Assert.Equal(2, report.IncomeCount);
         Assert.Equal(0, report.ExpenseCount);
+    }
+
+    [Fact]
+    public async Task CashFlow_FiltersByCaseIdUsingLinkedInvoicePayments()
+    {
+        await using var db = await CreateContextAsync();
+        var client = new Client
+        {
+            Name = "Case client",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var targetCase = new ClientCase
+        {
+            ClientId = client.Id,
+            Title = "Target case",
+            Status = ClientCaseStatus.Open,
+            CreatedAt = DateTime.UtcNow,
+        };
+        var linkedCase = new ClientCase
+        {
+            ClientId = client.Id,
+            Title = "Linked target case",
+            Status = ClientCaseStatus.Open,
+            CreatedAt = DateTime.UtcNow,
+        };
+        var otherCase = new ClientCase
+        {
+            ClientId = client.Id,
+            Title = "Other case",
+            Status = ClientCaseStatus.Open,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.ClientCases.AddRange(targetCase, linkedCase, otherCase);
+        await db.SaveChangesAsync();
+
+        var targetInvoice = new Invoice { Number = "CASE-1", Date = new DateTime(2026, 5, 1) };
+        var linkedInvoice = new Invoice { Number = "CASE-2", Date = new DateTime(2026, 5, 2) };
+        var otherInvoice = new Invoice { Number = "CASE-3", Date = new DateTime(2026, 5, 3) };
+        db.Invoices.AddRange(targetInvoice, linkedInvoice, otherInvoice);
+        await db.SaveChangesAsync();
+
+        db.Payments.AddRange(
+            new Payment
+            {
+                InvoiceId = targetInvoice.Id,
+                ClientId = client.Id,
+                ClientCaseId = targetCase.Id,
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Completed,
+                Amount = 10_000m,
+                PaidAmount = 10_000m,
+                Date = new DateTime(2026, 5, 1),
+                PlannedDate = new DateTime(2026, 5, 1),
+                CreatedAt = DateTime.UtcNow,
+            },
+            new Payment
+            {
+                InvoiceId = linkedInvoice.Id,
+                ClientId = client.Id,
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Completed,
+                Amount = 2_000m,
+                PaidAmount = 2_000m,
+                Date = new DateTime(2026, 5, 2),
+                PlannedDate = new DateTime(2026, 5, 2),
+                CreatedAt = DateTime.UtcNow,
+                InvoiceClientCases = new List<InvoiceClientCase>
+                {
+                    new() { ClientCaseId = targetCase.Id },
+                },
+            },
+            new Payment
+            {
+                InvoiceId = otherInvoice.Id,
+                ClientId = client.Id,
+                ClientCaseId = otherCase.Id,
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Completed,
+                Amount = 5_000m,
+                PaidAmount = 5_000m,
+                Date = new DateTime(2026, 5, 3),
+                PlannedDate = new DateTime(2026, 5, 3),
+                CreatedAt = DateTime.UtcNow,
+            });
+
+        db.MoneyOperations.AddRange(
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 3_000m, new DateTime(2026, 4, 25), "Main bank", linkedInvoiceId: targetInvoice.Id),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 7_000m, new DateTime(2026, 5, 4), "Main bank", linkedInvoiceId: targetInvoice.Id),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 2_000m, new DateTime(2026, 5, 5), "Main bank", linkedInvoiceId: linkedInvoice.Id),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 5_000m, new DateTime(2026, 5, 6), "Main bank", linkedInvoiceId: otherInvoice.Id),
+            Operation(MoneyOperationSource.Cash, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 9_000m, new DateTime(2026, 5, 7), "Cash"));
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.CashFlow(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            null,
+            null,
+            null,
+            null,
+            targetCase.Id,
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<CashFlowReportDto>(ok.Value);
+        Assert.Equal(3_000m, report.OpeningBalance);
+        Assert.Equal(9_000m, report.Income);
+        Assert.Equal(0m, report.Expense);
+        Assert.Equal(12_000m, report.ClosingBalance);
+        Assert.Equal(2, report.IncomeCount);
+        Assert.Equal(0, report.ExpenseCount);
+    }
+
+    [Fact]
+    public async Task CashFlowForecast_FiltersByCaseIdUsingPaymentCaseLinks()
+    {
+        await using var db = await CreateContextAsync();
+        var client = new Client
+        {
+            Name = "Forecast client",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var targetCase = new ClientCase
+        {
+            ClientId = client.Id,
+            Title = "Forecast target case",
+            Status = ClientCaseStatus.Open,
+            CreatedAt = DateTime.UtcNow,
+        };
+        var otherCase = new ClientCase
+        {
+            ClientId = client.Id,
+            Title = "Forecast other case",
+            Status = ClientCaseStatus.Open,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.ClientCases.AddRange(targetCase, otherCase);
+        await db.SaveChangesAsync();
+
+        db.Payments.AddRange(
+            new Payment
+            {
+                ClientId = client.Id,
+                ClientCaseId = targetCase.Id,
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Pending,
+                Amount = 12_000m,
+                PaidAmount = 2_000m,
+                Account = "Main bank",
+                Date = new DateTime(2026, 5, 5),
+                PlannedDate = new DateTime(2026, 5, 5),
+                CreatedAt = DateTime.UtcNow,
+            },
+            new Payment
+            {
+                ClientId = client.Id,
+                Type = PaymentType.Expense,
+                Status = PaymentStatus.Processing,
+                Amount = 5_000m,
+                PaidAmount = 1_000m,
+                Account = "Main bank",
+                Date = new DateTime(2026, 5, 6),
+                PlannedDate = new DateTime(2026, 5, 6),
+                CreatedAt = DateTime.UtcNow,
+                InvoiceClientCases = new List<InvoiceClientCase>
+                {
+                    new() { ClientCaseId = targetCase.Id },
+                },
+            },
+            new Payment
+            {
+                ClientId = client.Id,
+                ClientCaseId = otherCase.Id,
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Pending,
+                Amount = 20_000m,
+                PaidAmount = 0m,
+                Account = "Main bank",
+                Date = new DateTime(2026, 5, 7),
+                PlannedDate = new DateTime(2026, 5, 7),
+                CreatedAt = DateTime.UtcNow,
+            });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.CashFlowForecast(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            "Main bank",
+            null,
+            null,
+            targetCase.Id,
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<CashFlowForecastReportDto>(ok.Value);
+        Assert.Equal(10_000m, report.ExpectedIncome);
+        Assert.Equal(4_000m, report.ExpectedExpense);
+        Assert.Equal(6_000m, report.NetProjectedFlow);
+        Assert.Equal(1, report.IncomeCount);
+        Assert.Equal(1, report.ExpenseCount);
     }
 
     [Fact]
@@ -2624,6 +2879,7 @@ public class ReportsControllerTests
         var action = await controller.Categories(
             new DateTime(2026, 5, 1),
             new DateTime(2026, 5, 31),
+            null,
             null,
             null,
             null,
@@ -2675,6 +2931,7 @@ public class ReportsControllerTests
             "Касса",
             null,
             null,
+            null,
             CancellationToken.None);
 
         var accountOk = Assert.IsType<OkObjectResult>(accountAction.Result);
@@ -2691,6 +2948,7 @@ public class ReportsControllerTests
             null,
             null,
             "Ромаш",
+            null,
             null,
             CancellationToken.None);
 
@@ -2718,6 +2976,7 @@ public class ReportsControllerTests
         var action = await controller.Counterparties(
             new DateTime(2026, 5, 1),
             new DateTime(2026, 5, 31),
+            null,
             null,
             null,
             null,
@@ -2779,6 +3038,7 @@ public class ReportsControllerTests
             null,
             null,
             null,
+            null,
             CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
@@ -2831,6 +3091,7 @@ public class ReportsControllerTests
         var action = await controller.Directions(
             new DateTime(2026, 5, 1),
             new DateTime(2026, 5, 31),
+            null,
             null,
             null,
             null,
@@ -2890,6 +3151,7 @@ public class ReportsControllerTests
             null,
             null,
             null,
+            null,
             CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
@@ -2942,6 +3204,7 @@ public class ReportsControllerTests
         var action = await controller.Vat(
             new DateTime(2026, 5, 1),
             new DateTime(2026, 5, 31),
+            null,
             null,
             null,
             null,
@@ -3010,6 +3273,7 @@ public class ReportsControllerTests
             null,
             null,
             null,
+            null,
             CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
@@ -3066,6 +3330,7 @@ public class ReportsControllerTests
         var action = await controller.Advances(
             new DateTime(2026, 5, 1),
             new DateTime(2026, 5, 31),
+            null,
             null,
             null,
             null,
@@ -3129,6 +3394,7 @@ public class ReportsControllerTests
             null,
             null,
             null,
+            null,
             CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
@@ -3188,6 +3454,7 @@ public class ReportsControllerTests
             null,
             null,
             null,
+            null,
             CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
@@ -3240,6 +3507,7 @@ public class ReportsControllerTests
         var action = await controller.PaidInvoices(
             new DateTime(2026, 5, 1),
             new DateTime(2026, 5, 31),
+            null,
             null,
             null,
             null,
@@ -3658,6 +3926,7 @@ public class ReportsControllerTests
             null,
             null,
             null,
+            null,
             CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
@@ -3710,6 +3979,7 @@ public class ReportsControllerTests
         var action = await controller.PaymentPurposes(
             new DateTime(2026, 5, 1),
             new DateTime(2026, 5, 31),
+            null,
             null,
             null,
             null,
@@ -3767,6 +4037,7 @@ public class ReportsControllerTests
         var action = await controller.MatchStatuses(
             new DateTime(2026, 5, 1),
             new DateTime(2026, 5, 31),
+            null,
             null,
             null,
             null,
@@ -3841,6 +4112,7 @@ public class ReportsControllerTests
             null,
             null,
             null,
+            null,
             CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
@@ -3899,6 +4171,7 @@ public class ReportsControllerTests
         var action = await controller.Currencies(
             new DateTime(2026, 5, 1),
             new DateTime(2026, 5, 31),
+            null,
             null,
             null,
             null,
@@ -4208,7 +4481,8 @@ public class ReportsControllerTests
         string? paymentOrderNumber = null,
         string? purpose = null,
         MoneyOperationMatchStatus matchStatus = MoneyOperationMatchStatus.None,
-        string? currency = "RUB")
+        string? currency = "RUB",
+        int? linkedInvoiceId = null)
         => new()
         {
             Source = source,
@@ -4235,6 +4509,7 @@ public class ReportsControllerTests
             Purpose = purpose,
             MatchStatus = matchStatus,
             Currency = currency,
+            LinkedInvoiceId = linkedInvoiceId,
             CreatedAt = DateTime.UtcNow,
         };
 

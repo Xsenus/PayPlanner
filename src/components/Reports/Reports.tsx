@@ -74,7 +74,7 @@ import {
   monthRangeToDates,
   normalizeYmRange,
 } from '../../utils/reportPresentation';
-import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CaseFinanceReport, CaseSuccessReport, CashBookSummary, CashFlowForecastReport, CashFlowReport, CashOrderReport, Client, ContractStatusReport, CounterpartyReport, CurrencyReport, CurrentCasesReport, DirectionReport, InvoiceStatusReport, JournalStatusReport, LawyerWorkloadReport, LegalWorkReport, MatchStatusReport, MoneyAccount, MoneyCategoryReport, MoneyOperationSource, OverdueProceduralDeadlinesReport, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, TaskReport, VatReport } from '../../types';
+import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CaseFinanceReport, CaseSuccessReport, CashBookSummary, CashFlowForecastReport, CashFlowReport, CashOrderReport, Client, ClientCase, ContractStatusReport, CounterpartyReport, CurrencyReport, CurrentCasesReport, DirectionReport, InvoiceStatusReport, JournalStatusReport, LawyerWorkloadReport, LegalWorkReport, MatchStatusReport, MoneyAccount, MoneyCategoryReport, MoneyOperationSource, OverdueProceduralDeadlinesReport, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, TaskReport, VatReport } from '../../types';
 
 const statusMeta: Record<
   'Completed' | 'Pending' | 'Overdue',
@@ -2503,6 +2503,7 @@ type ManagementReportExportFilters = {
   accountName?: string;
   counterpartyName?: string;
   clientId?: number;
+  caseId?: number;
   asOf?: string;
   status?: string;
   responsibleUserId?: number;
@@ -7215,6 +7216,13 @@ interface ReportsProps {
   onOpenTask?: (taskId: number) => void;
 }
 
+function formatCaseOptionLabel(item: ClientCase) {
+  const number = item.caseNumber?.trim();
+  const title = item.title?.trim();
+  if (number && title) return `${number} - ${title}`;
+  return number || title || `#${item.id}`;
+}
+
 export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsProps = {}) {
   const profileTimeZoneId = useUserTimeZone();
   const ymNow = currentReportMonthInTimeZone(profileTimeZoneId);
@@ -7225,10 +7233,13 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
   const [moneyAccountName, setMoneyAccountName] = useState('');
   const [counterpartyName, setCounterpartyName] = useState('');
   const [clientId, setClientId] = useState('');
+  const [caseId, setCaseId] = useState('');
   const [moneyAccounts, setMoneyAccounts] = useState<MoneyAccount[]>([]);
   const [moneyAccountsError, setMoneyAccountsError] = useState<string | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
   const [clientsError, setClientsError] = useState<string | null>(null);
+  const [cases, setCases] = useState<ClientCase[]>([]);
+  const [casesError, setCasesError] = useState<string | null>(null);
 
   const normalizedRange = useMemo(
     () => normalizeYmRange((range.from ?? ymNow) as `${number}-${string}`, (range.to ?? range.from ?? ymNow) as `${number}-${string}`),
@@ -7244,6 +7255,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
   const selectedMoneyAccountName = moneyAccountName.trim() || undefined;
   const selectedCounterpartyName = counterpartyName.trim() || undefined;
   const selectedClientId = clientId ? Number(clientId) : undefined;
+  const selectedCaseId = caseId ? Number(caseId) : undefined;
   const visibleMoneyAccounts = useMemo(
     () =>
       moneyAccounts
@@ -7258,6 +7270,18 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
         .sort((left, right) => left.name.localeCompare(right.name, 'ru')),
     [clients],
   );
+  const visibleCases = useMemo(
+    () =>
+      cases
+        .filter((item) => item.id > 0)
+        .filter((item) => !selectedClientId || item.clientId === selectedClientId)
+        .sort((left, right) => {
+          const leftLabel = left.caseNumber || left.title || '';
+          const rightLabel = right.caseNumber || right.title || '';
+          return leftLabel.localeCompare(rightLabel, 'ru');
+        }),
+    [cases, selectedClientId],
+  );
   const moneyOperationReportFilters = useMemo(
     () => ({
       ...cashFlowDates,
@@ -7265,8 +7289,9 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
       ...(selectedMoneyAccountName ? { accountName: selectedMoneyAccountName } : {}),
       ...(selectedCounterpartyName ? { counterpartyName: selectedCounterpartyName } : {}),
       ...(selectedClientId ? { clientId: selectedClientId } : {}),
+      ...(selectedCaseId ? { caseId: selectedCaseId } : {}),
     }),
-    [cashFlowDates, selectedClientId, selectedCounterpartyName, selectedMoneyAccountName, selectedMoneySource],
+    [cashFlowDates, selectedCaseId, selectedClientId, selectedCounterpartyName, selectedMoneyAccountName, selectedMoneySource],
   );
   const moneyAccountReportFilters = useMemo(
     () => ({
@@ -7274,8 +7299,9 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
       ...(selectedMoneyAccountName ? { accountName: selectedMoneyAccountName } : {}),
       ...(selectedCounterpartyName ? { counterpartyName: selectedCounterpartyName } : {}),
       ...(selectedClientId ? { clientId: selectedClientId } : {}),
+      ...(selectedCaseId ? { caseId: selectedCaseId } : {}),
     }),
-    [cashFlowDates, selectedClientId, selectedCounterpartyName, selectedMoneyAccountName],
+    [cashFlowDates, selectedCaseId, selectedClientId, selectedCounterpartyName, selectedMoneyAccountName],
   );
   const casePeriodReportFilters = useMemo(
     () => ({ ...cashFlowDates, limit: 100 }),
@@ -7343,10 +7369,37 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+
+    apiService.getCases()
+      .then((items) => {
+        if (cancelled) return;
+        setCases(items);
+        setCasesError(null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setCases([]);
+        setCasesError(extractDisplayErrorMessage(err, 'Не удалось загрузить дела.'));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!moneyAccountName) return;
     if (visibleMoneyAccounts.some((account) => account.name === moneyAccountName)) return;
     setMoneyAccountName('');
   }, [moneyAccountName, visibleMoneyAccounts]);
+
+  useEffect(() => {
+    if (!caseId) return;
+    const numericCaseId = Number(caseId);
+    if (visibleCases.some((item) => item.id === numericCaseId)) return;
+    setCaseId('');
+  }, [caseId, visibleCases]);
 
   const {
     report: cashFlowReport,
@@ -7753,6 +7806,31 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
                 </select>
                 {clientsError ? (
                   <div className="mt-2 text-xs text-rose-600">{clientsError}</div>
+                ) : null}
+              </div>
+              <div className="mt-4">
+                <label
+                  className="text-xs font-semibold uppercase tracking-wide text-slate-500"
+                  htmlFor="reports-case"
+                >
+                  Дело
+                </label>
+                <select
+                  id="reports-case"
+                  value={caseId}
+                  onChange={(event) => setCaseId(event.target.value)}
+                  disabled={visibleCases.length === 0}
+                  className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                >
+                  <option value="">Все дела</option>
+                  {visibleCases.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {formatCaseOptionLabel(item)}
+                    </option>
+                  ))}
+                </select>
+                {casesError ? (
+                  <div className="mt-2 text-xs text-rose-600">{casesError}</div>
                 ) : null}
               </div>
               <div className="mt-5 grid grid-cols-2 gap-3">

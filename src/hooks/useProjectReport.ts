@@ -9,6 +9,7 @@ export interface ProjectReportFilters {
   accountName?: string;
   counterpartyName?: string;
   clientId?: number;
+  caseId?: number;
 }
 
 export function useProjectReport(filters: ProjectReportFilters) {
@@ -25,8 +26,9 @@ export function useProjectReport(filters: ProjectReportFilters) {
       accountName: filters.accountName,
       counterpartyName: filters.counterpartyName,
       clientId: filters.clientId,
+      caseId: filters.caseId,
     }),
-    [filters.accountName, filters.clientId, filters.counterpartyName, filters.from, filters.source, filters.to],
+    [filters.accountName, filters.caseId, filters.clientId, filters.counterpartyName, filters.from, filters.source, filters.to],
   );
 
   const load = useCallback(async () => {

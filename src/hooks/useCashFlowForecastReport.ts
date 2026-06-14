@@ -8,6 +8,7 @@ export interface CashFlowForecastReportFilters {
   accountName?: string;
   counterpartyName?: string;
   clientId?: number;
+  caseId?: number;
 }
 
 export function useCashFlowForecastReport(filters: CashFlowForecastReportFilters) {
@@ -23,8 +24,9 @@ export function useCashFlowForecastReport(filters: CashFlowForecastReportFilters
       accountName: filters.accountName,
       counterpartyName: filters.counterpartyName,
       clientId: filters.clientId,
+      caseId: filters.caseId,
     }),
-    [filters.accountName, filters.clientId, filters.counterpartyName, filters.from, filters.to],
+    [filters.accountName, filters.caseId, filters.clientId, filters.counterpartyName, filters.from, filters.to],
   );
 
   const load = useCallback(async () => {
