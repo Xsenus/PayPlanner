@@ -629,6 +629,22 @@ public class ReportsController : ControllerBase
                     return (BuildMatchStatusExportDocument(reportDto), null);
                 }
 
+            case "journal-statuses":
+                {
+                    var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+                    if (paymentsVisibility is null)
+                    {
+                        return (null, Unauthorized());
+                    }
+
+                    var (start, end) = ResolveReportPeriod(from, to, reportToday);
+                    var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                        cancellationToken => BuildJournalStatusReportAsync(start, end, null, paymentsVisibility, cancellationToken),
+                        _logger,
+                        ct);
+                    return (BuildJournalStatusExportDocument(reportDto), null);
+                }
+
             case "case-success":
                 {
                     var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
@@ -2264,6 +2280,34 @@ public class ReportsController : ControllerBase
             ],
             [
                 new("Статусы сверки", ["Статус", "Поступило", "Списано", "Итог", "Оборот", "Операций", "Приходов", "Расходов", "Доля оборота"], report.Statuses.Select(item => new ReportExportRow([
+                    item.StatusLabel,
+                    MoneyCell(item.Income),
+                    MoneyCell(item.Expense),
+                    MoneyCell(item.NetTotal),
+                    MoneyCell(item.TotalAmount),
+                    item.OperationCount.ToString(CultureInfo.InvariantCulture),
+                    item.IncomeCount.ToString(CultureInfo.InvariantCulture),
+                    item.ExpenseCount.ToString(CultureInfo.InvariantCulture),
+                    PercentCell(item.Share),
+                ])).ToList()),
+            ]);
+
+    private static ReportExportDocument BuildJournalStatusExportDocument(JournalStatusReportDto report)
+        => new(
+            "journal-status-report",
+            "Отчет по журнальным статусам",
+            $"Период: {DateCell(report.From)} - {DateCell(report.To)}{(report.Source.HasValue ? $" · Источник: {MoneyOperationSourceCell(report.Source.Value)}" : string.Empty)}",
+            [
+                new("Операций", report.OperationCount.ToString(CultureInfo.InvariantCulture)),
+                new("Проведено", report.PostedCount.ToString(CultureInfo.InvariantCulture)),
+                new("В обработке", report.ProcessingCount.ToString(CultureInfo.InvariantCulture)),
+                new("Ошибок", report.ErrorCount.ToString(CultureInfo.InvariantCulture)),
+                new("Поступило", MoneyCell(report.IncomeTotal)),
+                new("Списано", MoneyCell(report.ExpenseTotal)),
+                new("Итог", MoneyCell(report.NetTotal)),
+            ],
+            [
+                new("Журнальные статусы", ["Статус", "Поступило", "Списано", "Итог", "Оборот", "Операций", "Приходов", "Расходов", "Доля оборота"], report.Statuses.Select(item => new ReportExportRow([
                     item.StatusLabel,
                     MoneyCell(item.Income),
                     MoneyCell(item.Expense),

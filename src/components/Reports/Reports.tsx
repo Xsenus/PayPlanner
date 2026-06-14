@@ -666,6 +666,41 @@ function exportMatchStatusReport(report: MatchStatusReport, timeZoneId?: string 
   downloadCsv('match-status-report.csv', rows);
 }
 
+function exportJournalStatusReport(report: JournalStatusReport, timeZoneId?: string | null) {
+  const rows: unknown[][] = [
+    ['Показатель', 'Значение'],
+    ['Период с', formatDate(report.from, timeZoneId)],
+    ['Период по', formatDate(report.to, timeZoneId)],
+    ['Источник', report.source ? sourceLabel(report.source) : 'Все источники'],
+    ['Операций', report.operationCount],
+    ['Проведено', report.postedCount],
+    ['В обработке', report.processingCount],
+    ['Ошибок', report.errorCount],
+    ['Поступило', report.incomeTotal],
+    ['Списано', report.expenseTotal],
+    ['Итог', report.netTotal],
+    [],
+    ['Журнальные статусы'],
+    ['Статус', 'Поступило', 'Списано', 'Итог', 'Оборот', 'Операций', 'Приходов', 'Расходов', 'Доля оборота'],
+  ];
+
+  report.statuses.forEach((item) => {
+    rows.push([
+      item.statusLabel,
+      item.income,
+      item.expense,
+      item.netTotal,
+      item.totalAmount,
+      item.operationCount,
+      item.incomeCount,
+      item.expenseCount,
+      `${item.share}%`,
+    ]);
+  });
+
+  downloadCsv('journal-status-report.csv', rows);
+}
+
 function exportCashFlowForecastReport(report: CashFlowForecastReport, timeZoneId?: string | null) {
   const rows: unknown[][] = [
     ['Показатель', 'Значение'],
@@ -1911,7 +1946,7 @@ function ProjectReportSection({
 
 type LegalWorkExportFormat = 'csv' | 'excel' | 'pdf';
 type ManagementReportExportFormat = 'excel' | 'pdf';
-type ManagementReportKind = 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast' | 'categories' | 'counterparties' | 'projects' | 'directions' | 'sales-points' | 'vat' | 'payment-orders' | 'payment-purposes' | 'match-statuses';
+type ManagementReportKind = 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast' | 'categories' | 'counterparties' | 'projects' | 'directions' | 'sales-points' | 'vat' | 'payment-orders' | 'payment-purposes' | 'match-statuses' | 'journal-statuses';
 type ReportCaseSection = 'tasks' | 'documents' | 'court' | 'workOrder';
 
 type LegalWorkReportFilters = {
@@ -5814,11 +5849,15 @@ function JournalStatusReportSection({
   loading,
   error,
   onReload,
+  filters,
+  profileTimeZoneId,
 }: {
   report: JournalStatusReport | null;
   loading: boolean;
   error: string | null;
   onReload: () => void;
+  filters?: ManagementReportExportFilters;
+  profileTimeZoneId?: string | null;
 }) {
   const rows = report?.statuses ?? [];
 
@@ -5835,14 +5874,26 @@ function JournalStatusReportSection({
             Контроль фактических операций по состоянию учета: проведено, в обработке или требует исправления.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onReload}
-          className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-        >
-          <RefreshCcw className="h-4 w-4" />
-          Обновить
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => report && exportJournalStatusReport(report, profileTimeZoneId)}
+            disabled={!report || loading}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            CSV
+          </button>
+          <ManagementReportExportButtons reportKind="journal-statuses" filters={filters} disabled={!report || loading} />
+          <button
+            type="button"
+            onClick={onReload}
+            className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+          >
+            <RefreshCcw className="h-4 w-4" />
+            Обновить
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -7253,6 +7304,8 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={journalStatusReportLoading}
               error={journalStatusReportError}
               onReload={reloadJournalStatusReport}
+              filters={cashFlowDates}
+              profileTimeZoneId={profileTimeZoneId}
             />
 
             <CurrencyReportSection

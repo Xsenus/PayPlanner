@@ -273,6 +273,7 @@ public class ReportsControllerTests
             "payment-orders",
             "payment-purposes",
             "match-statuses",
+            "journal-statuses",
             "case-success",
             "current-cases",
             "lawyer-workload",
