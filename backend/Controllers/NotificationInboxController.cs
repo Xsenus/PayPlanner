@@ -36,7 +36,7 @@ public class NotificationInboxController : ControllerBase
             return Unauthorized();
         }
 
-        var visibility = await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
+        var visibility = await ResolveNotificationTargetVisibilityAsync(ct);
         var disabledTypes = await LoadDisabledNotificationTypesAsync(userId.Value, ct);
         var unreadQuery = _context.UserNotifications
             .AsNoTracking()
@@ -78,7 +78,7 @@ public class NotificationInboxController : ControllerBase
         var query = _context.UserNotifications
             .AsNoTracking()
             .Where(item => item.RecipientUserId == userId.Value && item.DeletedAt == null);
-        var visibility = await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
+        var visibility = await ResolveNotificationTargetVisibilityAsync(ct);
         var disabledTypes = await LoadDisabledNotificationTypesAsync(userId.Value, ct);
 
         query = ApplyStatusFilter(query, status);
@@ -126,7 +126,7 @@ public class NotificationInboxController : ControllerBase
 
         var query = _context.UserNotifications
             .Where(item => item.RecipientUserId == userId.Value && item.DeletedAt == null);
-        var visibility = await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
+        var visibility = await ResolveNotificationTargetVisibilityAsync(ct);
         var disabledTypes = await LoadDisabledNotificationTypesAsync(userId.Value, ct);
 
         query = ApplyStatusFilter(query, status);
@@ -275,7 +275,7 @@ public class NotificationInboxController : ControllerBase
             return null;
         }
 
-        var visibility = await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
+        var visibility = await ResolveNotificationTargetVisibilityAsync(ct);
         var query = _context.UserNotifications
             .Where(item =>
                 item.Id == id
@@ -306,7 +306,7 @@ public class NotificationInboxController : ControllerBase
             return [];
         }
 
-        var visibility = await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
+        var visibility = await ResolveNotificationTargetVisibilityAsync(ct);
         var disabledTypes = await LoadDisabledNotificationTypesAsync(userId.Value, ct);
         var query = _context.UserNotifications
             .Where(item =>
@@ -318,6 +318,15 @@ public class NotificationInboxController : ControllerBase
         query = WhereNotificationTargetVisible(query, _context, visibility);
         return await query.ToListAsync(ct);
     }
+
+    private async Task<NotificationTargetVisibility> ResolveNotificationTargetVisibilityAsync(CancellationToken ct)
+        => new(
+            await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct),
+            await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct),
+            await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct),
+            await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct),
+            await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Acts, ct),
+            await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Contracts, ct));
 
     private async Task<IReadOnlyList<string>> LoadDisabledNotificationTypesAsync(int userId, CancellationToken ct)
     {
@@ -492,25 +501,78 @@ public class NotificationInboxController : ControllerBase
     private static IQueryable<UserNotification> WhereNotificationTargetVisible(
         IQueryable<UserNotification> query,
         PaymentContext context,
-        DataVisibilityAccess? visibility)
+        NotificationTargetVisibility visibility)
     {
-        if (visibility is null)
+        if (visibility.HasNoAccess)
         {
-            return query.Where(item => !item.TaskJournalItemId.HasValue);
+            return query.Where(item =>
+                !item.TaskJournalItemId.HasValue
+                && !item.ObjectId.HasValue
+                && item.ObjectType == string.Empty);
         }
 
-        if (visibility.SeesAll)
+        if (visibility.SeesAllTargets)
         {
             return query;
         }
 
         var visibleTaskIds = context.TaskJournalItems
-            .ApplyTaskVisibility(visibility)
+            .ApplyTaskVisibility(visibility.Tasks)
             .Select(task => task.Id);
+        var visibleCaseIds = context.ClientCases
+            .ApplyClientCaseVisibility(visibility.Cases)
+            .Select(clientCase => clientCase.Id);
+        var visibleCaseDocumentIds = context.ClientCaseDocuments
+            .Where(document => visibleCaseIds.Contains(document.ClientCaseId))
+            .Select(document => document.Id);
+        var visibleAccountIds = context.Payments
+            .ApplyPaymentVisibility(visibility.Accounts)
+            .Select(payment => payment.Id);
+        var visiblePaymentIds = context.Payments
+            .ApplyPaymentVisibility(visibility.Payments)
+            .Select(payment => payment.Id);
+        var visibleActIds = context.Acts
+            .ApplyActVisibility(visibility.Acts)
+            .Select(act => act.Id);
+        var visibleContractIds = context.Contracts
+            .ApplyContractVisibility(visibility.Contracts)
+            .Select(contract => contract.Id);
 
         return query.Where(item =>
-            !item.TaskJournalItemId.HasValue
-            || visibleTaskIds.Contains(item.TaskJournalItemId.Value));
+            (!item.TaskJournalItemId.HasValue
+                && !item.ObjectId.HasValue
+                && item.ObjectType == string.Empty)
+            || (item.TaskJournalItemId.HasValue
+                && visibleTaskIds.Contains(item.TaskJournalItemId.Value))
+            || (!item.TaskJournalItemId.HasValue
+                && item.ObjectType == "task"
+                && item.ObjectId.HasValue
+                && visibleTaskIds.Contains(item.ObjectId.Value))
+            || (item.ObjectType == "case"
+                && item.ObjectId.HasValue
+                && visibleCaseIds.Contains(item.ObjectId.Value))
+            || (item.ObjectType == "client-case"
+                && item.ObjectId.HasValue
+                && visibleCaseIds.Contains(item.ObjectId.Value))
+            || (item.ObjectType == "client-case-document"
+                && item.ObjectId.HasValue
+                && visibleCaseDocumentIds.Contains(item.ObjectId.Value))
+            || (item.ObjectType == "invoice"
+                && item.ObjectId.HasValue
+                && visibleAccountIds.Contains(item.ObjectId.Value))
+            || (item.ObjectType == "account"
+                && item.ObjectId.HasValue
+                && visibleAccountIds.Contains(item.ObjectId.Value))
+            || (item.ObjectType == "payment"
+                && item.ObjectId.HasValue
+                && (visiblePaymentIds.Contains(item.ObjectId.Value)
+                    || visibleAccountIds.Contains(item.ObjectId.Value)))
+            || (item.ObjectType == "act"
+                && item.ObjectId.HasValue
+                && visibleActIds.Contains(item.ObjectId.Value))
+            || (item.ObjectType == "contract"
+                && item.ObjectId.HasValue
+                && visibleContractIds.Contains(item.ObjectId.Value)));
     }
 
     private static void MarkAsRead(UserNotification item)
@@ -559,4 +621,29 @@ public class NotificationInboxController : ControllerBase
             Deduplicate = item.Deduplicate,
             Digestible = item.Digestible
         };
+
+    private sealed record NotificationTargetVisibility(
+        DataVisibilityAccess? Tasks,
+        DataVisibilityAccess? Cases,
+        DataVisibilityAccess? Accounts,
+        DataVisibilityAccess? Payments,
+        DataVisibilityAccess? Acts,
+        DataVisibilityAccess? Contracts)
+    {
+        public bool HasNoAccess
+            => Tasks is null
+                && Cases is null
+                && Accounts is null
+                && Payments is null
+                && Acts is null
+                && Contracts is null;
+
+        public bool SeesAllTargets
+            => Tasks?.SeesAll == true
+                && Cases?.SeesAll == true
+                && Accounts?.SeesAll == true
+                && Payments?.SeesAll == true
+                && Acts?.SeesAll == true
+                && Contracts?.SeesAll == true;
+    }
 }

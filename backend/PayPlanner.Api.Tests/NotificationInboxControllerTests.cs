@@ -180,6 +180,84 @@ public class NotificationInboxControllerTests
     }
 
     [Fact]
+    public async Task GetNotifications_HidesObjectNotificationsWhenTargetObjectIsNotVisible()
+    {
+        await using var db = await CreateContextAsync();
+        var currentUser = await CreateUserAsync(db, "visible-object-notifications@example.com");
+        var otherUser = await CreateUserAsync(db, "hidden-object-owner@example.com");
+
+        var visibleClient = CreateClient("Visible client");
+        visibleClient.ResponsibleUserId = currentUser.Id;
+        var hiddenClient = CreateClient("Hidden client");
+        hiddenClient.ResponsibleUserId = otherUser.Id;
+        db.Clients.AddRange(visibleClient, hiddenClient);
+        await db.SaveChangesAsync();
+
+        var visibleCase = CreateCase(visibleClient, "Visible case");
+        var hiddenCase = CreateCase(hiddenClient, "Hidden case");
+        var visiblePayment = CreatePayment(visibleClient, DocumentKind.Payment, "visible-payment");
+        var hiddenPayment = CreatePayment(hiddenClient, DocumentKind.Payment, "hidden-payment");
+        var visibleInvoice = CreatePayment(visibleClient, DocumentKind.Invoice, "visible-invoice");
+        var hiddenInvoice = CreatePayment(hiddenClient, DocumentKind.Invoice, "hidden-invoice");
+        var visibleAct = CreateAct(visibleClient, "visible-act");
+        var hiddenAct = CreateAct(hiddenClient, "hidden-act");
+        var visibleContract = CreateContract(visibleClient, "visible-contract");
+        var hiddenContract = CreateContract(hiddenClient, "hidden-contract");
+        db.ClientCases.AddRange(visibleCase, hiddenCase);
+        db.Payments.AddRange(visiblePayment, hiddenPayment, visibleInvoice, hiddenInvoice);
+        db.Acts.AddRange(visibleAct, hiddenAct);
+        db.Contracts.AddRange(visibleContract, hiddenContract);
+        await db.SaveChangesAsync();
+
+        var visibleDocument = CreateCaseDocument(visibleCase, "visible-document");
+        var hiddenDocument = CreateCaseDocument(hiddenCase, "hidden-document");
+        db.ClientCaseDocuments.AddRange(visibleDocument, hiddenDocument);
+        await db.SaveChangesAsync();
+
+        var visibleNotifications = new[]
+        {
+            CreateObjectNotification(currentUser.Id, "case", visibleCase.Id, "visible-case"),
+            CreateObjectNotification(currentUser.Id, "client-case-document", visibleDocument.Id, "visible-document"),
+            CreateObjectNotification(currentUser.Id, "payment", visiblePayment.Id, "visible-payment"),
+            CreateObjectNotification(currentUser.Id, "invoice", visibleInvoice.Id, "visible-invoice"),
+            CreateObjectNotification(currentUser.Id, "act", visibleAct.Id, "visible-act"),
+            CreateObjectNotification(currentUser.Id, "contract", visibleContract.Id, "visible-contract"),
+        };
+        var hiddenNotifications = new[]
+        {
+            CreateObjectNotification(currentUser.Id, "case", hiddenCase.Id, "hidden-case"),
+            CreateObjectNotification(currentUser.Id, "client-case-document", hiddenDocument.Id, "hidden-document"),
+            CreateObjectNotification(currentUser.Id, "payment", hiddenPayment.Id, "hidden-payment"),
+            CreateObjectNotification(currentUser.Id, "invoice", hiddenInvoice.Id, "hidden-invoice"),
+            CreateObjectNotification(currentUser.Id, "act", hiddenAct.Id, "hidden-act"),
+            CreateObjectNotification(currentUser.Id, "contract", hiddenContract.Id, "hidden-contract"),
+        };
+        db.UserNotifications.AddRange(visibleNotifications);
+        db.UserNotifications.AddRange(hiddenNotifications);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, currentUser.Id);
+
+        var listResult = await controller.GetNotifications("active", null, null);
+        var page = Assert.IsType<PagedResponse<UserNotificationDto>>(Assert.IsType<OkObjectResult>(listResult.Result).Value);
+        var unreadResult = await controller.GetUnreadCount(CancellationToken.None);
+        var unreadCount = Assert.IsType<int>(Assert.IsType<OkObjectResult>(unreadResult.Result).Value);
+        var hiddenReadResult = await controller.MarkRead(hiddenNotifications[0].Id, CancellationToken.None);
+        var archiveResult = await controller.ArchiveSelected(new PayPlanner.Api.Models.Requests.BulkIdsRequest
+        {
+            Ids = [visibleNotifications[0].Id, hiddenNotifications[1].Id],
+        }, CancellationToken.None);
+        var archiveDto = Assert.IsType<UserNotificationBulkActionResultDto>(Assert.IsType<OkObjectResult>(archiveResult.Result).Value);
+
+        Assert.Equal(visibleNotifications.Length, page.Items.Count);
+        Assert.Equal(visibleNotifications.Length, unreadCount);
+        Assert.All(visibleNotifications, item => Assert.Contains(page.Items, dto => dto.Id == item.Id));
+        Assert.All(hiddenNotifications, item => Assert.DoesNotContain(page.Items, dto => dto.Id == item.Id));
+        Assert.IsType<NotFoundResult>(hiddenReadResult.Result);
+        Assert.Equal(1, archiveDto.UpdatedCount);
+    }
+
+    [Fact]
     public async Task GetNotifications_FiltersTaskNotificationsByDateEmployeeClientAndRole()
     {
         await using var db = await CreateContextAsync();
@@ -357,12 +435,28 @@ public class NotificationInboxControllerTests
             Title = title,
             BodyPreview = body,
             Tone = "blue",
-            ObjectType = "task",
-            ObjectId = 1,
+            ObjectType = string.Empty,
+            ObjectId = null,
             TaskJournalItemId = null,
             MetadataJson = "{}",
             CreatedAt = DateTime.UtcNow
         };
+
+    private static UserNotification CreateObjectNotification(
+        int userId,
+        string objectType,
+        int objectId,
+        string title)
+    {
+        var notification = CreateNotification(
+            userId,
+            $"{objectType}:{objectId}:changed",
+            title: title,
+            body: $"{title} body");
+        notification.ObjectType = objectType;
+        notification.ObjectId = objectId;
+        return notification;
+    }
 
     private static TaskJournalItem CreateTask(int userId, string title)
         => new()
@@ -384,6 +478,81 @@ public class NotificationInboxControllerTests
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
+
+    private static ClientCase CreateCase(Client client, string title)
+        => new()
+        {
+            Client = client,
+            ClientId = client.Id,
+            CaseNumber = title,
+            Title = title,
+            CaseType = "test",
+            Stage = "active",
+            Priority = "normal",
+            CreatedAt = DateTime.UtcNow,
+        };
+
+    private static ClientCaseDocument CreateCaseDocument(ClientCase clientCase, string key)
+        => new()
+        {
+            ClientCase = clientCase,
+            ClientCaseId = clientCase.Id,
+            DocumentKey = key,
+            DocumentType = "test",
+            Status = "created",
+            OriginalFileName = $"{key}.txt",
+            StoredFileName = $"{key}.txt",
+            StoragePath = $"cases/{clientCase.Id}/{key}.txt",
+            ContentType = "text/plain",
+            UploadedByName = "Test",
+            UploadedAt = DateTime.UtcNow,
+        };
+
+    private static Payment CreatePayment(Client client, DocumentKind documentKind, string account)
+        => new()
+        {
+            Client = client,
+            ClientId = client.Id,
+            Account = account,
+            AccountDate = DateTime.UtcNow.Date,
+            Amount = 1000m,
+            Date = DateTime.UtcNow.Date,
+            PlannedDate = DateTime.UtcNow.Date,
+            Description = account,
+            Status = PaymentStatus.Pending,
+            Type = PaymentType.Income,
+            DocumentKind = documentKind,
+            CreatedAt = DateTime.UtcNow,
+        };
+
+    private static Act CreateAct(Client client, string number)
+        => new()
+        {
+            Client = client,
+            ClientId = client.Id,
+            Number = number,
+            Date = DateTime.UtcNow.Date,
+            Amount = 1000m,
+            CreatedAt = DateTime.UtcNow,
+        };
+
+    private static Contract CreateContract(Client client, string number)
+    {
+        var contract = new Contract
+        {
+            Number = number,
+            Date = DateTime.UtcNow.Date,
+            Amount = 1000m,
+            CreatedAt = DateTime.UtcNow,
+        };
+        contract.ClientContracts.Add(new ClientContract
+        {
+            Client = client,
+            ClientId = client.Id,
+            Contract = contract,
+        });
+        return contract;
+    }
 
     private static Client CreateClient(string name)
         => new()
