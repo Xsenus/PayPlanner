@@ -73,6 +73,12 @@ async function fetchStatus(url, headers) {
   }
 }
 
+function assertCondition(condition, message) {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
 async function waitForApi() {
   const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
@@ -182,6 +188,63 @@ async function runApiSmoke() {
     }
 
     const headers = { Authorization: `Bearer ${token}` };
+    const clients = await fetchJson(`${baseUrl}/api/v2/clients?page=1&pageSize=1`, { headers });
+    const smokeClient = clients?.items?.[0];
+    assertCondition(smokeClient?.id, 'Smoke cannot create an advance payment because no client exists in the local database copy');
+
+    const smokeStamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
+    const smokeAmount = 1234.56;
+    const smokeDate = '2026-06-15T09:00:00.000Z';
+    const createdPayment = await fetchJson(`${baseUrl}/api/v2/payments`, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        amount: smokeAmount,
+        paidAmount: smokeAmount,
+        clientId: smokeClient.id,
+        counterpartyName: smokeClient.name ?? smokeClient.company ?? 'Advance smoke client',
+        date: smokeDate,
+        plannedDate: smokeDate,
+        description: `Advance acceptance smoke ${smokeStamp}`,
+        notes: 'Created by npm run test:advance-acceptance on a temporary SQLite copy',
+        isPaid: true,
+        paidDate: smokeDate,
+        lastPaymentDate: smokeDate,
+        status: 'Completed',
+        type: 'Income',
+        documentKind: 'Payment',
+        systemNotes: '',
+        rescheduleCount: 0,
+      }),
+    });
+    assertCondition(createdPayment?.id, 'Smoke payment was not created');
+    assertCondition(
+      createdPayment.advanceReviewStatus === 'RequiresDecision',
+      `Expected created smoke payment to require advance decision, got ${createdPayment.advanceReviewStatus}`,
+    );
+
+    const acceptedPayment = await fetchJson(`${baseUrl}/api/payments/${createdPayment.id}/advance-review/accept`, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ reason: 'Acceptance smoke: money accepted as an unallocated advance' }),
+    });
+    assertCondition(
+      acceptedPayment?.advanceReviewStatus === 'AcceptedAsAdvance',
+      `Expected accepted smoke payment to be AcceptedAsAdvance, got ${acceptedPayment?.advanceReviewStatus}`,
+    );
+
+    const balance = await fetchJson(`${baseUrl}/api/clients/${smokeClient.id}/balance`, { headers });
+    assertCondition(
+      Number(balance?.balance ?? 0) >= smokeAmount,
+      `Expected client balance to include smoke advance ${smokeAmount}, got ${balance?.balance}`,
+    );
+
     const diagnosticsQuery = '\u0412\u0438\u043d\u043e\u043a\u0443\u0440\u043e\u0432';
     const diagnostics = await fetchJson(
       `${baseUrl}/api/payments/advance-review/diagnostics?q=${encodeURIComponent(diagnosticsQuery)}&from=2026-03-02&to=2026-03-02&amount=7100&amountTolerance=0&limit=10`,
@@ -194,6 +257,9 @@ async function runApiSmoke() {
 
     console.log('\nAdvance API smoke result:');
     console.log(JSON.stringify({
+      createdAdvancePaymentId: createdPayment.id,
+      acceptedAdvanceStatus: acceptedPayment.advanceReviewStatus,
+      clientBalanceAfterAccept: balance?.balance ?? null,
       diagnosticsTotal: diagnostics?.total ?? null,
       candidatesTotal: candidates?.total ?? null,
       requiresDecisionTotal: pending?.total ?? null,
