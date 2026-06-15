@@ -4958,6 +4958,7 @@ export function LegalEntityModal({
           onSave={saveLegalEntityCase}
           onDelete={caseMode === "edit" && !readOnly ? removeLegalEntityCase : undefined}
           responsibles={responsibles}
+          canViewFinance={canViewPayments}
         />
       ) : null}
 

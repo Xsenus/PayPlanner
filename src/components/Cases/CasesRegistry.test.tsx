@@ -19,6 +19,7 @@ const authState = vi.hoisted(() => ({
 
 const permissionsState = vi.hoisted(() => ({
   casesCanExport: true,
+  paymentsCanView: true,
 }));
 
 function createTaskJournalItem(overrides: Partial<TaskJournalItem> = {}): TaskJournalItem {
@@ -105,7 +106,7 @@ vi.mock('../../hooks/useRolePermissions', () => ({
       cases: { ...section, canExport: permissionsState.casesCanExport },
       accounts: { ...section },
       acts: { ...section },
-      payments: { ...section },
+      payments: { ...section, canView: permissionsState.paymentsCanView },
       contracts: { ...section },
       dictionaries: { ...section },
       roles: { ...section },
@@ -163,6 +164,7 @@ describe('CasesRegistry', () => {
   beforeEach(() => {
     authState.isAdmin = true;
     permissionsState.casesCanExport = true;
+    permissionsState.paymentsCanView = true;
     window.localStorage.removeItem('pp.cases_registry_views.v1');
     vi.mocked(apiService.getCasesV2).mockReset();
     vi.mocked(apiService.getCasesV2).mockResolvedValue({
@@ -455,6 +457,34 @@ describe('CasesRegistry', () => {
     expect(screen.queryByRole('button', { name: /^Excel$/u })).toBeNull();
     expect(screen.queryByRole('button', { name: /^PDF$/u })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Печать' })).toBeNull();
+  });
+
+  it('hides case finance data and actions when the role cannot view payments', async () => {
+    authState.isAdmin = false;
+    permissionsState.paymentsCanView = false;
+    const onOpenCaseFinance = vi.fn();
+
+    render(<CasesRegistry onOpenCaseFinance={onOpenCaseFinance} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+
+    expect(screen.queryByText('Гонорар')).toBeNull();
+    expect(screen.queryByText('Счета')).toBeNull();
+    expect(screen.queryByText('Оплачено')).toBeNull();
+    expect(screen.queryByText('Долг')).toBeNull();
+    expect(screen.queryByPlaceholderText('Гонорар от')).toBeNull();
+    expect(screen.queryByPlaceholderText('Гонорар до')).toBeNull();
+    expect(screen.queryByLabelText('Открыть финансы дела')).toBeNull();
+    expect(screen.queryByText(/150\s*000\s*₽/u)).toBeNull();
+    expect(screen.queryByText(/35\s*000\s*₽/u)).toBeNull();
+    expect(screen.queryByText(/15\s*000\s*₽/u)).toBeNull();
+
+    expect(apiService.getCasesV2).toHaveBeenCalledWith(expect.objectContaining({
+      sortBy: 'createdAt',
+      minFee: undefined,
+      maxFee: undefined,
+    }));
+    expect(onOpenCaseFinance).not.toHaveBeenCalled();
   });
 
   it('opens the standalone case card when the registry callback is provided', async () => {

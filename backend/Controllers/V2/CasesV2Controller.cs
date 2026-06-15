@@ -173,6 +173,9 @@ public class CasesV2Controller : ControllerBase
         return permission is not null && permission.CanEdit ? null : Forbid();
     }
 
+    private Task<bool> CanViewCaseFinanceAsync(CancellationToken ct)
+        => _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Payments, static permission => permission.CanView, ct);
+
     private async Task<bool> CanRevealCaseSensitiveDataAsync(CancellationToken ct)
     {
         var userId = User.GetUserId();
@@ -253,6 +256,7 @@ public class CasesV2Controller : ControllerBase
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, MaxRegistryPageSize);
 
+        var canViewFinance = await CanViewCaseFinanceAsync(ct);
         var q = BuildRegistryQuery(
             visibility,
             clientId,
@@ -264,9 +268,9 @@ public class CasesV2Controller : ControllerBase
             priority,
             from,
             to,
-            minFee,
-            maxFee,
-            sortBy,
+            canViewFinance ? minFee : null,
+            canViewFinance ? maxFee : null,
+            canViewFinance || !string.Equals(sortBy, "feeAmount", StringComparison.OrdinalIgnoreCase) ? sortBy : null,
             sortDir,
             scope,
             activity,
@@ -278,7 +282,14 @@ public class CasesV2Controller : ControllerBase
             .Take(pageSize)
             .AsNoTracking()
             .ToListAsync(ct);
-        await ApplyFinanceSummaryAsync(items, ct);
+        if (canViewFinance)
+        {
+            await ApplyFinanceSummaryAsync(items, ct);
+        }
+        else
+        {
+            HideCaseFinanceData(items);
+        }
         await ApplyTaskSummaryAsync(items, ct);
         PopulateResponsibleViewAliases(items);
 
@@ -305,7 +316,7 @@ public class CasesV2Controller : ControllerBase
         [FromQuery] int? inactiveDays = null,
         CancellationToken ct = default)
     {
-        var (items, error) = await LoadRegistryExportItemsAsync(
+        var (items, canViewFinance, error) = await LoadRegistryExportItemsAsync(
             clientId,
             legalEntityId,
             status,
@@ -329,7 +340,7 @@ public class CasesV2Controller : ControllerBase
         }
 
         var statusClock = await ResolveCaseStatusClockAsync(ct);
-        var bytes = BuildRegistryCsv(items!, statusClock.TimeZone);
+        var bytes = BuildRegistryCsv(items!, statusClock.TimeZone, canViewFinance);
         var fileName = $"cases-registry-{FormatUserExportTimestamp(statusClock.NowLocal)}.csv";
         return File(bytes, "text/csv; charset=utf-8", fileName);
     }
@@ -354,7 +365,7 @@ public class CasesV2Controller : ControllerBase
         [FromQuery] int? inactiveDays = null,
         CancellationToken ct = default)
     {
-        var (items, error) = await LoadRegistryExportItemsAsync(
+        var (items, canViewFinance, error) = await LoadRegistryExportItemsAsync(
             clientId,
             legalEntityId,
             status,
@@ -378,7 +389,7 @@ public class CasesV2Controller : ControllerBase
         }
 
         var statusClock = await ResolveCaseStatusClockAsync(ct);
-        var bytes = BuildRegistryExcel(items!, statusClock.NowLocal, statusClock.TimeZone);
+        var bytes = BuildRegistryExcel(items!, statusClock.NowLocal, statusClock.TimeZone, canViewFinance);
         var fileName = $"cases-registry-{FormatUserExportTimestamp(statusClock.NowLocal)}.xls";
         return File(bytes, "application/vnd.ms-excel; charset=utf-8", fileName);
     }
@@ -403,7 +414,7 @@ public class CasesV2Controller : ControllerBase
         [FromQuery] int? inactiveDays = null,
         CancellationToken ct = default)
     {
-        var (items, error) = await LoadRegistryExportItemsAsync(
+        var (items, canViewFinance, error) = await LoadRegistryExportItemsAsync(
             clientId,
             legalEntityId,
             status,
@@ -432,7 +443,7 @@ public class CasesV2Controller : ControllerBase
         }
 
         var statusClock = await ResolveCaseStatusClockAsync(ct);
-        var bytes = await _pdfService.RenderAsync(BuildRegistryPrintHtml(items!, statusClock.NowLocal, statusClock.TimeZone), ct);
+        var bytes = await _pdfService.RenderAsync(BuildRegistryPrintHtml(items!, statusClock.NowLocal, statusClock.TimeZone, canViewFinance), ct);
         var fileName = $"cases-registry-{FormatUserExportTimestamp(statusClock.NowLocal)}.pdf";
         return File(bytes, "application/pdf", fileName);
     }
@@ -457,7 +468,7 @@ public class CasesV2Controller : ControllerBase
         [FromQuery] int? inactiveDays = null,
         CancellationToken ct = default)
     {
-        var (items, error) = await LoadRegistryExportItemsAsync(
+        var (items, canViewFinance, error) = await LoadRegistryExportItemsAsync(
             clientId,
             legalEntityId,
             status,
@@ -481,10 +492,10 @@ public class CasesV2Controller : ControllerBase
         }
 
         var statusClock = await ResolveCaseStatusClockAsync(ct);
-        return Content(BuildRegistryPrintHtml(items!, statusClock.NowLocal, statusClock.TimeZone), "text/html; charset=utf-8", Encoding.UTF8);
+        return Content(BuildRegistryPrintHtml(items!, statusClock.NowLocal, statusClock.TimeZone, canViewFinance), "text/html; charset=utf-8", Encoding.UTF8);
     }
 
-    private async Task<(IReadOnlyList<ClientCase>? Items, IActionResult? Error)> LoadRegistryExportItemsAsync(
+    private async Task<(IReadOnlyList<ClientCase>? Items, bool CanViewFinance, IActionResult? Error)> LoadRegistryExportItemsAsync(
         int? clientId,
         int? legalEntityId,
         ClientCaseStatus? status,
@@ -505,15 +516,16 @@ public class CasesV2Controller : ControllerBase
     {
         if (await RequireCasesPermissionAsync(static permission => permission.CanExport, ct) is { } forbidden)
         {
-            return (null, forbidden);
+            return (null, false, forbidden);
         }
 
         var visibility = await ResolveCasesVisibilityAsync(ct);
         if (visibility is null)
         {
-            return (null, Unauthorized());
+            return (null, false, Unauthorized());
         }
 
+        var canViewFinance = await CanViewCaseFinanceAsync(ct);
         var items = await BuildRegistryQuery(
                 visibility,
                 clientId,
@@ -525,9 +537,9 @@ public class CasesV2Controller : ControllerBase
                 priority,
                 from,
                 to,
-                minFee,
-                maxFee,
-                sortBy,
+                canViewFinance ? minFee : null,
+                canViewFinance ? maxFee : null,
+                canViewFinance || !string.Equals(sortBy, "feeAmount", StringComparison.OrdinalIgnoreCase) ? sortBy : null,
                 sortDir,
                 scope,
                 activity,
@@ -535,11 +547,18 @@ public class CasesV2Controller : ControllerBase
             .Take(MaxRegistryExportRows)
             .AsNoTracking()
             .ToListAsync(ct);
-        await ApplyFinanceSummaryAsync(items, ct);
+        if (canViewFinance)
+        {
+            await ApplyFinanceSummaryAsync(items, ct);
+        }
+        else
+        {
+            HideCaseFinanceData(items);
+        }
         await ApplyTaskSummaryAsync(items, ct);
         PopulateResponsibleViewAliases(items);
 
-        return (items, null);
+        return (items, canViewFinance, null);
     }
 
     private IQueryable<ClientCase> BuildRegistryQuery(
@@ -1173,9 +1192,9 @@ public class CasesV2Controller : ControllerBase
         return builder.ToString();
     }
 
-    private static byte[] BuildRegistryCsv(IReadOnlyCollection<ClientCase> items, TimeZoneInfo timeZone)
+    private static byte[] BuildRegistryCsv(IReadOnlyCollection<ClientCase> items, TimeZoneInfo timeZone, bool canViewFinance)
     {
-        var header = new[]
+        var header = new List<string>
         {
             "№ дела",
             "Название",
@@ -1192,10 +1211,6 @@ public class CasesV2Controller : ControllerBase
             "Выполненные задачи",
             "Прогресс",
             "Последняя активность",
-            "Гонорар",
-            "Счета",
-            "Оплачено",
-            "Долг",
             "Просмотр ответственным",
             "Активность подтвердил",
             "Приоритет",
@@ -1203,6 +1218,10 @@ public class CasesV2Controller : ControllerBase
             "№ в суде",
             "Заседание",
         };
+        if (canViewFinance)
+        {
+            header.InsertRange(15, ["Гонорар", "Счета", "Оплачено", "Долг"]);
+        }
 
         var lines = new List<string>
         {
@@ -1211,7 +1230,7 @@ public class CasesV2Controller : ControllerBase
 
         foreach (var item in items)
         {
-            lines.Add(string.Join(';', new[]
+            var values = new List<string?>
             {
                 item.CaseNumber,
                 item.Title,
@@ -1228,17 +1247,24 @@ public class CasesV2Controller : ControllerBase
                 item.CompletedTaskCount.ToString(CultureInfo.InvariantCulture),
                 $"{item.TaskProgressPercent}%",
                 FormatRuDateTime(GetLatestCaseActivityAt(item), timeZone),
-                FormatMoney(item.FeeAmount),
-                FormatMoney(item.IncomeTotal),
-                FormatMoney(item.IncomePaid),
-                FormatMoney(item.IncomeOutstanding),
                 FormatRuDateTime(item.LastViewedByResponsibleAt ?? item.LastViewedAt, timeZone),
                 item.ActivityConfirmedByUserName,
                 GetPriorityLabel(item.Priority),
                 item.CourtName,
                 item.CourtCaseNumber,
                 FormatRuDateTime(item.NextHearingAt, timeZone),
-            }.Select(CsvCell)));
+            };
+            if (canViewFinance)
+            {
+                values.InsertRange(15, [
+                    FormatMoney(item.FeeAmount),
+                    FormatMoney(item.IncomeTotal),
+                    FormatMoney(item.IncomePaid),
+                    FormatMoney(item.IncomeOutstanding),
+                ]);
+            }
+
+            lines.Add(string.Join(';', values.Select(CsvCell)));
         }
 
         var csv = string.Join('\n', lines);
@@ -1250,7 +1276,7 @@ public class CasesV2Controller : ControllerBase
         return result;
     }
 
-    private static byte[] BuildRegistryExcel(IReadOnlyCollection<ClientCase> items, DateTime generatedAtLocal, TimeZoneInfo timeZone)
+    private static byte[] BuildRegistryExcel(IReadOnlyCollection<ClientCase> items, DateTime generatedAtLocal, TimeZoneInfo timeZone, bool canViewFinance)
     {
         var generatedAt = FormatUserGeneratedAt(generatedAtLocal);
         var totalFee = items.Sum(item => item.FeeAmount);
@@ -1269,13 +1295,16 @@ public class CasesV2Controller : ControllerBase
         AppendExcelRow(builder, "Ограничение выгрузки", $"Первые {MaxRegistryExportRows} строк текущей выборки");
         AppendExcelRow(builder);
         AppendExcelRow(builder, "Дел", items.Count.ToString(CultureInfo.InvariantCulture));
-        AppendExcelRow(builder, "Гонорар", FormatMoney(totalFee));
-        AppendExcelRow(builder, "Счета", FormatMoney(totalIncome));
-        AppendExcelRow(builder, "Оплачено", FormatMoney(totalPaid));
-        AppendExcelRow(builder, "Долг", FormatMoney(totalDebt));
+        if (canViewFinance)
+        {
+            AppendExcelRow(builder, "Гонорар", FormatMoney(totalFee));
+            AppendExcelRow(builder, "Счета", FormatMoney(totalIncome));
+            AppendExcelRow(builder, "Оплачено", FormatMoney(totalPaid));
+            AppendExcelRow(builder, "Долг", FormatMoney(totalDebt));
+        }
         AppendExcelRow(builder);
-        AppendExcelRow(
-            builder,
+        var header = new List<string?>
+        {
             "№ дела",
             "Название",
             "Клиент/юр. лицо",
@@ -1291,21 +1320,23 @@ public class CasesV2Controller : ControllerBase
             "Выполненные задачи",
             "Прогресс",
             "Последняя активность",
-            "Гонорар",
-            "Счета",
-            "Оплачено",
-            "Долг",
             "Просмотр ответственным",
             "Активность подтвердил",
             "Приоритет",
             "Суд",
             "№ в суде",
-            "Заседание");
+            "Заседание",
+        };
+        if (canViewFinance)
+        {
+            header.InsertRange(15, ["Гонорар", "Счета", "Оплачено", "Долг"]);
+        }
+        AppendExcelRow(builder, header.ToArray());
 
         foreach (var item in items)
         {
-            AppendExcelRow(
-                builder,
+            var row = new List<string?>
+            {
                 item.CaseNumber,
                 item.Title,
                 GetOwnerName(item),
@@ -1321,16 +1352,23 @@ public class CasesV2Controller : ControllerBase
                 item.CompletedTaskCount.ToString(CultureInfo.InvariantCulture),
                 $"{item.TaskProgressPercent}%",
                 FormatRuDateTime(GetLatestCaseActivityAt(item), timeZone),
-                FormatMoney(item.FeeAmount),
-                FormatMoney(item.IncomeTotal),
-                FormatMoney(item.IncomePaid),
-                FormatMoney(item.IncomeOutstanding),
                 FormatRuDateTime(item.LastViewedByResponsibleAt ?? item.LastViewedAt, timeZone),
                 item.ActivityConfirmedByUserName,
                 GetPriorityLabel(item.Priority),
                 item.CourtName,
                 item.CourtCaseNumber,
-                FormatRuDateTime(item.NextHearingAt, timeZone));
+                FormatRuDateTime(item.NextHearingAt, timeZone),
+            };
+            if (canViewFinance)
+            {
+                row.InsertRange(15, [
+                    FormatMoney(item.FeeAmount),
+                    FormatMoney(item.IncomeTotal),
+                    FormatMoney(item.IncomePaid),
+                    FormatMoney(item.IncomeOutstanding),
+                ]);
+            }
+            AppendExcelRow(builder, row.ToArray());
         }
 
         builder
@@ -1346,13 +1384,30 @@ public class CasesV2Controller : ControllerBase
         return result;
     }
 
-    private static string BuildRegistryPrintHtml(IReadOnlyCollection<ClientCase> items, DateTime generatedAtLocal, TimeZoneInfo timeZone)
+    private static string BuildRegistryPrintHtml(IReadOnlyCollection<ClientCase> items, DateTime generatedAtLocal, TimeZoneInfo timeZone, bool canViewFinance)
     {
         var generatedAt = FormatUserGeneratedAt(generatedAtLocal);
         var totalFee = items.Sum(item => item.FeeAmount);
         var totalIncome = items.Sum(item => item.IncomeTotal);
         var totalPaid = items.Sum(item => item.IncomePaid);
         var totalDebt = items.Sum(item => item.IncomeOutstanding);
+        var summaryColumns = canViewFinance ? 5 : 1;
+        var financeSummary = canViewFinance
+            ? $"""
+                <div><span>Гонорар</span><strong>{Html(FormatMoney(totalFee))}</strong></div>
+                <div><span>Счета</span><strong>{Html(FormatMoney(totalIncome))}</strong></div>
+                <div><span>Оплачено</span><strong>{Html(FormatMoney(totalPaid))}</strong></div>
+                <div><span>Долг</span><strong>{Html(FormatMoney(totalDebt))}</strong></div>
+              """
+            : string.Empty;
+        var financeHeaders = canViewFinance
+            ? """
+                    <th>Гонорар</th>
+                    <th>Счета</th>
+                    <th>Оплачено</th>
+                    <th>Долг</th>
+              """
+            : string.Empty;
         var rows = string.Join('\n', items.Select(item => $"""
             <tr>
               <td>{Html(item.CaseNumber)}</td>
@@ -1365,10 +1420,12 @@ public class CasesV2Controller : ControllerBase
               <td>{Html(item.CaseType)}</td>
               <td>{Html(item.Stage)}</td>
               <td>{Html(FormatRuDate(item.DueDate))}</td>
+              {(canViewFinance ? $"""
               <td class="num">{Html(FormatMoney(item.FeeAmount))}</td>
               <td class="num">{Html(FormatMoney(item.IncomeTotal))}</td>
               <td class="num">{Html(FormatMoney(item.IncomePaid))}</td>
               <td class="num">{Html(FormatMoney(item.IncomeOutstanding))}</td>
+              """ : string.Empty)}
               <td>{item.OpenTaskCount} / {item.OverdueTaskCount}</td>
               <td>{Html(FormatRuDateTime(GetLatestCaseActivityAt(item), timeZone))}</td>
             </tr>
@@ -1384,7 +1441,7 @@ public class CasesV2Controller : ControllerBase
                 body { font-family: Arial, sans-serif; color: #0f172a; margin: 24px; }
                 h1 { margin: 0 0 6px; font-size: 24px; }
                 .meta { color: #64748b; margin-bottom: 18px; font-size: 12px; }
-                .summary { display: grid; grid-template-columns: repeat(5, minmax(120px, 1fr)); gap: 8px; margin-bottom: 18px; }
+                .summary { display: grid; grid-template-columns: repeat({{summaryColumns}}, minmax(120px, 1fr)); gap: 8px; margin-bottom: 18px; }
                 .summary div { border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; }
                 .summary span { display: block; color: #64748b; font-size: 11px; text-transform: uppercase; }
                 .summary strong { font-size: 15px; }
@@ -1395,7 +1452,7 @@ public class CasesV2Controller : ControllerBase
                 .num { white-space: nowrap; text-align: right; }
                 @media print {
                   body { margin: 10mm; }
-                  .summary { grid-template-columns: repeat(5, 1fr); }
+                  .summary { grid-template-columns: repeat({{summaryColumns}}, 1fr); }
                 }
               </style>
             </head>
@@ -1404,10 +1461,7 @@ public class CasesV2Controller : ControllerBase
               <div class="meta">Сформировано: {{Html(generatedAt)}}. В печатную форму попали первые {{MaxRegistryExportRows}} строк текущей выборки.</div>
               <section class="summary">
                 <div><span>Дел</span><strong>{{items.Count}}</strong></div>
-                <div><span>Гонорар</span><strong>{{Html(FormatMoney(totalFee))}}</strong></div>
-                <div><span>Счета</span><strong>{{Html(FormatMoney(totalIncome))}}</strong></div>
-                <div><span>Оплачено</span><strong>{{Html(FormatMoney(totalPaid))}}</strong></div>
-                <div><span>Долг</span><strong>{{Html(FormatMoney(totalDebt))}}</strong></div>
+                {{financeSummary}}
               </section>
               <table>
                 <thead>
@@ -1419,10 +1473,7 @@ public class CasesV2Controller : ControllerBase
                     <th>Тип</th>
                     <th>Этап</th>
                     <th>Срок</th>
-                    <th>Гонорар</th>
-                    <th>Счета</th>
-                    <th>Оплачено</th>
-                    <th>Долг</th>
+                    {{financeHeaders}}
                     <th>Задачи</th>
                     <th>Активность</th>
                   </tr>
@@ -2028,14 +2079,22 @@ public class CasesV2Controller : ControllerBase
             return Unauthorized();
         }
 
+        var canViewFinance = await CanViewCaseFinanceAsync(ct);
         var entity = await _db.ClientCases
-            .WithCaseIncludes(includePayments: true)
+            .WithCaseIncludes(includePayments: canViewFinance)
             .ApplyClientCaseVisibility(visibility)
             .AsNoTracking()
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (entity is not null)
         {
-            await ApplyFinanceSummaryAsync([entity], ct);
+            if (canViewFinance)
+            {
+                await ApplyFinanceSummaryAsync([entity], ct);
+            }
+            else
+            {
+                HideCaseFinanceData([entity]);
+            }
             await ApplyTaskSummaryAsync([entity], ct);
             PopulateResponsibleViewAliases([entity]);
             var canRevealSensitiveData = await CanRevealCaseSensitiveDataAsync(ct);
@@ -3295,8 +3354,9 @@ public class CasesV2Controller : ControllerBase
             return Unauthorized();
         }
 
+        var canViewFinance = await CanViewCaseFinanceAsync(ct);
         var clientCase = await _db.ClientCases
-            .WithCaseIncludes(includePayments: true)
+            .WithCaseIncludes(includePayments: canViewFinance)
             .ApplyClientCaseVisibility(visibility)
             .AsNoTracking()
             .FirstOrDefaultAsync(item => item.Id == id, ct);
@@ -3305,10 +3365,17 @@ public class CasesV2Controller : ControllerBase
             return NotFound();
         }
 
-        await ApplyFinanceSummaryAsync([clientCase], ct);
+        if (canViewFinance)
+        {
+            await ApplyFinanceSummaryAsync([clientCase], ct);
+        }
+        else
+        {
+            HideCaseFinanceData([clientCase]);
+        }
         await ApplyTaskSummaryAsync([clientCase], ct);
 
-        return Ok(MapCaseSummary(clientCase));
+        return Ok(MapCaseSummary(clientCase, canViewFinance));
     }
 
     [HttpGet("{id:int}/finance")]
@@ -3318,7 +3385,7 @@ public class CasesV2Controller : ControllerBase
         {
             return forbidden;
         }
-        if (!await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Payments, static permission => permission.CanView, ct))
+        if (!await CanViewCaseFinanceAsync(ct))
         {
             return Forbid();
         }
@@ -7032,6 +7099,10 @@ public class CasesV2Controller : ControllerBase
         var validation = await ValidateCaseOwnerAsync(model.ClientId, model.LegalEntityId, visibility, ct);
         if (validation is not null) return validation;
         ApplyCaseDetails(model, model);
+        if (!await CanViewCaseFinanceAsync(ct))
+        {
+            model.FeeAmount = 0m;
+        }
         ApplyCaseControlState(model, model.IsUnderControl, User.GetUserId(), User.GetDisplayName());
         ApplyHiddenFromExecutorMetadata(model, model.IsHiddenFromExecutor, User.GetUserId(), User.GetDisplayName());
         _db.ClientCases.Add(model);
@@ -7062,6 +7133,8 @@ public class CasesV2Controller : ControllerBase
         if (validation is not null) return validation;
 
         var shouldCloseLinkedTasks = !IsFinishedCaseStatus(e.Status) && IsFinishedCaseStatus(model.Status);
+        var previousFeeAmount = e.FeeAmount;
+        var canViewFinance = await CanViewCaseFinanceAsync(ct);
         e.Title = model.Title;
         e.Description = model.Description;
         e.Status = model.Status;
@@ -7069,6 +7142,10 @@ public class CasesV2Controller : ControllerBase
         e.LegalEntityId = model.LegalEntityId;
         var previousHiddenFromExecutor = e.IsHiddenFromExecutor;
         ApplyCaseDetails(e, model);
+        if (!canViewFinance)
+        {
+            e.FeeAmount = previousFeeAmount;
+        }
         ApplyCaseControlState(e, model.IsUnderControl, User.GetUserId(), User.GetDisplayName());
         if (previousHiddenFromExecutor != e.IsHiddenFromExecutor)
         {
@@ -7538,6 +7615,24 @@ public class CasesV2Controller : ControllerBase
                     clientCase.ExpenseCount += 1;
                 }
             }
+        }
+    }
+
+    private static void HideCaseFinanceData(IEnumerable<ClientCase> cases)
+    {
+        foreach (var clientCase in cases)
+        {
+            clientCase.FeeAmount = 0m;
+            clientCase.IncomeTotal = 0m;
+            clientCase.IncomePaid = 0m;
+            clientCase.IncomeOutstanding = 0m;
+            clientCase.IncomeCount = 0;
+            clientCase.ExpenseTotal = 0m;
+            clientCase.ExpensePaid = 0m;
+            clientCase.ExpenseOutstanding = 0m;
+            clientCase.ExpenseCount = 0;
+            clientCase.Payments = new List<Payment>();
+            clientCase.InvoiceClientCases = new List<InvoiceClientCase>();
         }
     }
 
@@ -8615,8 +8710,44 @@ public class CasesV2Controller : ControllerBase
         return string.IsNullOrWhiteSpace(sourceStage) ? null : sourceStage;
     }
 
-    private static ClientCaseSummaryDto MapCaseSummary(ClientCase clientCase)
+    private static ClientCaseSummaryDto MapCaseSummary(ClientCase clientCase, bool canViewFinance = true)
     {
+        if (!canViewFinance)
+        {
+            return new ClientCaseSummaryDto
+            {
+                Id = clientCase.Id,
+                Title = clientCase.Title,
+                CaseNumber = clientCase.CaseNumber,
+                Status = clientCase.Status.ToString(),
+                StatusLabel = FormatCaseStatus(clientCase.Status),
+                Priority = clientCase.Priority,
+                PriorityLabel = FormatCasePriority(clientCase.Priority),
+                Stage = clientCase.Stage,
+                OwnerName = clientCase.Client?.Name
+                    ?? clientCase.LegalEntity?.ShortName
+                    ?? clientCase.LegalEntity?.FullName
+                    ?? string.Empty,
+                ResponsibleUserId = clientCase.ResponsibleUserId,
+                ResponsibleName = FormatCaseResponsible(clientCase.ResponsibleUser),
+                StartDate = clientCase.StartDate,
+                DueDate = clientCase.DueDate,
+                NextHearingAt = clientCase.NextHearingAt,
+                OpenTaskCount = clientCase.OpenTaskCount,
+                OverdueTaskCount = clientCase.OverdueTaskCount,
+                CompletedTaskCount = clientCase.CompletedTaskCount,
+                TaskProgressPercent = clientCase.TaskProgressPercent,
+                FeeAmount = null,
+                PaidAmount = 0m,
+                DebtAmount = 0m,
+                LastTaskAt = clientCase.LastTaskAt,
+                LastViewedAt = clientCase.LastViewedAt,
+                LastViewedByResponsibleAt = clientCase.LastViewedAt,
+                LastViewedByResponsibleUserId = clientCase.LastViewedByUserId,
+                LastViewedByResponsibleUserName = clientCase.LastViewedByUserName,
+            };
+        }
+
         var paidAmount = clientCase.IncomePaid;
         var debtAmount = clientCase.FeeAmount > 0
             ? Math.Max(clientCase.FeeAmount - paidAmount, 0m)

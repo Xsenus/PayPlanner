@@ -1247,6 +1247,107 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task GetById_WithoutPaymentsViewPermission_HidesFinanceFieldsAndPayments()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "case-detail-finance-denied@example.com", "Owner", DataVisibilityScope.All);
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = owner.RoleId,
+            Section = RolePermissionCatalog.Payments,
+            CanView = false,
+            ViewScope = DataVisibilityScope.All,
+        });
+        var client = new Client
+        {
+            Name = "Finance hidden client",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            ResponsibleUserId = owner.Id,
+            Title = "Finance hidden case",
+            Status = ClientCaseStatus.Open,
+            FeeAmount = 50000m,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        db.Payments.Add(new Payment
+        {
+            Client = client,
+            ClientCase = clientCase,
+            DocumentKind = DocumentKind.Payment,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Completed,
+            Amount = 20000m,
+            PaidAmount = 20000m,
+            Date = DateTime.UtcNow.Date,
+            PlannedDate = DateTime.UtcNow.Date,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var result = await controller.GetById(clientCase.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var dto = Assert.IsType<ClientCase>(ok.Value);
+        Assert.Equal(0m, dto.FeeAmount);
+        Assert.Equal(0m, dto.IncomeTotal);
+        Assert.Equal(0m, dto.IncomePaid);
+        Assert.Equal(0m, dto.IncomeOutstanding);
+        Assert.Empty(dto.Payments);
+    }
+
+    [Fact]
+    public async Task Update_WithoutPaymentsViewPermission_PreservesFeeAmount()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "case-update-finance-denied@example.com", "Owner", DataVisibilityScope.All);
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = owner.RoleId,
+            Section = RolePermissionCatalog.Payments,
+            CanView = false,
+            ViewScope = DataVisibilityScope.All,
+        });
+        var client = new Client
+        {
+            Name = "Fee preserved client",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            ResponsibleUserId = owner.Id,
+            Title = "Fee preserved case",
+            Status = ClientCaseStatus.Open,
+            Priority = "normal",
+            FeeAmount = 50000m,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var result = await controller.Update(clientCase.Id, new ClientCase
+        {
+            ClientId = client.Id,
+            Title = "Updated title",
+            Status = ClientCaseStatus.Open,
+            Priority = "normal",
+            FeeAmount = 1m,
+        }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result);
+        var saved = await db.ClientCases.AsNoTracking().SingleAsync(item => item.Id == clientCase.Id);
+        Assert.Equal(50000m, saved.FeeAmount);
+    }
+
+    [Fact]
     public async Task GetFinance_UsesUserTimeZoneForPaymentCalendarStatus()
     {
         await using var db = await CreateContextAsync();

@@ -18,6 +18,7 @@ interface CaseModalProps {
   responsibles?: ActResponsible[];
   overlayClassName?: string;
   allowEdit?: boolean;
+  canViewFinance?: boolean;
 }
 
 type StatusValue = 'Open' | 'OnHold' | 'Closed' | 'Lost';
@@ -241,7 +242,7 @@ function getContactOptionKey(item: ContactDirectoryItemDto) {
   return `${item.sourceType}:${item.sourceId}`;
 }
 
-export function CaseModal({ isOpen, onClose, caseData, onSave, onDelete, responsibles = [], overlayClassName, allowEdit = true }: CaseModalProps) {
+export function CaseModal({ isOpen, onClose, caseData, onSave, onDelete, responsibles = [], overlayClassName, allowEdit = true, canViewFinance = true }: CaseModalProps) {
   const { confirm } = useDialog();
   const [timeZoneId, setTimeZoneId] = useState(() => normalizeUserTimeZoneId());
   const [title, setTitle] = useState(caseData.title ?? '');
@@ -485,7 +486,7 @@ export function CaseModal({ isOpen, onClose, caseData, onSave, onDelete, respons
   }, [refreshCaseTasks]);
 
   const refreshFinanceSummary = useCallback(async () => {
-    if (!isOpen || !caseData.id || caseData.id <= 0) {
+    if (!canViewFinance || !isOpen || !caseData.id || caseData.id <= 0) {
       setFinanceSummary(null);
       setFinanceLoading(false);
       return;
@@ -506,7 +507,7 @@ export function CaseModal({ isOpen, onClose, caseData, onSave, onDelete, respons
     } finally {
       setFinanceLoading(false);
     }
-  }, [caseData.clientId, caseData.id, caseData.legalEntityId, isOpen]);
+  }, [canViewFinance, caseData.clientId, caseData.id, caseData.legalEntityId, isOpen]);
 
   useEffect(() => {
     void refreshFinanceSummary();
@@ -651,7 +652,7 @@ export function CaseModal({ isOpen, onClose, caseData, onSave, onDelete, respons
         responsibleUserId: responsibleUserId ? Number(responsibleUserId) : null,
         startDate: fromDateInput(startDate),
         dueDate: fromDateInput(dueDate),
-        feeAmount: Number(feeAmount.replace(',', '.')) || 0,
+        ...(canViewFinance ? { feeAmount: Number(feeAmount.replace(',', '.')) || 0 } : {}),
         priority,
         courtName: courtName.trim(),
         courtCaseNumber: courtCaseNumber.trim(),
@@ -1090,20 +1091,22 @@ export function CaseModal({ isOpen, onClose, caseData, onSave, onDelete, respons
             />
           </div>
 
-          <div>
-            <label className="text-sm text-gray-600">Сумма гонорара</label>
-            <input
-              aria-label="Сумма гонорара"
-              type="number"
-              min="0"
-              step="0.01"
-              className="mt-1 w-full border rounded-lg px-3 py-2"
-              value={feeAmount}
-              onChange={(e) => setFeeAmount(e.target.value)}
-              placeholder="0.00"
-              disabled={saving}
-            />
-          </div>
+          {canViewFinance ? (
+            <div>
+              <label className="text-sm text-gray-600">Сумма гонорара</label>
+              <input
+                aria-label="Сумма гонорара"
+                type="number"
+                min="0"
+                step="0.01"
+                className="mt-1 w-full border rounded-lg px-3 py-2"
+                value={feeAmount}
+                onChange={(e) => setFeeAmount(e.target.value)}
+                placeholder="0.00"
+                disabled={saving}
+              />
+            </div>
+          ) : null}
 
           <div>
             <label className="text-sm text-gray-600">Описание</label>
@@ -1134,45 +1137,47 @@ export function CaseModal({ isOpen, onClose, caseData, onSave, onDelete, respons
             </select>
           </div>
 
-          <div className="md:col-span-2 rounded-xl border border-emerald-100 bg-emerald-50/50 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <h4 className="text-sm font-semibold text-emerald-900">Финансы по делу</h4>
-                <p className="mt-0.5 text-xs text-emerald-700/80">
-                  Суммы берутся из привязанных счетов и платежей по текущему делу.
-                </p>
+          {canViewFinance ? (
+            <div className="md:col-span-2 rounded-xl border border-emerald-100 bg-emerald-50/50 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-sm font-semibold text-emerald-900">Финансы по делу</h4>
+                  <p className="mt-0.5 text-xs text-emerald-700/80">
+                    Суммы берутся из привязанных счетов и платежей по текущему делу.
+                  </p>
+                </div>
+                {financeLoading ? (
+                  <span className="text-xs text-emerald-700">Обновляем...</span>
+                ) : null}
               </div>
-              {financeLoading ? (
-                <span className="text-xs text-emerald-700">Обновляем...</span>
-              ) : null}
-            </div>
-            {financeError ? (
-              <div className="mt-3 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm text-red-600">
-                {financeError}
-              </div>
-            ) : (
-              <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="rounded-lg border border-emerald-100 bg-white px-3 py-2">
-                  <div className="text-xs text-slate-500">Сумма договора</div>
-                  <div className="mt-1 text-sm font-semibold text-slate-900">{formatMoney(contractAmount)}</div>
+              {financeError ? (
+                <div className="mt-3 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm text-red-600">
+                  {financeError}
                 </div>
-                <div className="rounded-lg border border-emerald-100 bg-white px-3 py-2">
-                  <div className="text-xs text-slate-500">Счета по делу</div>
-                  <div className="mt-1 text-sm font-semibold text-slate-900">{formatMoney(incomeTotal)}</div>
-                </div>
-                <div className="rounded-lg border border-emerald-100 bg-white px-3 py-2">
-                  <div className="text-xs text-slate-500">Оплачено</div>
-                  <div className="mt-1 text-sm font-semibold text-emerald-700">{formatMoney(incomePaid)}</div>
-                </div>
-                <div className="rounded-lg border border-emerald-100 bg-white px-3 py-2">
-                  <div className="text-xs text-slate-500">Долг клиента</div>
-                  <div className={`mt-1 text-sm font-semibold ${incomeOutstanding > 0 ? 'text-rose-700' : 'text-slate-900'}`}>
-                    {formatMoney(incomeOutstanding)}
+              ) : (
+                <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="rounded-lg border border-emerald-100 bg-white px-3 py-2">
+                    <div className="text-xs text-slate-500">Сумма договора</div>
+                    <div className="mt-1 text-sm font-semibold text-slate-900">{formatMoney(contractAmount)}</div>
+                  </div>
+                  <div className="rounded-lg border border-emerald-100 bg-white px-3 py-2">
+                    <div className="text-xs text-slate-500">Счета по делу</div>
+                    <div className="mt-1 text-sm font-semibold text-slate-900">{formatMoney(incomeTotal)}</div>
+                  </div>
+                  <div className="rounded-lg border border-emerald-100 bg-white px-3 py-2">
+                    <div className="text-xs text-slate-500">Оплачено</div>
+                    <div className="mt-1 text-sm font-semibold text-emerald-700">{formatMoney(incomePaid)}</div>
+                  </div>
+                  <div className="rounded-lg border border-emerald-100 bg-white px-3 py-2">
+                    <div className="text-xs text-slate-500">Долг клиента</div>
+                    <div className={`mt-1 text-sm font-semibold ${incomeOutstanding > 0 ? 'text-rose-700' : 'text-slate-900'}`}>
+                      {formatMoney(incomeOutstanding)}
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          ) : null}
 
           <div className="md:col-span-2 mt-2 border-t pt-4">
             <h4 className="text-sm font-semibold text-gray-700 tracking-wide uppercase">Участники процесса</h4>

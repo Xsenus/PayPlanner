@@ -10948,6 +10948,7 @@ export function ClientDetail({
             }
             responsibles={actResponsibles}
             allowEdit={caseMode === "edit" ? clientPermissions.canEdit : clientPermissions.canCreate}
+            canViewFinance={paymentPermissions.canView}
           />
         )}
 

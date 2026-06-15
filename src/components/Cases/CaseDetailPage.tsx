@@ -2795,6 +2795,7 @@ export function CaseDetailPage({
         responsibles={responsibles}
         saving={savingCaseEdit}
         error={error}
+        canViewFinance={canViewFinance}
         onBack={closeCaseEditPage}
         onChange={setCaseEditDraft}
         onSave={() => void saveCaseFromPage()}
@@ -2956,7 +2957,9 @@ export function CaseDetailPage({
           <SummaryCard label="Ответственный" value={getResponsibleName(caseItem)} />
           <SummaryCard label="Ближайший срок" value={toRuDate(caseItem.dueDate) || formatRuDateTime(caseItem.nextHearingAt) || '—'} />
           <SummaryCard label="Просрочки" value={getRiskLabel(caseItem)} tone={overdueTasks > 0 ? 'rose' : 'emerald'} />
-          <SummaryCard label="Оплачено / долг" value={`${formatMoney(caseItem.incomePaid)} / ${formatMoney(caseItem.incomeOutstanding)}`} />
+          {canViewFinance ? (
+            <SummaryCard label="Оплачено / долг" value={`${formatMoney(caseItem.incomePaid)} / ${formatMoney(caseItem.incomeOutstanding)}`} />
+          ) : null}
           <SummaryCard label="Активность" value={inactivitySummary.value} tone={inactivitySummary.tone} />
           <SummaryCard label="Судебная проверка" value={courtSyncSummary.value} tone={courtSyncSummary.tone} />
         </div>
@@ -3523,6 +3526,7 @@ function CaseEditPage({
   responsibles,
   saving,
   error,
+  canViewFinance,
   onBack,
   onChange,
   onSave,
@@ -3532,6 +3536,7 @@ function CaseEditPage({
   responsibles: ActResponsible[];
   saving: boolean;
   error: string | null;
+  canViewFinance: boolean;
   onBack: () => void;
   onChange: (draft: CaseEditDraft) => void;
   onSave: () => void;
@@ -3634,10 +3639,12 @@ function CaseEditPage({
                   {responsibles.map((responsible) => <option key={responsible.id} value={responsible.id}>{responsible.fullName}</option>)}
                 </select>
               </label>
-              <label className="text-sm font-medium text-slate-700">
-                Сумма гонорара
-                <input aria-label="Сумма гонорара" type="number" value={draft.feeAmount} onChange={(event) => setField('feeAmount', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
-              </label>
+              {canViewFinance ? (
+                <label className="text-sm font-medium text-slate-700">
+                  Сумма гонорара
+                  <input aria-label="Сумма гонорара" type="number" value={draft.feeAmount} onChange={(event) => setField('feeAmount', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+                </label>
+              ) : null}
             </div>
           </section>
 

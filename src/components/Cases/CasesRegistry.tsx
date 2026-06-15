@@ -157,6 +157,8 @@ const CASE_COLUMN_CONFIGS: Array<{
   { key: 'actions', label: 'Действия', defaultWidth: 150 },
 ];
 
+const FINANCIAL_CASE_COLUMNS = new Set<CaseColumnKey>(['feeAmount', 'incomeTotal', 'incomePaid', 'incomeOutstanding']);
+
 const STATUS_LABELS: Record<string, string> = {
   Open: 'В работе',
   OnHold: 'Приостановлено',
@@ -375,6 +377,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
   const permissions = useRolePermissions(user?.role?.id);
   const canEditCases = isAdmin() || permissions.cases.canEdit;
   const canExportCases = isAdmin() || permissions.cases.canExport;
+  const canViewFinance = isAdmin() || permissions.payments.canView;
   const canManageCaseAccess = canEditCases;
   const [items, setItems] = useState<ClientCase[]>([]);
   const [accessRequests, setAccessRequests] = useState<ClientCaseAccessRequest[]>([]);
@@ -423,6 +426,10 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
   const [caseDraft, setCaseDraft] = useState<ClientCase | null>(null);
   const [editingCase, setEditingCase] = useState<ClientCase | null>(null);
   const [caseContextMenu, setCaseContextMenu] = useState<CaseContextMenuState | null>(null);
+  const caseColumnConfigs = useMemo(
+    () => CASE_COLUMN_CONFIGS.filter((column) => canViewFinance || !FINANCIAL_CASE_COLUMNS.has(column.key)),
+    [canViewFinance],
+  );
   const {
     visibleColumns,
     columnOrder,
@@ -443,13 +450,23 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
   } = usePersistedTableSettings<CaseColumnKey>({
     storageKey: 'pp.cases_registry_table_settings.v1',
     settingsKey: 'cases_registry_table_settings_v1',
-    columns: CASE_COLUMN_CONFIGS.map((column) => ({
+    columns: caseColumnConfigs.map((column) => ({
       key: column.key,
       defaultWidth: column.defaultWidth,
     })),
     defaultPageSize: 25,
     maxPageSize: 200,
   });
+
+  useEffect(() => {
+    if (canViewFinance) {
+      return;
+    }
+
+    setMinFee('');
+    setMaxFee('');
+    setSortBy((current) => current === 'feeAmount' ? 'createdAt' : current);
+  }, [canViewFinance]);
 
   useEffect(() => {
     let cancelled = false;
@@ -466,8 +483,8 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
         priority: priority || undefined,
         from: from || undefined,
         to: to || undefined,
-        minFee: minFee ? Number(minFee) : undefined,
-        maxFee: maxFee ? Number(maxFee) : undefined,
+        minFee: canViewFinance && minFee ? Number(minFee) : undefined,
+        maxFee: canViewFinance && maxFee ? Number(maxFee) : undefined,
         scope: caseScope === 'all' ? undefined : caseScope,
         activity: activityFilter === 'all' ? undefined : activityFilter,
         inactiveDays: INACTIVE_CASE_DAYS,
@@ -505,7 +522,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
     return () => {
       cancelled = true;
     };
-  }, [activityFilter, canManageCaseAccess, caseScope, caseType, from, maxFee, minFee, page, pageSize, priority, reloadToken, responsibleUserId, search, sortBy, sortDir, status, to]);
+  }, [activityFilter, canManageCaseAccess, canViewFinance, caseScope, caseType, from, maxFee, minFee, page, pageSize, priority, reloadToken, responsibleUserId, search, sortBy, sortDir, status, to]);
 
   useEffect(() => {
     setPage(1);
@@ -544,8 +561,8 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
   }, [items]);
 
   const caseColumnsByKey = useMemo(
-    () => Object.fromEntries(CASE_COLUMN_CONFIGS.map((column) => [column.key, column])) as Record<CaseColumnKey, (typeof CASE_COLUMN_CONFIGS)[number]>,
-    [],
+    () => Object.fromEntries(caseColumnConfigs.map((column) => [column.key, column])) as Partial<Record<CaseColumnKey, (typeof CASE_COLUMN_CONFIGS)[number]>>,
+    [caseColumnConfigs],
   );
   const visibleCaseColumns = useMemo(
     () => orderedVisibleColumns.map((key) => caseColumnsByKey[key]).filter(Boolean),
@@ -671,8 +688,8 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
     priority: priority || undefined,
     from: from || undefined,
     to: to || undefined,
-    minFee: minFee ? Number(minFee) : undefined,
-    maxFee: maxFee ? Number(maxFee) : undefined,
+    minFee: canViewFinance && minFee ? Number(minFee) : undefined,
+    maxFee: canViewFinance && maxFee ? Number(maxFee) : undefined,
     scope: caseScope === 'all' ? undefined : caseScope,
     activity: activityFilter === 'all' ? undefined : activityFilter,
     inactiveDays: INACTIVE_CASE_DAYS,
@@ -934,8 +951,12 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
       return;
     }
 
-    const header = ['№ дела', 'Название', 'Клиент/юр. лицо', 'Ответственный', 'Статус', 'Тип', 'Этап', 'Создано', 'Начало', 'Срок', 'Открытые задачи', 'Просроченные задачи', 'Выполненные задачи', 'Прогресс', 'Последняя активность', 'Гонорар', 'Счета', 'Оплачено', 'Долг', 'Просмотр ответственным', 'Активность подтвердил', 'Приоритет', 'Суд', '№ в суде', 'Заседание'];
-    const rows = sourceItems.map((item) => [
+    const header = ['№ дела', 'Название', 'Клиент/юр. лицо', 'Ответственный', 'Статус', 'Тип', 'Этап', 'Создано', 'Начало', 'Срок', 'Открытые задачи', 'Просроченные задачи', 'Выполненные задачи', 'Прогресс', 'Последняя активность', 'Просмотр ответственным', 'Активность подтвердил', 'Приоритет', 'Суд', '№ в суде', 'Заседание'];
+    if (canViewFinance) {
+      header.splice(15, 0, 'Гонорар', 'Счета', 'Оплачено', 'Долг');
+    }
+    const rows = sourceItems.map((item) => {
+      const row = [
       item.caseNumber,
       item.title,
       getOwnerName(item),
@@ -951,17 +972,26 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
       item.completedTaskCount ?? 0,
       `${item.taskProgressPercent ?? 0}%`,
       toRuDate(getLatestCaseActivityAt(item)),
-      typeof item.feeAmount === 'number' ? formatCurrencySmart(item.feeAmount).full : '',
-      formatMoney(item.incomeTotal),
-      formatMoney(item.incomePaid),
-      formatMoney(item.incomeOutstanding),
       toRuDate(getResponsibleLastViewedAt(item)),
       item.activityConfirmedByUserName || '',
       PRIORITY_LABELS[item.priority ?? ''] ?? item.priority,
       item.courtName,
       item.courtCaseNumber,
       formatProfileDateTime(item.nextHearingAt, timeZoneId),
-    ]);
+      ];
+      if (canViewFinance) {
+        row.splice(
+          15,
+          0,
+          typeof item.feeAmount === 'number' ? formatCurrencySmart(item.feeAmount).full : '',
+          formatMoney(item.incomeTotal),
+          formatMoney(item.incomePaid),
+          formatMoney(item.incomeOutstanding),
+        );
+      }
+
+      return row;
+    });
     const csv = [header, ...rows].map((row) => row.map(csvCell).join(';')).join('\n');
     const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -1173,15 +1203,17 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
               className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 text-slate-700 hover:bg-slate-50">
               <UserRound className="h-4 w-4" />
             </button>
-            <button
-              type="button"
-              onClick={() => onOpenCaseFinance?.(item)}
-              disabled={!onOpenCaseFinance}
-              aria-label="Открыть финансы дела"
-              title="Открыть финансы дела"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-indigo-200 text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50">
-              <WalletCards className="h-4 w-4" />
-            </button>
+            {canViewFinance ? (
+              <button
+                type="button"
+                onClick={() => onOpenCaseFinance?.(item)}
+                disabled={!onOpenCaseFinance}
+                aria-label="Открыть финансы дела"
+                title="Открыть финансы дела"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-indigo-200 text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50">
+                <WalletCards className="h-4 w-4" />
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => void runCourtSyncForCase(item)}
@@ -1251,10 +1283,12 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
         </div>
 
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-3">
-          <div className="text-sm text-slate-600">
-            <span className="font-semibold text-slate-900">{formatMoney(item.feeAmount)}</span>
-            {typeof item.incomeOutstanding === 'number' ? <span className="ml-2 text-rose-700">Долг: {formatMoney(item.incomeOutstanding)}</span> : null}
-          </div>
+          {canViewFinance ? (
+            <div className="text-sm text-slate-600">
+              <span className="font-semibold text-slate-900">{formatMoney(item.feeAmount)}</span>
+              {typeof item.incomeOutstanding === 'number' ? <span className="ml-2 text-rose-700">Долг: {formatMoney(item.incomeOutstanding)}</span> : null}
+            </div>
+          ) : <span />}
           {renderCaseCell('actions', item)}
         </div>
       </article>
@@ -1398,7 +1432,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
           <TableColumnSettings
             title="Настройка колонок реестра дел"
             description="Выберите видимые колонки, измените порядок и ширину. Настройка сохраняется под пользователя."
-            columns={CASE_COLUMN_CONFIGS.map((column) => ({ key: column.key, label: column.label }))}
+            columns={caseColumnConfigs.map((column) => ({ key: column.key, label: column.label }))}
             columnOrder={columnOrder}
             visibleColumns={visibleColumns}
             draggingColumn={draggingColumn}
@@ -1499,8 +1533,12 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
           <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
             <input type="date" value={from} onChange={(event) => setFrom(event.target.value)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm" aria-label="Дата с" />
             <input type="date" value={to} onChange={(event) => setTo(event.target.value)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm" aria-label="Дата по" />
-            <input type="number" min="0" value={minFee} onChange={(event) => setMinFee(event.target.value)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm" placeholder="Гонорар от" />
-            <input type="number" min="0" value={maxFee} onChange={(event) => setMaxFee(event.target.value)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm" placeholder="Гонорар до" />
+            {canViewFinance ? (
+              <>
+                <input type="number" min="0" value={minFee} onChange={(event) => setMinFee(event.target.value)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm" placeholder="Гонорар от" />
+                <input type="number" min="0" value={maxFee} onChange={(event) => setMaxFee(event.target.value)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm" placeholder="Гонорар до" />
+              </>
+            ) : null}
             <select value={pageSize} onChange={(event) => setPageSize(Number(event.target.value))} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm">
               {[25, 50, 100, 200].map((size) => <option key={size} value={size}>{size} строк</option>)}
             </select>
@@ -1598,11 +1636,13 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
               <div className="text-sm font-semibold text-blue-900">
                 Выбрано дел: {selectedIds.length}
               </div>
-              <div className="grid gap-1 text-xs text-blue-900 sm:grid-cols-3">
-                <span>Гонорар: {formatCurrencySmart(selectedSummary.feeAmount).full}</span>
-                <span>Оплачено: {formatCurrencySmart(selectedSummary.incomePaid).full}</span>
-                <span>Долг: {formatCurrencySmart(selectedSummary.incomeOutstanding).full}</span>
-              </div>
+              {canViewFinance ? (
+                <div className="grid gap-1 text-xs text-blue-900 sm:grid-cols-3">
+                  <span>Гонорар: {formatCurrencySmart(selectedSummary.feeAmount).full}</span>
+                  <span>Оплачено: {formatCurrencySmart(selectedSummary.incomePaid).full}</span>
+                  <span>Долг: {formatCurrencySmart(selectedSummary.incomeOutstanding).full}</span>
+                </div>
+              ) : null}
               <select
                 value={bulkStatus}
                 onChange={(event) => setBulkStatus(event.target.value)}
@@ -1836,6 +1876,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
           onClose={() => setCaseDraft(null)}
           onSave={createCase}
           allowEdit={allowCreate}
+          canViewFinance={canViewFinance}
         />
       ) : null}
       {editingCase ? (
@@ -1846,6 +1887,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
           onClose={() => setEditingCase(null)}
           onSave={updateCase}
           allowEdit={canEditCases}
+          canViewFinance={canViewFinance}
         />
       ) : null}
       {caseContextMenu ? (
@@ -1896,14 +1938,16 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
             className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
             <UserRound className="h-4 w-4 text-slate-700" /> Открыть владельца
           </button>
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => runContextMenuAction(() => onOpenCaseFinance?.(caseContextMenu.item))}
-            disabled={!onOpenCaseFinance}
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
-            <WalletCards className="h-4 w-4 text-indigo-700" /> Финансы дела
-          </button>
+          {canViewFinance ? (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => runContextMenuAction(() => onOpenCaseFinance?.(caseContextMenu.item))}
+              disabled={!onOpenCaseFinance}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
+              <WalletCards className="h-4 w-4 text-indigo-700" /> Финансы дела
+            </button>
+          ) : null}
           <button
             type="button"
             role="menuitem"
