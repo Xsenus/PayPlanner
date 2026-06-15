@@ -3249,6 +3249,41 @@ export interface PartialPaymentRemainderCandidatesResponse {
   checkedAt: string;
 }
 
+export interface PaymentAdvanceReviewDiagnosticItem {
+  id: number;
+  date: string;
+  amount: number;
+  paidAmount: number;
+  advanceAmount: number;
+  description: string;
+  clientId?: number | null;
+  legalEntityId?: number | null;
+  counterpartyName?: string | null;
+  clientCaseId?: number | null;
+  contractId?: number | null;
+  status: PaymentStatus;
+  advanceReviewStatus: PaymentAdvanceReviewStatus;
+  type: PaymentKind;
+  isUnallocatedAdvanceCandidate: boolean;
+  hasInvoiceLink: boolean;
+  hasActLink: boolean;
+  hasAccountNumber: boolean;
+  hasUnallocatedAdvanceBalanceTransaction: boolean;
+  unallocatedAdvanceBalanceAmount: number;
+}
+
+export interface PaymentAdvanceReviewDiagnosticsResponse {
+  total: number;
+  totalAmount: number;
+  limit: number;
+  query?: string | null;
+  from?: string | null;
+  to?: string | null;
+  amount?: number | null;
+  amountTolerance: number;
+  items: PaymentAdvanceReviewDiagnosticItem[];
+}
+
 export interface InvoiceResponsible {
   id: number;
   fullName: string;

@@ -218,6 +218,7 @@ vi.mock('../../services/api', () => ({
     acceptPaymentAdvance: vi.fn(),
     ignorePaymentAdvance: vi.fn(),
     refundPaymentAdvance: vi.fn(),
+    getPaymentAdvanceDiagnostics: vi.fn(),
     exportPaymentsCsv: vi.fn(),
     exportPaymentsExcel: vi.fn(),
     getClientBalance: vi.fn(),
@@ -256,6 +257,7 @@ describe('Payments integration', () => {
     vi.mocked(apiService.acceptPaymentAdvance).mockReset();
     vi.mocked(apiService.ignorePaymentAdvance).mockReset();
     vi.mocked(apiService.refundPaymentAdvance).mockReset();
+    vi.mocked(apiService.getPaymentAdvanceDiagnostics).mockReset();
     vi.mocked(apiService.exportPaymentsCsv).mockReset();
     vi.mocked(apiService.exportPaymentsExcel).mockReset();
     vi.mocked(apiService.getClientBalance).mockReset();
@@ -294,6 +296,17 @@ describe('Payments integration', () => {
     vi.mocked(apiService.acceptPaymentAdvance).mockResolvedValue({ id: 1, advanceReviewStatus: 'AcceptedAsAdvance' } as Payment);
     vi.mocked(apiService.ignorePaymentAdvance).mockResolvedValue({ id: 1, advanceReviewStatus: 'Ignored' } as Payment);
     vi.mocked(apiService.refundPaymentAdvance).mockResolvedValue({ id: 1, advanceReviewStatus: 'Refunded' } as Payment);
+    vi.mocked(apiService.getPaymentAdvanceDiagnostics).mockResolvedValue({
+      items: [],
+      total: 0,
+      totalAmount: 0,
+      limit: 20,
+      query: null,
+      from: null,
+      to: null,
+      amount: null,
+      amountTolerance: 0.01,
+    });
     vi.mocked(apiService.applyClientBalance).mockResolvedValue({ appliedAmount: 0, balance: 0 });
     vi.mocked(apiService.applyLegalEntityBalance).mockResolvedValue({ appliedAmount: 0, balance: 0 });
     vi.mocked(apiService.getPartialPaymentRemainderCandidates).mockResolvedValue({
@@ -429,6 +442,73 @@ describe('Payments integration', () => {
       expect(lastCall.status).toBeUndefined();
       expect(lastCall.page).toBe(1);
     });
+  });
+
+  it('checks a suspected unallocated advance from the monitoring panel', async () => {
+    vi.mocked(apiService.getPaymentAdvanceDiagnostics).mockResolvedValueOnce({
+      total: 1,
+      totalAmount: 7_100,
+      limit: 20,
+      query: 'Винокуров',
+      from: '2026-03-02',
+      to: '2026-03-02',
+      amount: 7_100,
+      amountTolerance: 0.01,
+      items: [
+        {
+          id: 901,
+          date: '2026-03-02',
+          amount: 7_100,
+          paidAmount: 7_100,
+          advanceAmount: 7_100,
+          description: 'Поступление без счета',
+          clientId: 15,
+          legalEntityId: null,
+          counterpartyName: 'Винокуров Валерий Витальевич',
+          clientCaseId: 44,
+          contractId: null,
+          status: 'Completed',
+          advanceReviewStatus: 'RequiresDecision',
+          type: 'Income',
+          isUnallocatedAdvanceCandidate: true,
+          hasInvoiceLink: false,
+          hasActLink: false,
+          hasAccountNumber: false,
+          hasUnallocatedAdvanceBalanceTransaction: false,
+          unallocatedAdvanceBalanceAmount: 0,
+        },
+      ],
+    });
+
+    render(<Payments />);
+
+    const monitoring = screen.getByRole('region', { name: 'Мониторинг нераспределенных авансов' });
+    fireEvent.change(within(monitoring).getByLabelText('Клиент, описание или номер для диагностики аванса'), {
+      target: { value: 'Винокуров' },
+    });
+    fireEvent.change(within(monitoring).getByLabelText('Дата платежа для диагностики аванса'), {
+      target: { value: '2026-03-02' },
+    });
+    fireEvent.change(within(monitoring).getByLabelText('Сумма платежа для диагностики аванса'), {
+      target: { value: '7100' },
+    });
+
+    fireEvent.click(within(monitoring).getByRole('button', { name: /Проверить платеж/ }));
+
+    await waitFor(() => {
+      expect(apiService.getPaymentAdvanceDiagnostics).toHaveBeenCalledWith({
+        q: 'Винокуров',
+        from: '2026-03-02',
+        to: '2026-03-02',
+        amount: 7100,
+        amountTolerance: 0.01,
+        limit: 20,
+      });
+    });
+
+    expect(await within(monitoring).findByText(/Винокуров Валерий Витальевич/)).toBeTruthy();
+    expect(within(monitoring).getByText('Кандидат в аванс')).toBeTruthy();
+    expect(within(monitoring).getByText('Нет проводки баланса')).toBeTruthy();
   });
 
   it('runs advance review actions from the monitoring list and refreshes payments', async () => {

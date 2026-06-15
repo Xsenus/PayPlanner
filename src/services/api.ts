@@ -3806,6 +3806,18 @@ export class ApiService {
     });
   }
 
+  async getPaymentAdvanceDiagnostics(params?: {
+    q?: string;
+    from?: string;
+    to?: string;
+    amount?: number;
+    amountTolerance?: number;
+    limit?: number;
+  }) {
+    const q = buildQuery(params ?? {});
+    return this.request<PaymentAdvanceReviewDiagnosticsResponse>(`/payments/advance-review/diagnostics${q}`);
+  }
+
   async transferPaymentRemainder(id: number, payment: PaymentPayload, remainderDate: string) {
     return this.request<TransferPaymentRemainderResponse>(`/payments/${id}/partial-remainder`, {
       method: 'PUT',
@@ -6534,6 +6546,7 @@ import type {
   MoneyOperationInvoiceCandidate,
   MoneyOperationsSummary,
   PaymentsListSummary,
+  PaymentAdvanceReviewDiagnosticsResponse,
   PaymentAdvanceReviewStatus,
   ClientBalanceSummary,
   ClientBalanceTransaction,

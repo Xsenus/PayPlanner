@@ -717,7 +717,7 @@ public class PaymentsController : ControllerBase
                 || (payment.LegacyAccountNumber != null && payment.LegacyAccountNumber.Contains(queryText))
                 || (payment.Client != null && payment.Client.Name.Contains(queryText))
                 || (payment.LegalEntity != null && ((payment.LegalEntity.ShortName != null && payment.LegalEntity.ShortName.Contains(queryText))
-                    || payment.LegalEntity.FullName.Contains(queryText))));
+                    || (payment.LegalEntity.FullName != null && payment.LegalEntity.FullName.Contains(queryText)))));
         }
 
         var total = await query.CountAsync(ct);

@@ -1,4 +1,4 @@
-﻿import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AUTH_SESSION_EXPIRED_EVENT, apiService, extractResponseErrorMessage } from './api';
 import { resolveApiBaseUrl } from './apiBaseUrl';
@@ -81,6 +81,41 @@ describe('resolveApiBaseUrl', () => {
 });
 
 describe('payments advance review API', () => {
+  it('requests advance diagnostics with search filters', async () => {
+    const payload = {
+      items: [],
+      total: 0,
+      totalAmount: 0,
+      limit: 20,
+      amountTolerance: 0.01,
+    };
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.getPaymentAdvanceDiagnostics({
+      q: 'Винокуров',
+      from: '2026-03-02',
+      to: '2026-03-02',
+      amount: 7100,
+      amountTolerance: 0.01,
+      limit: 20,
+    });
+
+    expect(result).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0];
+    const requestUrl = new URL(String(url));
+    expect(requestUrl.pathname).toContain('/payments/advance-review/diagnostics');
+    expect(requestUrl.searchParams.get('q')).toBe('Винокуров');
+    expect(requestUrl.searchParams.get('from')).toBe('2026-03-02');
+    expect(requestUrl.searchParams.get('to')).toBe('2026-03-02');
+    expect(requestUrl.searchParams.get('amount')).toBe('7100');
+    expect(requestUrl.searchParams.get('amountTolerance')).toBe('0.01');
+    expect(requestUrl.searchParams.get('limit')).toBe('20');
+  });
+
   it('refunds an accepted advance with reason', async () => {
     const payload = { id: 77, advanceReviewStatus: 'Refunded' };
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {

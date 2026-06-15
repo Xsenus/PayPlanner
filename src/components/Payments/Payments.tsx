@@ -10,7 +10,7 @@ import { useTranslation } from '../../hooks/useTranslation';
 import { usePaymentsPaged } from '../../hooks/usePaymentsPaged';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
-import type { ClientBalanceTransaction, ClientCase, ClientRole, PartialPaymentRemainderCandidate, Payment, PaymentAdvanceReviewStatus, PaymentPayload, PaymentStatus } from '../../types';
+import type { ClientBalanceTransaction, ClientCase, ClientRole, PartialPaymentRemainderCandidate, Payment, PaymentAdvanceReviewDiagnosticsResponse, PaymentAdvanceReviewStatus, PaymentPayload, PaymentStatus } from '../../types';
 import { PaymentsTable, type PaymentTableColumnKey } from '../Calendar/PaymentsTable';
 import { PaymentModal } from '../Calendar/PaymentModal';
 import { formatCurrencySmart } from '../../utils/formatters';
@@ -417,6 +417,12 @@ export function Payments({
   const [statusChangeSubmitting, setStatusChangeSubmitting] = useState(false);
   const [statusChangeError, setStatusChangeError] = useState<string | null>(null);
   const [advanceAllocation, setAdvanceAllocation] = useState<AdvanceAllocationState | null>(null);
+  const [advanceDiagnosticsQuery, setAdvanceDiagnosticsQuery] = useState('');
+  const [advanceDiagnosticsDate, setAdvanceDiagnosticsDate] = useState('');
+  const [advanceDiagnosticsAmount, setAdvanceDiagnosticsAmount] = useState('');
+  const [advanceDiagnosticsResult, setAdvanceDiagnosticsResult] = useState<PaymentAdvanceReviewDiagnosticsResponse | null>(null);
+  const [advanceDiagnosticsLoading, setAdvanceDiagnosticsLoading] = useState(false);
+  const [advanceDiagnosticsError, setAdvanceDiagnosticsError] = useState<string | null>(null);
 
   const initialFromRef = useRef(fromDate);
   const initialToRef = useRef(toDate);
@@ -925,6 +931,75 @@ export function Payments({
     setStatusFilter('all');
     setPage(1);
   }, []);
+
+  const openPaymentPreviewById = useCallback(async (paymentId: number) => {
+    const requestId = routePaymentRequestRef.current + 1;
+    routePaymentRequestRef.current = requestId;
+    setRoutePaymentPreviewOpen(true);
+    setRoutePaymentPreviewId(paymentId);
+    setRoutePaymentPreview(null);
+    setRoutePaymentPreviewError(null);
+    setRoutePaymentPreviewLoading(true);
+
+    try {
+      const payment = await apiService.getPayment(paymentId);
+      if (routePaymentRequestRef.current !== requestId) {
+        return;
+      }
+      setRoutePaymentPreview(payment);
+    } catch (error) {
+      if (routePaymentRequestRef.current !== requestId) {
+        return;
+      }
+      setRoutePaymentPreviewError(
+        extractDisplayErrorMessage(error, 'Не удалось загрузить платеж.'),
+      );
+    } finally {
+      if (routePaymentRequestRef.current === requestId) {
+        setRoutePaymentPreviewLoading(false);
+      }
+    }
+  }, []);
+
+  const handleRunAdvanceDiagnostics = useCallback(async () => {
+    const query = advanceDiagnosticsQuery.trim();
+    const date = advanceDiagnosticsDate.trim();
+    const rawAmount = advanceDiagnosticsAmount.trim();
+    const amount = rawAmount
+      ? Number(rawAmount.replace(/\s+/g, '').replace(',', '.'))
+      : undefined;
+
+    if (rawAmount && (!Number.isFinite(amount) || amount < 0)) {
+      setAdvanceDiagnosticsError('Укажите корректную сумму платежа.');
+      return;
+    }
+
+    if (!query && !date && amount === undefined) {
+      setAdvanceDiagnosticsError('Укажите клиента, дату или сумму спорного платежа.');
+      return;
+    }
+
+    setAdvanceDiagnosticsLoading(true);
+    setAdvanceDiagnosticsError(null);
+
+    try {
+      const result = await apiService.getPaymentAdvanceDiagnostics({
+        q: query || undefined,
+        from: date || undefined,
+        to: date || undefined,
+        amount,
+        amountTolerance: amount === undefined ? undefined : 0.01,
+        limit: 20,
+      });
+      setAdvanceDiagnosticsResult(result);
+    } catch (error) {
+      setAdvanceDiagnosticsError(
+        extractDisplayErrorMessage(error, 'Не удалось проверить спорный платеж.'),
+      );
+    } finally {
+      setAdvanceDiagnosticsLoading(false);
+    }
+  }, [advanceDiagnosticsAmount, advanceDiagnosticsDate, advanceDiagnosticsQuery]);
 
   const summaryCards: JSX.Element[] = [];
   if (appliedTypeFilter === 'all' || appliedTypeFilter === 'Income') {
@@ -2304,6 +2379,130 @@ export function Payments({
                       {advanceReviewPageSummary.acceptedCount} на {formatCurrencySmart(advanceReviewPageSummary.acceptedAmount).full}
                     </div>
                   </div>
+                </div>
+                <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50/70 p-3">
+                  <div className="flex flex-wrap items-end gap-2">
+                    <label className="min-w-[220px] flex-1 text-xs font-medium text-amber-900">
+                      Клиент, описание или номер
+                      <input
+                        aria-label="Клиент, описание или номер для диагностики аванса"
+                        type="search"
+                        value={advanceDiagnosticsQuery}
+                        onChange={(event) => setAdvanceDiagnosticsQuery(event.target.value)}
+                        className="mt-1 w-full rounded-md border border-amber-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-100"
+                        placeholder="Например: Винокуров"
+                      />
+                    </label>
+                    <label className="w-full text-xs font-medium text-amber-900 sm:w-40">
+                      Дата платежа
+                      <input
+                        aria-label="Дата платежа для диагностики аванса"
+                        type="date"
+                        value={advanceDiagnosticsDate}
+                        onChange={(event) => setAdvanceDiagnosticsDate(event.target.value)}
+                        className="mt-1 w-full rounded-md border border-amber-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-100"
+                      />
+                    </label>
+                    <label className="w-full text-xs font-medium text-amber-900 sm:w-40">
+                      Сумма
+                      <input
+                        aria-label="Сумма платежа для диагностики аванса"
+                        type="text"
+                        inputMode="decimal"
+                        value={advanceDiagnosticsAmount}
+                        onChange={(event) => setAdvanceDiagnosticsAmount(event.target.value)}
+                        className="mt-1 w-full rounded-md border border-amber-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-100"
+                        placeholder="7100"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => void handleRunAdvanceDiagnostics()}
+                      disabled={advanceDiagnosticsLoading}
+                      className="inline-flex min-h-[38px] items-center justify-center gap-2 rounded-md border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {advanceDiagnosticsLoading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Search className="h-4 w-4" />
+                      )}
+                      Проверить платеж
+                    </button>
+                  </div>
+                  {advanceDiagnosticsError ? (
+                    <div className="mt-2 rounded-md border border-rose-200 bg-white px-3 py-2 text-sm text-rose-700">
+                      {advanceDiagnosticsError}
+                    </div>
+                  ) : null}
+                  {advanceDiagnosticsResult ? (
+                    <div className="mt-3 space-y-2">
+                      <div className="text-xs font-medium text-amber-900">
+                        Найдено: {advanceDiagnosticsResult.total} на {formatCurrencySmart(advanceDiagnosticsResult.totalAmount).full}
+                      </div>
+                      {advanceDiagnosticsResult.items.length === 0 ? (
+                        <div className="rounded-md border border-amber-200 bg-white px-3 py-2 text-sm text-slate-600">
+                          Похожих платежей не найдено.
+                        </div>
+                      ) : (
+                        advanceDiagnosticsResult.items.map((item) => (
+                          <div key={item.id} className="rounded-md border border-amber-200 bg-white px-3 py-2">
+                            <div className="flex flex-wrap items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="text-sm font-semibold text-slate-900">
+                                  {item.counterpartyName?.trim() || 'Контрагент не указан'} · #{item.id}
+                                </div>
+                                <div className="mt-1 text-xs text-slate-600">
+                                  {formatDate(item.date)} · {formatCurrencySmart(item.advanceAmount || item.paidAmount || item.amount).full} · {item.description?.trim() || 'Без описания'}
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => void openPaymentPreviewById(item.id)}
+                                className="inline-flex items-center justify-center rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+                              >
+                                Открыть
+                              </button>
+                            </div>
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              <span className={[
+                                'rounded-full px-2 py-0.5 text-xs font-medium',
+                                item.isUnallocatedAdvanceCandidate
+                                  ? 'bg-rose-100 text-rose-700'
+                                  : 'bg-slate-100 text-slate-600',
+                              ].join(' ')}
+                              >
+                                {item.isUnallocatedAdvanceCandidate ? 'Кандидат в аванс' : 'Не требует решения'}
+                              </span>
+                              <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
+                                {advanceReviewLabels[item.advanceReviewStatus] ?? item.advanceReviewStatus}
+                              </span>
+                              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+                                {statusLabels[item.status] ?? item.status}
+                              </span>
+                              {item.hasInvoiceLink ? (
+                                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">Есть счет</span>
+                              ) : null}
+                              {item.hasActLink ? (
+                                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">Есть акт</span>
+                              ) : null}
+                              {item.hasAccountNumber ? (
+                                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">Есть номер счета</span>
+                              ) : null}
+                              {item.hasUnallocatedAdvanceBalanceTransaction ? (
+                                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                                  Баланс: {formatCurrencySmart(item.unallocatedAdvanceBalanceAmount).full}
+                                </span>
+                              ) : (
+                                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+                                  Нет проводки баланса
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  ) : null}
                 </div>
               </section>
               <PaymentsTable
