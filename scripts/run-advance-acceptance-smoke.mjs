@@ -403,6 +403,7 @@ async function runApiSmoke() {
     const result = {
       createdAdvancePaymentId: createdPayment.id,
       targetDebtPaymentId: targetDebt.id,
+      createdAdvanceStatus: createdPayment.advanceReviewStatus,
       acceptedAdvanceStatus: acceptedPayment.advanceReviewStatus,
       allocatedAdvanceStatus: allocatedSource.advanceReviewStatus,
       targetDebtStatus: completedTarget.status,
@@ -432,7 +433,8 @@ async function runApiSmoke() {
 function writeAcceptanceReport(apiSmokeResult) {
   const generatedAt = new Date();
   const stamp = generatedAt.toISOString().replace(/[:.]/g, '-');
-  const reportPath = path.join(artifactDir, `advance-acceptance-${stamp}.json`);
+  const jsonReportPath = path.join(artifactDir, `advance-acceptance-${stamp}.json`);
+  const markdownReportPath = path.join(artifactDir, `advance-acceptance-${stamp}.md`);
   const report = {
     generatedAtUtc: generatedAt.toISOString(),
     sourceDatabase: path.join(root, 'payplanner.db'),
@@ -446,8 +448,54 @@ function writeAcceptanceReport(apiSmokeResult) {
   };
 
   mkdirSync(artifactDir, { recursive: true });
-  writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
-  console.log(`Advance acceptance report written: ${reportPath}`);
+  writeFileSync(jsonReportPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+  writeFileSync(markdownReportPath, buildAcceptanceMarkdownReport(report), 'utf8');
+  console.log(`Advance acceptance report written: ${jsonReportPath}`);
+  console.log(`Advance acceptance summary written: ${markdownReportPath}`);
+}
+
+function buildAcceptanceMarkdownReport(report) {
+  const apiSmoke = report.apiSmoke;
+  const checkLines = report.checks.map((check) => (
+    `- \`${check.command} ${check.args.join(' ')}\`: успешно, ${check.durationMs} мс`
+  ));
+
+  return [
+    '# Приемка нераспределенных авансов',
+    '',
+    `Дата проверки: ${report.generatedAtUtc}`,
+    `База данных: временная копия \`${report.sourceDatabase}\``,
+    '',
+    '## Проверки',
+    '',
+    ...checkLines,
+    '- API smoke на локальной временной SQLite-копии: успешно',
+    '- Backend-логи после smoke: ошибок не найдено',
+    '',
+    '## Сценарий',
+    '',
+    `- Создан входящий платеж без счета: #${apiSmoke.createdAdvancePaymentId}`,
+    `- После создания статус контроля: ${apiSmoke.createdAdvanceStatus}`,
+    `- После принятия статус контроля: ${apiSmoke.acceptedAdvanceStatus}`,
+    `- Создан тестовый долг: #${apiSmoke.targetDebtPaymentId}`,
+    `- После зачета статус аванса: ${apiSmoke.allocatedAdvanceStatus}`,
+    `- После зачета статус долга: ${apiSmoke.targetDebtStatus}`,
+    `- Баланс до принятия: ${apiSmoke.clientBalanceBefore}`,
+    `- Баланс после принятия аванса: ${apiSmoke.clientBalanceAfterAccept}`,
+    `- Баланс после зачета: ${apiSmoke.clientBalanceAfterApply}`,
+    `- Балансовые проводки UnallocatedAdvance/CreditApplied: ${apiSmoke.balanceTransactionsChecked ? 'проверены' : 'не проверены'}`,
+    '',
+    '## Контроль локальных данных',
+    '',
+    `- Диагностика Винокурова в текущей локальной копии: найдено ${apiSmoke.diagnosticsTotal} записей`,
+    `- Кандидатов на разбор в текущей локальной копии после smoke: ${apiSmoke.candidatesTotal}`,
+    `- Платежей RequiresDecision в текущей локальной копии после smoke: ${apiSmoke.requiresDecisionTotal}`,
+    `- Отчет по авансам ответил HTTP ${apiSmoke.advancesReportStatus}`,
+    `- "Что нового" ответило HTTP ${apiSmoke.latestReleaseStatus}`,
+    '',
+    'Рабочий `payplanner.db` не изменялся: все действия выполнялись на временной SQLite-копии.',
+    '',
+  ].join('\n');
 }
 
 try {
