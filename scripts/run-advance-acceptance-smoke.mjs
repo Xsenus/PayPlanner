@@ -79,6 +79,12 @@ function assertCondition(condition, message) {
   }
 }
 
+function assertMoneyClose(actual, expected, message) {
+  if (Math.abs(Number(actual) - Number(expected)) > 0.01) {
+    throw new Error(`${message}. Expected ${expected}, got ${actual}`);
+  }
+}
+
 async function waitForApi() {
   const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
@@ -195,6 +201,7 @@ async function runApiSmoke() {
     const smokeStamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
     const smokeAmount = 1234.56;
     const smokeDate = '2026-06-15T09:00:00.000Z';
+    const balanceBefore = await fetchJson(`${baseUrl}/api/clients/${smokeClient.id}/balance`, { headers });
     const createdPayment = await fetchJson(`${baseUrl}/api/v2/payments`, {
       method: 'POST',
       headers: {
@@ -240,9 +247,68 @@ async function runApiSmoke() {
     );
 
     const balance = await fetchJson(`${baseUrl}/api/clients/${smokeClient.id}/balance`, { headers });
+    assertMoneyClose(
+      Number(balance?.balance ?? 0),
+      Number(balanceBefore?.balance ?? 0) + smokeAmount,
+      'Expected client balance to increase after accepting smoke advance',
+    );
+
+    const targetDebt = await fetchJson(`${baseUrl}/api/v2/payments`, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        amount: smokeAmount,
+        paidAmount: 0,
+        clientId: smokeClient.id,
+        counterpartyName: smokeClient.name ?? smokeClient.company ?? 'Advance smoke client',
+        date: '2026-06-16T09:00:00.000Z',
+        plannedDate: '2026-06-16T09:00:00.000Z',
+        description: `Advance allocation smoke debt ${smokeStamp}`,
+        notes: 'Created by npm run test:advance-acceptance on a temporary SQLite copy',
+        isPaid: false,
+        status: 'Pending',
+        type: 'Income',
+        documentKind: 'Invoice',
+        systemNotes: '',
+        rescheduleCount: 0,
+      }),
+    });
+    assertCondition(targetDebt?.id, 'Smoke target debt payment was not created');
+
+    await fetchJson(`${baseUrl}/api/clients/${smokeClient.id}/balance/apply`, {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        paymentId: targetDebt.id,
+        amount: smokeAmount,
+        sourcePaymentId: createdPayment.id,
+        description: 'Acceptance smoke: apply unallocated advance to target debt',
+      }),
+    });
+
+    const allocatedSource = await fetchJson(`${baseUrl}/api/v2/payments/${createdPayment.id}`, { headers });
+    const completedTarget = await fetchJson(`${baseUrl}/api/v2/payments/${targetDebt.id}`, { headers });
+    const balanceAfterApply = await fetchJson(`${baseUrl}/api/clients/${smokeClient.id}/balance`, { headers });
+
     assertCondition(
-      Number(balance?.balance ?? 0) >= smokeAmount,
-      `Expected client balance to include smoke advance ${smokeAmount}, got ${balance?.balance}`,
+      allocatedSource?.advanceReviewStatus === 'Allocated',
+      `Expected source advance to be Allocated, got ${allocatedSource?.advanceReviewStatus}`,
+    );
+    assertCondition(
+      completedTarget?.status === 'Completed',
+      `Expected target debt to be Completed, got ${completedTarget?.status}`,
+    );
+    assertMoneyClose(completedTarget?.paidAmount ?? 0, smokeAmount, 'Expected target debt paid amount to equal applied advance');
+    assertMoneyClose(
+      balanceAfterApply?.balance ?? 0,
+      balanceBefore?.balance ?? 0,
+      'Expected client balance to return to its initial value after applying smoke advance',
     );
 
     const diagnosticsQuery = '\u0412\u0438\u043d\u043e\u043a\u0443\u0440\u043e\u0432';
@@ -258,8 +324,13 @@ async function runApiSmoke() {
     console.log('\nAdvance API smoke result:');
     console.log(JSON.stringify({
       createdAdvancePaymentId: createdPayment.id,
+      targetDebtPaymentId: targetDebt.id,
       acceptedAdvanceStatus: acceptedPayment.advanceReviewStatus,
+      allocatedAdvanceStatus: allocatedSource.advanceReviewStatus,
+      targetDebtStatus: completedTarget.status,
+      clientBalanceBefore: balanceBefore?.balance ?? null,
       clientBalanceAfterAccept: balance?.balance ?? null,
+      clientBalanceAfterApply: balanceAfterApply?.balance ?? null,
       diagnosticsTotal: diagnostics?.total ?? null,
       candidatesTotal: candidates?.total ?? null,
       requiresDecisionTotal: pending?.total ?? null,
