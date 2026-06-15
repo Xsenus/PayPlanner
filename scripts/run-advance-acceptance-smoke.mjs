@@ -85,6 +85,16 @@ function assertMoneyClose(actual, expected, message) {
   }
 }
 
+function hasBalanceTransaction(transactions, predicate) {
+  return Array.isArray(transactions) && transactions.some((transaction) => {
+    try {
+      return predicate(transaction);
+    } catch {
+      return false;
+    }
+  });
+}
+
 async function waitForApi() {
   const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
@@ -295,6 +305,7 @@ async function runApiSmoke() {
     const allocatedSource = await fetchJson(`${baseUrl}/api/v2/payments/${createdPayment.id}`, { headers });
     const completedTarget = await fetchJson(`${baseUrl}/api/v2/payments/${targetDebt.id}`, { headers });
     const balanceAfterApply = await fetchJson(`${baseUrl}/api/clients/${smokeClient.id}/balance`, { headers });
+    const balanceTransactions = await fetchJson(`${baseUrl}/api/clients/${smokeClient.id}/balance/transactions`, { headers });
 
     assertCondition(
       allocatedSource?.advanceReviewStatus === 'Allocated',
@@ -309,6 +320,30 @@ async function runApiSmoke() {
       balanceAfterApply?.balance ?? 0,
       balanceBefore?.balance ?? 0,
       'Expected client balance to return to its initial value after applying smoke advance',
+    );
+    assertCondition(
+      hasBalanceTransaction(
+        balanceTransactions,
+        (transaction) =>
+          transaction.paymentId === createdPayment.id &&
+          transaction.type === 'UnallocatedAdvance' &&
+          transaction.direction === 'Credit' &&
+          Math.abs(Number(transaction.amount) - smokeAmount) <= 0.01,
+      ),
+      'Expected an UnallocatedAdvance credit transaction for the accepted smoke advance',
+    );
+    assertCondition(
+      hasBalanceTransaction(
+        balanceTransactions,
+        (transaction) =>
+          transaction.paymentId === targetDebt.id &&
+          transaction.type === 'CreditApplied' &&
+          transaction.direction === 'Debit' &&
+          typeof transaction.externalKey === 'string' &&
+          transaction.externalKey.startsWith(`payment-unallocated-advance-apply:${createdPayment.id}:`) &&
+          Math.abs(Number(transaction.amount) - smokeAmount) <= 0.01,
+      ),
+      'Expected a CreditApplied debit transaction linked to the accepted smoke advance',
     );
 
     const diagnosticsQuery = '\u0412\u0438\u043d\u043e\u043a\u0443\u0440\u043e\u0432';
@@ -331,6 +366,7 @@ async function runApiSmoke() {
       clientBalanceBefore: balanceBefore?.balance ?? null,
       clientBalanceAfterAccept: balance?.balance ?? null,
       clientBalanceAfterApply: balanceAfterApply?.balance ?? null,
+      balanceTransactionsChecked: true,
       diagnosticsTotal: diagnostics?.total ?? null,
       candidatesTotal: candidates?.total ?? null,
       requiresDecisionTotal: pending?.total ?? null,
