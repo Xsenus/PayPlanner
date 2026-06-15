@@ -376,13 +376,31 @@ export function UnifiedContacts({
   const toast = useToast();
   const permissions = useRolePermissions(user?.role?.id);
   const canEditLegalEntities = permissions.legalEntities.canEdit;
+  const isContactColumnAllowed = useCallback(
+    (columnKey: ContactColumnKey) => {
+      if (columnKey === 'invoices') return permissions.accounts.canView;
+      if (columnKey === 'acts') return permissions.acts.canView;
+      if (columnKey === 'payments') return permissions.payments.canView;
+      if (columnKey === 'contracts') return permissions.contracts.canView;
+      return true;
+    },
+    [
+      permissions.accounts.canView,
+      permissions.acts.canView,
+      permissions.contracts.canView,
+      permissions.payments.canView,
+    ],
+  );
   const settingsScope = lockKind ? initialKind : 'all';
   const userStorageScope = user?.id ?? 'guest';
   const viewModeStorageKey = `pp.contacts.${settingsScope}.viewMode.${userStorageScope}.${CONTACTS_SETTINGS_VERSION}`;
   const viewModeSettingsKey = contactSettingsKey(settingsScope, 'view_mode');
   const tableLayoutStorageKey = `pp.contacts.${settingsScope}.tableSettings.${userStorageScope}.${CONTACTS_SETTINGS_VERSION}`;
   const tableLayoutSettingsKey = contactSettingsKey(settingsScope, 'table_settings');
-  const contactColumns = useMemo(() => columnsForScope(settingsScope), [settingsScope]);
+  const contactColumns = useMemo(
+    () => columnsForScope(settingsScope).filter((column) => isContactColumnAllowed(column.key)),
+    [isContactColumnAllowed, settingsScope],
+  );
 
   const [items, setItems] = useState<UnifiedContact[]>([]);
   const [loading, setLoading] = useState(true);

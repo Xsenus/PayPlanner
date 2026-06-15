@@ -572,6 +572,9 @@ describe('ClientDetail integration', () => {
     useInvoicesMock.mockReset();
     useContractsMock.mockReset();
     usePaymentsPagedMock.mockReset();
+    vi.mocked(apiService.getClientBalance).mockClear();
+    vi.mocked(apiService.getClientBalanceTransactions).mockClear();
+    vi.mocked(apiService.getClientCaseFinanceSummaries).mockClear();
     window.sessionStorage.clear();
     authState.isAdmin = false;
 
@@ -719,10 +722,13 @@ describe('ClientDetail integration', () => {
     await screen.findByRole('heading', { name: 'Карточка клиента' });
 
     expect(screen.queryByRole('button', { name: 'Добавить платёж' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /История баланса/ })).toBeNull();
     await waitFor(() => {
       const lastCall = usePaymentsPagedMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
       expect(lastCall).toEqual(expect.objectContaining({ enabled: false, clientId: 1 }));
     });
+    expect(apiService.getClientBalance).not.toHaveBeenCalled();
+    expect(apiService.getClientCaseFinanceSummaries).not.toHaveBeenCalled();
     expect(apiService.getPaymentsV2).not.toHaveBeenCalled();
   });
 

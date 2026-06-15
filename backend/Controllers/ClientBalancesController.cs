@@ -24,22 +24,19 @@ public class ClientBalancesController : ControllerBase
     private Task<DataVisibilityAccess?> ResolveClientVisibilityAsync(CancellationToken ct)
         => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Clients, ct);
 
-    private async Task<bool> CanEditPaymentsAsync(CancellationToken ct)
-    {
-        var userId = User.GetUserId();
-        if (!userId.HasValue)
-        {
-            return User?.IsInRole("admin") == true || User?.Identity?.IsAuthenticated != true;
-        }
+    private Task<bool> CanViewPaymentsAsync(CancellationToken ct)
+        => _db.HasUserSectionPermissionAsync(
+            User,
+            RolePermissionCatalog.Payments,
+            permission => permission.CanView,
+            ct);
 
-        if (User.IsInRole("admin") || await _db.IsUserAdminAsync(userId.Value, ct))
-        {
-            return true;
-        }
-
-        var permission = await _db.GetUserSectionPermissionAsync(userId.Value, RolePermissionCatalog.Payments, ct);
-        return permission?.CanEdit == true;
-    }
+    private Task<bool> CanEditPaymentsAsync(CancellationToken ct)
+        => _db.HasUserSectionPermissionAsync(
+            User,
+            RolePermissionCatalog.Payments,
+            permission => permission.CanEdit,
+            ct);
 
     private async Task<IActionResult?> RequireVisibleClientAsync(int clientId, CancellationToken ct)
     {
@@ -60,6 +57,11 @@ public class ClientBalancesController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetSummary(int clientId, CancellationToken ct)
     {
+        if (!await CanViewPaymentsAsync(ct))
+        {
+            return Forbid();
+        }
+
         if (await RequireVisibleClientAsync(clientId, ct) is { } forbidden)
         {
             return forbidden;
@@ -76,6 +78,11 @@ public class ClientBalancesController : ControllerBase
     [HttpGet("transactions")]
     public async Task<IActionResult> GetTransactions(int clientId, CancellationToken ct)
     {
+        if (!await CanViewPaymentsAsync(ct))
+        {
+            return Forbid();
+        }
+
         if (await RequireVisibleClientAsync(clientId, ct) is { } forbidden)
         {
             return forbidden;

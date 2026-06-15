@@ -386,6 +386,29 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
   const canCreateClients = clientPermissions.canCreate;
   const canEditClients = clientPermissions.canEdit;
   const canDeleteClients = clientPermissions.canDelete;
+  const isColumnAllowed = useCallback(
+    (columnId: ColumnId) => {
+      if (columnId === 'invoicesCount') return permissions.accounts.canView;
+      if (columnId === 'actsCount') return permissions.acts.canView;
+      if (columnId === 'paymentsCount') return permissions.payments.canView;
+      if (columnId === 'contractsCount') return permissions.contracts.canView;
+      return true;
+    },
+    [
+      permissions.accounts.canView,
+      permissions.acts.canView,
+      permissions.contracts.canView,
+      permissions.payments.canView,
+    ],
+  );
+  const availableColumnDefinitions = useMemo(
+    () => COLUMN_DEFINITIONS.filter((column) => isColumnAllowed(column.id)),
+    [isColumnAllowed],
+  );
+  const availableTableLayoutColumns = useMemo(
+    () => TABLE_LAYOUT_COLUMNS.filter((column) => isColumnAllowed(column.id)),
+    [isColumnAllowed],
+  );
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedClientId, setSelectedClientId] = useState<number | null>(null);
@@ -436,7 +459,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
   } = usePersistedTableSettings<ColumnId>({
     storageKey: tableLayoutStorageKey,
     settingsKey: TABLE_SETTINGS_DB_KEY,
-    columns: TABLE_LAYOUT_COLUMNS,
+    columns: availableTableLayoutColumns,
     defaultPageSize: 25,
     minPageSize: 5,
     maxPageSize: 100,
@@ -448,11 +471,14 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
   const [page, setPage] = useState(1);
 
   const filterableColumns = useMemo(
-    () => COLUMN_DEFINITIONS.filter((col) => col.filterable),
-    [],
+    () => availableColumnDefinitions.filter((col) => col.filterable),
+    [availableColumnDefinitions],
   );
 
-  const activeFilterColumns = filterSettings.filterColumns;
+  const activeFilterColumns = useMemo(
+    () => filterSettings.filterColumns.filter(isColumnAllowed),
+    [filterSettings.filterColumns, isColumnAllowed],
+  );
 
   const filterParamMap = useMemo(
     () =>
@@ -980,7 +1006,10 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
     }
   }, [page, totalPages]);
 
-  const visibleColumnIds = orderedVisibleColumns;
+  const visibleColumnIds = useMemo(
+    () => orderedVisibleColumns.filter(isColumnAllowed),
+    [orderedVisibleColumns, isColumnAllowed],
+  );
 
   const handleFilterColumnsChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     const selected = Array.from(event.target.selectedOptions).map((option) => option.value as ColumnId);
@@ -1449,7 +1478,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
         {viewMode === 'table' && settingsOpen && (
           <div className="mb-6">
             <TableColumnSettings
-              columns={COLUMN_DEFINITIONS.map((column) => ({
+              columns={availableColumnDefinitions.map((column) => ({
                 key: column.id,
                 label: column.label,
               }))}

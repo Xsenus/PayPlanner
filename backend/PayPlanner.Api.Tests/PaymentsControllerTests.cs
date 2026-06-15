@@ -2793,6 +2793,70 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task ClientBalanceRead_WithoutPaymentViewPermission_ReturnsForbid()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateBalanceUserAsync(
+            db,
+            canEditPayments: true,
+            viewScope: DataVisibilityScope.All,
+            canViewPayments: false);
+
+        var client = new Client { Name = "Hidden payment balance client", CreatedAt = DateTime.UtcNow };
+        db.Clients.Add(client);
+        db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
+        {
+            Client = client,
+            Amount = 1_000m,
+            Type = ClientBalanceTransactionType.Overpayment,
+            Direction = ClientBalanceDirection.Credit,
+            Description = "Hidden balance",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateClientBalancesController(db, user.Id);
+
+        var summaryResult = await controller.GetSummary(client.Id, CancellationToken.None);
+        var transactionsResult = await controller.GetTransactions(client.Id, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(summaryResult);
+        Assert.IsType<ForbidResult>(transactionsResult);
+    }
+
+    [Fact]
+    public async Task LegalEntityBalanceRead_WithoutPaymentViewPermission_ReturnsForbid()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateBalanceUserAsync(
+            db,
+            canEditPayments: true,
+            viewScope: DataVisibilityScope.All,
+            canViewPayments: false);
+
+        var legalEntity = new LegalEntity { ShortName = "Hidden payment balance legal entity" };
+        db.LegalEntities.Add(legalEntity);
+        db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
+        {
+            LegalEntity = legalEntity,
+            Amount = 1_000m,
+            Type = ClientBalanceTransactionType.Overpayment,
+            Direction = ClientBalanceDirection.Credit,
+            Description = "Hidden legal balance",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateLegalEntityBalancesController(db, user.Id);
+
+        var summaryResult = await controller.GetSummary(legalEntity.Id, CancellationToken.None);
+        var transactionsResult = await controller.GetTransactions(legalEntity.Id, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(summaryResult);
+        Assert.IsType<ForbidResult>(transactionsResult);
+    }
+
+    [Fact]
     public async Task ApplyCredit_WithSourcePaymentId_UsesOnlySelectedAdvanceRemainder()
     {
         await using var db = await CreateContextAsync();
@@ -5504,7 +5568,8 @@ public class PaymentsControllerTests
     private static async Task<User> CreateBalanceUserAsync(
         PaymentContext db,
         bool canEditPayments,
-        string viewScope)
+        string viewScope,
+        bool canViewPayments = true)
     {
         var role = new Role
         {
@@ -5533,7 +5598,7 @@ public class PaymentsControllerTests
             {
                 RoleId = role.Id,
                 Section = RolePermissionCatalog.Payments,
-                CanView = true,
+                CanView = canViewPayments,
                 CanCreate = true,
                 CanEdit = canEditPayments,
                 CanDelete = true,

@@ -1408,6 +1408,7 @@ export function ClientDetail({
       sectionPermissions,
     ],
   );
+  const canViewClientFinancialSummary = paymentPermissions.canView;
   const clientViewStateKey = useMemo(
     () => `pp.clientDetail.${user?.id ?? "guest"}.${clientId}.viewState.v1`,
     [clientId, user?.id],
@@ -1473,7 +1474,11 @@ export function ClientDetail({
   );
   const [clientFormSaving, setClientFormSaving] = useState(false);
   const refreshClientBalance = useCallback(async () => {
-    if (!clientId) return;
+    if (!clientId || !canViewClientFinancialSummary) {
+      setClientBalance(null);
+      setClientBalanceLoading(false);
+      return;
+    }
 
     setClientBalanceLoading(true);
     try {
@@ -1485,10 +1490,13 @@ export function ClientDetail({
     } finally {
       setClientBalanceLoading(false);
     }
-  }, [clientId]);
+  }, [canViewClientFinancialSummary, clientId]);
 
   const refreshClientBalanceTransactions = useCallback(async () => {
-    if (!clientId) return;
+    if (!clientId || !canViewClientFinancialSummary) {
+      setClientBalanceTransactions([]);
+      return;
+    }
 
     try {
       const transactions = await apiService.getClientBalanceTransactions(clientId);
@@ -1497,16 +1505,25 @@ export function ClientDetail({
       console.error("Failed to load client balance transactions", error);
       setClientBalanceTransactions([]);
     }
-  }, [clientId]);
+  }, [canViewClientFinancialSummary, clientId]);
 
   useEffect(() => {
     void refreshClientBalance();
   }, [refreshClientBalance]);
 
   useEffect(() => {
-    if (!clientBalanceExpanded) return;
+    if (!clientBalanceExpanded || !canViewClientFinancialSummary) return;
     void refreshClientBalanceTransactions();
-  }, [clientBalanceExpanded, refreshClientBalanceTransactions]);
+  }, [
+    canViewClientFinancialSummary,
+    clientBalanceExpanded,
+    refreshClientBalanceTransactions,
+  ]);
+  useEffect(() => {
+    if (canViewClientFinancialSummary) return;
+    setClientBalanceExpanded(false);
+    setClientBalanceTransactions([]);
+  }, [canViewClientFinancialSummary]);
   // Временно закомментировано: будет возвращено при реинтеграции табов профиля.
   // const [activeProfileTab, setActiveProfileTab] = useState<ProfileTabKey>('phone');
   // const [profileDocuments, setProfileDocuments] = useState<ProfileDocumentsState>({
@@ -3194,6 +3211,13 @@ export function ClientDetail({
   const [statsReloadToken, setStatsReloadToken] = useState(0);
   const bumpStats = () => setStatsReloadToken((x) => x + 1);
   useEffect(() => {
+    if (!canViewClientFinancialSummary) {
+      setCaseFinanceSummaries({});
+      setCaseFinanceLoading(false);
+      setCaseFinanceError(null);
+      return;
+    }
+
     let alive = true;
     setCaseFinanceLoading(true);
     setCaseFinanceError(null);
@@ -3226,7 +3250,12 @@ export function ClientDetail({
     return () => {
       alive = false;
     };
-  }, [clientId, isSupplierCard, statsReloadToken]);
+  }, [
+    canViewClientFinancialSummary,
+    clientId,
+    isSupplierCard,
+    statsReloadToken,
+  ]);
 
   const showPermissionWarning = useCallback(
     (message: string) => {
@@ -6023,31 +6052,33 @@ export function ClientDetail({
             <ClientStatusBadge status={clientData?.clientStatus} />
           </h1>
           <div className="ml-auto flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setClientBalanceExpanded(true)}
-              className="inline-flex min-h-10 items-center gap-3 rounded-lg border border-blue-200 bg-white px-3 py-1 text-sm font-semibold text-blue-800 shadow-sm transition-colors hover:bg-blue-50"
-              title="История баланса"
-              aria-label="История баланса"
-            >
-              <span className="flex flex-col leading-tight">
-                <span className="text-[11px] font-bold uppercase text-rose-500">
-                  Долг
+            {canViewClientFinancialSummary ? (
+              <button
+                type="button"
+                onClick={() => setClientBalanceExpanded(true)}
+                className="inline-flex min-h-10 items-center gap-3 rounded-lg border border-blue-200 bg-white px-3 py-1 text-sm font-semibold text-blue-800 shadow-sm transition-colors hover:bg-blue-50"
+                title="История баланса"
+                aria-label="История баланса"
+              >
+                <span className="flex flex-col leading-tight">
+                  <span className="text-[11px] font-bold uppercase text-rose-500">
+                    Долг
+                  </span>
+                  <span className="text-sm font-semibold text-rose-700">
+                    {clientDebtLabel}
+                  </span>
                 </span>
-                <span className="text-sm font-semibold text-rose-700">
-                  {clientDebtLabel}
+                <span className="h-6 w-px bg-blue-100" aria-hidden="true" />
+                <span className="flex flex-col leading-tight">
+                  <span className="text-[11px] font-bold uppercase text-emerald-500">
+                    Аванс
+                  </span>
+                  <span className="text-sm font-semibold text-emerald-700">
+                    {clientAdvanceLabel}
+                  </span>
                 </span>
-              </span>
-              <span className="h-6 w-px bg-blue-100" aria-hidden="true" />
-              <span className="flex flex-col leading-tight">
-                <span className="text-[11px] font-bold uppercase text-emerald-500">
-                  Аванс
-                </span>
-                <span className="text-sm font-semibold text-emerald-700">
-                  {clientAdvanceLabel}
-                </span>
-              </span>
-            </button>
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => setClientAuditOpen(true)}
