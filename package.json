@@ -13,6 +13,7 @@
     "test:all": "vitest run",
     "test:unit": "vitest run --exclude \"**/*.integration.test.*\" --no-file-parallelism",
     "test:integration": "node scripts/run-integration-tests.mjs",
+    "test:advance-acceptance": "node scripts/run-advance-acceptance-smoke.mjs",
     "test:legal-e2e": "node scripts/run-legal-e2e-smoke.mjs",
     "test:legal-e2e:frontend": "node scripts/run-legal-e2e-smoke.mjs --public-only --scenarios=frontend-shell",
     "test:legal-e2e:public": "node scripts/run-legal-e2e-smoke.mjs --public-only --scenarios=frontend-shell,features",
