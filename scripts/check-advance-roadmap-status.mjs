@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -26,6 +26,7 @@ function runCli() {
   const roadmapPath = path.resolve(process.cwd(), roadmapArg);
   const failOnOpen = args.includes('--fail-on-open');
   const failOnBlocked = args.includes('--fail-on-blocked');
+  const failOnMissingChecklist = args.includes('--fail-on-missing-checklist');
   const report = buildRoadmapReport(readFileSync(roadmapPath, 'utf8'), roadmapPath);
 
   printReport(report);
@@ -39,6 +40,11 @@ function runCli() {
     console.error(`Blocked roadmap items found: ${report.blockedCount}`);
     process.exitCode = 1;
   }
+
+  if (failOnMissingChecklist && !report.acceptanceChecklist.exists) {
+    console.error('Acceptance checklist is missing or not linked.');
+    process.exitCode = 1;
+  }
 }
 
 function isCliEntryPoint() {
@@ -47,6 +53,7 @@ function isCliEntryPoint() {
 
 export function buildRoadmapReport(content, source = DEFAULT_ROADMAP) {
   const items = parseRoadmapItems(content);
+  const acceptanceChecklist = parseAcceptanceChecklist(content, source);
   const counts = {
     done: 0,
     notStarted: 0,
@@ -78,11 +85,35 @@ export function buildRoadmapReport(content, source = DEFAULT_ROADMAP) {
     implementationPercent,
     blockedItems: items.filter((item) => item.status === 'blocked'),
     acceptanceItems: items.filter((item) => item.status === 'acceptance'),
+    acceptanceChecklist,
     openImplementationItems: items.filter((item) => (
       item.status === 'notStarted' ||
       item.status === 'inProgress' ||
       item.status === 'decision'
     )),
+  };
+}
+
+function parseAcceptanceChecklist(content, source) {
+  const match = content.match(/Чек-лист ручного показа:\s+`([^`]+)`/);
+  const checklistPath = match?.[1] ?? null;
+
+  if (!checklistPath) {
+    return {
+      path: null,
+      exists: false,
+    };
+  }
+
+  const baseDir = path.dirname(path.resolve(source));
+  const rootRelativePath = path.resolve(process.cwd(), checklistPath);
+  const roadmapRelativePath = path.resolve(baseDir, checklistPath);
+  const absolutePath = existsSync(rootRelativePath) ? rootRelativePath : roadmapRelativePath;
+
+  return {
+    path: checklistPath,
+    absolutePath,
+    exists: existsSync(absolutePath),
   };
 }
 
@@ -121,6 +152,7 @@ function printReport(report) {
   console.log(`Open implementation: ${report.implementationOpenCount}`);
   console.log(`Blocked: ${report.blockedCount}`);
   console.log(`Manual acceptance: ${report.acceptance}`);
+  console.log(`Acceptance checklist: ${report.acceptanceChecklist.path ?? 'not linked'} (${report.acceptanceChecklist.exists ? 'found' : 'missing'})`);
 
   if (report.openImplementationItems.length > 0) {
     console.log('\nOpen implementation items:');
@@ -152,6 +184,8 @@ function runSelfTest() {
     '- [!] Blocked',
     '- [decision] Decision',
     '- [acceptance] Acceptance',
+    '',
+    'Чек-лист ручного показа: `package.json`.',
   ].join('\n'));
 
   assertEqual(report.total, 6, 'total');
@@ -164,6 +198,8 @@ function runSelfTest() {
   assertEqual(report.implementationTotal, 4, 'implementationTotal');
   assertEqual(report.implementationOpenCount, 3, 'implementationOpenCount');
   assertEqual(report.implementationPercent, 25, 'implementationPercent');
+  assertEqual(report.acceptanceChecklist.path, 'package.json', 'acceptanceChecklist.path');
+  assertEqual(report.acceptanceChecklist.exists, true, 'acceptanceChecklist.exists');
 
   console.log('Roadmap status self-test passed.');
 }
@@ -180,6 +216,8 @@ function printHelp() {
 Options:
   --fail-on-open     Exit with code 1 when [ ], [~], or [decision] implementation items exist.
   --fail-on-blocked  Exit with code 1 when [!] blocked items exist.
+  --fail-on-missing-checklist
+                     Exit with code 1 when the manual acceptance checklist is missing.
   --self-test        Run parser self-test.
   --help             Show this help.
 `);

@@ -468,6 +468,10 @@ function assertRoadmapReadyForAcceptance(roadmap) {
     roadmap.implementationOpenCount === 0,
     `Advance roadmap still has open implementation items: ${roadmap.implementationOpenCount}`,
   );
+  assertCondition(
+    roadmap.acceptanceChecklist.exists,
+    'Advance roadmap manual acceptance checklist is missing or not linked',
+  );
 }
 
 function buildAcceptanceMarkdownReport(report) {
