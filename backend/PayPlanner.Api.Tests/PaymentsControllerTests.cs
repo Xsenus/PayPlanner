@@ -5477,7 +5477,9 @@ public class PaymentsControllerTests
             RoleId = role.Id,
             Section = RolePermissionCatalog.Payments,
             CanView = true,
+            CanCreate = true,
             CanEdit = canEdit,
+            CanDelete = true,
             CanExport = canExport,
             ViewScope = viewScope,
         });
@@ -5532,7 +5534,9 @@ public class PaymentsControllerTests
                 RoleId = role.Id,
                 Section = RolePermissionCatalog.Payments,
                 CanView = true,
+                CanCreate = true,
                 CanEdit = canEditPayments,
+                CanDelete = true,
                 ViewScope = viewScope,
             });
 

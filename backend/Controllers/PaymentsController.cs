@@ -54,25 +54,15 @@ public class PaymentsController : ControllerBase
             .ApplyPaymentVisibility(visibility)
             .AnyAsync(payment => payment.Id == id, ct);
 
-    private async Task<bool> CanEditPaymentsAsync(CancellationToken ct)
-    {
-        var userId = User.GetUserId();
-        if (!userId.HasValue)
-        {
-            return User?.IsInRole("admin") == true || User?.Identity?.IsAuthenticated != true;
-        }
+    private async Task<IActionResult?> RequirePaymentsPermissionAsync(
+        Func<RolePermissionValues, bool> isAllowed,
+        CancellationToken ct)
+        => await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Payments, isAllowed, ct)
+            ? null
+            : Forbid();
 
-        if (User.IsInRole("admin") || await _db.IsUserAdminAsync(userId.Value, ct))
-        {
-            return true;
-        }
-
-        var permission = await _db.GetUserSectionPermissionAsync(userId.Value, RolePermissionCatalog.Payments, ct);
-        return permission?.CanEdit == true;
-    }
-
-    private async Task<IActionResult?> RequirePaymentsEditAsync(CancellationToken ct)
-        => await CanEditPaymentsAsync(ct) ? null : Forbid();
+    private Task<IActionResult?> RequirePaymentsEditAsync(CancellationToken ct)
+        => RequirePaymentsPermissionAsync(permission => permission.CanEdit, ct);
 
     [HttpGet]
     public async Task<IActionResult> Get(
@@ -127,6 +117,11 @@ public class PaymentsController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Payment model, CancellationToken ct)
     {
+        if (await RequirePaymentsPermissionAsync(permission => permission.CanCreate, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var missingCreate = await _formRequirements.GetMissingFieldsAsync("payments", model);
         if (missingCreate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingCreate });
 
@@ -176,6 +171,11 @@ public class PaymentsController : ControllerBase
     [HttpPut("{id:int}")]
     public async Task<IActionResult> Update(int id, [FromBody] Payment model, CancellationToken ct)
     {
+        if (await RequirePaymentsEditAsync(ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var missingUpdate = await _formRequirements.GetMissingFieldsAsync("payments", model);
         if (missingUpdate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingUpdate });
 
@@ -4046,6 +4046,11 @@ public class PaymentsController : ControllerBase
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
+        if (await RequirePaymentsPermissionAsync(permission => permission.CanDelete, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var visibility = await ResolvePaymentsVisibilityAsync(ct);
         if (visibility is null)
         {

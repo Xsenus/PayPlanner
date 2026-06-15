@@ -67,6 +67,13 @@ public class InvoicesController : ControllerBase
         return CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date;
     }
 
+    private async Task<ActionResult?> RequireAccountsPermissionAsync(
+        Func<RolePermissionValues, bool> isAllowed,
+        CancellationToken ct)
+        => await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Accounts, isAllowed, ct)
+            ? null
+            : Forbid();
+
     [HttpGet]
     public async Task<IActionResult> Get(
         [FromQuery] DateTime? from,
@@ -492,7 +499,17 @@ public class InvoicesController : ControllerBase
     [HttpPost("{id:int}/send-to-signing")]
     public async Task<ActionResult<InvoiceDto>> SendToSigning(int id, CancellationToken ct)
     {
-        var payment = await _db.Payments.FirstOrDefaultAsync(p => p.Id == id, ct);
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+        if (await RequireAccountsPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var payment = await BuildEditableInvoicePaymentsQuery(visibility).FirstOrDefaultAsync(p => p.Id == id, ct);
         if (payment is null)
         {
             return NotFound();
@@ -509,7 +526,17 @@ public class InvoicesController : ControllerBase
     [HttpPost("{id:int}/mark-signed")]
     public async Task<ActionResult<InvoiceDto>> MarkSigned(int id, CancellationToken ct)
     {
-        var payment = await _db.Payments.FirstOrDefaultAsync(p => p.Id == id, ct);
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+        if (await RequireAccountsPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var payment = await BuildEditableInvoicePaymentsQuery(visibility).FirstOrDefaultAsync(p => p.Id == id, ct);
         if (payment is null)
         {
             return NotFound();
@@ -525,7 +552,17 @@ public class InvoicesController : ControllerBase
     [HttpPost("{id:int}/mark-not-signed")]
     public async Task<ActionResult<InvoiceDto>> MarkNotSigned(int id, CancellationToken ct)
     {
-        var payment = await _db.Payments.FirstOrDefaultAsync(p => p.Id == id, ct);
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+        if (await RequireAccountsPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var payment = await BuildEditableInvoicePaymentsQuery(visibility).FirstOrDefaultAsync(p => p.Id == id, ct);
         if (payment is null)
         {
             return NotFound();
@@ -541,6 +578,16 @@ public class InvoicesController : ControllerBase
     [HttpPost("{id:int}/workflow-status")]
     public async Task<ActionResult<InvoiceDto>> UpdateWorkflowStatus(int id, [FromBody] UpdateNamedStatusRequest request, CancellationToken ct)
     {
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+        if (await RequireAccountsPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         if (!ModelState.IsValid)
         {
             return ValidationProblem(ModelState);
@@ -556,7 +603,7 @@ public class InvoicesController : ControllerBase
             return BadRequest("Only document signing workflow statuses can be changed through this endpoint.");
         }
 
-        var payment = await _db.Payments.FirstOrDefaultAsync(p => p.Id == id, ct);
+        var payment = await BuildEditableInvoicePaymentsQuery(visibility).FirstOrDefaultAsync(p => p.Id == id, ct);
         if (payment is null)
         {
             return NotFound();
@@ -628,6 +675,16 @@ public class InvoicesController : ControllerBase
     [HttpPost("{id:int}/cancel")]
     public async Task<ActionResult<InvoiceDto>> Cancel(int id, [FromBody] CancelInvoiceRequest request, CancellationToken ct)
     {
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+        if (await RequireAccountsPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         if (!ModelState.IsValid)
         {
             return ValidationProblem(ModelState);
@@ -640,7 +697,7 @@ public class InvoicesController : ControllerBase
         }
         ApplyAuditReason(reason);
 
-        var payment = await _db.Payments
+        var payment = await BuildEditableInvoicePaymentsQuery(visibility)
             .Include(p => p.Invoice)
             .Include(p => p.Client)
             .Include(p => p.LegalEntity)
@@ -900,6 +957,11 @@ public class InvoicesController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<InvoiceDto>> Create([FromBody] UpsertInvoiceRequest request, CancellationToken ct)
     {
+        if (await RequireAccountsPermissionAsync(permission => permission.CanCreate, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var missingCreate = await _formRequirements.GetMissingFieldsAsync("contract-invoices", request, ct);
         if (missingCreate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingCreate });
 
@@ -1060,6 +1122,16 @@ public class InvoicesController : ControllerBase
     [HttpPut("{id:int}")]
     public async Task<ActionResult<InvoiceDto>> Update(int id, [FromBody] UpsertInvoiceRequest request, CancellationToken ct)
     {
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+        if (await RequireAccountsPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var missingUpdate = await _formRequirements.GetMissingFieldsAsync("contract-invoices", request, ct);
         if (missingUpdate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingUpdate });
 
@@ -1074,7 +1146,7 @@ public class InvoicesController : ControllerBase
             return BadRequest("Unknown invoice workflow status.");
         }
 
-        var payment = await _db.Payments
+        var payment = await BuildEditableInvoicePaymentsQuery(visibility)
             .Include(p => p.Responsibles)
             .Include(p => p.Invoice)
             .Include(p => p.InvoiceClientCases)
@@ -2114,7 +2186,17 @@ public class InvoicesController : ControllerBase
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
-        var payment = await _db.Payments
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+        if (await RequireAccountsPermissionAsync(permission => permission.CanDelete, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var payment = await BuildEditableInvoicePaymentsQuery(visibility)
             .Include(p => p.Invoice)
             .FirstOrDefaultAsync(p => p.Id == id, ct);
         if (payment is null)
@@ -2161,6 +2243,11 @@ public class InvoicesController : ControllerBase
         {
             return Unauthorized();
         }
+        if (await RequireAccountsPermissionAsync(permission => permission.CanDelete, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var paymentsQuery = BuildEditableInvoicePaymentsQuery(visibility);
 
         var payments = await paymentsQuery

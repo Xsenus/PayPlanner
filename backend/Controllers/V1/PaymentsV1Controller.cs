@@ -19,6 +19,13 @@ public class PaymentsV1Controller : ControllerBase
     private Task<DataVisibilityAccess?> ResolvePaymentsVisibilityAsync(CancellationToken ct)
         => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
 
+    private async Task<IActionResult?> RequirePaymentsPermissionAsync(
+        Func<RolePermissionValues, bool> isAllowed,
+        CancellationToken ct)
+        => await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Payments, isAllowed, ct)
+            ? null
+            : Forbid();
+
     [HttpGet]
     public async Task<IActionResult> Get(
         [FromQuery] DateTime? from,
@@ -61,6 +68,11 @@ public class PaymentsV1Controller : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Payment model, CancellationToken ct = default)
     {
+        if (await RequirePaymentsPermissionAsync(permission => permission.CanCreate, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         if (model.IncomeTypeId.HasValue)
         {
             var it = await _db.IncomeTypes.AsNoTracking()
@@ -81,6 +93,19 @@ public class PaymentsV1Controller : ControllerBase
     [HttpPut("{id:int}")]
     public async Task<IActionResult> Update(int id, [FromBody] Payment model, CancellationToken ct = default)
     {
+        if (await RequirePaymentsPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null) return Unauthorized();
+        var canAccessPayment = await _db.Payments
+            .AsNoTracking()
+            .ApplyPaymentVisibility(visibility)
+            .AnyAsync(payment => payment.Id == id, ct);
+        if (!canAccessPayment) return NotFound();
+
         var e = await _db.Payments.FindAsync(id);
         if (e is null) return NotFound();
         var originalInvoiceId = e.InvoiceId;
@@ -129,6 +154,19 @@ public class PaymentsV1Controller : ControllerBase
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct = default)
     {
+        if (await RequirePaymentsPermissionAsync(permission => permission.CanDelete, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null) return Unauthorized();
+        var canAccessPayment = await _db.Payments
+            .AsNoTracking()
+            .ApplyPaymentVisibility(visibility)
+            .AnyAsync(payment => payment.Id == id, ct);
+        if (!canAccessPayment) return NotFound();
+
         var e = await _db.Payments.FindAsync(id);
         if (e is null) return NotFound();
         var invoiceId = e.InvoiceId;

@@ -122,6 +122,32 @@ public class BackendPermissionMatrixTests
 
     [Theory]
     [MemberData(nameof(DataScopedSections))]
+    public async Task SectionActionPermissions_RespectExplicitActionDenials(string section)
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, $"{section}-actions", new RolePermission
+        {
+            Section = section,
+            CanView = true,
+            CanCreate = false,
+            CanEdit = true,
+            CanDelete = false,
+            CanExport = true,
+            ViewScope = DataVisibilityScope.All
+        });
+        var principal = CreatePrincipal(user);
+
+        var canCreate = await db.HasUserSectionPermissionAsync(principal, section, permission => permission.CanCreate);
+        var canEdit = await db.HasUserSectionPermissionAsync(principal, section, permission => permission.CanEdit);
+        var canDelete = await db.HasUserSectionPermissionAsync(principal, section, permission => permission.CanDelete);
+
+        Assert.False(canCreate);
+        Assert.True(canEdit);
+        Assert.False(canDelete);
+    }
+
+    [Theory]
+    [MemberData(nameof(DataScopedSections))]
     public async Task DataVisibility_AllowsAdminAcrossDataScopedSections(string section)
     {
         await using var db = await CreateContextAsync();

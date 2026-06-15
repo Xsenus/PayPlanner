@@ -52,6 +52,13 @@ public class ActsController : ControllerBase
     private Task<DataVisibilityAccess?> ResolveActsVisibilityAsync(CancellationToken ct)
         => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Acts, ct);
 
+    private async Task<ActionResult?> RequireActsPermissionAsync(
+        Func<RolePermissionValues, bool> isAllowed,
+        CancellationToken ct)
+        => await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Acts, isAllowed, ct)
+            ? null
+            : Forbid();
+
     [HttpGet]
     public async Task<IActionResult> Get(
         [FromQuery] DateTime? from,
@@ -239,6 +246,11 @@ public class ActsController : ControllerBase
     [HttpPost("{id:int}/send-to-signing")]
     public async Task<ActionResult<ActDto>> SendToSigning(int id, CancellationToken ct)
     {
+        if (await RequireActsPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var act = await LoadActForWorkflowAsync(id, ct);
         if (act is null)
         {
@@ -256,6 +268,11 @@ public class ActsController : ControllerBase
     [HttpPost("{id:int}/mark-signed")]
     public async Task<ActionResult<ActDto>> MarkSigned(int id, CancellationToken ct)
     {
+        if (await RequireActsPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var act = await LoadActForWorkflowAsync(id, ct);
         if (act is null)
         {
@@ -275,6 +292,11 @@ public class ActsController : ControllerBase
     [HttpPost("{id:int}/mark-not-signed")]
     public async Task<ActionResult<ActDto>> MarkNotSigned(int id, CancellationToken ct)
     {
+        if (await RequireActsPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var act = await LoadActForWorkflowAsync(id, ct);
         if (act is null)
         {
@@ -293,6 +315,11 @@ public class ActsController : ControllerBase
     [HttpPost("{id:int}/workflow-status")]
     public async Task<ActionResult<ActDto>> UpdateWorkflowStatus(int id, [FromBody] UpdateNamedStatusRequest request, CancellationToken ct)
     {
+        if (await RequireActsPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         if (!ModelState.IsValid)
         {
             return ValidationProblem(ModelState);
@@ -374,6 +401,11 @@ public class ActsController : ControllerBase
     [HttpPost("{id:int}/cancel")]
     public async Task<ActionResult<ActDto>> Cancel(int id, [FromBody] CancelActRequest request, CancellationToken ct)
     {
+        if (await RequireActsPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         if (!ModelState.IsValid)
         {
             return ValidationProblem(ModelState);
@@ -408,6 +440,11 @@ public class ActsController : ControllerBase
     [HttpPost("{id:int}/correction")]
     public async Task<ActionResult<ActDto>> CreateCorrection(int id, [FromBody] CreateActCorrectionRequest? request, CancellationToken ct)
     {
+        if (await RequireActsPermissionAsync(permission => permission.CanCreate, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         if (!ModelState.IsValid)
         {
             return ValidationProblem(ModelState);
@@ -665,6 +702,11 @@ public class ActsController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<ActDto>> Create([FromBody] UpsertActRequest request, CancellationToken ct)
     {
+        if (await RequireActsPermissionAsync(permission => permission.CanCreate, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var missingCreate = await _formRequirements.GetMissingFieldsAsync("acts", request, ct);
         if (missingCreate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingCreate });
 
@@ -732,6 +774,11 @@ public class ActsController : ControllerBase
     [HttpPut("{id:int}")]
     public async Task<ActionResult<ActDto>> Update(int id, [FromBody] UpsertActRequest request, CancellationToken ct)
     {
+        if (await RequireActsPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var missingUpdate = await _formRequirements.GetMissingFieldsAsync("acts", request, ct);
         if (missingUpdate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingUpdate });
 
@@ -809,6 +856,11 @@ public class ActsController : ControllerBase
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
+        if (await RequireActsPermissionAsync(permission => permission.CanDelete, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var visibility = await ResolveActsVisibilityAsync(ct);
         if (visibility is null)
         {
