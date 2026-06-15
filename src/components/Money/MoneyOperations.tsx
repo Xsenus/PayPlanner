@@ -173,6 +173,8 @@ const MONEY_JOURNAL_STATUS_LABELS: Record<MoneyOperationJournalStatus, string> =
   Error: 'Ошибка',
 };
 
+const ADVANCE_REVIEW_FILTER_INTENT_KEY = 'pp.payments.advanceReviewFilter';
+
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
 
 const MONEY_OPERATION_COLUMNS = [
@@ -2307,6 +2309,12 @@ export function MoneyOperations({
   const [cashInventoryActualBalance, setCashInventoryActualBalance] = useState('');
   const [cashInventoryComment, setCashInventoryComment] = useState('');
   const [cashInventoryCreateCorrection, setCashInventoryCreateCorrection] = useState(true);
+  const [advanceReviewMonitor, setAdvanceReviewMonitor] = useState({
+    count: 0,
+    amount: 0,
+    loading: false,
+    error: null as string | null,
+  });
   const bankStatementInputRef = useRef<HTMLInputElement | null>(null);
   const journalActionsRef = useRef<HTMLDivElement | null>(null);
 
@@ -2385,6 +2393,53 @@ export function MoneyOperations({
     () => (effectivePageSize > 0 ? Math.max(1, Math.ceil(total / effectivePageSize)) : 1),
     [effectivePageSize, total],
   );
+  useEffect(() => {
+    if (!permissions.payments.canView) {
+      setAdvanceReviewMonitor({ count: 0, amount: 0, loading: false, error: null });
+      return;
+    }
+
+    let cancelled = false;
+    setAdvanceReviewMonitor((current) => ({ ...current, loading: true, error: null }));
+
+    apiService.getPaymentsV2({
+      advanceReviewStatus: 'RequiresDecision',
+      page: 1,
+      pageSize: 1,
+    })
+      .then((response) => {
+        if (cancelled) {
+          return;
+        }
+        setAdvanceReviewMonitor({
+          count: response.total,
+          amount: response.summary?.income ?? response.summary?.total ?? 0,
+          loading: false,
+          error: null,
+        });
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+        setAdvanceReviewMonitor({
+          count: 0,
+          amount: 0,
+          loading: false,
+          error: extractDisplayErrorMessage(error, 'Не удалось загрузить контроль авансов.'),
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [permissions.payments.canView]);
+
+  const openAdvanceReviewPayments = () => {
+    window.sessionStorage.setItem(ADVANCE_REVIEW_FILTER_INTENT_KEY, 'RequiresDecision');
+    setActiveTab('payments');
+  };
+
   const moneyColumnsByKey = useMemo(
     () =>
       Object.fromEntries(MONEY_OPERATION_COLUMNS.map((column) => [column.key, column])) as Record<
@@ -4839,6 +4894,33 @@ export function MoneyOperations({
             </div>
             {renderBalanceCheckBadge(summary)}
           </div>
+          {permissions.payments.canView ? (
+            <div className="rounded-lg border border-rose-100 bg-rose-50 px-3 py-2">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-rose-800">Контроль авансов</div>
+                  <div className="mt-1 text-xs text-rose-700/80">
+                    {advanceReviewMonitor.loading
+                      ? 'Проверяем платежи на разбор...'
+                      : advanceReviewMonitor.error
+                        ? advanceReviewMonitor.error
+                        : advanceReviewMonitor.count > 0
+                          ? `На разборе: ${advanceReviewMonitor.count} на ${formatMoney(advanceReviewMonitor.amount)} ₽`
+                          : 'Нет платежей, требующих решения по авансу'}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={openAdvanceReviewPayments}
+                disabled={advanceReviewMonitor.loading}
+                className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-md border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Открыть разбор
+              </button>
+            </div>
+          ) : null}
           <button
             type="button"
             onClick={handleCurrentYear}

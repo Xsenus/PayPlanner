@@ -37,6 +37,7 @@ const {
   getMoneyOperationMock,
   getMoneyOperationsPagedMock,
   getMoneyOperationsPrintHtmlMock,
+  getPaymentsV2Mock,
   getUserSettingMock,
   exportMoneyOperationsCsvMock,
   exportMoneyOperationsExcelMock,
@@ -50,6 +51,7 @@ const {
   toastMock,
   toastErrorMock,
   toastSuccessMock,
+  setActiveTabMock,
   updateCashOrderMock,
   updateMoneyOperationMock,
   upsertUserSettingMock,
@@ -89,6 +91,7 @@ const {
     getMoneyOperationMock: vi.fn(),
     getMoneyOperationsPagedMock: vi.fn(),
     getMoneyOperationsPrintHtmlMock: vi.fn(),
+    getPaymentsV2Mock: vi.fn(),
     getUserSettingMock: vi.fn(),
     exportMoneyOperationsCsvMock: vi.fn(),
     exportMoneyOperationsExcelMock: vi.fn(),
@@ -102,6 +105,7 @@ const {
     toastMock: { error: toastErrorMock, success: toastSuccessMock },
     toastErrorMock,
     toastSuccessMock,
+    setActiveTabMock: vi.fn(),
     updateCashOrderMock: vi.fn(),
     updateMoneyOperationMock: vi.fn(),
     upsertUserSettingMock: vi.fn(),
@@ -147,7 +151,7 @@ vi.mock('../../hooks/useRolePermissions', () => ({
 }));
 
 vi.mock('../../contexts/TabContext', () => ({
-  useTabNavigation: () => ({ setActiveTab: vi.fn() }),
+  useTabNavigation: () => ({ setActiveTab: setActiveTabMock }),
 }));
 
 vi.mock('../../hooks/useToast', () => ({
@@ -208,6 +212,7 @@ vi.mock('../../services/api', () => ({
     getMoneyOperation: getMoneyOperationMock,
     getMoneyOperationsPaged: getMoneyOperationsPagedMock,
     getMoneyOperationsPrintHtml: getMoneyOperationsPrintHtmlMock,
+    getPaymentsV2: getPaymentsV2Mock,
     getUserSetting: getUserSettingMock,
     exportMoneyOperationsCsv: exportMoneyOperationsCsvMock,
     exportMoneyOperationsExcel: exportMoneyOperationsExcelMock,
@@ -374,6 +379,7 @@ describe('MoneyOperations integration', () => {
     getMoneyOperationMock.mockReset();
     getMoneyOperationsPagedMock.mockReset();
     getMoneyOperationsPrintHtmlMock.mockReset();
+    getPaymentsV2Mock.mockReset();
     getUserSettingMock.mockReset();
     exportMoneyOperationsCsvMock.mockReset();
     exportMoneyOperationsExcelMock.mockReset();
@@ -386,11 +392,13 @@ describe('MoneyOperations integration', () => {
     rollbackBankStatementImportMock.mockReset();
     toastErrorMock.mockReset();
     toastSuccessMock.mockReset();
+    setActiveTabMock.mockReset();
     updateCashOrderMock.mockReset();
     updateMoneyOperationMock.mockReset();
     upsertUserSettingMock.mockReset();
     permissionsState.paymentsCanExport = true;
     window.localStorage.clear();
+    window.sessionStorage.clear();
     if (!URL.createObjectURL) {
       Object.defineProperty(URL, 'createObjectURL', { value: vi.fn(), configurable: true });
     }
@@ -540,6 +548,20 @@ describe('MoneyOperations integration', () => {
         pageSize: 25,
         summary: createSummary(filtered),
       };
+    });
+    getPaymentsV2Mock.mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 1,
+      summary: {
+        income: 0,
+        expense: 0,
+        balance: 0,
+        incomeCount: 0,
+        expenseCount: 0,
+        total: 0,
+      },
     });
 
     getCashOrderRegisterMock.mockResolvedValue({
@@ -865,6 +887,41 @@ describe('MoneyOperations integration', () => {
 
     expect(await screen.findByText('Ответственный')).toBeTruthy();
     expect(await screen.findByText('Анна Иванова')).toBeTruthy();
+  });
+
+  it('shows advance review monitor and opens payment review from money journal', async () => {
+    const user = userEvent.setup();
+    getPaymentsV2Mock.mockResolvedValue({
+      items: [],
+      total: 2,
+      page: 1,
+      pageSize: 1,
+      summary: {
+        income: 9_600,
+        expense: 0,
+        balance: 9_600,
+        incomeCount: 2,
+        expenseCount: 0,
+        total: 9_600,
+      },
+    });
+
+    render(<MoneyOperations source="Bank" />);
+
+    expect(await screen.findByText('Контроль авансов')).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByText((text) => text.includes('На разборе: 2') && text.includes('9'))).toBeTruthy();
+    });
+    expect(getPaymentsV2Mock).toHaveBeenCalledWith({
+      advanceReviewStatus: 'RequiresDecision',
+      page: 1,
+      pageSize: 1,
+    });
+
+    await user.click(screen.getByRole('button', { name: 'Открыть разбор' }));
+
+    expect(window.sessionStorage.getItem('pp.payments.advanceReviewFilter')).toBe('RequiresDecision');
+    expect(setActiveTabMock).toHaveBeenCalledWith('payments');
   });
 
   it('renders linked contract number in the money journal table', async () => {

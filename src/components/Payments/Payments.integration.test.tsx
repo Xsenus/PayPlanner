@@ -324,6 +324,7 @@ describe('Payments integration', () => {
     usePaymentsPagedMock.mockReturnValue(paymentsPagedResult);
     paymentsPagedResult.payments = [];
     paymentsPagedResult.total = 0;
+    window.sessionStorage.clear();
   });
 
   afterEach(() => {
@@ -442,6 +443,19 @@ describe('Payments integration', () => {
       expect(lastCall.status).toBeUndefined();
       expect(lastCall.page).toBe(1);
     });
+  });
+
+  it('opens the required advance review filter from a saved navigation intent', async () => {
+    window.sessionStorage.setItem('pp.payments.advanceReviewFilter', 'RequiresDecision');
+
+    render(<Payments />);
+
+    await waitFor(() => {
+      const lastCall = usePaymentsPagedMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastCall.advanceReviewStatus).toBe('RequiresDecision');
+      expect(lastCall.status).toBeUndefined();
+    });
+    expect(window.sessionStorage.getItem('pp.payments.advanceReviewFilter')).toBeNull();
   });
 
   it('checks a suspected unallocated advance from the monitoring panel', async () => {
