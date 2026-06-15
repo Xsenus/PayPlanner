@@ -987,7 +987,7 @@ export function Payments({
       ? Number(rawAmount.replace(/\s+/g, '').replace(',', '.'))
       : undefined;
 
-    if (rawAmount && (!Number.isFinite(amount) || amount < 0)) {
+    if (amount !== undefined && (!Number.isFinite(amount) || amount < 0)) {
       setAdvanceDiagnosticsError('Укажите корректную сумму платежа.');
       return;
     }
