@@ -206,12 +206,19 @@ public class ClientsController : ControllerBase
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (client is null) return NotFound();
 
+        var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+        if (paymentsVisibility is null)
+        {
+            return Unauthorized();
+        }
+
         var normalizedClientRole = QueryExtensions.NormalizeClientRole(clientRole);
+        var visiblePaymentsQuery = _db.Payments.ApplyPaymentVisibility(paymentsVisibility);
         var q = (normalizedClientRole switch
         {
-            "counterparty" => _db.Payments.Where(p => p.ClientId == id),
-            "expenseClient" => _db.Payments.Where(p => p.ExpenseClientId == id),
-            _ => _db.Payments.Where(p =>
+            "counterparty" => visiblePaymentsQuery.Where(p => p.ClientId == id),
+            "expenseClient" => visiblePaymentsQuery.Where(p => p.ExpenseClientId == id),
+            _ => visiblePaymentsQuery.Where(p =>
                 (p.Type == PaymentType.Income && p.ClientId == id) ||
                 (p.Type == PaymentType.Expense &&
                     (p.ExpenseClientId == id || (p.ExpenseClientId == null && p.ClientId == id)))),
@@ -286,9 +293,15 @@ public class ClientsController : ControllerBase
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (client is null) return NotFound();
 
+        var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+        if (paymentsVisibility is null)
+        {
+            return Unauthorized();
+        }
+
         if (QueryExtensions.NormalizeClientRole(clientRole) == "counterparty")
         {
-            return Ok(await BuildSupplierCaseFinanceSummariesAsync(id, ct));
+            return Ok(await BuildSupplierCaseFinanceSummariesAsync(id, paymentsVisibility, ct));
         }
 
         var caseIds = await _db.ClientCases
@@ -337,6 +350,7 @@ public class ClientsController : ControllerBase
 
         var payments = await _db.Payments
             .AsNoTracking()
+            .ApplyPaymentVisibility(paymentsVisibility)
             .Include(p => p.InvoiceClientCases)
             .Where(p => p.Status != PaymentStatus.Cancelled)
             .Where(p =>
@@ -403,9 +417,16 @@ public class ClientsController : ControllerBase
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (client is null) return NotFound();
 
+        var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+        if (paymentsVisibility is null)
+        {
+            return Unauthorized();
+        }
+
         var normalizedClientRole = QueryExtensions.NormalizeClientRole(clientRole);
         var query = _db.Payments
             .AsNoTracking()
+            .ApplyPaymentVisibility(paymentsVisibility)
             .Include(payment => payment.Client)
             .Include(payment => payment.ExpenseClient)
             .Include(payment => payment.Invoice)
@@ -496,10 +517,12 @@ public class ClientsController : ControllerBase
 
     private async Task<List<ClientCaseFinanceSummaryDto>> BuildSupplierCaseFinanceSummariesAsync(
         int supplierId,
+        DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
         var payments = await _db.Payments
             .AsNoTracking()
+            .ApplyPaymentVisibility(paymentsVisibility)
             .Include(p => p.ClientCase)
                 .ThenInclude(c => c!.Client)
             .Include(p => p.InvoiceClientCases)

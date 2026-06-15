@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Controllers.V2;
 
@@ -15,20 +16,11 @@ public class ClientsV2Controller : ControllerBase
     private readonly PaymentContext _db;
     public ClientsV2Controller(PaymentContext db) => _db = db;
 
-    private IQueryable<Client> BuildVisibleClientsQuery(int? currentUserId, bool isAdmin)
-        => _db.Clients.ApplyClientVisibility(isAdmin, currentUserId);
+    private IQueryable<Client> BuildVisibleClientsQuery(DataVisibilityAccess? access)
+        => _db.Clients.ApplyClientVisibility(access);
 
-    private async Task<(int? UserId, bool IsAdmin)> GetCurrentAccessAsync(CancellationToken ct)
-    {
-        var currentUserId = User.GetUserId();
-        if (!currentUserId.HasValue)
-        {
-            return (null, false);
-        }
-
-        var isAdmin = await _db.IsUserAdminAsync(currentUserId.Value, ct);
-        return (currentUserId, isAdmin);
-    }
+    private Task<DataVisibilityAccess?> GetCurrentAccessAsync(CancellationToken ct)
+        => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Clients, ct);
 
     private static string? FormatResponsibleUserName(User? user)
     {
@@ -106,12 +98,12 @@ public class ClientsV2Controller : ControllerBase
         pageSize = Math.Clamp(pageSize, 1, 500);
 
         var access = await GetCurrentAccessAsync(ct);
-        if (!access.IsAdmin && !access.UserId.HasValue)
+        if (access is null)
         {
             return Unauthorized();
         }
 
-        var q = BuildVisibleClientsQuery(access.UserId, access.IsAdmin)
+        var q = BuildVisibleClientsQuery(access)
             .Include(c => c.LegalEntity)
             .Include(c => c.ClientStatus)
             .Include(c => c.ResponsibleUser)
@@ -231,6 +223,10 @@ public class ClientsV2Controller : ControllerBase
         var itemIds = items.Select(c => c.Id).ToList();
         if (itemIds.Count > 0)
         {
+            var accountsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+            var actsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Acts, ct);
+            var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+
             var casesCountByClient = await _db.ClientCases
                 .AsNoTracking()
                 .Where(c => c.ClientId.HasValue && itemIds.Contains(c.ClientId.Value))
@@ -300,6 +296,7 @@ public class ClientsV2Controller : ControllerBase
 
             var actsCountByClient = await _db.Acts
                 .AsNoTracking()
+                .ApplyActVisibility(actsVisibility)
                 .Where(a => a.ClientId.HasValue && itemIds.Contains(a.ClientId.Value))
                 .GroupBy(a => a.ClientId!.Value)
                 .Select(g => new { ClientId = g.Key, Count = g.Count() })
@@ -307,6 +304,7 @@ public class ClientsV2Controller : ControllerBase
 
             var actRows = await _db.Acts
                 .AsNoTracking()
+                .ApplyActVisibility(actsVisibility)
                 .Where(a => a.ClientId.HasValue && itemIds.Contains(a.ClientId.Value))
                 .Select(a => new
                 {
@@ -343,6 +341,7 @@ public class ClientsV2Controller : ControllerBase
 
             var invoiceRows = await _db.Payments
                 .AsNoTracking()
+                .ApplyPaymentVisibility(accountsVisibility)
                 .Where(p => p.DocumentKind == DocumentKind.Invoice)
                 .Where(p =>
                     (p.ClientId.HasValue && itemIds.Contains(p.ClientId.Value)) ||
@@ -428,6 +427,7 @@ public class ClientsV2Controller : ControllerBase
 
             var paymentRows = await _db.Payments
                 .AsNoTracking()
+                .ApplyPaymentVisibility(paymentsVisibility)
                 .Where(p => p.DocumentKind != DocumentKind.Invoice)
                 .Where(p =>
                     (p.ClientId.HasValue && itemIds.Contains(p.ClientId.Value)) ||
@@ -512,12 +512,12 @@ public class ClientsV2Controller : ControllerBase
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
     {
         var access = await GetCurrentAccessAsync(ct);
-        if (!access.IsAdmin && !access.UserId.HasValue)
+        if (access is null)
         {
             return Unauthorized();
         }
 
-        var client = await BuildVisibleClientsQuery(access.UserId, access.IsAdmin)
+        var client = await BuildVisibleClientsQuery(access)
             .Include(c => c.Cases)
             .Include(c => c.LegalEntity)
             .Include(c => c.ClientStatus)
@@ -535,14 +535,14 @@ public class ClientsV2Controller : ControllerBase
     public async Task<IActionResult> Create([FromBody] Client model, CancellationToken ct)
     {
         var access = await GetCurrentAccessAsync(ct);
-        if (!access.UserId.HasValue)
+        if (access is null)
         {
             return Unauthorized();
         }
 
         var responsibleUserId = access.IsAdmin
-            ? (model.ResponsibleUserId ?? access.UserId.Value)
-            : access.UserId.Value;
+            ? (model.ResponsibleUserId ?? access.UserId)
+            : access.UserId;
         if (!await ResponsibleUserExistsAsync(responsibleUserId, ct))
         {
             return BadRequest($"Ответственный #{responsibleUserId} не найден");
@@ -560,12 +560,12 @@ public class ClientsV2Controller : ControllerBase
     public async Task<IActionResult> Update(int id, [FromBody] Client model, CancellationToken ct)
     {
         var access = await GetCurrentAccessAsync(ct);
-        if (!access.IsAdmin && !access.UserId.HasValue)
+        if (access is null)
         {
             return Unauthorized();
         }
 
-        var e = await BuildVisibleClientsQuery(access.UserId, access.IsAdmin)
+        var e = await BuildVisibleClientsQuery(access)
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (e is null) return NotFound();
 
@@ -599,12 +599,12 @@ public class ClientsV2Controller : ControllerBase
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
         var access = await GetCurrentAccessAsync(ct);
-        if (!access.IsAdmin && !access.UserId.HasValue)
+        if (access is null)
         {
             return Unauthorized();
         }
 
-        var e = await BuildVisibleClientsQuery(access.UserId, access.IsAdmin)
+        var e = await BuildVisibleClientsQuery(access)
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (e is null) return NotFound();
 

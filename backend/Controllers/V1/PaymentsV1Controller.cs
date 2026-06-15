@@ -16,6 +16,9 @@ public class PaymentsV1Controller : ControllerBase
     private readonly PaymentContext _db;
     public PaymentsV1Controller(PaymentContext db) => _db = db;
 
+    private Task<DataVisibilityAccess?> ResolvePaymentsVisibilityAsync(CancellationToken ct)
+        => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+
     [HttpGet]
     public async Task<IActionResult> Get(
         [FromQuery] DateTime? from,
@@ -29,7 +32,11 @@ public class PaymentsV1Controller : ControllerBase
         [FromQuery] string? sortDir = null,
         CancellationToken ct = default)
     {
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null) return Unauthorized();
+
         var q = _db.Payments.AsQueryable().WithPaymentIncludes()
+            .ApplyPaymentVisibility(visibility)
             .ExcludeInstallmentParentInvoices(_db, excludeInstallmentParents)
             .ApplyPaymentFilters(from, to, clientId, caseId, search, clientRole)
             .ApplyPaymentSort(sortBy, sortDir);
@@ -40,8 +47,12 @@ public class PaymentsV1Controller : ControllerBase
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
     {
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null) return Unauthorized();
+
         var entity = await _db.Payments
             .WithPaymentIncludes()
+            .ApplyPaymentVisibility(visibility)
             .AsNoTracking()
             .FirstOrDefaultAsync(p => p.Id == id, ct);
         return entity is not null ? Ok(entity) : NotFound();

@@ -81,25 +81,38 @@ public static class DataVisibilityService
         var isAdmin = claimIsAdmin
             || string.Equals(user.RoleName, "admin", StringComparison.OrdinalIgnoreCase);
 
-        var rawScope = await db.RolePermissions
+        var permission = await db.RolePermissions
             .AsNoTracking()
             .Where(permission => permission.RoleId == user.RoleId && permission.Section == section)
-            .Select(permission => permission.ViewScope)
+            .Select(permission => new
+            {
+                permission.CanView,
+                permission.ViewScope,
+            })
             .FirstOrDefaultAsync(ct);
-        if (rawScope is null)
+        if (permission is null)
         {
             var fallbackSection = RolePermissionCatalog.GetFallbackSection(section);
             if (!string.IsNullOrWhiteSpace(fallbackSection))
             {
-                rawScope = await db.RolePermissions
+                permission = await db.RolePermissions
                     .AsNoTracking()
                     .Where(permission => permission.RoleId == user.RoleId && permission.Section == fallbackSection)
-                    .Select(permission => permission.ViewScope)
+                    .Select(permission => new
+                    {
+                        permission.CanView,
+                        permission.ViewScope,
+                    })
                     .FirstOrDefaultAsync(ct);
             }
         }
 
-        var scope = NormalizeScope(section, rawScope, isAdmin);
+        if (!isAdmin && permission is not null && !permission.CanView)
+        {
+            return null;
+        }
+
+        var scope = NormalizeScope(section, permission?.ViewScope, isAdmin);
         var visibleUserIds = new List<int> { user.Id };
 
         if (!isAdmin

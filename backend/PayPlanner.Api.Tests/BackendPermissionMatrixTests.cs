@@ -105,6 +105,23 @@ public class BackendPermissionMatrixTests
 
     [Theory]
     [MemberData(nameof(DataScopedSections))]
+    public async Task DataVisibility_DeniesRegularUserWithoutSectionViewAccess(string section)
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, $"{section}-denied", new RolePermission
+        {
+            Section = section,
+            CanView = false,
+            ViewScope = DataVisibilityScope.All
+        });
+
+        var access = await db.ResolveDataVisibilityAsync(CreatePrincipal(user), section);
+
+        Assert.Null(access);
+    }
+
+    [Theory]
+    [MemberData(nameof(DataScopedSections))]
     public async Task DataVisibility_AllowsAdminAcrossDataScopedSections(string section)
     {
         await using var db = await CreateContextAsync();

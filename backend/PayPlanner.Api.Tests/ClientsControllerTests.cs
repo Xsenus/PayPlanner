@@ -149,6 +149,122 @@ public class ClientsControllerTests
     }
 
     [Fact]
+    public async Task V2Get_HidesFinancialRelatedDocuments_WhenSectionViewAccessDenied()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db);
+        var roleId = await db.Users
+            .Where(user => user.Id == userId)
+            .Select(user => user.RoleId)
+            .FirstAsync();
+
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                RoleId = roleId,
+                Section = RolePermissionCatalog.Clients,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = roleId,
+                Section = RolePermissionCatalog.Accounts,
+                CanView = false,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = roleId,
+                Section = RolePermissionCatalog.Acts,
+                CanView = false,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = roleId,
+                Section = RolePermissionCatalog.Payments,
+                CanView = false,
+                ViewScope = DataVisibilityScope.All,
+            });
+
+        var client = new Client
+        {
+            Name = "Restricted Client",
+            IsActive = true,
+            ResponsibleUserId = userId,
+        };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        db.Acts.Add(new Act
+        {
+            ClientId = client.Id,
+            Number = "A-SEC",
+            Date = DateTime.UtcNow.Date,
+            Amount = 500m,
+        });
+        db.Payments.AddRange(
+            new Payment
+            {
+                ClientId = client.Id,
+                DocumentKind = DocumentKind.Invoice,
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Pending,
+                Date = DateTime.UtcNow.Date,
+                Amount = 1000m,
+            },
+            new Payment
+            {
+                ClientId = client.Id,
+                DocumentKind = DocumentKind.Payment,
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Completed,
+                Date = DateTime.UtcNow.Date,
+                Amount = 2000m,
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateV2Controller(db, userId);
+
+        var action = await controller.Get(
+            search: "Restricted",
+            isActive: null,
+            id: null,
+            name: null,
+            email: null,
+            phone: null,
+            company: null,
+            address: null,
+            notes: null,
+            legalEntityId: null,
+            legalEntityShortName: null,
+            legalEntityFullName: null,
+            legalEntityInn: null,
+            legalEntityOgrn: null,
+            legalEntityKpp: null,
+            clientStatusId: null,
+            clientStatus: null,
+            sortBy: "name",
+            sortDir: "asc",
+            page: 1,
+            pageSize: 10,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action);
+        var items = Assert.IsAssignableFrom<IEnumerable<Client>>(ok.Value!.GetType().GetProperty("items")!.GetValue(ok.Value)).ToList();
+        var item = Assert.Single(items);
+
+        Assert.Equal(client.Id, item.Id);
+        Assert.Equal(0, item.InvoicesCount);
+        Assert.Equal(0, item.ActsCount);
+        Assert.Equal(0, item.PaymentsCount);
+        Assert.Empty(item.RelatedInvoices);
+        Assert.Empty(item.RelatedActs);
+        Assert.Empty(item.RelatedPayments);
+    }
+
+    [Fact]
     public async Task V2Get_DeduplicatesRelatedInvoices_WithSameVisibleNumber()
     {
         await using var db = await CreateContextAsync();
@@ -672,6 +788,59 @@ public class ClientsControllerTests
         Assert.Equal(1_000m, stats.TotalExpenses);
         Assert.Equal(3_000m, stats.OutstandingExpenses);
         Assert.Single(stats.RecentPayments);
+    }
+
+    [Fact]
+    public async Task GetStats_DeniesFinancialStats_WhenPaymentsViewAccessDenied()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db);
+        var roleId = await db.Users
+            .Where(user => user.Id == userId)
+            .Select(user => user.RoleId)
+            .FirstAsync();
+
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                RoleId = roleId,
+                Section = RolePermissionCatalog.Clients,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = roleId,
+                Section = RolePermissionCatalog.Payments,
+                CanView = false,
+                ViewScope = DataVisibilityScope.All,
+            });
+
+        var client = new Client
+        {
+            Name = "Stats Restricted",
+            ResponsibleUserId = userId,
+            IsActive = true,
+        };
+        db.Clients.Add(client);
+        db.Payments.Add(new Payment
+        {
+            Client = client,
+            Amount = 10_000m,
+            PaidAmount = 10_000m,
+            Date = DateTime.UtcNow.Date,
+            PlannedDate = DateTime.UtcNow.Date,
+            DocumentKind = DocumentKind.Payment,
+            Status = PaymentStatus.Completed,
+            Type = PaymentType.Income,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, userId);
+
+        var action = await controller.GetStats(client.Id, null, CancellationToken.None);
+
+        Assert.IsType<UnauthorizedResult>(action);
     }
 
     [Fact]
