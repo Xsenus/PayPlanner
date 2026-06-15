@@ -1,10 +1,15 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, copyFileSync, openSync, closeSync, rmSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, copyFileSync, openSync, closeSync, rmSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 const root = process.cwd();
 const keepTemp = process.argv.includes('--keep-temp');
+const artifactDir = path.resolve(
+  root,
+  readArgValue('--artifact-dir') ?? process.env.PAYPLANNER_ADVANCE_ACCEPTANCE_ARTIFACT_DIR ?? 'artifacts/advance-acceptance',
+);
+const checks = [];
 const tempDir = mkdtempSync(path.join(tmpdir(), 'payplanner-advance-smoke-'));
 const tempDb = path.join(tempDir, 'payplanner.db');
 const port = 5300 + Math.floor(Math.random() * 300);
@@ -12,8 +17,15 @@ const baseUrl = `http://127.0.0.1:${port}`;
 const backendLog = path.join(tempDir, 'backend.out.log');
 const backendErr = path.join(tempDir, 'backend.err.log');
 
+function readArgValue(name) {
+  const prefix = `${name}=`;
+  const value = process.argv.find((arg) => arg.startsWith(prefix));
+  return value ? value.slice(prefix.length) : null;
+}
+
 function run(command, args, options = {}) {
   console.log(`\n> ${command} ${args.join(' ')}`);
+  const startedAt = Date.now();
   let executable = command;
   let finalArgs = args;
   if (command === 'npx' && args[0] === 'vitest') {
@@ -35,6 +47,13 @@ function run(command, args, options = {}) {
   if (result.status !== 0) {
     throw new Error(`${command} exited with code ${result.status}`);
   }
+
+  return {
+    command,
+    args,
+    exitCode: result.status,
+    durationMs: Date.now() - startedAt,
+  };
 }
 
 async function fetchJson(url, options = {}) {
@@ -188,6 +207,7 @@ function copyLocalDatabase() {
 }
 
 async function runApiSmoke() {
+  const startedAt = Date.now();
   copyLocalDatabase();
 
   const out = openSync(backendLog, 'w');
@@ -380,8 +400,7 @@ async function runApiSmoke() {
     const reportStatus = await fetchStatus(`${baseUrl}/api/reports/advances?from=2026-01-01&to=2026-12-31`, headers);
     const releaseStatus = await fetchStatus(`${baseUrl}/api/app-version/latest`, headers);
 
-    console.log('\nAdvance API smoke result:');
-    console.log(JSON.stringify({
+    const result = {
       createdAdvancePaymentId: createdPayment.id,
       targetDebtPaymentId: targetDebt.id,
       acceptedAdvanceStatus: acceptedPayment.advanceReviewStatus,
@@ -396,26 +415,51 @@ async function runApiSmoke() {
       requiresDecisionTotal: pending?.total ?? null,
       advancesReportStatus: reportStatus,
       latestReleaseStatus: releaseStatus,
-    }, null, 2));
+      durationMs: Date.now() - startedAt,
+    };
+
+    console.log('\nAdvance API smoke result:');
+    console.log(JSON.stringify(result, null, 2));
+
+    return result;
   } finally {
     await stopProcessTree(backend);
     closeSync(out);
     closeSync(err);
   }
+}
 
-  assertBackendLogsClean();
+function writeAcceptanceReport(apiSmokeResult) {
+  const generatedAt = new Date();
+  const stamp = generatedAt.toISOString().replace(/[:.]/g, '-');
+  const reportPath = path.join(artifactDir, `advance-acceptance-${stamp}.json`);
+  const report = {
+    generatedAtUtc: generatedAt.toISOString(),
+    sourceDatabase: path.join(root, 'payplanner.db'),
+    databaseMode: 'temporary-sqlite-copy',
+    temporaryDatabase: keepTemp ? tempDb : null,
+    checks,
+    apiSmoke: {
+      ...apiSmokeResult,
+      backendLogsChecked: true,
+    },
+  };
+
+  mkdirSync(artifactDir, { recursive: true });
+  writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+  console.log(`Advance acceptance report written: ${reportPath}`);
 }
 
 try {
-  run('dotnet', [
+  checks.push(run('dotnet', [
     'test',
     'backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj',
     '--filter',
     'FullyQualifiedName~PaymentsControllerTests.AdvanceReviewAcceptanceFlow_CreatesAcceptsAndAppliesUnallocatedAdvance|FullyQualifiedName~ReportsControllerTests.Advances_GroupsAdvanceFactOperationsByCounterpartyAndRecognition',
     '--no-build',
-  ]);
+  ]));
 
-  run('npx', [
+  checks.push(run('npx', [
     'vitest',
     'run',
     'src/components/Payments/Payments.integration.test.tsx',
@@ -423,9 +467,11 @@ try {
     'src/components/Clients/ClientReconciliationAct.test.tsx',
     'src/services/api.test.ts',
     '--no-file-parallelism',
-  ]);
+  ]));
 
-  await runApiSmoke();
+  const apiSmokeResult = await runApiSmoke();
+  assertBackendLogsClean();
+  writeAcceptanceReport(apiSmokeResult);
   console.log('\nAdvance acceptance smoke passed.');
 } finally {
   if (keepTemp) {
