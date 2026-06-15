@@ -1208,6 +1208,45 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task GetFinance_WithoutPaymentsViewPermission_ReturnsForbid()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "case-finance-denied@example.com", "Owner", DataVisibilityScope.All);
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = owner.RoleId,
+            Section = RolePermissionCatalog.Payments,
+            CanView = false,
+            CanCreate = false,
+            CanEdit = false,
+            CanDelete = false,
+            CanExport = false,
+            ViewScope = DataVisibilityScope.All,
+        });
+        var client = new Client
+        {
+            Name = "Finance denied client",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            ResponsibleUserId = owner.Id,
+            Title = "Finance denied case",
+            Status = ClientCaseStatus.Open,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner);
+
+        var result = await controller.GetFinance(clientCase.Id, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
     public async Task GetFinance_UsesUserTimeZoneForPaymentCalendarStatus()
     {
         await using var db = await CreateContextAsync();

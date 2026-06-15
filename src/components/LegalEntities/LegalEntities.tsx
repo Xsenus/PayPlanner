@@ -606,6 +606,7 @@ export function LegalEntities({
           findById={(payload) => apiService.findLegalEntityById(payload)}
           allowEdit={editing ? allowDetailEdit : canCreate}
           allowDelete={allowDetailDelete}
+          canViewPayments={permissions.payments.canView}
           mode="page"
           onBack={() => {
             setDetailPageOpen(false);

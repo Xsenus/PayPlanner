@@ -1140,6 +1140,7 @@ function AppContent() {
             caseId={selectedCaseId}
             canEdit={permissions.cases.canEdit}
             canDelete={permissions.cases.canDelete}
+            canViewFinance={permissions.payments.canView}
             onBack={() => {
               setSelectedCaseId(null);
               setActiveTab(caseReturnTab === 'caseDetail' ? 'cases' : caseReturnTab);
@@ -1175,7 +1176,7 @@ function AppContent() {
               setActiveTab('accountsIncome');
             }}
             onCreatePayment={(caseItem) => {
-              if (!permissions.payments.canCreate) {
+              if (!permissions.payments.canView || !permissions.payments.canCreate) {
                 toast.error('Недостаточно прав для создания платежа.');
                 return;
               }

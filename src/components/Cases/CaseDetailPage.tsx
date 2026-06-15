@@ -73,6 +73,7 @@ interface CaseDetailPageProps {
   onCreatePayment?: (caseItem: ClientCase) => void;
   canEdit?: boolean;
   canDelete?: boolean;
+  canViewFinance?: boolean;
 }
 
 type CaseDetailTab = 'overview' | 'participants' | 'tasks' | 'court' | 'finance' | 'workOrder' | 'documents' | 'conversation' | 'history';
@@ -990,6 +991,7 @@ export function CaseDetailPage({
   onCreatePayment,
   canEdit = true,
   canDelete = true,
+  canViewFinance = true,
 }: CaseDetailPageProps) {
   const initialViewState = readCaseDetailViewState(caseId);
   const [caseItem, setCaseItem] = useState<ClientCase | null>(null);
@@ -1012,7 +1014,11 @@ export function CaseDetailPage({
   const [participantClients, setParticipantClients] = useState<Client[]>([]);
   const [participantLegalEntities, setParticipantLegalEntities] = useState<LegalEntitySummary[]>([]);
   const [participantContacts, setParticipantContacts] = useState<ContactDirectoryItemDto[]>([]);
-  const [activeTab, setActiveTab] = useState<CaseDetailTab>(initialViewState.activeTab ?? 'overview');
+  const [activeTab, setActiveTab] = useState<CaseDetailTab>(
+    canViewFinance || initialViewState.activeTab !== 'finance'
+      ? initialViewState.activeTab ?? 'overview'
+      : 'overview',
+  );
   const [loading, setLoading] = useState(true);
   const [tasksLoading, setTasksLoading] = useState(false);
   const [participantsLoading, setParticipantsLoading] = useState(false);
@@ -1143,14 +1149,24 @@ export function CaseDetailPage({
     [documentStatusDirectoryOptions, documents],
   );
   const documentSourceOptions = useMemo(
-    () => buildDocumentSourceOptions(documentSourceType, tasks, courtEvents, workOrder, financeDetail),
-    [courtEvents, documentSourceType, financeDetail, tasks, workOrder],
+    () => buildDocumentSourceOptions(
+      documentSourceType,
+      tasks,
+      courtEvents,
+      workOrder,
+      canViewFinance ? financeDetail : null,
+    ),
+    [canViewFinance, courtEvents, documentSourceType, financeDetail, tasks, workOrder],
   );
   const documentTypeListId = useMemo(() => `case-document-types-${caseId}`, [caseId]);
 
   useEffect(() => {
     const savedState = readCaseDetailViewState(caseId);
-    setActiveTab(savedState.activeTab ?? 'overview');
+    setActiveTab(
+      canViewFinance || savedState.activeTab !== 'finance'
+        ? savedState.activeTab ?? 'overview'
+        : 'overview',
+    );
     setTaskFilter(savedState.taskFilter ?? 'active');
     setParticipantSourceType(savedState.participantSourceType ?? 'client');
     setParticipantRole(savedState.participantRole ?? '');
@@ -1195,7 +1211,20 @@ export function CaseDetailPage({
     setCourtPartyRoleDraft('');
     setCourtPartyRepresentativeDraft('');
     setCourtPartyNotesDraft('');
-  }, [caseId]);
+  }, [canViewFinance, caseId]);
+
+  const visibleDetailTabs = useMemo(
+    () => DETAIL_TABS.filter((tab) => canViewFinance || tab.key !== 'finance'),
+    [canViewFinance],
+  );
+
+  useEffect(() => {
+    if (!canViewFinance && activeTab === 'finance') {
+      setActiveTab('overview');
+      setFinanceDetail(null);
+      setFinanceLoading(false);
+    }
+  }, [activeTab, canViewFinance]);
 
   useEffect(() => {
     setParticipantSourceId('');
@@ -1589,6 +1618,11 @@ export function CaseDetailPage({
   }, [activeTab, caseId, reloadToken]);
 
   useEffect(() => {
+    if (!canViewFinance) {
+      setFinanceDetail(null);
+      setFinanceLoading(false);
+      return;
+    }
     if (activeTab !== 'finance' && activeTab !== 'documents') return;
 
     let cancelled = false;
@@ -1607,7 +1641,7 @@ export function CaseDetailPage({
     return () => {
       cancelled = true;
     };
-  }, [activeTab, caseId, reloadToken]);
+  }, [activeTab, canViewFinance, caseId, reloadToken]);
 
   useEffect(() => {
     if (activeTab !== 'workOrder' && activeTab !== 'documents') return;
@@ -2817,9 +2851,11 @@ export function CaseDetailPage({
               <button type="button" onClick={openOwner} className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-slate-200 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50">
                 <UserRound className="h-4 w-4" /> Клиент
               </button>
-              <button type="button" onClick={() => onOpenFinance?.(caseItem)} disabled={!onOpenFinance} className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-indigo-200 px-4 text-sm font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-50">
-                <WalletCards className="h-4 w-4" /> Финансы
-              </button>
+              {canViewFinance ? (
+                <button type="button" onClick={() => onOpenFinance?.(caseItem)} disabled={!onOpenFinance} className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-indigo-200 px-4 text-sm font-medium text-indigo-700 hover:bg-indigo-50 disabled:opacity-50">
+                  <WalletCards className="h-4 w-4" /> Финансы
+                </button>
+              ) : null}
               <button type="button" onClick={() => void archiveCase()} disabled={savingHeader || caseItem.status === 'Closed'} className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-amber-200 px-4 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-50">
                 {savingHeader ? <Loader2 className="h-4 w-4 animate-spin" /> : <Archive className="h-4 w-4" />} Архив
               </button>
@@ -2932,13 +2968,13 @@ export function CaseDetailPage({
               canRevealSensitive={canRevealCaseSensitiveData}
               onOpenClient={onOpenClient}
               onOpenLegalEntity={onOpenLegalEntity}
-              onOpenFinance={onOpenFinance}
+              onOpenFinance={canViewFinance ? onOpenFinance : undefined}
               onCreateInvoice={onCreateInvoice}
-              onCreatePayment={onCreatePayment}
+              onCreatePayment={canViewFinance ? onCreatePayment : undefined}
             />
             <div className="min-w-0">
           <div className="mb-5 flex flex-wrap gap-2">
-            {DETAIL_TABS.map((tab) => (
+            {visibleDetailTabs.map((tab) => (
               <button
                 key={tab.key}
                 type="button"
@@ -3184,7 +3220,7 @@ export function CaseDetailPage({
             />
           ) : null}
 
-          {activeTab === 'finance' ? (
+          {canViewFinance && activeTab === 'finance' ? (
             <FinancePanel
               caseItem={caseItem}
               detail={financeDetail}

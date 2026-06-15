@@ -3318,6 +3318,10 @@ public class CasesV2Controller : ControllerBase
         {
             return forbidden;
         }
+        if (!await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Payments, static permission => permission.CanView, ct))
+        {
+            return Forbid();
+        }
 
         var visibility = await ResolveCasesVisibilityAsync(ct);
         if (visibility is null)

@@ -988,6 +988,20 @@ describe('CaseDetailPage', () => {
     expect(screen.getByText(/115\s*000\s*₽/u)).toBeTruthy();
   });
 
+  it('hides finance tab and skips finance loading without finance permission', async () => {
+    window.sessionStorage.setItem(
+      'pp.case-detail.15.view.v1',
+      JSON.stringify({ activeTab: 'finance' }),
+    );
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canViewFinance={false} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+
+    expect(screen.queryByRole('button', { name: 'Финансы' })).toBeNull();
+    expect(apiService.getCaseFinance).not.toHaveBeenCalled();
+  });
+
   it('opens the work order print form from the work order tab', async () => {
     vi.mocked(apiService.getCaseWorkOrder).mockResolvedValue({
       id: 31,

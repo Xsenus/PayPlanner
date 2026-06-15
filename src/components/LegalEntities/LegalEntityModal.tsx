@@ -115,6 +115,7 @@ interface LegalEntityModalProps {
   hideAuditSection?: boolean;
   hideDictionaryButtons?: boolean;
   compactReadOnlyView?: boolean;
+  canViewPayments?: boolean;
 }
 
 interface LegalEntityImageFieldProps {
@@ -738,6 +739,7 @@ export function LegalEntityModal({
   hideAuditSection = false,
   hideDictionaryButtons = false,
   compactReadOnlyView = false,
+  canViewPayments = true,
 }: LegalEntityModalProps) {
   const { t } = useTranslation();
   const { confirm } = useDialog();
@@ -1012,7 +1014,7 @@ export function LegalEntityModal({
     pageSize: 5,
     sortBy: "date",
     sortDir: "desc",
-    enabled: isOpen && Boolean(currentLegalEntityId),
+    enabled: canViewPayments && isOpen && Boolean(currentLegalEntityId),
   });
 
   useEffect(() => {
@@ -1046,7 +1048,7 @@ export function LegalEntityModal({
   );
 
   useEffect(() => {
-    if (!isOpen || !currentLegalEntityId) {
+    if (!canViewPayments || !isOpen || !currentLegalEntityId) {
       setCaseFinanceSummaries({});
       setCaseFinanceError(null);
       setCaseFinanceLoading(false);
@@ -1090,6 +1092,7 @@ export function LegalEntityModal({
       alive = false;
     };
   }, [
+    canViewPayments,
     caseFinanceReloadToken,
     currentLegalEntityId,
     extractErrorMessage,
@@ -3103,7 +3106,7 @@ export function LegalEntityModal({
           <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
             <span>Дел: {legalEntityCases.length}</span>
             <span>Открыто: {caseStatusCounts.open}</span>
-            <span>Платежей: {legalEntityPaymentsResult.total}</span>
+            {canViewPayments ? <span>Платежей: {legalEntityPaymentsResult.total}</span> : null}
             <span>Счетов: {legalEntityInvoicesResult.pagination.total}</span>
             <span>Актов: {legalEntityActsResult.pagination.total}</span>
           </div>
@@ -3118,14 +3121,16 @@ export function LegalEntityModal({
               <Plus className="h-4 w-4" />
               Дело
             </button>
-            <button
-              type="button"
-              onClick={() => openCreatePayment()}
-              className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
-            >
-              <WalletCards className="h-4 w-4" />
-              Платёж
-            </button>
+            {canViewPayments ? (
+              <button
+                type="button"
+                onClick={() => openCreatePayment()}
+                className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+              >
+                <WalletCards className="h-4 w-4" />
+                Платёж
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={openCreateInvoice}
@@ -3156,12 +3161,14 @@ export function LegalEntityModal({
             <p className="text-sm font-semibold text-emerald-900">
               Всего дел: {legalEntityCases.length}
             </p>
-            <p className="mt-1 text-sm text-emerald-700">
-              Доходы {formatCurrencySmart(legalEntityPaymentsResult.summary.income).full}, расходы{" "}
-              {formatCurrencySmart(legalEntityPaymentsResult.summary.expense).full}, баланс{" "}
-              {formatCurrencySmart(legalEntityPaymentsResult.summary.balance).full}.
-            </p>
-            {caseFinanceError ? (
+            {canViewPayments ? (
+              <p className="mt-1 text-sm text-emerald-700">
+                Доходы {formatCurrencySmart(legalEntityPaymentsResult.summary.income).full}, расходы{" "}
+                {formatCurrencySmart(legalEntityPaymentsResult.summary.expense).full}, баланс{" "}
+                {formatCurrencySmart(legalEntityPaymentsResult.summary.balance).full}.
+              </p>
+            ) : null}
+            {canViewPayments && caseFinanceError ? (
               <p className="mt-2 text-xs font-medium text-rose-700">
                 {caseFinanceError}
               </p>
@@ -3263,8 +3270,8 @@ export function LegalEntityModal({
           ) : (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               {filteredLegalEntityCases.map((caseItem) => {
-                const finance = caseFinanceSummaries[caseItem.id];
-                const legacyCasePayments = (caseItem as ClientCase & { payments?: Payment[] }).payments;
+                const finance = canViewPayments ? caseFinanceSummaries[caseItem.id] : undefined;
+                const legacyCasePayments = canViewPayments ? (caseItem as ClientCase & { payments?: Payment[] }).payments : undefined;
                 const paymentsCount = finance
                   ? finance.incomeCount + finance.expenseCount
                   : legacyCasePayments?.length ?? 0;
@@ -3300,7 +3307,7 @@ export function LegalEntityModal({
                           {caseItem.stage ? <span>Этап: {caseItem.stage}</span> : null}
                           {caseItem.dueDate ? <span>Срок: {formatDocumentDate(caseItem.dueDate)}</span> : null}
                           <span>Создано: {formatDocumentDate(caseItem.createdAt)}</span>
-                          <span>Платежей: {paymentsCount}</span>
+                          {canViewPayments ? <span>Платежей: {paymentsCount}</span> : null}
                         </div>
                         {caseItem.courtName || caseItem.courtCaseNumber || caseItem.nextHearingAt ? (
                           <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-500">
@@ -3313,6 +3320,7 @@ export function LegalEntityModal({
                         ) : null}
                       </div>
 
+                      {canViewPayments ? (
                       <div className="rounded-xl border border-slate-100 bg-slate-50 p-3">
                         {finance ? (
                           <div className="grid grid-cols-2 gap-2 text-xs">
@@ -3363,26 +3371,31 @@ export function LegalEntityModal({
                           </p>
                         )}
                       </div>
+                      ) : null}
 
                       <div className="mt-auto flex flex-wrap items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedLegalEntityCaseId(caseItem.id)}
-                          className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
-                        >
-                          <WalletCards className="h-4 w-4" />
-                          Платежи
-                        </button>
+                        {canViewPayments ? (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedLegalEntityCaseId(caseItem.id)}
+                            className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                          >
+                            <WalletCards className="h-4 w-4" />
+                            Платежи
+                          </button>
+                        ) : null}
                         {!readOnly ? (
                           <>
-                            <button
-                              type="button"
-                              onClick={() => openCreatePayment(caseItem.id)}
-                              className="inline-flex h-10 items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-sm font-medium text-emerald-700 transition-colors hover:bg-emerald-100"
-                            >
-                              <Plus className="h-4 w-4" />
-                              Платёж
-                            </button>
+                            {canViewPayments ? (
+                              <button
+                                type="button"
+                                onClick={() => openCreatePayment(caseItem.id)}
+                                className="inline-flex h-10 items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-sm font-medium text-emerald-700 transition-colors hover:bg-emerald-100"
+                              >
+                                <Plus className="h-4 w-4" />
+                                Платёж
+                              </button>
+                            ) : null}
                             <button
                               type="button"
                               onClick={() => {
@@ -3437,60 +3450,62 @@ export function LegalEntityModal({
             </div>
 
             <div className="grid gap-5 xl:grid-cols-3">
-              <div className="rounded-xl border border-slate-200">
-                <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
-                  <h4 className="text-sm font-semibold text-slate-800">Платежи</h4>
-                  {legalEntityPaymentsResult.refreshing ? (
-                    <span className="text-xs text-slate-400">Обновление...</span>
-                  ) : null}
-                </div>
-                <div className="divide-y divide-slate-100">
-                  {legalEntityPaymentsResult.loading ? (
-                    <div className="px-4 py-6 text-center text-sm text-slate-500">
-                      Загрузка...
-                    </div>
-                  ) : legalEntityPaymentsResult.error ? (
-                    <div className="px-4 py-4 text-sm text-rose-700">
-                      {legalEntityPaymentsResult.error}
-                    </div>
-                  ) : legalEntityPaymentsResult.payments.length === 0 ? (
-                    <div className="px-4 py-6 text-center text-sm text-slate-500">
-                      Платежей пока нет.
-                    </div>
-                  ) : (
-                    legalEntityPaymentsResult.payments.map((payment) => (
-                      <div key={payment.id} className="px-4 py-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <button
-                              type="button"
-                              onClick={() => openEditPayment(payment)}
-                              disabled={readOnly}
-                              className="truncate text-left font-medium text-slate-900 transition hover:text-blue-700 disabled:hover:text-slate-900"
+              {canViewPayments ? (
+                <div className="rounded-xl border border-slate-200">
+                  <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
+                    <h4 className="text-sm font-semibold text-slate-800">Платежи</h4>
+                    {legalEntityPaymentsResult.refreshing ? (
+                      <span className="text-xs text-slate-400">Обновление...</span>
+                    ) : null}
+                  </div>
+                  <div className="divide-y divide-slate-100">
+                    {legalEntityPaymentsResult.loading ? (
+                      <div className="px-4 py-6 text-center text-sm text-slate-500">
+                        Загрузка...
+                      </div>
+                    ) : legalEntityPaymentsResult.error ? (
+                      <div className="px-4 py-4 text-sm text-rose-700">
+                        {legalEntityPaymentsResult.error}
+                      </div>
+                    ) : legalEntityPaymentsResult.payments.length === 0 ? (
+                      <div className="px-4 py-6 text-center text-sm text-slate-500">
+                        Платежей пока нет.
+                      </div>
+                    ) : (
+                      legalEntityPaymentsResult.payments.map((payment) => (
+                        <div key={payment.id} className="px-4 py-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <button
+                                type="button"
+                                onClick={() => openEditPayment(payment)}
+                                disabled={readOnly}
+                                className="truncate text-left font-medium text-slate-900 transition hover:text-blue-700 disabled:hover:text-slate-900"
+                              >
+                                {payment.description || `Платёж #${payment.id}`}
+                              </button>
+                              <div className="mt-1 text-xs text-slate-500">
+                                {formatDocumentDate(payment.date)} ·{" "}
+                                {INVOICE_STATUS_LABELS[payment.status] ??
+                                  payment.status}
+                              </div>
+                            </div>
+                            <div
+                              className={`shrink-0 text-right text-sm font-semibold ${
+                                payment.type === "Expense"
+                                  ? "text-rose-700"
+                                  : "text-emerald-700"
+                              }`}
                             >
-                              {payment.description || `Платёж #${payment.id}`}
-                            </button>
-                            <div className="mt-1 text-xs text-slate-500">
-                              {formatDocumentDate(payment.date)} ·{" "}
-                              {INVOICE_STATUS_LABELS[payment.status] ??
-                                payment.status}
+                              {formatCurrencySmart(payment.amount).short}
                             </div>
                           </div>
-                          <div
-                            className={`shrink-0 text-right text-sm font-semibold ${
-                              payment.type === "Expense"
-                                ? "text-rose-700"
-                                : "text-emerald-700"
-                            }`}
-                          >
-                            {formatCurrencySmart(payment.amount).short}
-                          </div>
                         </div>
-                      </div>
-                    ))
-                  )}
+                      ))
+                    )}
+                  </div>
                 </div>
-              </div>
+              ) : null}
 
               <div className="rounded-xl border border-slate-200">
                 <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">

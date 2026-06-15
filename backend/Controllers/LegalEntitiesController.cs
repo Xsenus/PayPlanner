@@ -1704,6 +1704,11 @@ public class LegalEntitiesController : ControllerBase
     [HttpGet("{id:int}/case-finance-summaries")]
     public async Task<ActionResult<IEnumerable<ClientCaseFinanceSummaryDto>>> GetCaseFinanceSummaries(int id, CancellationToken ct)
     {
+        if (!await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Payments, static permission => permission.CanView, ct))
+        {
+            return Forbid();
+        }
+
         var visibleQuery = await ApplyCompanyVisibilityAsync(_db.LegalEntities.AsQueryable(), ct);
         var exists = await visibleQuery.AsNoTracking().AnyAsync(entity => entity.Id == id, ct);
         if (!exists)

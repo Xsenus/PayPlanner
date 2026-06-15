@@ -591,6 +591,56 @@ public class LegalEntitiesControllerCoverageTests
     }
 
     [Fact]
+    public async Task GetCaseFinanceSummaries_WithoutPaymentsViewPermission_ReturnsForbid()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role
+        {
+            Name = $"legal-finance-denied-{Guid.NewGuid():N}",
+            Description = "Legal finance denied",
+            Permissions =
+            [
+                new RolePermission
+                {
+                    Section = RolePermissionCatalog.LegalEntities,
+                    CanView = true,
+                    ViewScope = DataVisibilityScope.All,
+                },
+                new RolePermission
+                {
+                    Section = RolePermissionCatalog.Payments,
+                    CanView = false,
+                    ViewScope = DataVisibilityScope.All,
+                },
+            ],
+        };
+        var user = new User
+        {
+            Email = $"legal-finance-denied-{Guid.NewGuid():N}@example.com",
+            PasswordHash = "hash",
+            FullName = "Legal finance denied",
+            Role = role,
+            IsEmployee = true,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        var legalEntityId = await CreateLegalEntityAsync(db, "Denied Legal", inn: "7700000199");
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        var controller = CreateController(
+            db,
+            new StubLegalEntityEnrichmentService(),
+            currentUserId: user.Id,
+            isAdmin: false);
+
+        var action = await controller.GetCaseFinanceSummaries(legalEntityId, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(action.Result);
+    }
+
+    [Fact]
     public async Task Suggest_RejectsEmptyInput()
     {
         await using var db = await CreateContextAsync();

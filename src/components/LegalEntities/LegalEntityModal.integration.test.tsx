@@ -131,12 +131,55 @@ describe('LegalEntityModal integration', () => {
     vi.mocked(apiService.suggestClientAddresses).mockReset();
     vi.mocked(apiService.cleanAddress).mockReset();
     vi.mocked(apiService.getMainCompanySettings).mockReset();
+    vi.mocked(apiService.getCasesV1).mockReset();
+    vi.mocked(apiService.getPaymentsV2).mockReset();
+    vi.mocked(apiService.getLegalEntityCaseFinanceSummaries).mockReset();
     vi.mocked(apiService.suggestClientAddresses).mockResolvedValue([]);
     vi.mocked(apiService.cleanAddress).mockResolvedValue({ result: '' });
     vi.mocked(apiService.getMainCompanySettings).mockResolvedValue({
       defaultCompanyId: 9,
       companies: [{ id: 9, shortName: 'Наша компания', clientsCount: 0, createdAt: '2026-04-09T13:18:06Z' }],
     });
+    vi.mocked(apiService.getCasesV1).mockResolvedValue([]);
+    vi.mocked(apiService.getPaymentsV2).mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 5,
+      summary: {
+        income: 0,
+        expense: 0,
+        balance: 0,
+        incomeCount: 0,
+        expenseCount: 0,
+        total: 0,
+      },
+    });
+    vi.mocked(apiService.getLegalEntityCaseFinanceSummaries).mockResolvedValue([]);
+  });
+
+  it('does not load legal entity payments or case finance summaries without payment permission', async () => {
+    const initial = createInitialLegalEntity({ id: 9, shortName: 'Наша компания' });
+
+    render(
+      <LegalEntityModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(initial)}
+        initial={initial}
+        suggest={vi.fn().mockResolvedValue([])}
+        findById={vi.fn()}
+        allowEdit
+        allowDelete={false}
+        canViewPayments={false}
+      />,
+    );
+
+    await waitFor(() => expect(apiService.getMainCompanySettings).toHaveBeenCalled());
+
+    expect(apiService.getPaymentsV2).not.toHaveBeenCalled();
+    expect(apiService.getLegalEntityCaseFinanceSummaries).not.toHaveBeenCalled();
+    expect(screen.queryByText('Платежи')).toBeNull();
   });
 
   it('prefills DaData query from saved inn and keeps the full address after suggestion selection', async () => {
