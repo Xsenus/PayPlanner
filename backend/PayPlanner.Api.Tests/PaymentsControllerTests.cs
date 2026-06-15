@@ -4951,6 +4951,113 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task AdvanceReviewAcceptanceFlow_CreatesAcceptsAndAppliesUnallocatedAdvance()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateBalanceUserAsync(db, canEditPayments: true, DataVisibilityScope.All);
+        var client = new Client { Name = "Клиент приемки авансов" };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var paymentsController = CreatePaymentsController(db, user.Id);
+        var createResult = await paymentsController.Create(new Payment
+        {
+            ClientId = client.Id,
+            Amount = 3_000m,
+            PaidAmount = 3_000m,
+            Date = new DateTime(2026, 6, 10),
+            PlannedDate = new DateTime(2026, 6, 10),
+            PaidDate = new DateTime(2026, 6, 10),
+            LastPaymentDate = new DateTime(2026, 6, 10),
+            Description = "Поступление без счета для приемки",
+            DocumentKind = DocumentKind.Payment,
+            Status = PaymentStatus.Completed,
+            Type = PaymentType.Income,
+        }, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(createResult);
+        var sourceAdvance = Assert.IsType<Payment>(created.Value);
+        Assert.Equal(PaymentAdvanceReviewStatus.RequiresDecision, sourceAdvance.AdvanceReviewStatus);
+        Assert.Empty(await db.ClientBalanceTransactions.AsNoTracking().ToListAsync());
+
+        var v2 = CreatePaymentsV2Controller(db, user.Id);
+        var reviewPage = await v2.Get(
+            from: null,
+            to: null,
+            clientId: null,
+            caseId: null,
+            advanceReviewStatus: PaymentAdvanceReviewStatus.RequiresDecision,
+            ct: CancellationToken.None);
+        var reviewOk = Assert.IsType<OkObjectResult>(reviewPage.Result);
+        var reviewResponse = Assert.IsType<PaymentsPageResponse>(reviewOk.Value);
+        Assert.Contains(reviewResponse.Items, item => item.Id == sourceAdvance.Id);
+
+        var acceptResult = await paymentsController.AcceptAdvance(
+            sourceAdvance.Id,
+            new PaymentAdvanceReviewRequest { Reason = "Приемочный сценарий: деньги приняты как аванс" },
+            CancellationToken.None);
+
+        var acceptedOk = Assert.IsType<OkObjectResult>(acceptResult);
+        var acceptedAdvance = Assert.IsType<Payment>(acceptedOk.Value);
+        Assert.Equal(PaymentAdvanceReviewStatus.AcceptedAsAdvance, acceptedAdvance.AdvanceReviewStatus);
+        Assert.Equal(3_000m, await ClientBalanceService.GetBalanceAsync(db, client.Id));
+
+        var targetDebt = CreatePayment(new DateTime(2026, 6, 11), 3_000m, "Долг для зачета аванса");
+        targetDebt.ClientId = client.Id;
+        targetDebt.PaidAmount = 0m;
+        targetDebt.Status = PaymentStatus.Pending;
+        db.Payments.Add(targetDebt);
+        await db.SaveChangesAsync();
+
+        var balanceController = CreateClientBalancesController(db, user.Id);
+        var applyResult = await balanceController.ApplyCredit(
+            client.Id,
+            new ApplyClientBalanceRequest
+            {
+                PaymentId = targetDebt.Id,
+                Amount = 3_000m,
+                SourcePaymentId = sourceAdvance.Id,
+                Description = "Приемочный зачет нераспределенного аванса",
+            },
+            CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(applyResult);
+        db.ChangeTracker.Clear();
+
+        var updatedSource = await db.Payments.AsNoTracking().SingleAsync(item => item.Id == sourceAdvance.Id);
+        var updatedTarget = await db.Payments.AsNoTracking().SingleAsync(item => item.Id == targetDebt.Id);
+        Assert.Equal(PaymentAdvanceReviewStatus.Allocated, updatedSource.AdvanceReviewStatus);
+        Assert.Equal(PaymentStatus.Completed, updatedTarget.Status);
+        Assert.Equal(3_000m, updatedTarget.PaidAmount);
+        Assert.Equal(0m, await ClientBalanceService.GetBalanceAsync(db, client.Id));
+        Assert.Equal(
+            0m,
+            await ClientBalanceService.GetUnallocatedAdvanceAvailableAmountAsync(
+                db,
+                sourceAdvance.Id,
+                client.Id,
+                null));
+
+        var balanceTransactions = await db.ClientBalanceTransactions
+            .AsNoTracking()
+            .OrderBy(item => item.Direction)
+            .ThenBy(item => item.Id)
+            .ToListAsync();
+        Assert.Contains(balanceTransactions, item =>
+            item.Type == ClientBalanceTransactionType.UnallocatedAdvance &&
+            item.Direction == ClientBalanceDirection.Credit &&
+            item.Amount == 3_000m &&
+            item.PaymentId == sourceAdvance.Id);
+        Assert.Contains(balanceTransactions, item =>
+            item.Type == ClientBalanceTransactionType.CreditApplied &&
+            item.Direction == ClientBalanceDirection.Debit &&
+            item.Amount == 3_000m &&
+            item.PaymentId == targetDebt.Id &&
+            item.ExternalKey != null &&
+            item.ExternalKey.StartsWith(ClientBalanceService.BuildUnallocatedAdvanceApplicationKeyPrefix(sourceAdvance.Id), StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task AcceptAdvance_WithoutEditPermission_ReturnsForbidAndDoesNotCreateBalance()
     {
         await using var db = await CreateContextAsync();
