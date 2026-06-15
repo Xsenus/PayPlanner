@@ -1,36 +1,48 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const DEFAULT_ROADMAP = 'docs/unallocated-advance-monitoring-roadmap-2026-06-12.md';
-const args = process.argv.slice(2);
 
-if (args.includes('--help')) {
-  printHelp();
-  process.exit(0);
+if (isCliEntryPoint()) {
+  runCli();
 }
 
-if (args.includes('--self-test')) {
-  runSelfTest();
-  process.exit(0);
+function runCli() {
+  const args = process.argv.slice(2);
+
+  if (args.includes('--help')) {
+    printHelp();
+    process.exit(0);
+  }
+
+  if (args.includes('--self-test')) {
+    runSelfTest();
+    process.exit(0);
+  }
+
+  const roadmapArg = args.find((arg) => !arg.startsWith('--')) ?? DEFAULT_ROADMAP;
+  const roadmapPath = path.resolve(process.cwd(), roadmapArg);
+  const failOnOpen = args.includes('--fail-on-open');
+  const failOnBlocked = args.includes('--fail-on-blocked');
+  const report = buildRoadmapReport(readFileSync(roadmapPath, 'utf8'), roadmapPath);
+
+  printReport(report);
+
+  if (failOnOpen && report.implementationOpenCount > 0) {
+    console.error(`Open implementation roadmap items found: ${report.implementationOpenCount}`);
+    process.exitCode = 1;
+  }
+
+  if (failOnBlocked && report.blockedCount > 0) {
+    console.error(`Blocked roadmap items found: ${report.blockedCount}`);
+    process.exitCode = 1;
+  }
 }
 
-const roadmapArg = args.find((arg) => !arg.startsWith('--')) ?? DEFAULT_ROADMAP;
-const roadmapPath = path.resolve(process.cwd(), roadmapArg);
-const failOnOpen = args.includes('--fail-on-open');
-const failOnBlocked = args.includes('--fail-on-blocked');
-const report = buildRoadmapReport(readFileSync(roadmapPath, 'utf8'), roadmapPath);
-
-printReport(report);
-
-if (failOnOpen && report.implementationOpenCount > 0) {
-  console.error(`Open implementation roadmap items found: ${report.implementationOpenCount}`);
-  process.exitCode = 1;
-}
-
-if (failOnBlocked && report.blockedCount > 0) {
-  console.error(`Blocked roadmap items found: ${report.blockedCount}`);
-  process.exitCode = 1;
+function isCliEntryPoint() {
+  return Boolean(process.argv[1]) && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
 }
 
 export function buildRoadmapReport(content, source = DEFAULT_ROADMAP) {

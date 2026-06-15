@@ -2,6 +2,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, copyFileSync, openSync, closeSync, rmSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { buildRoadmapReport } from './check-advance-roadmap-status.mjs';
 
 const root = process.cwd();
 const keepTemp = process.argv.includes('--keep-temp');
@@ -16,6 +17,7 @@ const port = 5300 + Math.floor(Math.random() * 300);
 const baseUrl = `http://127.0.0.1:${port}`;
 const backendLog = path.join(tempDir, 'backend.out.log');
 const backendErr = path.join(tempDir, 'backend.err.log');
+const roadmapPath = path.join(root, 'docs', 'unallocated-advance-monitoring-roadmap-2026-06-12.md');
 
 function readArgValue(name) {
   const prefix = `${name}=`;
@@ -440,6 +442,7 @@ function writeAcceptanceReport(apiSmokeResult) {
     sourceDatabase: path.join(root, 'payplanner.db'),
     databaseMode: 'temporary-sqlite-copy',
     temporaryDatabase: keepTemp ? tempDb : null,
+    roadmap: readAdvanceRoadmapReport(),
     checks,
     apiSmoke: {
       ...apiSmokeResult,
@@ -454,11 +457,18 @@ function writeAcceptanceReport(apiSmokeResult) {
   console.log(`Advance acceptance summary written: ${markdownReportPath}`);
 }
 
+function readAdvanceRoadmapReport() {
+  return buildRoadmapReport(readFileSync(roadmapPath, 'utf8'), roadmapPath);
+}
+
 function buildAcceptanceMarkdownReport(report) {
   const apiSmoke = report.apiSmoke;
+  const roadmap = report.roadmap;
   const checkLines = report.checks.map((check) => (
     `- \`${check.command} ${check.args.join(' ')}\`: успешно, ${check.durationMs} мс`
   ));
+  const blockedLines = roadmap.blockedItems.map((item) => `- line ${item.line}: ${item.text}`);
+  const acceptanceLines = roadmap.acceptanceItems.map((item) => `- line ${item.line}: ${item.text}`);
 
   return [
     '# Приемка нераспределенных авансов',
@@ -471,6 +481,21 @@ function buildAcceptanceMarkdownReport(report) {
     ...checkLines,
     '- API smoke на локальной временной SQLite-копии: успешно',
     '- Backend-логи после smoke: ошибок не найдено',
+    '',
+    '## Roadmap',
+    '',
+    `- Реализация: ${roadmap.implementationPercent}% (${roadmap.implementationDone}/${roadmap.implementationTotal})`,
+    `- Открытые технические пункты: ${roadmap.implementationOpenCount}`,
+    `- Блокеры: ${roadmap.blockedCount}`,
+    `- Ручная приемка: ${roadmap.acceptance}`,
+    '',
+    '### Блокеры',
+    '',
+    ...(blockedLines.length > 0 ? blockedLines : ['- Нет']),
+    '',
+    '### Ручная приемка',
+    '',
+    ...(acceptanceLines.length > 0 ? acceptanceLines : ['- Нет']),
     '',
     '## Сценарий',
     '',
