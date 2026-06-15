@@ -531,11 +531,13 @@ function exportAdvanceReport(report: AdvanceReport, timeZoneId?: string | null) 
     ['Выданные авансы', report.expenseTotal],
     ['Признано', report.recognizedTotal],
     ['К признанию', report.unrecognizedTotal],
+    ['Нераспределенные авансы на балансе', report.unallocatedBalanceTotal],
     ['Признанных операций', report.recognizedCount],
     ['Непризнанных операций', report.unrecognizedCount],
+    ['Нераспределенных авансов на балансе', report.unallocatedBalanceCount],
     [],
     ['Контрагенты по авансам'],
-    ['Контрагент', 'Получено', 'Выдано', 'Признано', 'К признанию', 'Приходов', 'Расходов', 'Признанных операций', 'Непризнанных операций'],
+    ['Контрагент', 'Получено', 'Выдано', 'Признано', 'К признанию', 'Нераспределено на балансе', 'Приходов', 'Расходов', 'Признанных операций', 'Непризнанных операций', 'Нераспределенных авансов'],
   ];
 
   report.counterparties.forEach((item) => {
@@ -545,10 +547,12 @@ function exportAdvanceReport(report: AdvanceReport, timeZoneId?: string | null) 
       item.expenseTotal,
       item.recognizedTotal,
       item.unrecognizedTotal,
+      item.unallocatedBalanceTotal,
       item.incomeCount,
       item.expenseCount,
       item.recognizedCount,
       item.unrecognizedCount,
+      item.unallocatedBalanceCount,
     ]);
   });
 
@@ -5131,7 +5135,7 @@ function AdvanceReportSection({
           </div>
           <h2 className="mt-3 text-xl font-semibold text-slate-950">Отчет по авансам</h2>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-500">
-            Фактические авансовые платежи за период: полученные и выданные авансы, признанные суммы и остаток к признанию.
+            Фактические авансовые платежи за период и принятые нераспределенные авансы, которые остаются на балансе контрагентов.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -5167,7 +5171,7 @@ function AdvanceReportSection({
         </div>
       ) : (
         <>
-          <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-4">
+          <div className="mt-6 grid grid-cols-1 gap-4 xl:grid-cols-5">
             <MetricCard
               title="Полученные авансы"
               value={formatCurrency(report.incomeTotal)}
@@ -5196,6 +5200,13 @@ function AdvanceReportSection({
               tone="rate"
               subtitle={`${report.unrecognizedCount} операций`}
             />
+            <MetricCard
+              title="На балансе"
+              value={formatCurrency(report.unallocatedBalanceTotal)}
+              icon={Wallet}
+              tone="rate"
+              subtitle={`${report.unallocatedBalanceCount} авансов`}
+            />
           </div>
 
           <div className="mt-6 rounded-3xl border border-slate-100 bg-slate-50/70 p-5">
@@ -5223,7 +5234,7 @@ function AdvanceReportSection({
                     </div>
                   </div>
 
-                  <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-4">
+                  <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-5">
                     <div className="rounded-xl bg-emerald-50 px-3 py-2">
                       <div className="text-xs text-emerald-700">Получено</div>
                       <div className="font-semibold text-emerald-800">{formatCurrency(row.incomeTotal)}</div>
@@ -5239,6 +5250,10 @@ function AdvanceReportSection({
                     <div className="rounded-xl bg-amber-50 px-3 py-2">
                       <div className="text-xs text-amber-700">Осталось</div>
                       <div className="font-semibold text-amber-800">{formatCurrency(row.unrecognizedTotal)}</div>
+                    </div>
+                    <div className="rounded-xl bg-orange-50 px-3 py-2">
+                      <div className="text-xs text-orange-700">На балансе</div>
+                      <div className="font-semibold text-orange-800">{formatCurrency(row.unallocatedBalanceTotal)}</div>
                     </div>
                   </div>
                 </div>

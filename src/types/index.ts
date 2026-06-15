@@ -2311,10 +2311,12 @@ export interface AdvanceReportItem {
   expenseTotal: number;
   recognizedTotal: number;
   unrecognizedTotal: number;
+  unallocatedBalanceTotal: number;
   incomeCount: number;
   expenseCount: number;
   recognizedCount: number;
   unrecognizedCount: number;
+  unallocatedBalanceCount: number;
 }
 
 export interface AdvanceReport {
@@ -2325,8 +2327,10 @@ export interface AdvanceReport {
   expenseTotal: number;
   recognizedTotal: number;
   unrecognizedTotal: number;
+  unallocatedBalanceTotal: number;
   recognizedCount: number;
   unrecognizedCount: number;
+  unallocatedBalanceCount: number;
   counterparties: AdvanceReportItem[];
 }
 

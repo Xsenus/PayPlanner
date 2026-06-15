@@ -2536,20 +2536,24 @@ public class ReportsController : ControllerBase
                 new("Выданные авансы", MoneyCell(report.ExpenseTotal)),
                 new("Признано", MoneyCell(report.RecognizedTotal)),
                 new("К признанию", MoneyCell(report.UnrecognizedTotal)),
+                new("Нераспределенные авансы на балансе", MoneyCell(report.UnallocatedBalanceTotal)),
                 new("Признанных операций", report.RecognizedCount.ToString(CultureInfo.InvariantCulture)),
                 new("Непризнанных операций", report.UnrecognizedCount.ToString(CultureInfo.InvariantCulture)),
+                new("Нераспределенных авансов на балансе", report.UnallocatedBalanceCount.ToString(CultureInfo.InvariantCulture)),
             ],
             [
-                new("Контрагенты по авансам", ["Контрагент", "Получено", "Выдано", "Признано", "К признанию", "Приходов", "Расходов", "Признанных операций", "Непризнанных операций"], report.Counterparties.Select(item => new ReportExportRow([
+                new("Контрагенты по авансам", ["Контрагент", "Получено", "Выдано", "Признано", "К признанию", "Нераспределено на балансе", "Приходов", "Расходов", "Признанных операций", "Непризнанных операций", "Нераспределенных авансов"], report.Counterparties.Select(item => new ReportExportRow([
                     item.CounterpartyName,
                     MoneyCell(item.IncomeTotal),
                     MoneyCell(item.ExpenseTotal),
                     MoneyCell(item.RecognizedTotal),
                     MoneyCell(item.UnrecognizedTotal),
+                    MoneyCell(item.UnallocatedBalanceTotal),
                     item.IncomeCount.ToString(CultureInfo.InvariantCulture),
                     item.ExpenseCount.ToString(CultureInfo.InvariantCulture),
                     item.RecognizedCount.ToString(CultureInfo.InvariantCulture),
                     item.UnrecognizedCount.ToString(CultureInfo.InvariantCulture),
+                    item.UnallocatedBalanceCount.ToString(CultureInfo.InvariantCulture),
                 ])).ToList()),
             ]);
 
@@ -6281,29 +6285,80 @@ public class ReportsController : ControllerBase
             })
             .ToList();
 
-        var counterparties = enriched
+        List<AdvanceReportUnallocatedBalanceRow> unallocatedBalances = source.HasValue || !string.IsNullOrWhiteSpace(accountName)
+            ? []
+            : await BuildUnallocatedAdvanceBalanceRowsAsync(
+                to,
+                counterpartyName,
+                clientId,
+                caseId,
+                contractId,
+                incomeTypeId,
+                paymentsVisibility,
+                ct);
+
+        var moneyByCounterparty = enriched
             .GroupBy(item => item.CounterpartyName, StringComparer.OrdinalIgnoreCase)
-            .Select(group => new AdvanceReportItemDto
+            .ToDictionary(
+                group => group.First().CounterpartyName,
+                group => new
+                {
+                    IncomeTotal = group
+                        .Where(item => item.Direction == MoneyOperationDirection.Income)
+                        .Sum(item => item.Amount),
+                    ExpenseTotal = group
+                        .Where(item => item.Direction == MoneyOperationDirection.Expense)
+                        .Sum(item => item.Amount),
+                    RecognizedTotal = group
+                        .Where(item => item.IsRecognized)
+                        .Sum(item => item.Amount),
+                    UnrecognizedTotal = group
+                        .Where(item => !item.IsRecognized)
+                        .Sum(item => item.Amount),
+                    IncomeCount = group.Count(item => item.Direction == MoneyOperationDirection.Income),
+                    ExpenseCount = group.Count(item => item.Direction == MoneyOperationDirection.Expense),
+                    RecognizedCount = group.Count(item => item.IsRecognized),
+                    UnrecognizedCount = group.Count(item => !item.IsRecognized),
+                },
+                StringComparer.OrdinalIgnoreCase);
+
+        var unallocatedByCounterparty = unallocatedBalances
+            .GroupBy(item => item.CounterpartyName, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.First().CounterpartyName,
+                group => new
+                {
+                    Total = group.Sum(item => item.AvailableAmount),
+                    Count = group.Count(),
+                },
+                StringComparer.OrdinalIgnoreCase);
+
+        var counterpartyNames = moneyByCounterparty.Keys
+            .Concat(unallocatedByCounterparty.Keys)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+
+        var counterparties = counterpartyNames
+            .Select(name =>
             {
-                CounterpartyName = group.First().CounterpartyName,
-                IncomeTotal = group
-                    .Where(item => item.Direction == MoneyOperationDirection.Income)
-                    .Sum(item => item.Amount),
-                ExpenseTotal = group
-                    .Where(item => item.Direction == MoneyOperationDirection.Expense)
-                    .Sum(item => item.Amount),
-                RecognizedTotal = group
-                    .Where(item => item.IsRecognized)
-                    .Sum(item => item.Amount),
-                UnrecognizedTotal = group
-                    .Where(item => !item.IsRecognized)
-                    .Sum(item => item.Amount),
-                IncomeCount = group.Count(item => item.Direction == MoneyOperationDirection.Income),
-                ExpenseCount = group.Count(item => item.Direction == MoneyOperationDirection.Expense),
-                RecognizedCount = group.Count(item => item.IsRecognized),
-                UnrecognizedCount = group.Count(item => !item.IsRecognized),
+                moneyByCounterparty.TryGetValue(name, out var money);
+                unallocatedByCounterparty.TryGetValue(name, out var unallocated);
+
+                return new AdvanceReportItemDto
+                {
+                    CounterpartyName = name,
+                    IncomeTotal = money?.IncomeTotal ?? 0m,
+                    ExpenseTotal = money?.ExpenseTotal ?? 0m,
+                    RecognizedTotal = money?.RecognizedTotal ?? 0m,
+                    UnrecognizedTotal = money?.UnrecognizedTotal ?? 0m,
+                    UnallocatedBalanceTotal = unallocated?.Total ?? 0m,
+                    IncomeCount = money?.IncomeCount ?? 0,
+                    ExpenseCount = money?.ExpenseCount ?? 0,
+                    RecognizedCount = money?.RecognizedCount ?? 0,
+                    UnrecognizedCount = money?.UnrecognizedCount ?? 0,
+                    UnallocatedBalanceCount = unallocated?.Count ?? 0,
+                };
             })
-            .OrderByDescending(item => item.IncomeTotal + item.ExpenseTotal)
+            .OrderByDescending(item => item.IncomeTotal + item.ExpenseTotal + item.UnallocatedBalanceTotal)
             .ThenBy(item => item.CounterpartyName)
             .ToList();
 
@@ -6324,11 +6379,176 @@ public class ReportsController : ControllerBase
             UnrecognizedTotal = enriched
                 .Where(item => !item.IsRecognized)
                 .Sum(item => item.Amount),
+            UnallocatedBalanceTotal = unallocatedBalances.Sum(item => item.AvailableAmount),
             RecognizedCount = enriched.Count(item => item.IsRecognized),
             UnrecognizedCount = enriched.Count(item => !item.IsRecognized),
+            UnallocatedBalanceCount = unallocatedBalances.Count,
             Counterparties = counterparties,
         };
     }
+
+    private async Task<List<AdvanceReportUnallocatedBalanceRow>> BuildUnallocatedAdvanceBalanceRowsAsync(
+        DateTime to,
+        string? counterpartyName,
+        int? clientId,
+        int? caseId,
+        int? contractId,
+        int? incomeTypeId,
+        DataVisibilityAccess paymentsVisibility,
+        CancellationToken ct)
+    {
+        var toExclusive = to.Date.AddDays(1);
+        var query = _db.ClientBalanceTransactions
+            .AsNoTracking()
+            .Where(item =>
+                item.CreatedAt < toExclusive &&
+                item.PaymentId.HasValue &&
+                item.Direction == ClientBalanceDirection.Credit &&
+                item.Type == ClientBalanceTransactionType.UnallocatedAdvance)
+            .Where(item => _db.Payments
+                .AsNoTracking()
+                .ApplyPaymentVisibility(paymentsVisibility)
+                .Any(payment => payment.Id == item.PaymentId));
+
+        if (!string.IsNullOrWhiteSpace(counterpartyName))
+        {
+            var counterpartyFilter = counterpartyName.Trim();
+            query = query.Where(item =>
+                (item.Client != null &&
+                    ((!string.IsNullOrEmpty(item.Client.Name) && item.Client.Name.Contains(counterpartyFilter)) ||
+                        (!string.IsNullOrEmpty(item.Client.Company) && item.Client.Company.Contains(counterpartyFilter)))) ||
+                (item.LegalEntity != null &&
+                    ((!string.IsNullOrEmpty(item.LegalEntity.ShortName) && item.LegalEntity.ShortName.Contains(counterpartyFilter)) ||
+                        (!string.IsNullOrEmpty(item.LegalEntity.FullName) && item.LegalEntity.FullName.Contains(counterpartyFilter)))));
+        }
+
+        if (clientId.HasValue && clientId.Value > 0)
+        {
+            var targetClientId = clientId.Value;
+            query = query.Where(item => item.ClientId == targetClientId);
+        }
+
+        if (caseId.HasValue && caseId.Value > 0)
+        {
+            var targetCaseId = caseId.Value;
+            query = query.Where(item =>
+                item.Payment != null &&
+                (item.Payment.ClientCaseId == targetCaseId ||
+                    item.Payment.InvoiceClientCases.Any(link => link.ClientCaseId == targetCaseId)));
+        }
+
+        if (contractId.HasValue && contractId.Value > 0)
+        {
+            var targetContractId = contractId.Value;
+            query = query.Where(item =>
+                item.Payment != null &&
+                (item.Payment.ContractId == targetContractId ||
+                    _db.ContractPayments.Any(link => link.ContractId == targetContractId && link.PaymentId == item.PaymentId)));
+        }
+
+        if (incomeTypeId.HasValue && incomeTypeId.Value > 0)
+        {
+            var targetIncomeTypeId = incomeTypeId.Value;
+            query = query.Where(item => item.Payment != null && item.Payment.IncomeTypeId == targetIncomeTypeId);
+        }
+
+        var credits = await query
+            .Select(item => new
+            {
+                PaymentId = item.PaymentId!.Value,
+                item.ClientId,
+                item.LegalEntityId,
+                item.Amount,
+                ClientName = item.Client != null
+                    ? (!string.IsNullOrEmpty(item.Client.Name) ? item.Client.Name : item.Client.Company)
+                    : null,
+                LegalEntityName = item.LegalEntity != null
+                    ? (!string.IsNullOrEmpty(item.LegalEntity.ShortName) ? item.LegalEntity.ShortName : item.LegalEntity.FullName)
+                    : null,
+            })
+            .ToListAsync(ct);
+
+        if (credits.Count == 0)
+        {
+            return [];
+        }
+
+        var sourcePaymentIds = credits.Select(item => item.PaymentId).ToHashSet();
+        var balanceDebits = await _db.ClientBalanceTransactions
+            .AsNoTracking()
+            .Where(item =>
+                item.CreatedAt < toExclusive &&
+                item.Direction == ClientBalanceDirection.Debit &&
+                item.ExternalKey != null &&
+                (item.ExternalKey.StartsWith("payment-unallocated-advance-apply:") ||
+                    item.ExternalKey.StartsWith("payment-unallocated-advance-refund:")))
+            .Select(item => new
+            {
+                item.ExternalKey,
+                item.Amount,
+            })
+            .ToListAsync(ct);
+
+        var debitsBySourcePayment = balanceDebits
+            .Select(item => new
+            {
+                SourcePaymentId = TryParseUnallocatedAdvanceSourcePaymentId(item.ExternalKey),
+                item.Amount,
+            })
+            .Where(item => item.SourcePaymentId.HasValue && sourcePaymentIds.Contains(item.SourcePaymentId.Value))
+            .GroupBy(item => item.SourcePaymentId!.Value)
+            .ToDictionary(group => group.Key, group => group.Sum(item => item.Amount));
+
+        return credits
+            .Select(item =>
+            {
+                debitsBySourcePayment.TryGetValue(item.PaymentId, out var appliedOrRefunded);
+                var available = Math.Round(Math.Max(item.Amount - appliedOrRefunded, 0m), 2, MidpointRounding.AwayFromZero);
+
+                return new AdvanceReportUnallocatedBalanceRow(
+                    item.PaymentId,
+                    ResolveCounterpartyName(item.ClientName ?? item.LegalEntityName),
+                    available);
+            })
+            .Where(item => item.AvailableAmount > 0.009m)
+            .ToList();
+    }
+
+    private static int? TryParseUnallocatedAdvanceSourcePaymentId(string? externalKey)
+    {
+        if (string.IsNullOrWhiteSpace(externalKey))
+        {
+            return null;
+        }
+
+        const string applyPrefix = "payment-unallocated-advance-apply:";
+        const string refundPrefix = "payment-unallocated-advance-refund:";
+        string payload;
+
+        if (externalKey.StartsWith(applyPrefix, StringComparison.Ordinal))
+        {
+            payload = externalKey[applyPrefix.Length..];
+        }
+        else if (externalKey.StartsWith(refundPrefix, StringComparison.Ordinal))
+        {
+            payload = externalKey[refundPrefix.Length..];
+        }
+        else
+        {
+            return null;
+        }
+
+        var separatorIndex = payload.IndexOf(':', StringComparison.Ordinal);
+        var sourcePaymentIdText = separatorIndex >= 0 ? payload[..separatorIndex] : payload;
+        return int.TryParse(sourcePaymentIdText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var sourcePaymentId)
+            ? sourcePaymentId
+            : null;
+    }
+
+    private sealed record AdvanceReportUnallocatedBalanceRow(
+        int PaymentId,
+        string CounterpartyName,
+        decimal AvailableAmount);
 
     private async Task<PaymentPriorityReportDto> BuildPaymentPriorityReportAsync(
         DateTime from,

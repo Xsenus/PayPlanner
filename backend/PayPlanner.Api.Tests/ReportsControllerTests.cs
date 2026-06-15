@@ -3781,6 +3781,23 @@ services.Id,
     public async Task Advances_GroupsAdvanceFactOperationsByCounterpartyAndRecognition()
     {
         await using var db = await CreateContextAsync();
+        var advanceClient = new Client { Name = "ООО Ромашка" };
+        db.Clients.Add(advanceClient);
+        await db.SaveChangesAsync();
+
+        var sourceAdvancePayment = InvoicePayment(
+            "Аванс без счета",
+            PaymentType.Income,
+            PaymentStatus.Completed,
+            "signed",
+            5_000m,
+            5_000m,
+            new DateTime(2026, 5, 7));
+        sourceAdvancePayment.ClientId = advanceClient.Id;
+        sourceAdvancePayment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.AcceptedAsAdvance;
+        db.Payments.Add(sourceAdvancePayment);
+        await db.SaveChangesAsync();
+
         db.MoneyOperations.AddRange(
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 10_000m, new DateTime(2026, 5, 1), "Основной банк", counterpartyName: "ООО Ромашка", isAdvancePayment: true, recognitionDate: new DateTime(2026, 5, 10)),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 6_000m, new DateTime(2026, 5, 2), "Основной банк", counterpartyName: "ООО Ромашка", isAdvancePayment: true),
@@ -3788,6 +3805,40 @@ services.Id,
             Operation(MoneyOperationSource.Cash, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 3_000m, new DateTime(2026, 5, 4), "Касса", isAdvancePayment: true),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Plan, 99_999m, new DateTime(2026, 5, 5), "Основной банк", counterpartyName: "ООО Ромашка", isAdvancePayment: true),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 7_000m, new DateTime(2026, 5, 6), "Основной банк", counterpartyName: "ООО Ромашка"));
+        db.ClientBalanceTransactions.AddRange(
+            new ClientBalanceTransaction
+            {
+                ClientId = advanceClient.Id,
+                PaymentId = sourceAdvancePayment.Id,
+                Amount = 5_000m,
+                Type = ClientBalanceTransactionType.UnallocatedAdvance,
+                Direction = ClientBalanceDirection.Credit,
+                Description = "Принят как аванс",
+                ExternalKey = ClientBalanceService.BuildUnallocatedAdvanceKey(sourceAdvancePayment.Id),
+                CreatedAt = new DateTime(2026, 5, 7),
+            },
+            new ClientBalanceTransaction
+            {
+                ClientId = advanceClient.Id,
+                PaymentId = sourceAdvancePayment.Id,
+                Amount = 1_500m,
+                Type = ClientBalanceTransactionType.CreditApplied,
+                Direction = ClientBalanceDirection.Debit,
+                Description = "Зачет части аванса",
+                ExternalKey = ClientBalanceService.BuildUnallocatedAdvanceApplicationKey(sourceAdvancePayment.Id, sourceAdvancePayment.Id + 100, new DateTime(2026, 5, 8)),
+                CreatedAt = new DateTime(2026, 5, 8),
+            },
+            new ClientBalanceTransaction
+            {
+                ClientId = advanceClient.Id,
+                PaymentId = sourceAdvancePayment.Id,
+                Amount = 500m,
+                Type = ClientBalanceTransactionType.Refund,
+                Direction = ClientBalanceDirection.Debit,
+                Description = "Возврат части аванса",
+                ExternalKey = ClientBalanceService.BuildUnallocatedAdvanceRefundKey(sourceAdvancePayment.Id),
+                CreatedAt = new DateTime(2026, 5, 9),
+            });
         await db.SaveChangesAsync();
         var controller = CreateController(db);
 
@@ -3809,8 +3860,10 @@ services.Id,
         Assert.Equal(4_000m, report.ExpenseTotal);
         Assert.Equal(10_000m, report.RecognizedTotal);
         Assert.Equal(13_000m, report.UnrecognizedTotal);
+        Assert.Equal(3_000m, report.UnallocatedBalanceTotal);
         Assert.Equal(1, report.RecognizedCount);
         Assert.Equal(3, report.UnrecognizedCount);
+        Assert.Equal(1, report.UnallocatedBalanceCount);
 
         Assert.Collection(
             report.Counterparties,
@@ -3821,7 +3874,9 @@ services.Id,
                 Assert.Equal(0m, item.ExpenseTotal);
                 Assert.Equal(10_000m, item.RecognizedTotal);
                 Assert.Equal(6_000m, item.UnrecognizedTotal);
+                Assert.Equal(3_000m, item.UnallocatedBalanceTotal);
                 Assert.Equal(2, item.IncomeCount);
+                Assert.Equal(1, item.UnallocatedBalanceCount);
             },
             item =>
             {
