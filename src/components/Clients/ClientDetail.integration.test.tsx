@@ -105,6 +105,7 @@ function createPermissions() {
     accounts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     acts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     contracts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+    payments: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     tasks: { canView: true, canCreate: false, canEdit: false, canDelete: false, canExport: false },
   };
 }
@@ -554,6 +555,7 @@ describe('ClientDetail integration', () => {
     Object.assign(permissionsResult.accounts, createPermissions().accounts);
     Object.assign(permissionsResult.acts, createPermissions().acts);
     Object.assign(permissionsResult.contracts, createPermissions().contracts);
+    Object.assign(permissionsResult.payments, createPermissions().payments);
     Object.assign(permissionsResult.tasks, createPermissions().tasks);
     confirmMock.mockReset();
     confirmMock.mockResolvedValue(true);
@@ -695,6 +697,7 @@ describe('ClientDetail integration', () => {
     Object.assign(permissionsResult.accounts, { canCreate: true });
     Object.assign(permissionsResult.acts, { canCreate: true });
     Object.assign(permissionsResult.contracts, { canCreate: true });
+    Object.assign(permissionsResult.payments, { canCreate: true });
 
     render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
 
@@ -705,6 +708,22 @@ describe('ClientDetail integration', () => {
     expect(screen.getByRole('button', { name: 'Добавить счёт' }).parentElement?.textContent).toContain('Счета');
     expect(screen.getByRole('button', { name: 'Добавить акт' }).parentElement?.textContent).toContain('Акты');
     expect(screen.getByRole('button', { name: 'Добавить договор' }).parentElement?.textContent).toContain('Договоры');
+  });
+
+  it('hides client payment actions and keeps the payment section disabled without payment rights', async () => {
+    Object.assign(permissionsResult.clients, { canCreate: true });
+    Object.assign(permissionsResult.payments, { canView: false, canCreate: true });
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="payments" />);
+
+    await screen.findByRole('heading', { name: 'Карточка клиента' });
+
+    expect(screen.queryByRole('button', { name: 'Добавить платёж' })).toBeNull();
+    await waitFor(() => {
+      const lastCall = usePaymentsPagedMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastCall).toEqual(expect.objectContaining({ enabled: false, clientId: 1 }));
+    });
+    expect(apiService.getPaymentsV2).not.toHaveBeenCalled();
   });
 
   it('opens balance journal and audit from compact header actions', async () => {
@@ -1364,6 +1383,7 @@ describe('ClientDetail integration', () => {
   it('prefills expense client from selected supplier case when creating supplier payments', async () => {
     const user = userEvent.setup();
     permissionsResult.clients.canCreate = true;
+    permissionsResult.payments.canCreate = true;
 
     vi.mocked(apiService.getClient).mockResolvedValue({
       ...createClient(),

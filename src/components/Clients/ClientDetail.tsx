@@ -486,7 +486,7 @@ const SECTION_PERMISSION_MAP: Record<ClientDetailSection, MenuSectionKey> = {
   profile: "clients",
   cases: "clients",
   tasks: "tasks",
-  payments: "clients",
+  payments: "payments",
   accounts: "accounts",
   acts: "acts",
   contracts: "contracts",
@@ -1382,11 +1382,31 @@ export function ClientDetail({
   const clientPermissions = permissions.clients;
   const accountPermissions = permissions.accounts;
   const actPermissions = permissions.acts;
+  const paymentPermissions = permissions.payments;
   const contractPermissions = permissions.contracts;
   const sectionPermissions = useCallback(
     (section: ClientDetailSection) =>
       permissions[SECTION_PERMISSION_MAP[section]],
     [permissions],
+  );
+  const canViewSection = useCallback(
+    (section: ClientDetailSection) => {
+      if (section === "settlement") {
+        return (
+          accountPermissions.canView &&
+          actPermissions.canView &&
+          paymentPermissions.canView
+        );
+      }
+
+      return sectionPermissions(section).canView;
+    },
+    [
+      accountPermissions.canView,
+      actPermissions.canView,
+      paymentPermissions.canView,
+      sectionPermissions,
+    ],
   );
   const clientViewStateKey = useMemo(
     () => `pp.clientDetail.${user?.id ?? "guest"}.${clientId}.viewState.v1`,
@@ -1400,7 +1420,7 @@ export function ClientDetail({
     () => {
       if (initialSection) {
         try {
-          if (sectionPermissions(initialSection).canView) {
+          if (canViewSection(initialSection)) {
             return initialSection;
           }
         } catch {
@@ -1410,7 +1430,7 @@ export function ClientDetail({
 
       const firstAllowed = SECTION_ORDER.find((section) => {
         try {
-          return sectionPermissions(section).canView;
+          return canViewSection(section);
         } catch {
           return false;
         }
@@ -1418,7 +1438,7 @@ export function ClientDetail({
       const savedSection = savedViewState?.activeSection;
       if (savedSection) {
         try {
-          if (sectionPermissions(savedSection).canView) {
+          if (canViewSection(savedSection)) {
             return savedSection;
           }
         } catch {
@@ -2389,17 +2409,30 @@ export function ClientDetail({
     setRelatedDocumentLookupLoading(true);
     setRelatedDocumentLookupError(null);
 
+    const contractsRequest = contractPermissions.canView
+      ? apiService.getContracts({ clientId, page: 1, pageSize: 200 })
+      : Promise.resolve({ items: [] as Contract[] });
+    const invoicesRequest = accountPermissions.canView
+      ? apiService.getInvoices({ clientId, page: 1, pageSize: 200 })
+      : Promise.resolve({ items: [] as Invoice[] });
+    const actsRequest = actPermissions.canView
+      ? apiService.getActs({ clientId, page: 1, pageSize: 200 })
+      : Promise.resolve({ items: [] as Act[] });
+    const paymentsRequest = paymentPermissions.canView
+      ? apiService.getPaymentsV2({
+          clientId,
+          page: 1,
+          pageSize: 500,
+          sortBy: "date",
+          sortDir: "desc",
+        })
+      : Promise.resolve({ items: [] as Payment[] });
+
     Promise.allSettled([
-      apiService.getContracts({ clientId, page: 1, pageSize: 200 }),
-      apiService.getInvoices({ clientId, page: 1, pageSize: 200 }),
-      apiService.getActs({ clientId, page: 1, pageSize: 200 }),
-      apiService.getPaymentsV2({
-        clientId,
-        page: 1,
-        pageSize: 500,
-        sortBy: "date",
-        sortDir: "desc",
-      }),
+      contractsRequest,
+      invoicesRequest,
+      actsRequest,
+      paymentsRequest,
     ])
       .then(([contractsResult, invoicesResult, actsResult, paymentsResult]) => {
         if (!alive) return;
@@ -2443,7 +2476,14 @@ export function ClientDetail({
     return () => {
       alive = false;
     };
-  }, [activeSection, clientId]);
+  }, [
+    activeSection,
+    accountPermissions.canView,
+    actPermissions.canView,
+    clientId,
+    contractPermissions.canView,
+    paymentPermissions.canView,
+  ]);
 
   const handleActFromChange = useCallback((value: string) => {
     setActPeriod((prev) => {
@@ -3132,19 +3172,19 @@ export function ClientDetail({
   const visibleSections = useMemo(
     () =>
       SECTION_ORDER.filter(
-        (section) => sectionPermissions(section).canView,
+        (section) => canViewSection(section),
       ),
-    [sectionPermissions],
+    [canViewSection],
   );
 
   useEffect(() => {
-    if (!sectionPermissions(activeSection).canView) {
+    if (!canViewSection(activeSection)) {
       const fallback = SECTION_ORDER.find(
-        (section) => sectionPermissions(section).canView,
+        (section) => canViewSection(section),
       );
       if (fallback) setActiveSection(fallback);
     }
-  }, [activeSection, sectionPermissions]);
+  }, [activeSection, canViewSection]);
 
   const { isRequired } = useFormRequirements(
     "clients",
@@ -4597,7 +4637,7 @@ export function ClientDetail({
   }, [caseModalOpen, ensureActLookups]);
 
   const openAddPayment = () => {
-    if (!clientPermissions.canCreate) {
+    if (!paymentPermissions.canView || !paymentPermissions.canCreate) {
       showPermissionWarning(
         t("permissionNoAddPayment") ??
           "Недостаточно прав для добавления платежей.",
@@ -4609,7 +4649,7 @@ export function ClientDetail({
     setPayModalOpen(true);
   };
   const openEditPayment = (p: Payment) => {
-    if (!clientPermissions.canEdit) {
+    if (!paymentPermissions.canEdit) {
       showPermissionWarning(
         t("permissionNoEditPayment") ??
           "Недостаточно прав для редактирования платежей.",
@@ -4836,7 +4876,7 @@ export function ClientDetail({
     }
 
     const id = typeof target === "number" ? target : target.id;
-    if (!clientPermissions.canDelete) {
+    if (!paymentPermissions.canDelete) {
       showPermissionWarning(
         t("permissionNoDeletePayment") ??
           "Недостаточно прав для удаления платежей.",
@@ -6058,7 +6098,7 @@ export function ClientDetail({
                 </span>
               </div>
             )}
-            {clientPermissions.canCreate && (
+            {paymentPermissions.canView && paymentPermissions.canCreate && (
               <div className="flex flex-col items-center gap-1">
                 <button
                   type="button"
@@ -8501,7 +8541,12 @@ export function ClientDetail({
                         <table
                           className="min-w-full table-fixed divide-y divide-gray-200 text-sm"
                           style={{
-                            width: getPaymentTableWidth(clientPermissions.canEdit || clientPermissions.canDelete ? 144 : 0),
+                            width: getPaymentTableWidth(
+                              paymentPermissions.canEdit ||
+                                paymentPermissions.canDelete
+                                ? 144
+                                : 0,
+                            ),
                             minWidth: "100%",
                           }}
                         >
@@ -8514,8 +8559,8 @@ export function ClientDetail({
                                 }}
                               />
                             ))}
-                            {clientPermissions.canEdit ||
-                            clientPermissions.canDelete ? (
+                            {paymentPermissions.canEdit ||
+                            paymentPermissions.canDelete ? (
                               <col className="w-36" />
                             ) : null}
                           </colgroup>
@@ -8571,8 +8616,8 @@ export function ClientDetail({
                                   />
                                 </th>
                               ))}
-                              {(clientPermissions.canEdit ||
-                                clientPermissions.canDelete) && (
+                              {(paymentPermissions.canEdit ||
+                                paymentPermissions.canDelete) && (
                                 <th
                                   scope="col"
                                   className="px-4 py-3 text-right"
@@ -8971,11 +9016,11 @@ export function ClientDetail({
                                       )}
                                     </td>
                                   ))}
-                                  {(clientPermissions.canEdit ||
-                                    clientPermissions.canDelete) && (
+                                  {(paymentPermissions.canEdit ||
+                                    paymentPermissions.canDelete) && (
                                     <td className="px-4 py-4">
                                       <div className="flex items-center justify-end gap-2">
-                                        {clientPermissions.canEdit ? (
+                                        {paymentPermissions.canEdit ? (
                                           <button
                                             type="button"
                                             className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-200 text-blue-600 transition-colors hover:border-blue-300 hover:bg-blue-50"
@@ -8988,7 +9033,7 @@ export function ClientDetail({
                                             <Edit size={16} />
                                           </button>
                                         ) : null}
-                                        {clientPermissions.canDelete &&
+                                        {paymentPermissions.canDelete &&
                                         payment.documentKind !== "Invoice" &&
                                         !isTransferredRemainderPayment(payment) &&
                                         !isPartialRemainderSourcePayment(payment) ? (
