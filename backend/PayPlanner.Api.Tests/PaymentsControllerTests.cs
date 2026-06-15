@@ -4459,6 +4459,128 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task GetAdvanceReviewDiagnostics_FindsSuspectedPaymentWithoutChangingData()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreatePaymentsUserAsync(db, canExport: false);
+        var client = new Client { Name = "Винокуров Валерий Витальевич" };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var targetPayment = CreatePayment(new DateTime(2026, 3, 2), 7_100m, "Винокуров - нераспределенное поступление");
+        targetPayment.ClientId = client.Id;
+        targetPayment.PaidAmount = 7_100m;
+        targetPayment.Status = PaymentStatus.Completed;
+        targetPayment.IsPaid = true;
+        targetPayment.PaidDate = targetPayment.Date;
+        targetPayment.LastPaymentDate = targetPayment.Date;
+        targetPayment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.AcceptedAsAdvance;
+
+        var otherPayment = CreatePayment(new DateTime(2026, 3, 2), 7_500m, "Винокуров - другой платеж");
+        otherPayment.ClientId = client.Id;
+        otherPayment.PaidAmount = 7_500m;
+        otherPayment.Status = PaymentStatus.Completed;
+        otherPayment.IsPaid = true;
+        otherPayment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.None;
+
+        db.Payments.AddRange(targetPayment, otherPayment);
+        await db.SaveChangesAsync();
+
+        db.ClientBalanceTransactions.Add(new ClientBalanceTransaction
+        {
+            ClientId = client.Id,
+            PaymentId = targetPayment.Id,
+            Amount = 7_100m,
+            Type = ClientBalanceTransactionType.UnallocatedAdvance,
+            Direction = ClientBalanceDirection.Credit,
+            Description = "Принят как аванс",
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreatePaymentsController(db, user.Id);
+        var result = await controller.GetAdvanceReviewDiagnostics(
+            q: "Винокуров",
+            from: new DateTime(2026, 3, 2),
+            to: new DateTime(2026, 3, 2),
+            amount: 7_100m,
+            amountTolerance: 0.01m,
+            limit: 10,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var report = Assert.IsType<PaymentAdvanceReviewDiagnosticsResponseDto>(ok.Value);
+        Assert.Equal(1, report.Total);
+        Assert.Equal(7_100m, report.TotalAmount);
+        var item = Assert.Single(report.Items);
+        Assert.Equal(targetPayment.Id, item.Id);
+        Assert.True(item.IsUnallocatedAdvanceCandidate);
+        Assert.False(item.HasInvoiceLink);
+        Assert.False(item.HasActLink);
+        Assert.False(item.HasAccountNumber);
+        Assert.True(item.HasUnallocatedAdvanceBalanceTransaction);
+        Assert.Equal(7_100m, item.UnallocatedAdvanceBalanceAmount);
+        Assert.Equal(PaymentAdvanceReviewStatus.AcceptedAsAdvance, item.AdvanceReviewStatus);
+
+        db.ChangeTracker.Clear();
+        var statuses = await db.Payments
+            .AsNoTracking()
+            .OrderBy(payment => payment.Id)
+            .Select(payment => payment.AdvanceReviewStatus)
+            .ToListAsync();
+        Assert.Equal(
+            [
+                PaymentAdvanceReviewStatus.AcceptedAsAdvance,
+                PaymentAdvanceReviewStatus.None,
+            ],
+            statuses);
+        Assert.Single(await db.ClientBalanceTransactions.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task GetAdvanceReviewDiagnostics_WithOwnScope_ReturnsOnlyVisiblePayments()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreatePaymentsUserAsync(db, canExport: false, viewScope: DataVisibilityScope.Own);
+        var otherUser = await CreatePaymentsUserAsync(db, canExport: false, viewScope: DataVisibilityScope.Own);
+        var visibleClient = new Client { Name = "Винокуров видимый", ResponsibleUserId = user.Id };
+        var hiddenClient = new Client { Name = "Винокуров скрытый", ResponsibleUserId = otherUser.Id };
+        db.Clients.AddRange(visibleClient, hiddenClient);
+        await db.SaveChangesAsync();
+
+        var visiblePayment = CreatePayment(new DateTime(2026, 3, 2), 7_100m, "Винокуров visible");
+        visiblePayment.ClientId = visibleClient.Id;
+        visiblePayment.PaidAmount = 7_100m;
+        visiblePayment.Status = PaymentStatus.Completed;
+        visiblePayment.IsPaid = true;
+        visiblePayment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.None;
+
+        var hiddenPayment = CreatePayment(new DateTime(2026, 3, 2), 7_100m, "Винокуров hidden");
+        hiddenPayment.ClientId = hiddenClient.Id;
+        hiddenPayment.PaidAmount = 7_100m;
+        hiddenPayment.Status = PaymentStatus.Completed;
+        hiddenPayment.IsPaid = true;
+        hiddenPayment.AdvanceReviewStatus = PaymentAdvanceReviewStatus.None;
+
+        db.Payments.AddRange(visiblePayment, hiddenPayment);
+        await db.SaveChangesAsync();
+
+        var controller = CreatePaymentsController(db, user.Id);
+        var result = await controller.GetAdvanceReviewDiagnostics(
+            q: "Винокуров",
+            from: null,
+            to: null,
+            amount: 7_100m,
+            amountTolerance: 0.01m,
+            limit: 10,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var report = Assert.IsType<PaymentAdvanceReviewDiagnosticsResponseDto>(ok.Value);
+        Assert.Equal(1, report.Total);
+        Assert.Equal([visiblePayment.Id], report.Items.Select(item => item.Id).ToArray());
+    }
+
+    [Fact]
     public async Task BackfillAdvanceReviewCandidates_RequiresExplicitConfirmation()
     {
         await using var db = await CreateContextAsync();

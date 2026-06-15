@@ -654,6 +654,147 @@ public class PaymentsController : ControllerBase
         });
     }
 
+    [HttpGet("advance-review/diagnostics")]
+    public async Task<IActionResult> GetAdvanceReviewDiagnostics(
+        [FromQuery] string? q = null,
+        [FromQuery] DateTime? from = null,
+        [FromQuery] DateTime? to = null,
+        [FromQuery] decimal? amount = null,
+        [FromQuery] decimal amountTolerance = AmountTolerance,
+        [FromQuery] int limit = 50,
+        CancellationToken ct = default)
+    {
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var queryText = string.IsNullOrWhiteSpace(q) ? null : q.Trim();
+        if (queryText is null && !from.HasValue && !to.HasValue && !amount.HasValue)
+        {
+            return BadRequest(new { message = "Укажите текст поиска, период или сумму платежа для диагностики аванса." });
+        }
+
+        limit = Math.Clamp(limit, 1, 200);
+        amountTolerance = Math.Max(0m, amountTolerance);
+
+        var query = _db.Payments
+            .AsNoTracking()
+            .ApplyPaymentVisibility(visibility)
+            .Include(payment => payment.Client)
+            .Include(payment => payment.LegalEntity)
+            .Include(payment => payment.Acts)
+            .AsQueryable();
+
+        if (from.HasValue)
+        {
+            var fromDate = from.Value.Date;
+            query = query.Where(payment => payment.Date >= fromDate);
+        }
+
+        if (to.HasValue)
+        {
+            var toDate = to.Value.Date;
+            query = query.Where(payment => payment.Date <= toDate);
+        }
+
+        if (amount.HasValue)
+        {
+            var minAmount = amount.Value - amountTolerance;
+            var maxAmount = amount.Value + amountTolerance;
+            query = query.Where(payment =>
+                (payment.PaidAmount > AmountTolerance ? payment.PaidAmount : payment.Amount) >= minAmount
+                && (payment.PaidAmount > AmountTolerance ? payment.PaidAmount : payment.Amount) <= maxAmount);
+        }
+
+        if (queryText is not null)
+        {
+            query = query.Where(payment =>
+                (payment.Description != null && payment.Description.Contains(queryText))
+                || (payment.CounterpartyName != null && payment.CounterpartyName.Contains(queryText))
+                || (payment.Account != null && payment.Account.Contains(queryText))
+                || (payment.LegacyAccountNumber != null && payment.LegacyAccountNumber.Contains(queryText))
+                || (payment.Client != null && payment.Client.Name.Contains(queryText))
+                || (payment.LegalEntity != null && ((payment.LegalEntity.ShortName != null && payment.LegalEntity.ShortName.Contains(queryText))
+                    || payment.LegalEntity.FullName.Contains(queryText))));
+        }
+
+        var total = await query.CountAsync(ct);
+        var totalAmount = await query
+            .SumAsync(payment => payment.PaidAmount > AmountTolerance ? payment.PaidAmount : payment.Amount, ct);
+
+        var payments = await query
+            .OrderBy(payment => payment.Date)
+            .ThenBy(payment => payment.Id)
+            .Take(limit)
+            .ToListAsync(ct);
+
+        var paymentIds = payments.Select(payment => payment.Id).ToList();
+        var balanceByPaymentId = paymentIds.Count == 0
+            ? new Dictionary<int, decimal>()
+            : await _db.ClientBalanceTransactions
+                .AsNoTracking()
+                .Where(item => item.PaymentId.HasValue
+                    && paymentIds.Contains(item.PaymentId.Value)
+                    && item.Type == ClientBalanceTransactionType.UnallocatedAdvance)
+                .GroupBy(item => item.PaymentId!.Value)
+                .Select(group => new
+                {
+                    PaymentId = group.Key,
+                    Amount = group.Sum(item => item.Direction == ClientBalanceDirection.Credit ? item.Amount : -item.Amount),
+                })
+                .ToDictionaryAsync(item => item.PaymentId, item => item.Amount, ct);
+
+        var items = payments
+            .Select(payment =>
+            {
+                var unallocatedAdvanceBalance = balanceByPaymentId.GetValueOrDefault(payment.Id);
+                return new PaymentAdvanceReviewDiagnosticItemDto
+                {
+                    Id = payment.Id,
+                    Date = payment.Date,
+                    Amount = payment.Amount,
+                    PaidAmount = payment.PaidAmount,
+                    AdvanceAmount = PaymentAdvanceReviewService.GetAdvanceAmount(payment),
+                    Description = payment.Description,
+                    ClientId = payment.ClientId,
+                    LegalEntityId = payment.LegalEntityId,
+                    CounterpartyName = payment.Client?.Name
+                        ?? (!string.IsNullOrWhiteSpace(payment.LegalEntity?.ShortName)
+                            ? payment.LegalEntity.ShortName
+                            : payment.LegalEntity?.FullName)
+                        ?? payment.CounterpartyName,
+                    ClientCaseId = payment.ClientCaseId,
+                    ContractId = payment.ContractId,
+                    Status = payment.Status,
+                    Type = payment.Type,
+                    AdvanceReviewStatus = payment.AdvanceReviewStatus,
+                    IsUnallocatedAdvanceCandidate = PaymentAdvanceReviewService.IsUnallocatedAdvanceCandidate(payment),
+                    HasInvoiceLink = payment.InvoiceId.HasValue,
+                    HasActLink = payment.Acts.Count > 0,
+                    HasAccountNumber = !string.IsNullOrWhiteSpace(payment.Account)
+                        || !string.IsNullOrWhiteSpace(payment.LegacyAccountNumber),
+                    HasUnallocatedAdvanceBalanceTransaction = unallocatedAdvanceBalance != 0m,
+                    UnallocatedAdvanceBalanceAmount = unallocatedAdvanceBalance,
+                };
+            })
+            .ToList();
+
+        return Ok(new PaymentAdvanceReviewDiagnosticsResponseDto
+        {
+            Total = total,
+            TotalAmount = totalAmount,
+            Limit = limit,
+            Query = queryText,
+            From = from?.Date,
+            To = to?.Date,
+            Amount = amount,
+            AmountTolerance = amountTolerance,
+            Items = items,
+        });
+    }
+
     [HttpPost("advance-review/backfill")]
     public async Task<IActionResult> BackfillAdvanceReviewCandidates(
         [FromQuery] bool confirm = false,
