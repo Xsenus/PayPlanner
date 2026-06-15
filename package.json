@@ -9,6 +9,8 @@
     "lint": "eslint .",
     "audit:dates": "node scripts/audit-date-time.mjs",
     "audit:dates:test": "node scripts/audit-date-time.mjs --self-test",
+    "roadmap:advance-status": "node scripts/check-advance-roadmap-status.mjs docs/unallocated-advance-monitoring-roadmap-2026-06-12.md",
+    "roadmap:advance-status:test": "node scripts/check-advance-roadmap-status.mjs --self-test",
     "test": "npm run test:unit",
     "test:all": "vitest run",
     "test:unit": "vitest run --exclude \"**/*.integration.test.*\" --no-file-parallelism",
