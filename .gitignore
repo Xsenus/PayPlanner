@@ -80,6 +80,8 @@ out/
 # /build/
 artifacts/
 backups/
+local-db-backups/
+backup-before-deploy-*/
 
 # Кеши инструментов
 .sass-cache/
