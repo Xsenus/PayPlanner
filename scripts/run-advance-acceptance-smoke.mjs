@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, copyFileSync, openSync, closeSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, copyFileSync, openSync, closeSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -144,6 +144,30 @@ async function removeTempDir() {
         throw error;
       }
       await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+    }
+  }
+}
+
+function assertBackendLogsClean() {
+  const patterns = [
+    /^\s*(crit|critical|fail):/i,
+    /\bLogLevel\.(Critical|Error)\b/i,
+    /\bUnhandled exception\b/i,
+    /\bSystem\.[A-Za-z.]*Exception\b/i,
+  ];
+
+  for (const file of [backendLog, backendErr]) {
+    if (!existsSync(file)) {
+      continue;
+    }
+
+    const content = readFileSync(file, 'utf8');
+    const hit = content
+      .split(/\r?\n/)
+      .find((line) => patterns.some((pattern) => pattern.test(line)));
+
+    if (hit) {
+      throw new Error(`Backend smoke log contains an error marker in ${path.basename(file)}: ${hit.trim().slice(0, 240)}`);
     }
   }
 }
@@ -378,6 +402,8 @@ async function runApiSmoke() {
     closeSync(out);
     closeSync(err);
   }
+
+  assertBackendLogsClean();
 }
 
 try {
