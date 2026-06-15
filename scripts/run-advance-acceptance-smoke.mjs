@@ -437,12 +437,14 @@ function writeAcceptanceReport(apiSmokeResult) {
   const stamp = generatedAt.toISOString().replace(/[:.]/g, '-');
   const jsonReportPath = path.join(artifactDir, `advance-acceptance-${stamp}.json`);
   const markdownReportPath = path.join(artifactDir, `advance-acceptance-${stamp}.md`);
+  const roadmap = readAdvanceRoadmapReport();
+  assertRoadmapReadyForAcceptance(roadmap);
   const report = {
     generatedAtUtc: generatedAt.toISOString(),
     sourceDatabase: path.join(root, 'payplanner.db'),
     databaseMode: 'temporary-sqlite-copy',
     temporaryDatabase: keepTemp ? tempDb : null,
-    roadmap: readAdvanceRoadmapReport(),
+    roadmap,
     checks,
     apiSmoke: {
       ...apiSmokeResult,
@@ -459,6 +461,13 @@ function writeAcceptanceReport(apiSmokeResult) {
 
 function readAdvanceRoadmapReport() {
   return buildRoadmapReport(readFileSync(roadmapPath, 'utf8'), roadmapPath);
+}
+
+function assertRoadmapReadyForAcceptance(roadmap) {
+  assertCondition(
+    roadmap.implementationOpenCount === 0,
+    `Advance roadmap still has open implementation items: ${roadmap.implementationOpenCount}`,
+  );
 }
 
 function buildAcceptanceMarkdownReport(report) {
