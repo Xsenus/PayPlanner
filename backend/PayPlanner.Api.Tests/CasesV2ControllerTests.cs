@@ -5855,15 +5855,9 @@ public class CasesV2ControllerTests
             IsActive = true,
             ResponsibleUserId = owner.Id,
         };
-        var legalEntity = new LegalEntity
-        {
-            ShortName = "ООО Договор",
-            ResponsibleUserId = owner.Id,
-        };
         var clientCase = new ClientCase
         {
             Client = client,
-            LegalEntity = legalEntity,
             Title = "Дело для договора",
             CaseNumber = "CONTRACT-77",
             Status = ClientCaseStatus.Open,
@@ -5897,7 +5891,6 @@ public class CasesV2ControllerTests
             ],
         };
         db.Clients.Add(client);
-        db.LegalEntities.Add(legalEntity);
         db.ClientCases.Add(clientCase);
         db.ClientCaseWorkOrders.Add(workOrder);
         await db.SaveChangesAsync();
@@ -5917,7 +5910,7 @@ public class CasesV2ControllerTests
         Assert.Equal(new DateTime(2026, 06, 05), dto.StartDate);
         Assert.Equal(30000, dto.Amount);
         Assert.Equal(client.Id, dto.ClientId);
-        Assert.Equal(legalEntity.Id, dto.LegalEntityId);
+        Assert.Null(dto.LegalEntityId);
         Assert.Equal("approved", dto.WorkOrder.Status);
         Assert.NotNull(dto.DocumentId);
 
@@ -5932,7 +5925,7 @@ public class CasesV2ControllerTests
         Assert.Contains("Подготовка договора", contract.Description);
         Assert.Contains("Юридическое сопровождение", contract.Description);
         Assert.Contains(contract.ClientContracts, item => item.ClientId == client.Id);
-        Assert.Contains(contract.LegalEntityContracts, item => item.LegalEntityId == legalEntity.Id);
+        Assert.Empty(contract.LegalEntityContracts);
 
         var contractDocument = await db.ClientCaseDocuments.SingleAsync(item => item.Id == dto.DocumentId);
         Assert.Equal($"contract-{contract.Id}", contractDocument.DocumentKey);
