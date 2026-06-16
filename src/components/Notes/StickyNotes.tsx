@@ -130,7 +130,7 @@ function removeStoredValue(key: string) {
 }
 
 export async function copyTextToClipboard(text: string, clipboard?: Pick<Clipboard, 'writeText'>) {
-  const targetClipboard = clipboard ?? window.navigator.clipboard;
+  const targetClipboard = clipboard ?? globalThis.navigator?.clipboard ?? window.navigator.clipboard;
   if (!targetClipboard?.writeText) {
     throw new Error('Clipboard API is unavailable');
   }
@@ -738,11 +738,18 @@ export function StickyNotes() {
       return;
     }
 
+    const requestedBoardId = noteConflict.local.boardId;
+
     try {
       await copyTextToClipboard(noteConflict.local.text);
+      if (activeBoardIdRef.current !== requestedBoardId) {
+        return;
+      }
       toast.success('Текст вашей версии скопирован.');
     } catch {
-      toast.error('Не удалось скопировать текст автоматически.');
+      if (activeBoardIdRef.current === requestedBoardId) {
+        toast.error('Не удалось скопировать текст автоматически.');
+      }
     }
   };
 

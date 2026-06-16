@@ -1213,10 +1213,66 @@ describe('StickyNotes', () => {
 
   it('copies conflict draft text through the clipboard helper', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
+    const globalWriteText = vi.fn().mockResolvedValue(undefined);
 
     await copyTextToClipboard('Моя версия', { writeText });
+    vi.stubGlobal('navigator', { clipboard: { writeText: globalWriteText } });
+    await copyTextToClipboard('Глобальная версия');
 
     expect(writeText).toHaveBeenCalledWith('Моя версия');
+    expect(globalWriteText).toHaveBeenCalledWith('Глобальная версия');
+  });
+
+  it('does not show a stale conflict copy toast after switching boards', async () => {
+    const copyResponse = createDeferred<void>();
+    let copiedText = '';
+    const writeText = vi.fn((text: string) => {
+      copiedText = text;
+      return copyResponse.promise;
+    });
+
+    const user = userEvent.setup();
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(window.navigator, 'clipboard');
+    Object.defineProperty(window.navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    expect(window.navigator.clipboard.writeText).toBe(writeText);
+
+    const serverNote = { ...createdNote, text: 'Версия сервера', version: 2 };
+    apiMock.getStickyNoteBoards.mockResolvedValue([board, personalBoard]);
+    apiMock.getStickyNotes.mockImplementation(async (boardId) => (
+      boardId === 9
+        ? [{ ...createdNote, id: 12, boardId: 9, text: 'Личная доска после копирования' }]
+        : [{ ...createdNote, text: 'Моя версия', version: 1 }]
+    ));
+    apiMock.updateStickyNote.mockRejectedValueOnce(new StickyNoteConflictError(serverNote));
+
+    try {
+      renderStickyNotes();
+
+      await screen.findByDisplayValue('Моя версия');
+      await user.click(screen.getByTitle('Сохранить'));
+      await user.click(await screen.findByRole('button', { name: /Скопировать мой текст/i }));
+      await waitFor(() => expect(copiedText).toBe('Моя версия'));
+
+      await user.click(screen.getByRole('button', { name: /Мои заметки/i }));
+      expect(await screen.findByDisplayValue('Личная доска после копирования')).toBeTruthy();
+
+      await act(async () => {
+        copyResponse.resolve();
+        await copyResponse.promise;
+      });
+
+      expect(screen.queryByText('Текст вашей версии скопирован.')).toBeNull();
+      expect(screen.getByDisplayValue('Личная доска после копирования')).toBeTruthy();
+    } finally {
+      if (clipboardDescriptor) {
+        Object.defineProperty(window.navigator, 'clipboard', clipboardDescriptor);
+      } else {
+        delete (window.navigator as Navigator & { clipboard?: Clipboard }).clipboard;
+      }
+    }
   });
 
   it('overwrites the server conflict version with the local draft', async () => {
