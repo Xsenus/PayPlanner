@@ -79,6 +79,41 @@ public sealed class StickyNotesControllerTests
     }
 
     [Fact]
+    public async Task GetBoards_ReturnsDeleteBoardPermissionOnlyForOwner()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db);
+        var editor = await CreateUserAsync(db);
+        var board = new StickyNoteBoard
+        {
+            Title = "Личная владельца",
+            Visibility = StickyNoteBoardVisibility.Personal,
+            OwnerUserId = owner.Id,
+            OwnerUserName = owner.FullName,
+            Background = "gray",
+            Members = new List<StickyNoteBoardMember>
+            {
+                new() { UserId = editor.Id, Role = "editor" },
+            },
+        };
+        db.StickyNoteBoards.Add(board);
+        await db.SaveChangesAsync();
+
+        var ownerResult = await CreateController(db, owner).GetBoards(CancellationToken.None);
+        var ownerBoards = Assert.IsAssignableFrom<IReadOnlyCollection<StickyNoteBoardDto>>(Assert.IsType<OkObjectResult>(ownerResult.Result).Value);
+        var ownerDto = Assert.Single(ownerBoards, item => item.Id == board.Id);
+        Assert.True(ownerDto.CanDelete);
+        Assert.True(ownerDto.CanDeleteNotes);
+
+        var editorResult = await CreateController(db, editor).GetBoards(CancellationToken.None);
+        var editorBoards = Assert.IsAssignableFrom<IReadOnlyCollection<StickyNoteBoardDto>>(Assert.IsType<OkObjectResult>(editorResult.Result).Value);
+        var editorDto = Assert.Single(editorBoards, item => item.Id == board.Id);
+        Assert.True(editorDto.CanEdit);
+        Assert.False(editorDto.CanDelete);
+        Assert.True(editorDto.CanDeleteNotes);
+    }
+
+    [Fact]
     public async Task GetMemberCandidates_RequiresEditPermission()
     {
         await using var db = await CreateContextAsync();
