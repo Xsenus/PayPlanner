@@ -543,6 +543,27 @@ describe('StickyNotes', () => {
     expect(screen.queryByText('Заметка изменена другим пользователем')).toBeNull();
   });
 
+  it('disables conflict overwrite when edit access is revoked', async () => {
+    realtimeMock.canStart = true;
+    const serverNote = { ...createdNote, text: 'Версия сервера', version: 2 };
+    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Моя версия', version: 1 }]);
+    apiMock.updateStickyNote.mockRejectedValueOnce(new StickyNoteConflictError(serverNote));
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    await screen.findByDisplayValue('Моя версия');
+    await user.click(screen.getByTitle('Сохранить'));
+    expect(await screen.findByText('Заметка изменена другим пользователем')).toBeTruthy();
+
+    apiMock.getStickyNoteBoards.mockResolvedValue([{ ...board, canEdit: false }]);
+    realtimeMock.handlers.get('stickyNoteBoardChanged')?.({ type: 'boardUpdated', boardId: 7 });
+
+    const overwriteButton = await screen.findByRole('button', { name: /^Перезаписать$/i });
+    await waitFor(() => expect(overwriteButton).toHaveProperty('disabled', true));
+    expect(overwriteButton.getAttribute('title')).toBe('Нет права редактировать эту доску');
+  });
+
   it('keeps a local draft when a realtime update arrives during pending autosave', async () => {
     realtimeMock.canStart = true;
     apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Мой черновик', version: 1 }]);
