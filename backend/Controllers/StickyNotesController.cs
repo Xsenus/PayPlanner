@@ -194,7 +194,7 @@ public sealed class StickyNotesController : ControllerBase
     [HttpGet("member-candidates")]
     public async Task<ActionResult<IReadOnlyCollection<StickyNoteBoardMemberCandidateDto>>> GetMemberCandidates(CancellationToken ct)
     {
-        var access = await GetAccessAsync(static permission => permission.CanView, ct);
+        var access = await GetAccessAsync(static permission => permission.CanEdit, ct);
         if (access is null)
         {
             return Forbid();
@@ -202,7 +202,14 @@ public sealed class StickyNotesController : ControllerBase
 
         var users = await _db.Users
             .AsNoTracking()
-            .Where(user => user.IsActive && user.IsApproved)
+            .Where(user =>
+                user.IsActive
+                && user.IsApproved
+                && user.Role != null
+                && (user.Role.Name == "admin"
+                    || user.Role.Permissions.Any(permission =>
+                        permission.Section == RolePermissionCatalog.Notes
+                        && permission.CanView)))
             .OrderBy(user => user.FullName)
             .ThenBy(user => user.Email)
             .Select(user => new StickyNoteBoardMemberCandidateDto

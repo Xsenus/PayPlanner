@@ -79,6 +79,36 @@ public sealed class StickyNotesControllerTests
     }
 
     [Fact]
+    public async Task GetMemberCandidates_RequiresEditPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, canEdit: false);
+        var controller = CreateController(db, user);
+
+        var result = await controller.GetMemberCandidates(CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task GetMemberCandidates_ReturnsOnlyUsersWithNotesViewPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var manager = await CreateUserAsync(db);
+        var allowedUser = await CreateUserAsync(db);
+        var deniedUser = await CreateUserAsync(db, canView: false);
+        var controller = CreateController(db, manager);
+
+        var result = await controller.GetMemberCandidates(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var candidates = Assert.IsAssignableFrom<IReadOnlyCollection<StickyNoteBoardMemberCandidateDto>>(ok.Value);
+        Assert.Contains(candidates, candidate => candidate.UserId == manager.Id);
+        Assert.Contains(candidates, candidate => candidate.UserId == allowedUser.Id);
+        Assert.DoesNotContain(candidates, candidate => candidate.UserId == deniedUser.Id);
+    }
+
+    [Fact]
     public async Task CreateNote_ReturnsConflict_WhenBoardLimitReached()
     {
         await using var db = await CreateContextAsync();

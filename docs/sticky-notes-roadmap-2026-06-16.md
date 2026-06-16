@@ -845,3 +845,10 @@
 - [x] Board safety: `JoinBoard` дополнительно покрыт тестами на доступную общую доску, запрет без права `notes.canView` и запрет для чужой личной доски.
 - [x] Tests: добавлены backend-тесты `OnConnectedAsync_Aborts_WhenUserIsNotApproved`, `OnConnectedAsync_Aborts_WhenClaimUserDoesNotExist`, `JoinBoard_AddsBoardGroup_WhenUserCanViewSharedBoard`, `JoinBoard_DoesNotAddBoardGroup_WhenUserCannotViewNotes` и `JoinBoard_DoesNotAddBoardGroup_WhenPersonalBoardIsNotVisible`.
 - [x] "Что нового": запись раздела "Заметки" дополнена описанием строгой проверки пользователя и доски перед live-подпиской.
+
+## Отметка защиты списка кандидатов участников 2026-06-16
+
+- [x] Backend access: `GetMemberCandidates` теперь требует право `notes.canEdit`, а не только просмотр раздела "Заметки".
+- [x] Data safety: список кандидатов для добавления в доску заметок теперь включает только активных, подтвержденных сотрудников с правом `notes.canView` или администраторов.
+- [x] Tests: добавлены backend-тесты `GetMemberCandidates_RequiresEditPermission` и `GetMemberCandidates_ReturnsOnlyUsersWithNotesViewPermission`.
+- [x] "Что нового": запись раздела "Заметки" дополнена описанием ограничения списка кандидатов участников.
