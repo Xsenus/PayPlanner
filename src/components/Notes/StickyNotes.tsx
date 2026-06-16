@@ -881,13 +881,21 @@ export function StickyNotes() {
       return;
     }
 
+    const requestedBoardId = activeBoard.id;
+
     try {
-      await apiService.deleteStickyNoteBoardMember(activeBoard.id, member.userId);
+      await apiService.deleteStickyNoteBoardMember(requestedBoardId, member.userId);
+      if (activeBoardIdRef.current !== requestedBoardId) {
+        await loadBoards();
+        return;
+      }
       setMembers((current) => current.filter((item) => item.userId !== member.userId));
       await loadBoards();
     } catch (error) {
       console.error(error);
-      toast.error('Не удалось убрать участника.');
+      if (activeBoardIdRef.current === requestedBoardId) {
+        toast.error('Не удалось убрать участника.');
+      }
     }
   };
 

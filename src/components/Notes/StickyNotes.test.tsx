@@ -741,6 +741,64 @@ describe('StickyNotes', () => {
     expect(screen.getByRole('button', { name: /Личные напоминания/i })).toBeTruthy();
   });
 
+  it('does not remove a member from another board after switching boards', async () => {
+    const archiveBoard: StickyNoteBoard = {
+      ...personalBoard,
+      id: 13,
+      title: 'Личные напоминания',
+      sortOrder: 2,
+    };
+    const ownerMember = {
+      id: 0,
+      boardId: 9,
+      userId: 1,
+      displayName: 'Пользователь',
+      email: 'user@example.com',
+      role: 'owner' as const,
+    };
+    const annaOnPersonal = {
+      id: 5,
+      boardId: 9,
+      userId: 3,
+      displayName: 'Анна Юрист',
+      email: 'anna@example.com',
+      role: 'viewer' as const,
+    };
+    const annaOnArchive = {
+      ...annaOnPersonal,
+      id: 6,
+      boardId: 13,
+    };
+    const deleteMemberResponse = createDeferred<void>();
+    window.localStorage.setItem('payplanner.stickyNotes.activeBoardId', '9');
+    apiMock.getStickyNoteBoards.mockResolvedValue([personalBoard, archiveBoard]);
+    apiMock.getStickyNoteBoardMembers.mockImplementation(async (boardId) => (
+      boardId === 13
+        ? [{ ...ownerMember, boardId: 13 }, annaOnArchive]
+        : [ownerMember, annaOnPersonal]
+    ));
+    apiMock.deleteStickyNoteBoardMember.mockImplementationOnce(() => deleteMemberResponse.promise);
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    await screen.findByText('Анна Юрист');
+    await user.click(screen.getByTitle('Убрать участника'));
+    await waitFor(() => expect(apiMock.deleteStickyNoteBoardMember).toHaveBeenCalledWith(9, 3));
+
+    await user.click(screen.getByRole('button', { name: /Личные напоминания/i }));
+    await waitFor(() => expect(apiMock.getStickyNoteBoardMembers).toHaveBeenCalledWith(13));
+    expect(screen.queryAllByText('Анна Юрист').filter((element) => element.tagName !== 'OPTION')).toHaveLength(1);
+
+    await act(async () => {
+      deleteMemberResponse.resolve();
+      await deleteMemberResponse.promise;
+    });
+
+    expect(screen.queryAllByText('Анна Юрист').filter((element) => element.tagName !== 'OPTION')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: /Личные напоминания/i })).toBeTruthy();
+  });
+
   it('requires selecting a board member candidate before adding access', async () => {
     apiMock.getStickyNoteBoards.mockResolvedValue([personalBoard]);
     apiMock.getStickyNoteBoardMembers.mockResolvedValue([
