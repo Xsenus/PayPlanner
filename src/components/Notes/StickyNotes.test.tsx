@@ -123,11 +123,13 @@ function renderStickyNotes() {
 
 function createDeferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((nextResolve) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((nextResolve, nextReject) => {
     resolve = nextResolve;
+    reject = nextReject;
   });
 
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 describe('StickyNotes', () => {
@@ -1026,6 +1028,40 @@ describe('StickyNotes', () => {
     expect(screen.getAllByText('Моя версия').length).toBeGreaterThan(1);
   });
 
+  it('does not show a stale note conflict after switching boards', async () => {
+    const saveResponse = createDeferred<StickyNoteItem>();
+    const serverNote = { ...createdNote, text: 'Версия старой доски', version: 2 };
+    apiMock.getStickyNoteBoards.mockResolvedValue([board, personalBoard]);
+    apiMock.getStickyNotes.mockImplementation(async (boardId) => (
+      boardId === 9
+        ? [{ ...createdNote, id: 12, boardId: 9, text: 'Личная заметка после сохранения' }]
+        : [{ ...createdNote, text: 'Моя версия', version: 1 }]
+    ));
+    apiMock.updateStickyNote.mockImplementationOnce(() => saveResponse.promise);
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    await screen.findByDisplayValue('Моя версия');
+    await user.click(screen.getByTitle('Сохранить'));
+    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledWith(11, expect.objectContaining({
+      text: 'Моя версия',
+      version: 1,
+    })));
+
+    await user.click(screen.getByRole('button', { name: /Мои заметки/i }));
+    expect(await screen.findByDisplayValue('Личная заметка после сохранения')).toBeTruthy();
+
+    await act(async () => {
+      saveResponse.reject(new StickyNoteConflictError(serverNote));
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText('Заметка изменена другим пользователем')).toBeNull();
+    expect(screen.queryByText('Версия старой доски')).toBeNull();
+    expect(screen.getByDisplayValue('Личная заметка после сохранения')).toBeTruthy();
+  });
+
   it('applies the server version from the conflict panel', async () => {
     const serverNote = { ...createdNote, text: 'Версия сервера', version: 2 };
     apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Моя версия', version: 1 }]);
@@ -1115,6 +1151,46 @@ describe('StickyNotes', () => {
     })));
     expect(await screen.findByText('Заметка изменена другим пользователем')).toBeTruthy();
     expect(screen.getAllByText('Перетащить меня').length).toBeGreaterThan(1);
+  });
+
+  it('does not show a stale layout conflict after switching boards', async () => {
+    const layoutResponse = createDeferred<StickyNoteItem>();
+    const localNote = { ...createdNote, text: 'Перетащить и уйти', x: 56, y: 56, version: 1 };
+    const serverNote = { ...localNote, x: 300, y: 220, version: 2 };
+    apiMock.getStickyNoteBoards.mockResolvedValue([board, personalBoard]);
+    apiMock.getStickyNotes.mockImplementation(async (boardId) => (
+      boardId === 9
+        ? [{ ...createdNote, id: 12, boardId: 9, text: 'Личная доска после перемещения' }]
+        : [localNote]
+    ));
+    apiMock.updateStickyNoteLayout.mockImplementationOnce(() => layoutResponse.promise);
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    const textarea = await screen.findByDisplayValue('Перетащить и уйти');
+    const noteElement = textarea.parentElement as HTMLElement;
+    fireEvent.pointerDown(noteElement, { pointerId: 1, clientX: 120, clientY: 120 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 180, clientY: 170 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 180, clientY: 170 });
+
+    await waitFor(() => expect(apiMock.updateStickyNoteLayout).toHaveBeenCalledWith(11, expect.objectContaining({
+      x: 116,
+      y: 106,
+      version: 1,
+    })));
+
+    await user.click(screen.getByRole('button', { name: /Мои заметки/i }));
+    expect(await screen.findByDisplayValue('Личная доска после перемещения')).toBeTruthy();
+
+    await act(async () => {
+      layoutResponse.reject(new StickyNoteConflictError(serverNote));
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText('Заметка изменена другим пользователем')).toBeNull();
+    expect(screen.queryByDisplayValue('Перетащить и уйти')).toBeNull();
+    expect(screen.getByDisplayValue('Личная доска после перемещения')).toBeTruthy();
   });
 
   it('keeps a local draft when a realtime update arrives during pending autosave', async () => {

@@ -600,6 +600,8 @@ export function StickyNotes() {
       return;
     }
 
+    const requestedBoardId = note.boardId;
+
     const timer = autosaveTimersRef.current.get(note.id);
     if (timer) {
       window.clearTimeout(timer);
@@ -619,11 +621,20 @@ export function StickyNotes() {
         isPinned: note.isPinned,
         version: note.version,
       });
+      if (activeBoardIdRef.current !== requestedBoardId || saved.boardId !== requestedBoardId) {
+        return;
+      }
       setNotes((current) => sortNotes(current.map((item) => (item.id === saved.id ? saved : item))));
       setNoteConflict((current) => current?.local.id === saved.id ? null : current);
     } catch (error) {
       console.error(error);
+      if (activeBoardIdRef.current !== requestedBoardId) {
+        return;
+      }
       if (error instanceof StickyNoteConflictError) {
+        if (error.serverNote.boardId !== requestedBoardId) {
+          return;
+        }
         setNoteConflict({ local: note, server: error.serverNote });
         setNotes((current) => sortNotes(current.map((item) => (item.id === note.id ? note : item))));
         toast.error('Заметка уже изменена другим пользователем. Проверьте конфликт перед сохранением.');
@@ -667,6 +678,8 @@ export function StickyNotes() {
       return;
     }
 
+    const requestedBoardId = note.boardId;
+
     try {
       const saved = await apiService.updateStickyNoteLayout(note.id, {
         x: note.x,
@@ -676,10 +689,19 @@ export function StickyNotes() {
         zIndex: note.zIndex,
         version: note.version,
       });
+      if (activeBoardIdRef.current !== requestedBoardId || saved.boardId !== requestedBoardId) {
+        return;
+      }
       setNotes((current) => sortNotes(current.map((item) => (item.id === saved.id ? saved : item))));
     } catch (error) {
       console.error(error);
+      if (activeBoardIdRef.current !== requestedBoardId) {
+        return;
+      }
       if (error instanceof StickyNoteConflictError) {
+        if (error.serverNote.boardId !== requestedBoardId) {
+          return;
+        }
         setNoteConflict({ local: note, server: error.serverNote });
         setNotes((current) => sortNotes(current.map((item) => (item.id === note.id ? note : item))));
         toast.error('Расположение заметки уже изменено другим пользователем. Проверьте конфликт перед сохранением.');
