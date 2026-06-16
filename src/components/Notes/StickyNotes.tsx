@@ -148,6 +148,7 @@ export function StickyNotes() {
   const activeBoardIdRef = useRef<number | null>(null);
   const autosaveTimersRef = useRef<Map<number, number>>(new Map());
   const boardLoadRequestIdRef = useRef(0);
+  const notesLoadRequestIdRef = useRef(0);
   const [boards, setBoards] = useState<StickyNoteBoard[]>([]);
   const [activeBoardId, setActiveBoardId] = useState<number | null>(null);
   const [notes, setNotes] = useState<StickyNoteItem[]>([]);
@@ -328,21 +329,23 @@ export function StickyNotes() {
   }, [clearActiveBoardState, toast]);
 
   const loadNotes = useCallback(async (boardId: number) => {
+    const requestId = notesLoadRequestIdRef.current + 1;
+    notesLoadRequestIdRef.current = requestId;
     setNotesLoading(true);
     try {
       const nextNotes = await apiService.getStickyNotes(boardId);
-      if (activeBoardIdRef.current !== boardId) {
+      if (notesLoadRequestIdRef.current !== requestId || activeBoardIdRef.current !== boardId) {
         return;
       }
 
       setNotes(sortNotes(nextNotes));
     } catch (error) {
       console.error(error);
-      if (activeBoardIdRef.current === boardId) {
+      if (notesLoadRequestIdRef.current === requestId && activeBoardIdRef.current === boardId) {
         toast.error('Не удалось загрузить заметки на доске.');
       }
     } finally {
-      if (activeBoardIdRef.current === boardId) {
+      if (notesLoadRequestIdRef.current === requestId && activeBoardIdRef.current === boardId) {
         setNotesLoading(false);
       }
     }

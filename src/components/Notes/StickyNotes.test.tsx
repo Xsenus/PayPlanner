@@ -228,6 +228,35 @@ describe('StickyNotes', () => {
     expect(screen.getByDisplayValue('Рабочая заметка после переключения')).toBeTruthy();
   });
 
+  it('ignores stale notes responses when a newer refresh has already applied', async () => {
+    const staleNotes = createDeferred<StickyNoteItem[]>();
+    const freshNotes = createDeferred<StickyNoteItem[]>();
+    apiMock.getStickyNotes
+      .mockImplementationOnce(() => staleNotes.promise)
+      .mockImplementationOnce(() => freshNotes.promise);
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    await waitFor(() => expect(apiMock.getStickyNotes).toHaveBeenCalledWith(7));
+    await user.click(screen.getByTitle('Обновить'));
+    await waitFor(() => expect(apiMock.getStickyNotes).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      freshNotes.resolve([{ ...createdNote, text: 'Свежая заметка' }]);
+      await freshNotes.promise;
+    });
+    expect(await screen.findByDisplayValue('Свежая заметка')).toBeTruthy();
+
+    await act(async () => {
+      staleNotes.resolve([{ ...createdNote, text: 'Устаревшая заметка' }]);
+      await staleNotes.promise;
+    });
+
+    expect(screen.getByDisplayValue('Свежая заметка')).toBeTruthy();
+    expect(screen.queryByDisplayValue('Устаревшая заметка')).toBeNull();
+  });
+
   it('creates a note on the active board', async () => {
     const user = userEvent.setup();
     renderStickyNotes();
