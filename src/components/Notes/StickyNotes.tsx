@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent } from 'react';
 import {
   Filter,
+  LayoutGrid,
+  List,
   Lock,
   Palette,
   Pin,
@@ -53,6 +55,7 @@ type NoteConflict = {
   local: StickyNoteItem;
   server: StickyNoteItem;
 };
+type NotesViewMode = 'canvas' | 'list';
 
 function colorClass(color: StickyNoteColor): string {
   return COLORS.find((item) => item.value === color)?.className ?? COLORS[0].className;
@@ -90,6 +93,7 @@ export function StickyNotes() {
   const [memberUserId, setMemberUserId] = useState('');
   const [memberRole, setMemberRole] = useState<Exclude<StickyNoteBoardMemberRole, 'owner'>>('viewer');
   const [noteConflict, setNoteConflict] = useState<NoteConflict | null>(null);
+  const [viewMode, setViewMode] = useState<NotesViewMode>('canvas');
 
   const activeBoard = useMemo(
     () => boards.find((board) => board.id === activeBoardId) ?? null,
@@ -661,6 +665,102 @@ export function StickyNotes() {
     window.addEventListener('pointerup', handleUp, { once: true });
   };
 
+  const renderNote = (note: StickyNoteItem, mode: NotesViewMode) => {
+    const isCanvas = mode === 'canvas';
+
+    return (
+      <div
+        key={note.id}
+        onPointerDown={isCanvas ? (event) => startDrag(event, note) : undefined}
+        onClick={() => setSelectedNoteId(note.id)}
+        className={`${isCanvas ? 'absolute' : 'relative min-h-[160px] w-full'} flex flex-col rounded-sm border p-2 shadow-md ${colorClass(note.color)} ${
+          selectedNoteId === note.id ? 'ring-2 ring-slate-900/40' : ''
+        } ${isCanvas && !note.isPinned ? 'cursor-grab active:cursor-grabbing' : 'cursor-default'}`}
+        style={isCanvas
+          ? {
+            left: note.x,
+            top: note.y,
+            width: note.width,
+            height: note.height,
+            zIndex: note.zIndex,
+          }
+          : undefined}
+      >
+        <div className="mb-1 flex items-center gap-1">
+          <Palette className="h-3.5 w-3.5 text-slate-500" />
+          <select
+            value={note.color}
+            disabled={!canEditActiveBoard}
+            onChange={(event) => patchNote(note.id, { color: event.target.value as StickyNoteColor })}
+            onBlur={() => saveNote(note)}
+            className="min-w-0 flex-1 rounded border border-black/10 bg-white/60 px-1 py-0.5 text-xs"
+          >
+            {COLORS.map((item) => (
+              <option key={item.value} value={item.value}>{item.label}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => {
+              const next = { ...note, isPinned: !note.isPinned };
+              patchNote(note.id, { isPinned: next.isPinned });
+              void saveNote(next);
+            }}
+            disabled={!canEditActiveBoard}
+            className="inline-flex h-6 w-6 items-center justify-center rounded border border-black/10 bg-white/50 text-slate-700 hover:bg-white disabled:opacity-50"
+            title={note.isPinned ? 'Открепить' : 'Закрепить'}
+          >
+            {note.isPinned ? <Pin className="h-3.5 w-3.5" /> : <PinOff className="h-3.5 w-3.5" />}
+          </button>
+          <button
+            type="button"
+            onClick={() => saveNote(note)}
+            disabled={!canEditActiveBoard || savingNoteIds.has(note.id)}
+            className="inline-flex h-6 w-6 items-center justify-center rounded border border-black/10 bg-white/50 text-slate-700 hover:bg-white disabled:opacity-50"
+            title="Сохранить"
+          >
+            <Save className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => deleteNote(note.id)}
+            disabled={!canEditActiveBoard}
+            className="inline-flex h-6 w-6 items-center justify-center rounded border border-black/10 bg-white/50 text-rose-700 hover:bg-white disabled:opacity-50"
+            title="Удалить"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+        <textarea
+          value={note.text}
+          onChange={(event) => {
+            patchNote(note.id, { text: event.target.value });
+            scheduleNoteAutosave(note.id);
+          }}
+          onBlur={() => saveNote(note)}
+          readOnly={!canEditActiveBoard}
+          maxLength={4000}
+          className="min-h-0 flex-1 resize-none bg-transparent text-sm leading-snug outline-none placeholder:text-slate-500"
+          placeholder="Текст заметки"
+        />
+        <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-slate-500">
+          <span className="truncate" title={`Создал: ${note.authorUserName || 'не указан'}`}>
+            {note.lastUpdatedByUserName ? `Изменил: ${note.lastUpdatedByUserName}` : note.authorUserName || 'Автор не указан'}
+          </span>
+          <span>{note.text.length}/4000</span>
+        </div>
+        {canEditActiveBoard && isCanvas ? (
+          <button
+            type="button"
+            onPointerDown={(event) => startResize(event, note)}
+            className="absolute bottom-1 right-1 h-4 w-4 cursor-se-resize rounded-sm border-b-2 border-r-2 border-slate-400/70"
+            title="Изменить размер"
+          />
+        ) : null}
+      </div>
+    );
+  };
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if ((event.key !== 'Delete' && event.key !== 'Backspace') || !selectedNoteId || isInteractiveTarget(event.target)) {
@@ -676,8 +776,8 @@ export function StickyNotes() {
   }, [selectedNoteId, canEditActiveBoard]);
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] min-h-[620px] bg-slate-100">
-      <aside className="flex w-72 shrink-0 flex-col border-r border-slate-200 bg-white">
+    <div className="flex h-[calc(100vh-4rem)] min-h-[620px] flex-col bg-slate-100 lg:flex-row">
+      <aside className="flex w-full shrink-0 flex-col border-b border-slate-200 bg-white lg:w-72 lg:border-b-0 lg:border-r">
         <div className="border-b border-slate-200 p-3">
           <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
             <StickyNote className="h-4 w-4" />
@@ -813,6 +913,30 @@ export function StickyNotes() {
             </p>
           </div>
           <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
+            <div className="inline-flex h-9 shrink-0 rounded-md border border-slate-300 bg-white p-0.5">
+              <button
+                type="button"
+                onClick={() => setViewMode('canvas')}
+                className={`inline-flex h-8 w-8 items-center justify-center rounded text-slate-700 ${
+                  viewMode === 'canvas' ? 'bg-slate-900 text-white' : 'hover:bg-slate-50'
+                }`}
+                title="Холст"
+                aria-label="Показать холст"
+              >
+                <LayoutGrid className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('list')}
+                className={`inline-flex h-8 w-8 items-center justify-center rounded text-slate-700 ${
+                  viewMode === 'list' ? 'bg-slate-900 text-white' : 'hover:bg-slate-50'
+                }`}
+                title="Список"
+                aria-label="Показать список"
+              >
+                <List className="h-4 w-4" />
+              </button>
+            </div>
             <label className="relative min-w-[180px] max-w-xs flex-1">
               <Search className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
@@ -871,122 +995,60 @@ export function StickyNotes() {
 
         <div
           ref={boardCanvasRef}
-          onDoubleClick={handleCanvasDoubleClick}
+          onDoubleClick={viewMode === 'canvas' ? handleCanvasDoubleClick : undefined}
           className={`relative min-h-0 flex-1 overflow-auto ${
             activeBoard?.background === 'gray'
               ? 'bg-[radial-gradient(circle_at_1px_1px,#cbd5e1_1px,transparent_0)] [background-size:18px_18px]'
               : 'bg-[radial-gradient(circle_at_1px_1px,#b45309_0.7px,transparent_0)] [background-color:#c48a4b] [background-size:12px_12px]'
           }`}
         >
-          <div className="relative min-h-[900px] min-w-[1200px] p-3">
-            {notesLoading ? (
-              <div className="absolute left-4 top-4 rounded-md bg-white/90 px-3 py-2 text-sm text-slate-600 shadow-sm">
-                Загрузка заметок...
-              </div>
-            ) : null}
-
-            {!notesLoading && notes.length === 0 ? (
-              <div className="absolute left-4 top-4 rounded-md bg-white/90 px-3 py-2 text-sm text-slate-600 shadow-sm">
-                На доске пока нет заметок.
-              </div>
-            ) : null}
-
-            {!notesLoading && notes.length > 0 && filteredNotes.length === 0 ? (
-              <div className="absolute left-4 top-4 rounded-md bg-white/90 px-3 py-2 text-sm text-slate-600 shadow-sm">
-                По текущему поиску заметок нет.
-              </div>
-            ) : null}
-
-            {filteredNotes.map((note) => (
-              <div
-                key={note.id}
-                onPointerDown={(event) => startDrag(event, note)}
-                onClick={() => setSelectedNoteId(note.id)}
-                className={`absolute flex flex-col rounded-sm border p-2 shadow-md ${colorClass(note.color)} ${
-                  selectedNoteId === note.id ? 'ring-2 ring-slate-900/40' : ''
-                } ${note.isPinned ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'}`}
-                style={{
-                  left: note.x,
-                  top: note.y,
-                  width: note.width,
-                  height: note.height,
-                  zIndex: note.zIndex,
-                }}
-              >
-                <div className="mb-1 flex items-center gap-1">
-                  <Palette className="h-3.5 w-3.5 text-slate-500" />
-                  <select
-                    value={note.color}
-                    disabled={!canEditActiveBoard}
-                    onChange={(event) => patchNote(note.id, { color: event.target.value as StickyNoteColor })}
-                    onBlur={() => saveNote(note)}
-                    className="min-w-0 flex-1 rounded border border-black/10 bg-white/60 px-1 py-0.5 text-xs"
-                  >
-                    {COLORS.map((item) => (
-                      <option key={item.value} value={item.value}>{item.label}</option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const next = { ...note, isPinned: !note.isPinned };
-                      patchNote(note.id, { isPinned: next.isPinned });
-                      void saveNote(next);
-                    }}
-                    disabled={!canEditActiveBoard}
-                    className="inline-flex h-6 w-6 items-center justify-center rounded border border-black/10 bg-white/50 text-slate-700 hover:bg-white disabled:opacity-50"
-                    title={note.isPinned ? 'Открепить' : 'Закрепить'}
-                  >
-                    {note.isPinned ? <Pin className="h-3.5 w-3.5" /> : <PinOff className="h-3.5 w-3.5" />}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => saveNote(note)}
-                    disabled={!canEditActiveBoard || savingNoteIds.has(note.id)}
-                    className="inline-flex h-6 w-6 items-center justify-center rounded border border-black/10 bg-white/50 text-slate-700 hover:bg-white disabled:opacity-50"
-                    title="Сохранить"
-                  >
-                    <Save className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => deleteNote(note.id)}
-                    disabled={!canEditActiveBoard}
-                    className="inline-flex h-6 w-6 items-center justify-center rounded border border-black/10 bg-white/50 text-rose-700 hover:bg-white disabled:opacity-50"
-                    title="Удалить"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+          {viewMode === 'canvas' ? (
+            <div className="relative min-h-[900px] min-w-[1200px] p-3">
+              {notesLoading ? (
+                <div className="absolute left-4 top-4 rounded-md bg-white/90 px-3 py-2 text-sm text-slate-600 shadow-sm">
+                  Загрузка заметок...
                 </div>
-                <textarea
-                  value={note.text}
-                  onChange={(event) => {
-                    patchNote(note.id, { text: event.target.value });
-                    scheduleNoteAutosave(note.id);
-                  }}
-                  onBlur={() => saveNote(note)}
-                  readOnly={!canEditActiveBoard}
-                  maxLength={4000}
-                  className="min-h-0 flex-1 resize-none bg-transparent text-sm leading-snug outline-none placeholder:text-slate-500"
-                  placeholder="Текст заметки"
-                />
-                <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-slate-500">
-                  <span className="truncate" title={`Создал: ${note.authorUserName || 'не указан'}`}>
-                    {note.lastUpdatedByUserName ? `Изменил: ${note.lastUpdatedByUserName}` : note.authorUserName || 'Автор не указан'}
-                  </span>
-                  <span>{note.text.length}/4000</span>
+              ) : null}
+
+              {!notesLoading && notes.length === 0 ? (
+                <div className="absolute left-4 top-4 rounded-md bg-white/90 px-3 py-2 text-sm text-slate-600 shadow-sm">
+                  На доске пока нет заметок.
                 </div>
-                {canEditActiveBoard ? (
-                  <button
-                    type="button"
-                    onPointerDown={(event) => startResize(event, note)}
-                    className="absolute bottom-1 right-1 h-4 w-4 cursor-se-resize rounded-sm border-b-2 border-r-2 border-slate-400/70"
-                    title="Изменить размер"
-                  />
-                ) : null}
+              ) : null}
+
+              {!notesLoading && notes.length > 0 && filteredNotes.length === 0 ? (
+                <div className="absolute left-4 top-4 rounded-md bg-white/90 px-3 py-2 text-sm text-slate-600 shadow-sm">
+                  По текущему поиску заметок нет.
+                </div>
+              ) : null}
+
+              {filteredNotes.map((note) => renderNote(note, 'canvas'))}
+            </div>
+          ) : (
+            <div className="p-3">
+              {notesLoading ? (
+                <div className="rounded-md bg-white/90 px-3 py-2 text-sm text-slate-600 shadow-sm">
+                  Загрузка заметок...
+                </div>
+              ) : null}
+
+              {!notesLoading && notes.length === 0 ? (
+                <div className="rounded-md bg-white/90 px-3 py-2 text-sm text-slate-600 shadow-sm">
+                  На доске пока нет заметок.
+                </div>
+              ) : null}
+
+              {!notesLoading && notes.length > 0 && filteredNotes.length === 0 ? (
+                <div className="rounded-md bg-white/90 px-3 py-2 text-sm text-slate-600 shadow-sm">
+                  По текущему поиску заметок нет.
+                </div>
+              ) : null}
+
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                {filteredNotes.map((note) => renderNote(note, 'list'))}
               </div>
-            ))}
-          </div>
+            </div>
+          )}
 
           {deletedNoteId ? (
             <div className="sticky bottom-3 left-3 ml-3 inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-lg">

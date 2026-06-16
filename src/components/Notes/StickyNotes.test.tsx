@@ -166,6 +166,19 @@ describe('StickyNotes', () => {
     expect(screen.getByDisplayValue('Позвонить клиенту')).toBeTruthy();
   });
 
+  it('switches notes to the compact list view', async () => {
+    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Напомнить бухгалтерии' }]);
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    await screen.findByDisplayValue('Напомнить бухгалтерии');
+    await user.click(screen.getByRole('button', { name: 'Показать список' }));
+
+    expect(screen.getByRole('button', { name: 'Показать холст' })).toBeTruthy();
+    expect(screen.getByDisplayValue('Напомнить бухгалтерии')).toBeTruthy();
+  });
+
   it('restores a deleted note from the undo action', async () => {
     apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Удаляемая заметка' }]);
     vi.spyOn(window, 'confirm').mockReturnValue(true);
