@@ -533,6 +533,8 @@ export function StickyNotes() {
       return;
     }
 
+    const requestedActiveBoardId = activeBoardIdRef.current;
+
     setCreatingBoard(true);
     try {
       const board = await apiService.createStickyNoteBoard({
@@ -545,8 +547,10 @@ export function StickyNotes() {
           ? current.map((item) => (item.id === board.id ? board : item))
           : [...current, board]
       ));
-      setActiveBoardId(board.id);
-      setNewBoardTitle('');
+      if (activeBoardIdRef.current === requestedActiveBoardId) {
+        setActiveBoardId(board.id);
+      }
+      setNewBoardTitle((current) => (current.trim() === title ? '' : current));
     } catch (error) {
       console.error(error);
       toast.error('Не удалось создать доску.');

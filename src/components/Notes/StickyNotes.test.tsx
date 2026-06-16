@@ -378,6 +378,45 @@ describe('StickyNotes', () => {
     expect(screen.queryByText('Рабочая доска')).toBeNull();
   });
 
+  it('does not switch boards or clear a new draft after a late board creation response', async () => {
+    const createBoardResponse = createDeferred<StickyNoteBoard>();
+    apiMock.getStickyNoteBoards.mockResolvedValue([board, personalBoard]);
+    apiMock.createStickyNoteBoard.mockImplementationOnce(() => createBoardResponse.promise);
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    await screen.findAllByText('Рабочая доска');
+    const titleInput = screen.getByPlaceholderText('Новая доска');
+    await user.type(titleInput, 'Новая общая доска');
+    await user.click(screen.getByRole('button', { name: 'Общая' }));
+    await waitFor(() => expect(apiMock.createStickyNoteBoard).toHaveBeenCalledWith({
+      title: 'Новая общая доска',
+      visibility: 'shared',
+      background: 'cork',
+    }));
+
+    await user.click(screen.getByRole('button', { name: /Мои заметки/i }));
+    await user.clear(titleInput);
+    await user.type(titleInput, 'Следующая доска');
+    await waitFor(() => expect(window.localStorage.getItem('payplanner.stickyNotes.activeBoardId')).toBe('9'));
+
+    await act(async () => {
+      createBoardResponse.resolve({
+        ...board,
+        id: 13,
+        title: 'Новая общая доска',
+        sortOrder: 2,
+      });
+      await createBoardResponse.promise;
+    });
+
+    expect(screen.getByRole('button', { name: /Новая общая доска/i })).toBeTruthy();
+    expect(window.localStorage.getItem('payplanner.stickyNotes.activeBoardId')).toBe('9');
+    expect(titleInput).toHaveProperty('value', 'Следующая доска');
+    expect(apiMock.getStickyNotes).not.toHaveBeenCalledWith(13);
+  });
+
   it('disables note creation when the board does not allow creating notes', async () => {
     apiMock.getStickyNoteBoards.mockResolvedValue([{ ...board, canCreateNotes: false }]);
 
