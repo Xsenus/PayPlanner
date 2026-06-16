@@ -314,6 +314,23 @@ describe('StickyNotes', () => {
     })));
   });
 
+  it('saves the current textarea value with Ctrl+Enter', async () => {
+    const user = userEvent.setup();
+    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Быстрая заметка' }]);
+    apiMock.updateStickyNote.mockResolvedValue({ ...createdNote, text: 'Быстрая заметка готова', version: 2 });
+
+    renderStickyNotes();
+
+    const textarea = await screen.findByDisplayValue('Быстрая заметка');
+    await user.type(textarea, ' готова');
+    await user.keyboard('{Control>}{Enter}{/Control}');
+
+    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledWith(11, expect.objectContaining({
+      text: 'Быстрая заметка готова',
+      version: 1,
+    })));
+  });
+
   it('shows a conflict panel without losing the local text', async () => {
     const serverNote = { ...createdNote, text: 'Версия сервера', version: 2 };
     apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Моя версия', version: 1 }]);

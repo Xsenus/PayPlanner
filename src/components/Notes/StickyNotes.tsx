@@ -836,6 +836,12 @@ export function StickyNotes() {
             patchNote(note.id, { text: event.target.value });
             scheduleNoteAutosave(note.id);
           }}
+          onKeyDown={(event) => {
+            if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+              event.preventDefault();
+              void saveNote({ ...note, text: event.currentTarget.value });
+            }
+          }}
           onBlur={(event) => saveNote({ ...note, text: event.currentTarget.value })}
           readOnly={!canEditActiveBoard}
           maxLength={4000}
