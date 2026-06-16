@@ -113,6 +113,9 @@ const {
 });
 
 const permissionsState = vi.hoisted(() => ({
+  paymentsCanCreate: true,
+  paymentsCanEdit: true,
+  paymentsCanDelete: true,
   paymentsCanExport: true,
 }));
 
@@ -141,7 +144,13 @@ vi.mock('../../hooks/useRolePermissions', () => ({
       cases: { ...section },
       accounts: { ...section },
       acts: { ...section },
-      payments: { ...section, canExport: permissionsState.paymentsCanExport },
+      payments: {
+        ...section,
+        canCreate: permissionsState.paymentsCanCreate,
+        canEdit: permissionsState.paymentsCanEdit,
+        canDelete: permissionsState.paymentsCanDelete,
+        canExport: permissionsState.paymentsCanExport,
+      },
       contracts: { ...section },
       dictionaries: { ...section },
       roles: { ...section },
@@ -396,6 +405,9 @@ describe('MoneyOperations integration', () => {
     updateCashOrderMock.mockReset();
     updateMoneyOperationMock.mockReset();
     upsertUserSettingMock.mockReset();
+    permissionsState.paymentsCanCreate = true;
+    permissionsState.paymentsCanEdit = true;
+    permissionsState.paymentsCanDelete = true;
     permissionsState.paymentsCanExport = true;
     window.localStorage.clear();
     window.sessionStorage.clear();
@@ -2123,6 +2135,32 @@ describe('MoneyOperations integration', () => {
     await waitFor(() => expect(createCashOrderFromPaymentMock).toHaveBeenCalledWith(77));
     expect(toastSuccessMock).toHaveBeenCalledWith('Создан кассовый ордер ПКО-2026-0001.', 'Касса');
     await waitFor(() => expect(getCashOrderRegisterMock).toHaveBeenCalledTimes(2));
+  }, 15000);
+
+  it('hides cash order creation actions without payment create permission', async () => {
+    permissionsState.paymentsCanCreate = false;
+    operations = [
+      createOperation({
+        id: -77,
+        source: 'Cash',
+        direction: 'Income',
+        accountName: '33',
+        counterpartyName: 'Клиент без права создания',
+        amount: 25000,
+        isReadonly: true,
+        relatedPaymentId: 77,
+        canCreateCashOrder: true,
+      }),
+    ];
+
+    render(<MoneyOperations source="Cash" />);
+
+    await screen.findByText('Клиент без права создания');
+    expect(screen.queryByRole('button', { name: 'Создать ПКО' })).toBeNull();
+    await screen.findByText('Кассовые ордера');
+    expect(screen.queryByRole('button', { name: 'Создать ордер' })).toBeNull();
+    expect(createCashOrderFromPaymentMock).not.toHaveBeenCalled();
+    expect(createCashOrderMock).not.toHaveBeenCalled();
   }, 15000);
 
   it('creates a cash order for a manual cash operation', async () => {

@@ -143,6 +143,13 @@ public class MoneyOperationsController : ControllerBase
     private Task<DataVisibilityAccess?> ResolveMoneyVisibilityAsync(CancellationToken ct)
         => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
 
+    private async Task<ForbidResult?> RequirePaymentsPermissionAsync(
+        Func<RolePermissionValues, bool> isAllowed,
+        CancellationToken ct)
+        => await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Payments, isAllowed, ct)
+            ? null
+            : Forbid();
+
     private async Task<bool> CanExportMoneyOperationsAsync(CancellationToken ct)
     {
         var userId = GetCurrentUserId();
@@ -761,6 +768,11 @@ public class MoneyOperationsController : ControllerBase
         [FromQuery] string? accountName,
         CancellationToken ct = default)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var results = await SqliteRetryHelper.ExecuteAsync(async cancellationToken =>
         {
             var query = _db.MoneyBalanceReconciliationResults.AsNoTracking().AsQueryable();
@@ -805,6 +817,11 @@ public class MoneyOperationsController : ControllerBase
         [FromQuery] string? accountName,
         CancellationToken ct = default)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var visibility = await ResolveMoneyVisibilityAsync(ct);
         if (visibility is null)
         {
@@ -1729,6 +1746,11 @@ public class MoneyOperationsController : ControllerBase
         int id,
         CancellationToken ct)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var operation = await _db.MoneyOperations
             .AsNoTracking()
             .FirstOrDefaultAsync(item => item.Id == id, ct);
@@ -1862,6 +1884,11 @@ public class MoneyOperationsController : ControllerBase
     [HttpPost("{id:int}/ignore")]
     public async Task<IActionResult> Ignore(int id, CancellationToken ct)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var operation = await _db.MoneyOperations.FirstOrDefaultAsync(item => item.Id == id, ct);
         if (operation is null)
         {
@@ -1891,6 +1918,11 @@ public class MoneyOperationsController : ControllerBase
         [FromBody] LinkMoneyOperationInvoiceRequest request,
         CancellationToken ct)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         if (request.InvoiceId <= 0)
         {
             return BadRequest("Не выбран счёт для сверки.");
@@ -1927,6 +1959,11 @@ public class MoneyOperationsController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] MoneyOperation model, CancellationToken ct = default)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanCreate, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         if (model.Amount < 0)
         {
             return BadRequest("Сумма денежной операции не может быть отрицательной.");
@@ -2000,6 +2037,11 @@ public class MoneyOperationsController : ControllerBase
         [FromBody] MoneyOperationTransferRequest request,
         CancellationToken ct = default)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanCreate, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         if (request.Amount <= 0)
         {
             return BadRequest("Сумма перевода должна быть больше нуля.");
@@ -2123,6 +2165,11 @@ public class MoneyOperationsController : ControllerBase
     [RequestSizeLimit(MaxStatementFileSizeBytes)]
     public async Task<ActionResult<BankStatementImportResultDto>> ImportBankStatement(IFormFile? file, CancellationToken ct)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanCreate, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         if (file is null || file.Length == 0)
         {
             return BadRequest("Файл выписки не выбран.");
@@ -2242,6 +2289,11 @@ public class MoneyOperationsController : ControllerBase
     [HttpPost("bank-statement/auto-import/run")]
     public async Task<ActionResult<BankStatementAutoImportRunResultDto>> RunBankStatementAutoImport(CancellationToken ct)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanCreate, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var userId = GetCurrentUserId();
         if (userId is null)
         {
@@ -2427,6 +2479,11 @@ public class MoneyOperationsController : ControllerBase
     [HttpPost("bank-statement/imports/{batchId:int}/rollback")]
     public async Task<ActionResult<BankStatementImportRollbackResultDto>> RollbackBankStatementImport(int batchId, CancellationToken ct)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var batch = await _db.BankStatementImportBatches
             .Include(item => item.Rows)
             .FirstOrDefaultAsync(item => item.Id == batchId, ct);
@@ -2528,6 +2585,11 @@ public class MoneyOperationsController : ControllerBase
     [HttpPost("bank-statement/imports/{batchId:int}/reprocess")]
     public async Task<ActionResult<BankStatementImportResultDto>> ReprocessBankStatementImport(int batchId, CancellationToken ct)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanCreate, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var batch = await _db.BankStatementImportBatches
             .Include(item => item.Rows)
                 .ThenInclude(row => row.MoneyOperation)
@@ -2579,6 +2641,11 @@ public class MoneyOperationsController : ControllerBase
     [HttpPut("{id:int}")]
     public async Task<IActionResult> Update(int id, [FromBody] MoneyOperation model, CancellationToken ct = default)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var visibility = await ResolveMoneyVisibilityAsync(ct);
         if (visibility is null)
         {
@@ -2707,6 +2774,11 @@ public class MoneyOperationsController : ControllerBase
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanDelete, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var visibility = await ResolveMoneyVisibilityAsync(ct);
         if (visibility is null)
         {

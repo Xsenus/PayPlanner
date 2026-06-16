@@ -764,6 +764,22 @@ function mapCashOrderToForm(order: CashOrder): CashOrder {
   };
 }
 
+function formatCashOrderOrigin(order: CashOrder) {
+  if (order.originType === 'payment' || order.paymentId) {
+    return order.paymentId ? `Платеж #${order.paymentId}` : 'Платеж';
+  }
+
+  if (order.originType === 'moneyOperation' || order.moneyOperationId) {
+    return order.moneyOperationId ? `Операция денег #${order.moneyOperationId}` : 'Операция денег';
+  }
+
+  if (order.originType === 'inventory') {
+    return 'Инвентаризация кассы';
+  }
+
+  return 'Ручной ордер';
+}
+
 function CashOrderModal({
   order,
   open,
@@ -777,6 +793,9 @@ function CashOrderModal({
   onCopy,
   onDownloadPdf,
   onPrint,
+  canCreate,
+  canEdit,
+  canDelete,
 }: {
   order: CashOrder | null;
   open: boolean;
@@ -790,6 +809,9 @@ function CashOrderModal({
   onCopy: (order: CashOrder) => Promise<void>;
   onDownloadPdf: (id: number) => Promise<void>;
   onPrint: (id: number) => void;
+  canCreate: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
 }) {
   const [form, setForm] = useState<CashOrder | null>(order ? mapCashOrderToForm(order) : null);
   const [error, setError] = useState<string | null>(null);
@@ -827,6 +849,10 @@ function CashOrderModal({
   const paymentLabel = form.paymentId ? `#${form.paymentId}` : '—';
   const invoiceLabel = form.invoiceId ? `#${form.invoiceId}` : '—';
   const operationLabel = form.moneyOperationId ? `#${form.moneyOperationId}` : '—';
+  const originLabel = formatCashOrderOrigin(form);
+  const createdByLabel = form.createdByUserName || (form.createdByUserId ? `#${form.createdByUserId}` : '—');
+  const updatedByLabel = form.updatedByUserName || (form.updatedByUserId ? `#${form.updatedByUserId}` : '—');
+  const canSaveCurrentOrder = isPersisted ? canEdit : canCreate;
 
   const setField = <K extends keyof CashOrder>(key: K, value: CashOrder[K]) => {
     setForm((prev) => (prev ? { ...prev, [key]: value } : prev));
@@ -834,6 +860,11 @@ function CashOrderModal({
 
   const handleSave = async () => {
     setError(null);
+    if (!canSaveCurrentOrder) {
+      setError('У вас нет прав на сохранение кассового ордера.');
+      return;
+    }
+
     if (form.amount <= 0) {
       setError('Сумма кассового ордера должна быть больше нуля.');
       return;
@@ -997,6 +1028,10 @@ function CashOrderModal({
 
           <div className="mt-5 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600 md:grid-cols-4">
             <div>
+              <div className="text-xs uppercase text-slate-400">Источник</div>
+              <div className="mt-1 font-medium text-slate-800">{originLabel}</div>
+            </div>
+            <div>
               <div className="text-xs uppercase text-slate-400">Клиент</div>
               <div className="mt-1 font-medium text-slate-800">{clientLabel}</div>
             </div>
@@ -1015,10 +1050,12 @@ function CashOrderModal({
             <div>
               <div className="text-xs uppercase text-slate-400">Создан</div>
               <div className="mt-1 font-medium text-slate-800">{formatDate(form.createdAt, timeZoneId)}</div>
+              <div className="mt-0.5 text-xs text-slate-500">{createdByLabel}</div>
             </div>
             <div>
               <div className="text-xs uppercase text-slate-400">Обновлён</div>
               <div className="mt-1 font-medium text-slate-800">{form.updatedAt ? formatDate(form.updatedAt, timeZoneId) : '—'}</div>
+              <div className="mt-0.5 text-xs text-slate-500">{updatedByLabel}</div>
             </div>
           </div>
         </div>
@@ -1067,7 +1104,7 @@ function CashOrderModal({
             <button
               type="button"
               onClick={() => void onCopy(form)}
-              disabled={!isPersisted || isSaving}
+              disabled={!isPersisted || isSaving || !canEdit}
               className="inline-flex items-center gap-2 rounded-lg border border-blue-200 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50">
               <Copy className="h-4 w-4" />
               Копировать
@@ -1076,7 +1113,7 @@ function CashOrderModal({
               <button
                 type="button"
                 onClick={() => void onPostOrder(form)}
-                disabled={isSaving}
+                disabled={isSaving || !canEdit}
                 className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
                 <CheckCircle2 className="h-4 w-4" />
                 Провести
@@ -1092,7 +1129,7 @@ function CashOrderModal({
 
                 void onCancelOrder(form, cancelReason.trim() || undefined);
               }}
-              disabled={!isPersisted || isCancelled || isSaving}
+              disabled={!isPersisted || isCancelled || isSaving || !canEdit}
               className="inline-flex items-center gap-2 rounded-lg border border-rose-200 px-3 py-2 text-sm font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50">
               <Ban className="h-4 w-4" />
               {confirmingCancel ? 'Подтвердить отмену' : 'Отменить'}
@@ -1116,7 +1153,7 @@ function CashOrderModal({
 
                   void onDeleteOrder(form);
                 }}
-                disabled={isSaving}
+                disabled={isSaving || !canDelete}
                 className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50">
                 <Trash2 className="h-4 w-4" />
                 {confirmingDelete ? 'Подтвердить удаление' : 'Удалить'}
@@ -1141,7 +1178,7 @@ function CashOrderModal({
             <button
               type="button"
               onClick={() => void handleSave()}
-              disabled={isCancelled || isSaving}
+              disabled={isCancelled || isSaving || !canSaveCurrentOrder}
               className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
               <Save className="h-4 w-4" />
               {isSaving ? 'Сохранение...' : 'Сохранить'}
@@ -1203,6 +1240,8 @@ function CashOrdersPanel({
   onCreate,
   onOpen,
   onPrint,
+  canCreate,
+  canExport,
 }: {
   from: string;
   to: string;
@@ -1212,6 +1251,8 @@ function CashOrdersPanel({
   onCreate: () => void;
   onOpen: (cashOrderId: number) => void;
   onPrint: (cashOrderId: number) => void;
+  canCreate: boolean;
+  canExport: boolean;
 }) {
   const [orders, setOrders] = useState<CashOrder[]>([]);
   const [cashBook, setCashBook] = useState<CashBookSummary | null>(null);
@@ -1312,16 +1353,19 @@ function CashOrdersPanel({
           <p className="text-sm text-slate-500">ПКО и РКО по выбранному периоду кассы</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={onCreate}
-            className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700">
-            <Plus className="h-4 w-4" />
-            Создать ордер
-          </button>
+          {canCreate && (
+            <button
+              type="button"
+              onClick={onCreate}
+              className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700">
+              <Plus className="h-4 w-4" />
+              Создать ордер
+            </button>
+          )}
           <button
             type="button"
             onClick={() => void handlePrintCashBook()}
+            disabled={!canExport}
             className="inline-flex items-center gap-2 rounded-lg border border-amber-200 px-3 py-1.5 text-sm font-medium text-amber-700 hover:bg-amber-50">
             <Printer className="h-4 w-4" />
             Кассовая книга
@@ -1329,6 +1373,7 @@ function CashOrdersPanel({
           <button
             type="button"
             onClick={() => void handlePrintRegister()}
+            disabled={!canExport}
             className="inline-flex items-center gap-2 rounded-lg border border-blue-200 px-3 py-1.5 text-sm font-medium text-blue-700 hover:bg-blue-50">
             <Printer className="h-4 w-4" />
             Журнал
@@ -1474,6 +1519,7 @@ function CashOrdersPanel({
             <col style={{ width: 120 }} />
             <col style={{ width: 150 }} />
             <col style={{ width: 220 }} />
+            <col style={{ width: 190 }} />
             <col style={{ width: 260 }} />
             <col style={{ width: 90 }} />
           </colgroup>
@@ -1484,6 +1530,7 @@ function CashOrdersPanel({
               <th className="px-3 py-2 text-left font-medium">Тип</th>
               <th className="px-3 py-2 text-left font-medium">Сумма</th>
               <th className="px-3 py-2 text-left font-medium">Плательщик</th>
+              <th className="px-3 py-2 text-left font-medium">Источник</th>
               <th className="px-3 py-2 text-left font-medium">Основание</th>
               <th className="px-3 py-2 text-left font-medium">Действия</th>
             </tr>
@@ -1491,19 +1538,19 @@ function CashOrdersPanel({
           <tbody className="divide-y divide-slate-100">
             {loading ? (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
+                <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
                   Загрузка кассовых ордеров...
                 </td>
               </tr>
             ) : error ? (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-red-500">
+                <td colSpan={8} className="px-4 py-8 text-center text-red-500">
                   {error}
                 </td>
               </tr>
             ) : orders.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
+                <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
                   За выбранный период кассовых ордеров нет.
                 </td>
               </tr>
@@ -1532,6 +1579,7 @@ function CashOrdersPanel({
                   </td>
                   <td className="px-3 py-2 font-medium">{formatMoney(order.amount)} ₽</td>
                   <td className="px-3 py-2 text-slate-700">{order.payerName ?? order.clientName ?? '—'}</td>
+                  <td className="px-3 py-2 text-slate-700">{formatCashOrderOrigin(order)}</td>
                   <td className="px-3 py-2">
                     <div className="line-clamp-2 text-slate-700" title={order.basis ?? undefined}>
                       {order.basis ?? '—'}
@@ -2230,6 +2278,9 @@ export function MoneyOperations({
   const profileTimeZoneId = useUserTimeZone();
   const permissions = useRolePermissions(user?.role?.id);
   const canExportJournal = permissions.payments.canExport;
+  const canCreateMoneyOperations = permissions.payments.canCreate;
+  const canEditMoneyOperations = permissions.payments.canEdit;
+  const canDeleteMoneyOperations = permissions.payments.canDelete;
   const { setActiveTab } = useTabNavigation();
   const toast = useToast();
   const [showFilters, setShowFilters] = useState(false);
@@ -2456,10 +2507,10 @@ export function MoneyOperations({
   const selectedOperationIdSet = useMemo(() => new Set(selectedOperationIds), [selectedOperationIds]);
   const selectableOperationIds = useMemo(
     () =>
-      selectionEnabled
+      selectionEnabled && canDeleteMoneyOperations
         ? items.filter((item) => !item.isReadonly && item.id > 0 && !isAppliedToInvoice(item)).map((item) => item.id)
         : [],
-    [items, selectionEnabled],
+    [canDeleteMoneyOperations, items, selectionEnabled],
   );
   const selectedOperationsCount = selectedOperationIds.length;
   const moneyTableColumnCount = visibleMoneyColumns.length + 1 + (selectionEnabled ? 1 : 0);
@@ -2468,14 +2519,14 @@ export function MoneyOperations({
   const someVisibleOperationsSelected =
     selectableOperationIds.some((id) => selectedOperationIdSet.has(id)) && !allVisibleOperationsSelected;
   useEffect(() => {
-    if (!selectionEnabled) {
+    if (!selectionEnabled || !canDeleteMoneyOperations) {
       setSelectedOperationIds([]);
       return;
     }
 
     const availableIds = new Set(selectableOperationIds);
     setSelectedOperationIds((current) => current.filter((id) => availableIds.has(id)));
-  }, [selectableOperationIds, selectionEnabled]);
+  }, [canDeleteMoneyOperations, selectableOperationIds, selectionEnabled]);
   const selectedAccountSummary = useMemo(
     () => accountSummaries.find((account) => account.accountName === accountName) ?? null,
     [accountName, accountSummaries],
@@ -3057,6 +3108,11 @@ export function MoneyOperations({
   };
 
   const handleCreateCashInventory = async () => {
+    if (!canEditMoneyOperations) {
+      toast.error('У вас нет прав на изменение операций кассы.', 'Касса');
+      return;
+    }
+
     const actualBalance = Number(cashInventoryActualBalance);
     if (!Number.isFinite(actualBalance) || actualBalance < 0) {
       toast.error('Укажите фактический остаток кассы.', 'Касса');
@@ -3092,6 +3148,11 @@ export function MoneyOperations({
   };
 
   const handleRunBankAutoImport = async () => {
+    if (!canCreateMoneyOperations) {
+      toast.error('У вас нет прав на создание операций денег.', 'Выписка банка');
+      return;
+    }
+
     setBankAutoImportRunning(true);
     try {
       const result = await apiService.runBankStatementAutoImport();
@@ -3118,6 +3179,11 @@ export function MoneyOperations({
 
   const handleRunBalanceReconciliation = async () => {
     if (source === 'Total') {
+      return;
+    }
+
+    if (!canEditMoneyOperations) {
+      toast.error('У вас нет прав на изменение операций денег.', 'Сверка остатков');
       return;
     }
 
@@ -3367,6 +3433,11 @@ export function MoneyOperations({
   };
 
   const handleCreateStandaloneCashOrder = () => {
+    if (!canCreateMoneyOperations) {
+      toast.error('У вас нет прав на создание кассового ордера.', 'Касса');
+      return;
+    }
+
     const cashAccountName = accountName || selectedMoneyAccount?.name || '';
     const draft: CashOrder = {
       id: 0,
@@ -3398,6 +3469,12 @@ export function MoneyOperations({
   };
 
   const handleSaveCashOrder = async (payload: CashOrder) => {
+    const canSaveCashOrder = payload.id > 0 ? canEditMoneyOperations : canCreateMoneyOperations;
+    if (!canSaveCashOrder) {
+      toast.error('У вас нет прав на сохранение кассового ордера.', 'Касса');
+      return;
+    }
+
     setCashOrderSaving(true);
     try {
       const isNewOrder = payload.id <= 0;
@@ -3418,6 +3495,11 @@ export function MoneyOperations({
   };
 
   const handleCancelCashOrder = async (order: CashOrder, reason?: string) => {
+    if (!canEditMoneyOperations) {
+      toast.error('У вас нет прав на отмену кассового ордера.', 'Касса');
+      return;
+    }
+
     setCashOrderSaving(true);
     try {
       const cancelled = await apiService.cancelCashOrder(order.id, reason);
@@ -3435,6 +3517,11 @@ export function MoneyOperations({
   };
 
   const handlePostCashOrder = async (order: CashOrder) => {
+    if (!canEditMoneyOperations) {
+      toast.error('У вас нет прав на проведение кассового ордера.', 'Касса');
+      return;
+    }
+
     setCashOrderSaving(true);
     try {
       const posted = await apiService.postCashOrder(order.id);
@@ -3452,6 +3539,11 @@ export function MoneyOperations({
   };
 
   const handleDeleteCashOrder = async (order: CashOrder) => {
+    if (!canDeleteMoneyOperations) {
+      toast.error('У вас нет прав на удаление кассового ордера.', 'Касса');
+      return;
+    }
+
     setCashOrderSaving(true);
     try {
       await apiService.deleteCashOrder(order.id);
@@ -3470,6 +3562,11 @@ export function MoneyOperations({
   };
 
   const handleCopyCashOrder = async (order: CashOrder) => {
+    if (!canEditMoneyOperations) {
+      toast.error('У вас нет прав на копирование кассового ордера.', 'Касса');
+      return;
+    }
+
     setCashOrderSaving(true);
     try {
       const copied = await apiService.copyCashOrder(order.id);
@@ -3505,6 +3602,11 @@ export function MoneyOperations({
   };
 
   const handleCreateCashOrder = async (item: MoneyOperation) => {
+    if (!canCreateMoneyOperations) {
+      toast.error('У вас нет прав на создание кассового ордера.', 'Касса');
+      return;
+    }
+
     if (!item.relatedPaymentId && item.id <= 0) return;
 
     try {
@@ -3524,6 +3626,10 @@ export function MoneyOperations({
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
+    if (!canCreateMoneyOperations) {
+      toast.error('У вас нет прав на импорт операций денег.', 'Выписка банка');
+      return;
+    }
 
     setBankStatementImporting(true);
     setBankStatementImportResult(null);
@@ -3579,6 +3685,11 @@ export function MoneyOperations({
   };
 
   const handleRollbackBankImport = async (batchId: number) => {
+    if (!canEditMoneyOperations) {
+      toast.error('У вас нет прав на откат импорта выписки.', 'Выписка банка');
+      return;
+    }
+
     if (!window.confirm('Откатить импорт выписки? Будут удалены только несверенные операции без связанных кассовых ордеров.')) {
       return;
     }
@@ -3605,6 +3716,11 @@ export function MoneyOperations({
   };
 
   const handleReprocessBankImport = async (batchId: number) => {
+    if (!canCreateMoneyOperations) {
+      toast.error('У вас нет прав на повторную обработку выписки.', 'Выписка банка');
+      return;
+    }
+
     setBankImportReprocessLoading(true);
     try {
       const result = await apiService.reprocessBankStatementImport(batchId);
@@ -3780,6 +3896,11 @@ export function MoneyOperations({
   }, [page, source, totalPages]);
 
   const savePreparedMoneyOperation = async (prepared: MoneyOperation) => {
+    if (editingOperation ? !canEditMoneyOperations : !canCreateMoneyOperations) {
+      toast.error('У вас нет прав на сохранение операции денег.', 'Деньги');
+      return;
+    }
+
     setSaving(true);
     try {
       if (editingOperation) {
@@ -3882,12 +4003,14 @@ export function MoneyOperations({
   };
 
   const handleEdit = (item: MoneyOperation) => {
+    if (!canEditMoneyOperations) return;
     if (item.isReadonly || item.id <= 0) return;
     setEditingOperation(item);
     setModalOpen(true);
   };
 
   const handleDelete = (item: MoneyOperation) => {
+    if (!canDeleteMoneyOperations) return;
     if (item.isReadonly || item.id <= 0) return;
     setConfirmDelete(item);
   };
@@ -3908,6 +4031,11 @@ export function MoneyOperations({
 
   const confirmDeleteOperation = async () => {
     if (!confirmDelete) return;
+    if (!canDeleteMoneyOperations) {
+      setConfirmDelete(null);
+      return;
+    }
+
     try {
       await apiService.deleteMoneyOperation(confirmDelete.id);
       toast.success('Операция удалена.', 'Деньги');
@@ -3925,6 +4053,10 @@ export function MoneyOperations({
 
   const confirmBulkDeleteOperations = async () => {
     if (selectedOperationIds.length === 0) return;
+    if (!canDeleteMoneyOperations) {
+      setConfirmBulkDeleteOpen(false);
+      return;
+    }
 
     const idsToDelete = [...selectedOperationIds];
     try {
@@ -4170,7 +4302,7 @@ export function MoneyOperations({
                                 <button
                                   type="button"
                                   onClick={() => handleEdit(item)}
-                                  disabled={Boolean(item.isReadonly) || item.id <= 0}
+                                  disabled={Boolean(item.isReadonly) || item.id <= 0 || !canEditMoneyOperations}
                                   className="rounded-md border border-amber-200 p-2 text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-40"
                                   aria-label="Уточнить"
                                   title="Уточнить операцию и привязать счёт">
@@ -4180,7 +4312,7 @@ export function MoneyOperations({
                               <button
                                 type="button"
                                 onClick={() => handleEdit(item)}
-                                disabled={Boolean(item.isReadonly) || item.id <= 0}
+                                disabled={Boolean(item.isReadonly) || item.id <= 0 || !canEditMoneyOperations}
                                 className="rounded-md border border-slate-200 p-2 text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
                                 aria-label="Изменить">
                                 <Pencil className="h-4 w-4" />
@@ -4255,7 +4387,7 @@ export function MoneyOperations({
               <button
                 className="flex items-center gap-2 rounded-lg border border-blue-500 px-4 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
                 type="button"
-                disabled={bankStatementImporting}
+                disabled={bankStatementImporting || !canCreateMoneyOperations}
                 onClick={() => bankStatementInputRef.current?.click()}>
                 <UploadCloud className="h-4 w-4" />
                 {bankStatementImporting ? 'Загружаем...' : 'Загрузить выписку'}
@@ -4266,7 +4398,7 @@ export function MoneyOperations({
                     type="checkbox"
                     role="switch"
                     checked={bankAutoImportSettings.enabled}
-                    disabled={bankAutoImportLoading || bankAutoImportSaving}
+                    disabled={bankAutoImportLoading || bankAutoImportSaving || !canCreateMoneyOperations}
                     onChange={(event) => updateBankAutoImportSettings({ enabled: event.target.checked })}
                     className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                   />
@@ -4275,7 +4407,7 @@ export function MoneyOperations({
                 <button
                   type="button"
                   onClick={() => void saveBankAutoImportSettings()}
-                  disabled={bankAutoImportLoading || bankAutoImportSaving}
+                  disabled={bankAutoImportLoading || bankAutoImportSaving || !canCreateMoneyOperations}
                   className="rounded-md border border-blue-200 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60">
                   {bankAutoImportSaving ? 'Сохранение...' : 'Сохранить'}
                 </button>
@@ -4327,7 +4459,7 @@ export function MoneyOperations({
               <button
                 type="button"
                 onClick={() => void saveBankAutoImportSettings()}
-                disabled={bankAutoImportLoading || bankAutoImportSaving}
+                disabled={bankAutoImportLoading || bankAutoImportSaving || !canCreateMoneyOperations}
                 className="inline-flex w-full items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60">
                 {bankAutoImportSaving ? 'Сохранение...' : 'Сохранить'}
               </button>
@@ -4336,7 +4468,7 @@ export function MoneyOperations({
               <button
                 type="button"
                 onClick={() => void handleRunBankAutoImport()}
-                disabled={bankAutoImportLoading || bankAutoImportSaving || bankAutoImportRunning}
+                disabled={bankAutoImportLoading || bankAutoImportSaving || bankAutoImportRunning || !canCreateMoneyOperations}
                 className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-blue-200 bg-white px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60">
                 <RefreshCw className={`h-4 w-4 ${bankAutoImportRunning ? 'animate-spin' : ''}`} />
                 {bankAutoImportRunning ? 'Проверяем...' : 'Проверить'}
@@ -4472,6 +4604,7 @@ export function MoneyOperations({
                 min="0"
                 step="100"
                 value={cashInventoryActualBalance}
+                disabled={!canEditMoneyOperations}
                 onChange={(event) => setCashInventoryActualBalance(event.target.value)}
                 placeholder="0"
                 className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700"
@@ -4481,6 +4614,7 @@ export function MoneyOperations({
               Комментарий
               <input
                 value={cashInventoryComment}
+                disabled={!canEditMoneyOperations}
                 onChange={(event) => setCashInventoryComment(event.target.value)}
                 placeholder="Причина расхождения или примечание"
                 className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700"
@@ -4490,7 +4624,7 @@ export function MoneyOperations({
               <button
                 type="button"
                 onClick={() => void handleCreateCashInventory()}
-                disabled={cashInventorySaving}
+                disabled={cashInventorySaving || !canEditMoneyOperations}
                 className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60">
                 <History className="h-4 w-4" />
                 {cashInventorySaving ? 'Сохранение...' : 'Провести'}
@@ -4502,6 +4636,7 @@ export function MoneyOperations({
             <input
               type="checkbox"
               checked={cashInventoryCreateCorrection}
+              disabled={!canEditMoneyOperations}
               onChange={(event) => setCashInventoryCreateCorrection(event.target.checked)}
               className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-500"
             />
@@ -4843,7 +4978,7 @@ export function MoneyOperations({
                             onClick={() => void handleRollbackBankImport(batch.id)}
                             aria-label={`Откатить импорт выписки ${batch.fileName || `#${batch.id}`} из списка`}
                             className="inline-flex items-center gap-1.5 rounded-md border border-amber-200 px-2.5 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60"
-                            disabled={bankImportRollbackLoading || batch.status === 'RolledBack'}>
+                            disabled={bankImportRollbackLoading || batch.status === 'RolledBack' || !canEditMoneyOperations}>
                             <RotateCcw className="h-3.5 w-3.5" />
                             Откатить
                           </button>
@@ -4928,16 +5063,18 @@ export function MoneyOperations({
             <Calendar className="h-4 w-4" />
             Текущий год
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              setEditingOperation(null);
-              setModalOpen(true);
-            }}
-            className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
-            <Plus className="h-4 w-4" />
-            Добавить
-          </button>
+          {canCreateMoneyOperations && (
+            <button
+              type="button"
+              onClick={() => {
+                setEditingOperation(null);
+                setModalOpen(true);
+              }}
+              className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+              <Plus className="h-4 w-4" />
+              Добавить
+            </button>
+          )}
           <button
             type="button"
             onClick={() => void reload()}
@@ -5389,6 +5526,7 @@ export function MoneyOperations({
               <button
                 type="button"
                 onClick={() => setConfirmBulkDeleteOpen(true)}
+                disabled={!canDeleteMoneyOperations}
                 className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50">
                 <Trash2 className="h-4 w-4" />
                 Удалить выбранные
@@ -5417,7 +5555,7 @@ export function MoneyOperations({
                       aria-label="Выбрать операции на странице"
                       checked={allVisibleOperationsSelected}
                       indeterminate={someVisibleOperationsSelected}
-                      disabled={selectableOperationIds.length === 0}
+                      disabled={selectableOperationIds.length === 0 || !canDeleteMoneyOperations}
                       onChange={(event) => toggleVisibleOperationsSelection(event.target.checked)}
                     />
                   </th>
@@ -5480,7 +5618,7 @@ export function MoneyOperations({
                         <TableSelectCheckbox
                           aria-label={`Выбрать операцию ${item.id}`}
                           checked={selectedOperationIdSet.has(item.id)}
-                          disabled={item.isReadonly || item.id <= 0 || isAppliedToInvoice(item)}
+                          disabled={!canDeleteMoneyOperations || item.isReadonly || item.id <= 0 || isAppliedToInvoice(item)}
                           onChange={(event) => toggleOperationSelection(item.id, event.target.checked)}
                         />
                       </td>
@@ -5505,7 +5643,7 @@ export function MoneyOperations({
                             </span>
                           ) : null;
                         })()}
-                        {item.canCreateCashOrder && (
+                        {item.canCreateCashOrder && canCreateMoneyOperations && (
                           <button
                             type="button"
                             onClick={() => handleCreateCashOrder(item)}
@@ -5529,7 +5667,7 @@ export function MoneyOperations({
                           <button
                             type="button"
                             onClick={() => handleEdit(item)}
-                            disabled={Boolean(item.isReadonly) || item.id <= 0}
+                            disabled={Boolean(item.isReadonly) || item.id <= 0 || !canEditMoneyOperations}
                             className="rounded-md border border-amber-200 p-2 text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-40"
                             aria-label="Уточнить"
                             title="Уточнить операцию и привязать счёт">
@@ -5539,7 +5677,7 @@ export function MoneyOperations({
                         <button
                           type="button"
                           onClick={() => handleEdit(item)}
-                          disabled={Boolean(item.isReadonly) || item.id <= 0}
+                          disabled={Boolean(item.isReadonly) || item.id <= 0 || !canEditMoneyOperations}
                           className="rounded-md border border-slate-200 p-2 text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
                           aria-label="Изменить">
                           <Pencil className="h-4 w-4" />
@@ -5547,7 +5685,7 @@ export function MoneyOperations({
                         <button
                           type="button"
                           onClick={() => handleDelete(item)}
-                          disabled={Boolean(item.isReadonly) || item.id <= 0 || isAppliedToInvoice(item)}
+                          disabled={Boolean(item.isReadonly) || item.id <= 0 || isAppliedToInvoice(item) || !canDeleteMoneyOperations}
                           className="rounded-md border border-red-200 p-2 text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
                           aria-label="Удалить"
                           title={isAppliedToInvoice(item) ? 'Операция уже зачтена в счёте' : 'Удалить'}>
@@ -5587,6 +5725,8 @@ export function MoneyOperations({
           onCreate={handleCreateStandaloneCashOrder}
           onOpen={(cashOrderId) => void handleOpenCashOrder(cashOrderId)}
           onPrint={handlePrintCashOrder}
+          canCreate={canCreateMoneyOperations}
+          canExport={canExportJournal}
         />
       )}
 
@@ -5606,6 +5746,9 @@ export function MoneyOperations({
         onCopy={handleCopyCashOrder}
         onDownloadPdf={handleDownloadCashOrderPdf}
         onPrint={handlePrintCashOrder}
+        canCreate={canCreateMoneyOperations}
+        canEdit={canEditMoneyOperations}
+        canDelete={canDeleteMoneyOperations}
       />
 
       {selectedBankImport &&
@@ -5634,6 +5777,7 @@ export function MoneyOperations({
                     className="inline-flex items-center gap-2 rounded-lg border border-blue-200 px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
                     disabled={
                       bankImportReprocessLoading ||
+                      !canCreateMoneyOperations ||
                       !selectedBankImport.rows.some((row) => ['Skipped', 'Error', 'RolledBack'].includes(row.status))
                     }>
                     <RefreshCw className="h-4 w-4" />
@@ -5644,7 +5788,7 @@ export function MoneyOperations({
                     onClick={() => void handleRollbackBankImport(selectedBankImport.id)}
                     aria-label={`Откатить импорт выписки ${selectedBankImport.fileName || `#${selectedBankImport.id}`} из карточки`}
                     className="inline-flex items-center gap-2 rounded-lg border border-amber-200 px-3 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60"
-                    disabled={bankImportRollbackLoading || selectedBankImport.status === 'RolledBack'}>
+                    disabled={bankImportRollbackLoading || selectedBankImport.status === 'RolledBack' || !canEditMoneyOperations}>
                     <RotateCcw className="h-4 w-4" />
                     Откатить
                   </button>

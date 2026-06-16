@@ -27,6 +27,13 @@ public class CashOrdersController : ControllerBase
         _pdfService = pdfService;
     }
 
+    private async Task<ForbidResult?> RequirePaymentsPermissionAsync(
+        Func<RolePermissionValues, bool> isAllowed,
+        CancellationToken ct)
+        => await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Payments, isAllowed, ct)
+            ? null
+            : Forbid();
+
     [HttpGet("cashbook")]
     public async Task<ActionResult<CashBookResponseDto>> GetCashBook(
         [FromQuery] DateTime? from,
@@ -34,6 +41,11 @@ public class CashOrdersController : ControllerBase
         [FromQuery] string? accountName = null,
         CancellationToken ct = default)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         return Ok(await BuildCashBookAsync(from, to, accountName, ct));
     }
 
@@ -44,6 +56,11 @@ public class CashOrdersController : ControllerBase
         [FromQuery] string? accountName = null,
         CancellationToken ct = default)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanExport, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var cashBook = await BuildCashBookAsync(from, to, accountName, ct);
         return Content(BuildCashBookPrintHtml(cashBook), "text/html; charset=utf-8", Encoding.UTF8);
     }
@@ -54,6 +71,11 @@ public class CashOrdersController : ControllerBase
         [FromQuery] DateTime? date,
         CancellationToken ct)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanCreate, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var today = await ResolveCashOrderTodayAsync(ct);
         var effectiveDate = (date ?? today).Date;
         var number = await GenerateNumberAsync(type, effectiveDate, ct);
@@ -77,6 +99,11 @@ public class CashOrdersController : ControllerBase
         [FromQuery] string? accountName = null,
         CancellationToken ct = default)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 5, 200);
 
@@ -112,6 +139,11 @@ public class CashOrdersController : ControllerBase
         [FromQuery] string? accountName = null,
         CancellationToken ct = default)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 5, 200);
 
@@ -169,6 +201,11 @@ public class CashOrdersController : ControllerBase
         [FromQuery] string? accountName = null,
         CancellationToken ct = default)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanExport, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var query = BuildFilteredQuery(from, to, type, status, search, accountName);
         var total = await query.CountAsync(ct);
         var summary = await query
@@ -222,6 +259,11 @@ public class CashOrdersController : ControllerBase
         [FromQuery] int pageSize = 10,
         CancellationToken ct = default)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 5, 100);
 
@@ -267,6 +309,11 @@ public class CashOrdersController : ControllerBase
     [HttpPost("inventories")]
     public async Task<IActionResult> CreateInventory([FromBody] CashInventoryCreateRequest request, CancellationToken ct)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var accountName = NormalizeAccountFilter(request.AccountName);
         if (accountName is null)
         {
@@ -327,9 +374,15 @@ public class CashOrdersController : ControllerBase
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var order = await _db.CashOrders
             .Include(item => item.Client)
             .Include(item => item.Payment)
+            .Include(item => item.MoneyOperation)
             .AsNoTracking()
             .FirstOrDefaultAsync(item => item.Id == id, ct);
 
@@ -339,6 +392,11 @@ public class CashOrdersController : ControllerBase
     [HttpPost("from-payment/{paymentId:int}")]
     public async Task<IActionResult> CreateFromPayment(int paymentId, CancellationToken ct)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanCreate, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var payment = await _db.Payments
             .Include(item => item.Client)
             .Include(item => item.PaymentSource)
@@ -397,6 +455,11 @@ public class CashOrdersController : ControllerBase
     [HttpPost("from-money-operation/{operationId:int}")]
     public async Task<IActionResult> CreateFromMoneyOperation(int operationId, CancellationToken ct)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanCreate, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var operation = await _db.MoneyOperations.FirstOrDefaultAsync(item => item.Id == operationId, ct);
         if (operation is null)
         {
@@ -444,6 +507,11 @@ public class CashOrdersController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CashOrder model, CancellationToken ct)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanCreate, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         if (model.Amount <= 0m)
         {
             return BadRequest("Сумма кассового ордера должна быть больше нуля.");
@@ -474,6 +542,11 @@ public class CashOrdersController : ControllerBase
     [HttpPut("{id:int}")]
     public async Task<IActionResult> Update(int id, [FromBody] CashOrder model, CancellationToken ct)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var order = await _db.CashOrders.FirstOrDefaultAsync(item => item.Id == id, ct);
         if (order is null)
         {
@@ -514,6 +587,11 @@ public class CashOrdersController : ControllerBase
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanDelete, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var order = await _db.CashOrders.FirstOrDefaultAsync(item => item.Id == id, ct);
         if (order is null)
         {
@@ -534,6 +612,11 @@ public class CashOrdersController : ControllerBase
     [HttpPost("{id:int}/post")]
     public async Task<IActionResult> Post(int id, CancellationToken ct)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var order = await _db.CashOrders.FirstOrDefaultAsync(item => item.Id == id, ct);
         if (order is null)
         {
@@ -563,6 +646,11 @@ public class CashOrdersController : ControllerBase
     [HttpPost("{id:int}/cancel")]
     public async Task<IActionResult> Cancel(int id, [FromBody] CashOrderCancelRequest? request, CancellationToken ct)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var order = await _db.CashOrders.FirstOrDefaultAsync(item => item.Id == id, ct);
         if (order is null)
         {
@@ -584,6 +672,11 @@ public class CashOrdersController : ControllerBase
     [HttpPost("{id:int}/copy")]
     public async Task<IActionResult> Copy(int id, CancellationToken ct)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var source = await _db.CashOrders
             .AsNoTracking()
             .FirstOrDefaultAsync(item => item.Id == id, ct);
@@ -621,9 +714,15 @@ public class CashOrdersController : ControllerBase
     [HttpGet("{id:int}/print")]
     public async Task<IActionResult> Print(int id, CancellationToken ct)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var order = await _db.CashOrders
             .Include(item => item.Client)
             .Include(item => item.Payment)
+            .Include(item => item.MoneyOperation)
             .AsNoTracking()
             .FirstOrDefaultAsync(item => item.Id == id, ct);
         if (order is null)
@@ -637,9 +736,15 @@ public class CashOrdersController : ControllerBase
     [HttpGet("{id:int}/pdf")]
     public async Task<IActionResult> DownloadPdf(int id, CancellationToken ct)
     {
+        if (await RequirePaymentsPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var order = await _db.CashOrders
             .Include(item => item.Client)
             .Include(item => item.Payment)
+            .Include(item => item.MoneyOperation)
             .AsNoTracking()
             .FirstOrDefaultAsync(item => item.Id == id, ct);
         if (order is null)
@@ -771,6 +876,7 @@ public class CashOrdersController : ControllerBase
         var query = _db.CashOrders
             .Include(order => order.Client)
             .Include(order => order.Payment)
+            .Include(order => order.MoneyOperation)
             .AsNoTracking()
             .AsQueryable();
 
@@ -914,6 +1020,7 @@ public class CashOrdersController : ControllerBase
             PaymentId = order.PaymentId,
             MoneyOperationId = order.MoneyOperationId,
             InvoiceId = order.InvoiceId,
+            OriginType = ResolveCashOrderOriginType(order),
             Account = order.Account,
             PayerName = order.PayerName,
             ReceiverName = order.ReceiverName,
@@ -923,8 +1030,33 @@ public class CashOrdersController : ControllerBase
             CancelledAt = order.CancelledAt,
             CancelledReason = order.CancelledReason,
             CreatedAt = order.CreatedAt,
+            CreatedByUserId = order.CreatedByUserId,
+            CreatedByUserName = order.CreatedByUserName,
             UpdatedAt = order.UpdatedAt,
+            UpdatedByUserId = order.UpdatedByUserId,
+            UpdatedByUserName = order.UpdatedByUserName,
         };
+
+    private static string ResolveCashOrderOriginType(CashOrder order)
+    {
+        if (order.PaymentId.HasValue)
+        {
+            return "payment";
+        }
+
+        if (order.MoneyOperationId.HasValue)
+        {
+            return "moneyOperation";
+        }
+
+        if ((order.Basis ?? string.Empty).Contains("inventory", StringComparison.OrdinalIgnoreCase) ||
+            (order.Comment ?? string.Empty).Contains("inventory", StringComparison.OrdinalIgnoreCase))
+        {
+            return "inventory";
+        }
+
+        return "manual";
+    }
 
     private static CashInventoryDto Map(CashInventory inventory)
         => new()

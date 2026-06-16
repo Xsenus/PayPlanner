@@ -4799,6 +4799,65 @@ services.Id,
     }
 
     [Fact]
+    public async Task CashOrders_WithoutPaymentsViewPermission_ReturnsForbid()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateReportsUserWithPaymentsPermissionAsync(
+            db,
+            reportsCanView: true,
+            reportsCanExport: true,
+            paymentsCanView: false,
+            paymentsCanExport: false);
+        var controller = CreateController(db, CreateUserPrincipal(user.Id));
+
+        var action = await controller.CashOrders(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(action.Result);
+    }
+
+    [Fact]
+    public async Task CashOrdersExport_WithoutPaymentsExportPermission_ReturnsForbid()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateReportsUserWithPaymentsPermissionAsync(
+            db,
+            reportsCanView: true,
+            reportsCanExport: true,
+            paymentsCanView: true,
+            paymentsCanExport: false);
+        var controller = CreateController(db, CreateUserPrincipal(user.Id));
+
+        var action = await controller.ExportManagementReportExcel(
+            "cash-orders",
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(action);
+    }
+
+    [Fact]
     public async Task BankStatementImports_GroupsBatchesByStatus()
     {
         await using var db = await CreateContextAsync();
@@ -5258,6 +5317,49 @@ services.Id,
             Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
             Value = timeZoneId,
         });
+        await db.SaveChangesAsync();
+        return user;
+    }
+
+    private static async Task<User> CreateReportsUserWithPaymentsPermissionAsync(
+        PaymentContext db,
+        bool reportsCanView,
+        bool reportsCanExport,
+        bool paymentsCanView,
+        bool paymentsCanExport)
+    {
+        var role = new Role
+        {
+            Name = $"reports-payments-{Guid.NewGuid():N}",
+            Description = "Reports payments permission test role",
+        };
+        var user = new User
+        {
+            Email = $"reports-payments-{Guid.NewGuid():N}@example.test",
+            FullName = "Reports payments permission user",
+            IsActive = true,
+            Role = role,
+        };
+
+        db.Roles.Add(role);
+        db.Users.Add(user);
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                Role = role,
+                Section = RolePermissionCatalog.Reports,
+                CanView = reportsCanView,
+                CanExport = reportsCanExport,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                Role = role,
+                Section = RolePermissionCatalog.Payments,
+                CanView = paymentsCanView,
+                CanExport = paymentsCanExport,
+                ViewScope = DataVisibilityScope.All,
+            });
         await db.SaveChangesAsync();
         return user;
     }

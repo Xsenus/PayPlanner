@@ -656,6 +656,35 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task Create_ReturnsForbidWhenPaymentCreateIsDenied()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "money-create-denied@example.test", "Money Create Denied");
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = user.RoleId,
+            Section = RolePermissionCatalog.Payments,
+            CanView = true,
+            CanCreate = false,
+            ViewScope = DataVisibilityScope.All,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, user.Id, isAdminClaim: false);
+
+        var action = await controller.Create(new MoneyOperation
+        {
+            Source = MoneyOperationSource.Bank,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 1_000m,
+            Date = new DateTime(2026, 5, 1),
+            CreatedAt = DateTime.UtcNow,
+        }, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(action);
+    }
+
+    [Fact]
     public async Task Print_ReturnsFilteredJournalHtmlWithEscapedRowsAndTotals()
     {
         await using var db = await CreateContextAsync();

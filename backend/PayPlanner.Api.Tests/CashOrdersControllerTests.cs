@@ -239,6 +239,173 @@ public class CashOrdersControllerTests
         Assert.Equal(1, response.Total);
     }
 
+    [Fact]
+    public async Task CashBook_WithoutPaymentsViewPermission_ReturnsForbid()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db);
+        var controller = CreateController(db, userId, isAdminClaim: false);
+
+        var action = await controller.GetCashBook(null, null, null, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(action.Result);
+    }
+
+    [Fact]
+    public async Task Create_WithoutPaymentsCreatePermission_ReturnsForbid()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canCreate: false);
+        var controller = CreateController(db, userId, isAdminClaim: false);
+
+        var action = await controller.Create(new CashOrder
+        {
+            Type = CashOrderType.Incoming,
+            Amount = 1_000m,
+            Date = new DateTime(2026, 5, 1),
+        }, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(action);
+    }
+
+    [Fact]
+    public async Task PrintRegister_WithoutPaymentsExportPermission_ReturnsForbid()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canExport: false);
+        var controller = CreateController(db, userId, isAdminClaim: false);
+
+        var action = await controller.PrintRegister(null, null, null, null, null, null, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(action);
+    }
+
+    [Fact]
+    public async Task Register_WithoutPaymentsViewPermission_ReturnsForbid()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db);
+        var controller = CreateController(db, userId, isAdminClaim: false);
+
+        var action = await controller.GetRegister(null, null, null, null, null, 1, 25, null, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(action.Result);
+    }
+
+    [Fact]
+    public async Task GetById_WithoutPaymentsViewPermission_ReturnsForbid()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db);
+        var controller = CreateController(db, userId, isAdminClaim: false);
+
+        var action = await controller.GetById(1, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(action);
+    }
+
+    [Fact]
+    public async Task Update_WithoutPaymentsEditPermission_ReturnsForbid()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canEdit: false);
+        var controller = CreateController(db, userId, isAdminClaim: false);
+
+        var action = await controller.Update(1, new CashOrder
+        {
+            Type = CashOrderType.Incoming,
+            Amount = 1_000m,
+            Date = new DateTime(2026, 5, 1),
+        }, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(action);
+    }
+
+    [Fact]
+    public async Task Delete_WithoutPaymentsDeletePermission_ReturnsForbid()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canDelete: false);
+        var controller = CreateController(db, userId, isAdminClaim: false);
+
+        var action = await controller.Delete(1, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(action);
+    }
+
+    [Fact]
+    public async Task Print_WithoutPaymentsViewPermission_ReturnsForbid()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db);
+        var controller = CreateController(db, userId, isAdminClaim: false);
+
+        var action = await controller.Print(1, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(action);
+    }
+
+    [Fact]
+    public async Task CreateInventory_WithoutPaymentsEditPermission_ReturnsForbid()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, canEdit: false);
+        var controller = CreateController(db, userId, isAdminClaim: false);
+
+        var action = await controller.CreateInventory(
+            new CashInventoryCreateRequest
+            {
+                Date = new DateTime(2026, 5, 1),
+                AccountName = "Main cashbox",
+                ActualBalance = 1_000m,
+                CreateCorrection = false,
+            },
+            CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(action);
+    }
+
+    [Fact]
+    public async Task GetById_IncludesOriginAndAuditFields()
+    {
+        await using var db = await CreateContextAsync();
+        var operation = new MoneyOperation
+        {
+            Source = MoneyOperationSource.Cash,
+            Direction = MoneyOperationDirection.Income,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 1_000m,
+            Date = new DateTime(2026, 5, 1),
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.MoneyOperations.Add(operation);
+        await db.SaveChangesAsync();
+
+        var order = new CashOrder
+        {
+            Number = "PKO-2026-0001",
+            Type = CashOrderType.Incoming,
+            Status = CashOrderStatus.Posted,
+            Date = new DateTime(2026, 5, 1),
+            Amount = 1_000m,
+            MoneyOperationId = operation.Id,
+            CreatedByUserId = 7,
+            CreatedByUserName = "Бухгалтер",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.CashOrders.Add(order);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId: 1);
+
+        var action = await controller.GetById(order.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action);
+        var dto = Assert.IsType<CashOrderDto>(ok.Value);
+        Assert.Equal("moneyOperation", dto.OriginType);
+        Assert.Equal(7, dto.CreatedByUserId);
+        Assert.Equal("Бухгалтер", dto.CreatedByUserName);
+    }
+
     private static async Task<PaymentContext> CreateContextAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");
@@ -290,7 +457,50 @@ public class CashOrdersControllerTests
         return user.Id;
     }
 
-    private static CashOrdersController CreateController(PaymentContext db, int userId)
+    private static async Task<int> CreateUserWithPaymentsPermissionAsync(
+        PaymentContext db,
+        bool canView = false,
+        bool canCreate = false,
+        bool canEdit = false,
+        bool canDelete = false,
+        bool canExport = false)
+    {
+        var role = new Role
+        {
+            Name = $"cash-order-permissions-{Guid.NewGuid():N}",
+            Description = "Cash order permissions test role",
+            CreatedAt = DateTime.UtcNow,
+        };
+        var user = new User
+        {
+            Email = $"cash-order-permissions-{Guid.NewGuid():N}@example.test",
+            PasswordHash = "hash",
+            FullName = "Cash order permissions user",
+            Role = role,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+
+        db.Roles.Add(role);
+        db.Users.Add(user);
+        db.RolePermissions.Add(new RolePermission
+        {
+            Role = role,
+            Section = RolePermissionCatalog.Payments,
+            CanView = canView,
+            CanCreate = canCreate,
+            CanEdit = canEdit,
+            CanDelete = canDelete,
+            CanExport = canExport,
+            ViewScope = DataVisibilityScope.All,
+        });
+        await db.SaveChangesAsync();
+        return user.Id;
+    }
+
+    private static CashOrdersController CreateController(PaymentContext db, int userId, bool isAdminClaim = true)
         => new(db)
         {
             ControllerContext = new ControllerContext
@@ -298,10 +508,16 @@ public class CashOrdersControllerTests
                 HttpContext = new DefaultHttpContext
                 {
                     User = new ClaimsPrincipal(new ClaimsIdentity(
-                        [
-                            new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
-                            new Claim(ClaimTypes.Role, "admin"),
-                        ],
+                        isAdminClaim
+                            ?
+                            [
+                                new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
+                                new Claim(ClaimTypes.Role, "admin"),
+                            ]
+                            :
+                            [
+                                new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
+                            ],
                         authenticationType: "Test")),
                 },
             },

@@ -25,6 +25,8 @@ import {
 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { usePeriodStats } from '../../hooks/usePeriodStats';
+import { useAuth } from '../../contexts/AuthContext';
+import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useCashFlowReport, type CashFlowReportFilters } from '../../hooks/useCashFlowReport';
 import { useCashFlowForecastReport } from '../../hooks/useCashFlowForecastReport';
 import { useCashReport } from '../../hooks/useCashReport';
@@ -1442,6 +1444,7 @@ function CashFlowReportSection({
   onReload,
   filters,
   profileTimeZoneId,
+  canExportPaymentReports,
 }: {
   report: CashFlowReport | null;
   loading: boolean;
@@ -1449,6 +1452,7 @@ function CashFlowReportSection({
   onReload: () => void;
   filters?: ManagementReportExportFilters;
   profileTimeZoneId?: string | null;
+  canExportPaymentReports: boolean;
 }) {
   const topAccounts = (report?.byAccount ?? []).slice(0, 6);
   const recentDays = (report?.days ?? []).slice(-8);
@@ -1799,13 +1803,13 @@ function CashReportSection({
           <button
             type="button"
             onClick={() => report && exportCashReport(report, profileTimeZoneId)}
-            disabled={!report || loading}
+            disabled={!report || loading || !canExportPaymentReports}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
-          <ManagementReportExportButtons reportKind="cash" filters={filters} disabled={!report || loading} />
+          <ManagementReportExportButtons reportKind="cash" filters={filters} disabled={!report || loading || !canExportPaymentReports} />
           <button
             type="button"
             onClick={onReload}
@@ -1913,6 +1917,7 @@ function BankReportSection({
   onReload,
   filters,
   profileTimeZoneId,
+  canExportPaymentReports,
 }: {
   report: CashFlowReport | null;
   loading: boolean;
@@ -1920,6 +1925,7 @@ function BankReportSection({
   onReload: () => void;
   filters?: ManagementReportExportFilters;
   profileTimeZoneId?: string | null;
+  canExportPaymentReports: boolean;
 }) {
   const recentDays = (report?.days ?? []).slice(-8);
   const accounts = report?.byAccount ?? [];
@@ -6840,13 +6846,13 @@ function CashOrderReportSection({
           <button
             type="button"
             onClick={() => report && exportCashOrderReport(report, profileTimeZoneId)}
-            disabled={!report || loading}
+            disabled={!report || loading || !canExportPaymentReports}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
-          <ManagementReportExportButtons reportKind="cash-orders" filters={filters} disabled={!report || loading} />
+          <ManagementReportExportButtons reportKind="cash-orders" filters={filters} disabled={!report || loading || !canExportPaymentReports} />
           <button
             type="button"
             onClick={onReload}
@@ -7253,6 +7259,10 @@ function formatContractOptionLabel(item: Contract) {
 }
 
 export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsProps = {}) {
+  const { user } = useAuth();
+  const permissions = useRolePermissions(user?.role?.id);
+  const canViewPaymentReports = permissions.payments.canView;
+  const canExportPaymentReports = permissions.payments.canExport;
   const profileTimeZoneId = useUserTimeZone();
   const ymNow = currentReportMonthInTimeZone(profileTimeZoneId);
   const [range, setRange] = useState<MonthRange>({ from: ymNow, to: ymNow });
@@ -7528,7 +7538,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     loading: cashReportLoading,
     error: cashReportError,
     reload: reloadCashReport,
-  } = useCashReport(cashFlowDates);
+  } = useCashReport(cashFlowDates, { enabled: canViewPaymentReports });
   const bankReportFilters = useMemo(
     () => buildBankReportFilters(moneyOperationReportFilters),
     [moneyOperationReportFilters],
@@ -7720,7 +7730,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     loading: cashOrderReportLoading,
     error: cashOrderReportError,
     reload: reloadCashOrderReport,
-  } = useCashOrderReport(cashFlowDates);
+  } = useCashOrderReport(cashFlowDates, { enabled: canViewPaymentReports });
   const {
     report: bankStatementImportReport,
     loading: bankStatementImportReportLoading,
@@ -8202,14 +8212,17 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               profileTimeZoneId={profileTimeZoneId}
             />
 
-            <CashReportSection
-              report={cashReport}
-              loading={cashReportLoading}
-              error={cashReportError}
-              onReload={reloadCashReport}
-              filters={cashFlowDates}
-              profileTimeZoneId={profileTimeZoneId}
-            />
+            {canViewPaymentReports ? (
+              <CashReportSection
+                report={cashReport}
+                loading={cashReportLoading}
+                error={cashReportError}
+                onReload={reloadCashReport}
+                filters={cashFlowDates}
+                profileTimeZoneId={profileTimeZoneId}
+                canExportPaymentReports={canExportPaymentReports}
+              />
+            ) : null}
 
             <BankReportSection
               report={bankReport}
@@ -8488,14 +8501,17 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               profileTimeZoneId={profileTimeZoneId}
             />
 
-            <CashOrderReportSection
-              report={cashOrderReport}
-              loading={cashOrderReportLoading}
-              error={cashOrderReportError}
-              onReload={reloadCashOrderReport}
-              filters={cashFlowDates}
-              profileTimeZoneId={profileTimeZoneId}
-            />
+            {canViewPaymentReports ? (
+              <CashOrderReportSection
+                report={cashOrderReport}
+                loading={cashOrderReportLoading}
+                error={cashOrderReportError}
+                onReload={reloadCashOrderReport}
+                filters={cashFlowDates}
+                profileTimeZoneId={profileTimeZoneId}
+                canExportPaymentReports={canExportPaymentReports}
+              />
+            ) : null}
 
             <BankStatementImportReportSection
               report={bankStatementImportReport}

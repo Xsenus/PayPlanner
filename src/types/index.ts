@@ -1396,6 +1396,7 @@ export interface CashOrder {
   paymentId?: number | null;
   moneyOperationId?: number | null;
   invoiceId?: number | null;
+  originType?: 'payment' | 'moneyOperation' | 'inventory' | 'manual' | string;
   account?: string | null;
   payerName?: string | null;
   receiverName?: string | null;
@@ -1405,7 +1406,11 @@ export interface CashOrder {
   cancelledAt?: string | null;
   cancelledReason?: string | null;
   createdAt: string;
+  createdByUserId?: number | null;
+  createdByUserName?: string | null;
   updatedAt?: string | null;
+  updatedByUserId?: number | null;
+  updatedByUserName?: string | null;
 }
 
 export interface NextCashOrderNumber {

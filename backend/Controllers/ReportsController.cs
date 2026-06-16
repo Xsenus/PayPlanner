@@ -102,6 +102,11 @@ public class ReportsController : ControllerBase
         return permission?.CanExport == true;
     }
 
+    private Task<bool> HasPaymentsPermissionAsync(
+        Func<RolePermissionValues, bool> isAllowed,
+        CancellationToken ct)
+        => _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Payments, isAllowed, ct);
+
     private async Task<DateTime> ResolveReportTodayAsync(CancellationToken ct)
     {
         var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
@@ -528,6 +533,11 @@ public class ReportsController : ControllerBase
 
             case "cash":
                 {
+                    if (!await HasPaymentsPermissionAsync(static permission => permission.CanExport, ct))
+                    {
+                        return (null, Forbid());
+                    }
+
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
                         cancellationToken => BuildCashBookReportAsync(start, end, cancellationToken),
@@ -858,6 +868,11 @@ public class ReportsController : ControllerBase
 
             case "cash-orders":
                 {
+                    if (!await HasPaymentsPermissionAsync(static permission => permission.CanExport, ct))
+                    {
+                        return (null, Forbid());
+                    }
+
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
                         cancellationToken => BuildCashOrderReportAsync(start, end, cancellationToken),
@@ -1656,6 +1671,11 @@ public class ReportsController : ControllerBase
         var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         if (!await CanViewReportsAsync(ct))
+        {
+            return Forbid();
+        }
+
+        if (!await HasPaymentsPermissionAsync(static permission => permission.CanView, ct))
         {
             return Forbid();
         }

@@ -7,7 +7,8 @@ export interface CashOrderReportFilters {
   to?: string;
 }
 
-export function useCashOrderReport(filters: CashOrderReportFilters) {
+export function useCashOrderReport(filters: CashOrderReportFilters, options: { enabled?: boolean } = {}) {
+  const enabled = options.enabled ?? true;
   const [report, setReport] = useState<CashOrderReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,6 +25,13 @@ export function useCashOrderReport(filters: CashOrderReportFilters) {
   const load = useCallback(async () => {
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
+    if (!enabled) {
+      setReport(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
@@ -46,7 +54,7 @@ export function useCashOrderReport(filters: CashOrderReportFilters) {
         setLoading(false);
       }
     }
-  }, [stableFilters]);
+  }, [enabled, stableFilters]);
 
   useEffect(() => {
     void load();

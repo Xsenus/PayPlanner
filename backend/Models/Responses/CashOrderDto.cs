@@ -14,6 +14,7 @@ public sealed class CashOrderDto
     public int? PaymentId { get; init; }
     public int? MoneyOperationId { get; init; }
     public int? InvoiceId { get; init; }
+    public string OriginType { get; init; } = "manual";
     public string? Account { get; init; }
     public string? PayerName { get; init; }
     public string? ReceiverName { get; init; }
@@ -23,5 +24,9 @@ public sealed class CashOrderDto
     public DateTime? CancelledAt { get; init; }
     public string? CancelledReason { get; init; }
     public DateTime CreatedAt { get; init; }
+    public int? CreatedByUserId { get; init; }
+    public string? CreatedByUserName { get; init; }
     public DateTime? UpdatedAt { get; init; }
+    public int? UpdatedByUserId { get; init; }
+    public string? UpdatedByUserName { get; init; }
 }

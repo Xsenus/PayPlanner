@@ -26,5 +26,9 @@ public class CashOrder
     public DateTime? CancelledAt { get; set; }
     public string? CancelledReason { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public int? CreatedByUserId { get; set; }
+    public string? CreatedByUserName { get; set; }
     public DateTime? UpdatedAt { get; set; }
+    public int? UpdatedByUserId { get; set; }
+    public string? UpdatedByUserName { get; set; }
 }

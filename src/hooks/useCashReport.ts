@@ -8,7 +8,8 @@ export interface CashReportFilters {
   accountName?: string;
 }
 
-export function useCashReport(filters: CashReportFilters) {
+export function useCashReport(filters: CashReportFilters, options: { enabled?: boolean } = {}) {
+  const enabled = options.enabled ?? true;
   const [report, setReport] = useState<CashBookSummary | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -26,6 +27,13 @@ export function useCashReport(filters: CashReportFilters) {
   const load = useCallback(async () => {
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
+    if (!enabled) {
+      setReport(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
@@ -48,7 +56,7 @@ export function useCashReport(filters: CashReportFilters) {
         setLoading(false);
       }
     }
-  }, [stableFilters]);
+  }, [enabled, stableFilters]);
 
   useEffect(() => {
     void load();
