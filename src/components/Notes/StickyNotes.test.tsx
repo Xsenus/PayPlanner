@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../../contexts/ToastContext';
 import { copyTextToClipboard, getEffectiveBoardNotesCount, StickyNotes } from './StickyNotes';
-import type { StickyNoteBoard, StickyNoteBoardMemberCandidate, StickyNoteItem } from '../../services/api';
+import type { StickyNoteBoard, StickyNoteBoardMember, StickyNoteBoardMemberCandidate, StickyNoteItem } from '../../services/api';
 
 const realtimeMock = vi.hoisted(() => {
   const handlers = new Map<string, (event: unknown) => void>();
@@ -681,6 +681,64 @@ describe('StickyNotes', () => {
     await user.click(screen.getByTitle('Добавить участника'));
 
     await waitFor(() => expect(apiMock.upsertStickyNoteBoardMember).toHaveBeenCalledWith(9, 3, { role: 'viewer' }));
+  });
+
+  it('does not add a stale board member after switching boards', async () => {
+    const archiveBoard: StickyNoteBoard = {
+      ...personalBoard,
+      id: 13,
+      title: 'Личные напоминания',
+      sortOrder: 2,
+    };
+    const ownerMember = {
+      id: 0,
+      boardId: 9,
+      userId: 1,
+      displayName: 'Пользователь',
+      email: 'user@example.com',
+      role: 'owner' as const,
+    };
+    const archiveOwnerMember = {
+      ...ownerMember,
+      boardId: 13,
+    };
+    const upsertResponse = createDeferred<StickyNoteBoardMember>();
+    window.localStorage.setItem('payplanner.stickyNotes.activeBoardId', '9');
+    apiMock.getStickyNoteBoards.mockResolvedValue([personalBoard, archiveBoard]);
+    apiMock.getStickyNoteBoardMembers.mockImplementation(async (boardId) => (
+      boardId === 13 ? [archiveOwnerMember] : [ownerMember]
+    ));
+    apiMock.getStickyNoteMemberCandidates.mockResolvedValue([
+      { userId: 3, displayName: 'Анна Юрист', email: 'anna@example.com' },
+    ]);
+    apiMock.upsertStickyNoteBoardMember.mockImplementationOnce(() => upsertResponse.promise);
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    await screen.findByText('Участники');
+    await user.selectOptions(screen.getByLabelText('Сотрудник для доступа к доске'), '3');
+    await user.click(screen.getByTitle('Добавить участника'));
+    await waitFor(() => expect(apiMock.upsertStickyNoteBoardMember).toHaveBeenCalledWith(9, 3, { role: 'viewer' }));
+
+    await user.click(screen.getByRole('button', { name: /Личные напоминания/i }));
+    await waitFor(() => expect(apiMock.getStickyNoteBoardMembers).toHaveBeenCalledWith(13));
+    expect(screen.queryAllByText('Анна Юрист').filter((element) => element.tagName !== 'OPTION')).toHaveLength(0);
+
+    await act(async () => {
+      upsertResponse.resolve({
+        id: 5,
+        boardId: 9,
+        userId: 3,
+        displayName: 'Анна Юрист',
+        email: 'anna@example.com',
+        role: 'viewer',
+      });
+      await upsertResponse.promise;
+    });
+
+    expect(screen.queryAllByText('Анна Юрист').filter((element) => element.tagName !== 'OPTION')).toHaveLength(0);
+    expect(screen.getByRole('button', { name: /Личные напоминания/i })).toBeTruthy();
   });
 
   it('requires selecting a board member candidate before adding access', async () => {

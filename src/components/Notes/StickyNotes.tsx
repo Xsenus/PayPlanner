@@ -852,8 +852,14 @@ export function StickyNotes() {
       return;
     }
 
+    const requestedBoardId = activeBoard.id;
+
     try {
-      const member = await apiService.upsertStickyNoteBoardMember(activeBoard.id, parsedUserId, { role: memberRole });
+      const member = await apiService.upsertStickyNoteBoardMember(requestedBoardId, parsedUserId, { role: memberRole });
+      if (activeBoardIdRef.current !== requestedBoardId) {
+        await loadBoards();
+        return;
+      }
       setMembers((current) => {
         const exists = current.some((item) => item.userId === member.userId);
         return exists
@@ -864,7 +870,9 @@ export function StickyNotes() {
       await loadBoards();
     } catch (error) {
       console.error(error);
-      toast.error('Не удалось обновить участника доски.');
+      if (activeBoardIdRef.current === requestedBoardId) {
+        toast.error('Не удалось обновить участника доски.');
+      }
     }
   };
 
