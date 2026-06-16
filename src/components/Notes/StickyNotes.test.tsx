@@ -270,6 +270,35 @@ describe('StickyNotes', () => {
     expect(screen.getAllByDisplayValue('Создано почти одновременно')).toHaveLength(1);
   });
 
+  it('ignores a stale created note response after switching boards', async () => {
+    const createdNoteResponse = createDeferred<StickyNoteItem>();
+    apiMock.getStickyNoteBoards.mockResolvedValue([board, personalBoard]);
+    apiMock.getStickyNotes.mockImplementation(async (boardId) => (
+      boardId === 9
+        ? [{ ...createdNote, id: 12, boardId: 9, text: 'Личная доска открыта' }]
+        : []
+    ));
+    apiMock.createStickyNote.mockImplementationOnce(() => createdNoteResponse.promise);
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    await screen.findAllByText('Рабочая доска');
+    await user.click(screen.getByRole('button', { name: /Заметка/i }));
+    await waitFor(() => expect(apiMock.createStickyNote).toHaveBeenCalledWith(7, expect.any(Object)));
+
+    await user.click(screen.getByRole('button', { name: /Мои заметки/i }));
+    expect(await screen.findByDisplayValue('Личная доска открыта')).toBeTruthy();
+
+    await act(async () => {
+      createdNoteResponse.resolve({ ...createdNote, text: 'Поздний ответ старой доски' });
+      await createdNoteResponse.promise;
+    });
+
+    expect(screen.queryByDisplayValue('Поздний ответ старой доски')).toBeNull();
+    expect(screen.getByDisplayValue('Личная доска открыта')).toBeTruthy();
+  });
+
   it('switches away when the active board disappears during count refresh', async () => {
     window.localStorage.setItem('payplanner.stickyNotes.activeBoardId', '9');
     apiMock.getStickyNoteBoards

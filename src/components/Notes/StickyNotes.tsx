@@ -560,6 +560,8 @@ export function StickyNotes() {
       return;
     }
 
+    const requestedBoardId = activeBoardId;
+
     if (isActiveBoardAtNoteLimit) {
       toast.error(`На одной доске можно хранить до ${MAX_NOTES_PER_BOARD} заметок.`);
       return;
@@ -567,13 +569,17 @@ export function StickyNotes() {
 
     const offset = notes.length * 24;
     try {
-      const note = await apiService.createStickyNote(activeBoardId, {
+      const note = await apiService.createStickyNote(requestedBoardId, {
         text: '',
         color: 'yellow',
         x: Math.max(0, x ?? 56 + (offset % 360)),
         y: Math.max(0, y ?? 56 + (offset % 240)),
         ...DEFAULT_NOTE_SIZE,
       });
+      if (activeBoardIdRef.current !== requestedBoardId) {
+        await refreshBoardCounts();
+        return;
+      }
       setNotes((current) => {
         const exists = current.some((item) => item.id === note.id);
         const next = exists
