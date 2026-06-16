@@ -61,6 +61,7 @@ const board: StickyNoteBoard = {
   notesCount: 0,
   canEdit: true,
   canDelete: false,
+  canDeleteNotes: true,
   canManageMembers: false,
   createdAt: '2026-06-16T00:00:00Z',
 };
@@ -239,6 +240,18 @@ describe('StickyNotes', () => {
     await user.click(screen.getAllByRole('button', { name: /Восстановить/i })[0]);
 
     await waitFor(() => expect(apiMock.restoreStickyNote).toHaveBeenCalledWith(11));
+  });
+
+  it('disables note deletion when the board does not allow deleting notes', async () => {
+    apiMock.getStickyNoteBoards.mockResolvedValue([{ ...board, canDeleteNotes: false }]);
+    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Нельзя удалить' }]);
+
+    renderStickyNotes();
+
+    await screen.findByDisplayValue('Нельзя удалить');
+
+    expect(screen.getByTitle('Удалить')).toHaveProperty('disabled', true);
+    expect(apiMock.deleteStickyNote).not.toHaveBeenCalled();
   });
 
   it('adds a board member when the user manages a personal board', async () => {

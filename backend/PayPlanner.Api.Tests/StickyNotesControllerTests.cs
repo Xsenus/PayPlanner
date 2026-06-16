@@ -131,6 +131,39 @@ public sealed class StickyNotesControllerTests
     }
 
     [Fact]
+    public async Task DeleteNote_RequiresDeletePermission()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, canDelete: false);
+        var board = new StickyNoteBoard
+        {
+            Title = "Личная",
+            Visibility = StickyNoteBoardVisibility.Personal,
+            OwnerUserId = user.Id,
+            OwnerUserName = user.FullName,
+            Background = "gray",
+        };
+        var note = new StickyNote
+        {
+            Board = board,
+            Text = "Не удалять",
+            Color = "yellow",
+            Version = 1,
+            Width = 220,
+            Height = 180,
+        };
+        db.StickyNotes.Add(note);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, user);
+
+        var result = await controller.DeleteNote(note.Id, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result);
+        Assert.Contains(await db.StickyNotes.ToListAsync(), item => item.Id == note.Id);
+    }
+
+    [Fact]
     public async Task BoardViewer_CanReadButCannotEditNotes()
     {
         await using var db = await CreateContextAsync();

@@ -149,6 +149,7 @@ export function StickyNotes() {
   );
 
   const canEditActiveBoard = Boolean(activeBoard?.canEdit);
+  const canDeleteNotesOnActiveBoard = Boolean(activeBoard?.canDeleteNotes);
   const currentUserId = user?.id ?? null;
 
   const filteredNotes = useMemo(() => {
@@ -566,7 +567,7 @@ export function StickyNotes() {
   };
 
   const deleteNote = async (noteId: number) => {
-    if (!canEditActiveBoard || !window.confirm('Удалить заметку?')) {
+    if (!canDeleteNotesOnActiveBoard || !window.confirm('Удалить заметку?')) {
       return;
     }
 
@@ -822,7 +823,7 @@ export function StickyNotes() {
           <button
             type="button"
             onClick={() => deleteNote(note.id)}
-            disabled={!canEditActiveBoard}
+            disabled={!canDeleteNotesOnActiveBoard}
             className="inline-flex h-6 w-6 items-center justify-center rounded border border-black/10 bg-white/50 text-rose-700 hover:bg-white disabled:opacity-50"
             title="Удалить"
           >
@@ -861,7 +862,7 @@ export function StickyNotes() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if ((event.key !== 'Delete' && event.key !== 'Backspace') || !selectedNoteId || isInteractiveTarget(event.target)) {
+      if ((event.key !== 'Delete' && event.key !== 'Backspace') || !selectedNoteId || !canDeleteNotesOnActiveBoard || isInteractiveTarget(event.target)) {
         return;
       }
 
@@ -871,7 +872,7 @@ export function StickyNotes() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedNoteId, canEditActiveBoard]);
+  }, [selectedNoteId, canDeleteNotesOnActiveBoard]);
 
   return (
     <div className="flex h-[calc(100vh-4rem)] min-h-[620px] flex-col bg-slate-100 lg:flex-row">

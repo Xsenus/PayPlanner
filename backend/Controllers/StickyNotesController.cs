@@ -773,6 +773,7 @@ public sealed class StickyNotesController : ControllerBase
             NotesCount = notesCount,
             CanEdit = canEdit,
             CanDelete = canDelete && board.Visibility == StickyNoteBoardVisibility.Personal,
+            CanDeleteNotes = canDelete && canEdit,
             CanManageMembers = canManageMembers,
             CreatedAt = board.CreatedAt,
             UpdatedAt = board.UpdatedAt,

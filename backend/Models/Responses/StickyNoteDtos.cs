@@ -13,6 +13,7 @@ public sealed class StickyNoteBoardDto
     public int NotesCount { get; set; }
     public bool CanEdit { get; set; }
     public bool CanDelete { get; set; }
+    public bool CanDeleteNotes { get; set; }
     public bool CanManageMembers { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
