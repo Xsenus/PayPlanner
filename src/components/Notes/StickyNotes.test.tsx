@@ -60,6 +60,7 @@ const board: StickyNoteBoard = {
   sortOrder: 0,
   notesCount: 0,
   canEdit: true,
+  canCreateNotes: true,
   canDelete: false,
   canDeleteNotes: true,
   canManageMembers: false,
@@ -166,6 +167,17 @@ describe('StickyNotes', () => {
       height: 180,
     })));
     expect(await screen.findByPlaceholderText('Текст заметки')).toBeTruthy();
+  });
+
+  it('disables note creation when the board does not allow creating notes', async () => {
+    apiMock.getStickyNoteBoards.mockResolvedValue([{ ...board, canCreateNotes: false }]);
+
+    renderStickyNotes();
+
+    await screen.findAllByText('Рабочая доска');
+
+    expect(screen.getByRole('button', { name: /Заметка/i })).toHaveProperty('disabled', true);
+    expect(apiMock.createStickyNote).not.toHaveBeenCalled();
   });
 
   it('updates board title and background from settings', async () => {

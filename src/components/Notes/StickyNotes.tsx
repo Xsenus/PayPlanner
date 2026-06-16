@@ -149,6 +149,7 @@ export function StickyNotes() {
   );
 
   const canEditActiveBoard = Boolean(activeBoard?.canEdit);
+  const canCreateNotesOnActiveBoard = Boolean(activeBoard?.canCreateNotes);
   const canDeleteNotesOnActiveBoard = Boolean(activeBoard?.canDeleteNotes);
   const currentUserId = user?.id ?? null;
 
@@ -396,7 +397,7 @@ export function StickyNotes() {
   };
 
   const createNoteAt = async (x?: number, y?: number) => {
-    if (!activeBoardId || !canEditActiveBoard) {
+    if (!activeBoardId || !canCreateNotesOnActiveBoard) {
       return;
     }
 
@@ -681,7 +682,7 @@ export function StickyNotes() {
   };
 
   const handleCanvasDoubleClick = (event: ReactMouseEvent<HTMLDivElement>) => {
-    if (!canEditActiveBoard || isInteractiveTarget(event.target)) {
+    if (!canCreateNotesOnActiveBoard || isInteractiveTarget(event.target)) {
       return;
     }
 
@@ -1104,7 +1105,7 @@ export function StickyNotes() {
             <button
               type="button"
               onClick={() => createNoteAt()}
-              disabled={!canEditActiveBoard}
+              disabled={!canCreateNotesOnActiveBoard}
               className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Plus className="h-4 w-4" />

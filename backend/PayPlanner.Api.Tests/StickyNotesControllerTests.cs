@@ -54,6 +54,31 @@ public sealed class StickyNotesControllerTests
     }
 
     [Fact]
+    public async Task GetBoards_ReturnsCreateNotePermissionSeparately()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, canCreate: false);
+        var board = new StickyNoteBoard
+        {
+            Title = "Общее",
+            Visibility = StickyNoteBoardVisibility.Shared,
+            Background = "cork",
+        };
+        db.StickyNoteBoards.Add(board);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, user);
+
+        var result = await controller.GetBoards(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var boards = Assert.IsAssignableFrom<IReadOnlyCollection<StickyNoteBoardDto>>(ok.Value);
+        var dto = Assert.Single(boards, item => item.Id == board.Id);
+        Assert.True(dto.CanEdit);
+        Assert.False(dto.CanCreateNotes);
+    }
+
+    [Fact]
     public async Task UpdateNote_ReturnsConflict_WhenVersionIsStale()
     {
         await using var db = await CreateContextAsync();

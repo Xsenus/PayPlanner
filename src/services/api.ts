@@ -723,6 +723,7 @@ export interface StickyNoteBoard {
   sortOrder: number;
   notesCount: number;
   canEdit: boolean;
+  canCreateNotes: boolean;
   canDelete: boolean;
   canDeleteNotes: boolean;
   canManageMembers: boolean;

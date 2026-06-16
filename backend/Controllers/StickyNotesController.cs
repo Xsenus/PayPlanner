@@ -72,6 +72,7 @@ public sealed class StickyNotesController : ControllerBase
                 item.Board,
                 item.NotesCount,
                 CanEditBoard(item.Board, access.Value),
+                access.Value.CanCreate,
                 access.Value.CanDelete,
                 CanManageMembers(item.Board, access.Value)))
             .ToList());
@@ -101,7 +102,7 @@ public sealed class StickyNotesController : ControllerBase
         _db.StickyNoteBoards.Add(board);
         await _db.SaveChangesAsync(ct);
 
-        return CreatedAtAction(nameof(GetNotes), new { boardId = board.Id }, ToBoardDto(board, 0, true, access.Value.CanDelete, CanManageMembers(board, access.Value)));
+        return CreatedAtAction(nameof(GetNotes), new { boardId = board.Id }, ToBoardDto(board, 0, true, access.Value.CanCreate, access.Value.CanDelete, CanManageMembers(board, access.Value)));
     }
 
     [HttpPut("boards/{boardId:int}")]
@@ -132,7 +133,7 @@ public sealed class StickyNotesController : ControllerBase
 
         await _db.SaveChangesAsync(ct);
         await PublishAsync(board.Id, "boardUpdated", null, null, access.Value, ct);
-        return Ok(ToBoardDto(board, await CountNotesAsync(board.Id, ct), true, access.Value.CanDelete, CanManageMembers(board, access.Value)));
+        return Ok(ToBoardDto(board, await CountNotesAsync(board.Id, ct), true, access.Value.CanCreate, access.Value.CanDelete, CanManageMembers(board, access.Value)));
     }
 
     [HttpDelete("boards/{boardId:int}")]
@@ -759,7 +760,7 @@ public sealed class StickyNotesController : ControllerBase
             .ToListAsync(ct);
     }
 
-    private static StickyNoteBoardDto ToBoardDto(StickyNoteBoard board, int notesCount, bool canEdit, bool canDelete, bool canManageMembers)
+    private static StickyNoteBoardDto ToBoardDto(StickyNoteBoard board, int notesCount, bool canEdit, bool canCreate, bool canDelete, bool canManageMembers)
         => new()
         {
             Id = board.Id,
@@ -772,6 +773,7 @@ public sealed class StickyNotesController : ControllerBase
             SortOrder = board.SortOrder,
             NotesCount = notesCount,
             CanEdit = canEdit,
+            CanCreateNotes = canCreate && canEdit,
             CanDelete = canDelete && board.Visibility == StickyNoteBoardVisibility.Personal,
             CanDeleteNotes = canDelete && canEdit,
             CanManageMembers = canManageMembers,
