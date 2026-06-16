@@ -586,6 +586,12 @@ public sealed class StickyNotesController : ControllerBase
             return Forbid();
         }
 
+        var notesCount = await CountNotesAsync(note.BoardId, ct);
+        if (notesCount >= MaxNotesPerBoard)
+        {
+            return Conflict(new { message = $"На одной доске можно хранить до {MaxNotesPerBoard} заметок." });
+        }
+
         _db.Entry(note).Property("IsDeleted").CurrentValue = false;
         note.Version++;
         await _db.SaveChangesAsync(ct);

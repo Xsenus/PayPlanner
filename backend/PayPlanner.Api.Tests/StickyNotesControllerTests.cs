@@ -459,6 +459,61 @@ public sealed class StickyNotesControllerTests
     }
 
     [Fact]
+    public async Task RestoreNote_ReturnsConflict_WhenBoardLimitReached()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db);
+        var board = new StickyNoteBoard
+        {
+            Title = "Личная",
+            Visibility = StickyNoteBoardVisibility.Personal,
+            OwnerUserId = user.Id,
+            OwnerUserName = user.FullName,
+            Background = "gray",
+        };
+        var deletedNote = new StickyNote
+        {
+            Board = board,
+            Text = "Вернуть",
+            Color = "yellow",
+            Version = 1,
+            Width = 220,
+            Height = 180,
+        };
+        db.StickyNotes.Add(deletedNote);
+        await db.SaveChangesAsync();
+        db.StickyNotes.Remove(deletedNote);
+        await db.SaveChangesAsync();
+
+        for (var index = 0; index < 200; index++)
+        {
+            db.StickyNotes.Add(new StickyNote
+            {
+                BoardId = board.Id,
+                Text = $"Активная заметка {index}",
+                Color = "yellow",
+                Version = 1,
+                Width = 220,
+                Height = 180,
+            });
+        }
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, user);
+
+        var result = await controller.RestoreNote(deletedNote.Id, CancellationToken.None);
+
+        Assert.IsType<ConflictObjectResult>(result.Result);
+        var isStillDeleted = await db.StickyNotes
+            .IgnoreQueryFilters()
+            .Where(item => item.Id == deletedNote.Id)
+            .Select(item => EF.Property<bool>(item, "IsDeleted"))
+            .SingleAsync();
+        Assert.True(isStillDeleted);
+        Assert.Equal(200, await db.StickyNotes.CountAsync(item => item.BoardId == board.Id));
+    }
+
+    [Fact]
     public async Task UpsertBoardMember_ReturnsNotFound_WhenUserCannotViewNotes()
     {
         await using var db = await CreateContextAsync();
