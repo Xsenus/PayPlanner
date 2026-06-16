@@ -776,6 +776,13 @@ export interface StickyNoteRealtimeEvent {
   createdAt: string;
 }
 
+export class StickyNoteConflictError extends Error {
+  constructor(public readonly serverNote: StickyNoteItem) {
+    super('Sticky note version conflict');
+    this.name = 'StickyNoteConflictError';
+  }
+}
+
 export interface CreateStickyNoteBoardPayload {
   title: string;
   description?: string | null;
@@ -1966,6 +1973,58 @@ export class ApiService {
     }
 
     return (await response.json()) as T;
+  }
+
+  private async requestStickyNote<T>(endpoint: string, options?: RequestInit): Promise<T> {
+    const url = `${API_BASE_URL}${endpoint}`;
+    const token = getAuthToken();
+    const headers: Record<string, string> = {
+      ...(options?.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(options?.headers as Record<string, string> | undefined),
+    };
+    if (token) headers.Authorization = `Bearer ${token}`;
+
+    const response = await fetch(url, {
+      ...options,
+      headers,
+    });
+
+    if (response.status === 409) {
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        try {
+          throw new StickyNoteConflictError(await response.json() as StickyNoteItem);
+        } catch (error) {
+          if (error instanceof StickyNoteConflictError) {
+            throw error;
+          }
+        }
+      }
+    }
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        notifyAuthSessionExpired();
+        throw new Error(`HTTP 401 Unauthorized at ${url} - ${AUTH_SESSION_EXPIRED_MESSAGE}`);
+      }
+
+      const text = await extractResponseErrorMessage(response);
+      throw new Error(
+        `HTTP ${response.status} ${response.statusText} at ${url} ${text ? `- ${text}` : ''}`,
+      );
+    }
+
+    if (response.status === 204) {
+      return undefined as T;
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      const text = await response.text();
+      return text as unknown as T;
+    }
+
+    return await response.json() as T;
   }
 
   async getFeatureFlags() {
@@ -3540,14 +3599,14 @@ export class ApiService {
   }
 
   async updateStickyNote(id: number, payload: UpdateStickyNotePayload) {
-    return this.request<StickyNoteItem>(`/sticky-notes/notes/${id}`, {
+    return this.requestStickyNote<StickyNoteItem>(`/sticky-notes/notes/${id}`, {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
   }
 
   async updateStickyNoteLayout(id: number, payload: UpdateStickyNoteLayoutPayload) {
-    return this.request<StickyNoteItem>(`/sticky-notes/notes/${id}/layout`, {
+    return this.requestStickyNote<StickyNoteItem>(`/sticky-notes/notes/${id}/layout`, {
       method: 'PATCH',
       body: JSON.stringify(payload),
     });

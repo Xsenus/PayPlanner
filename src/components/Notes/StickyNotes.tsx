@@ -17,7 +17,7 @@ import {
   X,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
-import { apiService, type StickyNoteBoard, type StickyNoteBoardMember, type StickyNoteBoardMemberCandidate, type StickyNoteBoardMemberRole, type StickyNoteColor, type StickyNoteItem } from '../../services/api';
+import { apiService, StickyNoteConflictError, type StickyNoteBoard, type StickyNoteBoardMember, type StickyNoteBoardMemberCandidate, type StickyNoteBoardMemberRole, type StickyNoteColor, type StickyNoteItem } from '../../services/api';
 import {
   canStartNotesHubConnection,
   createNotesHubConnection,
@@ -49,6 +49,10 @@ const FILTER_OPTIONS = [
 ] as const;
 
 type NoteFilter = typeof FILTER_OPTIONS[number]['value'] | StickyNoteColor;
+type NoteConflict = {
+  local: StickyNoteItem;
+  server: StickyNoteItem;
+};
 
 function colorClass(color: StickyNoteColor): string {
   return COLORS.find((item) => item.value === color)?.className ?? COLORS[0].className;
@@ -68,6 +72,7 @@ export function StickyNotes() {
   const connectionRef = useRef<HubConnection | null>(null);
   const boardCanvasRef = useRef<HTMLDivElement | null>(null);
   const notesRef = useRef<StickyNoteItem[]>([]);
+  const autosaveTimersRef = useRef<Map<number, number>>(new Map());
   const [boards, setBoards] = useState<StickyNoteBoard[]>([]);
   const [activeBoardId, setActiveBoardId] = useState<number | null>(null);
   const [notes, setNotes] = useState<StickyNoteItem[]>([]);
@@ -84,6 +89,7 @@ export function StickyNotes() {
   const [deletedNoteId, setDeletedNoteId] = useState<number | null>(null);
   const [memberUserId, setMemberUserId] = useState('');
   const [memberRole, setMemberRole] = useState<Exclude<StickyNoteBoardMemberRole, 'owner'>>('viewer');
+  const [noteConflict, setNoteConflict] = useState<NoteConflict | null>(null);
 
   const activeBoard = useMemo(
     () => boards.find((board) => board.id === activeBoardId) ?? null,
@@ -184,6 +190,16 @@ export function StickyNotes() {
   useEffect(() => {
     notesRef.current = notes;
   }, [notes]);
+
+  useEffect(() => {
+    const timers = autosaveTimersRef.current;
+    return () => {
+      for (const timer of timers.values()) {
+        window.clearTimeout(timer);
+      }
+      timers.clear();
+    };
+  }, []);
 
   useEffect(() => {
     if (!activeBoardId) {
@@ -333,6 +349,12 @@ export function StickyNotes() {
       return;
     }
 
+    const timer = autosaveTimersRef.current.get(note.id);
+    if (timer) {
+      window.clearTimeout(timer);
+      autosaveTimersRef.current.delete(note.id);
+    }
+
     setSavingNoteIds((current) => new Set(current).add(note.id));
     try {
       const saved = await apiService.updateStickyNote(note.id, {
@@ -347,11 +369,18 @@ export function StickyNotes() {
         version: note.version,
       });
       setNotes((current) => sortNotes(current.map((item) => (item.id === saved.id ? saved : item))));
+      setNoteConflict((current) => current?.local.id === saved.id ? null : current);
     } catch (error) {
       console.error(error);
-      toast.error('Заметка уже изменена другим пользователем. Доска обновлена.');
-      if (activeBoardId) {
-        await loadNotes(activeBoardId);
+      if (error instanceof StickyNoteConflictError) {
+        setNoteConflict({ local: note, server: error.serverNote });
+        setNotes((current) => sortNotes(current.map((item) => (item.id === note.id ? note : item))));
+        toast.error('Заметка уже изменена другим пользователем. Проверьте конфликт перед сохранением.');
+      } else {
+        toast.error('Не удалось сохранить заметку.');
+        if (activeBoardId) {
+          await loadNotes(activeBoardId);
+        }
       }
     } finally {
       setSavingNoteIds((current) => {
@@ -360,6 +389,26 @@ export function StickyNotes() {
         return next;
       });
     }
+  };
+
+  const scheduleNoteAutosave = (noteId: number) => {
+    if (!canEditActiveBoard) {
+      return;
+    }
+
+    const existing = autosaveTimersRef.current.get(noteId);
+    if (existing) {
+      window.clearTimeout(existing);
+    }
+
+    const timer = window.setTimeout(() => {
+      autosaveTimersRef.current.delete(noteId);
+      const latest = notesRef.current.find((note) => note.id === noteId);
+      if (latest) {
+        void saveNote(latest);
+      }
+    }, 1200);
+    autosaveTimersRef.current.set(noteId, timer);
   };
 
   const saveNoteLayout = async (note: StickyNoteItem) => {
@@ -383,6 +432,47 @@ export function StickyNotes() {
         await loadNotes(activeBoardId);
       }
     }
+  };
+
+  const applyServerConflictVersion = () => {
+    if (!noteConflict) {
+      return;
+    }
+
+    setNotes((current) => sortNotes(current.map((note) => (note.id === noteConflict.server.id ? noteConflict.server : note))));
+    setNoteConflict(null);
+  };
+
+  const copyConflictDraft = async () => {
+    if (!noteConflict) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(noteConflict.local.text);
+      toast.success('Текст вашей версии скопирован.');
+    } catch {
+      toast.error('Не удалось скопировать текст автоматически.');
+    }
+  };
+
+  const overwriteConflictVersion = async () => {
+    if (!noteConflict || !canEditActiveBoard) {
+      return;
+    }
+
+    const note = {
+      ...noteConflict.local,
+      version: noteConflict.server.version,
+      x: noteConflict.server.x,
+      y: noteConflict.server.y,
+      width: noteConflict.server.width,
+      height: noteConflict.server.height,
+      zIndex: noteConflict.server.zIndex,
+    };
+
+    setNoteConflict(null);
+    await saveNote(note);
   };
 
   const patchNote = (noteId: number, patch: Partial<StickyNoteItem>) => {
@@ -870,7 +960,10 @@ export function StickyNotes() {
                 </div>
                 <textarea
                   value={note.text}
-                  onChange={(event) => patchNote(note.id, { text: event.target.value })}
+                  onChange={(event) => {
+                    patchNote(note.id, { text: event.target.value });
+                    scheduleNoteAutosave(note.id);
+                  }}
                   onBlur={() => saveNote(note)}
                   readOnly={!canEditActiveBoard}
                   maxLength={4000}
@@ -906,6 +999,45 @@ export function StickyNotes() {
                 <Undo2 className="h-3.5 w-3.5" />
                 Восстановить
               </button>
+            </div>
+          ) : null}
+
+          {noteConflict ? (
+            <div className="sticky bottom-3 left-3 ml-3 mt-2 max-w-xl rounded-md border border-amber-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-lg">
+              <div className="font-semibold text-amber-800">Заметка изменена другим пользователем</div>
+              <div className="mt-1 grid gap-2 text-xs sm:grid-cols-2">
+                <div className="min-w-0 rounded border border-slate-200 bg-slate-50 p-2">
+                  <div className="mb-1 font-medium text-slate-600">На сервере</div>
+                  <div className="max-h-14 overflow-hidden whitespace-pre-wrap">{noteConflict.server.text || 'Пустая заметка'}</div>
+                </div>
+                <div className="min-w-0 rounded border border-slate-200 bg-slate-50 p-2">
+                  <div className="mb-1 font-medium text-slate-600">Ваша версия</div>
+                  <div className="max-h-14 overflow-hidden whitespace-pre-wrap">{noteConflict.local.text || 'Пустая заметка'}</div>
+                </div>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={applyServerConflictVersion}
+                  className="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Обновить с сервера
+                </button>
+                <button
+                  type="button"
+                  onClick={copyConflictDraft}
+                  className="rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Скопировать мой текст
+                </button>
+                <button
+                  type="button"
+                  onClick={overwriteConflictVersion}
+                  className="rounded-md bg-slate-900 px-2 py-1 text-xs font-medium text-white hover:bg-slate-800"
+                >
+                  Перезаписать
+                </button>
+              </div>
             </div>
           ) : null}
         </div>

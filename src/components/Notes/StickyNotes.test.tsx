@@ -1,11 +1,17 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../../contexts/ToastContext';
 import { StickyNotes } from './StickyNotes';
 import type { StickyNoteBoard, StickyNoteItem } from '../../services/api';
 
 vi.mock('../../services/api', () => ({
+  StickyNoteConflictError: class StickyNoteConflictError extends Error {
+    constructor(public readonly serverNote: StickyNoteItem) {
+      super('Sticky note version conflict');
+      this.name = 'StickyNoteConflictError';
+    }
+  },
   apiService: {
     getStickyNoteBoards: vi.fn(),
     getStickyNotes: vi.fn(),
@@ -39,7 +45,7 @@ vi.mock('../../services/stickyNotesRealtime', () => ({
   STICKY_NOTE_BOARD_CHANGED_EVENT: 'stickyNoteBoardChanged',
 }));
 
-import { apiService } from '../../services/api';
+import { apiService, StickyNoteConflictError } from '../../services/api';
 
 const apiMock = vi.mocked(apiService);
 
@@ -114,6 +120,11 @@ describe('StickyNotes', () => {
       email: 'anna@example.com',
       role: 'viewer',
     });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it('loads boards and notes', async () => {
@@ -194,5 +205,37 @@ describe('StickyNotes', () => {
     await user.click(screen.getByTitle('Добавить участника'));
 
     await waitFor(() => expect(apiMock.upsertStickyNoteBoardMember).toHaveBeenCalledWith(9, 3, { role: 'viewer' }));
+  });
+
+  it('autosaves note text after typing pauses', async () => {
+    const user = userEvent.setup();
+    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Черновик' }]);
+    apiMock.updateStickyNote.mockResolvedValue({ ...createdNote, text: 'Черновик обновлен', version: 2 });
+
+    renderStickyNotes();
+
+    await screen.findByDisplayValue('Черновик');
+    await user.type(screen.getByDisplayValue('Черновик'), ' обновлен');
+
+    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledWith(11, expect.objectContaining({
+      text: 'Черновик обновлен',
+      version: 1,
+    })), { timeout: 2500 });
+  }, 4000);
+
+  it('shows a conflict panel without losing the local text', async () => {
+    const serverNote = { ...createdNote, text: 'Версия сервера', version: 2 };
+    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Моя версия', version: 1 }]);
+    apiMock.updateStickyNote.mockRejectedValueOnce(new StickyNoteConflictError(serverNote));
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    await screen.findByDisplayValue('Моя версия');
+    await user.click(screen.getByTitle('Сохранить'));
+
+    expect(await screen.findByText('Заметка изменена другим пользователем')).toBeTruthy();
+    expect(screen.getByText('Версия сервера')).toBeTruthy();
+    expect(screen.getAllByText('Моя версия').length).toBeGreaterThan(1);
   });
 });
