@@ -417,6 +417,39 @@ describe('StickyNotes', () => {
     expect(apiMock.getStickyNotes).not.toHaveBeenCalledWith(13);
   });
 
+  it('does not show a stale board creation error after switching boards and typing a new draft', async () => {
+    const createBoardResponse = createDeferred<StickyNoteBoard>();
+    apiMock.getStickyNoteBoards.mockResolvedValue([board, personalBoard]);
+    apiMock.createStickyNoteBoard.mockImplementationOnce(() => createBoardResponse.promise);
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    await screen.findAllByText('Рабочая доска');
+    const titleInput = screen.getByPlaceholderText('Новая доска');
+    await user.type(titleInput, 'Ошибочная доска');
+    await user.click(screen.getByRole('button', { name: 'Общая' }));
+    await waitFor(() => expect(apiMock.createStickyNoteBoard).toHaveBeenCalledWith({
+      title: 'Ошибочная доска',
+      visibility: 'shared',
+      background: 'cork',
+    }));
+
+    await user.click(screen.getByRole('button', { name: /Мои заметки/i }));
+    await user.clear(titleInput);
+    await user.type(titleInput, 'Новая попытка');
+    await waitFor(() => expect(window.localStorage.getItem('payplanner.stickyNotes.activeBoardId')).toBe('9'));
+
+    await act(async () => {
+      createBoardResponse.reject(new Error('board creation failed'));
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText('Не удалось создать доску.')).toBeNull();
+    expect(window.localStorage.getItem('payplanner.stickyNotes.activeBoardId')).toBe('9');
+    expect(titleInput).toHaveProperty('value', 'Новая попытка');
+  });
+
   it('disables note creation when the board does not allow creating notes', async () => {
     apiMock.getStickyNoteBoards.mockResolvedValue([{ ...board, canCreateNotes: false }]);
 

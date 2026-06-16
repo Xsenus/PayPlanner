@@ -144,6 +144,7 @@ export function StickyNotes() {
   const connectionRef = useRef<HubConnection | null>(null);
   const boardCanvasRef = useRef<HTMLDivElement | null>(null);
   const notesRef = useRef<StickyNoteItem[]>([]);
+  const newBoardTitleRef = useRef('');
   const activeBoardIdRef = useRef<number | null>(null);
   const autosaveTimersRef = useRef<Map<number, number>>(new Map());
   const [boards, setBoards] = useState<StickyNoteBoard[]>([]);
@@ -359,6 +360,10 @@ export function StickyNotes() {
   }, [notes]);
 
   useEffect(() => {
+    newBoardTitleRef.current = newBoardTitle;
+  }, [newBoardTitle]);
+
+  useEffect(() => {
     setBoardTitle(activeBoard?.title ?? '');
     setBoardDescription(activeBoard?.description ?? '');
     setBoardBackground(activeBoard?.background ?? 'cork');
@@ -553,7 +558,9 @@ export function StickyNotes() {
       setNewBoardTitle((current) => (current.trim() === title ? '' : current));
     } catch (error) {
       console.error(error);
-      toast.error('Не удалось создать доску.');
+      if (activeBoardIdRef.current === requestedActiveBoardId && newBoardTitleRef.current.trim() === title) {
+        toast.error('Не удалось создать доску.');
+      }
     } finally {
       setCreatingBoard(false);
     }
