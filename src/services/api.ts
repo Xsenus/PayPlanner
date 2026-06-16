@@ -724,8 +724,26 @@ export interface StickyNoteBoard {
   notesCount: number;
   canEdit: boolean;
   canDelete: boolean;
+  canManageMembers: boolean;
   createdAt: string;
   updatedAt?: string | null;
+}
+
+export type StickyNoteBoardMemberRole = 'owner' | 'editor' | 'viewer';
+
+export interface StickyNoteBoardMember {
+  id: number;
+  boardId: number;
+  userId: number;
+  displayName: string;
+  email: string;
+  role: StickyNoteBoardMemberRole;
+}
+
+export interface StickyNoteBoardMemberCandidate {
+  userId: number;
+  displayName: string;
+  email: string;
 }
 
 export interface StickyNoteItem {
@@ -747,7 +765,7 @@ export interface StickyNoteItem {
 }
 
 export interface StickyNoteRealtimeEvent {
-  type: 'noteCreated' | 'noteUpdated' | 'noteDeleted' | 'boardDeleted';
+  type: 'noteCreated' | 'noteUpdated' | 'noteDeleted' | 'noteRestored' | 'boardDeleted' | 'boardMembersChanged';
   boardId: number;
   note?: StickyNoteItem | null;
   noteId?: number | null;
@@ -3487,6 +3505,27 @@ export class ApiService {
     });
   }
 
+  async getStickyNoteBoardMembers(boardId: number) {
+    return this.request<StickyNoteBoardMember[]>(`/sticky-notes/boards/${boardId}/members`);
+  }
+
+  async getStickyNoteMemberCandidates() {
+    return this.request<StickyNoteBoardMemberCandidate[]>('/sticky-notes/member-candidates');
+  }
+
+  async upsertStickyNoteBoardMember(boardId: number, userId: number, payload: { role: Exclude<StickyNoteBoardMemberRole, 'owner'> }) {
+    return this.request<StickyNoteBoardMember>(`/sticky-notes/boards/${boardId}/members/${userId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ userId, ...payload }),
+    });
+  }
+
+  async deleteStickyNoteBoardMember(boardId: number, userId: number) {
+    return this.request<void>(`/sticky-notes/boards/${boardId}/members/${userId}`, {
+      method: 'DELETE',
+    });
+  }
+
   async getStickyNotes(boardId: number) {
     return this.request<StickyNoteItem[]>(`/sticky-notes/boards/${boardId}/notes`);
   }
@@ -3515,6 +3554,12 @@ export class ApiService {
   async deleteStickyNote(id: number) {
     return this.request<void>(`/sticky-notes/notes/${id}`, {
       method: 'DELETE',
+    });
+  }
+
+  async restoreStickyNote(id: number) {
+    return this.request<StickyNoteItem>(`/sticky-notes/notes/${id}/restore`, {
+      method: 'POST',
     });
   }
 

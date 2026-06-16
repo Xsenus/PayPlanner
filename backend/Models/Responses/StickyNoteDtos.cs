@@ -13,8 +13,26 @@ public sealed class StickyNoteBoardDto
     public int NotesCount { get; set; }
     public bool CanEdit { get; set; }
     public bool CanDelete { get; set; }
+    public bool CanManageMembers { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
+}
+
+public sealed class StickyNoteBoardMemberDto
+{
+    public int Id { get; set; }
+    public int BoardId { get; set; }
+    public int UserId { get; set; }
+    public string DisplayName { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public string Role { get; set; } = string.Empty;
+}
+
+public sealed class StickyNoteBoardMemberCandidateDto
+{
+    public int UserId { get; set; }
+    public string DisplayName { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
 }
 
 public sealed class StickyNoteDto

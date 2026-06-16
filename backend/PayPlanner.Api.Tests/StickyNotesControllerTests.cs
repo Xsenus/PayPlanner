@@ -130,6 +130,144 @@ public sealed class StickyNotesControllerTests
         Assert.True(await db.StickyNotes.IgnoreQueryFilters().AnyAsync(item => item.Id == note.Id && EF.Property<bool>(item, "IsDeleted")));
     }
 
+    [Fact]
+    public async Task BoardViewer_CanReadButCannotEditNotes()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db);
+        var viewer = await CreateUserAsync(db);
+        var board = new StickyNoteBoard
+        {
+            Title = "Личная владельца",
+            Visibility = StickyNoteBoardVisibility.Personal,
+            OwnerUserId = owner.Id,
+            OwnerUserName = owner.FullName,
+            Background = "gray",
+            Members = new List<StickyNoteBoardMember>
+            {
+                new() { UserId = viewer.Id, Role = "viewer" },
+            },
+        };
+        var note = new StickyNote
+        {
+            Board = board,
+            Text = "Только чтение",
+            Color = "yellow",
+            Version = 1,
+            Width = 220,
+            Height = 180,
+        };
+        db.StickyNotes.Add(note);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, viewer);
+
+        var readResult = await controller.GetNotes(board.Id, CancellationToken.None);
+        var ok = Assert.IsType<OkObjectResult>(readResult.Result);
+        Assert.Single(Assert.IsAssignableFrom<IReadOnlyCollection<StickyNoteDto>>(ok.Value));
+
+        var updateResult = await controller.UpdateNote(note.Id, new UpdateStickyNoteRequest
+        {
+            Text = "Попытка изменения",
+            Color = "blue",
+            X = 10,
+            Y = 20,
+            Width = 220,
+            Height = 180,
+            ZIndex = 2,
+            Version = 1,
+        }, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(updateResult.Result);
+    }
+
+    [Fact]
+    public async Task BoardEditor_CanUpdateSharedPersonalBoardNote()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db);
+        var editor = await CreateUserAsync(db);
+        var board = new StickyNoteBoard
+        {
+            Title = "Личная владельца",
+            Visibility = StickyNoteBoardVisibility.Personal,
+            OwnerUserId = owner.Id,
+            OwnerUserName = owner.FullName,
+            Background = "gray",
+            Members = new List<StickyNoteBoardMember>
+            {
+                new() { UserId = editor.Id, Role = "editor" },
+            },
+        };
+        var note = new StickyNote
+        {
+            Board = board,
+            Text = "До",
+            Color = "yellow",
+            Version = 1,
+            Width = 220,
+            Height = 180,
+        };
+        db.StickyNotes.Add(note);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, editor);
+
+        var result = await controller.UpdateNote(note.Id, new UpdateStickyNoteRequest
+        {
+            Text = "После",
+            Color = "green",
+            X = 10,
+            Y = 20,
+            Width = 220,
+            Height = 180,
+            ZIndex = 2,
+            Version = 1,
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<StickyNoteDto>(ok.Value);
+        Assert.Equal("После", dto.Text);
+        Assert.Equal(2, dto.Version);
+    }
+
+    [Fact]
+    public async Task RestoreNote_ReturnsSoftDeletedNote()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db);
+        var board = new StickyNoteBoard
+        {
+            Title = "Личная",
+            Visibility = StickyNoteBoardVisibility.Personal,
+            OwnerUserId = user.Id,
+            OwnerUserName = user.FullName,
+            Background = "gray",
+        };
+        var note = new StickyNote
+        {
+            Board = board,
+            Text = "Вернуть",
+            Color = "yellow",
+            Version = 1,
+            Width = 220,
+            Height = 180,
+        };
+        db.StickyNotes.Add(note);
+        await db.SaveChangesAsync();
+        db.StickyNotes.Remove(note);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, user);
+
+        var result = await controller.RestoreNote(note.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<StickyNoteDto>(ok.Value);
+        Assert.Equal("Вернуть", dto.Text);
+        Assert.Contains(await db.StickyNotes.ToListAsync(), item => item.Id == note.Id);
+    }
+
     private static async Task<PaymentContext> CreateContextAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");

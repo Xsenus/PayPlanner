@@ -16,6 +16,8 @@ namespace PayPlanner.Api.Controllers;
 [Route("api/sticky-notes")]
 public sealed class StickyNotesController : ControllerBase
 {
+    private const int MaxNotesPerBoard = 200;
+
     private static readonly HashSet<string> AllowedColors = new(StringComparer.OrdinalIgnoreCase)
     {
         "yellow",
@@ -65,7 +67,14 @@ public sealed class StickyNotesController : ControllerBase
             .AsNoTracking()
             .ToListAsync(ct);
 
-        return Ok(boards.Select(item => ToBoardDto(item.Board, item.NotesCount, CanEditBoard(item.Board, access.Value), access.Value.CanDelete)).ToList());
+        return Ok(boards
+            .Select(item => ToBoardDto(
+                item.Board,
+                item.NotesCount,
+                CanEditBoard(item.Board, access.Value),
+                access.Value.CanDelete,
+                CanManageMembers(item.Board, access.Value)))
+            .ToList());
     }
 
     [HttpPost("boards")]
@@ -92,7 +101,7 @@ public sealed class StickyNotesController : ControllerBase
         _db.StickyNoteBoards.Add(board);
         await _db.SaveChangesAsync(ct);
 
-        return CreatedAtAction(nameof(GetNotes), new { boardId = board.Id }, ToBoardDto(board, 0, true, access.Value.CanDelete));
+        return CreatedAtAction(nameof(GetNotes), new { boardId = board.Id }, ToBoardDto(board, 0, true, access.Value.CanDelete, CanManageMembers(board, access.Value)));
     }
 
     [HttpPut("boards/{boardId:int}")]
@@ -122,7 +131,7 @@ public sealed class StickyNotesController : ControllerBase
         board.Background = NormalizeBackground(request.Background);
 
         await _db.SaveChangesAsync(ct);
-        return Ok(ToBoardDto(board, await CountNotesAsync(board.Id, ct), true, access.Value.CanDelete));
+        return Ok(ToBoardDto(board, await CountNotesAsync(board.Id, ct), true, access.Value.CanDelete, CanManageMembers(board, access.Value)));
     }
 
     [HttpDelete("boards/{boardId:int}")]
@@ -150,6 +159,159 @@ public sealed class StickyNotesController : ControllerBase
         _db.StickyNoteBoards.Remove(board);
         await _db.SaveChangesAsync(ct);
         await PublishAsync(board.Id, "boardDeleted", null, null, access.Value, ct);
+        return NoContent();
+    }
+
+    [HttpGet("boards/{boardId:int}/members")]
+    public async Task<ActionResult<IReadOnlyCollection<StickyNoteBoardMemberDto>>> GetBoardMembers(int boardId, CancellationToken ct)
+    {
+        var access = await GetAccessAsync(static permission => permission.CanView, ct);
+        if (access is null)
+        {
+            return Forbid();
+        }
+
+        var board = await _db.StickyNoteBoards
+            .Include(item => item.Members)
+            .ThenInclude(member => member.User)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == boardId, ct);
+        if (board is null)
+        {
+            return NotFound();
+        }
+
+        if (!CanViewBoard(board, access.Value.UserId))
+        {
+            return Forbid();
+        }
+
+        return Ok(ToMemberDtos(board));
+    }
+
+    [HttpGet("member-candidates")]
+    public async Task<ActionResult<IReadOnlyCollection<StickyNoteBoardMemberCandidateDto>>> GetMemberCandidates(CancellationToken ct)
+    {
+        var access = await GetAccessAsync(static permission => permission.CanView, ct);
+        if (access is null)
+        {
+            return Forbid();
+        }
+
+        var users = await _db.Users
+            .AsNoTracking()
+            .Where(user => user.IsActive && user.IsApproved)
+            .OrderBy(user => user.FullName)
+            .ThenBy(user => user.Email)
+            .Select(user => new StickyNoteBoardMemberCandidateDto
+            {
+                UserId = user.Id,
+                DisplayName = string.IsNullOrWhiteSpace(user.FullName) ? user.Email : user.FullName,
+                Email = user.Email,
+            })
+            .ToListAsync(ct);
+
+        return Ok(users);
+    }
+
+    [HttpPut("boards/{boardId:int}/members/{userId:int}")]
+    public async Task<ActionResult<StickyNoteBoardMemberDto>> UpsertBoardMember(
+        int boardId,
+        int userId,
+        [FromBody] UpsertStickyNoteBoardMemberRequest request,
+        CancellationToken ct)
+    {
+        var access = await GetAccessAsync(static permission => permission.CanEdit, ct);
+        if (access is null)
+        {
+            return Forbid();
+        }
+
+        var board = await _db.StickyNoteBoards
+            .Include(item => item.Members)
+            .ThenInclude(member => member.User)
+            .FirstOrDefaultAsync(item => item.Id == boardId, ct);
+        if (board is null)
+        {
+            return NotFound();
+        }
+
+        if (!CanManageMembers(board, access.Value) || board.Visibility == StickyNoteBoardVisibility.Shared)
+        {
+            return Forbid();
+        }
+
+        if (board.OwnerUserId == userId)
+        {
+            return BadRequest(new { message = "Владелец доски уже имеет полный доступ." });
+        }
+
+        var user = await _db.Users
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == userId && item.IsActive && item.IsApproved, ct);
+        if (user is null)
+        {
+            return NotFound();
+        }
+
+        var role = NormalizeMemberRole(request.Role);
+        var member = board.Members.FirstOrDefault(item => item.UserId == userId);
+        if (member is null)
+        {
+            member = new StickyNoteBoardMember
+            {
+                BoardId = board.Id,
+                UserId = userId,
+                Role = role,
+            };
+            _db.StickyNoteBoardMembers.Add(member);
+        }
+        else
+        {
+            member.Role = role;
+        }
+
+        await _db.SaveChangesAsync(ct);
+        await PublishAsync(board.Id, "boardMembersChanged", null, null, access.Value, ct);
+        return Ok(ToMemberDto(member, board.Id, user));
+    }
+
+    [HttpDelete("boards/{boardId:int}/members/{userId:int}")]
+    public async Task<IActionResult> DeleteBoardMember(int boardId, int userId, CancellationToken ct)
+    {
+        var access = await GetAccessAsync(static permission => permission.CanEdit, ct);
+        if (access is null)
+        {
+            return Forbid();
+        }
+
+        var board = await _db.StickyNoteBoards
+            .Include(item => item.Members)
+            .FirstOrDefaultAsync(item => item.Id == boardId, ct);
+        if (board is null)
+        {
+            return NotFound();
+        }
+
+        if (!CanManageMembers(board, access.Value) || board.Visibility == StickyNoteBoardVisibility.Shared)
+        {
+            return Forbid();
+        }
+
+        if (board.OwnerUserId == userId)
+        {
+            return BadRequest(new { message = "Владельца доски нельзя удалить из участников." });
+        }
+
+        var member = board.Members.FirstOrDefault(item => item.UserId == userId);
+        if (member is null)
+        {
+            return NotFound();
+        }
+
+        _db.StickyNoteBoardMembers.Remove(member);
+        await _db.SaveChangesAsync(ct);
+        await PublishAsync(board.Id, "boardMembersChanged", null, null, access.Value, ct);
         return NoContent();
     }
 
@@ -207,6 +369,12 @@ public sealed class StickyNotesController : ControllerBase
         if (!CanEditBoard(board, access.Value))
         {
             return Forbid();
+        }
+
+        var notesCount = await CountNotesAsync(boardId, ct);
+        if (notesCount >= MaxNotesPerBoard)
+        {
+            return Conflict(new { message = $"На одной доске можно хранить до {MaxNotesPerBoard} заметок." });
         }
 
         var maxZIndex = await _db.StickyNotes
@@ -354,6 +522,41 @@ public sealed class StickyNotesController : ControllerBase
         return NoContent();
     }
 
+    [HttpPost("notes/{noteId:int}/restore")]
+    public async Task<ActionResult<StickyNoteDto>> RestoreNote(int noteId, CancellationToken ct)
+    {
+        var access = await GetAccessAsync(static permission => permission.CanDelete, ct);
+        if (access is null)
+        {
+            return Forbid();
+        }
+
+        var note = await _db.StickyNotes
+            .IgnoreQueryFilters()
+            .Include(item => item.Board)
+            .ThenInclude(board => board!.Members)
+            .FirstOrDefaultAsync(
+                item => item.Id == noteId && EF.Property<bool>(item, "IsDeleted"),
+                ct);
+        if (note is null || note.Board is null)
+        {
+            return NotFound();
+        }
+
+        if (!CanEditBoard(note.Board, access.Value))
+        {
+            return Forbid();
+        }
+
+        _db.Entry(note).Property("IsDeleted").CurrentValue = false;
+        note.Version++;
+        await _db.SaveChangesAsync(ct);
+
+        var dto = ToNoteDto(note);
+        await PublishAsync(note.BoardId, "noteRestored", dto, note.Id, access.Value, ct);
+        return Ok(dto);
+    }
+
     private async Task<NotesAccess?> GetAccessAsync(Func<RolePermissionValues, bool> isAllowed, CancellationToken ct)
     {
         var userId = User.GetUserId();
@@ -453,6 +656,9 @@ public sealed class StickyNotesController : ControllerBase
                 || board.OwnerUserId == access.UserId
                 || board.Members.Any(member => member.UserId == access.UserId && !string.Equals(member.Role, "viewer", StringComparison.OrdinalIgnoreCase)));
 
+    private static bool CanManageMembers(StickyNoteBoard board, NotesAccess access)
+        => access.CanEdit && board.OwnerUserId == access.UserId;
+
     private async Task<int> CountNotesAsync(int boardId, CancellationToken ct)
         => await _db.StickyNotes.CountAsync(note => note.BoardId == boardId, ct);
 
@@ -473,7 +679,7 @@ public sealed class StickyNotesController : ControllerBase
                 },
                 ct);
 
-    private static StickyNoteBoardDto ToBoardDto(StickyNoteBoard board, int notesCount, bool canEdit, bool canDelete)
+    private static StickyNoteBoardDto ToBoardDto(StickyNoteBoard board, int notesCount, bool canEdit, bool canDelete, bool canManageMembers)
         => new()
         {
             Id = board.Id,
@@ -487,8 +693,45 @@ public sealed class StickyNotesController : ControllerBase
             NotesCount = notesCount,
             CanEdit = canEdit,
             CanDelete = canDelete && board.Visibility == StickyNoteBoardVisibility.Personal,
+            CanManageMembers = canManageMembers,
             CreatedAt = board.CreatedAt,
             UpdatedAt = board.UpdatedAt,
+        };
+
+    private static IReadOnlyCollection<StickyNoteBoardMemberDto> ToMemberDtos(StickyNoteBoard board)
+    {
+        var members = board.Members
+            .Select(member => ToMemberDto(member, board.Id, member.User))
+            .OrderBy(member => member.Role == "owner" ? 0 : 1)
+            .ThenBy(member => member.DisplayName)
+            .ToList();
+
+        if (board.OwnerUserId is { } ownerUserId && ownerUserId > 0)
+        {
+            members.Insert(0, new StickyNoteBoardMemberDto
+            {
+                Id = 0,
+                BoardId = board.Id,
+                UserId = ownerUserId,
+                DisplayName = string.IsNullOrWhiteSpace(board.OwnerUserName) ? "Владелец" : board.OwnerUserName,
+                Role = "owner",
+            });
+        }
+
+        return members;
+    }
+
+    private static StickyNoteBoardMemberDto ToMemberDto(StickyNoteBoardMember member, int boardId, User? user)
+        => new()
+        {
+            Id = member.Id,
+            BoardId = boardId,
+            UserId = member.UserId,
+            DisplayName = user is null
+                ? $"Пользователь #{member.UserId}"
+                : string.IsNullOrWhiteSpace(user.FullName) ? user.Email : user.FullName,
+            Email = user?.Email ?? string.Empty,
+            Role = NormalizeMemberRole(member.Role),
         };
 
     private static StickyNoteDto ToNoteDto(StickyNote note)
@@ -525,6 +768,11 @@ public sealed class StickyNotesController : ControllerBase
         => !string.IsNullOrWhiteSpace(value) && AllowedColors.Contains(value)
             ? value.Trim().ToLowerInvariant()
             : "yellow";
+
+    private static string NormalizeMemberRole(string? value)
+        => string.Equals(value, "editor", StringComparison.OrdinalIgnoreCase)
+            ? "editor"
+            : "viewer";
 
     private static string NormalizeTitle(string value)
     {

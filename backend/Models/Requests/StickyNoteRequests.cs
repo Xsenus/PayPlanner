@@ -71,3 +71,11 @@ public sealed class UpdateStickyNoteLayoutRequest
     public int ZIndex { get; set; }
     public int? Version { get; set; }
 }
+
+public sealed class UpsertStickyNoteBoardMemberRequest
+{
+    public int UserId { get; set; }
+
+    [MaxLength(24)]
+    public string Role { get; set; } = "viewer";
+}
