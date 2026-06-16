@@ -506,6 +506,37 @@ describe('StickyNotes', () => {
     await waitFor(() => expect(screen.getAllByText('Заметка удалена').length).toBe(1));
   });
 
+  it('does not show a stale delete undo after switching boards', async () => {
+    const deleteResponse = createDeferred<void>();
+    apiMock.getStickyNoteBoards.mockResolvedValue([board, personalBoard]);
+    apiMock.getStickyNotes.mockImplementation(async (boardId) => (
+      boardId === 9
+        ? [{ ...createdNote, id: 12, boardId: 9, text: 'Личная заметка после удаления' }]
+        : [{ ...createdNote, text: 'Удалить и уйти' }]
+    ));
+    apiMock.deleteStickyNote.mockImplementationOnce(() => deleteResponse.promise);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    await screen.findByDisplayValue('Удалить и уйти');
+    await user.click(screen.getByTitle('Удалить'));
+    await waitFor(() => expect(apiMock.deleteStickyNote).toHaveBeenCalledWith(11));
+
+    await user.click(screen.getByRole('button', { name: /Мои заметки/i }));
+    expect(await screen.findByDisplayValue('Личная заметка после удаления')).toBeTruthy();
+
+    await act(async () => {
+      deleteResponse.resolve();
+      await deleteResponse.promise;
+    });
+
+    expect(screen.queryByText('Заметка удалена')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Восстановить/i })).toBeNull();
+    expect(screen.getByDisplayValue('Личная заметка после удаления')).toBeTruthy();
+  });
+
   it('disables note deletion when the board does not allow deleting notes', async () => {
     apiMock.getStickyNoteBoards.mockResolvedValue([{ ...board, canDeleteNotes: false }]);
     apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Нельзя удалить' }]);

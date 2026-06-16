@@ -758,8 +758,14 @@ export function StickyNotes() {
       return;
     }
 
+    const requestedBoardId = activeBoardId;
+
     try {
       await apiService.deleteStickyNote(noteId);
+      if (!requestedBoardId || activeBoardIdRef.current !== requestedBoardId) {
+        await refreshBoardCounts();
+        return;
+      }
       clearNoteTransientState(noteId);
       setNotes((current) => current.filter((note) => note.id !== noteId));
       setDeletedNoteId(noteId);
@@ -776,7 +782,9 @@ export function StickyNotes() {
       await refreshBoardCounts();
     } catch (error) {
       console.error(error);
-      toast.error('Не удалось удалить заметку.');
+      if (!requestedBoardId || activeBoardIdRef.current === requestedBoardId) {
+        toast.error('Не удалось удалить заметку.');
+      }
     }
   };
 
