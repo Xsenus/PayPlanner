@@ -79,6 +79,42 @@ public sealed class StickyNotesControllerTests
     }
 
     [Fact]
+    public async Task CreateNote_ReturnsConflict_WhenBoardLimitReached()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db);
+        var board = new StickyNoteBoard
+        {
+            Title = "Лимит",
+            Visibility = StickyNoteBoardVisibility.Shared,
+            Background = "cork",
+        };
+        db.StickyNoteBoards.Add(board);
+        await db.SaveChangesAsync();
+
+        for (var index = 0; index < 200; index++)
+        {
+            db.StickyNotes.Add(new StickyNote
+            {
+                BoardId = board.Id,
+                Text = $"Заметка {index}",
+                Color = "yellow",
+                Version = 1,
+                Width = 220,
+                Height = 180,
+            });
+        }
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, user);
+
+        var result = await controller.CreateNote(board.Id, new CreateStickyNoteRequest { Text = "Лишняя" }, CancellationToken.None);
+
+        Assert.IsType<ConflictObjectResult>(result.Result);
+        Assert.Equal(200, await db.StickyNotes.CountAsync(item => item.BoardId == board.Id));
+    }
+
+    [Fact]
     public async Task UpdateNote_ReturnsConflict_WhenVersionIsStale()
     {
         await using var db = await CreateContextAsync();

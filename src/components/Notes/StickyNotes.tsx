@@ -44,6 +44,7 @@ const COLORS: Array<{ value: StickyNoteColor; label: string; className: string }
 ];
 
 const DEFAULT_NOTE_SIZE = { width: 220, height: 180 };
+const MAX_NOTES_PER_BOARD = 200;
 const FILTER_OPTIONS = [
   { value: 'all', label: 'Все' },
   { value: 'mine', label: 'Мои' },
@@ -151,6 +152,8 @@ export function StickyNotes() {
   const canEditActiveBoard = Boolean(activeBoard?.canEdit);
   const canCreateNotesOnActiveBoard = Boolean(activeBoard?.canCreateNotes);
   const canDeleteNotesOnActiveBoard = Boolean(activeBoard?.canDeleteNotes);
+  const isActiveBoardAtNoteLimit = (activeBoard?.notesCount ?? notes.length) >= MAX_NOTES_PER_BOARD;
+  const canAddNoteToActiveBoard = canCreateNotesOnActiveBoard && !isActiveBoardAtNoteLimit;
   const currentUserId = user?.id ?? null;
 
   const filteredNotes = useMemo(() => {
@@ -398,6 +401,11 @@ export function StickyNotes() {
 
   const createNoteAt = async (x?: number, y?: number) => {
     if (!activeBoardId || !canCreateNotesOnActiveBoard) {
+      return;
+    }
+
+    if (isActiveBoardAtNoteLimit) {
+      toast.error(`На одной доске можно хранить до ${MAX_NOTES_PER_BOARD} заметок.`);
       return;
     }
 
@@ -682,7 +690,7 @@ export function StickyNotes() {
   };
 
   const handleCanvasDoubleClick = (event: ReactMouseEvent<HTMLDivElement>) => {
-    if (!canCreateNotesOnActiveBoard || isInteractiveTarget(event.target)) {
+    if (!canAddNoteToActiveBoard || isInteractiveTarget(event.target)) {
       return;
     }
 
@@ -1105,8 +1113,9 @@ export function StickyNotes() {
             <button
               type="button"
               onClick={() => createNoteAt()}
-              disabled={!canCreateNotesOnActiveBoard}
+              disabled={!canAddNoteToActiveBoard}
               className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              title={isActiveBoardAtNoteLimit ? `На одной доске можно хранить до ${MAX_NOTES_PER_BOARD} заметок.` : 'Создать заметку'}
             >
               <Plus className="h-4 w-4" />
               Заметка

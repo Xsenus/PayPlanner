@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../../contexts/ToastContext';
@@ -180,15 +180,27 @@ describe('StickyNotes', () => {
     expect(apiMock.createStickyNote).not.toHaveBeenCalled();
   });
 
+  it('disables note creation when the active board reached the note limit', async () => {
+    apiMock.getStickyNoteBoards.mockResolvedValue([{ ...board, notesCount: 200 }]);
+
+    renderStickyNotes();
+
+    await screen.findAllByText('Рабочая доска');
+
+    const createButton = screen.getByRole('button', { name: /Заметка/i });
+    expect(createButton).toHaveProperty('disabled', true);
+    expect(createButton.getAttribute('title')).toBe('На одной доске можно хранить до 200 заметок.');
+    expect(apiMock.createStickyNote).not.toHaveBeenCalled();
+  });
+
   it('updates board title and background from settings', async () => {
     const user = userEvent.setup();
     renderStickyNotes();
 
     await screen.findAllByText('Рабочая доска');
     await user.click(screen.getByRole('button', { name: 'Настройки доски' }));
-    await user.clear(screen.getByPlaceholderText('Название доски'));
-    await user.type(screen.getByPlaceholderText('Название доски'), 'Юридические заметки');
-    await user.type(screen.getByPlaceholderText('Короткое описание доски'), 'Напоминания по клиентским документам');
+    fireEvent.change(screen.getByPlaceholderText('Название доски'), { target: { value: 'Юридические заметки' } });
+    fireEvent.change(screen.getByPlaceholderText('Короткое описание доски'), { target: { value: 'Напоминания по клиентским документам' } });
     await user.selectOptions(screen.getByLabelText('Фон доски'), 'gray');
     await user.click(screen.getByRole('button', { name: /Сохранить/i }));
 
