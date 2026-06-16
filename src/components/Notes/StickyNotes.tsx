@@ -169,6 +169,15 @@ export function StickyNotes() {
     return getEffectiveBoardNotesCount(board.notesCount, notes.length);
   };
 
+  const clearActiveBoardState = useCallback(() => {
+    setNotes([]);
+    setMembers([]);
+    setSelectedNoteId(null);
+    setDeletedNoteId(null);
+    setNoteConflict(null);
+    setBoardSettingsOpen(false);
+  }, []);
+
   const filteredNotes = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
     const recentThreshold = Date.now() - 7 * 24 * 60 * 60 * 1000;
@@ -343,6 +352,7 @@ export function StickyNotes() {
           return sortNotes(next);
         });
       } else if (event.type === 'boardDeleted') {
+        clearActiveBoardState();
         void loadBoards();
       } else if (event.type === 'boardMembersChanged' || event.type === 'boardUpdated') {
         void loadBoards();
@@ -364,7 +374,7 @@ export function StickyNotes() {
       connectionRef.current = null;
       void stopNotesHubConnection(connection);
     };
-  }, [activeBoardId, loadBoards, loadMembers]);
+  }, [activeBoardId, clearActiveBoardState, loadBoards, loadMembers]);
 
   useEffect(() => {
     const connection = connectionRef.current;
@@ -624,12 +634,7 @@ export function StickyNotes() {
       await apiService.deleteStickyNoteBoard(activeBoard.id);
       const nextBoards = boards.filter((board) => board.id !== activeBoard.id);
       setBoards(nextBoards);
-      setNotes([]);
-      setMembers([]);
-      setSelectedNoteId(null);
-      setDeletedNoteId(null);
-      setNoteConflict(null);
-      setBoardSettingsOpen(false);
+      clearActiveBoardState();
       setActiveBoardId(nextBoards[0]?.id ?? null);
       toast.success('Доска заметок удалена.');
     } catch (error) {

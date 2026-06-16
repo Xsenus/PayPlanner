@@ -5,6 +5,22 @@ import { ToastProvider } from '../../contexts/ToastContext';
 import { getEffectiveBoardNotesCount, StickyNotes } from './StickyNotes';
 import type { StickyNoteBoard, StickyNoteItem } from '../../services/api';
 
+const realtimeMock = vi.hoisted(() => {
+  const handlers = new Map<string, (event: unknown) => void>();
+  return {
+    canStart: false,
+    handlers,
+    connection: {
+      on: (eventName: string, handler: (event: unknown) => void) => {
+        handlers.set(eventName, handler);
+      },
+      off: (eventName: string) => {
+        handlers.delete(eventName);
+      },
+    },
+  };
+});
+
 vi.mock('../../services/api', () => ({
   StickyNoteConflictError: class StickyNoteConflictError extends Error {
     constructor(public readonly serverNote: StickyNoteItem) {
@@ -37,11 +53,11 @@ vi.mock('../../contexts/AuthContext', () => ({
 }));
 
 vi.mock('../../services/stickyNotesRealtime', () => ({
-  canStartNotesHubConnection: () => false,
-  createNotesHubConnection: vi.fn(),
+  canStartNotesHubConnection: () => realtimeMock.canStart,
+  createNotesHubConnection: vi.fn(() => realtimeMock.connection),
   joinNotesBoard: vi.fn(),
   leaveNotesBoard: vi.fn(),
-  startNotesHubConnection: vi.fn(),
+  startNotesHubConnection: vi.fn(async () => true),
   stopNotesHubConnection: vi.fn(),
   STICKY_NOTE_BOARD_CHANGED_EVENT: 'stickyNoteBoardChanged',
 }));
@@ -108,6 +124,8 @@ function renderStickyNotes() {
 describe('StickyNotes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    realtimeMock.canStart = false;
+    realtimeMock.handlers.clear();
     window.localStorage.clear();
     apiMock.getStickyNoteBoards.mockResolvedValue([board]);
     apiMock.getStickyNotes.mockResolvedValue([]);
@@ -304,6 +322,28 @@ describe('StickyNotes', () => {
     await waitFor(() => expect(apiMock.getStickyNotes).toHaveBeenCalledWith(7));
     expect(screen.queryByDisplayValue('Личная заметка перед удалением')).toBeNull();
     expect(await screen.findByText('Доска заметок удалена.')).toBeTruthy();
+  });
+
+  it('clears active board state when the current board is deleted through realtime', async () => {
+    realtimeMock.canStart = true;
+    window.localStorage.setItem('payplanner.stickyNotes.activeBoardId', '9');
+    apiMock.getStickyNoteBoards
+      .mockResolvedValueOnce([board, personalBoard])
+      .mockResolvedValue([board]);
+    apiMock.getStickyNotes.mockImplementation(async (boardId) => (
+      boardId === 9
+        ? [{ ...createdNote, boardId: 9, text: 'Удалили в другой вкладке' }]
+        : []
+    ));
+
+    renderStickyNotes();
+
+    await screen.findByDisplayValue('Удалили в другой вкладке');
+    realtimeMock.handlers.get('stickyNoteBoardChanged')?.({ type: 'boardDeleted', boardId: 9 });
+
+    await waitFor(() => expect(apiMock.getStickyNoteBoards).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(apiMock.getStickyNotes).toHaveBeenCalledWith(7));
+    expect(screen.queryByDisplayValue('Удалили в другой вкладке')).toBeNull();
   });
 
   it('adds a board member when the user manages a personal board', async () => {
