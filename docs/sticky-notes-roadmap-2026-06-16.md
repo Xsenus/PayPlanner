@@ -837,3 +837,11 @@
 - [x] Access safety: пользователь без доступа к разделу "Заметки" не остается подключенным к notes hub и не получает подписку на live-обновления.
 - [x] Tests: добавлены backend-тесты `OnConnectedAsync_AddsUserGroup_WhenUserCanViewNotes` и `OnConnectedAsync_Aborts_WhenUserCannotViewNotes`.
 - [x] "Что нового": запись раздела "Заметки" дополнена описанием проверки прав при realtime-подключении.
+
+## Отметка строгой авторизации подписок NotesHub 2026-06-16
+
+- [x] Backend realtime: `NotesHub` теперь использует единую строгую проверку пользователя из БД для подключения и подписки на доску: пользователь должен быть активным, подтвержденным и иметь `notes.canView`.
+- [x] Access safety: stale claim или неподтвержденный пользователь больше не получает персональную realtime-группу заметок даже при наличии старого токена.
+- [x] Board safety: `JoinBoard` дополнительно покрыт тестами на доступную общую доску, запрет без права `notes.canView` и запрет для чужой личной доски.
+- [x] Tests: добавлены backend-тесты `OnConnectedAsync_Aborts_WhenUserIsNotApproved`, `OnConnectedAsync_Aborts_WhenClaimUserDoesNotExist`, `JoinBoard_AddsBoardGroup_WhenUserCanViewSharedBoard`, `JoinBoard_DoesNotAddBoardGroup_WhenUserCannotViewNotes` и `JoinBoard_DoesNotAddBoardGroup_WhenPersonalBoardIsNotVisible`.
+- [x] "Что нового": запись раздела "Заметки" дополнена описанием строгой проверки пользователя и доски перед live-подпиской.

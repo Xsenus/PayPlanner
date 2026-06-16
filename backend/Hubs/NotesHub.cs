@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -26,24 +25,14 @@ public sealed class NotesHub : Hub
 
     public override async Task OnConnectedAsync()
     {
-        if (!int.TryParse(Context.User?.FindFirstValue(ClaimTypes.NameIdentifier), out var userId) || userId <= 0)
+        var userId = await GetAuthorizedNotesUserIdAsync();
+        if (!userId.HasValue)
         {
             Context.Abort();
             return;
         }
 
-        var canViewNotes = await _db.HasUserSectionPermissionAsync(
-            Context.User,
-            RolePermissionCatalog.Notes,
-            static permission => permission.CanView,
-            Context.ConnectionAborted);
-        if (!canViewNotes)
-        {
-            Context.Abort();
-            return;
-        }
-
-        await Groups.AddToGroupAsync(Context.ConnectionId, UserGroup(userId), Context.ConnectionAborted);
+        await Groups.AddToGroupAsync(Context.ConnectionId, UserGroup(userId.Value), Context.ConnectionAborted);
         await base.OnConnectedAsync();
     }
 
@@ -54,8 +43,8 @@ public sealed class NotesHub : Hub
             return;
         }
 
-        var userId = Context.User?.GetUserId();
-        if (!userId.HasValue || !await _db.HasUserSectionPermissionAsync(Context.User!, RolePermissionCatalog.Notes, static permission => permission.CanView, Context.ConnectionAborted))
+        var userId = await GetAuthorizedNotesUserIdAsync();
+        if (!userId.HasValue)
         {
             return;
         }
@@ -86,5 +75,27 @@ public sealed class NotesHub : Hub
         }
 
         return Groups.RemoveFromGroupAsync(Context.ConnectionId, BoardGroup(boardId));
+    }
+
+    private async Task<int?> GetAuthorizedNotesUserIdAsync()
+    {
+        var userId = Context.User?.GetUserId();
+        if (!userId.HasValue || userId.Value <= 0)
+        {
+            return null;
+        }
+
+        var canViewNotes = await _db.Users
+            .AsNoTracking()
+            .Where(user => user.Id == userId.Value && user.IsActive && user.IsApproved)
+            .Select(user =>
+                user.Role != null
+                && (user.Role.Name == "admin"
+                    || user.Role.Permissions.Any(permission =>
+                        permission.Section == RolePermissionCatalog.Notes
+                        && permission.CanView)))
+            .FirstOrDefaultAsync(Context.ConnectionAborted);
+
+        return canViewNotes ? userId.Value : null;
     }
 }
