@@ -272,6 +272,19 @@ export function StickyNotes() {
     return memberCandidates.filter((candidate) => !blocked.has(candidate.userId));
   }, [activeBoard?.ownerUserId, memberCandidates, members]);
 
+  useEffect(() => {
+    if (!memberUserId) {
+      return;
+    }
+
+    const selectedCandidateStillAvailable = availableMemberCandidates.some(
+      (candidate) => String(candidate.userId) === memberUserId,
+    );
+    if (!selectedCandidateStillAvailable) {
+      setMemberUserId('');
+    }
+  }, [availableMemberCandidates, memberUserId]);
+
   const loadBoards = useCallback(async () => {
     setLoading(true);
     try {

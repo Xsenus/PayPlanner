@@ -474,6 +474,47 @@ describe('StickyNotes', () => {
     await waitFor(() => expect(apiMock.upsertStickyNoteBoardMember).toHaveBeenCalledWith(9, 3, { role: 'viewer' }));
   });
 
+  it('clears the selected member candidate when the user becomes a board member', async () => {
+    realtimeMock.canStart = true;
+    const ownerMember = {
+      id: 0,
+      boardId: 9,
+      userId: 1,
+      displayName: 'Пользователь',
+      email: 'user@example.com',
+      role: 'owner' as const,
+    };
+    const annaMember = {
+      id: 5,
+      boardId: 9,
+      userId: 3,
+      displayName: 'Анна Юрист',
+      email: 'anna@example.com',
+      role: 'viewer' as const,
+    };
+    apiMock.getStickyNoteBoards.mockResolvedValue([personalBoard]);
+    apiMock.getStickyNoteBoardMembers
+      .mockResolvedValueOnce([ownerMember])
+      .mockResolvedValue([ownerMember, annaMember]);
+    apiMock.getStickyNoteMemberCandidates.mockResolvedValue([
+      { userId: 3, displayName: 'Анна Юрист', email: 'anna@example.com' },
+    ]);
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    const memberSelect = await screen.findByLabelText('Сотрудник для доступа к доске') as HTMLSelectElement;
+    await screen.findByRole('option', { name: 'Анна Юрист' });
+    await user.selectOptions(memberSelect, '3');
+    expect(memberSelect.value).toBe('3');
+
+    realtimeMock.handlers.get('stickyNoteBoardChanged')?.({ type: 'boardMembersChanged', boardId: 9 });
+
+    await waitFor(() => expect(apiMock.getStickyNoteBoardMembers).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(memberSelect.value).toBe(''));
+    expect(screen.queryByRole('option', { name: 'Анна Юрист' })).toBeNull();
+  });
+
   it('ignores stale member candidate responses after switching boards', async () => {
     const staleCandidates = createDeferred<StickyNoteBoardMemberCandidate[]>();
     const freshCandidates = createDeferred<StickyNoteBoardMemberCandidate[]>();
