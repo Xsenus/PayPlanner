@@ -510,11 +510,21 @@ export function StickyNotes() {
   const refreshBoardCounts = useCallback(async () => {
     try {
       const nextBoards = await apiService.getStickyNoteBoards();
+      const currentBoardId = activeBoardIdRef.current;
+      if (currentBoardId && !nextBoards.some((board) => board.id === currentBoardId)) {
+        clearActiveBoardState();
+      }
+
       setBoards(nextBoards);
+      setActiveBoardId((current) => (
+        current && nextBoards.some((board) => board.id === current)
+          ? current
+          : nextBoards[0]?.id ?? null
+      ));
     } catch {
       // The next manual refresh will recover counts.
     }
-  }, []);
+  }, [clearActiveBoardState]);
 
   const createBoard = async (visibility: 'personal' | 'shared') => {
     const title = newBoardTitle.trim();

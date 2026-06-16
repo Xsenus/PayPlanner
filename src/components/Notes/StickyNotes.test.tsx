@@ -241,6 +241,35 @@ describe('StickyNotes', () => {
     expect(await screen.findByPlaceholderText('Текст заметки')).toBeTruthy();
   });
 
+  it('switches away when the active board disappears during count refresh', async () => {
+    window.localStorage.setItem('payplanner.stickyNotes.activeBoardId', '9');
+    apiMock.getStickyNoteBoards
+      .mockResolvedValueOnce([board, personalBoard])
+      .mockResolvedValue([board]);
+    apiMock.getStickyNotes.mockImplementation(async (boardId) => (
+      boardId === 7
+        ? [{ ...createdNote, id: 12, boardId: 7, text: 'Рабочая доска после обновления' }]
+        : []
+    ));
+    apiMock.createStickyNote.mockResolvedValue({
+      ...createdNote,
+      id: 13,
+      boardId: 9,
+      text: 'Личная заметка без доступа',
+    });
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    await waitFor(() => expect(apiMock.getStickyNotes).toHaveBeenCalledWith(9));
+    await user.click(screen.getByRole('button', { name: /Заметка/i }));
+
+    await waitFor(() => expect(apiMock.createStickyNote).toHaveBeenCalledWith(9, expect.any(Object)));
+    await waitFor(() => expect(apiMock.getStickyNotes).toHaveBeenCalledWith(7));
+    expect(await screen.findByDisplayValue('Рабочая доска после обновления')).toBeTruthy();
+    expect(screen.queryByDisplayValue('Личная заметка без доступа')).toBeNull();
+  });
+
   it('does not duplicate a board when the created board is already in the list', async () => {
     const user = userEvent.setup();
     apiMock.createStickyNoteBoard.mockResolvedValue({ ...board, title: 'Рабочая доска обновлена' });
