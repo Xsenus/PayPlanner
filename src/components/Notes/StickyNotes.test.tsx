@@ -443,6 +443,8 @@ describe('StickyNotes', () => {
 
     await waitFor(() => expect(apiMock.getStickyNoteBoards).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(apiMock.getStickyNotes).toHaveBeenCalledWith(7));
+    await waitFor(() => expect(apiMock.getStickyNoteBoardMembers).toHaveBeenCalledWith(7));
+    expect(apiMock.getStickyNoteBoardMembers.mock.calls.map(([boardId]) => boardId)).toEqual([9, 7]);
     expect(screen.queryByDisplayValue('Доступ уже отозвали')).toBeNull();
   });
 

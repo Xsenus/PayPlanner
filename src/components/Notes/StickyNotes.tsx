@@ -281,22 +281,20 @@ export function StickyNotes() {
         clearActiveBoardState();
       }
 
+      const storedBoardId = readStoredActiveBoardId();
+      const nextActiveBoardId = currentBoardId && nextBoards.some((board) => board.id === currentBoardId)
+        ? currentBoardId
+        : storedBoardId && nextBoards.some((board) => board.id === storedBoardId)
+          ? storedBoardId
+          : nextBoards[0]?.id ?? null;
+
       setBoards(nextBoards);
-      setActiveBoardId((current) => {
-        if (current && nextBoards.some((board) => board.id === current)) {
-          return current;
-        }
-
-        const storedBoardId = readStoredActiveBoardId();
-        if (storedBoardId && nextBoards.some((board) => board.id === storedBoardId)) {
-          return storedBoardId;
-        }
-
-        return nextBoards[0]?.id ?? null;
-      });
+      setActiveBoardId(nextActiveBoardId);
+      return nextActiveBoardId;
     } catch (error) {
       console.error(error);
       toast.error('Не удалось загрузить доски заметок.');
+      return activeBoardIdRef.current;
     } finally {
       setLoading(false);
     }
@@ -447,10 +445,11 @@ export function StickyNotes() {
         clearActiveBoardState();
         void loadBoards();
       } else if (event.type === 'boardMembersChanged' || event.type === 'boardUpdated') {
-        void loadBoards();
-        if (activeBoardId) {
-          void loadMembers(activeBoardId);
-        }
+        void loadBoards().then((nextActiveBoardId) => {
+          if (nextActiveBoardId === event.boardId) {
+            void loadMembers(nextActiveBoardId);
+          }
+        });
       }
     };
 
