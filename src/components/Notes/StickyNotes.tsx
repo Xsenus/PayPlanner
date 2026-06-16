@@ -878,7 +878,9 @@ export function StickyNotes() {
                   placeholder="Текст заметки"
                 />
                 <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-slate-500">
-                  <span className="truncate">{note.authorUserName || 'Автор не указан'}</span>
+                  <span className="truncate" title={`Создал: ${note.authorUserName || 'не указан'}`}>
+                    {note.lastUpdatedByUserName ? `Изменил: ${note.lastUpdatedByUserName}` : note.authorUserName || 'Автор не указан'}
+                  </span>
                   <span>{note.text.length}/4000</span>
                 </div>
                 {canEditActiveBoard ? (

@@ -50,6 +50,8 @@ public sealed class StickyNoteDto
     public bool IsPinned { get; set; }
     public int? AuthorUserId { get; set; }
     public string AuthorUserName { get; set; } = string.Empty;
+    public int? LastUpdatedByUserId { get; set; }
+    public string LastUpdatedByUserName { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
 }

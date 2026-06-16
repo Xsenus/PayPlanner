@@ -343,7 +343,26 @@ public sealed class StickyNotesController : ControllerBase
             .Where(note => note.BoardId == boardId)
             .OrderBy(note => note.ZIndex)
             .ThenBy(note => note.Id)
-            .Select(note => ToNoteDto(note))
+            .Select(note => new StickyNoteDto
+            {
+                Id = note.Id,
+                BoardId = note.BoardId,
+                Text = note.Text,
+                Color = note.Color,
+                X = note.X,
+                Y = note.Y,
+                Width = note.Width,
+                Height = note.Height,
+                ZIndex = note.ZIndex,
+                Version = note.Version,
+                IsPinned = note.IsPinned,
+                AuthorUserId = note.AuthorUserId,
+                AuthorUserName = note.AuthorUserName,
+                LastUpdatedByUserId = EF.Property<int?>(note, "UpdatedByUserId"),
+                LastUpdatedByUserName = EF.Property<string?>(note, "UpdatedByUserName") ?? note.AuthorUserName,
+                CreatedAt = note.CreatedAt,
+                UpdatedAt = note.UpdatedAt,
+            })
             .ToListAsync(ct);
 
         return Ok(notes);
@@ -399,7 +418,7 @@ public sealed class StickyNotesController : ControllerBase
         _db.StickyNotes.Add(note);
         await _db.SaveChangesAsync(ct);
 
-        var dto = ToNoteDto(note);
+        var dto = ToNoteDto(note, access.Value.UserId, access.Value.DisplayName);
         await PublishAsync(boardId, "noteCreated", dto, note.Id, access.Value, ct);
         return CreatedAtAction(nameof(GetNotes), new { boardId }, dto);
     }
@@ -444,7 +463,7 @@ public sealed class StickyNotesController : ControllerBase
 
         await _db.SaveChangesAsync(ct);
 
-        var dto = ToNoteDto(note);
+        var dto = ToNoteDto(note, access.Value.UserId, access.Value.DisplayName);
         await PublishAsync(note.BoardId, "noteUpdated", dto, note.Id, access.Value, ct);
         return Ok(dto);
     }
@@ -486,7 +505,7 @@ public sealed class StickyNotesController : ControllerBase
 
         await _db.SaveChangesAsync(ct);
 
-        var dto = ToNoteDto(note);
+        var dto = ToNoteDto(note, access.Value.UserId, access.Value.DisplayName);
         await PublishAsync(note.BoardId, "noteUpdated", dto, note.Id, access.Value, ct);
         return Ok(dto);
     }
@@ -552,7 +571,7 @@ public sealed class StickyNotesController : ControllerBase
         note.Version++;
         await _db.SaveChangesAsync(ct);
 
-        var dto = ToNoteDto(note);
+        var dto = ToNoteDto(note, access.Value.UserId, access.Value.DisplayName);
         await PublishAsync(note.BoardId, "noteRestored", dto, note.Id, access.Value, ct);
         return Ok(dto);
     }
@@ -662,9 +681,16 @@ public sealed class StickyNotesController : ControllerBase
     private async Task<int> CountNotesAsync(int boardId, CancellationToken ct)
         => await _db.StickyNotes.CountAsync(note => note.BoardId == boardId, ct);
 
-    private Task PublishAsync(int boardId, string type, StickyNoteDto? note, int? noteId, NotesAccess access, CancellationToken ct)
-        => _hub.Clients
-            .Group(NotesHub.BoardGroup(boardId))
+    private async Task PublishAsync(int boardId, string type, StickyNoteDto? note, int? noteId, NotesAccess access, CancellationToken ct)
+    {
+        var recipientUserIds = await GetBoardRealtimeRecipientUserIdsAsync(boardId, ct);
+        if (recipientUserIds.Count == 0)
+        {
+            return;
+        }
+
+        await _hub.Clients
+            .Groups(recipientUserIds.Select(NotesHub.UserGroup).Distinct(StringComparer.Ordinal).ToList())
             .SendAsync(
                 NotesHub.BoardChangedEvent,
                 new StickyNoteRealtimeEventDto
@@ -678,6 +704,59 @@ public sealed class StickyNotesController : ControllerBase
                     CreatedAt = DateTime.UtcNow,
                 },
                 ct);
+    }
+
+    private async Task<IReadOnlyList<int>> GetBoardRealtimeRecipientUserIdsAsync(int boardId, CancellationToken ct)
+    {
+        var board = await _db.StickyNoteBoards
+            .AsNoTracking()
+            .Include(item => item.Members)
+            .FirstOrDefaultAsync(item => item.Id == boardId && !item.IsArchived, ct);
+        if (board is null)
+        {
+            return Array.Empty<int>();
+        }
+
+        var query = _db.Users
+            .AsNoTracking()
+            .Where(user => user.IsActive && user.IsApproved);
+
+        if (board.Visibility == StickyNoteBoardVisibility.Shared)
+        {
+            query = query.Where(user =>
+                user.Role != null
+                && (user.Role.Name == "admin"
+                    || user.Role.Permissions.Any(permission =>
+                        permission.Section == RolePermissionCatalog.Notes
+                        && permission.CanView)));
+        }
+        else
+        {
+            var boardUserIds = board.Members
+                .Select(member => member.UserId)
+                .Append(board.OwnerUserId.GetValueOrDefault())
+                .Where(userId => userId > 0)
+                .Distinct()
+                .ToArray();
+
+            if (boardUserIds.Length == 0)
+            {
+                return Array.Empty<int>();
+            }
+
+            query = query.Where(user =>
+                boardUserIds.Contains(user.Id)
+                && user.Role != null
+                && (user.Role.Name == "admin"
+                    || user.Role.Permissions.Any(permission =>
+                        permission.Section == RolePermissionCatalog.Notes
+                        && permission.CanView)));
+        }
+
+        return await query
+            .Select(user => user.Id)
+            .ToListAsync(ct);
+    }
 
     private static StickyNoteBoardDto ToBoardDto(StickyNoteBoard board, int notesCount, bool canEdit, bool canDelete, bool canManageMembers)
         => new()
@@ -734,7 +813,7 @@ public sealed class StickyNotesController : ControllerBase
             Role = NormalizeMemberRole(member.Role),
         };
 
-    private static StickyNoteDto ToNoteDto(StickyNote note)
+    private static StickyNoteDto ToNoteDto(StickyNote note, int? lastUpdatedByUserId = null, string? lastUpdatedByUserName = null)
         => new()
         {
             Id = note.Id,
@@ -750,6 +829,10 @@ public sealed class StickyNotesController : ControllerBase
             IsPinned = note.IsPinned,
             AuthorUserId = note.AuthorUserId,
             AuthorUserName = note.AuthorUserName,
+            LastUpdatedByUserId = lastUpdatedByUserId,
+            LastUpdatedByUserName = string.IsNullOrWhiteSpace(lastUpdatedByUserName)
+                ? note.AuthorUserName
+                : lastUpdatedByUserName,
             CreatedAt = note.CreatedAt,
             UpdatedAt = note.UpdatedAt,
         };

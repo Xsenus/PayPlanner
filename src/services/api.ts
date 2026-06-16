@@ -760,6 +760,8 @@ export interface StickyNoteItem {
   isPinned: boolean;
   authorUserId?: number | null;
   authorUserName: string;
+  lastUpdatedByUserId?: number | null;
+  lastUpdatedByUserName: string;
   createdAt: string;
   updatedAt?: string | null;
 }

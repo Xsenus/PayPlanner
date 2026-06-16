@@ -83,6 +83,8 @@ const createdNote: StickyNoteItem = {
   isPinned: false,
   authorUserId: 1,
   authorUserName: 'Пользователь',
+  lastUpdatedByUserId: 1,
+  lastUpdatedByUserName: 'Пользователь',
   createdAt: '2026-06-16T00:00:00Z',
 };
 

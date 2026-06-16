@@ -22,6 +22,7 @@ public sealed class NotesHub : Hub
     }
 
     public static string BoardGroup(int boardId) => $"sticky-notes:board:{boardId}";
+    public static string UserGroup(int userId) => $"sticky-notes:user:{userId}";
 
     public override async Task OnConnectedAsync()
     {
@@ -31,6 +32,7 @@ public sealed class NotesHub : Hub
             return;
         }
 
+        await Groups.AddToGroupAsync(Context.ConnectionId, UserGroup(userId), Context.ConnectionAborted);
         await base.OnConnectedAsync();
     }
 

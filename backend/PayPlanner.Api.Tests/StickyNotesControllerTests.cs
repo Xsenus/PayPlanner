@@ -268,6 +268,40 @@ public sealed class StickyNotesControllerTests
         Assert.Contains(await db.StickyNotes.ToListAsync(), item => item.Id == note.Id);
     }
 
+    [Fact]
+    public async Task DeleteBoardMember_RemovesUserFromRealtimeRecipients()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db);
+        var removedUser = await CreateUserAsync(db);
+        var remainingUser = await CreateUserAsync(db);
+        var board = new StickyNoteBoard
+        {
+            Title = "Личная владельца",
+            Visibility = StickyNoteBoardVisibility.Personal,
+            OwnerUserId = owner.Id,
+            OwnerUserName = owner.FullName,
+            Background = "gray",
+            Members = new List<StickyNoteBoardMember>
+            {
+                new() { UserId = removedUser.Id, Role = "editor" },
+                new() { UserId = remainingUser.Id, Role = "viewer" },
+            },
+        };
+        db.StickyNoteBoards.Add(board);
+        await db.SaveChangesAsync();
+
+        var hub = new FakeNotesHubContext();
+        var controller = CreateController(db, owner, hub);
+
+        var result = await controller.DeleteBoardMember(board.Id, removedUser.Id, CancellationToken.None);
+
+        Assert.IsType<NoContentResult>(result);
+        Assert.DoesNotContain(NotesHub.UserGroup(removedUser.Id), hub.SentGroupNames);
+        Assert.Contains(NotesHub.UserGroup(owner.Id), hub.SentGroupNames);
+        Assert.Contains(NotesHub.UserGroup(remainingUser.Id), hub.SentGroupNames);
+    }
+
     private static async Task<PaymentContext> CreateContextAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");
@@ -315,7 +349,7 @@ public sealed class StickyNotesControllerTests
         return user;
     }
 
-    private static StickyNotesController CreateController(PaymentContext db, User user)
+    private static StickyNotesController CreateController(PaymentContext db, User user, FakeNotesHubContext? hub = null)
     {
         var claims = new List<Claim>
         {
@@ -324,7 +358,7 @@ public sealed class StickyNotesControllerTests
             new(ClaimTypes.Email, user.Email),
         };
 
-        return new StickyNotesController(db, new FakeNotesHubContext())
+        return new StickyNotesController(db, hub ?? new FakeNotesHubContext())
         {
             ControllerContext = new ControllerContext
             {
@@ -338,27 +372,49 @@ public sealed class StickyNotesControllerTests
 
     private sealed class FakeNotesHubContext : IHubContext<NotesHub>
     {
-        public IHubClients Clients { get; } = new FakeHubClients();
+        private readonly FakeHubClients _clients = new();
+
+        public IHubClients Clients => _clients;
         public IGroupManager Groups { get; } = new FakeGroupManager();
+        public IReadOnlyCollection<string> SentGroupNames => _clients.SentGroupNames;
     }
 
     private sealed class FakeHubClients : IHubClients
     {
-        private static readonly IClientProxy Proxy = new FakeClientProxy();
+        private readonly FakeClientProxy _proxy = new();
 
-        public IClientProxy All => Proxy;
-        public IClientProxy AllExcept(IReadOnlyList<string> excludedConnectionIds) => Proxy;
-        public IClientProxy Client(string connectionId) => Proxy;
-        public IClientProxy Clients(IReadOnlyList<string> connectionIds) => Proxy;
-        public IClientProxy Group(string groupName) => Proxy;
-        public IClientProxy GroupExcept(string groupName, IReadOnlyList<string> excludedConnectionIds) => Proxy;
-        public IClientProxy Groups(IReadOnlyList<string> groupNames) => Proxy;
-        public IClientProxy User(string userId) => Proxy;
-        public IClientProxy Users(IReadOnlyList<string> userIds) => Proxy;
+        public IReadOnlyCollection<string> SentGroupNames => _proxy.GroupNames;
+
+        public IClientProxy All => _proxy;
+        public IClientProxy AllExcept(IReadOnlyList<string> excludedConnectionIds) => _proxy;
+        public IClientProxy Client(string connectionId) => _proxy;
+        public IClientProxy Clients(IReadOnlyList<string> connectionIds) => _proxy;
+        public IClientProxy Group(string groupName)
+        {
+            _proxy.GroupNames.Add(groupName);
+            return _proxy;
+        }
+
+        public IClientProxy GroupExcept(string groupName, IReadOnlyList<string> excludedConnectionIds)
+        {
+            _proxy.GroupNames.Add(groupName);
+            return _proxy;
+        }
+
+        public IClientProxy Groups(IReadOnlyList<string> groupNames)
+        {
+            _proxy.GroupNames.AddRange(groupNames);
+            return _proxy;
+        }
+
+        public IClientProxy User(string userId) => _proxy;
+        public IClientProxy Users(IReadOnlyList<string> userIds) => _proxy;
     }
 
     private sealed class FakeClientProxy : IClientProxy
     {
+        public List<string> GroupNames { get; } = new();
+
         public Task SendCoreAsync(string method, object?[] args, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
     }
