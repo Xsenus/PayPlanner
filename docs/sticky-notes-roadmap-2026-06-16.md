@@ -830,3 +830,10 @@
 - [x] Backend contract: fake SignalR hub в тестах сохраняет последний method/payload, чтобы проверять не только группы получателей, но и тело realtime-события.
 - [x] Tests: добавлен backend-тест `CreateNote_PublishesRealtimePayloadForTheSameBoard`, который проверяет согласованность `BoardId`, `Note.BoardId` и `NoteId` в событии создания заметки.
 - [x] "Что нового": запись раздела "Заметки" дополнена описанием серверной защиты от несогласованных realtime-обновлений.
+
+## Отметка защиты подключения к realtime заметок 2026-06-16
+
+- [x] Backend realtime: `NotesHub.OnConnectedAsync` теперь проверяет право `notes.canView` до подписки соединения на персональную realtime-группу пользователя.
+- [x] Access safety: пользователь без доступа к разделу "Заметки" не остается подключенным к notes hub и не получает подписку на live-обновления.
+- [x] Tests: добавлены backend-тесты `OnConnectedAsync_AddsUserGroup_WhenUserCanViewNotes` и `OnConnectedAsync_Aborts_WhenUserCannotViewNotes`.
+- [x] "Что нового": запись раздела "Заметки" дополнена описанием проверки прав при realtime-подключении.

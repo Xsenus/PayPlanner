@@ -32,6 +32,17 @@ public sealed class NotesHub : Hub
             return;
         }
 
+        var canViewNotes = await _db.HasUserSectionPermissionAsync(
+            Context.User,
+            RolePermissionCatalog.Notes,
+            static permission => permission.CanView,
+            Context.ConnectionAborted);
+        if (!canViewNotes)
+        {
+            Context.Abort();
+            return;
+        }
+
         await Groups.AddToGroupAsync(Context.ConnectionId, UserGroup(userId), Context.ConnectionAborted);
         await base.OnConnectedAsync();
     }
