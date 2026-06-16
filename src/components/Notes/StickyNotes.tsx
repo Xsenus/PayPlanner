@@ -353,19 +353,15 @@ export function StickyNotes() {
 
   useEffect(() => {
     if (!activeBoardId) {
-      setNotes([]);
-      setMembers([]);
+      clearActiveBoardState();
+      setNotesLoading(false);
       return;
     }
 
-    setSelectedNoteId(null);
-    setDeletedNoteId(null);
-    setNoteConflict(null);
-    setNotes([]);
-    setMembers([]);
+    clearActiveBoardState();
     void loadNotes(activeBoardId);
     void loadMembers(activeBoardId);
-  }, [activeBoardId, loadMembers, loadNotes]);
+  }, [activeBoardId, clearActiveBoardState, loadMembers, loadNotes]);
 
   useEffect(() => {
     if (!activeBoard?.canManageMembers) {

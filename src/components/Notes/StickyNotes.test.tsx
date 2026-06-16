@@ -426,6 +426,26 @@ describe('StickyNotes', () => {
     })), { timeout: 2500 });
   }, 4000);
 
+  it('cancels pending autosave when switching boards', async () => {
+    apiMock.getStickyNoteBoards.mockResolvedValue([board, personalBoard]);
+    apiMock.getStickyNotes.mockImplementation(async (boardId) => (
+      boardId === 7
+        ? [{ ...createdNote, text: 'Черновик перед уходом' }]
+        : [{ ...createdNote, id: 12, boardId: 9, text: 'Личная доска открыта' }]
+    ));
+
+    renderStickyNotes();
+
+    const textarea = await screen.findByDisplayValue('Черновик перед уходом');
+    fireEvent.change(textarea, { target: { value: 'Черновик перед уходом обновлен' } });
+    fireEvent.click(screen.getByRole('button', { name: /Мои заметки/i }));
+
+    expect(await screen.findByDisplayValue('Личная доска открыта')).toBeTruthy();
+    await new Promise((resolve) => window.setTimeout(resolve, 1300));
+
+    expect(apiMock.updateStickyNote).not.toHaveBeenCalled();
+  }, 4000);
+
   it('saves the current textarea value on blur', async () => {
     const user = userEvent.setup();
     apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Старый текст' }]);
