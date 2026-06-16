@@ -591,7 +591,9 @@ export function StickyNotes() {
       await refreshBoardCounts();
     } catch (error) {
       console.error(error);
-      toast.error('Не удалось создать заметку.');
+      if (activeBoardIdRef.current === requestedBoardId) {
+        toast.error('Не удалось создать заметку.');
+      }
     }
   };
 
@@ -771,7 +773,9 @@ export function StickyNotes() {
       toast.success('Заметка восстановлена.');
     } catch (error) {
       console.error(error);
-      toast.error('Не удалось восстановить заметку.');
+      if (!requestedBoardId || activeBoardIdRef.current === requestedBoardId) {
+        toast.error('Не удалось восстановить заметку.');
+      }
     }
   };
 

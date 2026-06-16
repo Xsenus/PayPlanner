@@ -301,6 +301,35 @@ describe('StickyNotes', () => {
     expect(screen.getByDisplayValue('Личная доска открыта')).toBeTruthy();
   });
 
+  it('does not show a stale create note error after switching boards', async () => {
+    const createdNoteResponse = createDeferred<StickyNoteItem>();
+    apiMock.getStickyNoteBoards.mockResolvedValue([board, personalBoard]);
+    apiMock.getStickyNotes.mockImplementation(async (boardId) => (
+      boardId === 9
+        ? [{ ...createdNote, id: 12, boardId: 9, text: 'Личная доска после ошибки создания' }]
+        : []
+    ));
+    apiMock.createStickyNote.mockImplementationOnce(() => createdNoteResponse.promise);
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    await screen.findAllByText('Рабочая доска');
+    await user.click(screen.getByRole('button', { name: /Заметка/i }));
+    await waitFor(() => expect(apiMock.createStickyNote).toHaveBeenCalledWith(7, expect.any(Object)));
+
+    await user.click(screen.getByRole('button', { name: /Мои заметки/i }));
+    expect(await screen.findByDisplayValue('Личная доска после ошибки создания')).toBeTruthy();
+
+    await act(async () => {
+      createdNoteResponse.reject(new Error('create failed'));
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText('Не удалось создать заметку.')).toBeNull();
+    expect(screen.getByDisplayValue('Личная доска после ошибки создания')).toBeTruthy();
+  });
+
   it('switches away when the active board disappears during count refresh', async () => {
     window.localStorage.setItem('payplanner.stickyNotes.activeBoardId', '9');
     apiMock.getStickyNoteBoards
@@ -518,6 +547,38 @@ describe('StickyNotes', () => {
 
     expect(screen.queryByDisplayValue('Позднее восстановление')).toBeNull();
     expect(screen.getByDisplayValue('Личная заметка')).toBeTruthy();
+  });
+
+  it('does not show a stale restore note error after switching boards', async () => {
+    const restoreResponse = createDeferred<StickyNoteItem>();
+    apiMock.getStickyNoteBoards.mockResolvedValue([board, personalBoard]);
+    apiMock.getStickyNotes.mockImplementation(async (boardId) => (
+      boardId === 9
+        ? [{ ...createdNote, id: 12, boardId: 9, text: 'Личная доска после ошибки восстановления' }]
+        : [{ ...createdNote, text: 'Восстановить с ошибкой' }]
+    ));
+    apiMock.restoreStickyNote.mockImplementationOnce(() => restoreResponse.promise);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    await screen.findByDisplayValue('Восстановить с ошибкой');
+    await user.click(screen.getByTitle('Удалить'));
+    await screen.findAllByText('Заметка удалена');
+    await user.click(screen.getAllByRole('button', { name: /Восстановить/i })[0]);
+    await waitFor(() => expect(apiMock.restoreStickyNote).toHaveBeenCalledWith(11));
+
+    await user.click(screen.getByRole('button', { name: /Мои заметки/i }));
+    expect(await screen.findByDisplayValue('Личная доска после ошибки восстановления')).toBeTruthy();
+
+    await act(async () => {
+      restoreResponse.reject(new Error('restore failed'));
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText('Не удалось восстановить заметку.')).toBeNull();
+    expect(screen.getByDisplayValue('Личная доска после ошибки восстановления')).toBeTruthy();
   });
 
   it('clears the local undo panel when a deleted note is restored through realtime', async () => {
