@@ -115,6 +115,7 @@ describe('StickyNotes', () => {
     apiMock.updateStickyNoteBoard.mockImplementation(async (_id, payload) => ({
       ...board,
       title: payload.title,
+      description: payload.description,
       background: payload.background ?? board.background,
     }));
     apiMock.deleteStickyNote.mockResolvedValue(undefined);
@@ -174,11 +175,13 @@ describe('StickyNotes', () => {
     await user.click(screen.getByRole('button', { name: 'Настройки доски' }));
     await user.clear(screen.getByPlaceholderText('Название доски'));
     await user.type(screen.getByPlaceholderText('Название доски'), 'Юридические заметки');
+    await user.type(screen.getByPlaceholderText('Короткое описание доски'), 'Напоминания по клиентским документам');
     await user.selectOptions(screen.getByLabelText('Фон доски'), 'gray');
     await user.click(screen.getByRole('button', { name: /Сохранить/i }));
 
     await waitFor(() => expect(apiMock.updateStickyNoteBoard).toHaveBeenCalledWith(7, {
       title: 'Юридические заметки',
+      description: 'Напоминания по клиентским документам',
       background: 'gray',
     }));
   });

@@ -329,12 +329,14 @@ public sealed class StickyNotesControllerTests
         var result = await controller.UpdateBoard(board.Id, new UpdateStickyNoteBoardRequest
         {
             Title = "Новая доска",
+            Description = "Короткое описание",
             Background = "gray",
         }, CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var dto = Assert.IsType<StickyNoteBoardDto>(ok.Value);
         Assert.Equal("Новая доска", dto.Title);
+        Assert.Equal("Короткое описание", dto.Description);
         Assert.Equal("gray", dto.Background);
         Assert.Contains(NotesHub.UserGroup(owner.Id), hub.SentGroupNames);
         Assert.Contains(NotesHub.UserGroup(member.Id), hub.SentGroupNames);

@@ -139,6 +139,7 @@ export function StickyNotes() {
   const [viewMode, setViewMode] = useState<NotesViewMode>(() => readStoredViewMode());
   const [boardSettingsOpen, setBoardSettingsOpen] = useState(false);
   const [boardTitle, setBoardTitle] = useState('');
+  const [boardDescription, setBoardDescription] = useState('');
   const [boardBackground, setBoardBackground] = useState<StickyNoteBoardBackground>('cork');
   const [savingBoardSettings, setSavingBoardSettings] = useState(false);
 
@@ -249,8 +250,9 @@ export function StickyNotes() {
 
   useEffect(() => {
     setBoardTitle(activeBoard?.title ?? '');
+    setBoardDescription(activeBoard?.description ?? '');
     setBoardBackground(activeBoard?.background ?? 'cork');
-  }, [activeBoard?.background, activeBoard?.id, activeBoard?.title]);
+  }, [activeBoard?.background, activeBoard?.description, activeBoard?.id, activeBoard?.title]);
 
   useEffect(() => {
     writeStoredValue(NOTES_VIEW_MODE_STORAGE_KEY, viewMode);
@@ -621,6 +623,7 @@ export function StickyNotes() {
     try {
       const updated = await apiService.updateStickyNoteBoard(activeBoard.id, {
         title,
+        description: boardDescription.trim() || null,
         background: boardBackground,
       });
       setBoards((current) => current.map((board) => (board.id === updated.id ? updated : board)));
@@ -1003,8 +1006,10 @@ export function StickyNotes() {
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 py-2">
           <div className="min-w-0">
             <h1 className="truncate text-base font-semibold text-slate-950">{activeBoard?.title ?? 'Заметки'}</h1>
-            <p className="text-xs text-slate-500">
-              {activeBoard?.visibility === 'shared' ? 'Общая доска сотрудников' : 'Личная доска'}
+            <p className="truncate text-xs text-slate-500">
+              {activeBoard?.description
+                ? `${activeBoard.visibility === 'shared' ? 'Общая доска сотрудников' : 'Личная доска'} · ${activeBoard.description}`
+                : activeBoard?.visibility === 'shared' ? 'Общая доска сотрудников' : 'Личная доска'}
             </p>
           </div>
           <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
@@ -1111,6 +1116,16 @@ export function StickyNotes() {
                 className="h-9 w-full rounded-md border border-slate-300 px-2 text-sm"
                 maxLength={120}
                 placeholder="Название доски"
+              />
+            </label>
+            <label className="min-w-0 lg:col-span-3">
+              <span className="sr-only">Описание доски</span>
+              <textarea
+                value={boardDescription}
+                onChange={(event) => setBoardDescription(event.target.value)}
+                className="min-h-16 w-full resize-y rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+                maxLength={500}
+                placeholder="Короткое описание доски"
               />
             </label>
             <label className="min-w-0">
