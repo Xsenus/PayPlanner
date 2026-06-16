@@ -685,6 +685,11 @@ public sealed class StickyNotesController : ControllerBase
 
     private async Task PublishAsync(int boardId, string type, StickyNoteDto? note, int? noteId, NotesAccess access, CancellationToken ct)
     {
+        if (note is not null && note.BoardId != boardId)
+        {
+            throw new InvalidOperationException("Sticky note realtime payload board does not match the event board.");
+        }
+
         var recipientUserIds = await GetBoardRealtimeRecipientUserIdsAsync(boardId, ct);
         if (recipientUserIds.Count == 0)
         {

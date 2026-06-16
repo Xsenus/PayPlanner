@@ -115,6 +115,37 @@ public sealed class StickyNotesControllerTests
     }
 
     [Fact]
+    public async Task CreateNote_PublishesRealtimePayloadForTheSameBoard()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db);
+        var board = new StickyNoteBoard
+        {
+            Title = "Общее",
+            Visibility = StickyNoteBoardVisibility.Shared,
+            Background = "cork",
+        };
+        db.StickyNoteBoards.Add(board);
+        await db.SaveChangesAsync();
+
+        var hub = new FakeNotesHubContext();
+        var controller = CreateController(db, user, hub);
+
+        var result = await controller.CreateNote(board.Id, new CreateStickyNoteRequest { Text = "Проверить событие" }, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedAtActionResult>(result.Result);
+        var dto = Assert.IsType<StickyNoteDto>(created.Value);
+        Assert.Equal(NotesHub.BoardChangedEvent, hub.LastMethodName);
+        var realtimeEvent = Assert.IsType<StickyNoteRealtimeEventDto>(Assert.Single(hub.LastArguments));
+        Assert.Equal("noteCreated", realtimeEvent.Type);
+        Assert.Equal(board.Id, realtimeEvent.BoardId);
+        Assert.NotNull(realtimeEvent.Note);
+        Assert.Equal(board.Id, realtimeEvent.Note.BoardId);
+        Assert.Equal(dto.Id, realtimeEvent.Note.Id);
+        Assert.Equal(dto.Id, realtimeEvent.NoteId);
+    }
+
+    [Fact]
     public async Task UpdateNote_ReturnsConflict_WhenVersionIsStale()
     {
         await using var db = await CreateContextAsync();
@@ -511,6 +542,8 @@ public sealed class StickyNotesControllerTests
         public IHubClients Clients => _clients;
         public IGroupManager Groups { get; } = new FakeGroupManager();
         public IReadOnlyCollection<string> SentGroupNames => _clients.SentGroupNames;
+        public string? LastMethodName => _clients.LastMethodName;
+        public IReadOnlyList<object?> LastArguments => _clients.LastArguments;
     }
 
     private sealed class FakeHubClients : IHubClients
@@ -518,6 +551,8 @@ public sealed class StickyNotesControllerTests
         private readonly FakeClientProxy _proxy = new();
 
         public IReadOnlyCollection<string> SentGroupNames => _proxy.GroupNames;
+        public string? LastMethodName => _proxy.LastMethodName;
+        public IReadOnlyList<object?> LastArguments => _proxy.LastArguments;
 
         public IClientProxy All => _proxy;
         public IClientProxy AllExcept(IReadOnlyList<string> excludedConnectionIds) => _proxy;
@@ -548,9 +583,15 @@ public sealed class StickyNotesControllerTests
     private sealed class FakeClientProxy : IClientProxy
     {
         public List<string> GroupNames { get; } = new();
+        public string? LastMethodName { get; private set; }
+        public IReadOnlyList<object?> LastArguments { get; private set; } = Array.Empty<object?>();
 
         public Task SendCoreAsync(string method, object?[] args, CancellationToken cancellationToken = default)
-            => Task.CompletedTask;
+        {
+            LastMethodName = method;
+            LastArguments = args;
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class FakeGroupManager : IGroupManager
