@@ -302,6 +302,44 @@ public sealed class StickyNotesControllerTests
         Assert.Contains(NotesHub.UserGroup(remainingUser.Id), hub.SentGroupNames);
     }
 
+    [Fact]
+    public async Task UpdateBoard_PublishesRealtimeEventToBoardRecipients()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db);
+        var member = await CreateUserAsync(db);
+        var board = new StickyNoteBoard
+        {
+            Title = "Старая доска",
+            Visibility = StickyNoteBoardVisibility.Personal,
+            OwnerUserId = owner.Id,
+            OwnerUserName = owner.FullName,
+            Background = "cork",
+            Members = new List<StickyNoteBoardMember>
+            {
+                new() { UserId = member.Id, Role = "viewer" },
+            },
+        };
+        db.StickyNoteBoards.Add(board);
+        await db.SaveChangesAsync();
+
+        var hub = new FakeNotesHubContext();
+        var controller = CreateController(db, owner, hub);
+
+        var result = await controller.UpdateBoard(board.Id, new UpdateStickyNoteBoardRequest
+        {
+            Title = "Новая доска",
+            Background = "gray",
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<StickyNoteBoardDto>(ok.Value);
+        Assert.Equal("Новая доска", dto.Title);
+        Assert.Equal("gray", dto.Background);
+        Assert.Contains(NotesHub.UserGroup(owner.Id), hub.SentGroupNames);
+        Assert.Contains(NotesHub.UserGroup(member.Id), hub.SentGroupNames);
+    }
+
     private static async Task<PaymentContext> CreateContextAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");

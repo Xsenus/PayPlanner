@@ -18,6 +18,7 @@ vi.mock('../../services/api', () => ({
     getStickyNoteBoardMembers: vi.fn(),
     getStickyNoteMemberCandidates: vi.fn(),
     createStickyNoteBoard: vi.fn(),
+    updateStickyNoteBoard: vi.fn(),
     createStickyNote: vi.fn(),
     updateStickyNote: vi.fn(),
     updateStickyNoteLayout: vi.fn(),
@@ -111,6 +112,11 @@ describe('StickyNotes', () => {
     apiMock.getStickyNoteBoardMembers.mockResolvedValue([]);
     apiMock.getStickyNoteMemberCandidates.mockResolvedValue([]);
     apiMock.createStickyNote.mockResolvedValue(createdNote);
+    apiMock.updateStickyNoteBoard.mockImplementation(async (_id, payload) => ({
+      ...board,
+      title: payload.title,
+      background: payload.background ?? board.background,
+    }));
     apiMock.deleteStickyNote.mockResolvedValue(undefined);
     apiMock.restoreStickyNote.mockResolvedValue(createdNote);
     apiMock.upsertStickyNoteBoardMember.mockResolvedValue({
@@ -158,6 +164,23 @@ describe('StickyNotes', () => {
       height: 180,
     })));
     expect(await screen.findByPlaceholderText('Текст заметки')).toBeTruthy();
+  });
+
+  it('updates board title and background from settings', async () => {
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    await screen.findAllByText('Рабочая доска');
+    await user.click(screen.getByRole('button', { name: 'Настройки доски' }));
+    await user.clear(screen.getByPlaceholderText('Название доски'));
+    await user.type(screen.getByPlaceholderText('Название доски'), 'Юридические заметки');
+    await user.selectOptions(screen.getByLabelText('Фон доски'), 'gray');
+    await user.click(screen.getByRole('button', { name: /Сохранить/i }));
+
+    await waitFor(() => expect(apiMock.updateStickyNoteBoard).toHaveBeenCalledWith(7, {
+      title: 'Юридические заметки',
+      background: 'gray',
+    }));
   });
 
   it('filters notes by search text', async () => {

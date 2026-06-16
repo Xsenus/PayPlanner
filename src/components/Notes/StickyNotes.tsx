@@ -11,6 +11,7 @@ import {
   RefreshCw,
   Save,
   Search,
+  Settings2,
   StickyNote,
   Trash2,
   Undo2,
@@ -19,7 +20,7 @@ import {
   X,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
-import { apiService, StickyNoteConflictError, type StickyNoteBoard, type StickyNoteBoardMember, type StickyNoteBoardMemberCandidate, type StickyNoteBoardMemberRole, type StickyNoteColor, type StickyNoteItem } from '../../services/api';
+import { apiService, StickyNoteConflictError, type StickyNoteBoard, type StickyNoteBoardBackground, type StickyNoteBoardMember, type StickyNoteBoardMemberCandidate, type StickyNoteBoardMemberRole, type StickyNoteColor, type StickyNoteItem } from '../../services/api';
 import {
   canStartNotesHubConnection,
   createNotesHubConnection,
@@ -136,6 +137,10 @@ export function StickyNotes() {
   const [memberRole, setMemberRole] = useState<Exclude<StickyNoteBoardMemberRole, 'owner'>>('viewer');
   const [noteConflict, setNoteConflict] = useState<NoteConflict | null>(null);
   const [viewMode, setViewMode] = useState<NotesViewMode>(() => readStoredViewMode());
+  const [boardSettingsOpen, setBoardSettingsOpen] = useState(false);
+  const [boardTitle, setBoardTitle] = useState('');
+  const [boardBackground, setBoardBackground] = useState<StickyNoteBoardBackground>('cork');
+  const [savingBoardSettings, setSavingBoardSettings] = useState(false);
 
   const activeBoard = useMemo(
     () => boards.find((board) => board.id === activeBoardId) ?? null,
@@ -243,6 +248,11 @@ export function StickyNotes() {
   }, [notes]);
 
   useEffect(() => {
+    setBoardTitle(activeBoard?.title ?? '');
+    setBoardBackground(activeBoard?.background ?? 'cork');
+  }, [activeBoard?.background, activeBoard?.id, activeBoard?.title]);
+
+  useEffect(() => {
     writeStoredValue(NOTES_VIEW_MODE_STORAGE_KEY, viewMode);
   }, [viewMode]);
 
@@ -314,7 +324,7 @@ export function StickyNotes() {
         });
       } else if (event.type === 'boardDeleted') {
         void loadBoards();
-      } else if (event.type === 'boardMembersChanged') {
+      } else if (event.type === 'boardMembersChanged' || event.type === 'boardUpdated') {
         void loadBoards();
         if (activeBoardId) {
           void loadMembers(activeBoardId);
@@ -593,6 +603,34 @@ export function StickyNotes() {
     } catch (error) {
       console.error(error);
       toast.error('Не удалось удалить доску.');
+    }
+  };
+
+  const saveBoardSettings = async () => {
+    if (!activeBoard || !canEditActiveBoard) {
+      return;
+    }
+
+    const title = boardTitle.trim();
+    if (!title) {
+      toast.error('Введите название доски.');
+      return;
+    }
+
+    setSavingBoardSettings(true);
+    try {
+      const updated = await apiService.updateStickyNoteBoard(activeBoard.id, {
+        title,
+        background: boardBackground,
+      });
+      setBoards((current) => current.map((board) => (board.id === updated.id ? updated : board)));
+      setBoardSettingsOpen(false);
+      toast.success('Настройки доски сохранены.');
+    } catch (error) {
+      console.error(error);
+      toast.error('Не удалось сохранить настройки доски.');
+    } finally {
+      setSavingBoardSettings(false);
     }
   };
 
@@ -1028,6 +1066,19 @@ export function StickyNotes() {
             >
               <RefreshCw className="h-4 w-4" />
             </button>
+            {canEditActiveBoard ? (
+              <button
+                type="button"
+                onClick={() => setBoardSettingsOpen((current) => !current)}
+                className={`inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 ${
+                  boardSettingsOpen ? 'bg-slate-900 text-white hover:bg-slate-800' : ''
+                }`}
+                title="Настройки доски"
+                aria-label="Настройки доски"
+              >
+                <Settings2 className="h-4 w-4" />
+              </button>
+            ) : null}
             {activeBoard?.canDelete ? (
               <button
                 type="button"
@@ -1049,6 +1100,52 @@ export function StickyNotes() {
             </button>
           </div>
         </div>
+
+        {boardSettingsOpen && activeBoard && canEditActiveBoard ? (
+          <div className="grid gap-2 border-b border-slate-200 bg-white px-3 py-2 text-sm lg:grid-cols-[minmax(180px,1fr)_180px_auto]">
+            <label className="min-w-0">
+              <span className="sr-only">Название доски</span>
+              <input
+                value={boardTitle}
+                onChange={(event) => setBoardTitle(event.target.value)}
+                className="h-9 w-full rounded-md border border-slate-300 px-2 text-sm"
+                maxLength={120}
+                placeholder="Название доски"
+              />
+            </label>
+            <label className="min-w-0">
+              <span className="sr-only">Фон доски</span>
+              <select
+                aria-label="Фон доски"
+                value={boardBackground}
+                onChange={(event) => setBoardBackground(event.target.value as StickyNoteBoardBackground)}
+                className="h-9 w-full rounded-md border border-slate-300 bg-white px-2 text-sm"
+              >
+                <option value="cork">Пробковая доска</option>
+                <option value="gray">Серый фон</option>
+              </select>
+            </label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={saveBoardSettings}
+                disabled={savingBoardSettings}
+                className="inline-flex h-9 items-center gap-1 rounded-md bg-slate-900 px-3 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-60"
+              >
+                <Save className="h-4 w-4" />
+                Сохранить
+              </button>
+              <button
+                type="button"
+                onClick={() => setBoardSettingsOpen(false)}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50"
+                title="Закрыть настройки"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         <div
           ref={boardCanvasRef}

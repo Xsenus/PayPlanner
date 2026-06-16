@@ -131,6 +131,7 @@ public sealed class StickyNotesController : ControllerBase
         board.Background = NormalizeBackground(request.Background);
 
         await _db.SaveChangesAsync(ct);
+        await PublishAsync(board.Id, "boardUpdated", null, null, access.Value, ct);
         return Ok(ToBoardDto(board, await CountNotesAsync(board.Id, ct), true, access.Value.CanDelete, CanManageMembers(board, access.Value)));
     }
 
