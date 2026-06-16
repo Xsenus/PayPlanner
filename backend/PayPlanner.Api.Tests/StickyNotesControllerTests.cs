@@ -453,6 +453,35 @@ public sealed class StickyNotesControllerTests
     }
 
     [Fact]
+    public async Task DeleteBoard_ForbidsEditorMemberFromDeletingOwnersPersonalBoard()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db);
+        var editor = await CreateUserAsync(db);
+        var board = new StickyNoteBoard
+        {
+            Title = "Личная владельца",
+            Visibility = StickyNoteBoardVisibility.Personal,
+            OwnerUserId = owner.Id,
+            OwnerUserName = owner.FullName,
+            Background = "gray",
+            Members = new List<StickyNoteBoardMember>
+            {
+                new() { UserId = editor.Id, Role = "editor" },
+            },
+        };
+        db.StickyNoteBoards.Add(board);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, editor);
+
+        var result = await controller.DeleteBoard(board.Id, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result);
+        Assert.Contains(await db.StickyNoteBoards.ToListAsync(), item => item.Id == board.Id);
+    }
+
+    [Fact]
     public async Task DeleteBoardMember_RemovesUserFromRealtimeRecipients()
     {
         await using var db = await CreateContextAsync();

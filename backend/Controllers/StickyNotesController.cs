@@ -153,7 +153,7 @@ public sealed class StickyNotesController : ControllerBase
             return NotFound();
         }
 
-        if (board.Visibility == StickyNoteBoardVisibility.Shared || !CanEditBoard(board, access.Value))
+        if (board.Visibility == StickyNoteBoardVisibility.Shared || !CanDeleteBoard(board, access.Value))
         {
             return Forbid();
         }
@@ -695,6 +695,9 @@ public sealed class StickyNotesController : ControllerBase
 
     private static bool CanManageMembers(StickyNoteBoard board, NotesAccess access)
         => access.CanEdit && board.OwnerUserId == access.UserId;
+
+    private static bool CanDeleteBoard(StickyNoteBoard board, NotesAccess access)
+        => access.CanDelete && board.OwnerUserId == access.UserId;
 
     private async Task<int> CountNotesAsync(int boardId, CancellationToken ct)
         => await _db.StickyNotes.CountAsync(note => note.BoardId == boardId, ct);
