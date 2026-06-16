@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../../contexts/ToastContext';
@@ -121,6 +121,15 @@ function renderStickyNotes() {
   );
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+
+  return { promise, resolve };
+}
+
 describe('StickyNotes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -160,7 +169,7 @@ describe('StickyNotes', () => {
 
     expect(await screen.findAllByText('Рабочая доска')).toHaveLength(2);
     expect(apiMock.getStickyNoteBoards).toHaveBeenCalledTimes(1);
-    expect(apiMock.getStickyNotes).toHaveBeenCalledWith(7);
+    await waitFor(() => expect(apiMock.getStickyNotes).toHaveBeenCalledWith(7));
   });
 
   it('restores the last selected board from local storage', async () => {
@@ -170,6 +179,35 @@ describe('StickyNotes', () => {
     renderStickyNotes();
 
     await waitFor(() => expect(apiMock.getStickyNotes).toHaveBeenCalledWith(9));
+  });
+
+  it('ignores stale notes responses after switching boards', async () => {
+    const personalNotes = createDeferred<StickyNoteItem[]>();
+    window.localStorage.setItem('payplanner.stickyNotes.activeBoardId', '9');
+    apiMock.getStickyNoteBoards.mockResolvedValue([board, personalBoard]);
+    apiMock.getStickyNotes.mockImplementation(async (boardId) => {
+      if (boardId === 9) {
+        return personalNotes.promise;
+      }
+
+      return [{ ...createdNote, id: 12, boardId: 7, text: 'Рабочая заметка после переключения' }];
+    });
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    await waitFor(() => expect(apiMock.getStickyNotes).toHaveBeenCalledWith(9));
+    await user.click(screen.getByRole('button', { name: /Рабочая доска/i }));
+
+    expect(await screen.findByDisplayValue('Рабочая заметка после переключения')).toBeTruthy();
+
+    await act(async () => {
+      personalNotes.resolve([{ ...createdNote, boardId: 9, text: 'Старая личная заметка' }]);
+      await personalNotes.promise;
+    });
+
+    expect(screen.queryByDisplayValue('Старая личная заметка')).toBeNull();
+    expect(screen.getByDisplayValue('Рабочая заметка после переключения')).toBeTruthy();
   });
 
   it('creates a note on the active board', async () => {

@@ -123,6 +123,7 @@ export function StickyNotes() {
   const connectionRef = useRef<HubConnection | null>(null);
   const boardCanvasRef = useRef<HTMLDivElement | null>(null);
   const notesRef = useRef<StickyNoteItem[]>([]);
+  const activeBoardIdRef = useRef<number | null>(null);
   const autosaveTimersRef = useRef<Map<number, number>>(new Map());
   const [boards, setBoards] = useState<StickyNoteBoard[]>([]);
   const [activeBoardId, setActiveBoardId] = useState<number | null>(null);
@@ -279,22 +280,36 @@ export function StickyNotes() {
     setNotesLoading(true);
     try {
       const nextNotes = await apiService.getStickyNotes(boardId);
+      if (activeBoardIdRef.current !== boardId) {
+        return;
+      }
+
       setNotes(sortNotes(nextNotes));
     } catch (error) {
       console.error(error);
-      toast.error('Не удалось загрузить заметки на доске.');
+      if (activeBoardIdRef.current === boardId) {
+        toast.error('Не удалось загрузить заметки на доске.');
+      }
     } finally {
-      setNotesLoading(false);
+      if (activeBoardIdRef.current === boardId) {
+        setNotesLoading(false);
+      }
     }
   }, [toast]);
 
   const loadMembers = useCallback(async (boardId: number) => {
     try {
       const nextMembers = await apiService.getStickyNoteBoardMembers(boardId);
+      if (activeBoardIdRef.current !== boardId) {
+        return;
+      }
+
       setMembers(nextMembers);
     } catch (error) {
       console.error(error);
-      setMembers([]);
+      if (activeBoardIdRef.current === boardId) {
+        setMembers([]);
+      }
     }
   }, []);
 
@@ -323,6 +338,10 @@ export function StickyNotes() {
   }, [activeBoardId]);
 
   useEffect(() => {
+    activeBoardIdRef.current = activeBoardId;
+  }, [activeBoardId]);
+
+  useEffect(() => {
     const timers = autosaveTimersRef.current;
     return () => {
       for (const timer of timers.values()) {
@@ -341,6 +360,9 @@ export function StickyNotes() {
 
     setSelectedNoteId(null);
     setDeletedNoteId(null);
+    setNoteConflict(null);
+    setNotes([]);
+    setMembers([]);
     void loadNotes(activeBoardId);
     void loadMembers(activeBoardId);
   }, [activeBoardId, loadMembers, loadNotes]);
