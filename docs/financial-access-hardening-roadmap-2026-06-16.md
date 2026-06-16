@@ -156,6 +156,7 @@
   - Нужно принять бизнес-ожидание: бухгалтер может создавать и редактировать деньги, но не удалять и не экспортировать.
   - Локальная проверка зафиксирована в `docs/financial-cash-access-acceptance-report-2026-06-16.md`.
   - Для повторной проверки на другой БД подготовлен read-only SQL: `docs/financial-cash-access-acceptance-checks.sql`.
+  - Ручная приемка описана в `docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md`.
 
 ## Milestone 4. Отчеты и экспорты кассы
 
@@ -223,6 +224,7 @@
   - DoD: заказчик подтверждает, что объяснение "откуда это" стало понятным.
   - Локальная расшифровка подготовлена в `docs/financial-cash-access-acceptance-report-2026-06-16.md`.
   - SQL для получения такой же расшифровки на актуальной БД: `docs/financial-cash-access-acceptance-checks.sql`.
+  - Шаги демонстрации заказчику описаны в `docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md`.
 
 ## Milestone 6. Локальная БД, диагностика и приемка прав
 
@@ -252,6 +254,7 @@
   - Сверить, что секретарь и юристы не видят кассу ни через меню, ни через закладки, ни через прямую ссылку.
   - Для проверки подготовлен локальный приемочный отчет: `docs/financial-cash-access-acceptance-report-2026-06-16.md`.
   - Для проверки прав и происхождения ПКО на актуальной БД подготовлен read-only SQL: `docs/financial-cash-access-acceptance-checks.sql`.
+  - Ручной сценарий проверки ролей и прямых ссылок подготовлен в `docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md`.
 
 ## Milestone 7. Release notes, регрессия и закрытие
 
