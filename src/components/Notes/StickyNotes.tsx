@@ -117,6 +117,15 @@ function writeStoredValue(key: string, value: string) {
   }
 }
 
+export async function copyTextToClipboard(text: string, clipboard?: Pick<Clipboard, 'writeText'>) {
+  const targetClipboard = clipboard ?? window.navigator.clipboard;
+  if (!targetClipboard?.writeText) {
+    throw new Error('Clipboard API is unavailable');
+  }
+
+  await targetClipboard.writeText(text);
+}
+
 export function StickyNotes() {
   const toast = useToast();
   const { user } = useAuth();
@@ -615,7 +624,7 @@ export function StickyNotes() {
     }
 
     try {
-      await navigator.clipboard.writeText(noteConflict.local.text);
+      await copyTextToClipboard(noteConflict.local.text);
       toast.success('Текст вашей версии скопирован.');
     } catch {
       toast.error('Не удалось скопировать текст автоматически.');
@@ -1366,7 +1375,8 @@ export function StickyNotes() {
                 <button
                   type="button"
                   onClick={overwriteConflictVersion}
-                  className="rounded-md bg-slate-900 px-2 py-1 text-xs font-medium text-white hover:bg-slate-800"
+                  disabled={!canEditActiveBoard}
+                  className="rounded-md bg-slate-900 px-2 py-1 text-xs font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Перезаписать
                 </button>

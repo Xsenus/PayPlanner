@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../../contexts/ToastContext';
-import { getEffectiveBoardNotesCount, StickyNotes } from './StickyNotes';
+import { copyTextToClipboard, getEffectiveBoardNotesCount, StickyNotes } from './StickyNotes';
 import type { StickyNoteBoard, StickyNoteItem } from '../../services/api';
 
 const realtimeMock = vi.hoisted(() => {
@@ -162,6 +162,7 @@ describe('StickyNotes', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('loads boards and notes', async () => {
@@ -495,6 +496,51 @@ describe('StickyNotes', () => {
     expect(await screen.findByText('Заметка изменена другим пользователем')).toBeTruthy();
     expect(screen.getByText('Версия сервера')).toBeTruthy();
     expect(screen.getAllByText('Моя версия').length).toBeGreaterThan(1);
+  });
+
+  it('applies the server version from the conflict panel', async () => {
+    const serverNote = { ...createdNote, text: 'Версия сервера', version: 2 };
+    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Моя версия', version: 1 }]);
+    apiMock.updateStickyNote.mockRejectedValueOnce(new StickyNoteConflictError(serverNote));
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    await screen.findByDisplayValue('Моя версия');
+    await user.click(screen.getByTitle('Сохранить'));
+    await user.click(await screen.findByRole('button', { name: /Обновить с сервера/i }));
+
+    expect(screen.getByDisplayValue('Версия сервера')).toBeTruthy();
+    expect(screen.queryByText('Заметка изменена другим пользователем')).toBeNull();
+  });
+
+  it('copies conflict draft text through the clipboard helper', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+
+    await copyTextToClipboard('Моя версия', { writeText });
+
+    expect(writeText).toHaveBeenCalledWith('Моя версия');
+  });
+
+  it('overwrites the server conflict version with the local draft', async () => {
+    const serverNote = { ...createdNote, text: 'Версия сервера', version: 2 };
+    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Моя версия', version: 1 }]);
+    apiMock.updateStickyNote
+      .mockRejectedValueOnce(new StickyNoteConflictError(serverNote))
+      .mockResolvedValueOnce({ ...serverNote, text: 'Моя версия', version: 3 });
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    await screen.findByDisplayValue('Моя версия');
+    await user.click(screen.getByTitle('Сохранить'));
+    await user.click(await screen.findByRole('button', { name: /^Перезаписать$/i }));
+
+    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenLastCalledWith(11, expect.objectContaining({
+      text: 'Моя версия',
+      version: 2,
+    })));
+    expect(screen.queryByText('Заметка изменена другим пользователем')).toBeNull();
   });
 
   it('keeps a local draft when a realtime update arrives during pending autosave', async () => {
