@@ -147,6 +147,7 @@ export function StickyNotes() {
   const newBoardTitleRef = useRef('');
   const activeBoardIdRef = useRef<number | null>(null);
   const autosaveTimersRef = useRef<Map<number, number>>(new Map());
+  const boardLoadRequestIdRef = useRef(0);
   const [boards, setBoards] = useState<StickyNoteBoard[]>([]);
   const [activeBoardId, setActiveBoardId] = useState<number | null>(null);
   const [notes, setNotes] = useState<StickyNoteItem[]>([]);
@@ -287,9 +288,15 @@ export function StickyNotes() {
   }, [availableMemberCandidates, memberUserId]);
 
   const loadBoards = useCallback(async () => {
+    const requestId = boardLoadRequestIdRef.current + 1;
+    boardLoadRequestIdRef.current = requestId;
     setLoading(true);
     try {
       const nextBoards = await apiService.getStickyNoteBoards();
+      if (boardLoadRequestIdRef.current !== requestId) {
+        return activeBoardIdRef.current;
+      }
+
       const currentBoardId = activeBoardIdRef.current;
       if (currentBoardId && !nextBoards.some((board) => board.id === currentBoardId)) {
         clearActiveBoardState();
@@ -307,10 +314,16 @@ export function StickyNotes() {
       return nextActiveBoardId;
     } catch (error) {
       console.error(error);
+      if (boardLoadRequestIdRef.current !== requestId) {
+        return activeBoardIdRef.current;
+      }
+
       toast.error('Не удалось загрузить доски заметок.');
       return activeBoardIdRef.current;
     } finally {
-      setLoading(false);
+      if (boardLoadRequestIdRef.current === requestId) {
+        setLoading(false);
+      }
     }
   }, [clearActiveBoardState, toast]);
 

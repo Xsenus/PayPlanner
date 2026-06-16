@@ -828,6 +828,40 @@ describe('StickyNotes', () => {
     expect(screen.queryByDisplayValue('Доступ уже отозвали')).toBeNull();
   });
 
+  it('ignores stale board list refreshes when a newer refresh has already applied', async () => {
+    realtimeMock.canStart = true;
+    const staleBoards = createDeferred<StickyNoteBoard[]>();
+    const freshBoards = createDeferred<StickyNoteBoard[]>();
+    apiMock.getStickyNoteBoards
+      .mockResolvedValueOnce([board, personalBoard])
+      .mockImplementationOnce(() => staleBoards.promise)
+      .mockImplementationOnce(() => freshBoards.promise);
+
+    renderStickyNotes();
+
+    await screen.findByRole('button', { name: /Рабочая доска/i });
+    await waitFor(() => expect(realtimeMock.handlers.has('stickyNoteBoardChanged')).toBe(true));
+    const handler = realtimeMock.handlers.get('stickyNoteBoardChanged');
+
+    act(() => handler?.({ type: 'boardMembersChanged', boardId: 9 }));
+    act(() => handler?.({ type: 'boardUpdated', boardId: 9 }));
+    await waitFor(() => expect(apiMock.getStickyNoteBoards).toHaveBeenCalledTimes(3));
+
+    await act(async () => {
+      freshBoards.resolve([{ ...board, title: 'Актуальная доска' }, personalBoard]);
+      await freshBoards.promise;
+    });
+    expect(await screen.findByRole('button', { name: /Актуальная доска/i })).toBeTruthy();
+
+    await act(async () => {
+      staleBoards.resolve([{ ...board, title: 'Устаревшая доска' }, personalBoard]);
+      await staleBoards.promise;
+    });
+
+    expect(screen.getByRole('button', { name: /Актуальная доска/i })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Устаревшая доска/i })).toBeNull();
+  });
+
   it('adds a board member when the user manages a personal board', async () => {
     apiMock.getStickyNoteBoards.mockResolvedValue([personalBoard]);
     apiMock.getStickyNoteBoardMembers.mockResolvedValue([
