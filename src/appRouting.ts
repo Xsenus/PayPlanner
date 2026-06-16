@@ -28,6 +28,8 @@ export function canAccessTab(tab: Tab, permissions: RolePermissions, options: Ta
     case 'tasksApprovals':
     case 'tasksCalendar':
       return permissions.tasks.canView;
+    case 'notes':
+      return permissions.notes.canView;
     case 'reports':
       return permissions.reports.canView;
     case 'calculator':
@@ -193,6 +195,14 @@ export function isNotificationsPath(): boolean {
   return /^\/notifications\/?$/i.test(window.location.pathname);
 }
 
+export function isNotesPath(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return /^\/notes\/?$/i.test(window.location.pathname);
+}
+
 export function getPathClientId(): number | null {
   if (typeof window === 'undefined') {
     return null;
@@ -337,6 +347,10 @@ export function getInitialTab(): Tab {
     return 'notifications';
   }
 
+  if (isNotesPath()) {
+    return 'notes';
+  }
+
   if (getPathInvoiceId() || isInvoicesListPath()) {
     return isAccountsTab(urlTab) ? urlTab : 'accounts';
   }
@@ -412,6 +426,10 @@ export function getTabHref(tab: Tab): string {
 
   if (tab === 'notifications') {
     return '/notifications';
+  }
+
+  if (tab === 'notes') {
+    return '/notes';
   }
 
   if (tab === 'tasksApprovals') {

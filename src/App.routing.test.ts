@@ -22,6 +22,7 @@ import {
   isClientsListPath,
   isContractsListPath,
   isNotificationsPath,
+  isNotesPath,
   isPaymentsListPath,
   isTasksApprovalsPath,
   isTasksCalendarPath,
@@ -35,6 +36,7 @@ function createPermissions(overrides: Partial<RolePermissions> = {}): RolePermis
     ...defaultRolePermissions,
     calendar: { ...defaultRolePermissions.calendar, ...overrides.calendar },
     tasks: { ...defaultRolePermissions.tasks, ...overrides.tasks },
+    notes: { ...defaultRolePermissions.notes, ...overrides.notes },
     reports: { ...defaultRolePermissions.reports, ...overrides.reports },
     calculator: { ...defaultRolePermissions.calculator, ...overrides.calculator },
     legalEntities: { ...defaultRolePermissions.legalEntities, ...overrides.legalEntities },
@@ -209,6 +211,7 @@ describe('App sidebar routing helpers', () => {
   it('builds real href values for menu tabs', () => {
     expect(getTabHref('calendar')).toBe('/?ppTab=calendar');
     expect(getTabHref('notifications')).toBe('/notifications');
+    expect(getTabHref('notes')).toBe('/notes');
     expect(getTabHref('tasks')).toBe('/tasks');
     expect(getTabHref('tasksApprovals')).toBe('/tasks/approvals');
     expect(getTabHref('tasksCalendar')).toBe('/tasks/calendar');
@@ -240,6 +243,13 @@ describe('App sidebar routing helpers', () => {
 
     expect(isNotificationsPath()).toBe(true);
     expect(getInitialTab()).toBe('notifications');
+  });
+
+  it('detects the notes pathname', () => {
+    window.history.replaceState({}, '', '/notes');
+
+    expect(isNotesPath()).toBe(true);
+    expect(getInitialTab()).toBe('notes');
   });
 });
 
@@ -284,6 +294,11 @@ describe('App negative deep-link guards', () => {
       path: '/tasks/1',
       expectedTab: 'tasks' as Tab,
       permissions: createPermissions({ tasks: { ...defaultRolePermissions.tasks, canView: false } }),
+    },
+    {
+      path: '/notes',
+      expectedTab: 'notes' as Tab,
+      permissions: createPermissions({ notes: { ...defaultRolePermissions.notes, canView: false } }),
     },
     {
       path: '/clients/1',

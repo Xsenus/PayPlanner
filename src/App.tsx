@@ -165,6 +165,7 @@ const MoneyOperations = lazy(() => import('./components/Money/MoneyOperations').
 const CompanyProfile = lazy(() => import('./components/CompanyProfile/CompanyProfile').then((module) => ({ default: module.CompanyProfile })));
 const AppSettings = lazy(() => import('./components/Settings/AppSettings').then((module) => ({ default: module.AppSettings })));
 const ProfilePage = lazy(() => import('./components/Profile/ProfilePage').then((module) => ({ default: module.ProfilePage })));
+const StickyNotes = lazy(() => import('./components/Notes/StickyNotes').then((module) => ({ default: module.StickyNotes })));
 
 function ActiveTabContent({ render }: { render: () => ReactNode }) {
   return <>{render()}</>;
@@ -190,6 +191,7 @@ function AppContent() {
       tasksControl: 'Задачи на контроле',
       tasksApprovals: 'Согласования задач',
       tasksCalendar: 'Журнал задач: календарь',
+      notes: 'Заметки',
       reports: 'Отчеты',
       calculator: 'Калькулятор',
       legalEntities: 'Юр. лица',
@@ -275,6 +277,7 @@ function AppContent() {
         { tab: 'tasksControl' as Tab, allowed: permissions.tasks.canView },
         { tab: 'tasksApprovals' as Tab, allowed: permissions.tasks.canView },
         { tab: 'tasksCalendar' as Tab, allowed: permissions.tasks.canView },
+        { tab: 'notes' as Tab, allowed: permissions.notes.canView },
         { tab: 'reports' as Tab, allowed: permissions.reports.canView },
         { tab: 'calculator' as Tab, allowed: permissions.calculator.canView },
         { tab: 'legalEntities' as Tab, allowed: permissions.legalEntities.canView },
@@ -732,6 +735,8 @@ function AppContent() {
       url.pathname = '/tasks/approvals';
     } else if (activeTab === 'tasksCalendar') {
       url.pathname = '/tasks/calendar';
+    } else if (activeTab === 'notes') {
+      url.pathname = '/notes';
     } else if (activeTab === 'clientDetail') {
       url.pathname = selectedClientId ? `/clients/${selectedClientId}` : '/clients';
     } else if (activeTab === 'accounts' || activeTab === 'accountsIncome' || activeTab === 'accountsExpense') {
@@ -755,6 +760,8 @@ function AppContent() {
     } else if (/^\/notifications\/?$/i.test(url.pathname)) {
       url.pathname = '/';
     } else if (/^\/tasks(?:\/(?:\d+|calendar|approvals|control))?\/?$/i.test(url.pathname)) {
+      url.pathname = '/';
+    } else if (/^\/notes\/?$/i.test(url.pathname)) {
       url.pathname = '/';
     } else if (/^\/invoices(?:\/\d+)?\/?$/i.test(url.pathname)) {
       url.pathname = '/';
@@ -1037,6 +1044,11 @@ function AppContent() {
               />
             )
           : renderNoAccess('Журнал задач недоступен для вашей роли.');
+
+      case 'notes':
+        return permissions.notes.canView
+          ? <StickyNotes />
+          : renderNoAccess('Раздел заметок недоступен для вашей роли.');
 
       case 'reports':
         return permissions.reports.canView

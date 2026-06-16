@@ -5,6 +5,7 @@ export const ALL_TABS = [
   'tasksControl',
   'tasksApprovals',
   'tasksCalendar',
+  'notes',
   'reports',
   'calculator',
   'legalEntities',

@@ -7,6 +7,7 @@ public static class RolePermissionCatalog
 {
     public const string Calendar = "calendar";
     public const string Tasks = "tasks";
+    public const string Notes = "notes";
     public const string Reports = "reports";
     public const string Calculator = "calculator";
     public const string LegalEntities = "legalEntities";
@@ -27,6 +28,7 @@ public static class RolePermissionCatalog
     [
         Calendar,
         Tasks,
+        Notes,
         Reports,
         Calculator,
         LegalEntities,
@@ -75,6 +77,7 @@ public static class RolePermissionCatalog
         {
             [Calendar] = new(true, true, true, true, true, true, GetDefaultViewScope(Calendar, allowRoleManagement)),
             [Tasks] = new(true, true, true, true, true, false, GetDefaultViewScope(Tasks, allowRoleManagement)),
+            [Notes] = new(true, true, true, true, false, false, GetDefaultViewScope(Notes, allowRoleManagement)),
             [Reports] = new(true, true, true, true, true, false, GetDefaultViewScope(Reports, allowRoleManagement)),
             [Calculator] = new(true, true, true, true, true, false, GetDefaultViewScope(Calculator, allowRoleManagement)),
             [LegalEntities] = new(true, true, true, true, true, false, GetDefaultViewScope(LegalEntities, allowRoleManagement)),
@@ -135,6 +138,7 @@ public static class RolePermissionCatalog
         {
             Calendar = ToCalendar(defaults[Calendar]),
             Tasks = ToSection(defaults[Tasks]),
+            Notes = ToSection(defaults[Notes]),
             Reports = ToSection(defaults[Reports]),
             Calculator = ToSection(defaults[Calculator]),
             LegalEntities = ToSection(defaults[LegalEntities]),

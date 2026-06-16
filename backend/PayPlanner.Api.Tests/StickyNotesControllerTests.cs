@@ -1,0 +1,236 @@
+using System.Security.Claims;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using PayPlanner.Api.Controllers;
+using PayPlanner.Api.Data;
+using PayPlanner.Api.Hubs;
+using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Requests;
+using PayPlanner.Api.Models.Responses;
+using Xunit;
+
+namespace PayPlanner.Api.Tests;
+
+public sealed class StickyNotesControllerTests
+{
+    [Fact]
+    public async Task GetBoards_CreatesPersonalAndSharedBoards()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db);
+        var controller = CreateController(db, user);
+
+        var result = await controller.GetBoards(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var boards = Assert.IsAssignableFrom<IReadOnlyCollection<StickyNoteBoardDto>>(ok.Value);
+        Assert.Contains(boards, board => board.Visibility == StickyNoteBoardVisibility.Personal && board.OwnerUserId == user.Id);
+        Assert.Contains(boards, board => board.Visibility == StickyNoteBoardVisibility.Shared);
+    }
+
+    [Fact]
+    public async Task CreateNote_RequiresCreatePermission()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, canCreate: false);
+        var board = new StickyNoteBoard
+        {
+            Title = "Общее",
+            Visibility = StickyNoteBoardVisibility.Shared,
+            Background = "cork",
+        };
+        db.StickyNoteBoards.Add(board);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, user);
+
+        var result = await controller.CreateNote(board.Id, new CreateStickyNoteRequest { Text = "Нельзя создать" }, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result.Result);
+        Assert.Empty(await db.StickyNotes.ToListAsync());
+    }
+
+    [Fact]
+    public async Task UpdateNote_ReturnsConflict_WhenVersionIsStale()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db);
+        var board = new StickyNoteBoard
+        {
+            Title = "Общее",
+            Visibility = StickyNoteBoardVisibility.Shared,
+            Background = "cork",
+        };
+        var note = new StickyNote
+        {
+            Board = board,
+            Text = "Текущий текст",
+            Color = "yellow",
+            Version = 3,
+            Width = 220,
+            Height = 180,
+        };
+        db.StickyNotes.Add(note);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, user);
+
+        var result = await controller.UpdateNote(note.Id, new UpdateStickyNoteRequest
+        {
+            Text = "Старый клиент",
+            Color = "blue",
+            X = 10,
+            Y = 20,
+            Width = 220,
+            Height = 180,
+            ZIndex = 2,
+            Version = 2,
+        }, CancellationToken.None);
+
+        var conflict = Assert.IsType<ConflictObjectResult>(result.Result);
+        var dto = Assert.IsType<StickyNoteDto>(conflict.Value);
+        Assert.Equal(3, dto.Version);
+        Assert.Equal("Текущий текст", dto.Text);
+    }
+
+    [Fact]
+    public async Task DeleteNote_SoftDeletesNote()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db);
+        var board = new StickyNoteBoard
+        {
+            Title = "Личная",
+            Visibility = StickyNoteBoardVisibility.Personal,
+            OwnerUserId = user.Id,
+            OwnerUserName = user.FullName,
+            Background = "gray",
+        };
+        var note = new StickyNote
+        {
+            Board = board,
+            Text = "Удалить",
+            Color = "yellow",
+            Version = 1,
+            Width = 220,
+            Height = 180,
+        };
+        db.StickyNotes.Add(note);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, user);
+
+        var result = await controller.DeleteNote(note.Id, CancellationToken.None);
+
+        Assert.IsType<NoContentResult>(result);
+        Assert.Empty(await db.StickyNotes.ToListAsync());
+        Assert.True(await db.StickyNotes.IgnoreQueryFilters().AnyAsync(item => item.Id == note.Id && EF.Property<bool>(item, "IsDeleted")));
+    }
+
+    private static async Task<PaymentContext> CreateContextAsync()
+    {
+        var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var options = new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        var db = new PaymentContext(options);
+        await db.Database.EnsureCreatedAsync();
+        return db;
+    }
+
+    private static async Task<User> CreateUserAsync(
+        PaymentContext db,
+        bool canView = true,
+        bool canCreate = true,
+        bool canEdit = true,
+        bool canDelete = true)
+    {
+        var role = new Role
+        {
+            Name = Guid.NewGuid().ToString("N"),
+            Description = "Тестовая роль",
+        };
+        role.Permissions = RolePermissionCatalog.CreateEntities(role.Id, allowRoleManagement: false);
+        var notesPermission = role.Permissions.Single(permission => permission.Section == RolePermissionCatalog.Notes);
+        notesPermission.CanView = canView;
+        notesPermission.CanCreate = canCreate;
+        notesPermission.CanEdit = canEdit;
+        notesPermission.CanDelete = canDelete;
+
+        var user = new User
+        {
+            Email = $"{Guid.NewGuid():N}@example.com",
+            FullName = "Тестовый пользователь",
+            IsActive = true,
+            IsApproved = true,
+            Role = role,
+        };
+
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        return user;
+    }
+
+    private static StickyNotesController CreateController(PaymentContext db, User user)
+    {
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, user.Id.ToString()),
+            new(ClaimTypes.Name, user.FullName),
+            new(ClaimTypes.Email, user.Email),
+        };
+
+        return new StickyNotesController(db, new FakeNotesHubContext())
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(claims, authenticationType: "Test")),
+                },
+            },
+        };
+    }
+
+    private sealed class FakeNotesHubContext : IHubContext<NotesHub>
+    {
+        public IHubClients Clients { get; } = new FakeHubClients();
+        public IGroupManager Groups { get; } = new FakeGroupManager();
+    }
+
+    private sealed class FakeHubClients : IHubClients
+    {
+        private static readonly IClientProxy Proxy = new FakeClientProxy();
+
+        public IClientProxy All => Proxy;
+        public IClientProxy AllExcept(IReadOnlyList<string> excludedConnectionIds) => Proxy;
+        public IClientProxy Client(string connectionId) => Proxy;
+        public IClientProxy Clients(IReadOnlyList<string> connectionIds) => Proxy;
+        public IClientProxy Group(string groupName) => Proxy;
+        public IClientProxy GroupExcept(string groupName, IReadOnlyList<string> excludedConnectionIds) => Proxy;
+        public IClientProxy Groups(IReadOnlyList<string> groupNames) => Proxy;
+        public IClientProxy User(string userId) => Proxy;
+        public IClientProxy Users(IReadOnlyList<string> userIds) => Proxy;
+    }
+
+    private sealed class FakeClientProxy : IClientProxy
+    {
+        public Task SendCoreAsync(string method, object?[] args, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+    }
+
+    private sealed class FakeGroupManager : IGroupManager
+    {
+        public Task AddToGroupAsync(string connectionId, string groupName, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task RemoveFromGroupAsync(string connectionId, string groupName, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+    }
+}

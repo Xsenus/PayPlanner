@@ -28,6 +28,7 @@ import {
   History,
   Bell,
   Briefcase,
+  StickyNote,
 } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
@@ -196,6 +197,14 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
             icon: CalendarDays,
           },
         ],
+      });
+    }
+    if (permissions.notes.canView) {
+      items.push({
+        id: 'notes',
+        tab: 'notes' as Tab,
+        label: 'Заметки',
+        icon: StickyNote,
       });
     }
     if (permissions.reports.canView) {

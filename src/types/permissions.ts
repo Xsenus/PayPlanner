@@ -1,6 +1,7 @@
 export type MenuSectionKey =
   | 'calendar'
   | 'tasks'
+  | 'notes'
   | 'reports'
   | 'calculator'
   | 'legalEntities'
@@ -50,6 +51,7 @@ export type RolePermissions = {
 export const MENU_SECTION_KEYS: MenuSectionKey[] = [
   'calendar',
   'tasks',
+  'notes',
   'reports',
   'calculator',
   'legalEntities',
@@ -100,6 +102,7 @@ export const defaultRolePermissions: RolePermissions = {
   },
   reports: { ...defaultMenuPermissions },
   tasks: { ...defaultMenuPermissions },
+  notes: { ...defaultMenuPermissions, canExport: false },
   calculator: { ...defaultMenuPermissions },
   legalEntities: { ...defaultMenuPermissions },
   clients: { ...defaultMenuPermissions },

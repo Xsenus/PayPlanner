@@ -212,7 +212,9 @@ builder.Services
             {
                 var accessToken = context.Request.Query["access_token"];
                 var path = context.HttpContext.Request.Path;
-                if (!string.IsNullOrWhiteSpace(accessToken) && path.StartsWithSegments(NotificationsHub.Path))
+                if (!string.IsNullOrWhiteSpace(accessToken)
+                    && (path.StartsWithSegments(NotificationsHub.Path)
+                        || path.StartsWithSegments(NotesHub.Path)))
                 {
                     context.Token = accessToken;
                 }
@@ -285,6 +287,7 @@ using (var scope = app.Services.CreateScope())
 
 app.MapControllers();
 app.MapHub<NotificationsHub>(NotificationsHub.Path);
+app.MapHub<NotesHub>(NotesHub.Path);
 
 app.Run();
 

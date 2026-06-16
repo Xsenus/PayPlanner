@@ -6296,6 +6296,260 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("SpreadsheetImportBatchOperations");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.StickyNote", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("AuthorUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("AuthorUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int>("BoardId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Color")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasDefaultValue("yellow");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DeletedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<double>("Height")
+                        .HasColumnType("double precision");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("IsPinned")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.Property<double>("Width")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("X")
+                        .HasColumnType("double precision");
+
+                    b.Property<double>("Y")
+                        .HasColumnType("double precision");
+
+                    b.Property<int>("ZIndex")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AuthorUserId");
+
+                    b.HasIndex("BoardId")
+                        .HasDatabaseName("IX_StickyNotes_BoardId");
+
+                    b.HasIndex("DeletedAt")
+                        .HasDatabaseName("IX_StickyNote_DeletedAt_Audit");
+
+                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("IX_StickyNote_IsDeleted");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("IX_StickyNote_UpdatedAt_Audit");
+
+                    b.HasIndex("BoardId", "ZIndex")
+                        .HasDatabaseName("IX_StickyNotes_BoardId_ZIndex");
+
+                    b.ToTable("StickyNotes");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.StickyNoteBoard", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Background")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("cork");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DeletedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<bool>("IsArchived")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
+
+                    b.Property<int?>("OwnerUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("OwnerUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Visibility")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasDefaultValue("personal");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DeletedAt")
+                        .HasDatabaseName("IX_StickyNoteBoard_DeletedAt_Audit");
+
+                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("IX_StickyNoteBoard_IsDeleted");
+
+                    b.HasIndex("OwnerUserId")
+                        .HasDatabaseName("IX_StickyNoteBoards_OwnerUserId");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("IX_StickyNoteBoard_UpdatedAt_Audit");
+
+                    b.HasIndex("Visibility")
+                        .HasDatabaseName("IX_StickyNoteBoards_Visibility");
+
+                    b.HasIndex("Visibility", "SortOrder")
+                        .HasDatabaseName("IX_StickyNoteBoards_Visibility_SortOrder");
+
+                    b.ToTable("StickyNoteBoards");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.StickyNoteBoardMember", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("BoardId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasDefaultValue("editor");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("IX_StickyNoteBoardMembers_UserId");
+
+                    b.HasIndex("BoardId", "UserId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_StickyNoteBoardMembers_Board_User");
+
+                    b.ToTable("StickyNoteBoardMembers");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.SystemSetting", b =>
                 {
                     b.Property<int>("Id")
@@ -8938,6 +9192,53 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("Batch");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.StickyNote", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.User", "AuthorUser")
+                        .WithMany()
+                        .HasForeignKey("AuthorUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.StickyNoteBoard", "Board")
+                        .WithMany("Notes")
+                        .HasForeignKey("BoardId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AuthorUser");
+
+                    b.Navigation("Board");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.StickyNoteBoard", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.User", "OwnerUser")
+                        .WithMany()
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("OwnerUser");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.StickyNoteBoardMember", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.StickyNoteBoard", "Board")
+                        .WithMany("Members")
+                        .HasForeignKey("BoardId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Board");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.TaskJournalComment", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.User", "AuthorUser")
@@ -9443,6 +9744,13 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("Files");
 
                     b.Navigation("Operations");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.StickyNoteBoard", b =>
+                {
+                    b.Navigation("Members");
+
+                    b.Navigation("Notes");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.TaskJournalItem", b =>

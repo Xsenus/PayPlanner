@@ -71,7 +71,9 @@ public class PaymentContext : DbContext
         typeof(PowerOfAttorney),
         typeof(CashOrder),
         typeof(CashInventory),
-        typeof(TaskJournalItem)
+        typeof(TaskJournalItem),
+        typeof(StickyNoteBoard),
+        typeof(StickyNote)
     };
 
     private static readonly HashSet<Type> MetadataOnlyAuditedEntityTypes = new()
@@ -151,6 +153,9 @@ public class PaymentContext : DbContext
     public DbSet<BankStatementImportBatch> BankStatementImportBatches => Set<BankStatementImportBatch>();
     public DbSet<BankStatementImportRow> BankStatementImportRows => Set<BankStatementImportRow>();
     public DbSet<MoneyBalanceReconciliationResult> MoneyBalanceReconciliationResults => Set<MoneyBalanceReconciliationResult>();
+    public DbSet<StickyNoteBoard> StickyNoteBoards => Set<StickyNoteBoard>();
+    public DbSet<StickyNoteBoardMember> StickyNoteBoardMembers => Set<StickyNoteBoardMember>();
+    public DbSet<StickyNote> StickyNotes => Set<StickyNote>();
 
     /// <summary>
     /// Выполняет конфигурацию сущностей, связей и индексов.
@@ -2765,6 +2770,71 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.ChatId).HasDatabaseName("IX_NotificationBotSubscriptions_ChatId");
         });
 
+        modelBuilder.Entity<StickyNoteBoard>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Title).HasMaxLength(120).IsRequired();
+            entity.Property(e => e.Description).HasMaxLength(500);
+            entity.Property(e => e.Visibility).HasMaxLength(24).HasDefaultValue(StickyNoteBoardVisibility.Personal).IsRequired();
+            entity.Property(e => e.OwnerUserName).HasMaxLength(256);
+            entity.Property(e => e.Background).HasMaxLength(32).HasDefaultValue("cork").IsRequired();
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.OwnerUser)
+                .WithMany()
+                .HasForeignKey(e => e.OwnerUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasMany(e => e.Notes)
+                .WithOne(e => e.Board)
+                .HasForeignKey(e => e.BoardId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(e => e.Members)
+                .WithOne(e => e.Board)
+                .HasForeignKey(e => e.BoardId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => e.Visibility).HasDatabaseName("IX_StickyNoteBoards_Visibility");
+            entity.HasIndex(e => e.OwnerUserId).HasDatabaseName("IX_StickyNoteBoards_OwnerUserId");
+            entity.HasIndex(e => new { e.Visibility, e.SortOrder }).HasDatabaseName("IX_StickyNoteBoards_Visibility_SortOrder");
+        });
+
+        modelBuilder.Entity<StickyNoteBoardMember>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Role).HasMaxLength(24).HasDefaultValue("editor").IsRequired();
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => new { e.BoardId, e.UserId })
+                .HasDatabaseName("IX_StickyNoteBoardMembers_Board_User")
+                .IsUnique();
+            entity.HasIndex(e => e.UserId).HasDatabaseName("IX_StickyNoteBoardMembers_UserId");
+        });
+
+        modelBuilder.Entity<StickyNote>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Text).HasMaxLength(4000);
+            entity.Property(e => e.Color).HasMaxLength(24).HasDefaultValue("yellow").IsRequired();
+            entity.Property(e => e.AuthorUserName).HasMaxLength(256);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.AuthorUser)
+                .WithMany()
+                .HasForeignKey(e => e.AuthorUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => e.BoardId).HasDatabaseName("IX_StickyNotes_BoardId");
+            entity.HasIndex(e => new { e.BoardId, e.ZIndex }).HasDatabaseName("IX_StickyNotes_BoardId_ZIndex");
+            entity.HasIndex(e => e.UpdatedAt).HasDatabaseName("IX_StickyNotes_UpdatedAt");
+        });
+
         if (UseObjectAuditModel)
         {
             ConfigureAudit<Act>(modelBuilder);
@@ -2787,6 +2857,8 @@ public class PaymentContext : DbContext
             ConfigureAudit<CashOrder>(modelBuilder);
             ConfigureAudit<CashInventory>(modelBuilder);
             ConfigureAudit<TaskJournalItem>(modelBuilder);
+            ConfigureAudit<StickyNoteBoard>(modelBuilder);
+            ConfigureAudit<StickyNote>(modelBuilder);
             ConfigureAudit<Role>(modelBuilder, enableSoftDelete: false);
             ConfigureAudit<User>(modelBuilder, enableSoftDelete: false);
         }
@@ -3185,6 +3257,8 @@ public class PaymentContext : DbContext
         if (clrType == typeof(CashOrder)) return "cash-order";
         if (clrType == typeof(CashInventory)) return "cash-inventory";
         if (clrType == typeof(TaskJournalItem)) return "task-journal-item";
+        if (clrType == typeof(StickyNoteBoard)) return "sticky-note-board";
+        if (clrType == typeof(StickyNote)) return "sticky-note";
 
         return null;
     }

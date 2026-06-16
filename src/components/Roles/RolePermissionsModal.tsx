@@ -16,6 +16,7 @@ import {
   Settings,
   Shield,
   ShieldCheck,
+  StickyNote,
   Unlock,
   Users,
   WalletCards,
@@ -88,6 +89,12 @@ const SECTION_CONFIG: Record<MenuSectionKey, SectionConfig> = {
     title: 'Журнал задач',
     description: 'Постановка задач, контроль сроков, исполнителей и результатов.',
     icon: ListTodo,
+  },
+  notes: {
+    key: 'notes',
+    title: 'Заметки',
+    description: 'Доступ к рабочим доскам с быстрыми заметками и напоминаниями сотрудников.',
+    icon: StickyNote,
   },
   calculator: {
     key: 'calculator',
@@ -180,7 +187,7 @@ const GROUPS: GroupConfig[] = [
     key: 'core',
     title: 'Основные разделы',
     description: 'Базовые рабочие модули и аналитика.',
-    sections: ['calendar', 'tasks', 'reports', 'calculator'],
+    sections: ['calendar', 'tasks', 'notes', 'reports', 'calculator'],
   },
   {
     key: 'crm',

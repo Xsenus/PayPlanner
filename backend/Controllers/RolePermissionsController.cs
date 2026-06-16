@@ -273,6 +273,9 @@ public class RolePermissionsController : ControllerBase
                 case RolePermissionCatalog.Tasks:
                     dto.Tasks = ToSection(permission);
                     break;
+                case RolePermissionCatalog.Notes:
+                    dto.Notes = ToSection(permission);
+                    break;
                 case RolePermissionCatalog.Calculator:
                     dto.Calculator = ToSection(permission);
                     break;
@@ -503,6 +506,8 @@ public class RolePermissionsController : ControllerBase
                 && (permission.CanCreate || permission.CanDelete || permission.CanExport || permission.CanViewAnalytics))
             || (string.Equals(permission.Section, RolePermissionCatalog.Notifications, StringComparison.OrdinalIgnoreCase)
                 && (permission.CanCreate || permission.CanDelete || permission.CanExport || permission.CanViewAnalytics))
+            || (string.Equals(permission.Section, RolePermissionCatalog.Notes, StringComparison.OrdinalIgnoreCase)
+                && (permission.CanExport || permission.CanViewAnalytics))
             || (string.Equals(permission.Section, RolePermissionCatalog.YandexDisk, StringComparison.OrdinalIgnoreCase)
                 && permission.CanViewAnalytics)
             || (string.Equals(permission.Section, RolePermissionCatalog.S3Storage, StringComparison.OrdinalIgnoreCase)
@@ -516,6 +521,7 @@ public class RolePermissionsController : ControllerBase
         {
             [RolePermissionCatalog.Calendar] = ToValues(dto.Calendar),
             [RolePermissionCatalog.Tasks] = ToValues(dto.Tasks),
+            [RolePermissionCatalog.Notes] = ToValues(dto.Notes),
             [RolePermissionCatalog.Reports] = ToValues(dto.Reports),
             [RolePermissionCatalog.Calculator] = ToValues(dto.Calculator),
             [RolePermissionCatalog.LegalEntities] = ToValues(dto.LegalEntities),
@@ -562,6 +568,7 @@ public class RolePermissionsController : ControllerBase
 
         var canExport = string.Equals(section, RolePermissionCatalog.Roles, StringComparison.OrdinalIgnoreCase)
             || string.Equals(section, RolePermissionCatalog.Audit, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(section, RolePermissionCatalog.Notes, StringComparison.OrdinalIgnoreCase)
             ? false
             : values.CanExport;
 

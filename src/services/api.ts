@@ -708,6 +708,97 @@ export interface RolePermissionAuditReportDto {
   roles: RolePermissionAuditRoleDto[];
 }
 
+export type StickyNoteColor = 'yellow' | 'blue' | 'green' | 'pink' | 'white' | 'cyan';
+export type StickyNoteBoardVisibility = 'personal' | 'shared';
+export type StickyNoteBoardBackground = 'cork' | 'gray';
+
+export interface StickyNoteBoard {
+  id: number;
+  title: string;
+  description?: string | null;
+  visibility: StickyNoteBoardVisibility;
+  ownerUserId?: number | null;
+  ownerUserName: string;
+  background: StickyNoteBoardBackground;
+  sortOrder: number;
+  notesCount: number;
+  canEdit: boolean;
+  canDelete: boolean;
+  createdAt: string;
+  updatedAt?: string | null;
+}
+
+export interface StickyNoteItem {
+  id: number;
+  boardId: number;
+  text: string;
+  color: StickyNoteColor;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  zIndex: number;
+  version: number;
+  isPinned: boolean;
+  authorUserId?: number | null;
+  authorUserName: string;
+  createdAt: string;
+  updatedAt?: string | null;
+}
+
+export interface StickyNoteRealtimeEvent {
+  type: 'noteCreated' | 'noteUpdated' | 'noteDeleted' | 'boardDeleted';
+  boardId: number;
+  note?: StickyNoteItem | null;
+  noteId?: number | null;
+  actorUserId: number;
+  actorUserName: string;
+  createdAt: string;
+}
+
+export interface CreateStickyNoteBoardPayload {
+  title: string;
+  description?: string | null;
+  visibility?: StickyNoteBoardVisibility;
+  background?: StickyNoteBoardBackground;
+}
+
+export interface UpdateStickyNoteBoardPayload {
+  title: string;
+  description?: string | null;
+  background?: StickyNoteBoardBackground;
+}
+
+export interface CreateStickyNotePayload {
+  text?: string | null;
+  color?: StickyNoteColor;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+}
+
+export interface UpdateStickyNotePayload {
+  text: string;
+  color: StickyNoteColor;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  zIndex: number;
+  isPinned: boolean;
+  version?: number;
+}
+
+export interface UpdateStickyNoteLayoutPayload {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  zIndex: number;
+  version?: number;
+}
+
 export type NotificationChannel = 'email' | 'telegram';
 
 export interface NotificationChannelDto {
@@ -3369,6 +3460,62 @@ export class ApiService {
 
   async resetRolePermissions(roleId: number) {
     return this.request<void>(`/role-permissions/${roleId}`, { method: 'DELETE' });
+  }
+
+  // ===== Sticky notes =====
+  async getStickyNoteBoards() {
+    return this.request<StickyNoteBoard[]>('/sticky-notes/boards');
+  }
+
+  async createStickyNoteBoard(payload: CreateStickyNoteBoardPayload) {
+    return this.request<StickyNoteBoard>('/sticky-notes/boards', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateStickyNoteBoard(id: number, payload: UpdateStickyNoteBoardPayload) {
+    return this.request<StickyNoteBoard>(`/sticky-notes/boards/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteStickyNoteBoard(id: number) {
+    return this.request<void>(`/sticky-notes/boards/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getStickyNotes(boardId: number) {
+    return this.request<StickyNoteItem[]>(`/sticky-notes/boards/${boardId}/notes`);
+  }
+
+  async createStickyNote(boardId: number, payload: CreateStickyNotePayload) {
+    return this.request<StickyNoteItem>(`/sticky-notes/boards/${boardId}/notes`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateStickyNote(id: number, payload: UpdateStickyNotePayload) {
+    return this.request<StickyNoteItem>(`/sticky-notes/notes/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateStickyNoteLayout(id: number, payload: UpdateStickyNoteLayoutPayload) {
+    return this.request<StickyNoteItem>(`/sticky-notes/notes/${id}/layout`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteStickyNote(id: number) {
+    return this.request<void>(`/sticky-notes/notes/${id}`, {
+      method: 'DELETE',
+    });
   }
 
   // ===== Task journal =====

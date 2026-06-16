@@ -36,6 +36,7 @@ function normalizePermissions(perms?: Partial<RolePermissions> | null): RolePerm
   return {
     calendar: normalizeSectionPermissions(defaultRolePermissions.calendar, source.calendar),
     tasks: normalizeSectionPermissions(defaultRolePermissions.tasks, source.tasks),
+    notes: normalizeSectionPermissions(defaultRolePermissions.notes, source.notes),
     reports: normalizeSectionPermissions(defaultRolePermissions.reports, source.reports),
     calculator: normalizeSectionPermissions(defaultRolePermissions.calculator, source.calculator),
     legalEntities: normalizeSectionPermissions(defaultRolePermissions.legalEntities, source.legalEntities),
@@ -58,6 +59,7 @@ function clonePermissions(perms: RolePermissions): RolePermissions {
   return {
     calendar: { ...perms.calendar },
     tasks: { ...perms.tasks },
+    notes: { ...perms.notes },
     reports: { ...perms.reports },
     calculator: { ...perms.calculator },
     legalEntities: { ...perms.legalEntities },

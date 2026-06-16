@@ -6149,6 +6149,254 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("SpreadsheetImportBatchOperations");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.StickyNote", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("AuthorUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AuthorUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("BoardId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Color")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(24)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("yellow");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DeletedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<double>("Height")
+                        .HasColumnType("REAL");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<bool>("IsPinned")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("Width")
+                        .HasColumnType("REAL");
+
+                    b.Property<double>("X")
+                        .HasColumnType("REAL");
+
+                    b.Property<double>("Y")
+                        .HasColumnType("REAL");
+
+                    b.Property<int>("ZIndex")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AuthorUserId");
+
+                    b.HasIndex("BoardId")
+                        .HasDatabaseName("IX_StickyNotes_BoardId");
+
+                    b.HasIndex("DeletedAt")
+                        .HasDatabaseName("IX_StickyNote_DeletedAt_Audit");
+
+                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("IX_StickyNote_IsDeleted");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("IX_StickyNote_UpdatedAt_Audit");
+
+                    b.HasIndex("BoardId", "ZIndex")
+                        .HasDatabaseName("IX_StickyNotes_BoardId_ZIndex");
+
+                    b.ToTable("StickyNotes");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.StickyNoteBoard", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Background")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("cork");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("DeletedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DeletedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsArchived")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
+                    b.Property<int?>("OwnerUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("OwnerUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("UpdatedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UpdatedByUserName")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Visibility")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(24)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("personal");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DeletedAt")
+                        .HasDatabaseName("IX_StickyNoteBoard_DeletedAt_Audit");
+
+                    b.HasIndex("IsDeleted")
+                        .HasDatabaseName("IX_StickyNoteBoard_IsDeleted");
+
+                    b.HasIndex("OwnerUserId")
+                        .HasDatabaseName("IX_StickyNoteBoards_OwnerUserId");
+
+                    b.HasIndex("UpdatedAt")
+                        .HasDatabaseName("IX_StickyNoteBoard_UpdatedAt_Audit");
+
+                    b.HasIndex("Visibility")
+                        .HasDatabaseName("IX_StickyNoteBoards_Visibility");
+
+                    b.HasIndex("Visibility", "SortOrder")
+                        .HasDatabaseName("IX_StickyNoteBoards_Visibility_SortOrder");
+
+                    b.ToTable("StickyNoteBoards");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.StickyNoteBoardMember", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("BoardId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(24)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("editor");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("IX_StickyNoteBoardMembers_UserId");
+
+                    b.HasIndex("BoardId", "UserId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_StickyNoteBoardMembers_Board_User");
+
+                    b.ToTable("StickyNoteBoardMembers");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.SystemSetting", b =>
                 {
                     b.Property<int>("Id")
@@ -8752,6 +9000,53 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Batch");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.StickyNote", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.User", "AuthorUser")
+                        .WithMany()
+                        .HasForeignKey("AuthorUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.StickyNoteBoard", "Board")
+                        .WithMany("Notes")
+                        .HasForeignKey("BoardId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("AuthorUser");
+
+                    b.Navigation("Board");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.StickyNoteBoard", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.User", "OwnerUser")
+                        .WithMany()
+                        .HasForeignKey("OwnerUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("OwnerUser");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.StickyNoteBoardMember", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.StickyNoteBoard", "Board")
+                        .WithMany("Members")
+                        .HasForeignKey("BoardId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Board");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.TaskJournalComment", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.User", "AuthorUser")
@@ -9257,6 +9552,13 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("Files");
 
                     b.Navigation("Operations");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.StickyNoteBoard", b =>
+                {
+                    b.Navigation("Members");
+
+                    b.Navigation("Notes");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.TaskJournalItem", b =>

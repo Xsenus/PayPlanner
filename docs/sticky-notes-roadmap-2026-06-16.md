@@ -459,3 +459,25 @@
 - Изменение заметки одним пользователем отображается у другого на открытой доске без ручного refresh.
 - Конфликт одновременного редактирования не приводит к тихой потере текста.
 - Все изменения покрыты тестами, миграциями, UTF-8 check, build и локальной БД.
+
+## Отметка реализации 2026-06-16
+
+- [x] Milestone 1: архитектура, навигация, права, realtime и UI-паттерны изучены перед реализацией.
+- [x] Milestone 2: добавлены модели `StickyNoteBoard`, `StickyNoteBoardMember`, `StickyNote`, версия заметки, SQLite/PostgreSQL миграции и ленивое создание досок "Мои заметки" и "Общее".
+- [x] Milestone 3: добавлен отдельный раздел прав `notes`, backfill прав для существующих ролей, проверки `canView`, `canCreate`, `canEdit`, `canDelete` на API и в навигации.
+- [x] Milestone 4: реализован backend API `api/sticky-notes`, soft-delete, object audit, version conflict `409`, SignalR hub `/hubs/notes`.
+- [x] Milestone 5: добавлен frontend API service и realtime-клиент заметок.
+- [x] Milestone 6: добавлен раздел "Заметки" с левой панелью досок, созданием личных/общих досок, созданием заметок, цветами, закреплением, удалением, inline-редактированием и drag-сохранением позиции.
+- [x] Milestone 7: реализованы optimistic updates, server version check и обновление открытой доски по realtime event.
+- [acceptance] Milestone 8: общая и личная доска работают; отдельный UI управления участниками досок не реализован в MVP, потому что текущая бизнес-модель покрывает личные доски и общую доску для всех сотрудников.
+- [acceptance] Milestone 9: быстрые команды, поиск, фильтры и undo-восстановление оставлены на следующий этап UX-полировки.
+- [x] Milestone 10: пройдены проверки:
+  - `dotnet build backend\PayPlanner.Api.csproj`;
+  - `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --filter StickyNotesControllerTests`;
+  - `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --filter "StickyNotesControllerTests|SqliteMigrationSmokeTests"`;
+  - `npm run test:unit -- src/App.routing.test.ts src/components/Notes/StickyNotes.test.tsx src/components/Navigation/Navigation.test.tsx`;
+  - `npm run build`;
+  - `dotnet ef database update` для `PaymentContext` и `PostgreSqlPaymentContext`;
+  - `dotnet ef migrations list` подтвердил `AddStickyNotes` в SQLite и PostgreSQL;
+  - browser smoke: `http://127.0.0.1:4173/notes` открывается без console errors, без авторизации показывает форму входа.
+- [x] Milestone 11: запись для "Что нового" добавлена в `backend/AppReleases/releases.json`; roadmap обновлен; коммит выполняется отдельным шагом.
