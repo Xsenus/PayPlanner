@@ -413,6 +413,10 @@ export function StickyNotes() {
           }
         }
 
+        if (event.type === 'noteRestored') {
+          setDeletedNoteId((current) => (current === event.note!.id ? null : current));
+        }
+
         setNotes((current) => {
           const exists = current.some((note) => note.id === event.note!.id);
           const next = exists

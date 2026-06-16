@@ -332,6 +332,30 @@ describe('StickyNotes', () => {
     await waitFor(() => expect(apiMock.restoreStickyNote).toHaveBeenCalledWith(11));
   });
 
+  it('clears the local undo panel when a deleted note is restored through realtime', async () => {
+    realtimeMock.canStart = true;
+    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Вернули в другой вкладке' }]);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    await screen.findByDisplayValue('Вернули в другой вкладке');
+    await user.click(screen.getByTitle('Удалить'));
+
+    await waitFor(() => expect(apiMock.deleteStickyNote).toHaveBeenCalledWith(11));
+    expect(screen.getAllByText('Заметка удалена').length).toBeGreaterThan(1);
+
+    realtimeMock.handlers.get('stickyNoteBoardChanged')?.({
+      type: 'noteRestored',
+      boardId: 7,
+      note: { ...createdNote, text: 'Вернули в другой вкладке' },
+    });
+
+    expect(await screen.findByDisplayValue('Вернули в другой вкладке')).toBeTruthy();
+    await waitFor(() => expect(screen.getAllByText('Заметка удалена').length).toBe(1));
+  });
+
   it('disables note deletion when the board does not allow deleting notes', async () => {
     apiMock.getStickyNoteBoards.mockResolvedValue([{ ...board, canDeleteNotes: false }]);
     apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Нельзя удалить' }]);
