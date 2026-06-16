@@ -117,6 +117,18 @@ function writeStoredValue(key: string, value: string) {
   }
 }
 
+function removeStoredValue(key: string) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // Local storage is a convenience; the notes themselves stay server-backed.
+  }
+}
+
 export async function copyTextToClipboard(text: string, clipboard?: Pick<Clipboard, 'writeText'>) {
   const targetClipboard = clipboard ?? window.navigator.clipboard;
   if (!targetClipboard?.writeText) {
@@ -348,8 +360,10 @@ export function StickyNotes() {
   useEffect(() => {
     if (activeBoardId) {
       writeStoredValue(NOTES_ACTIVE_BOARD_STORAGE_KEY, String(activeBoardId));
+    } else if (!loading) {
+      removeStoredValue(NOTES_ACTIVE_BOARD_STORAGE_KEY);
     }
-  }, [activeBoardId]);
+  }, [activeBoardId, loading]);
 
   useEffect(() => {
     activeBoardIdRef.current = activeBoardId;

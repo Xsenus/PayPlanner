@@ -183,6 +183,18 @@ describe('StickyNotes', () => {
     renderStickyNotes();
 
     await waitFor(() => expect(apiMock.getStickyNotes).toHaveBeenCalledWith(9));
+    expect(window.localStorage.getItem('payplanner.stickyNotes.activeBoardId')).toBe('9');
+  });
+
+  it('clears the stored active board when no boards are available', async () => {
+    window.localStorage.setItem('payplanner.stickyNotes.activeBoardId', '9');
+    apiMock.getStickyNoteBoards.mockResolvedValue([]);
+
+    renderStickyNotes();
+
+    expect(await screen.findByText('Досок пока нет.')).toBeTruthy();
+    expect(apiMock.getStickyNotes).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem('payplanner.stickyNotes.activeBoardId')).toBeNull();
   });
 
   it('ignores stale notes responses after switching boards', async () => {
