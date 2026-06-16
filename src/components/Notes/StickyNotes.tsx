@@ -603,7 +603,11 @@ export function StickyNotes() {
       setNotes((current) => sortNotes(current.map((item) => (item.id === saved.id ? saved : item))));
     } catch (error) {
       console.error(error);
-      if (activeBoardId) {
+      if (error instanceof StickyNoteConflictError) {
+        setNoteConflict({ local: note, server: error.serverNote });
+        setNotes((current) => sortNotes(current.map((item) => (item.id === note.id ? note : item))));
+        toast.error('Расположение заметки уже изменено другим пользователем. Проверьте конфликт перед сохранением.');
+      } else if (activeBoardId) {
         await loadNotes(activeBoardId);
       }
     }

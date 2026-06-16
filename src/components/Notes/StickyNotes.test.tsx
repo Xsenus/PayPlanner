@@ -136,6 +136,9 @@ describe('StickyNotes', () => {
     realtimeMock.canStart = false;
     realtimeMock.handlers.clear();
     window.localStorage.clear();
+    if (!HTMLElement.prototype.setPointerCapture) {
+      HTMLElement.prototype.setPointerCapture = vi.fn();
+    }
     apiMock.getStickyNoteBoards.mockResolvedValue([board]);
     apiMock.getStickyNotes.mockResolvedValue([]);
     apiMock.getStickyNoteBoardMembers.mockResolvedValue([]);
@@ -562,6 +565,31 @@ describe('StickyNotes', () => {
     const overwriteButton = await screen.findByRole('button', { name: /^Перезаписать$/i });
     await waitFor(() => expect(overwriteButton).toHaveProperty('disabled', true));
     expect(overwriteButton.getAttribute('title')).toBe('Нет права редактировать эту доску');
+  });
+
+  it('shows a conflict panel when note layout save conflicts', async () => {
+    const localNote = { ...createdNote, text: 'Перетащить меня', x: 56, y: 56, version: 1 };
+    const serverNote = { ...localNote, x: 300, y: 220, version: 2 };
+    apiMock.getStickyNotes.mockResolvedValue([localNote]);
+    apiMock.updateStickyNoteLayout.mockRejectedValueOnce(new StickyNoteConflictError(serverNote));
+
+    renderStickyNotes();
+
+    const textarea = await screen.findByDisplayValue('Перетащить меня');
+    const noteElement = textarea.parentElement as HTMLElement;
+    expect(noteElement).toBeTruthy();
+
+    fireEvent.pointerDown(noteElement, { pointerId: 1, clientX: 120, clientY: 120 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 180, clientY: 170 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 180, clientY: 170 });
+
+    await waitFor(() => expect(apiMock.updateStickyNoteLayout).toHaveBeenCalledWith(11, expect.objectContaining({
+      x: 116,
+      y: 106,
+      version: 1,
+    })));
+    expect(await screen.findByText('Заметка изменена другим пользователем')).toBeTruthy();
+    expect(screen.getAllByText('Перетащить меня').length).toBeGreaterThan(1);
   });
 
   it('keeps a local draft when a realtime update arrives during pending autosave', async () => {
