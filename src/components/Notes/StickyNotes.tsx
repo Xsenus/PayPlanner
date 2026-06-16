@@ -793,16 +793,22 @@ export function StickyNotes() {
       return;
     }
 
+    const requestedBoardId = activeBoard.id;
+    const fallbackBoardId = boards.filter((board) => board.id !== requestedBoardId)[0]?.id ?? null;
+
     try {
-      await apiService.deleteStickyNoteBoard(activeBoard.id);
-      const nextBoards = boards.filter((board) => board.id !== activeBoard.id);
-      setBoards(nextBoards);
-      clearActiveBoardState();
-      setActiveBoardId(nextBoards[0]?.id ?? null);
-      toast.success('Доска заметок удалена.');
+      await apiService.deleteStickyNoteBoard(requestedBoardId);
+      setBoards((current) => current.filter((board) => board.id !== requestedBoardId));
+      if (activeBoardIdRef.current === requestedBoardId) {
+        clearActiveBoardState();
+        setActiveBoardId(fallbackBoardId);
+        toast.success('Доска заметок удалена.');
+      }
     } catch (error) {
       console.error(error);
-      toast.error('Не удалось удалить доску.');
+      if (activeBoardIdRef.current === requestedBoardId) {
+        toast.error('Не удалось удалить доску.');
+      }
     }
   };
 

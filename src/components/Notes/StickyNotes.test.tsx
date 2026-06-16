@@ -571,6 +571,46 @@ describe('StickyNotes', () => {
     expect(await screen.findByText('Доска заметок удалена.')).toBeTruthy();
   });
 
+  it('keeps the current board when a board deletion finishes after switching boards', async () => {
+    const archiveBoard: StickyNoteBoard = {
+      ...board,
+      id: 13,
+      title: 'Архив заметок',
+      sortOrder: 2,
+    };
+    const deleteBoardResponse = createDeferred<void>();
+    window.localStorage.setItem('payplanner.stickyNotes.activeBoardId', '9');
+    apiMock.getStickyNoteBoards.mockResolvedValue([{ ...personalBoard, canDelete: true }, board, archiveBoard]);
+    apiMock.getStickyNotes.mockImplementation(async (boardId) => (
+      boardId === 9
+        ? [{ ...createdNote, boardId: 9, text: 'Доска удаляется' }]
+        : boardId === 13
+          ? [{ ...createdNote, id: 13, boardId: 13, text: 'Архив открыт' }]
+          : [{ ...createdNote, id: 7, text: 'Рабочая открылась' }]
+    ));
+    apiMock.deleteStickyNoteBoard.mockImplementationOnce(() => deleteBoardResponse.promise);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    await screen.findByDisplayValue('Доска удаляется');
+    await user.click(screen.getByTitle('Удалить доску'));
+    await waitFor(() => expect(apiMock.deleteStickyNoteBoard).toHaveBeenCalledWith(9));
+
+    await user.click(screen.getByRole('button', { name: /Архив заметок/i }));
+    expect(await screen.findByDisplayValue('Архив открыт')).toBeTruthy();
+
+    await act(async () => {
+      deleteBoardResponse.resolve();
+      await deleteBoardResponse.promise;
+    });
+
+    expect(screen.getByDisplayValue('Архив открыт')).toBeTruthy();
+    expect(screen.queryByDisplayValue('Рабочая открылась')).toBeNull();
+    expect(screen.queryByText('Доска заметок удалена.')).toBeNull();
+  });
+
   it('clears active board state when the current board is deleted through realtime', async () => {
     realtimeMock.canStart = true;
     window.localStorage.setItem('payplanner.stickyNotes.activeBoardId', '9');
