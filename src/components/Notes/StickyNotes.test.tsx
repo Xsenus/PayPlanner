@@ -337,6 +337,25 @@ describe('StickyNotes', () => {
     expect(screen.getAllByDisplayValue('Создано почти одновременно')).toHaveLength(1);
   });
 
+  it('ignores realtime note payloads that belong to another board', async () => {
+    realtimeMock.canStart = true;
+    renderStickyNotes();
+
+    await screen.findByRole('button', { name: /Рабочая доска/i });
+    await waitFor(() => expect(realtimeMock.handlers.has('stickyNoteBoardChanged')).toBe(true));
+
+    act(() => {
+      realtimeMock.handlers.get('stickyNoteBoardChanged')?.({
+        type: 'noteCreated',
+        boardId: 7,
+        note: { ...createdNote, id: 17, boardId: 9, text: 'Чужая доска' },
+      });
+    });
+
+    expect(screen.queryByDisplayValue('Чужая доска')).toBeNull();
+    await waitFor(() => expect(apiMock.getStickyNoteBoards).toHaveBeenCalledTimes(2));
+  });
+
   it('ignores a stale created note response after switching boards', async () => {
     const createdNoteResponse = createDeferred<StickyNoteItem>();
     apiMock.getStickyNoteBoards.mockResolvedValue([board, personalBoard]);

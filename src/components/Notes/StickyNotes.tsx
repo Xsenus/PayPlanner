@@ -473,6 +473,11 @@ export function StickyNotes() {
         clearNoteTransientState(event.noteId);
         setNotes((current) => current.filter((note) => note.id !== event.noteId));
       } else if ((event.type === 'noteCreated' || event.type === 'noteUpdated' || event.type === 'noteRestored') && event.note) {
+        if (event.note.boardId !== activeBoardId) {
+          void loadBoards();
+          return;
+        }
+
         if (event.type === 'noteUpdated' && autosaveTimersRef.current.has(event.note.id)) {
           const localNote = notesRef.current.find((note) => note.id === event.note!.id);
           if (localNote) {
