@@ -395,6 +395,42 @@ describe('StickyNotes', () => {
     }));
   });
 
+  it('does not show stale board settings toast after switching boards', async () => {
+    const updateBoardResponse = createDeferred<StickyNoteBoard>();
+    apiMock.getStickyNoteBoards.mockResolvedValue([board, personalBoard]);
+    apiMock.updateStickyNoteBoard.mockImplementationOnce(() => updateBoardResponse.promise);
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    await screen.findAllByText('Рабочая доска');
+    await user.click(screen.getByRole('button', { name: 'Настройки доски' }));
+    fireEvent.change(screen.getByPlaceholderText('Название доски'), { target: { value: 'Юридические заметки' } });
+    await user.selectOptions(screen.getByLabelText('Фон доски'), 'gray');
+    await user.click(screen.getByRole('button', { name: /Сохранить/i }));
+    await waitFor(() => expect(apiMock.updateStickyNoteBoard).toHaveBeenCalledWith(7, {
+      title: 'Юридические заметки',
+      description: null,
+      background: 'gray',
+    }));
+
+    await user.click(screen.getByRole('button', { name: /Мои заметки/i }));
+    await waitFor(() => expect(apiMock.getStickyNotes).toHaveBeenCalledWith(9));
+
+    await act(async () => {
+      updateBoardResponse.resolve({
+        ...board,
+        title: 'Юридические заметки',
+        background: 'gray',
+      });
+      await updateBoardResponse.promise;
+    });
+
+    expect(screen.queryByText('Настройки доски сохранены.')).toBeNull();
+    expect(screen.getByRole('button', { name: /Мои заметки/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Юридические заметки/i })).toBeTruthy();
+  });
+
   it('filters notes by search text', async () => {
     apiMock.getStickyNotes.mockResolvedValue([
       { ...createdNote, id: 11, text: 'Заказать воду' },

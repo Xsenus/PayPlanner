@@ -823,19 +823,26 @@ export function StickyNotes() {
       return;
     }
 
+    const requestedBoardId = activeBoard.id;
+
     setSavingBoardSettings(true);
     try {
-      const updated = await apiService.updateStickyNoteBoard(activeBoard.id, {
+      const updated = await apiService.updateStickyNoteBoard(requestedBoardId, {
         title,
         description: boardDescription.trim() || null,
         background: boardBackground,
       });
       setBoards((current) => current.map((board) => (board.id === updated.id ? updated : board)));
+      if (activeBoardIdRef.current !== requestedBoardId) {
+        return;
+      }
       setBoardSettingsOpen(false);
       toast.success('Настройки доски сохранены.');
     } catch (error) {
       console.error(error);
-      toast.error('Не удалось сохранить настройки доски.');
+      if (activeBoardIdRef.current === requestedBoardId) {
+        toast.error('Не удалось сохранить настройки доски.');
+      }
     } finally {
       setSavingBoardSettings(false);
     }
