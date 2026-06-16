@@ -149,6 +149,7 @@ export function StickyNotes() {
   const autosaveTimersRef = useRef<Map<number, number>>(new Map());
   const boardLoadRequestIdRef = useRef(0);
   const notesLoadRequestIdRef = useRef(0);
+  const membersLoadRequestIdRef = useRef(0);
   const [boards, setBoards] = useState<StickyNoteBoard[]>([]);
   const [activeBoardId, setActiveBoardId] = useState<number | null>(null);
   const [notes, setNotes] = useState<StickyNoteItem[]>([]);
@@ -352,16 +353,18 @@ export function StickyNotes() {
   }, [toast]);
 
   const loadMembers = useCallback(async (boardId: number) => {
+    const requestId = membersLoadRequestIdRef.current + 1;
+    membersLoadRequestIdRef.current = requestId;
     try {
       const nextMembers = await apiService.getStickyNoteBoardMembers(boardId);
-      if (activeBoardIdRef.current !== boardId) {
+      if (membersLoadRequestIdRef.current !== requestId || activeBoardIdRef.current !== boardId) {
         return;
       }
 
       setMembers(nextMembers);
     } catch (error) {
       console.error(error);
-      if (activeBoardIdRef.current === boardId) {
+      if (membersLoadRequestIdRef.current === requestId && activeBoardIdRef.current === boardId) {
         setMembers([]);
       }
     }

@@ -1033,6 +1033,52 @@ describe('StickyNotes', () => {
     expect(screen.getByRole('button', { name: /Личные напоминания/i })).toBeTruthy();
   });
 
+  it('ignores stale member responses when a newer refresh has already applied', async () => {
+    realtimeMock.canStart = true;
+    const staleMembers = createDeferred<StickyNoteBoardMember[]>();
+    const freshMembers = createDeferred<StickyNoteBoardMember[]>();
+    const ownerMember = {
+      id: 0,
+      boardId: 9,
+      userId: 1,
+      displayName: 'Пользователь',
+      email: 'user@example.com',
+      role: 'owner' as const,
+    };
+    const annaMember = {
+      id: 5,
+      boardId: 9,
+      userId: 3,
+      displayName: 'Анна Юрист',
+      email: 'anna@example.com',
+      role: 'viewer' as const,
+    };
+    apiMock.getStickyNoteBoards.mockResolvedValue([personalBoard]);
+    apiMock.getStickyNoteBoardMembers
+      .mockImplementationOnce(() => staleMembers.promise)
+      .mockImplementationOnce(() => freshMembers.promise);
+
+    renderStickyNotes();
+
+    await screen.findByText('Участники');
+    await waitFor(() => expect(realtimeMock.handlers.has('stickyNoteBoardChanged')).toBe(true));
+    realtimeMock.handlers.get('stickyNoteBoardChanged')?.({ type: 'boardMembersChanged', boardId: 9 });
+    await waitFor(() => expect(apiMock.getStickyNoteBoardMembers).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      freshMembers.resolve([ownerMember, annaMember]);
+      await freshMembers.promise;
+    });
+    expect(await screen.findByText('Анна Юрист')).toBeTruthy();
+
+    await act(async () => {
+      staleMembers.resolve([ownerMember]);
+      await staleMembers.promise;
+    });
+
+    expect(screen.getByText('Анна Юрист')).toBeTruthy();
+  });
+
   it('requires selecting a board member candidate before adding access', async () => {
     apiMock.getStickyNoteBoards.mockResolvedValue([personalBoard]);
     apiMock.getStickyNoteBoardMembers.mockResolvedValue([
