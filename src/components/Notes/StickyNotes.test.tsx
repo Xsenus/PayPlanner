@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../../contexts/ToastContext';
-import { StickyNotes } from './StickyNotes';
+import { getEffectiveBoardNotesCount, StickyNotes } from './StickyNotes';
 import type { StickyNoteBoard, StickyNoteItem } from '../../services/api';
 
 vi.mock('../../services/api', () => ({
@@ -191,6 +191,12 @@ describe('StickyNotes', () => {
     expect(createButton).toHaveProperty('disabled', true);
     expect(createButton.getAttribute('title')).toBe('На одной доске можно хранить до 200 заметок.');
     expect(apiMock.createStickyNote).not.toHaveBeenCalled();
+  });
+
+  it('prefers loaded notes count when the board count is stale', () => {
+    expect(getEffectiveBoardNotesCount(0, 200)).toBe(200);
+    expect(getEffectiveBoardNotesCount(200, 0)).toBe(200);
+    expect(getEffectiveBoardNotesCount(12, 8)).toBe(12);
   });
 
   it('updates board title and background from settings', async () => {

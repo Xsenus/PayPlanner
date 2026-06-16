@@ -74,6 +74,10 @@ function isInteractiveTarget(target: EventTarget | null) {
   return target instanceof HTMLElement && Boolean(target.closest('textarea,button,select,input'));
 }
 
+export function getEffectiveBoardNotesCount(boardNotesCount: number, loadedNotesCount: number) {
+  return Math.max(boardNotesCount, loadedNotesCount);
+}
+
 function readStoredViewMode(): NotesViewMode {
   if (typeof window === 'undefined') {
     return 'canvas';
@@ -152,9 +156,18 @@ export function StickyNotes() {
   const canEditActiveBoard = Boolean(activeBoard?.canEdit);
   const canCreateNotesOnActiveBoard = Boolean(activeBoard?.canCreateNotes);
   const canDeleteNotesOnActiveBoard = Boolean(activeBoard?.canDeleteNotes);
-  const isActiveBoardAtNoteLimit = (activeBoard?.notesCount ?? notes.length) >= MAX_NOTES_PER_BOARD;
+  const effectiveActiveBoardNotesCount = activeBoard ? getEffectiveBoardNotesCount(activeBoard.notesCount, notes.length) : notes.length;
+  const isActiveBoardAtNoteLimit = effectiveActiveBoardNotesCount >= MAX_NOTES_PER_BOARD;
   const canAddNoteToActiveBoard = canCreateNotesOnActiveBoard && !isActiveBoardAtNoteLimit;
   const currentUserId = user?.id ?? null;
+
+  const getDisplayedBoardNotesCount = (board: StickyNoteBoard) => {
+    if (board.id !== activeBoardId) {
+      return board.notesCount;
+    }
+
+    return getEffectiveBoardNotesCount(board.notesCount, notes.length);
+  };
 
   const filteredNotes = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
@@ -946,7 +959,7 @@ export function StickyNotes() {
               >
                 {board.visibility === 'shared' ? <Users className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
                 <span className="min-w-0 flex-1 truncate">{board.title}</span>
-                <span className="rounded-full bg-slate-200 px-1.5 py-0.5 text-xs text-slate-700">{board.notesCount}</span>
+                <span className="rounded-full bg-slate-200 px-1.5 py-0.5 text-xs text-slate-700">{getDisplayedBoardNotesCount(board)}</span>
               </button>
             ))
           )}
