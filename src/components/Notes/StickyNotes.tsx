@@ -800,8 +800,8 @@ export function StickyNotes() {
       return;
     }
 
-    const parsedUserId = Number(memberUserId || availableMemberCandidates[0]?.userId);
-    if (!parsedUserId) {
+    const parsedUserId = Number(memberUserId);
+    if (!Number.isInteger(parsedUserId) || parsedUserId <= 0) {
       toast.error('Выберите сотрудника.');
       return;
     }

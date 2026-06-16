@@ -474,6 +474,32 @@ describe('StickyNotes', () => {
     await waitFor(() => expect(apiMock.upsertStickyNoteBoardMember).toHaveBeenCalledWith(9, 3, { role: 'viewer' }));
   });
 
+  it('requires selecting a board member candidate before adding access', async () => {
+    apiMock.getStickyNoteBoards.mockResolvedValue([personalBoard]);
+    apiMock.getStickyNoteBoardMembers.mockResolvedValue([
+      {
+        id: 0,
+        boardId: 9,
+        userId: 1,
+        displayName: 'Пользователь',
+        email: 'user@example.com',
+        role: 'owner',
+      },
+    ]);
+    apiMock.getStickyNoteMemberCandidates.mockResolvedValue([
+      { userId: 3, displayName: 'Анна Юрист', email: 'anna@example.com' },
+    ]);
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    await screen.findByRole('option', { name: 'Анна Юрист' });
+    await user.click(screen.getByTitle('Добавить участника'));
+
+    expect(apiMock.upsertStickyNoteBoardMember).not.toHaveBeenCalled();
+    expect(await screen.findByText('Выберите сотрудника.')).toBeTruthy();
+  });
+
   it('clears the selected member candidate when the user becomes a board member', async () => {
     realtimeMock.canStart = true;
     const ownerMember = {
