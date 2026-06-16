@@ -534,8 +534,14 @@ export function StickyNotes() {
   }, [activeBoardId]);
 
   const refreshBoardCounts = useCallback(async () => {
+    const requestId = boardLoadRequestIdRef.current + 1;
+    boardLoadRequestIdRef.current = requestId;
     try {
       const nextBoards = await apiService.getStickyNoteBoards();
+      if (boardLoadRequestIdRef.current !== requestId) {
+        return;
+      }
+
       const currentBoardId = activeBoardIdRef.current;
       if (currentBoardId && !nextBoards.some((board) => board.id === currentBoardId)) {
         clearActiveBoardState();
@@ -549,6 +555,10 @@ export function StickyNotes() {
       ));
     } catch {
       // The next manual refresh will recover counts.
+    } finally {
+      if (boardLoadRequestIdRef.current === requestId) {
+        setLoading(false);
+      }
     }
   }, [clearActiveBoardState]);
 

@@ -927,6 +927,55 @@ describe('StickyNotes', () => {
     expect(screen.queryByRole('button', { name: /Устаревшая доска/i })).toBeNull();
   });
 
+  it('ignores stale board count refreshes when a newer refresh has already applied', async () => {
+    const firstCreateResponse = createDeferred<StickyNoteItem>();
+    const secondCreateResponse = createDeferred<StickyNoteItem>();
+    const staleBoards = createDeferred<StickyNoteBoard[]>();
+    const freshBoards = createDeferred<StickyNoteBoard[]>();
+    apiMock.getStickyNoteBoards
+      .mockResolvedValueOnce([board, personalBoard])
+      .mockImplementationOnce(() => staleBoards.promise)
+      .mockImplementationOnce(() => freshBoards.promise);
+    apiMock.createStickyNote
+      .mockImplementationOnce(() => firstCreateResponse.promise)
+      .mockImplementationOnce(() => secondCreateResponse.promise);
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    await screen.findByRole('button', { name: /Рабочая доска/i });
+    const addNoteButton = screen.getByRole('button', { name: /Заметка/i });
+    await user.click(addNoteButton);
+    await user.click(addNoteButton);
+    await waitFor(() => expect(apiMock.createStickyNote).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      firstCreateResponse.resolve({ ...createdNote, id: 21, text: 'Первый стикер' });
+      await firstCreateResponse.promise;
+    });
+    await waitFor(() => expect(apiMock.getStickyNoteBoards).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      secondCreateResponse.resolve({ ...createdNote, id: 22, text: 'Второй стикер' });
+      await secondCreateResponse.promise;
+    });
+    await waitFor(() => expect(apiMock.getStickyNoteBoards).toHaveBeenCalledTimes(3));
+
+    await act(async () => {
+      freshBoards.resolve([{ ...board, title: 'Актуальные счетчики', notesCount: 2 }, personalBoard]);
+      await freshBoards.promise;
+    });
+    expect(await screen.findByRole('button', { name: /Актуальные счетчики/i })).toBeTruthy();
+
+    await act(async () => {
+      staleBoards.resolve([{ ...board, title: 'Устаревшие счетчики', notesCount: 1 }, personalBoard]);
+      await staleBoards.promise;
+    });
+
+    expect(screen.getByRole('button', { name: /Актуальные счетчики/i })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Устаревшие счетчики/i })).toBeNull();
+  });
+
   it('adds a board member when the user manages a personal board', async () => {
     apiMock.getStickyNoteBoards.mockResolvedValue([personalBoard]);
     apiMock.getStickyNoteBoardMembers.mockResolvedValue([
