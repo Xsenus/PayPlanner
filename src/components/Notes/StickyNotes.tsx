@@ -530,7 +530,11 @@ export function StickyNotes() {
         visibility,
         background: visibility === 'shared' ? 'cork' : 'gray',
       });
-      setBoards((current) => [...current, board]);
+      setBoards((current) => (
+        current.some((item) => item.id === board.id)
+          ? current.map((item) => (item.id === board.id ? board : item))
+          : [...current, board]
+      ));
       setActiveBoardId(board.id);
       setNewBoardTitle('');
     } catch (error) {

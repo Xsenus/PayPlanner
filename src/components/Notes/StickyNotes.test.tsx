@@ -241,6 +241,25 @@ describe('StickyNotes', () => {
     expect(await screen.findByPlaceholderText('Текст заметки')).toBeTruthy();
   });
 
+  it('does not duplicate a board when the created board is already in the list', async () => {
+    const user = userEvent.setup();
+    apiMock.createStickyNoteBoard.mockResolvedValue({ ...board, title: 'Рабочая доска обновлена' });
+
+    renderStickyNotes();
+
+    await screen.findAllByText('Рабочая доска');
+    await user.type(screen.getByPlaceholderText('Новая доска'), 'Рабочая доска обновлена');
+    await user.click(screen.getByRole('button', { name: 'Общая' }));
+
+    await waitFor(() => expect(apiMock.createStickyNoteBoard).toHaveBeenCalledWith({
+      title: 'Рабочая доска обновлена',
+      visibility: 'shared',
+      background: 'cork',
+    }));
+    expect(screen.getAllByText('Рабочая доска обновлена')).toHaveLength(2);
+    expect(screen.queryByText('Рабочая доска')).toBeNull();
+  });
+
   it('disables note creation when the board does not allow creating notes', async () => {
     apiMock.getStickyNoteBoards.mockResolvedValue([{ ...board, canCreateNotes: false }]);
 
