@@ -169,7 +169,38 @@ export function StickyNotes() {
     return getEffectiveBoardNotesCount(board.notesCount, notes.length);
   };
 
+  const clearAutosaveTimer = useCallback((noteId: number) => {
+    const timer = autosaveTimersRef.current.get(noteId);
+    if (timer) {
+      window.clearTimeout(timer);
+      autosaveTimersRef.current.delete(noteId);
+    }
+  }, []);
+
+  const clearNoteTransientState = useCallback((noteId: number) => {
+    clearAutosaveTimer(noteId);
+    setSelectedNoteId((current) => (current === noteId ? null : current));
+    setDeletedNoteId((current) => (current === noteId ? null : current));
+    setNoteConflict((current) => (
+      current?.local.id === noteId || current?.server.id === noteId ? null : current
+    ));
+    setSavingNoteIds((current) => {
+      if (!current.has(noteId)) {
+        return current;
+      }
+
+      const next = new Set(current);
+      next.delete(noteId);
+      return next;
+    });
+  }, [clearAutosaveTimer]);
+
   const clearActiveBoardState = useCallback(() => {
+    for (const timer of autosaveTimersRef.current.values()) {
+      window.clearTimeout(timer);
+    }
+    autosaveTimersRef.current.clear();
+    setSavingNoteIds(new Set());
     setNotes([]);
     setMembers([]);
     setSelectedNoteId(null);
@@ -342,6 +373,7 @@ export function StickyNotes() {
       }
 
       if (event.type === 'noteDeleted' && event.noteId) {
+        clearNoteTransientState(event.noteId);
         setNotes((current) => current.filter((note) => note.id !== event.noteId));
       } else if ((event.type === 'noteCreated' || event.type === 'noteUpdated' || event.type === 'noteRestored') && event.note) {
         setNotes((current) => {
@@ -374,7 +406,7 @@ export function StickyNotes() {
       connectionRef.current = null;
       void stopNotesHubConnection(connection);
     };
-  }, [activeBoardId, clearActiveBoardState, loadBoards, loadMembers]);
+  }, [activeBoardId, clearActiveBoardState, clearNoteTransientState, loadBoards, loadMembers]);
 
   useEffect(() => {
     const connection = connectionRef.current;
@@ -605,8 +637,8 @@ export function StickyNotes() {
 
     try {
       await apiService.deleteStickyNote(noteId);
+      clearNoteTransientState(noteId);
       setNotes((current) => current.filter((note) => note.id !== noteId));
-      setSelectedNoteId(null);
       setDeletedNoteId(noteId);
       toast.showToast({
         title: 'Заметка удалена',

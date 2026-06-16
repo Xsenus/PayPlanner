@@ -438,4 +438,24 @@ describe('StickyNotes', () => {
     expect(screen.getByText('Версия сервера')).toBeTruthy();
     expect(screen.getAllByText('Моя версия').length).toBeGreaterThan(1);
   });
+
+  it('clears note conflict when the conflicting note is deleted through realtime', async () => {
+    realtimeMock.canStart = true;
+    const serverNote = { ...createdNote, text: 'Версия сервера', version: 2 };
+    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Моя версия', version: 1 }]);
+    apiMock.updateStickyNote.mockRejectedValueOnce(new StickyNoteConflictError(serverNote));
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    await screen.findByDisplayValue('Моя версия');
+    await user.click(screen.getByTitle('Сохранить'));
+    expect(await screen.findByText('Заметка изменена другим пользователем')).toBeTruthy();
+
+    realtimeMock.handlers.get('stickyNoteBoardChanged')?.({ type: 'noteDeleted', boardId: 7, noteId: 11 });
+
+    await waitFor(() => expect(screen.queryByText('Заметка изменена другим пользователем')).toBeNull());
+    expect(screen.queryByDisplayValue('Моя версия')).toBeNull();
+    expect(screen.queryByText('Версия сервера')).toBeNull();
+  });
 });
