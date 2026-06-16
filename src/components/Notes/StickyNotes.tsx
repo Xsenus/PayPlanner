@@ -57,6 +57,9 @@ type NoteConflict = {
 };
 type NotesViewMode = 'canvas' | 'list';
 
+const NOTES_VIEW_MODE_STORAGE_KEY = 'payplanner.stickyNotes.viewMode';
+const NOTES_ACTIVE_BOARD_STORAGE_KEY = 'payplanner.stickyNotes.activeBoardId';
+
 function colorClass(color: StickyNoteColor): string {
   return COLORS.find((item) => item.value === color)?.className ?? COLORS[0].className;
 }
@@ -67,6 +70,45 @@ function sortNotes(notes: StickyNoteItem[]) {
 
 function isInteractiveTarget(target: EventTarget | null) {
   return target instanceof HTMLElement && Boolean(target.closest('textarea,button,select,input'));
+}
+
+function readStoredViewMode(): NotesViewMode {
+  if (typeof window === 'undefined') {
+    return 'canvas';
+  }
+
+  try {
+    const stored = window.localStorage.getItem(NOTES_VIEW_MODE_STORAGE_KEY);
+    return stored === 'list' || stored === 'canvas' ? stored : 'canvas';
+  } catch {
+    return 'canvas';
+  }
+}
+
+function readStoredActiveBoardId(): number | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    const stored = window.localStorage.getItem(NOTES_ACTIVE_BOARD_STORAGE_KEY);
+    const parsed = Number(stored);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredValue(key: string, value: string) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Local storage is a convenience; the notes themselves stay server-backed.
+  }
 }
 
 export function StickyNotes() {
@@ -93,7 +135,7 @@ export function StickyNotes() {
   const [memberUserId, setMemberUserId] = useState('');
   const [memberRole, setMemberRole] = useState<Exclude<StickyNoteBoardMemberRole, 'owner'>>('viewer');
   const [noteConflict, setNoteConflict] = useState<NoteConflict | null>(null);
-  const [viewMode, setViewMode] = useState<NotesViewMode>('canvas');
+  const [viewMode, setViewMode] = useState<NotesViewMode>(() => readStoredViewMode());
 
   const activeBoard = useMemo(
     () => boards.find((board) => board.id === activeBoardId) ?? null,
@@ -154,6 +196,11 @@ export function StickyNotes() {
           return current;
         }
 
+        const storedBoardId = readStoredActiveBoardId();
+        if (storedBoardId && nextBoards.some((board) => board.id === storedBoardId)) {
+          return storedBoardId;
+        }
+
         return nextBoards[0]?.id ?? null;
       });
     } catch (error) {
@@ -194,6 +241,16 @@ export function StickyNotes() {
   useEffect(() => {
     notesRef.current = notes;
   }, [notes]);
+
+  useEffect(() => {
+    writeStoredValue(NOTES_VIEW_MODE_STORAGE_KEY, viewMode);
+  }, [viewMode]);
+
+  useEffect(() => {
+    if (activeBoardId) {
+      writeStoredValue(NOTES_ACTIVE_BOARD_STORAGE_KEY, String(activeBoardId));
+    }
+  }, [activeBoardId]);
 
   useEffect(() => {
     const timers = autosaveTimersRef.current;
@@ -692,7 +749,7 @@ export function StickyNotes() {
             value={note.color}
             disabled={!canEditActiveBoard}
             onChange={(event) => patchNote(note.id, { color: event.target.value as StickyNoteColor })}
-            onBlur={() => saveNote(note)}
+            onBlur={(event) => saveNote({ ...note, color: event.currentTarget.value as StickyNoteColor })}
             className="min-w-0 flex-1 rounded border border-black/10 bg-white/60 px-1 py-0.5 text-xs"
           >
             {COLORS.map((item) => (
@@ -737,7 +794,7 @@ export function StickyNotes() {
             patchNote(note.id, { text: event.target.value });
             scheduleNoteAutosave(note.id);
           }}
-          onBlur={() => saveNote(note)}
+          onBlur={(event) => saveNote({ ...note, text: event.currentTarget.value })}
           readOnly={!canEditActiveBoard}
           maxLength={4000}
           className="min-h-0 flex-1 resize-none bg-transparent text-sm leading-snug outline-none placeholder:text-slate-500"

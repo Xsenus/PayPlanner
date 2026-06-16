@@ -105,6 +105,7 @@ function renderStickyNotes() {
 describe('StickyNotes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.clear();
     apiMock.getStickyNoteBoards.mockResolvedValue([board]);
     apiMock.getStickyNotes.mockResolvedValue([]);
     apiMock.getStickyNoteBoardMembers.mockResolvedValue([]);
@@ -133,6 +134,15 @@ describe('StickyNotes', () => {
     expect(await screen.findAllByText('Рабочая доска')).toHaveLength(2);
     expect(apiMock.getStickyNoteBoards).toHaveBeenCalledTimes(1);
     expect(apiMock.getStickyNotes).toHaveBeenCalledWith(7);
+  });
+
+  it('restores the last selected board from local storage', async () => {
+    window.localStorage.setItem('payplanner.stickyNotes.activeBoardId', '9');
+    apiMock.getStickyNoteBoards.mockResolvedValue([board, personalBoard]);
+
+    renderStickyNotes();
+
+    await waitFor(() => expect(apiMock.getStickyNotes).toHaveBeenCalledWith(9));
   });
 
   it('creates a note on the active board', async () => {
@@ -177,6 +187,17 @@ describe('StickyNotes', () => {
 
     expect(screen.getByRole('button', { name: 'Показать холст' })).toBeTruthy();
     expect(screen.getByDisplayValue('Напомнить бухгалтерии')).toBeTruthy();
+    expect(window.localStorage.getItem('payplanner.stickyNotes.viewMode')).toBe('list');
+  });
+
+  it('restores the compact list view from local storage', async () => {
+    window.localStorage.setItem('payplanner.stickyNotes.viewMode', 'list');
+    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Открыть списком' }]);
+
+    renderStickyNotes();
+
+    expect(await screen.findByRole('button', { name: 'Показать холст' })).toBeTruthy();
+    expect(screen.getByDisplayValue('Открыть списком')).toBeTruthy();
   });
 
   it('restores a deleted note from the undo action', async () => {
@@ -235,6 +256,24 @@ describe('StickyNotes', () => {
       version: 1,
     })), { timeout: 2500 });
   }, 4000);
+
+  it('saves the current textarea value on blur', async () => {
+    const user = userEvent.setup();
+    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Старый текст' }]);
+    apiMock.updateStickyNote.mockResolvedValue({ ...createdNote, text: 'Новый текст', version: 2 });
+
+    renderStickyNotes();
+
+    const textarea = await screen.findByDisplayValue('Старый текст');
+    await user.clear(textarea);
+    await user.type(textarea, 'Новый текст');
+    await user.tab();
+
+    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledWith(11, expect.objectContaining({
+      text: 'Новый текст',
+      version: 1,
+    })));
+  });
 
   it('shows a conflict panel without losing the local text', async () => {
     const serverNote = { ...createdNote, text: 'Версия сервера', version: 2 };
