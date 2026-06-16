@@ -450,6 +450,38 @@ describe('StickyNotes', () => {
     await waitFor(() => expect(apiMock.restoreStickyNote).toHaveBeenCalledWith(11));
   });
 
+  it('does not show a restored note on another board after switching boards', async () => {
+    const restoreResponse = createDeferred<StickyNoteItem>();
+    apiMock.getStickyNoteBoards.mockResolvedValue([board, personalBoard]);
+    apiMock.getStickyNotes.mockImplementation(async (boardId) => (
+      boardId === 9
+        ? [{ ...createdNote, id: 12, boardId: 9, text: 'Личная заметка' }]
+        : [{ ...createdNote, text: 'Восстановить позже' }]
+    ));
+    apiMock.restoreStickyNote.mockImplementationOnce(() => restoreResponse.promise);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    await screen.findByDisplayValue('Восстановить позже');
+    await user.click(screen.getByTitle('Удалить'));
+    await screen.findAllByText('Заметка удалена');
+    await user.click(screen.getAllByRole('button', { name: /Восстановить/i })[0]);
+    await waitFor(() => expect(apiMock.restoreStickyNote).toHaveBeenCalledWith(11));
+
+    await user.click(screen.getByRole('button', { name: /Мои заметки/i }));
+    expect(await screen.findByDisplayValue('Личная заметка')).toBeTruthy();
+
+    await act(async () => {
+      restoreResponse.resolve({ ...createdNote, text: 'Позднее восстановление' });
+      await restoreResponse.promise;
+    });
+
+    expect(screen.queryByDisplayValue('Позднее восстановление')).toBeNull();
+    expect(screen.getByDisplayValue('Личная заметка')).toBeTruthy();
+  });
+
   it('clears the local undo panel when a deleted note is restored through realtime', async () => {
     realtimeMock.canStart = true;
     apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Вернули в другой вкладке' }]);

@@ -735,8 +735,14 @@ export function StickyNotes() {
   };
 
   const restoreDeletedNote = async (noteId: number) => {
+    const requestedBoardId = activeBoardId;
+
     try {
       const restored = await apiService.restoreStickyNote(noteId);
+      if (!requestedBoardId || activeBoardIdRef.current !== requestedBoardId || restored.boardId !== requestedBoardId) {
+        await refreshBoardCounts();
+        return;
+      }
       setNotes((current) => sortNotes([...current.filter((note) => note.id !== restored.id), restored]));
       setDeletedNoteId(null);
       await refreshBoardCounts();
