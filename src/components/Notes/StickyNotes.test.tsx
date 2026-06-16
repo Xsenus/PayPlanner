@@ -412,6 +412,28 @@ describe('StickyNotes', () => {
     expect(screen.queryByDisplayValue('Удалили в другой вкладке')).toBeNull();
   });
 
+  it('clears active board notes when board access is revoked through realtime', async () => {
+    realtimeMock.canStart = true;
+    window.localStorage.setItem('payplanner.stickyNotes.activeBoardId', '9');
+    apiMock.getStickyNoteBoards
+      .mockResolvedValueOnce([board, personalBoard])
+      .mockResolvedValue([board]);
+    apiMock.getStickyNotes.mockImplementation(async (boardId) => (
+      boardId === 9
+        ? [{ ...createdNote, boardId: 9, text: 'Доступ уже отозвали' }]
+        : []
+    ));
+
+    renderStickyNotes();
+
+    await screen.findByDisplayValue('Доступ уже отозвали');
+    realtimeMock.handlers.get('stickyNoteBoardChanged')?.({ type: 'boardMembersChanged', boardId: 9 });
+
+    await waitFor(() => expect(apiMock.getStickyNoteBoards).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(apiMock.getStickyNotes).toHaveBeenCalledWith(7));
+    expect(screen.queryByDisplayValue('Доступ уже отозвали')).toBeNull();
+  });
+
   it('adds a board member when the user manages a personal board', async () => {
     apiMock.getStickyNoteBoards.mockResolvedValue([personalBoard]);
     apiMock.getStickyNoteBoardMembers.mockResolvedValue([

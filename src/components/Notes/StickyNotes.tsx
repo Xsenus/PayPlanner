@@ -264,6 +264,11 @@ export function StickyNotes() {
     setLoading(true);
     try {
       const nextBoards = await apiService.getStickyNoteBoards();
+      const currentBoardId = activeBoardIdRef.current;
+      if (currentBoardId && !nextBoards.some((board) => board.id === currentBoardId)) {
+        clearActiveBoardState();
+      }
+
       setBoards(nextBoards);
       setActiveBoardId((current) => {
         if (current && nextBoards.some((board) => board.id === current)) {
@@ -283,7 +288,7 @@ export function StickyNotes() {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [clearActiveBoardState, toast]);
 
   const loadNotes = useCallback(async (boardId: number) => {
     setNotesLoading(true);
