@@ -63,8 +63,11 @@ vi.mock('../../services/stickyNotesRealtime', () => ({
 }));
 
 import { apiService, StickyNoteConflictError } from '../../services/api';
+import { joinNotesBoard, startNotesHubConnection } from '../../services/stickyNotesRealtime';
 
 const apiMock = vi.mocked(apiService);
+const joinNotesBoardMock = vi.mocked(joinNotesBoard);
+const startNotesHubConnectionMock = vi.mocked(startNotesHubConnection);
 
 const board: StickyNoteBoard = {
   id: 7,
@@ -255,6 +258,39 @@ describe('StickyNotes', () => {
 
     expect(screen.getByDisplayValue('Свежая заметка')).toBeTruthy();
     expect(screen.queryByDisplayValue('Устаревшая заметка')).toBeNull();
+  });
+
+  it('does not join a stale realtime board when hub start finishes after switching boards', async () => {
+    realtimeMock.canStart = true;
+    const oldBoardStart = createDeferred<boolean>();
+    const newBoardStart = createDeferred<boolean>();
+    apiMock.getStickyNoteBoards.mockResolvedValue([board, personalBoard]);
+    startNotesHubConnectionMock
+      .mockResolvedValueOnce(true)
+      .mockImplementationOnce(() => oldBoardStart.promise)
+      .mockImplementationOnce(() => newBoardStart.promise);
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    await screen.findByRole('button', { name: /Рабочая доска/i });
+    await waitFor(() => expect(startNotesHubConnectionMock).toHaveBeenCalledTimes(2));
+
+    await user.click(screen.getByRole('button', { name: /Мои заметки/i }));
+    await waitFor(() => expect(startNotesHubConnectionMock).toHaveBeenCalledTimes(3));
+    const oldBoardJoinCount = joinNotesBoardMock.mock.calls.filter(([, boardId]) => boardId === 7).length;
+
+    await act(async () => {
+      oldBoardStart.resolve(true);
+      await oldBoardStart.promise;
+    });
+    expect(joinNotesBoardMock.mock.calls.filter(([, boardId]) => boardId === 7)).toHaveLength(oldBoardJoinCount);
+
+    await act(async () => {
+      newBoardStart.resolve(true);
+      await newBoardStart.promise;
+    });
+    await waitFor(() => expect(joinNotesBoardMock).toHaveBeenCalledWith(realtimeMock.connection, 9));
   });
 
   it('creates a note on the active board', async () => {

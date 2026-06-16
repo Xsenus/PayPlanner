@@ -459,6 +459,7 @@ export function StickyNotes() {
       return;
     }
 
+    let cancelled = false;
     const connection = createNotesHubConnection();
     connectionRef.current = connection;
 
@@ -507,12 +508,13 @@ export function StickyNotes() {
 
     connection.on(STICKY_NOTE_BOARD_CHANGED_EVENT, handler);
     void startNotesHubConnection(connection).then((started) => {
-      if (started && activeBoardId) {
+      if (!cancelled && started && activeBoardId) {
         void joinNotesBoard(connection, activeBoardId);
       }
     });
 
     return () => {
+      cancelled = true;
       connection.off(STICKY_NOTE_BOARD_CHANGED_EVENT, handler);
       connectionRef.current = null;
       void stopNotesHubConnection(connection);
