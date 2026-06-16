@@ -181,6 +181,7 @@ export function StickyNotes() {
 
   const canEditActiveBoard = Boolean(activeBoard?.canEdit);
   const canCreateNotesOnActiveBoard = Boolean(activeBoard?.canCreateNotes);
+  const canUpdateActiveBoardSettings = Boolean(activeBoard?.canUpdateSettings);
   const canDeleteNotesOnActiveBoard = Boolean(activeBoard?.canDeleteNotes);
   const effectiveActiveBoardNotesCount = activeBoard ? getEffectiveBoardNotesCount(activeBoard.notesCount, notes.length) : notes.length;
   const isActiveBoardAtNoteLimit = effectiveActiveBoardNotesCount >= MAX_NOTES_PER_BOARD;
@@ -893,7 +894,7 @@ export function StickyNotes() {
   };
 
   const saveBoardSettings = async () => {
-    if (!activeBoard || !canEditActiveBoard) {
+    if (!activeBoard || !canUpdateActiveBoardSettings) {
       return;
     }
 
@@ -1384,7 +1385,7 @@ export function StickyNotes() {
             >
               <RefreshCw className="h-4 w-4" />
             </button>
-            {canEditActiveBoard ? (
+            {canUpdateActiveBoardSettings || activeBoard?.canManageMembers ? (
               <button
                 type="button"
                 onClick={() => setBoardSettingsOpen((current) => !current)}
@@ -1420,13 +1421,14 @@ export function StickyNotes() {
           </div>
         </div>
 
-        {boardSettingsOpen && activeBoard && canEditActiveBoard ? (
+        {boardSettingsOpen && activeBoard && (canUpdateActiveBoardSettings || activeBoard.canManageMembers) ? (
           <div className="grid gap-2 border-b border-slate-200 bg-white px-3 py-2 text-sm lg:grid-cols-[minmax(180px,1fr)_180px_auto]">
             <label className="min-w-0">
               <span className="sr-only">Название доски</span>
               <input
                 value={boardTitle}
                 onChange={(event) => setBoardTitle(event.target.value)}
+                disabled={!canUpdateActiveBoardSettings}
                 className="h-9 w-full rounded-md border border-slate-300 px-2 text-sm"
                 maxLength={120}
                 placeholder="Название доски"
@@ -1437,6 +1439,7 @@ export function StickyNotes() {
               <textarea
                 value={boardDescription}
                 onChange={(event) => setBoardDescription(event.target.value)}
+                disabled={!canUpdateActiveBoardSettings}
                 className="min-h-16 w-full resize-y rounded-md border border-slate-300 px-2 py-1.5 text-sm"
                 maxLength={500}
                 placeholder="Короткое описание доски"
@@ -1448,6 +1451,7 @@ export function StickyNotes() {
                 aria-label="Фон доски"
                 value={boardBackground}
                 onChange={(event) => setBoardBackground(event.target.value as StickyNoteBoardBackground)}
+                disabled={!canUpdateActiveBoardSettings}
                 className="h-9 w-full rounded-md border border-slate-300 bg-white px-2 text-sm"
               >
                 <option value="cork">Пробковая доска</option>
@@ -1458,7 +1462,7 @@ export function StickyNotes() {
               <button
                 type="button"
                 onClick={saveBoardSettings}
-                disabled={savingBoardSettings}
+                disabled={savingBoardSettings || !canUpdateActiveBoardSettings}
                 className="inline-flex h-9 items-center gap-1 rounded-md bg-slate-900 px-3 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-60"
               >
                 <Save className="h-4 w-4" />

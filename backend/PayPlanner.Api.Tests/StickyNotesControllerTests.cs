@@ -104,6 +104,7 @@ public sealed class StickyNotesControllerTests
         var ownerDto = Assert.Single(ownerBoards, item => item.Id == board.Id);
         Assert.True(ownerDto.CanDelete);
         Assert.True(ownerDto.CanDeleteNotes);
+        Assert.True(ownerDto.CanUpdateSettings);
 
         var editorResult = await CreateController(db, editor).GetBoards(CancellationToken.None);
         var editorBoards = Assert.IsAssignableFrom<IReadOnlyCollection<StickyNoteBoardDto>>(Assert.IsType<OkObjectResult>(editorResult.Result).Value);
@@ -111,6 +112,7 @@ public sealed class StickyNotesControllerTests
         Assert.True(editorDto.CanEdit);
         Assert.False(editorDto.CanDelete);
         Assert.True(editorDto.CanDeleteNotes);
+        Assert.False(editorDto.CanUpdateSettings);
     }
 
     [Fact]
@@ -643,6 +645,42 @@ public sealed class StickyNotesControllerTests
         Assert.Equal("gray", dto.Background);
         Assert.Contains(NotesHub.UserGroup(owner.Id), hub.SentGroupNames);
         Assert.Contains(NotesHub.UserGroup(member.Id), hub.SentGroupNames);
+    }
+
+    [Fact]
+    public async Task UpdateBoard_ForbidsEditorMemberFromChangingOwnersPersonalBoard()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db);
+        var editor = await CreateUserAsync(db);
+        var board = new StickyNoteBoard
+        {
+            Title = "Личная владельца",
+            Description = "Старое описание",
+            Visibility = StickyNoteBoardVisibility.Personal,
+            OwnerUserId = owner.Id,
+            OwnerUserName = owner.FullName,
+            Background = "cork",
+            Members = new List<StickyNoteBoardMember>
+            {
+                new() { UserId = editor.Id, Role = "editor" },
+            },
+        };
+        db.StickyNoteBoards.Add(board);
+        await db.SaveChangesAsync();
+
+        var result = await CreateController(db, editor).UpdateBoard(board.Id, new UpdateStickyNoteBoardRequest
+        {
+            Title = "Чужое изменение",
+            Description = "Новое описание",
+            Background = "gray",
+        }, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result.Result);
+        var unchangedBoard = await db.StickyNoteBoards.AsNoTracking().SingleAsync(item => item.Id == board.Id);
+        Assert.Equal("Личная владельца", unchangedBoard.Title);
+        Assert.Equal("Старое описание", unchangedBoard.Description);
+        Assert.Equal("cork", unchangedBoard.Background);
     }
 
     private static async Task<PaymentContext> CreateContextAsync()

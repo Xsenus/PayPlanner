@@ -73,6 +73,7 @@ public sealed class StickyNotesController : ControllerBase
                 item.NotesCount,
                 CanEditBoard(item.Board, access.Value),
                 access.Value.CanCreate,
+                CanUpdateBoardSettings(item.Board, access.Value),
                 CanDeleteBoard(item.Board, access.Value),
                 access.Value.CanDelete,
                 CanManageMembers(item.Board, access.Value)))
@@ -103,7 +104,7 @@ public sealed class StickyNotesController : ControllerBase
         _db.StickyNoteBoards.Add(board);
         await _db.SaveChangesAsync(ct);
 
-        return CreatedAtAction(nameof(GetNotes), new { boardId = board.Id }, ToBoardDto(board, 0, true, access.Value.CanCreate, CanDeleteBoard(board, access.Value), access.Value.CanDelete, CanManageMembers(board, access.Value)));
+        return CreatedAtAction(nameof(GetNotes), new { boardId = board.Id }, ToBoardDto(board, 0, true, access.Value.CanCreate, CanUpdateBoardSettings(board, access.Value), CanDeleteBoard(board, access.Value), access.Value.CanDelete, CanManageMembers(board, access.Value)));
     }
 
     [HttpPut("boards/{boardId:int}")]
@@ -123,7 +124,7 @@ public sealed class StickyNotesController : ControllerBase
             return NotFound();
         }
 
-        if (!CanEditBoard(board, access.Value))
+        if (!CanUpdateBoardSettings(board, access.Value))
         {
             return Forbid();
         }
@@ -134,7 +135,7 @@ public sealed class StickyNotesController : ControllerBase
 
         await _db.SaveChangesAsync(ct);
         await PublishAsync(board.Id, "boardUpdated", null, null, access.Value, ct);
-        return Ok(ToBoardDto(board, await CountNotesAsync(board.Id, ct), true, access.Value.CanCreate, CanDeleteBoard(board, access.Value), access.Value.CanDelete, CanManageMembers(board, access.Value)));
+        return Ok(ToBoardDto(board, await CountNotesAsync(board.Id, ct), CanEditBoard(board, access.Value), access.Value.CanCreate, CanUpdateBoardSettings(board, access.Value), CanDeleteBoard(board, access.Value), access.Value.CanDelete, CanManageMembers(board, access.Value)));
     }
 
     [HttpDelete("boards/{boardId:int}")]
@@ -703,6 +704,10 @@ public sealed class StickyNotesController : ControllerBase
     private static bool CanManageMembers(StickyNoteBoard board, NotesAccess access)
         => access.CanEdit && board.OwnerUserId == access.UserId;
 
+    private static bool CanUpdateBoardSettings(StickyNoteBoard board, NotesAccess access)
+        => access.CanEdit
+            && (board.Visibility == StickyNoteBoardVisibility.Shared || board.OwnerUserId == access.UserId);
+
     private static bool CanDeleteBoard(StickyNoteBoard board, NotesAccess access)
         => access.CanDelete && board.OwnerUserId == access.UserId;
 
@@ -791,7 +796,7 @@ public sealed class StickyNotesController : ControllerBase
             .ToListAsync(ct);
     }
 
-    private static StickyNoteBoardDto ToBoardDto(StickyNoteBoard board, int notesCount, bool canEdit, bool canCreate, bool canDeleteBoard, bool canDeleteNotes, bool canManageMembers)
+    private static StickyNoteBoardDto ToBoardDto(StickyNoteBoard board, int notesCount, bool canEdit, bool canCreate, bool canUpdateSettings, bool canDeleteBoard, bool canDeleteNotes, bool canManageMembers)
         => new()
         {
             Id = board.Id,
@@ -805,6 +810,7 @@ public sealed class StickyNotesController : ControllerBase
             NotesCount = notesCount,
             CanEdit = canEdit,
             CanCreateNotes = canCreate && canEdit,
+            CanUpdateSettings = canUpdateSettings,
             CanDelete = canDeleteBoard,
             CanDeleteNotes = canDeleteNotes && canEdit,
             CanManageMembers = canManageMembers,

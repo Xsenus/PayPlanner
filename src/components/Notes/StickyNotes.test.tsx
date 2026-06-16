@@ -80,6 +80,7 @@ const board: StickyNoteBoard = {
   notesCount: 0,
   canEdit: true,
   canCreateNotes: true,
+  canUpdateSettings: true,
   canDelete: false,
   canDeleteNotes: true,
   canManageMembers: false,
@@ -580,6 +581,22 @@ describe('StickyNotes', () => {
       description: 'Напоминания по клиентским документам',
       background: 'gray',
     }));
+  });
+
+  it('hides board settings when the user can only edit notes on another personal board', async () => {
+    apiMock.getStickyNoteBoards.mockResolvedValue([
+      {
+        ...personalBoard,
+        canEdit: true,
+        canUpdateSettings: false,
+        canManageMembers: false,
+      },
+    ]);
+
+    renderStickyNotes();
+
+    await screen.findAllByText('Мои заметки');
+    expect(screen.queryByRole('button', { name: 'Настройки доски' })).toBeNull();
   });
 
   it('does not show stale board settings toast after switching boards', async () => {
