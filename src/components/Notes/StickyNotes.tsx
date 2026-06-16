@@ -391,16 +391,31 @@ export function StickyNotes() {
 
   useEffect(() => {
     if (!activeBoard?.canManageMembers) {
+      setMemberCandidates([]);
+      setMemberUserId('');
       return;
     }
 
+    let cancelled = false;
+    const boardId = activeBoard.id;
+
     void apiService.getStickyNoteMemberCandidates()
-      .then(setMemberCandidates)
+      .then((candidates) => {
+        if (!cancelled && activeBoardIdRef.current === boardId) {
+          setMemberCandidates(candidates);
+        }
+      })
       .catch((error) => {
         console.error(error);
-        setMemberCandidates([]);
+        if (!cancelled && activeBoardIdRef.current === boardId) {
+          setMemberCandidates([]);
+        }
       });
-  }, [activeBoard?.canManageMembers]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeBoard?.canManageMembers, activeBoard?.id]);
 
   useEffect(() => {
     if (!canStartNotesHubConnection()) {

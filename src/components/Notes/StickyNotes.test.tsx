@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../../contexts/ToastContext';
 import { copyTextToClipboard, getEffectiveBoardNotesCount, StickyNotes } from './StickyNotes';
-import type { StickyNoteBoard, StickyNoteItem } from '../../services/api';
+import type { StickyNoteBoard, StickyNoteBoardMemberCandidate, StickyNoteItem } from '../../services/api';
 
 const realtimeMock = vi.hoisted(() => {
   const handlers = new Map<string, (event: unknown) => void>();
@@ -472,6 +472,43 @@ describe('StickyNotes', () => {
     await user.click(screen.getByTitle('Добавить участника'));
 
     await waitFor(() => expect(apiMock.upsertStickyNoteBoardMember).toHaveBeenCalledWith(9, 3, { role: 'viewer' }));
+  });
+
+  it('ignores stale member candidate responses after switching boards', async () => {
+    const staleCandidates = createDeferred<StickyNoteBoardMemberCandidate[]>();
+    const freshCandidates = createDeferred<StickyNoteBoardMemberCandidate[]>();
+    window.localStorage.setItem('payplanner.stickyNotes.activeBoardId', '9');
+    apiMock.getStickyNoteBoards.mockResolvedValue([board, personalBoard]);
+    apiMock.getStickyNoteMemberCandidates
+      .mockImplementationOnce(() => staleCandidates.promise)
+      .mockImplementationOnce(() => freshCandidates.promise);
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    await screen.findByText('Участники');
+    await waitFor(() => expect(apiMock.getStickyNoteMemberCandidates).toHaveBeenCalledTimes(1));
+
+    await user.click(screen.getByRole('button', { name: /Рабочая доска/i }));
+    await waitFor(() => expect(screen.queryByText('Участники')).toBeNull());
+
+    await act(async () => {
+      staleCandidates.resolve([{ userId: 3, displayName: 'Анна Юрист', email: 'anna@example.com' }]);
+      await staleCandidates.promise;
+    });
+
+    await user.click(screen.getByRole('button', { name: /Мои заметки/i }));
+    await screen.findByText('Участники');
+    await waitFor(() => expect(apiMock.getStickyNoteMemberCandidates).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('option', { name: 'Анна Юрист' })).toBeNull();
+
+    await act(async () => {
+      freshCandidates.resolve([{ userId: 4, displayName: 'Олег Бухгалтер', email: 'oleg@example.com' }]);
+      await freshCandidates.promise;
+    });
+
+    expect(await screen.findByRole('option', { name: 'Олег Бухгалтер' })).toBeTruthy();
+    expect(screen.queryByRole('option', { name: 'Анна Юрист' })).toBeNull();
   });
 
   it('autosaves note text after typing pauses', async () => {
