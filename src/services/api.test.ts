@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { AUTH_SESSION_EXPIRED_EVENT, apiService, extractResponseErrorMessage } from './api';
+import { AUTH_SESSION_EXPIRED_EVENT, apiService, extractResponseErrorMessage, STICKY_NOTE_REALTIME_EVENT_TYPES } from './api';
 import { resolveApiBaseUrl } from './apiBaseUrl';
 
 afterEach(() => {
@@ -77,6 +77,13 @@ describe('resolveApiBaseUrl', () => {
     expect(resolveApiBaseUrl({ isProduction: false, pageProtocol: 'http:' })).toBe(
       'http://localhost:5080/api',
     );
+  });
+});
+
+describe('sticky notes realtime contract', () => {
+  it('keeps board update events in the shared frontend contract', () => {
+    expect(STICKY_NOTE_REALTIME_EVENT_TYPES).toContain('boardUpdated');
+    expect(STICKY_NOTE_REALTIME_EVENT_TYPES).toContain('boardMembersChanged');
   });
 });
 

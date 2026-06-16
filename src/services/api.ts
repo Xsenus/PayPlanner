@@ -768,8 +768,20 @@ export interface StickyNoteItem {
   updatedAt?: string | null;
 }
 
+export const STICKY_NOTE_REALTIME_EVENT_TYPES = [
+  'noteCreated',
+  'noteUpdated',
+  'noteDeleted',
+  'noteRestored',
+  'boardDeleted',
+  'boardUpdated',
+  'boardMembersChanged',
+] as const;
+
+export type StickyNoteRealtimeEventType = typeof STICKY_NOTE_REALTIME_EVENT_TYPES[number];
+
 export interface StickyNoteRealtimeEvent {
-  type: 'noteCreated' | 'noteUpdated' | 'noteDeleted' | 'noteRestored' | 'boardDeleted' | 'boardMembersChanged';
+  type: StickyNoteRealtimeEventType;
   boardId: number;
   note?: StickyNoteItem | null;
   noteId?: number | null;
