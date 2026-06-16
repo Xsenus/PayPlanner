@@ -241,6 +241,35 @@ describe('StickyNotes', () => {
     expect(await screen.findByPlaceholderText('Текст заметки')).toBeTruthy();
   });
 
+  it('does not duplicate a created note when realtime arrives before the API response', async () => {
+    realtimeMock.canStart = true;
+    const createdByRealtime = { ...createdNote, text: 'Создано почти одновременно' };
+    const createdNoteResponse = createDeferred<StickyNoteItem>();
+    apiMock.createStickyNote.mockImplementationOnce(() => createdNoteResponse.promise);
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    await screen.findAllByText('Рабочая доска');
+    await user.click(screen.getByRole('button', { name: /Заметка/i }));
+    await waitFor(() => expect(apiMock.createStickyNote).toHaveBeenCalledWith(7, expect.any(Object)));
+
+    realtimeMock.handlers.get('stickyNoteBoardChanged')?.({
+      type: 'noteCreated',
+      boardId: 7,
+      note: createdByRealtime,
+    });
+
+    expect(await screen.findByDisplayValue('Создано почти одновременно')).toBeTruthy();
+
+    await act(async () => {
+      createdNoteResponse.resolve(createdByRealtime);
+      await createdNoteResponse.promise;
+    });
+
+    expect(screen.getAllByDisplayValue('Создано почти одновременно')).toHaveLength(1);
+  });
+
   it('switches away when the active board disappears during count refresh', async () => {
     window.localStorage.setItem('payplanner.stickyNotes.activeBoardId', '9');
     apiMock.getStickyNoteBoards

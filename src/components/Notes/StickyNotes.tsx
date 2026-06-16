@@ -574,7 +574,13 @@ export function StickyNotes() {
         y: Math.max(0, y ?? 56 + (offset % 240)),
         ...DEFAULT_NOTE_SIZE,
       });
-      setNotes((current) => sortNotes([...current, note]));
+      setNotes((current) => {
+        const exists = current.some((item) => item.id === note.id);
+        const next = exists
+          ? current.map((item) => (item.id === note.id ? note : item))
+          : [...current, note];
+        return sortNotes(next);
+      });
       setSelectedNoteId(note.id);
       await refreshBoardCounts();
     } catch (error) {
