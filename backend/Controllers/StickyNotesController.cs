@@ -257,7 +257,16 @@ public sealed class StickyNotesController : ControllerBase
 
         var user = await _db.Users
             .AsNoTracking()
-            .FirstOrDefaultAsync(item => item.Id == userId && item.IsActive && item.IsApproved, ct);
+            .FirstOrDefaultAsync(item =>
+                item.Id == userId
+                && item.IsActive
+                && item.IsApproved
+                && item.Role != null
+                && (item.Role.Name == "admin"
+                    || item.Role.Permissions.Any(permission =>
+                        permission.Section == RolePermissionCatalog.Notes
+                        && permission.CanView)),
+                ct);
         if (user is null)
         {
             return NotFound();

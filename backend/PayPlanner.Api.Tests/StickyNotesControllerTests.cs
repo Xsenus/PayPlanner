@@ -424,6 +424,35 @@ public sealed class StickyNotesControllerTests
     }
 
     [Fact]
+    public async Task UpsertBoardMember_ReturnsNotFound_WhenUserCannotViewNotes()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db);
+        var deniedUser = await CreateUserAsync(db, canView: false);
+        var board = new StickyNoteBoard
+        {
+            Title = "Личная владельца",
+            Visibility = StickyNoteBoardVisibility.Personal,
+            OwnerUserId = owner.Id,
+            OwnerUserName = owner.FullName,
+            Background = "gray",
+        };
+        db.StickyNoteBoards.Add(board);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, owner);
+
+        var result = await controller.UpsertBoardMember(
+            board.Id,
+            deniedUser.Id,
+            new UpsertStickyNoteBoardMemberRequest { Role = "viewer" },
+            CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(result.Result);
+        Assert.Empty(await db.StickyNoteBoardMembers.ToListAsync());
+    }
+
+    [Fact]
     public async Task DeleteBoardMember_RemovesUserFromRealtimeRecipients()
     {
         await using var db = await CreateContextAsync();
