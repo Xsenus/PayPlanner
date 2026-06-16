@@ -497,6 +497,25 @@ describe('StickyNotes', () => {
     expect(screen.getAllByText('Моя версия').length).toBeGreaterThan(1);
   });
 
+  it('keeps a local draft when a realtime update arrives during pending autosave', async () => {
+    realtimeMock.canStart = true;
+    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Мой черновик', version: 1 }]);
+    const serverNote = { ...createdNote, text: 'Версия из другой вкладки', version: 2 };
+
+    renderStickyNotes();
+
+    const textarea = await screen.findByDisplayValue('Мой черновик');
+    fireEvent.change(textarea, { target: { value: 'Мой черновик с правкой' } });
+    realtimeMock.handlers.get('stickyNoteBoardChanged')?.({ type: 'noteUpdated', boardId: 7, note: serverNote });
+
+    expect(await screen.findByText('Заметка изменена другим пользователем')).toBeTruthy();
+    expect(screen.getByDisplayValue('Мой черновик с правкой')).toBeTruthy();
+    expect(screen.getByText('Версия из другой вкладки')).toBeTruthy();
+
+    await new Promise((resolve) => window.setTimeout(resolve, 1300));
+    expect(apiMock.updateStickyNote).not.toHaveBeenCalled();
+  }, 4000);
+
   it('clears note conflict when the conflicting note is deleted through realtime', async () => {
     realtimeMock.canStart = true;
     const serverNote = { ...createdNote, text: 'Версия сервера', version: 2 };

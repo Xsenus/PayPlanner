@@ -394,6 +394,16 @@ export function StickyNotes() {
         clearNoteTransientState(event.noteId);
         setNotes((current) => current.filter((note) => note.id !== event.noteId));
       } else if ((event.type === 'noteCreated' || event.type === 'noteUpdated' || event.type === 'noteRestored') && event.note) {
+        if (event.type === 'noteUpdated' && autosaveTimersRef.current.has(event.note.id)) {
+          const localNote = notesRef.current.find((note) => note.id === event.note!.id);
+          if (localNote) {
+            clearAutosaveTimer(event.note.id);
+            setNoteConflict({ local: localNote, server: event.note });
+            toast.error('Заметка уже изменена другим пользователем. Проверьте конфликт перед сохранением.');
+            return;
+          }
+        }
+
         setNotes((current) => {
           const exists = current.some((note) => note.id === event.note!.id);
           const next = exists
@@ -424,7 +434,7 @@ export function StickyNotes() {
       connectionRef.current = null;
       void stopNotesHubConnection(connection);
     };
-  }, [activeBoardId, clearActiveBoardState, clearNoteTransientState, loadBoards, loadMembers]);
+  }, [activeBoardId, clearActiveBoardState, clearAutosaveTimer, clearNoteTransientState, loadBoards, loadMembers, toast]);
 
   useEffect(() => {
     const connection = connectionRef.current;
