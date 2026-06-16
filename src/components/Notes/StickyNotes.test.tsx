@@ -284,6 +284,28 @@ describe('StickyNotes', () => {
     expect(apiMock.deleteStickyNote).not.toHaveBeenCalled();
   });
 
+  it('clears deleted board notes and switches to the next available board', async () => {
+    window.localStorage.setItem('payplanner.stickyNotes.activeBoardId', '9');
+    apiMock.getStickyNoteBoards.mockResolvedValue([board, { ...personalBoard, canDelete: true }]);
+    apiMock.getStickyNotes.mockImplementation(async (boardId) => (
+      boardId === 9
+        ? [{ ...createdNote, boardId: 9, text: 'Личная заметка перед удалением' }]
+        : []
+    ));
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    await screen.findByDisplayValue('Личная заметка перед удалением');
+    await user.click(screen.getByTitle('Удалить доску'));
+
+    await waitFor(() => expect(apiMock.deleteStickyNoteBoard).toHaveBeenCalledWith(9));
+    await waitFor(() => expect(apiMock.getStickyNotes).toHaveBeenCalledWith(7));
+    expect(screen.queryByDisplayValue('Личная заметка перед удалением')).toBeNull();
+    expect(await screen.findByText('Доска заметок удалена.')).toBeTruthy();
+  });
+
   it('adds a board member when the user manages a personal board', async () => {
     apiMock.getStickyNoteBoards.mockResolvedValue([personalBoard]);
     apiMock.getStickyNoteBoardMembers.mockResolvedValue([

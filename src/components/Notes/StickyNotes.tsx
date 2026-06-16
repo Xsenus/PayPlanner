@@ -624,7 +624,14 @@ export function StickyNotes() {
       await apiService.deleteStickyNoteBoard(activeBoard.id);
       const nextBoards = boards.filter((board) => board.id !== activeBoard.id);
       setBoards(nextBoards);
+      setNotes([]);
+      setMembers([]);
+      setSelectedNoteId(null);
+      setDeletedNoteId(null);
+      setNoteConflict(null);
+      setBoardSettingsOpen(false);
       setActiveBoardId(nextBoards[0]?.id ?? null);
+      toast.success('Доска заметок удалена.');
     } catch (error) {
       console.error(error);
       toast.error('Не удалось удалить доску.');
