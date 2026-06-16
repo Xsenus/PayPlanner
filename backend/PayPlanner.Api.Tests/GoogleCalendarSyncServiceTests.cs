@@ -709,6 +709,39 @@ public class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncNowAsync_AdminConnectionRemovesDuplicateAssigneeCalendars()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateUserAsync(db, "admin-google-duplicate-calendar@example.com", "admin", "Администратор");
+        var assignee = await CreateUserAsync(db, "employee-google-duplicate-calendar@example.com", "user", "Елена Кожеваткина");
+        await EnableGoogleSettingsAsync(db);
+        var connection = await CreateConnectionAsync(db, admin.Id, calendarMode: "adminByAssignee");
+        var primaryCalendar = await CreateCalendarAsync(db, connection.Id, "calendar-elena-primary", "PayPlanner - Елена Кожеваткина", assignee.Id);
+        await CreateCalendarAsync(db, connection.Id, "calendar-elena-duplicate", "PayPlanner - Елена Кожеваткина", assignee.Id);
+        connection.DefaultCalendarId = primaryCalendar.GoogleCalendarId;
+        connection.DefaultCalendarName = primaryCalendar.Name;
+        await db.SaveChangesAsync();
+
+        var handler = new RecordingGoogleHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        var result = await service.SyncNowAsync(admin.Id, CreateHttpRequest(admin.Id, "admin"), CancellationToken.None);
+
+        Assert.Equal(0, result.ErrorCount);
+        var calendars = await db.GoogleCalendarSyncCalendars
+            .Where(item => item.ConnectionId == connection.Id && item.OwnerUserId == assignee.Id)
+            .ToListAsync();
+        var calendar = Assert.Single(calendars);
+        Assert.Equal("calendar-elena-primary", calendar.GoogleCalendarId);
+        Assert.Contains(handler.Requests, request =>
+            request.Method == HttpMethod.Delete &&
+            request.RequestUri!.AbsolutePath.EndsWith("/calendars/calendar-elena-duplicate", StringComparison.Ordinal));
+        Assert.Contains(await db.GoogleCalendarSyncLogs.ToListAsync(), item =>
+            item.Operation == "delete-duplicate-calendar" &&
+            item.Status == "success");
+    }
+
+    [Fact]
     public async Task DeleteTaskForConnectedUsersAsync_RemovesLinkedGoogleEventAndWritesLog()
     {
         await using var db = await CreateContextAsync();

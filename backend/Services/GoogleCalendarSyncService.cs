@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
@@ -19,6 +20,8 @@ namespace PayPlanner.Api.Services;
 
 public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
 {
+    private static readonly ConcurrentDictionary<int, SemaphoreSlim> ConnectionSyncLocks = new();
+
     private const string GoogleEnabledKey = "auth.google.enabled";
     private const string GoogleClientIdKey = "auth.google.clientId";
     private const string GoogleClientSecretKey = "auth.google.clientSecret";
@@ -533,6 +536,20 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
 
     private async Task<ConnectionSyncResult> SyncConnectionAsync(int userId, bool forceFull, CancellationToken cancellationToken)
     {
+        var syncLock = ConnectionSyncLocks.GetOrAdd(userId, static _ => new SemaphoreSlim(1, 1));
+        await syncLock.WaitAsync(cancellationToken);
+        try
+        {
+            return await SyncConnectionCoreAsync(userId, forceFull, cancellationToken);
+        }
+        finally
+        {
+            syncLock.Release();
+        }
+    }
+
+    private async Task<ConnectionSyncResult> SyncConnectionCoreAsync(int userId, bool forceFull, CancellationToken cancellationToken)
+    {
         var connection = await LoadConnectionQuery()
             .FirstOrDefaultAsync(item => item.UserId == userId, cancellationToken);
         if (connection is null || !connection.IsEnabled || !connection.SyncEnabled)
@@ -542,6 +559,18 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
 
         var errors = 0;
         var importedEvents = 0;
+        try
+        {
+            var accessToken = await ResolveAccessTokenAsync(connection, cancellationToken);
+            await CleanupDuplicateCalendarsAsync(connection, accessToken, cancellationToken);
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            errors++;
+            connection.LastError = Trim(ex.Message, 2000);
+            await AddLogAsync(connection.Id, null, null, "system", "cleanup-duplicate-calendars", "error", "Не удалось очистить дубли календарей Google Calendar.", ex.Message, cancellationToken);
+        }
+
         try
         {
             importedEvents += await ImportGoogleChangesAsync(connection, forceFull, cancellationToken);
@@ -608,6 +637,20 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
 
     private async Task SyncSingleTaskAsync(int userId, int taskId, CancellationToken cancellationToken)
     {
+        var syncLock = ConnectionSyncLocks.GetOrAdd(userId, static _ => new SemaphoreSlim(1, 1));
+        await syncLock.WaitAsync(cancellationToken);
+        try
+        {
+            await SyncSingleTaskCoreAsync(userId, taskId, cancellationToken);
+        }
+        finally
+        {
+            syncLock.Release();
+        }
+    }
+
+    private async Task SyncSingleTaskCoreAsync(int userId, int taskId, CancellationToken cancellationToken)
+    {
         var connection = await LoadConnectionQuery()
             .FirstOrDefaultAsync(item => item.UserId == userId, cancellationToken);
         if (connection is null || !connection.IsEnabled || !connection.SyncEnabled)
@@ -643,6 +686,78 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         }
 
         connection.LastIncrementalSyncAt = DateTime.UtcNow;
+        connection.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task CleanupDuplicateCalendarsAsync(
+        GoogleCalendarConnection connection,
+        string accessToken,
+        CancellationToken cancellationToken)
+    {
+        var duplicateGroups = connection.Calendars
+            .GroupBy(item => item.OwnerUserId)
+            .Where(group => group.Count() > 1)
+            .ToList();
+
+        if (duplicateGroups.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var group in duplicateGroups)
+        {
+            var calendars = group
+                .OrderBy(item => item.Id)
+                .ToList();
+            var canonical = calendars.FirstOrDefault(item => string.Equals(item.GoogleCalendarId, connection.DefaultCalendarId, StringComparison.Ordinal))
+                ?? calendars[0];
+
+            if (connection.DefaultCalendarId is null || calendars.Any(item => string.Equals(item.GoogleCalendarId, connection.DefaultCalendarId, StringComparison.Ordinal)))
+            {
+                connection.DefaultCalendarId = canonical.GoogleCalendarId;
+                connection.DefaultCalendarName = canonical.Name;
+            }
+
+            foreach (var duplicate in calendars.Where(item => item.Id != canonical.Id))
+            {
+                try
+                {
+                    var deleted = await DeleteGoogleCalendarAsync(accessToken, duplicate.GoogleCalendarId, cancellationToken);
+                    await AddLogAsync(
+                        connection.Id,
+                        duplicate.Id,
+                        null,
+                        "system",
+                        deleted ? "delete-duplicate-calendar" : "delete-duplicate-calendar-missing",
+                        "success",
+                        deleted
+                            ? $"Дублирующий календарь «{duplicate.Name}» удален из Google Calendar."
+                            : $"Дублирующий календарь «{duplicate.Name}» уже отсутствовал в Google Calendar.",
+                        $"Оставлен основной календарь «{canonical.Name}».",
+                        cancellationToken);
+
+                    _db.GoogleCalendarSyncCalendars.Remove(duplicate);
+                    connection.Calendars.Remove(duplicate);
+                }
+                catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+                {
+                    duplicate.LastError = Trim(ex.Message, 2000);
+                    duplicate.UpdatedAt = DateTime.UtcNow;
+                    await AddLogAsync(
+                        connection.Id,
+                        duplicate.Id,
+                        null,
+                        "system",
+                        "delete-duplicate-calendar",
+                        "error",
+                        $"Не удалось удалить дублирующий календарь «{duplicate.Name}» из Google Calendar.",
+                        ex.Message,
+                        cancellationToken);
+                }
+            }
+        }
+
         connection.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(cancellationToken);
     }
@@ -1073,7 +1188,10 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             ? $"PayPlanner - {NormalizeOptional(ownerName) ?? $"сотрудник #{ownerUserId.Value}"}"
             : "PayPlanner задачи";
 
-        var calendar = connection.Calendars.FirstOrDefault(item => item.OwnerUserId == ownerUserId);
+        var calendar = await _db.GoogleCalendarSyncCalendars
+            .Where(item => item.ConnectionId == connection.Id && item.OwnerUserId == ownerUserId)
+            .OrderBy(item => item.Id)
+            .FirstOrDefaultAsync(cancellationToken);
         var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, ownerUserId ?? connection.UserId, cancellationToken);
         if (calendar is not null)
         {
@@ -1095,7 +1213,35 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         _db.GoogleCalendarSyncCalendars.Add(calendar);
         connection.DefaultCalendarId ??= created.Id;
         connection.DefaultCalendarName ??= name;
-        await _db.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException) when (!cancellationToken.IsCancellationRequested)
+        {
+            _db.Entry(calendar).State = EntityState.Detached;
+            connection.Calendars.Remove(calendar);
+            try
+            {
+                await DeleteGoogleCalendarAsync(accessToken, created.Id, cancellationToken);
+            }
+            catch (Exception deleteEx) when (!cancellationToken.IsCancellationRequested)
+            {
+                await AddLogAsync(connection.Id, null, null, "system", "delete-race-calendar", "error", $"Не удалось удалить календарь «{name}», созданный повторным параллельным запуском.", deleteEx.Message, cancellationToken);
+            }
+
+            var existing = await _db.GoogleCalendarSyncCalendars
+                .Where(item => item.ConnectionId == connection.Id && item.OwnerUserId == ownerUserId)
+                .OrderBy(item => item.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (existing is not null)
+            {
+                return existing;
+            }
+
+            throw;
+        }
+
         await AddLogAsync(connection.Id, calendar.Id, null, "system", "create-calendar", "success", $"В Google Calendar создан календарь «{name}».", null, cancellationToken);
         return calendar;
     }
