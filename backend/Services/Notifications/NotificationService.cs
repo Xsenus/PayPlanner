@@ -917,13 +917,20 @@ public sealed class NotificationService : INotificationService
             return Array.Empty<NotificationDelivery>();
         }
 
-        var taskChangedSubject = $"Изменения по задаче: {task.Title}";
-        var eventKey = $"task:{task.Id}:changed:{DateTime.UtcNow:yyyyMMddHHmmssfff}:{actorUserId}";
+        var hasDueAtChange = HasTaskDueAtChange(changeLabels);
+        var taskChangedSubject = hasDueAtChange
+            ? $"Изменен срок задачи: {task.Title}"
+            : $"Изменения по задаче: {task.Title}";
+        var eventKey = hasDueAtChange
+            ? $"task:{task.Id}:due-at:{DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc):yyyyMMddHHmm}:{actorUserId}"
+            : $"task:{task.Id}:changed:{DateTime.UtcNow:yyyyMMddHHmmssfff}:{actorUserId}";
+        var tone = hasDueAtChange ? ResolveDueAtChangeTone(task) : "blue";
         var deliveries = new List<NotificationDelivery>();
         foreach (var userId in recipients)
         {
             var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(userId, cancellationToken);
-            var taskChangedBody = BuildTaskChangedBody(task, changeLabels, actorName, comment, recipientTimeZone);
+            var recipientChangeLabels = FormatTaskChangeLabels(changeLabels, recipientTimeZone);
+            var taskChangedBody = BuildTaskChangedBody(task, recipientChangeLabels, actorName, comment, recipientTimeZone);
             var message = await RenderTemplateAsync(
                 NotificationTemplateKeys.TaskChanged,
                 taskChangedSubject,
@@ -932,8 +939,9 @@ public sealed class NotificationService : INotificationService
                     BuildTaskTemplateValues(task, recipientTimeZone, actorName),
                     new Dictionary<string, string?>
                     {
-                        ["task.changes"] = string.Join(Environment.NewLine, changeLabels.Select(label => $"- {label}")),
+                        ["task.changes"] = string.Join(Environment.NewLine, recipientChangeLabels.Select(label => $"- {label}")),
                         ["task.commentBlock"] = string.IsNullOrWhiteSpace(comment) ? string.Empty : $"Комментарий: {comment.Trim()}",
+                        ["task.changeSubject"] = taskChangedSubject,
                     }),
                 purpose: NotificationPurposes.TaskReminder,
                 cancellationToken: cancellationToken);
@@ -946,9 +954,9 @@ public sealed class NotificationService : INotificationService
                     eventKey,
                     message.Subject,
                     message.Body,
-                    "blue",
+                    tone,
                     task,
-                    new { actorUserId, actorName, changeLabels },
+                    new { actorUserId, actorName, changeLabels, hasDueAtChange },
                     cancellationToken);
             }
 
@@ -2259,6 +2267,57 @@ public sealed class NotificationService : INotificationService
         return string.Join('\n', lines);
     }
 
+    private static IReadOnlyList<string> FormatTaskChangeLabels(IReadOnlyList<string> changeLabels, TimeZoneInfo timeZone)
+        => changeLabels
+            .Select(label => FormatTaskDueAtChangeLabel(label, timeZone))
+            .ToList();
+
+    private static string FormatTaskDueAtChangeLabel(string label, TimeZoneInfo timeZone)
+    {
+        const string prefix = "Срок:";
+        var normalized = label.Trim();
+        if (!normalized.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return label;
+        }
+
+        var value = normalized[prefix.Length..].Trim();
+        var separator = value.Contains("->", StringComparison.Ordinal)
+            ? "->"
+            : value.Contains('→', StringComparison.Ordinal) ? "→" : null;
+        if (separator is null)
+        {
+            return label;
+        }
+
+        var parts = value.Split(separator, 2, StringSplitOptions.TrimEntries);
+        if (parts.Length != 2
+            || !TryParseHistoryDateTime(parts[0], out var oldDueAt)
+            || !TryParseHistoryDateTime(parts[1], out var newDueAt))
+        {
+            return label;
+        }
+
+        return $"Срок: {FormatTaskDueAt(oldDueAt, timeZone)} -> {FormatTaskDueAt(newDueAt, timeZone)}";
+    }
+
+    private static bool TryParseHistoryDateTime(string value, out DateTime dateTime)
+    {
+        if (DateTime.TryParseExact(
+                value,
+                "dd.MM.yyyy HH:mm",
+                RuCulture,
+                DateTimeStyles.None,
+                out var parsed))
+        {
+            dateTime = DateTime.SpecifyKind(parsed, DateTimeKind.Utc);
+            return true;
+        }
+
+        dateTime = default;
+        return false;
+    }
+
     private static string BuildTaskCommentBody(TaskJournalItem task, TaskJournalComment comment, TimeZoneInfo timeZone)
     {
         var dueText = FormatTaskDueAt(task.DueAt, timeZone);
@@ -2290,6 +2349,20 @@ public sealed class NotificationService : INotificationService
             .Where(channel => channel is NotificationChannels.Email or NotificationChannels.Telegram)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+    private static bool HasTaskDueAtChange(IReadOnlyList<string> changeLabels)
+        => changeLabels.Any(label =>
+        {
+            var normalized = label.Trim();
+            return normalized.Equals("Срок", StringComparison.OrdinalIgnoreCase)
+                || normalized.StartsWith("Срок:", StringComparison.OrdinalIgnoreCase);
+        });
+
+    private static string ResolveDueAtChangeTone(TaskJournalItem task)
+    {
+        var dueAt = DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc);
+        return dueAt <= DateTime.UtcNow.AddDays(1) ? "rose" : "amber";
+    }
 
     private static IReadOnlyList<int> ResolveTaskNotificationUserIds(TaskJournalItem task, int actorUserId)
     {

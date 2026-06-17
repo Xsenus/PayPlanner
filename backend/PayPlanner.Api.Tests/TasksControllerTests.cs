@@ -3100,6 +3100,10 @@ public class TasksControllerTests
             Assert.Contains(task.Comments, item => item.Kind == "system" && item.Text.Contains("Массовое изменение", StringComparison.OrdinalIgnoreCase));
         });
         Assert.Equal(2, notificationService.ChangedTasks.Count);
+        Assert.All(notificationService.ChangedTasks, notification =>
+            Assert.Contains(notification.ChangeLabels, item =>
+                item.Contains("Срок:", StringComparison.OrdinalIgnoreCase)
+                && item.Contains("->", StringComparison.OrdinalIgnoreCase)));
     }
 
     [Fact]

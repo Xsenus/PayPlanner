@@ -161,9 +161,9 @@ public static class NotificationTemplateCatalog
             NotificationTemplateKeys.TaskChanged,
             "Изменения по задаче",
             "Уведомление участникам при изменении важных полей задачи.",
-            "Изменения по задаче: {{task.title}}",
+            "{{task.changeSubject}}",
             "{{actor.name}} изменил задачу: {{task.title}}\n\nИзменения:\n{{task.changes}}\n\n{{task.commentBlock}}",
-            [.. TaskVariables, new("task.changes", "Список изменений"), new("task.commentBlock", "Комментарий к изменению, если заполнен")]),
+            [.. TaskVariables, new("task.changes", "Список изменений"), new("task.commentBlock", "Комментарий к изменению, если заполнен"), new("task.changeSubject", "Тема уведомления с учетом типа изменения")]),
         new(
             NotificationTemplateKeys.TaskComment,
             "Комментарий по задаче",

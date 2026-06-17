@@ -1936,8 +1936,8 @@ public class TasksController : ControllerBase
             var requestDueAt = request.DueAt.HasValue ? NormalizeUtcInstant(request.DueAt.Value) : (DateTime?)null;
             if (requestDueAt.HasValue && entity.DueAt != requestDueAt.Value)
             {
+                changes.Add($"Срок: {FormatHistoryDateTime(entity.DueAt)} -> {FormatHistoryDateTime(requestDueAt.Value)}");
                 entity.DueAt = requestDueAt.Value;
-                changes.Add("Срок");
             }
 
             var becameDone = false;

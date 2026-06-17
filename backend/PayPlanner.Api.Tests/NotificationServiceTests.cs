@@ -292,6 +292,72 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyTaskChangedAsync_HighlightsDueAtChange()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db, "author-due-change@example.com");
+        var assignee = new User
+        {
+            Email = "assignee-due-change@example.com",
+            FullName = "Исполнитель",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(assignee);
+        await db.SaveChangesAsync();
+
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = assignee.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Asia/Yekaterinburg",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var oldDueAt = new DateTime(2026, 6, 4, 11, 0, 0, DateTimeKind.Utc);
+        var newDueAt = new DateTime(2026, 6, 4, 12, 0, 0, DateTimeKind.Utc);
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Дело клиента",
+            Title = "Подготовить заявление",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            DueAt = newDueAt,
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "inProgress"
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+
+        var deliveries = await service.NotifyTaskChangedAsync(
+            task,
+            [$"Срок: {oldDueAt:dd.MM.yyyy HH:mm} -> {newDueAt:dd.MM.yyyy HH:mm}"],
+            author.FullName,
+            author.Id);
+
+        Assert.Empty(deliveries);
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(UserNotificationTypes.TaskChanged, notification.Type);
+        Assert.Equal("rose", notification.Tone);
+        Assert.Contains("Изменен срок задачи", notification.Title, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Срок: 04.06.2026 16:00 -> 04.06.2026 17:00", notification.BodyPreview, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("04.06.2026 11:00", notification.BodyPreview, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains($":due-at:{DateTime.SpecifyKind(newDueAt, DateTimeKind.Utc):yyyyMMddHHmm}:", notification.EventKey, StringComparison.Ordinal);
+        Assert.Contains("\"hasDueAtChange\":true", notification.MetadataJson, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task NotifyTaskChangedAsync_SkipsInAppNotificationWhenTypeDisabledForUser()
     {
         await using var db = await CreateContextAsync();
