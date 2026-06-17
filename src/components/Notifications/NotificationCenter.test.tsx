@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { NotificationCenter } from './NotificationCenter';
 import type { PagedResult, UserNotificationDto } from '../../services/api';
+import { USER_NOTIFICATIONS_EVENT } from '../../utils/userNotifications';
 
 const apiMock = vi.hoisted(() => ({
   getUserNotificationTypes: vi.fn(),
@@ -125,6 +126,27 @@ describe('NotificationCenter', () => {
     await waitFor(() => expect(apiMock.deleteUserNotifications).toHaveBeenCalledWith([20]));
     expect(apiMock.deleteUserNotifications).not.toHaveBeenCalledWith([20, 21]);
     expect(toastMock.success).toHaveBeenCalledWith('Удалено уведомлений: 1.');
+  });
+
+  it('refreshes the open list when a realtime notification arrives', async () => {
+    const initial = createNotification({ id: 40, title: 'Первое уведомление' });
+    const realtime = createNotification({ id: 41, title: 'Новая задача из realtime' });
+    apiMock.getUserNotifications
+      .mockResolvedValueOnce(createPage([initial]))
+      .mockResolvedValueOnce(createPage([realtime, initial]));
+
+    render(<NotificationCenter />);
+
+    expect(await screen.findByText('Первое уведомление')).toBeTruthy();
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent(USER_NOTIFICATIONS_EVENT, {
+        detail: { source: 'realtime', reason: 'created', unreadDelta: 1, notificationId: 41 },
+      }));
+    });
+
+    expect(await screen.findByText('Новая задача из realtime')).toBeTruthy();
+    expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(2);
   });
 
   it.each([

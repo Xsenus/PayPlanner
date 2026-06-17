@@ -2,6 +2,7 @@ import { act, render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { RealtimeNotificationToasts } from './RealtimeNotificationToasts';
 import { REALTIME_USER_NOTIFICATION_CREATED_EVENT, type RealtimeUserNotification } from '../../services/realtimeNotifications';
+import { USER_NOTIFICATIONS_EVENT, type UserNotificationsChangedDetail } from '../../utils/userNotifications';
 
 const toastMock = vi.hoisted(() => ({
   showToast: vi.fn(),
@@ -14,6 +15,8 @@ const connectionState = vi.hoisted(() => ({
   start: vi.fn(),
   stop: vi.fn(),
   off: vi.fn(),
+  onreconnected: vi.fn(),
+  onclose: vi.fn(),
 }));
 
 vi.mock('../../hooks/useToast', () => ({
@@ -35,6 +38,8 @@ vi.mock('../../services/realtimeNotifications', async (importOriginal) => {
           connectionState.handlers.set(eventName, handler);
         },
         off: connectionState.off,
+        onreconnected: connectionState.onreconnected,
+        onclose: connectionState.onclose,
       };
     },
   };
@@ -58,6 +63,8 @@ describe('RealtimeNotificationToasts', () => {
     connectionState.stop.mockReset();
     connectionState.stop.mockResolvedValue(undefined);
     connectionState.off.mockReset();
+    connectionState.onreconnected.mockReset();
+    connectionState.onclose.mockReset();
   });
 
   it('shows task assignment toast and opens the task from action', async () => {
@@ -289,5 +296,62 @@ describe('RealtimeNotificationToasts', () => {
     );
 
     errorSpy.mockRestore();
+  });
+
+  it('emits user notification change details for realtime notifications', async () => {
+    const changedEvents: CustomEvent<UserNotificationsChangedDetail>[] = [];
+    const handleChanged = (event: Event) => changedEvents.push(event as CustomEvent<UserNotificationsChangedDetail>);
+    window.addEventListener(USER_NOTIFICATIONS_EVENT, handleChanged);
+
+    render(<RealtimeNotificationToasts userId={5} onOpenTask={vi.fn()} />);
+
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.({
+        id: 501,
+        recipientUserId: 5,
+        type: 'taskAssigned',
+        eventKey: 'task:501:assigned',
+        title: 'Новая задача',
+        bodyPreview: 'Проверьте задачу.',
+        tone: 'blue',
+        objectType: 'task',
+        objectId: 501,
+        taskJournalItemId: 501,
+        createdAt: '2026-06-17T10:00:00Z',
+      });
+    });
+
+    expect(changedEvents.at(-1)?.detail).toMatchObject({
+      source: 'realtime',
+      reason: 'created',
+      unreadDelta: 1,
+      notificationId: 501,
+    });
+
+    window.removeEventListener(USER_NOTIFICATIONS_EVENT, handleChanged);
+  });
+
+  it('requests notification refresh after realtime reconnect', async () => {
+    const changedEvents: CustomEvent<UserNotificationsChangedDetail>[] = [];
+    const handleChanged = (event: Event) => changedEvents.push(event as CustomEvent<UserNotificationsChangedDetail>);
+    window.addEventListener(USER_NOTIFICATIONS_EVENT, handleChanged);
+
+    render(<RealtimeNotificationToasts userId={5} onOpenTask={vi.fn()} />);
+
+    await waitFor(() => expect(connectionState.onreconnected).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      const callback = connectionState.onreconnected.mock.calls[0][0] as () => void;
+      callback();
+    });
+
+    expect(changedEvents.at(-1)?.detail).toMatchObject({
+      source: 'realtime',
+      reason: 'reconnected',
+    });
+
+    window.removeEventListener(USER_NOTIFICATIONS_EVENT, handleChanged);
   });
 });

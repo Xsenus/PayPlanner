@@ -225,7 +225,12 @@ export function RealtimeNotificationToasts({
           return;
         }
 
-        emitUserNotificationsChanged();
+        emitUserNotificationsChanged({
+          source: 'realtime',
+          reason: 'created',
+          unreadDelta: 1,
+          notificationId: notification.id,
+        });
 
         if (shownNotificationIdsRef.current.has(notification.id)) {
           return;
@@ -266,6 +271,22 @@ export function RealtimeNotificationToasts({
         }
       }
     };
+
+    connection.onreconnected(() => {
+      emitUserNotificationsChanged({ source: 'realtime', reason: 'reconnected' });
+    });
+
+    connection.onclose((error) => {
+      if (disposed) {
+        return;
+      }
+
+      if (error && !isExpectedRealtimeStartupError(error)) {
+        console.error('Realtime notifications connection closed.', error);
+      }
+
+      retryTimer = window.setTimeout(start, 5000);
+    });
 
     void start();
 

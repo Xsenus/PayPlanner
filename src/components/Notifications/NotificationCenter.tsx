@@ -29,7 +29,7 @@ import {
 import type { Client } from '../../types';
 import { useToast } from '../../hooks/useToast';
 import type { TaskJournalAssignee } from '../../utils/taskJournalStore';
-import { emitUserNotificationsChanged } from '../../utils/userNotifications';
+import { emitUserNotificationsChanged, USER_NOTIFICATIONS_EVENT, type UserNotificationsChangedDetail } from '../../utils/userNotifications';
 import {
   DEFAULT_USER_NOTIFICATION_TYPE_PREFERENCES,
   USER_NOTIFICATION_TYPE_PREFERENCES_SETTING_KEY,
@@ -358,6 +358,21 @@ export function NotificationCenter({
   useEffect(() => refresh(), [refresh]);
 
   useEffect(() => {
+    const handleNotificationsChanged = (event: Event) => {
+      const detail = (event as CustomEvent<UserNotificationsChangedDetail>).detail;
+
+      if (detail?.source === 'inbox') {
+        return;
+      }
+
+      refresh();
+    };
+
+    window.addEventListener(USER_NOTIFICATIONS_EVENT, handleNotificationsChanged);
+    return () => window.removeEventListener(USER_NOTIFICATIONS_EVENT, handleNotificationsChanged);
+  }, [refresh]);
+
+  useEffect(() => {
     if (pageSelectionRef.current) {
       pageSelectionRef.current.indeterminate = somePageSelected && !allPageSelected;
     }
@@ -380,7 +395,7 @@ export function NotificationCenter({
       ...previous,
       items: previous.items.map((item) => (item.id === nextItem.id ? nextItem : item)),
     }));
-    emitUserNotificationsChanged();
+    emitUserNotificationsChanged({ source: 'inbox', reason: 'item-updated', notificationId: nextItem.id });
   };
 
   const removeItem = (id: number) => {
@@ -398,7 +413,7 @@ export function NotificationCenter({
       next.delete(id);
       return next;
     });
-    emitUserNotificationsChanged();
+    emitUserNotificationsChanged({ source: 'inbox', reason: 'item-removed', notificationId: id });
   };
 
   const toggleSelection = (id: number, checked: boolean) => {
@@ -557,7 +572,7 @@ export function NotificationCenter({
         clientId: selectedClientId,
         taskRole: selectedTaskRole,
       });
-      emitUserNotificationsChanged();
+      emitUserNotificationsChanged({ source: 'inbox', reason: 'bulk-read' });
       refresh();
       toast.success(
         result.updatedCount > 0
@@ -579,7 +594,7 @@ export function NotificationCenter({
       setBulkBusy(true);
       const result = await apiService.archiveUserNotifications(ids);
       setSelectedIds(new Set());
-      emitUserNotificationsChanged();
+      emitUserNotificationsChanged({ source: 'inbox', reason: 'bulk-archive' });
       refresh();
       toast.success(
         result.updatedCount > 0
@@ -601,7 +616,7 @@ export function NotificationCenter({
       setBulkBusy(true);
       const result = await apiService.deleteUserNotifications(ids);
       setSelectedIds(new Set());
-      emitUserNotificationsChanged();
+      emitUserNotificationsChanged({ source: 'inbox', reason: 'bulk-delete' });
       refresh();
       toast.success(
         result.updatedCount > 0
@@ -622,7 +637,7 @@ export function NotificationCenter({
         USER_NOTIFICATION_TYPE_PREFERENCES_SETTING_KEY,
         serializeUserNotificationTypePreferences(preferences, knownTypeKeys),
       );
-      emitUserNotificationsChanged();
+      emitUserNotificationsChanged({ source: 'inbox', reason: 'preferences-saved' });
       setPage(1);
       refresh();
       toast.success('Настройки типов уведомлений сохранены.');

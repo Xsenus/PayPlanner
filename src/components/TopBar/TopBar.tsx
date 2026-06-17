@@ -5,7 +5,7 @@ import { useTabNavigation } from '../../contexts/TabContext';
 import { useDialog } from '../../hooks/useDialog';
 import { apiService } from '../../services/api';
 import { setStoredCompanyProfileCompanyId, setStoredCompanyProfileMode } from '../../utils/companyProfileBridge';
-import { USER_NOTIFICATIONS_EVENT } from '../../utils/userNotifications';
+import { USER_NOTIFICATIONS_EVENT, type UserNotificationsChangedDetail } from '../../utils/userNotifications';
 
 type TopBarProps = {
   title: string;
@@ -32,6 +32,7 @@ export default function TopBar({ title, onSignOut, onOpenProfile, onOpenNotifica
   const [unreadCount, setUnreadCount] = useState(0);
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
+  const refreshUnreadTimerRef = useRef<number | null>(null);
 
   const initials = useMemo(() => getInitials(user?.fullName), [user?.fullName]);
 
@@ -48,11 +49,31 @@ export default function TopBar({ title, onSignOut, onOpenProfile, onOpenNotifica
   useEffect(() => {
     refreshUnreadCount();
     const timer = window.setInterval(refreshUnreadCount, 60_000);
-    window.addEventListener(USER_NOTIFICATIONS_EVENT, refreshUnreadCount);
+    const handleNotificationsChanged = (event: Event) => {
+      const detail = (event as CustomEvent<UserNotificationsChangedDetail>).detail;
+
+      if (detail?.unreadDelta) {
+        setUnreadCount((current) => Math.max(0, current + detail.unreadDelta!));
+      }
+
+      if (refreshUnreadTimerRef.current !== null) {
+        window.clearTimeout(refreshUnreadTimerRef.current);
+      }
+
+      refreshUnreadTimerRef.current = window.setTimeout(
+        refreshUnreadCount,
+        detail?.source === 'realtime' ? 800 : 0,
+      );
+    };
+
+    window.addEventListener(USER_NOTIFICATIONS_EVENT, handleNotificationsChanged);
 
     return () => {
       window.clearInterval(timer);
-      window.removeEventListener(USER_NOTIFICATIONS_EVENT, refreshUnreadCount);
+      if (refreshUnreadTimerRef.current !== null) {
+        window.clearTimeout(refreshUnreadTimerRef.current);
+      }
+      window.removeEventListener(USER_NOTIFICATIONS_EVENT, handleNotificationsChanged);
     };
   }, [refreshUnreadCount]);
 
