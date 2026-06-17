@@ -42,6 +42,43 @@ public class WebPushNotificationServiceTests
         Assert.Equal(NotificationDeliveryStatus.Skipped, delivery.Status);
     }
 
+    [Theory]
+    [InlineData(UserNotificationTypes.PaymentAssigned, "payment")]
+    [InlineData(UserNotificationTypes.InvoiceChanged, "invoice")]
+    [InlineData(UserNotificationTypes.ActChanged, "act")]
+    [InlineData(UserNotificationTypes.ContractChanged, "contract")]
+    public async Task SendUserNotificationAsync_SanitizesFinancialObjectTypesInDeliveryLogWhenServerIsNotReady(
+        string notificationType,
+        string objectType)
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserWithSubscriptionAsync(db, $"finance-{objectType}-push@example.com");
+        var notification = CreateNotification(user.Id, new UserNotification
+        {
+            Type = notificationType,
+            EventKey = $"{objectType}:42:sensitive",
+            Title = "Изменение по Иванову на 125 000 ₽",
+            BodyPreview = "Иванов Иван: сумма 125 000 ₽, счет №77, договор D-77.",
+            Tone = "amber",
+            ObjectType = objectType,
+            ObjectId = 42,
+        });
+        db.UserNotifications.Add(notification);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db);
+
+        await service.SendUserNotificationAsync(notification);
+
+        var delivery = await db.NotificationDeliveries.SingleAsync();
+        Assert.Equal("Финансовое уведомление PayPlanner", delivery.Subject);
+        Assert.Equal("Откройте CRM, чтобы посмотреть детали финансового события после проверки прав доступа.", delivery.BodyPreview);
+        Assert.DoesNotContain("125 000", delivery.Subject + delivery.BodyPreview, StringComparison.Ordinal);
+        Assert.DoesNotContain("Иванов", delivery.Subject + delivery.BodyPreview, StringComparison.Ordinal);
+        Assert.DoesNotContain("№77", delivery.Subject + delivery.BodyPreview, StringComparison.Ordinal);
+        Assert.Equal(NotificationDeliveryStatus.Skipped, delivery.Status);
+    }
+
     [Fact]
     public async Task SendUserNotificationAsync_KeepsTaskPayloadPreviewInDeliveryLogWhenServerIsNotReady()
     {

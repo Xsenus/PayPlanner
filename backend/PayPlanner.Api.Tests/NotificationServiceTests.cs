@@ -2348,7 +2348,8 @@ public class NotificationServiceTests
             Date = new DateTime(2026, 6, 17),
             Amount = 15000m,
             Status = PaymentStatus.Pending,
-            Type = PaymentType.Income
+            Type = PaymentType.Income,
+            Responsibles = { new PaymentResponsible { UserId = recipient.Id } }
         };
         db.Payments.Add(payment);
         await db.SaveChangesAsync();
@@ -2401,7 +2402,8 @@ public class NotificationServiceTests
             Date = new DateTime(2026, 6, 18),
             Amount = 42000m,
             Status = PaymentStatus.Overdue,
-            Type = PaymentType.Income
+            Type = PaymentType.Income,
+            Responsibles = { new PaymentResponsible { UserId = recipient.Id } }
         };
         db.Payments.Add(payment);
         await db.SaveChangesAsync();
@@ -2456,6 +2458,7 @@ public class NotificationServiceTests
             Type = PaymentType.Income,
             DocumentKind = DocumentKind.Invoice,
             InvoiceWorkflowStatus = InvoiceWorkflowStatus.Draft,
+            Responsibles = { new PaymentResponsible { UserId = recipient.Id } },
             Invoice = new Invoice
             {
                 Number = "45",
@@ -2516,6 +2519,7 @@ public class NotificationServiceTests
             Type = PaymentType.Income,
             DocumentKind = DocumentKind.Invoice,
             InvoiceWorkflowStatus = InvoiceWorkflowStatus.PartiallyPaid,
+            Responsibles = { new PaymentResponsible { UserId = recipient.Id } },
             Invoice = new Invoice
             {
                 Number = "46",
@@ -2675,6 +2679,12 @@ public class NotificationServiceTests
         };
         db.Users.Add(recipient);
         await db.SaveChangesAsync();
+        var client = new Client
+        {
+            Name = "Клиент договора",
+            IsActive = true,
+            ResponsibleUserId = recipient.Id
+        };
         var contract = new Contract
         {
             Number = "D-45",
@@ -2683,7 +2693,8 @@ public class NotificationServiceTests
             StartDate = new DateTime(2026, 6, 24),
             ValidUntil = new DateTime(2026, 12, 31),
             Amount = 120000m,
-            Status = ContractStatus.Draft
+            Status = ContractStatus.Draft,
+            ClientContracts = { new ClientContract { Client = client } }
         };
         db.Contracts.Add(contract);
         await db.SaveChangesAsync();
@@ -2730,6 +2741,12 @@ public class NotificationServiceTests
         };
         db.Users.Add(recipient);
         await db.SaveChangesAsync();
+        var client = new Client
+        {
+            Name = "Клиент договора проверки",
+            IsActive = true,
+            ResponsibleUserId = recipient.Id
+        };
         var contract = new Contract
         {
             Number = "D-46",
@@ -2737,7 +2754,8 @@ public class NotificationServiceTests
             Date = new DateTime(2026, 6, 24),
             ValidUntil = new DateTime(2026, 11, 30),
             Amount = 90000m,
-            Status = ContractStatus.Concluded
+            Status = ContractStatus.Concluded,
+            ClientContracts = { new ClientContract { Client = client } }
         };
         db.Contracts.Add(contract);
         await db.SaveChangesAsync();
@@ -2770,6 +2788,12 @@ public class NotificationServiceTests
     {
         await using var db = await CreateContextAsync();
         var recipient = await CreateUserAsync(db, "contract-expiring-recipient@example.com");
+        var client = new Client
+        {
+            Name = "Клиент срочного договора",
+            IsActive = true,
+            ResponsibleUserId = recipient.Id
+        };
         var contract = new Contract
         {
             Number = "D-47",
@@ -2777,7 +2801,8 @@ public class NotificationServiceTests
             Date = new DateTime(2026, 6, 24),
             ValidUntil = DateTime.UtcNow.Date.AddDays(3),
             Amount = 45000m,
-            Status = ContractStatus.Concluded
+            Status = ContractStatus.Concluded,
+            ClientContracts = { new ClientContract { Client = client } }
         };
         db.Contracts.Add(contract);
         await db.SaveChangesAsync();
@@ -2793,6 +2818,121 @@ public class NotificationServiceTests
         Assert.Equal(contract.Id, notification.ObjectId);
         Assert.Contains("Осталось дней: 3", notification.BodyPreview);
         Assert.Contains("D-47", notification.BodyPreview);
+    }
+
+    [Fact]
+    public async Task NotifyPaymentAssignedAsync_SkipsRecipientWithoutPaymentsAccess()
+    {
+        await using var db = await CreateContextAsync();
+        var actor = await CreateUserAsync(db, "payment-denied-actor@example.com");
+        var deniedRecipient = await CreateUserWithoutSectionAccessAsync(db, "payment-denied-recipient@example.com", RolePermissionCatalog.Payments);
+        var payment = new Payment
+        {
+            Description = "Платеж со скрытыми правами",
+            Date = new DateTime(2026, 6, 25),
+            Amount = 77777m,
+            Status = PaymentStatus.Pending,
+            Type = PaymentType.Income,
+            Responsibles = { new PaymentResponsible { UserId = deniedRecipient.Id } }
+        };
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService(), realtime, webPush);
+
+        await service.NotifyPaymentAssignedAsync(payment, actor.FullName, actor.Id, [deniedRecipient.Id]);
+
+        Assert.Empty(await db.UserNotifications.ToListAsync());
+        Assert.Empty(realtime.Notifications);
+        Assert.Empty(webPush.Notifications);
+    }
+
+    [Fact]
+    public async Task NotifyInvoiceCreatedAsync_SkipsRecipientWithoutAccountsAccess()
+    {
+        await using var db = await CreateContextAsync();
+        var actor = await CreateUserAsync(db, "invoice-denied-actor@example.com");
+        var deniedRecipient = await CreateUserWithoutSectionAccessAsync(db, "invoice-denied-recipient@example.com", RolePermissionCatalog.Accounts);
+        var payment = new Payment
+        {
+            Account = "Счет №77",
+            Date = new DateTime(2026, 6, 25),
+            Amount = 88000m,
+            Status = PaymentStatus.Pending,
+            Type = PaymentType.Income,
+            DocumentKind = DocumentKind.Invoice,
+            InvoiceWorkflowStatus = InvoiceWorkflowStatus.Draft,
+            Responsibles = { new PaymentResponsible { UserId = deniedRecipient.Id } },
+            Invoice = new Invoice
+            {
+                Number = "77",
+                Date = new DateTime(2026, 6, 25)
+            }
+        };
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+
+        await service.NotifyInvoiceCreatedAsync(payment, actor.FullName, actor.Id, [deniedRecipient.Id]);
+
+        Assert.Empty(await db.UserNotifications.ToListAsync());
+    }
+
+    [Fact]
+    public async Task NotifyActCreatedAsync_SkipsRecipientWithoutActsAccess()
+    {
+        await using var db = await CreateContextAsync();
+        var actor = await CreateUserAsync(db, "act-denied-actor@example.com");
+        var deniedRecipient = await CreateUserWithoutSectionAccessAsync(db, "act-denied-recipient@example.com", RolePermissionCatalog.Acts);
+        var act = new Act
+        {
+            Number = "A-77",
+            Title = "Скрытый акт",
+            Date = new DateTime(2026, 6, 25),
+            Amount = 99000m,
+            Status = ActStatus.Created,
+            WorkflowStatus = ActWorkflowStatus.Draft,
+            ResponsibleId = deniedRecipient.Id
+        };
+        db.Acts.Add(act);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+
+        await service.NotifyActCreatedAsync(act, actor.FullName, actor.Id, [deniedRecipient.Id]);
+
+        Assert.Empty(await db.UserNotifications.ToListAsync());
+    }
+
+    [Fact]
+    public async Task NotifyContractCreatedAsync_SkipsRecipientWithoutContractsAccess()
+    {
+        await using var db = await CreateContextAsync();
+        var actor = await CreateUserAsync(db, "contract-denied-actor@example.com");
+        var deniedRecipient = await CreateUserWithoutSectionAccessAsync(db, "contract-denied-recipient@example.com", RolePermissionCatalog.Contracts);
+        var client = new Client
+        {
+            Name = "Клиент скрытого договора",
+            IsActive = true,
+            ResponsibleUserId = deniedRecipient.Id
+        };
+        var contract = new Contract
+        {
+            Number = "D-77",
+            Title = "Скрытый договор",
+            Date = new DateTime(2026, 6, 25),
+            ValidUntil = new DateTime(2026, 12, 25),
+            Amount = 100000m,
+            Status = ContractStatus.Draft,
+            ClientContracts = { new ClientContract { Client = client } }
+        };
+        db.Contracts.Add(contract);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+
+        await service.NotifyContractCreatedAsync(contract, actor.FullName, actor.Id, [deniedRecipient.Id]);
+
+        Assert.Empty(await db.UserNotifications.ToListAsync());
     }
 
     [Fact]
@@ -3859,6 +3999,44 @@ public class NotificationServiceTests
             await db.SaveChangesAsync();
         }
 
+        return user;
+    }
+
+    private static async Task<User> CreateUserWithoutSectionAccessAsync(PaymentContext db, string email, string section)
+    {
+        var role = new Role
+        {
+            Name = $"denied-{section}-{Guid.NewGuid():N}",
+            Description = "Denied test role",
+            CreatedAt = DateTime.UtcNow,
+            Permissions =
+            {
+                new RolePermission
+                {
+                    Section = section,
+                    CanView = false,
+                    CanCreate = false,
+                    CanEdit = false,
+                    CanDelete = false,
+                    CanExport = false,
+                    CanViewAnalytics = false,
+                    ViewScope = DataVisibilityScope.All
+                }
+            }
+        };
+        var user = new User
+        {
+            Email = email,
+            FullName = email,
+            PasswordHash = "hash",
+            Role = role,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
         return user;
     }
 

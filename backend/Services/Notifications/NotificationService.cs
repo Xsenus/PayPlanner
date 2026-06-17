@@ -1,12 +1,15 @@
 using System.Globalization;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Services.Notifications;
 
@@ -1249,6 +1252,17 @@ public sealed class NotificationService : INotificationService
             return;
         }
 
+        var visibleRecipientUserIds = await ResolveVisiblePaymentNotificationRecipientIdsAsync(
+            payment,
+            RolePermissionCatalog.Payments,
+            recipientUserIds,
+            actorUserId,
+            cancellationToken);
+        if (visibleRecipientUserIds.Count == 0)
+        {
+            return;
+        }
+
         var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
         var message = await RenderTemplateAsync(
             NotificationTemplateKeys.PaymentAssigned,
@@ -1258,9 +1272,7 @@ public sealed class NotificationService : INotificationService
             purpose: NotificationPurposes.ManualTest,
             cancellationToken: cancellationToken);
 
-        foreach (var recipientUserId in recipientUserIds
-            .Where(userId => userId > 0 && userId != actorUserId)
-            .Distinct())
+        foreach (var recipientUserId in visibleRecipientUserIds)
         {
             await CreateUserNotificationAsync(
                 recipientUserId,
@@ -1297,6 +1309,17 @@ public sealed class NotificationService : INotificationService
             return;
         }
 
+        var visibleRecipientUserIds = await ResolveVisiblePaymentNotificationRecipientIdsAsync(
+            payment,
+            RolePermissionCatalog.Payments,
+            recipientUserIds,
+            actorUserId,
+            cancellationToken);
+        if (visibleRecipientUserIds.Count == 0)
+        {
+            return;
+        }
+
         var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
         var changeText = string.Join('\n', normalizedChanges.Select(label => $"- {label}"));
         var message = await RenderTemplateAsync(
@@ -1316,9 +1339,7 @@ public sealed class NotificationService : INotificationService
             string.Join(";", normalizedChanges)
         ]));
 
-        foreach (var recipientUserId in recipientUserIds
-            .Where(userId => userId > 0 && userId != actorUserId)
-            .Distinct())
+        foreach (var recipientUserId in visibleRecipientUserIds)
         {
             await CreateUserNotificationAsync(
                 recipientUserId,
@@ -1355,6 +1376,17 @@ public sealed class NotificationService : INotificationService
             return;
         }
 
+        var visibleRecipientUserIds = await ResolveVisiblePaymentNotificationRecipientIdsAsync(
+            invoicePayment,
+            RolePermissionCatalog.Accounts,
+            recipientUserIds,
+            actorUserId,
+            cancellationToken);
+        if (visibleRecipientUserIds.Count == 0)
+        {
+            return;
+        }
+
         var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
         var message = await RenderTemplateAsync(
             NotificationTemplateKeys.InvoiceCreated,
@@ -1364,9 +1396,7 @@ public sealed class NotificationService : INotificationService
             purpose: NotificationPurposes.ManualTest,
             cancellationToken: cancellationToken);
 
-        foreach (var recipientUserId in recipientUserIds
-            .Where(userId => userId > 0 && userId != actorUserId)
-            .Distinct())
+        foreach (var recipientUserId in visibleRecipientUserIds)
         {
             await CreateUserNotificationAsync(
                 recipientUserId,
@@ -1404,6 +1434,17 @@ public sealed class NotificationService : INotificationService
             return;
         }
 
+        var visibleRecipientUserIds = await ResolveVisiblePaymentNotificationRecipientIdsAsync(
+            invoicePayment,
+            RolePermissionCatalog.Accounts,
+            recipientUserIds,
+            actorUserId,
+            cancellationToken);
+        if (visibleRecipientUserIds.Count == 0)
+        {
+            return;
+        }
+
         var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
         var message = await RenderTemplateAsync(
             NotificationTemplateKeys.InvoiceChanged,
@@ -1422,9 +1463,7 @@ public sealed class NotificationService : INotificationService
             string.Join(";", normalizedChanges)
         ]));
 
-        foreach (var recipientUserId in recipientUserIds
-            .Where(userId => userId > 0 && userId != actorUserId)
-            .Distinct())
+        foreach (var recipientUserId in visibleRecipientUserIds)
         {
             await CreateUserNotificationAsync(
                 recipientUserId,
@@ -1461,6 +1500,16 @@ public sealed class NotificationService : INotificationService
             return;
         }
 
+        var visibleRecipientUserIds = await ResolveVisibleActNotificationRecipientIdsAsync(
+            act,
+            recipientUserIds,
+            actorUserId,
+            cancellationToken);
+        if (visibleRecipientUserIds.Count == 0)
+        {
+            return;
+        }
+
         var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
         var message = await RenderTemplateAsync(
             NotificationTemplateKeys.ActCreated,
@@ -1470,9 +1519,7 @@ public sealed class NotificationService : INotificationService
             purpose: NotificationPurposes.ManualTest,
             cancellationToken: cancellationToken);
 
-        foreach (var recipientUserId in recipientUserIds
-            .Where(userId => userId > 0 && userId != actorUserId)
-            .Distinct())
+        foreach (var recipientUserId in visibleRecipientUserIds)
         {
             await CreateUserNotificationAsync(
                 recipientUserId,
@@ -1510,6 +1557,16 @@ public sealed class NotificationService : INotificationService
             return;
         }
 
+        var visibleRecipientUserIds = await ResolveVisibleActNotificationRecipientIdsAsync(
+            act,
+            recipientUserIds,
+            actorUserId,
+            cancellationToken);
+        if (visibleRecipientUserIds.Count == 0)
+        {
+            return;
+        }
+
         var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
         var message = await RenderTemplateAsync(
             NotificationTemplateKeys.ActChanged,
@@ -1527,9 +1584,7 @@ public sealed class NotificationService : INotificationService
             string.Join(";", normalizedChanges)
         ]));
 
-        foreach (var recipientUserId in recipientUserIds
-            .Where(userId => userId > 0 && userId != actorUserId)
-            .Distinct())
+        foreach (var recipientUserId in visibleRecipientUserIds)
         {
             await CreateUserNotificationAsync(
                 recipientUserId,
@@ -1566,6 +1621,16 @@ public sealed class NotificationService : INotificationService
             return;
         }
 
+        var visibleRecipientUserIds = await ResolveVisibleContractNotificationRecipientIdsAsync(
+            contract,
+            recipientUserIds,
+            actorUserId,
+            cancellationToken);
+        if (visibleRecipientUserIds.Count == 0)
+        {
+            return;
+        }
+
         var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
         var message = await RenderTemplateAsync(
             NotificationTemplateKeys.ContractCreated,
@@ -1575,9 +1640,7 @@ public sealed class NotificationService : INotificationService
             purpose: NotificationPurposes.ManualTest,
             cancellationToken: cancellationToken);
 
-        foreach (var recipientUserId in recipientUserIds
-            .Where(userId => userId > 0 && userId != actorUserId)
-            .Distinct())
+        foreach (var recipientUserId in visibleRecipientUserIds)
         {
             await CreateUserNotificationAsync(
                 recipientUserId,
@@ -1615,6 +1678,16 @@ public sealed class NotificationService : INotificationService
             return;
         }
 
+        var visibleRecipientUserIds = await ResolveVisibleContractNotificationRecipientIdsAsync(
+            contract,
+            recipientUserIds,
+            actorUserId,
+            cancellationToken);
+        if (visibleRecipientUserIds.Count == 0)
+        {
+            return;
+        }
+
         var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
         var message = await RenderTemplateAsync(
             NotificationTemplateKeys.ContractChanged,
@@ -1631,9 +1704,7 @@ public sealed class NotificationService : INotificationService
             string.Join(";", normalizedChanges)
         ]));
 
-        foreach (var recipientUserId in recipientUserIds
-            .Where(userId => userId > 0 && userId != actorUserId)
-            .Distinct())
+        foreach (var recipientUserId in visibleRecipientUserIds)
         {
             await CreateUserNotificationAsync(
                 recipientUserId,
@@ -1669,6 +1740,16 @@ public sealed class NotificationService : INotificationService
             return;
         }
 
+        var visibleRecipientUserIds = await ResolveVisibleContractNotificationRecipientIdsAsync(
+            contract,
+            recipientUserIds,
+            actorUserId: null,
+            cancellationToken);
+        if (visibleRecipientUserIds.Count == 0)
+        {
+            return;
+        }
+
         var message = await RenderTemplateAsync(
             NotificationTemplateKeys.ContractExpiring,
             $"Истекает срок договора №{BuildContractNumber(contract)}",
@@ -1678,9 +1759,7 @@ public sealed class NotificationService : INotificationService
             cancellationToken: cancellationToken);
         var expirationDate = contract.ValidUntil.Value.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
-        foreach (var recipientUserId in recipientUserIds
-            .Where(userId => userId > 0)
-            .Distinct())
+        foreach (var recipientUserId in visibleRecipientUserIds)
         {
             await CreateUserNotificationAsync(
                 recipientUserId,
@@ -4101,6 +4180,95 @@ public sealed class NotificationService : INotificationService
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
         return Convert.ToHexString(hash)[..16].ToLowerInvariant();
     }
+
+    private async Task<IReadOnlyList<int>> ResolveVisiblePaymentNotificationRecipientIdsAsync(
+        Payment payment,
+        string section,
+        IReadOnlyCollection<int> recipientUserIds,
+        int? actorUserId,
+        CancellationToken cancellationToken)
+        => await ResolveVisibleFinancialNotificationRecipientIdsAsync(
+            recipientUserIds,
+            actorUserId,
+            section,
+            async (access, ct) => await _context.Payments
+                .AsNoTracking()
+                .Where(item => item.Id == payment.Id)
+                .ApplyPaymentVisibility(access)
+                .AnyAsync(ct),
+            cancellationToken);
+
+    private async Task<IReadOnlyList<int>> ResolveVisibleActNotificationRecipientIdsAsync(
+        Act act,
+        IReadOnlyCollection<int> recipientUserIds,
+        int? actorUserId,
+        CancellationToken cancellationToken)
+        => await ResolveVisibleFinancialNotificationRecipientIdsAsync(
+            recipientUserIds,
+            actorUserId,
+            RolePermissionCatalog.Acts,
+            async (access, ct) => await _context.Acts
+                .AsNoTracking()
+                .Where(item => item.Id == act.Id)
+                .ApplyActVisibility(access)
+                .AnyAsync(ct),
+            cancellationToken);
+
+    private async Task<IReadOnlyList<int>> ResolveVisibleContractNotificationRecipientIdsAsync(
+        Contract contract,
+        IReadOnlyCollection<int> recipientUserIds,
+        int? actorUserId,
+        CancellationToken cancellationToken)
+        => await ResolveVisibleFinancialNotificationRecipientIdsAsync(
+            recipientUserIds,
+            actorUserId,
+            RolePermissionCatalog.Contracts,
+            async (access, ct) => await _context.Contracts
+                .AsNoTracking()
+                .Where(item => item.Id == contract.Id)
+                .ApplyContractVisibility(access)
+                .AnyAsync(ct),
+            cancellationToken);
+
+    private async Task<IReadOnlyList<int>> ResolveVisibleFinancialNotificationRecipientIdsAsync(
+        IReadOnlyCollection<int> recipientUserIds,
+        int? actorUserId,
+        string section,
+        Func<DataVisibilityAccess, CancellationToken, Task<bool>> canSeeObjectAsync,
+        CancellationToken cancellationToken)
+    {
+        var candidateUserIds = recipientUserIds
+            .Where(userId => userId > 0 && (!actorUserId.HasValue || userId != actorUserId.Value))
+            .Distinct()
+            .ToArray();
+        if (candidateUserIds.Length == 0)
+        {
+            return Array.Empty<int>();
+        }
+
+        var visibleUserIds = new List<int>(candidateUserIds.Length);
+        foreach (var userId in candidateUserIds)
+        {
+            var principal = CreateNotificationRecipientPrincipal(userId);
+            var access = await _context.ResolveDataVisibilityAsync(principal, section, cancellationToken);
+            if (access is null)
+            {
+                continue;
+            }
+
+            if (await canSeeObjectAsync(access, cancellationToken))
+            {
+                visibleUserIds.Add(userId);
+            }
+        }
+
+        return visibleUserIds;
+    }
+
+    private static ClaimsPrincipal CreateNotificationRecipientPrincipal(int userId)
+        => new(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture))],
+            authenticationType: "notification-service"));
 
     private static Dictionary<string, string?> BuildPaymentTemplateValues(
         Payment payment,

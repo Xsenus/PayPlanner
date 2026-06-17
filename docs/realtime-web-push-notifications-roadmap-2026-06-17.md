@@ -391,10 +391,12 @@
   - Проверено: targeted-тесты `NotifyContract|ContractExpiration|MarkConcluded_Notifies`, полный `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj`, `npm run lint`, `npm run build`, JSON/UTF-8, локальный запуск backend на временной SQLite-БД с `GET /api/health`.
   - DoD: договорные действия попадают в общий центр уведомлений.
 
-- [ ] Проверить права финансовых уведомлений.
+- [x] Проверить права финансовых уведомлений.
   - Нельзя раскрывать платеж/счет/акт через push, если у пользователя нет прав.
   - Текст push должен быть безопасным.
   - Переход из уведомления должен повторно проверять права.
+  - Сделано: центральный `NotificationService` дополнительно фильтрует получателей платежей, счетов, актов и договоров через существующие правила `ResolveDataVisibilityAsync` и `Apply...Visibility`; пользователь без `CanView` нужного раздела не получает внутреннее/realtime/Web Push уведомление даже при ошибочной передаче в список получателей. Web Push для финансовых объектов оставлен обезличенным.
+  - Проверено: targeted-тесты `NotifyPaymentAssignedAsync|NotifyPaymentChangedAsync|NotifyInvoiceCreatedAsync|NotifyInvoiceChangedAsync|NotifyActCreatedAsync|NotifyActChangedAsync|NotifyContractCreatedAsync|NotifyContractChangedAsync|NotifyContractExpiringAsync|WebPushNotificationServiceTests`, полный `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj`, `npm run lint`, `npm run build`, JSON/UTF-8, `git diff --check`, локальный запуск backend на временной SQLite-БД с `GET /api/health`.
   - DoD: новая система не ломает ранее закрытую задачу по доступам к платежам/счетам/актам.
 
 ## Milestone 8. Дела, клиенты, суды и документы
