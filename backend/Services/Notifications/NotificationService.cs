@@ -533,6 +533,8 @@ public sealed class NotificationService : INotificationService
         }
 
         var eventKey = $"task:{task.Id}:assigned";
+        var tone = ResolveTaskAssignedTone(task);
+        var isUrgent = string.Equals(tone, "rose", StringComparison.OrdinalIgnoreCase);
         var deliveries = new List<NotificationDelivery>();
         foreach (var userId in recipients)
         {
@@ -555,9 +557,9 @@ public sealed class NotificationService : INotificationService
                     eventKey,
                     message.Subject,
                     message.Body,
-                    "blue",
+                    tone,
                     task,
-                    new { actorUserId, actorName, task.AssigneeUserId, task.AssigneeName },
+                    new { actorUserId, actorName, task.AssigneeUserId, task.AssigneeName, isUrgent },
                     cancellationToken);
             }
 
@@ -2605,6 +2607,17 @@ public sealed class NotificationService : INotificationService
             return normalized.Equals("Срок", StringComparison.OrdinalIgnoreCase)
                 || normalized.StartsWith("Срок:", StringComparison.OrdinalIgnoreCase);
         });
+
+    private static string ResolveTaskAssignedTone(TaskJournalItem task)
+    {
+        if (task.DueAt == default)
+        {
+            return "blue";
+        }
+
+        var dueAt = DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc);
+        return dueAt <= DateTime.UtcNow.AddDays(1) ? "rose" : "blue";
+    }
 
     private static string ResolveDueAtChangeTone(TaskJournalItem task)
     {

@@ -582,7 +582,7 @@ public class NotificationServiceTests
             AuthorName = author.FullName,
             AssigneeUserId = assignee.Id,
             AssigneeName = assignee.FullName,
-            DueAt = DateTime.UtcNow.AddHours(4),
+            DueAt = DateTime.UtcNow.AddDays(3),
             RemindersJson = "[]",
             ChannelsJson = "[\"inApp\"]",
             Status = "new"
@@ -599,9 +599,59 @@ public class NotificationServiceTests
         Assert.Equal(assignee.Id, notification.RecipientUserId);
         Assert.Equal(UserNotificationTypes.TaskAssigned, notification.Type);
         Assert.Equal($"task:{task.Id}:assigned", notification.EventKey);
+        Assert.Equal("blue", notification.Tone);
         Assert.Contains("Новая задача", notification.Title);
         Assert.Contains("Подготовить отзыв", notification.BodyPreview);
         Assert.False(notification.IsRead);
+    }
+
+    [Fact]
+    public async Task NotifyTaskAssignedAsync_HighlightsUrgentDueAt()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db, "task-author-urgent@example.com");
+        var assignee = new User
+        {
+            Email = "urgent-assignee@example.com",
+            FullName = "Срочный исполнитель",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(assignee);
+        await db.SaveChangesAsync();
+
+        var task = new TaskJournalItem
+        {
+            ObjectName = "ЗЕМЦОВ - банкротство",
+            Title = "Срочно подготовить отзыв",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            DueAt = DateTime.UtcNow.AddHours(4),
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "new"
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService(), realtime);
+
+        var deliveries = await service.NotifyTaskAssignedAsync(task, author.FullName, author.Id);
+
+        Assert.Empty(deliveries);
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal("rose", notification.Tone);
+        Assert.Contains("\"isUrgent\":true", notification.MetadataJson, StringComparison.OrdinalIgnoreCase);
+        var published = Assert.Single(realtime.Notifications);
+        Assert.Equal("rose", published.Tone);
+        Assert.Equal(UserNotificationTypes.TaskAssigned, published.Type);
     }
 
     [Fact]
