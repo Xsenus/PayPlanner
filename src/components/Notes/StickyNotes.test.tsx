@@ -318,6 +318,36 @@ describe('StickyNotes', () => {
     expect(await screen.findByPlaceholderText('Текст заметки')).toBeTruthy();
   });
 
+  it('changes a note color from the palette', async () => {
+    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Цветная заметка' }]);
+    apiMock.updateStickyNote.mockImplementation(async (_id, payload) => ({
+      ...createdNote,
+      text: payload.text,
+      color: payload.color,
+      x: payload.x,
+      y: payload.y,
+      width: payload.width,
+      height: payload.height,
+      zIndex: payload.zIndex,
+      isPinned: payload.isPinned,
+      version: 2,
+    }));
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    await screen.findByDisplayValue('Цветная заметка');
+    await user.click(screen.getByRole('button', { name: 'Выбрать цвет заметки: Желтая' }));
+    await user.click(screen.getByRole('button', { name: 'Цвет заметки: Синяя' }));
+
+    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledWith(11, expect.objectContaining({
+      color: 'blue',
+      text: 'Цветная заметка',
+      version: 1,
+    })));
+    expect(screen.getByRole('button', { name: 'Выбрать цвет заметки: Синяя' })).toBeTruthy();
+  });
+
   it('does not duplicate a created note when realtime arrives before the API response', async () => {
     realtimeMock.canStart = true;
     const createdByRealtime = { ...createdNote, text: 'Создано почти одновременно' };

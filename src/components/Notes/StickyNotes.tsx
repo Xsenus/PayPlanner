@@ -35,13 +35,13 @@ import { useToast } from '../../hooks/useToast';
 import { useDialog } from '../../hooks/useDialog';
 import type { HubConnection } from '@microsoft/signalr';
 
-const COLORS: Array<{ value: StickyNoteColor; label: string; className: string }> = [
-  { value: 'yellow', label: 'Желтая', className: 'bg-amber-100 border-amber-200 text-slate-950' },
-  { value: 'blue', label: 'Синяя', className: 'bg-sky-100 border-sky-200 text-slate-950' },
-  { value: 'green', label: 'Зеленая', className: 'bg-emerald-100 border-emerald-200 text-slate-950' },
-  { value: 'pink', label: 'Розовая', className: 'bg-rose-100 border-rose-200 text-slate-950' },
-  { value: 'cyan', label: 'Бирюзовая', className: 'bg-cyan-100 border-cyan-200 text-slate-950' },
-  { value: 'white', label: 'Белая', className: 'bg-white border-slate-200 text-slate-950' },
+const COLORS: Array<{ value: StickyNoteColor; label: string; className: string; swatchClassName: string }> = [
+  { value: 'yellow', label: 'Желтая', className: 'bg-amber-100 border-amber-200 text-slate-950', swatchClassName: 'bg-amber-200 border-amber-400' },
+  { value: 'blue', label: 'Синяя', className: 'bg-sky-100 border-sky-200 text-slate-950', swatchClassName: 'bg-sky-200 border-sky-400' },
+  { value: 'green', label: 'Зеленая', className: 'bg-emerald-100 border-emerald-200 text-slate-950', swatchClassName: 'bg-emerald-200 border-emerald-400' },
+  { value: 'pink', label: 'Розовая', className: 'bg-rose-100 border-rose-200 text-slate-950', swatchClassName: 'bg-rose-200 border-rose-400' },
+  { value: 'cyan', label: 'Бирюзовая', className: 'bg-cyan-100 border-cyan-200 text-slate-950', swatchClassName: 'bg-cyan-200 border-cyan-400' },
+  { value: 'white', label: 'Белая', className: 'bg-white border-slate-200 text-slate-950', swatchClassName: 'bg-white border-slate-400' },
 ];
 
 const DEFAULT_NOTE_SIZE = { width: 220, height: 180 };
@@ -63,8 +63,16 @@ type NotesViewMode = 'canvas' | 'list';
 const NOTES_VIEW_MODE_STORAGE_KEY = 'payplanner.stickyNotes.viewMode';
 const NOTES_ACTIVE_BOARD_STORAGE_KEY = 'payplanner.stickyNotes.activeBoardId';
 
+function colorMeta(color: StickyNoteColor) {
+  return COLORS.find((item) => item.value === color) ?? COLORS[0];
+}
+
 function colorClass(color: StickyNoteColor): string {
-  return COLORS.find((item) => item.value === color)?.className ?? COLORS[0].className;
+  return colorMeta(color).className;
+}
+
+function colorSwatchClass(color: StickyNoteColor): string {
+  return colorMeta(color).swatchClassName;
 }
 
 function sortNotes(notes: StickyNoteItem[]) {
@@ -166,6 +174,7 @@ export function StickyNotes() {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<NoteFilter>('all');
   const [deletedNoteId, setDeletedNoteId] = useState<number | null>(null);
+  const [colorPaletteNoteId, setColorPaletteNoteId] = useState<number | null>(null);
   const [memberUserId, setMemberUserId] = useState('');
   const [memberRole, setMemberRole] = useState<Exclude<StickyNoteBoardMemberRole, 'owner'>>('viewer');
   const [noteConflict, setNoteConflict] = useState<NoteConflict | null>(null);
@@ -210,6 +219,7 @@ export function StickyNotes() {
     clearAutosaveTimer(noteId);
     setSelectedNoteId((current) => (current === noteId ? null : current));
     setDeletedNoteId((current) => (current === noteId ? null : current));
+    setColorPaletteNoteId((current) => (current === noteId ? null : current));
     setNoteConflict((current) => (
       current?.local.id === noteId || current?.server.id === noteId ? null : current
     ));
@@ -234,6 +244,7 @@ export function StickyNotes() {
     setMembers([]);
     setSelectedNoteId(null);
     setDeletedNoteId(null);
+    setColorPaletteNoteId(null);
     setNoteConflict(null);
     setBoardSettingsOpen(false);
   }, []);
@@ -815,6 +826,17 @@ export function StickyNotes() {
     setNotes((current) => sortNotes(current.map((note) => (note.id === noteId ? { ...note, ...patch } : note))));
   };
 
+  const selectNoteColor = (note: StickyNoteItem, color: StickyNoteColor) => {
+    setColorPaletteNoteId(null);
+    if (!canEditActiveBoard || note.color === color) {
+      return;
+    }
+
+    const next = { ...note, color };
+    patchNote(note.id, { color });
+    void saveNote(next);
+  };
+
   const restoreDeletedNote = useCallback(async (noteId: number) => {
     const requestedBoardId = activeBoardId;
 
@@ -1099,6 +1121,8 @@ export function StickyNotes() {
 
   const renderNote = (note: StickyNoteItem, mode: NotesViewMode) => {
     const isCanvas = mode === 'canvas';
+    const currentColor = colorMeta(note.color);
+    const isColorPaletteOpen = colorPaletteNoteId === note.id;
 
     return (
       <div
@@ -1119,18 +1143,45 @@ export function StickyNotes() {
           : undefined}
       >
         <div className="mb-1 flex items-center gap-1">
-          <Palette className="h-3.5 w-3.5 text-slate-500" />
-          <select
-            value={note.color}
-            disabled={!canEditActiveBoard}
-            onChange={(event) => patchNote(note.id, { color: event.target.value as StickyNoteColor })}
-            onBlur={(event) => saveNote({ ...note, color: event.currentTarget.value as StickyNoteColor })}
-            className="min-w-0 flex-1 rounded border border-black/10 bg-white/60 px-1 py-0.5 text-xs"
-          >
-            {COLORS.map((item) => (
-              <option key={item.value} value={item.value}>{item.label}</option>
-            ))}
-          </select>
+          <div className="relative shrink-0">
+            <button
+              type="button"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                setColorPaletteNoteId((current) => (current === note.id ? null : note.id));
+              }}
+              disabled={!canEditActiveBoard}
+              className="inline-flex h-6 w-9 items-center justify-center gap-1 rounded border border-black/10 bg-white/50 text-slate-700 hover:bg-white disabled:opacity-50"
+              title={`Цвет заметки: ${currentColor.label}`}
+              aria-label={`Выбрать цвет заметки: ${currentColor.label}`}
+              aria-expanded={isColorPaletteOpen}
+            >
+              <Palette className="h-3 w-3" />
+              <span className={`h-3 w-3 rounded-sm border ${colorSwatchClass(note.color)}`} />
+            </button>
+            {isColorPaletteOpen ? (
+              <div
+                className="absolute left-0 top-7 z-[60] grid grid-cols-3 gap-1 rounded-md border border-slate-200 bg-white p-1.5 shadow-lg"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
+              >
+                {COLORS.map((item) => (
+                  <button
+                    key={item.value}
+                    type="button"
+                    onClick={() => selectNoteColor(note, item.value)}
+                    className={`h-6 w-6 rounded-sm border ${item.swatchClassName} ${
+                      note.color === item.value ? 'ring-2 ring-slate-900 ring-offset-1' : 'hover:ring-2 hover:ring-slate-400 hover:ring-offset-1'
+                    }`}
+                    title={item.label}
+                    aria-label={`Цвет заметки: ${item.label}`}
+                    aria-pressed={note.color === item.value}
+                  />
+                ))}
+              </div>
+            ) : null}
+          </div>
           <button
             type="button"
             onPointerDown={(event) => event.stopPropagation()}
