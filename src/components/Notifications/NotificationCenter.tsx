@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
+  CalendarDays,
   Bell,
   CheckCheck,
   CheckCircle2,
+  CircleDollarSign,
   ExternalLink,
   Filter,
+  Gavel,
   Inbox,
+  ListTodo,
   Mail,
   Monitor,
   RefreshCw,
@@ -16,6 +20,7 @@ import {
   Settings2,
   Save,
   Smartphone,
+  StickyNote,
   Trash2,
   type LucideIcon,
 } from 'lucide-react';
@@ -51,6 +56,7 @@ import {
 
 type NotificationStatusFilter = NonNullable<UserNotificationsQuery['status']>;
 type NotificationTaskRoleFilter = 'all' | 'assignee' | 'author' | 'observer' | 'approver';
+type NotificationDomainFilter = 'all' | 'task' | 'calendar' | 'note' | 'finance' | 'case' | 'system';
 
 type NotificationCenterProps = {
   onOpenTask?: (taskId: number) => void;
@@ -75,6 +81,16 @@ const TASK_ROLE_FILTERS: Array<{ value: NotificationTaskRoleFilter; label: strin
   { value: 'author', label: 'Постановщик' },
   { value: 'observer', label: 'Наблюдатель' },
   { value: 'approver', label: 'Согласующий' },
+];
+
+const DOMAIN_FILTERS: Array<{ value: NotificationDomainFilter; label: string; Icon: LucideIcon }> = [
+  { value: 'all', label: 'Все', Icon: Inbox },
+  { value: 'task', label: 'Задачи', Icon: ListTodo },
+  { value: 'calendar', label: 'Календарь', Icon: CalendarDays },
+  { value: 'note', label: 'Заметки', Icon: StickyNote },
+  { value: 'finance', label: 'Финансы', Icon: CircleDollarSign },
+  { value: 'case', label: 'Дела и суды', Icon: Gavel },
+  { value: 'system', label: 'Система', Icon: Monitor },
 ];
 
 const CHANNEL_OPTIONS: Array<{ value: UserNotificationPreferenceChannel; label: string; Icon: LucideIcon }> = [
@@ -139,6 +155,8 @@ export function NotificationCenter({
   const [itemsPage, setItemsPage] = useState<PagedResult<UserNotificationDto>>(EMPTY_PAGE);
   const [types, setTypes] = useState<UserNotificationTypeDto[]>([]);
   const [status, setStatus] = useState<NotificationStatusFilter>('active');
+  const [domain, setDomain] = useState<NotificationDomainFilter>('all');
+  const [requiresActionOnly, setRequiresActionOnly] = useState(false);
   const [type, setType] = useState('all');
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
@@ -186,6 +204,7 @@ export function NotificationCenter({
   const selectedEmployeeId = employeeId === 'all' ? undefined : Number(employeeId);
   const selectedClientId = clientId === 'all' ? undefined : Number(clientId);
   const selectedTaskRole = taskRole === 'all' ? undefined : taskRole;
+  const selectedDomain = domain === 'all' ? undefined : domain;
   const currentPageIds = useMemo(() => itemsPage.items.map((item) => item.id), [itemsPage.items]);
   const selectedCount = selectedIds.size;
   const allPageSelected = currentPageIds.length > 0 && currentPageIds.every((id) => selectedIds.has(id));
@@ -193,6 +212,8 @@ export function NotificationCenter({
   const hasCustomFilters = Boolean(
     searchInput
       || search
+      || domain !== 'all'
+      || requiresActionOnly
       || type !== 'all'
       || status !== 'active'
       || dateFrom
@@ -312,6 +333,8 @@ export function NotificationCenter({
     apiService.getUserNotifications({
       status,
       type: type === 'all' ? undefined : type,
+      domain: selectedDomain,
+      requiresAction: requiresActionOnly ? true : undefined,
       search,
       dateFrom: dateFrom || undefined,
       dateTo: dateTo || undefined,
@@ -348,8 +371,10 @@ export function NotificationCenter({
     page,
     search,
     selectedClientId,
+    selectedDomain,
     selectedEmployeeId,
     selectedTaskRole,
+    requiresActionOnly,
     status,
     toast,
     type,
@@ -565,6 +590,8 @@ export function NotificationCenter({
       const result = await apiService.markAllUserNotificationsRead({
         status,
         type: type === 'all' ? undefined : type,
+        domain: selectedDomain,
+        requiresAction: requiresActionOnly ? true : undefined,
         search,
         dateFrom: dateFrom || undefined,
         dateTo: dateTo || undefined,
@@ -689,6 +716,8 @@ export function NotificationCenter({
 
   const handleResetFilters = () => {
     setStatus('active');
+    setDomain('all');
+    setRequiresActionOnly(false);
     setType('all');
     setSearchInput('');
     setSearch('');
@@ -790,6 +819,52 @@ export function NotificationCenter({
       </div>
 
       <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex flex-wrap gap-2">
+            {DOMAIN_FILTERS.map(({ value, label, Icon }) => {
+              const active = domain === value;
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => {
+                    setDomain(value);
+                    setPage(1);
+                    setSelectedIds(new Set());
+                  }}
+                  className={`inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition ${
+                    active
+                      ? 'border-blue-500 bg-blue-50 text-blue-700 shadow-sm'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
+                  aria-pressed={active}
+                >
+                  <Icon className="h-4 w-4" />
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              setRequiresActionOnly((value) => !value);
+              setPage(1);
+              setSelectedIds(new Set());
+            }}
+            className={`inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-medium transition ${
+              requiresActionOnly
+                ? 'border-rose-500 bg-rose-50 text-rose-700 shadow-sm'
+                : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+            }`}
+            aria-pressed={requiresActionOnly}
+          >
+            <Bell className="h-4 w-4" />
+            Требуют действия
+          </button>
+        </div>
+
         <div className="grid gap-3 lg:grid-cols-[minmax(16rem,1fr)_12rem_14rem]">
           <label className="relative block">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />

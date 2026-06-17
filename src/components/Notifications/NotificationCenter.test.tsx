@@ -149,6 +149,54 @@ describe('NotificationCenter', () => {
     expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(2);
   });
 
+  it('passes domain and action filters to inbox requests and read-all action', async () => {
+    const finance = createNotification({
+      id: 50,
+      type: 'paymentAdvanceReviewRequired',
+      typeLabel: 'Контроль аванса',
+      title: 'Финансовое уведомление',
+      objectType: 'payment',
+      objectId: 50,
+      taskId: null,
+    });
+    apiMock.getUserNotifications.mockResolvedValue(createPage([finance]));
+    apiMock.markAllUserNotificationsRead.mockResolvedValueOnce({ updatedCount: 1 });
+
+    render(<NotificationCenter />);
+
+    expect(await screen.findByText('Финансовое уведомление')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /Финансы/ }));
+    await waitFor(() =>
+      expect(apiMock.getUserNotifications).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          domain: 'finance',
+          requiresAction: undefined,
+        }),
+      ),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Требуют действия' }));
+    await waitFor(() =>
+      expect(apiMock.getUserNotifications).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          domain: 'finance',
+          requiresAction: true,
+        }),
+      ),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Прочитать все/ }));
+    await waitFor(() =>
+      expect(apiMock.markAllUserNotificationsRead).toHaveBeenCalledWith(
+        expect.objectContaining({
+          domain: 'finance',
+          requiresAction: true,
+        }),
+      ),
+    );
+  });
+
   it.each([
     ['payment', 'К платежу', 'onOpenPayment'],
     ['invoice', 'К счету', 'onOpenInvoice'],

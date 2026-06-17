@@ -943,6 +943,8 @@ describe('apiService auth handling', () => {
       employeeId: 12,
       clientId: 34,
       taskRole: 'observer',
+      domain: 'finance',
+      requiresAction: true,
       search: 'договор',
       page: 2,
       pageSize: 10,
@@ -958,6 +960,8 @@ describe('apiService auth handling', () => {
     expect(String(url)).toContain('employeeId=12');
     expect(String(url)).toContain('clientId=34');
     expect(String(url)).toContain('taskRole=observer');
+    expect(String(url)).toContain('domain=finance');
+    expect(String(url)).toContain('requiresAction=true');
     expect(String(url)).toContain('page=2');
     expect(String(url)).toContain('pageSize=10');
   });
@@ -978,6 +982,8 @@ describe('apiService auth handling', () => {
       employeeId: 12,
       clientId: 34,
       taskRole: 'author',
+      domain: 'case',
+      requiresAction: true,
       search: 'срок',
     });
 
@@ -992,6 +998,8 @@ describe('apiService auth handling', () => {
     expect(String(url)).toContain('employeeId=12');
     expect(String(url)).toContain('clientId=34');
     expect(String(url)).toContain('taskRole=author');
+    expect(String(url)).toContain('domain=case');
+    expect(String(url)).toContain('requiresAction=true');
     expect(init?.method).toBe('POST');
   });
 

@@ -377,6 +377,56 @@ public class NotificationInboxControllerTests
     }
 
     [Fact]
+    public async Task DomainAndActionFilters_LimitInboxAndBulkRead()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "domain-action@example.com");
+        var financeAction = CreateObjectNotification(user.Id, "payment", 10, "Аванс требует решения");
+        financeAction.Type = UserNotificationTypes.PaymentAdvanceReviewRequired;
+        var financeInfo = CreateObjectNotification(user.Id, "act", 11, "Акт обновлен");
+        financeInfo.Type = UserNotificationTypes.TaskChanged;
+        var taskAction = CreateNotification(
+            user.Id,
+            "task:12:assigned",
+            UserNotificationTypes.TaskAssigned,
+            title: "Новая задача");
+        taskAction.TaskJournalItemId = 12;
+        db.UserNotifications.AddRange(financeAction, financeInfo, taskAction);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, user.Id);
+
+        var listResult = await controller.GetNotifications(
+            "active",
+            null,
+            null,
+            domain: "finance",
+            requiresAction: true);
+
+        var page = Assert.IsType<PagedResponse<UserNotificationDto>>(Assert.IsType<OkObjectResult>(listResult.Result).Value);
+        var item = Assert.Single(page.Items);
+        Assert.Equal(financeAction.Id, item.Id);
+
+        var markResult = await controller.MarkAllRead(
+            "active",
+            null,
+            null,
+            domain: "finance",
+            requiresAction: true,
+            ct: CancellationToken.None);
+
+        var dto = Assert.IsType<UserNotificationBulkActionResultDto>(Assert.IsType<OkObjectResult>(markResult.Result).Value);
+        Assert.Equal(1, dto.UpdatedCount);
+
+        await db.Entry(financeAction).ReloadAsync();
+        await db.Entry(financeInfo).ReloadAsync();
+        await db.Entry(taskAction).ReloadAsync();
+        Assert.True(financeAction.IsRead);
+        Assert.False(financeInfo.IsRead);
+        Assert.False(taskAction.IsRead);
+    }
+
+    [Fact]
     public async Task BulkArchiveAndDelete_UpdateOnlySelectedCurrentUserNotifications()
     {
         await using var db = await CreateContextAsync();

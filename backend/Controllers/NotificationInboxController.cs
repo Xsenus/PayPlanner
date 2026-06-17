@@ -62,6 +62,8 @@ public class NotificationInboxController : ControllerBase
         [FromQuery] int? employeeId = null,
         [FromQuery] int? clientId = null,
         [FromQuery] string? taskRole = null,
+        [FromQuery] string? domain = null,
+        [FromQuery] bool? requiresAction = null,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 25,
         CancellationToken ct = default)
@@ -84,6 +86,8 @@ public class NotificationInboxController : ControllerBase
         query = ApplyStatusFilter(query, status);
         query = ApplyDisabledTypeFilter(query, disabledTypes);
         query = ApplyTypeAndSearchFilters(query, type, search);
+        query = ApplyDomainFilter(query, domain);
+        query = ApplyRequiresActionFilter(query, requiresAction);
         query = ApplyDateRangeFilter(query, dateFrom, dateTo);
         query = ApplyTaskReferenceFilters(query, _context, employeeId, clientId, taskRole);
         query = WhereNotificationTargetVisible(query, _context, visibility);
@@ -116,6 +120,8 @@ public class NotificationInboxController : ControllerBase
         [FromQuery] int? employeeId = null,
         [FromQuery] int? clientId = null,
         [FromQuery] string? taskRole = null,
+        [FromQuery] string? domain = null,
+        [FromQuery] bool? requiresAction = null,
         CancellationToken ct = default)
     {
         var userId = User.GetUserId();
@@ -132,6 +138,8 @@ public class NotificationInboxController : ControllerBase
         query = ApplyStatusFilter(query, status);
         query = ApplyDisabledTypeFilter(query, disabledTypes);
         query = ApplyTypeAndSearchFilters(query, type, search);
+        query = ApplyDomainFilter(query, domain);
+        query = ApplyRequiresActionFilter(query, requiresAction);
         query = ApplyDateRangeFilter(query, dateFrom, dateTo);
         query = ApplyTaskReferenceFilters(query, _context, employeeId, clientId, taskRole);
         query = WhereNotificationTargetVisible(query, _context, visibility);
@@ -396,6 +404,99 @@ public class NotificationInboxController : ControllerBase
         }
 
         return query;
+    }
+
+    private static IQueryable<UserNotification> ApplyDomainFilter(
+        IQueryable<UserNotification> query,
+        string? domain)
+    {
+        return NormalizeNotificationDomain(domain) switch
+        {
+            "task" => query.Where(item =>
+                item.TaskJournalItemId.HasValue
+                || item.ObjectType == "task"
+                || item.Type == UserNotificationTypes.TaskAssigned
+                || item.Type == UserNotificationTypes.TaskReminder
+                || item.Type == UserNotificationTypes.TaskChanged
+                || item.Type == UserNotificationTypes.TaskComment
+                || item.Type == UserNotificationTypes.TaskCompleted
+                || item.Type == UserNotificationTypes.TaskScheduleConflict
+                || item.Type == UserNotificationTypes.TaskApprovalRequested
+                || item.Type == UserNotificationTypes.TaskApproved
+                || item.Type == UserNotificationTypes.TaskRevisionRequested),
+            "calendar" => query.Where(item =>
+                item.ObjectType == "calendar"
+                || item.Type.Contains("Calendar")),
+            "note" => query.Where(item =>
+                item.ObjectType == "note"
+                || item.Type.StartsWith("note")),
+            "finance" => query.Where(item =>
+                item.ObjectType == "payment"
+                || item.ObjectType == "invoice"
+                || item.ObjectType == "account"
+                || item.ObjectType == "act"
+                || item.ObjectType == "contract"
+                || item.Type == UserNotificationTypes.PaymentAdvanceReviewRequired
+                || item.Type == UserNotificationTypes.PaymentAdvanceReviewEscalation),
+            "case" => query.Where(item =>
+                item.ObjectType == "case"
+                || item.ObjectType == "client-case"
+                || item.ObjectType == "client-case-document"
+                || item.Type == UserNotificationTypes.CaseInactivityControl
+                || item.Type == UserNotificationTypes.CaseAccessRequested
+                || item.Type == UserNotificationTypes.CaseAccessResolved
+                || item.Type == UserNotificationTypes.CaseCourtEvent
+                || item.Type == UserNotificationTypes.CourtHearing
+                || item.Type == UserNotificationTypes.CourtStatusChanged
+                || item.Type == UserNotificationTypes.CourtDecisionPublished
+                || item.Type == UserNotificationTypes.CourtSyncFailed
+                || item.Type == UserNotificationTypes.CaseProceduralDeadline
+                || item.Type == UserNotificationTypes.CaseDocument
+                || item.Type == UserNotificationTypes.CaseInactivityReminder),
+            "system" => query.Where(item =>
+                item.Type == UserNotificationTypes.SystemAdminWarning
+                || (item.ObjectType == string.Empty
+                    && !item.ObjectId.HasValue
+                    && !item.TaskJournalItemId.HasValue)),
+            _ => query
+        };
+    }
+
+    private static IQueryable<UserNotification> ApplyRequiresActionFilter(
+        IQueryable<UserNotification> query,
+        bool? requiresAction)
+    {
+        if (requiresAction != true)
+        {
+            return query;
+        }
+
+        return query.Where(item =>
+            item.Type == UserNotificationTypes.TaskAssigned
+            || item.Type == UserNotificationTypes.TaskReminder
+            || item.Type == UserNotificationTypes.TaskScheduleConflict
+            || item.Type == UserNotificationTypes.TaskApprovalRequested
+            || item.Type == UserNotificationTypes.TaskRevisionRequested
+            || item.Type == UserNotificationTypes.CaseInactivityControl
+            || item.Type == UserNotificationTypes.CaseAccessRequested
+            || item.Type == UserNotificationTypes.CaseCourtEvent
+            || item.Type == UserNotificationTypes.CourtHearing
+            || item.Type == UserNotificationTypes.CourtStatusChanged
+            || item.Type == UserNotificationTypes.CourtDecisionPublished
+            || item.Type == UserNotificationTypes.CourtSyncFailed
+            || item.Type == UserNotificationTypes.CaseProceduralDeadline
+            || item.Type == UserNotificationTypes.CaseInactivityReminder
+            || item.Type == UserNotificationTypes.PaymentAdvanceReviewRequired
+            || item.Type == UserNotificationTypes.PaymentAdvanceReviewEscalation
+            || item.Type == UserNotificationTypes.SystemAdminWarning);
+    }
+
+    private static string? NormalizeNotificationDomain(string? domain)
+    {
+        var value = domain?.Trim().ToLowerInvariant();
+        return value is "task" or "calendar" or "note" or "finance" or "case" or "system"
+            ? value
+            : null;
     }
 
     private static IQueryable<UserNotification> ApplyTaskReferenceFilters(

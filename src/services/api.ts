@@ -1098,6 +1098,8 @@ export interface UserNotificationsQuery {
   employeeId?: number;
   clientId?: number;
   taskRole?: 'assignee' | 'author' | 'observer' | 'approver' | string;
+  domain?: 'task' | 'calendar' | 'note' | 'finance' | 'case' | 'system' | string;
+  requiresAction?: boolean;
   page?: number;
   pageSize?: number;
 }
@@ -3877,6 +3879,8 @@ export class ApiService {
       employeeId: params?.employeeId,
       clientId: params?.clientId,
       taskRole: params?.taskRole,
+      domain: params?.domain,
+      requiresAction: params?.requiresAction,
       page: params?.page ?? 1,
       pageSize: params?.pageSize ?? 25,
     });
@@ -3899,7 +3903,7 @@ export class ApiService {
     });
   }
 
-  async markAllUserNotificationsRead(params?: Pick<UserNotificationsQuery, 'status' | 'type' | 'search' | 'dateFrom' | 'dateTo' | 'employeeId' | 'clientId' | 'taskRole'>) {
+  async markAllUserNotificationsRead(params?: Pick<UserNotificationsQuery, 'status' | 'type' | 'search' | 'dateFrom' | 'dateTo' | 'employeeId' | 'clientId' | 'taskRole' | 'domain' | 'requiresAction'>) {
     const q = buildQuery({
       status: params?.status,
       type: params?.type,
@@ -3909,6 +3913,8 @@ export class ApiService {
       employeeId: params?.employeeId,
       clientId: params?.clientId,
       taskRole: params?.taskRole,
+      domain: params?.domain,
+      requiresAction: params?.requiresAction,
     });
     return this.request<UserNotificationBulkActionResultDto>(`/notifications/inbox/read-all${q}`, {
       method: 'POST',
