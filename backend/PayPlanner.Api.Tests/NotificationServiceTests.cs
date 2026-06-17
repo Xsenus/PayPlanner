@@ -1435,6 +1435,256 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyTaskApprovalDecisionAsync_CreatesApprovedNotificationForTaskStakeholders()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db, "approval-approved-author@example.com");
+        var assignee = new User
+        {
+            Email = "approval-approved-assignee@example.com",
+            FullName = "Исполнитель",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        var approver = new User
+        {
+            Email = "approval-approved-approver@example.com",
+            FullName = "Согласующий",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        var observer = new User
+        {
+            Email = "approval-approved-observer@example.com",
+            FullName = "Наблюдатель",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.AddRange(assignee, approver, observer);
+        await db.SaveChangesAsync();
+
+        var participant = new TaskJournalParticipant
+        {
+            UserId = approver.Id,
+            DisplayName = approver.FullName,
+            Role = "approver",
+            ApprovalStatus = "approved",
+            SortOrder = 0
+        };
+        var task = new TaskJournalItem
+        {
+            ObjectName = "ЕГОРОВ - спор",
+            Title = "Согласовать результат",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            DueAt = DateTime.UtcNow.AddHours(4),
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "approved",
+            Participants =
+            [
+                participant,
+                new TaskJournalParticipant
+                {
+                    UserId = observer.Id,
+                    DisplayName = observer.FullName,
+                    Role = "observer",
+                    SortOrder = 1
+                }
+            ]
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService(), realtime);
+
+        var deliveries = await service.NotifyTaskApprovalDecisionAsync(
+            task,
+            participant,
+            "approved",
+            approver.FullName,
+            approver.Id,
+            "Можно закрывать");
+
+        Assert.Empty(deliveries);
+        var notifications = await db.UserNotifications
+            .OrderBy(item => item.RecipientUserId)
+            .ToListAsync();
+        Assert.Equal([author.Id, assignee.Id, observer.Id], notifications.Select(item => item.RecipientUserId).ToArray());
+        Assert.DoesNotContain(notifications, item => item.RecipientUserId == approver.Id);
+        Assert.All(notifications, notification =>
+        {
+            Assert.Equal(UserNotificationTypes.TaskApproved, notification.Type);
+            Assert.Equal("emerald", notification.Tone);
+            Assert.Contains("согласована", notification.Title, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Можно закрывать", notification.BodyPreview, StringComparison.OrdinalIgnoreCase);
+        });
+        Assert.Equal(
+            notifications.Select(item => item.Id).OrderBy(id => id),
+            realtime.Notifications.Select(item => item.Id).OrderBy(id => id));
+    }
+
+    [Fact]
+    public async Task NotifyTaskApprovalRequestedAsync_SendsWebPushForCurrentApprover()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db, "approval-request-web-push-author@example.com");
+        var approver = new User
+        {
+            Email = "approval-request-web-push-approver@example.com",
+            FullName = "Web Push Approver",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(approver);
+        await db.SaveChangesAsync();
+
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Client case",
+            Title = "Approve with push",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            DueAt = DateTime.UtcNow.AddHours(4),
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "onApproval",
+            Participants =
+            [
+                new TaskJournalParticipant
+                {
+                    UserId = approver.Id,
+                    DisplayName = approver.FullName,
+                    Role = "approver",
+                    ApprovalStatus = "pending",
+                    SortOrder = 0
+                }
+            ]
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            webPushNotificationService: webPush);
+
+        await service.NotifyTaskApprovalRequestedAsync(task, author.FullName, author.Id);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        var pushed = Assert.Single(webPush.Notifications);
+        Assert.Equal(approver.Id, notification.RecipientUserId);
+        Assert.Equal(notification.Id, pushed.Id);
+        Assert.Equal(UserNotificationTypes.TaskApprovalRequested, pushed.Type);
+    }
+
+    [Fact]
+    public async Task NotifyTaskApprovalOverdueAsync_NotifiesRecipientsOncePerLocalDayAndSendsWebPush()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db, "approval-overdue-author@example.com");
+        var assignee = new User
+        {
+            Email = "approval-overdue-assignee@example.com",
+            FullName = "Исполнитель",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        var approver = new User
+        {
+            Email = "approval-overdue-approver@example.com",
+            FullName = "Согласующий",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.AddRange(assignee, approver);
+        await db.SaveChangesAsync();
+
+        var nowUtc = DateTime.UtcNow;
+        var task = new TaskJournalItem
+        {
+            ObjectName = "ЕГОРОВ - спор",
+            Title = "Просроченное согласование",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            DueAt = nowUtc.AddDays(3),
+            ApprovalDueAt = nowUtc.AddHours(-2),
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "onApproval",
+            Participants =
+            [
+                new TaskJournalParticipant
+                {
+                    UserId = approver.Id,
+                    DisplayName = approver.FullName,
+                    Role = "approver",
+                    ApprovalStatus = "pending",
+                    SortOrder = 0
+                }
+            ]
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            webPushNotificationService: webPush);
+
+        await service.NotifyTaskApprovalOverdueAsync(task, nowUtc);
+        await service.NotifyTaskApprovalOverdueAsync(task, nowUtc.AddMinutes(5));
+
+        var notifications = await db.UserNotifications
+            .OrderBy(item => item.RecipientUserId)
+            .ToListAsync();
+        Assert.Equal([author.Id, assignee.Id, approver.Id], notifications.Select(item => item.RecipientUserId).ToArray());
+        Assert.All(notifications, notification =>
+        {
+            Assert.Equal(UserNotificationTypes.TaskApprovalOverdue, notification.Type);
+            Assert.Equal("rose", notification.Tone);
+            Assert.Contains("Просрочено согласование", notification.Title, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Срок согласования", notification.BodyPreview, StringComparison.OrdinalIgnoreCase);
+        });
+        Assert.Equal(
+            notifications.Select(item => item.Id).OrderBy(id => id),
+            webPush.Notifications.Select(item => item.Id).OrderBy(id => id));
+    }
+
+    [Fact]
     public async Task SendToUserAsync_SendsThroughAllMatchingSendersForPurpose()
     {
         await using var db = await CreateContextAsync();

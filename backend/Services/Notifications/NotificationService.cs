@@ -1068,6 +1068,84 @@ public sealed class NotificationService : INotificationService
         return deliveries;
     }
 
+    public async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskApprovalOverdueAsync(
+        TaskJournalItem task,
+        DateTime nowUtc,
+        CancellationToken cancellationToken = default)
+    {
+        if (!task.ApprovalDueAt.HasValue)
+        {
+            return Array.Empty<NotificationDelivery>();
+        }
+
+        var currentApprover = GetCurrentApprover(task);
+        if (currentApprover is null)
+        {
+            return Array.Empty<NotificationDelivery>();
+        }
+
+        var recipients = ResolveApprovalRequestRecipientUserIds(task, actorUserId: 0);
+        if (recipients.Count == 0)
+        {
+            return Array.Empty<NotificationDelivery>();
+        }
+
+        var subject = $"Просрочено согласование: {task.Title}";
+        var channels = ResolveTaskMessageChannels(task);
+        var deliveries = new List<NotificationDelivery>();
+        foreach (var userId in recipients)
+        {
+            var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(userId, cancellationToken);
+            var localDate = CalendarTimeZoneHelper.ToUserLocal(nowUtc, recipientTimeZone).Date;
+            var eventKey = $"task:{task.Id}:approval-overdue:{localDate:yyyyMMdd}";
+            var approvalBody = BuildTaskApprovalOverdueBody(task, currentApprover, recipientTimeZone);
+            var message = await RenderTemplateAsync(
+                NotificationTemplateKeys.TaskApprovalOverdue,
+                subject,
+                approvalBody,
+                NotificationTemplateCatalog.MergeValues(
+                    BuildTaskTemplateValues(task, recipientTimeZone, "Система"),
+                    new Dictionary<string, string?>
+                    {
+                        ["approval.approverName"] = ResolveParticipantName(currentApprover),
+                        ["approval.dueAt"] = FormatTaskDueAt(DateTime.SpecifyKind(task.ApprovalDueAt.Value, DateTimeKind.Utc), recipientTimeZone)
+                    }),
+                purpose: NotificationPurposes.TaskReminder,
+                cancellationToken: cancellationToken);
+
+            if (HasTaskChannel(task, NotificationChannels.InApp))
+            {
+                await CreateUserNotificationAsync(
+                    userId,
+                    UserNotificationTypes.TaskApprovalOverdue,
+                    eventKey,
+                    message.Subject,
+                    message.Body,
+                    "rose",
+                    task,
+                    new
+                    {
+                        currentApproverId = currentApprover.Id,
+                        currentApproverUserId = currentApprover.UserId,
+                        approvalDueAt = task.ApprovalDueAt
+                    },
+                    cancellationToken);
+            }
+
+            var enabledChannels = await ResolveUserNotificationChannelsAsync(
+                userId,
+                UserNotificationTypes.TaskApprovalOverdue,
+                channels,
+                cancellationToken);
+            if (enabledChannels.Count > 0)
+            {
+                deliveries.AddRange(await SendToUserAsync(userId, message, enabledChannels, eventKey, cancellationToken));
+            }
+        }
+
+        return deliveries;
+    }
+
     public async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskChangedAsync(
         TaskJournalItem task,
         IReadOnlyList<string> changeLabels,
@@ -2454,6 +2532,39 @@ public sealed class NotificationService : INotificationService
         {
             lines.Add(string.Empty);
             lines.Add($"Резолюция: {resolution.Trim()}");
+        }
+
+        return string.Join('\n', lines);
+    }
+
+    private static string BuildTaskApprovalOverdueBody(
+        TaskJournalItem task,
+        TaskJournalParticipant approver,
+        TimeZoneInfo timeZone)
+    {
+        var dueText = task.ApprovalDueAt.HasValue
+            ? FormatTaskDueAt(DateTime.SpecifyKind(task.ApprovalDueAt.Value, DateTimeKind.Utc), timeZone)
+            : "не указан";
+        var taskDueText = FormatTaskDueAt(task.DueAt, timeZone);
+        var lines = new List<string>
+        {
+            "Срок согласования задачи истек.",
+            string.Empty,
+            $"Клиент/дело: {task.ObjectName}",
+            $"Задача: {task.Title}",
+            $"Срок согласования: {dueText}",
+            $"Срок задачи: {taskDueText}",
+        };
+
+        var approverName = ResolveParticipantName(approver);
+        if (!string.IsNullOrWhiteSpace(approverName))
+        {
+            lines.Add($"Текущий согласующий: {approverName}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(task.AssigneeName))
+        {
+            lines.Add($"Исполнитель: {task.AssigneeName.Trim()}");
         }
 
         return string.Join('\n', lines);

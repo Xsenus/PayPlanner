@@ -93,11 +93,16 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
 
             var tasks = await context.TaskJournalItems
                 .AsNoTracking()
+                .Include(task => task.Participants)
+                    .ThenInclude(participant => participant.User)
                 .Where(task =>
                     task.AssigneeUserId.HasValue
                     && task.Status != "done"
                     && task.Status != "cancelled"
-                    && task.DueAt <= nowUtc.AddDays(7))
+                    && (task.DueAt <= nowUtc.AddDays(7)
+                        || (task.ApprovalDueAt.HasValue
+                            && task.ApprovalDueAt <= nowUtc
+                            && (task.Status == "onApproval" || task.Status == "overdueApproval"))))
                 .OrderBy(task => task.DueAt)
                 .Take(500)
                 .ToListAsync(cancellationToken);
@@ -117,6 +122,12 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
                 }
 
                 var assigneeUserId = task.AssigneeUserId!.Value;
+                if (IsApprovalOverdueNotificationDue(task, nowUtc))
+                {
+                    var approvalDeliveries = await notificationService.NotifyTaskApprovalOverdueAsync(task, nowUtc, cancellationToken);
+                    sent += approvalDeliveries.Count;
+                }
+
                 if (!assigneeTimeZones.TryGetValue(assigneeUserId, out var assigneeTimeZone))
                 {
                     assigneeTimeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(
@@ -227,6 +238,15 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
             _ => false
         };
     }
+
+    private static bool IsApprovalOverdueNotificationDue(TaskJournalItem task, DateTime nowUtc)
+        => task.ApprovalDueAt.HasValue
+            && task.ApprovalDueAt.Value <= nowUtc
+            && (string.Equals(task.Status, "onApproval", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(task.Status, "overdueApproval", StringComparison.OrdinalIgnoreCase))
+            && task.Participants.Any(participant =>
+                string.Equals(participant.Role, "approver", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(participant.ApprovalStatus, "approved", StringComparison.OrdinalIgnoreCase));
 
     private static bool IsInsideReminderWindow(DateTime nowUtc, DateTime dueAt, TimeSpan offset)
         => nowUtc >= dueAt.Subtract(offset) && nowUtc < dueAt;

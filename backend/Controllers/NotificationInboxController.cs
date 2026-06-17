@@ -423,7 +423,8 @@ public class NotificationInboxController : ControllerBase
                 || item.Type == UserNotificationTypes.TaskScheduleConflict
                 || item.Type == UserNotificationTypes.TaskApprovalRequested
                 || item.Type == UserNotificationTypes.TaskApproved
-                || item.Type == UserNotificationTypes.TaskRevisionRequested),
+                || item.Type == UserNotificationTypes.TaskRevisionRequested
+                || item.Type == UserNotificationTypes.TaskApprovalOverdue),
             "calendar" => query.Where(item =>
                 item.ObjectType == "calendar"
                 || item.Type.Contains("Calendar")),
@@ -477,6 +478,7 @@ public class NotificationInboxController : ControllerBase
             || item.Type == UserNotificationTypes.TaskScheduleConflict
             || item.Type == UserNotificationTypes.TaskApprovalRequested
             || item.Type == UserNotificationTypes.TaskRevisionRequested
+            || item.Type == UserNotificationTypes.TaskApprovalOverdue
             || item.Type == UserNotificationTypes.CaseInactivityControl
             || item.Type == UserNotificationTypes.CaseAccessRequested
             || item.Type == UserNotificationTypes.CaseCourtEvent

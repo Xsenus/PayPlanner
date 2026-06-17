@@ -1035,6 +1035,79 @@ public class SystemJobsControllerTests
     }
 
     [Fact]
+    public async Task TaskReminderService_NotifiesOverdueApprovalEvenWhenTaskDueDateIsLater()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var nowUtc = DateTime.UtcNow;
+        var role = new Role { Name = $"approval-overdue-role-{Guid.NewGuid():N}", Description = "Approval overdue role" };
+        scope.Db.Roles.Add(role);
+        await scope.Db.SaveChangesAsync();
+        var assignee = new User
+        {
+            Email = $"approval-overdue-assignee-{Guid.NewGuid():N}@example.com",
+            FullName = "Approval Overdue Assignee",
+            PasswordHash = "hash",
+            RoleId = role.Id,
+            IsApproved = true,
+            IsActive = true,
+        };
+        var approver = new User
+        {
+            Email = $"approval-overdue-approver-{Guid.NewGuid():N}@example.com",
+            FullName = "Approval Overdue Approver",
+            PasswordHash = "hash",
+            RoleId = role.Id,
+            IsApproved = true,
+            IsActive = true,
+        };
+        scope.Db.Users.AddRange(assignee, approver);
+        await scope.Db.SaveChangesAsync();
+        var task = new TaskJournalItem
+        {
+            ObjectName = "CASE-APPROVAL-OVERDUE",
+            Title = "Approval overdue boundary",
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            DueAt = nowUtc.AddDays(14),
+            ApprovalDueAt = nowUtc.AddHours(-1),
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "onApproval",
+            Participants =
+            [
+                new TaskJournalParticipant
+                {
+                    UserId = approver.Id,
+                    DisplayName = approver.FullName,
+                    Role = "approver",
+                    ApprovalStatus = "pending",
+                    SortOrder = 0,
+                    CreatedAt = nowUtc,
+                    UpdatedAt = nowUtc,
+                }
+            ]
+        };
+        scope.Db.TaskJournalItems.Add(task);
+        await scope.Db.SaveChangesAsync();
+
+        var notificationService = new RecordingTaskReminderNotificationService();
+        var services = new ServiceCollection();
+        services.AddScoped(_ => new PaymentContext(scope.Options, useObjectAuditModel: false));
+        services.AddSingleton<INotificationService>(notificationService);
+        await using var provider = services.BuildServiceProvider();
+        var service = new TaskJournalReminderNotificationService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new ConfigurationBuilder().Build(),
+            NullLogger<TaskJournalReminderNotificationService>.Instance);
+
+        var sent = await service.RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal(1, sent);
+        Assert.Equal([task.Id], notificationService.ApprovalOverdueTaskIds);
+        Assert.Empty(notificationService.Reminders);
+    }
+
+    [Fact]
     public async Task SystemJobRunStateService_RoundTripsLastRunState()
     {
         await using var scope = await CreateDbScopeAsync();
@@ -1162,6 +1235,7 @@ public class SystemJobsControllerTests
     private sealed class RecordingTaskReminderNotificationService : INotificationService
     {
         public List<(int TaskId, string ReminderKey)> Reminders { get; } = [];
+        public List<int> ApprovalOverdueTaskIds { get; } = [];
 
         public Task<NotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
@@ -1244,6 +1318,22 @@ public class SystemJobsControllerTests
 
         public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskApprovalDecisionAsync(TaskJournalItem task, TaskJournalParticipant approver, string decision, string actorName, int actorUserId, string? resolution = null, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskApprovalOverdueAsync(TaskJournalItem task, DateTime nowUtc, CancellationToken cancellationToken = default)
+        {
+            ApprovalOverdueTaskIds.Add(task.Id);
+            return Task.FromResult<IReadOnlyList<NotificationDelivery>>(
+            [
+                new NotificationDelivery
+                {
+                    EventKey = $"task:{task.Id}:approval-overdue",
+                    Channel = NotificationChannels.InApp,
+                    Subject = "Approval overdue",
+                    CreatedAt = nowUtc,
+                    Status = NotificationDeliveryStatus.Sent,
+                }
+            ]);
+        }
 
         public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskChangedAsync(TaskJournalItem task, IReadOnlyList<string> changeLabels, string actorName, int actorUserId, string? comment = null, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());

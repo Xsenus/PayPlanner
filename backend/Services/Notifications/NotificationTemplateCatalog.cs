@@ -18,6 +18,7 @@ public static class NotificationTemplateKeys
     public const string TaskApprovalRequested = "task.approvalRequested";
     public const string TaskApproved = "task.approved";
     public const string TaskRevisionRequested = "task.revisionRequested";
+    public const string TaskApprovalOverdue = "task.approvalOverdue";
     public const string TaskChanged = "task.changed";
     public const string TaskComment = "task.comment";
     public const string CaseInactivityControl = "case.inactivityControl";
@@ -159,6 +160,13 @@ public static class NotificationTemplateCatalog
             "Задача возвращена на доработку: {{task.title}}",
             "{{actor.name}} вернул задачу на доработку: {{task.title}}\n\nКомментарий: {{approval.resolution}}",
             [.. TaskVariables, new("approval.resolution", "Комментарий согласующего")]),
+        new(
+            NotificationTemplateKeys.TaskApprovalOverdue,
+            "Просрочено согласование",
+            "Уведомление о просроченном сроке согласования задачи.",
+            "Просрочено согласование: {{task.title}}",
+            "Срок согласования задачи истек.\n\nЗадача: {{task.title}}\nСогласующий: {{approval.approverName}}\nСрок согласования: {{approval.dueAt}}\nОбъект: {{task.objectName}}",
+            [.. TaskVariables, new("approval.approverName", "Текущий согласующий"), new("approval.dueAt", "Срок согласования")]),
         new(
             NotificationTemplateKeys.TaskChanged,
             "Изменения по задаче",

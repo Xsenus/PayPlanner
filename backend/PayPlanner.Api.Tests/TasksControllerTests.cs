@@ -3665,6 +3665,7 @@ public class TasksControllerTests
         public List<int> AssignedTaskIds { get; } = [];
         public List<int> ApprovalRequestedTaskIds { get; } = [];
         public List<(int TaskId, string Decision)> ApprovalDecisionTaskIds { get; } = [];
+        public List<int> ApprovalOverdueTaskIds { get; } = [];
         public List<(int TaskId, IReadOnlyList<string> ChangeLabels, string? Comment)> ChangedTasks { get; } = [];
         public List<(int TaskId, int? PreviousAssigneeUserId, string? PreviousAssigneeName, IReadOnlyList<string> ChangeLabels, string? Comment)> ReassignedTasks { get; } = [];
         public List<int> CommentTaskIds { get; } = [];
@@ -3752,6 +3753,12 @@ public class TasksControllerTests
         public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskApprovalDecisionAsync(TaskJournalItem task, TaskJournalParticipant approver, string decision, string actorName, int actorUserId, string? resolution = null, CancellationToken cancellationToken = default)
         {
             ApprovalDecisionTaskIds.Add((task.Id, decision));
+            return Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+        }
+
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskApprovalOverdueAsync(TaskJournalItem task, DateTime nowUtc, CancellationToken cancellationToken = default)
+        {
+            ApprovalOverdueTaskIds.Add(task.Id);
             return Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
         }
 
