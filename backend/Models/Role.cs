@@ -12,4 +12,5 @@ public class Role
 
     public ICollection<User> Users { get; set; } = new List<User>();
     public ICollection<RolePermission> Permissions { get; set; } = new List<RolePermission>();
+    public ICollection<RoleCalendarVisibleUser> CalendarVisibleUsers { get; set; } = new List<RoleCalendarVisibleUser>();
 }

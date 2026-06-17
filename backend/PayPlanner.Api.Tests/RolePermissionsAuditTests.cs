@@ -169,6 +169,107 @@ public class RolePermissionsAuditTests
         Assert.IsType<ForbidResult>(response.Result);
     }
 
+    [Fact]
+    public async Task Update_SynchronizesSpecificCalendarVisibleUsers()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "secretary", Description = "Secretary" };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.AddRange(RolePermissionCatalog.CreateEntities(role.Id, allowRoleManagement: false));
+        var first = new User
+        {
+            Email = "calendar-first@example.com",
+            PasswordHash = "hash",
+            FullName = "Первый сотрудник",
+            RoleId = role.Id,
+            IsActive = true,
+            IsApproved = true,
+        };
+        var second = new User
+        {
+            Email = "calendar-second@example.com",
+            PasswordHash = "hash",
+            FullName = "Второй сотрудник",
+            RoleId = role.Id,
+            IsActive = true,
+            IsApproved = true,
+        };
+        db.Users.AddRange(first, second);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateAdminPrincipal());
+        var request = new RolePermissionsDto
+        {
+            Calendar = new CalendarPermissionsDto
+            {
+                CanView = true,
+                CanViewAnalytics = true,
+                ViewScope = DataVisibilityScope.Specific,
+                VisibleUserIds = new List<int> { first.Id, first.Id, second.Id },
+            },
+        };
+
+        var updateResult = await controller.Update(role.Id, request, CancellationToken.None);
+
+        Assert.IsType<NoContentResult>(updateResult);
+        var storedIds = await db.RoleCalendarVisibleUsers
+            .AsNoTracking()
+            .Where(item => item.RoleId == role.Id)
+            .OrderBy(item => item.UserId)
+            .Select(item => item.UserId)
+            .ToListAsync();
+        Assert.Equal(new[] { first.Id, second.Id }, storedIds);
+
+        request.Calendar.VisibleUserIds = new List<int> { second.Id };
+        updateResult = await controller.Update(role.Id, request, CancellationToken.None);
+
+        Assert.IsType<NoContentResult>(updateResult);
+        var response = await controller.Get(role.Id, CancellationToken.None);
+        var dto = AssertOk<RolePermissionsDto>(response);
+        Assert.Equal(DataVisibilityScope.Specific, dto.Calendar.ViewScope);
+        Assert.Equal(new[] { second.Id }, dto.Calendar.VisibleUserIds);
+    }
+
+    [Fact]
+    public async Task Update_RejectsInactiveCalendarVisibleUser()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "secretary", Description = "Secretary" };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.AddRange(RolePermissionCatalog.CreateEntities(role.Id, allowRoleManagement: false));
+        var inactive = new User
+        {
+            Email = "calendar-inactive-role@example.com",
+            PasswordHash = "hash",
+            FullName = "Неактивный сотрудник",
+            RoleId = role.Id,
+            IsActive = false,
+            IsApproved = true,
+        };
+        db.Users.Add(inactive);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateAdminPrincipal());
+        var request = new RolePermissionsDto
+        {
+            Calendar = new CalendarPermissionsDto
+            {
+                CanView = true,
+                ViewScope = DataVisibilityScope.Specific,
+                VisibleUserIds = new List<int> { inactive.Id },
+            },
+        };
+
+        var updateResult = await controller.Update(role.Id, request, CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(updateResult);
+        Assert.Empty(await db.RoleCalendarVisibleUsers.AsNoTracking().ToListAsync());
+    }
+
     private static RolePermissionsController CreateController(PaymentContext db, ClaimsPrincipal user)
         => new(db, new RoleManagementAccessService(db))
         {

@@ -708,6 +708,15 @@ export interface RolePermissionAuditReportDto {
   roles: RolePermissionAuditRoleDto[];
 }
 
+export interface RoleCalendarVisibleUserOptionDto {
+  id: number;
+  name: string;
+  email: string;
+  departmentId?: number | null;
+  department?: string | null;
+  roleName: string;
+}
+
 export type StickyNoteColor = 'yellow' | 'blue' | 'green' | 'pink' | 'white' | 'cyan';
 export type StickyNoteBoardVisibility = 'personal' | 'shared';
 export type StickyNoteBoardBackground = 'cork' | 'gray';
@@ -3519,6 +3528,10 @@ export class ApiService {
     return this.request<RolePermissions>(`/role-permissions/${roleId}`);
   }
 
+  async getRoleCalendarVisibleUserOptions() {
+    return this.request<RoleCalendarVisibleUserOptionDto[]>('/role-permissions/calendar-users');
+  }
+
   async getRolePermissionsAudit() {
     return this.request<RolePermissionAuditReportDto>('/role-permissions/audit');
   }
@@ -3652,6 +3665,7 @@ export class ApiService {
     legalEntityId?: number;
     from?: string;
     to?: string;
+    calendarView?: boolean;
     page?: number;
     pageSize?: number;
   }) {
@@ -3667,14 +3681,18 @@ export class ApiService {
       legalEntityId: params?.legalEntityId,
       from: params?.from,
       to: params?.to,
+      calendarView: params?.calendarView,
       page: params?.page ?? 1,
       pageSize: params?.pageSize ?? 100,
     });
     return this.request<PagedResult<TaskJournalItem>>(`/tasks${q}`);
   }
 
-  async getTaskJournalAssignees() {
-    return this.request<TaskJournalAssignee[]>('/tasks/assignees');
+  async getTaskJournalAssignees(params?: { calendarView?: boolean }) {
+    const q = buildQuery({
+      calendarView: params?.calendarView,
+    });
+    return this.request<TaskJournalAssignee[]>(`/tasks/assignees${q}`);
   }
 
   async getTaskJournalSettings() {

@@ -114,7 +114,42 @@ public class RolePermissionsController : ControllerBase
             .Where(rp => rp.RoleId == roleId)
             .ToListAsync(ct);
 
-        return Ok(MapToDto(permissions, IsProtectedRole(roleInfo.Name)));
+        var calendarVisibleUserIds = await _db.RoleCalendarVisibleUsers
+            .AsNoTracking()
+            .Where(item => item.RoleId == roleId && item.User != null && item.User.IsActive && item.User.IsApproved)
+            .OrderBy(item => item.UserId)
+            .Select(item => item.UserId)
+            .ToListAsync(ct);
+
+        return Ok(MapToDto(permissions, IsProtectedRole(roleInfo.Name), calendarVisibleUserIds));
+    }
+
+    [HttpGet("calendar-users")]
+    public async Task<ActionResult<IReadOnlyCollection<RoleCalendarVisibleUserOptionDto>>> GetCalendarUsers(CancellationToken ct)
+    {
+        var access = await _roleAccess.GetSnapshotAsync(User, ct);
+        if (!access.IsAdmin && !access.CanView && !access.CanEdit)
+        {
+            return Forbid();
+        }
+
+        var users = await _db.Users
+            .AsNoTracking()
+            .Where(user => user.IsActive && user.IsApproved)
+            .OrderBy(user => user.FullName == "" ? user.Email : user.FullName)
+            .ThenBy(user => user.Email)
+            .Select(user => new RoleCalendarVisibleUserOptionDto
+            {
+                Id = user.Id,
+                Name = user.FullName == "" ? user.Email : user.FullName,
+                Email = user.Email,
+                DepartmentId = user.DepartmentId,
+                Department = user.Department,
+                RoleName = user.Role == null ? string.Empty : user.Role.Name,
+            })
+            .ToListAsync(ct);
+
+        return Ok(users);
     }
 
     [HttpPut("{roleId:int}")]
@@ -175,6 +210,15 @@ public class RolePermissionsController : ControllerBase
         if (unused.Count > 0)
         {
             _db.RolePermissions.RemoveRange(unused);
+        }
+
+        if (request.Calendar.VisibleUserIds is not null)
+        {
+            var validation = await SyncCalendarVisibleUsersAsync(roleId, request.Calendar.VisibleUserIds, ct);
+            if (validation is not null)
+            {
+                return validation;
+            }
         }
 
         StampPermissionsAudit(role);
@@ -241,6 +285,14 @@ public class RolePermissionsController : ControllerBase
             _db.RolePermissions.RemoveRange(unused);
         }
 
+        var calendarVisibleUsers = await _db.RoleCalendarVisibleUsers
+            .Where(item => item.RoleId == roleId)
+            .ToListAsync(ct);
+        if (calendarVisibleUsers.Count > 0)
+        {
+            _db.RoleCalendarVisibleUsers.RemoveRange(calendarVisibleUsers);
+        }
+
         StampPermissionsAudit(role);
         await _db.SaveChangesAsync(ct);
         return NoContent();
@@ -248,7 +300,8 @@ public class RolePermissionsController : ControllerBase
 
     private static RolePermissionsDto MapToDto(
         IReadOnlyCollection<RolePermission> permissions,
-        bool allowRoleManagement)
+        bool allowRoleManagement,
+        IReadOnlyCollection<int>? calendarVisibleUserIds = null)
     {
         var dto = RolePermissionCatalog.CreateDto(allowRoleManagement);
         foreach (var permission in permissions)
@@ -265,6 +318,7 @@ public class RolePermissionsController : ControllerBase
                         CanExport = permission.CanExport,
                         CanViewAnalytics = permission.CanViewAnalytics,
                         ViewScope = NormalizeViewScope(RolePermissionCatalog.Calendar, permission.ViewScope),
+                        VisibleUserIds = calendarVisibleUserIds?.Distinct().OrderBy(id => id).ToList() ?? [],
                     };
                     break;
                 case RolePermissionCatalog.Reports:
@@ -328,6 +382,75 @@ public class RolePermissionsController : ControllerBase
         }
 
         return dto;
+    }
+
+    private async Task<IActionResult?> SyncCalendarVisibleUsersAsync(
+        int roleId,
+        IReadOnlyCollection<int> requestedUserIds,
+        CancellationToken ct)
+    {
+        var requested = requestedUserIds
+            .Where(id => id > 0)
+            .Distinct()
+            .OrderBy(id => id)
+            .ToArray();
+
+        if (requested.Length == 0)
+        {
+            var allExisting = await _db.RoleCalendarVisibleUsers
+                .Where(item => item.RoleId == roleId)
+                .ToListAsync(ct);
+            if (allExisting.Count > 0)
+            {
+                _db.RoleCalendarVisibleUsers.RemoveRange(allExisting);
+            }
+
+            return null;
+        }
+
+        var validUserIds = await _db.Users
+            .AsNoTracking()
+            .Where(user => requested.Contains(user.Id) && user.IsActive && user.IsApproved)
+            .Select(user => user.Id)
+            .ToListAsync(ct);
+
+        var invalidUserIds = requested.Except(validUserIds).ToArray();
+        if (invalidUserIds.Length > 0)
+        {
+            return BadRequest(new
+            {
+                message = "Для видимости календарей выбраны несуществующие или неактивные пользователи.",
+                userIds = invalidUserIds,
+            });
+        }
+
+        var existing = await _db.RoleCalendarVisibleUsers
+            .Where(item => item.RoleId == roleId)
+            .ToListAsync(ct);
+        var existingUserIds = existing.Select(item => item.UserId).ToHashSet();
+        var requestedSet = requested.ToHashSet();
+
+        var toRemove = existing
+            .Where(item => !requestedSet.Contains(item.UserId))
+            .ToList();
+        if (toRemove.Count > 0)
+        {
+            _db.RoleCalendarVisibleUsers.RemoveRange(toRemove);
+        }
+
+        foreach (var userId in requested.Where(userId => !existingUserIds.Contains(userId)))
+        {
+            _db.RoleCalendarVisibleUsers.Add(new RoleCalendarVisibleUser
+            {
+                RoleId = roleId,
+                UserId = userId,
+                CreatedAt = DateTime.UtcNow,
+                CreatedByUserId = User.GetUserId(),
+                CreatedByUserName = User.GetDisplayName(),
+            });
+        }
+
+        return null;
     }
 
     private static RolePermissionAuditRoleDto BuildAuditRole(Role role)
@@ -474,14 +597,17 @@ public class RolePermissionsController : ControllerBase
 
     private static bool HasInvalidViewScope(RolePermission permission)
     {
-        if (!DataVisibilityScope.IsSupported(permission.ViewScope))
+        var isCalendar = string.Equals(permission.Section, RolePermissionCatalog.Calendar, StringComparison.OrdinalIgnoreCase);
+        if (!DataVisibilityScope.IsSupported(permission.ViewScope, includeSpecific: isCalendar))
         {
             return true;
         }
 
         if (RolePermissionCatalog.HasDataScope(permission.Section))
         {
-            return false;
+            return isCalendar
+                ? false
+                : string.Equals(permission.ViewScope, DataVisibilityScope.Specific, StringComparison.OrdinalIgnoreCase);
         }
 
         return !string.Equals(
@@ -610,7 +736,10 @@ public class RolePermissionsController : ControllerBase
 
     private static string NormalizeViewScope(string section, string? value)
         => RolePermissionCatalog.HasDataScope(section)
-            ? DataVisibilityScope.Normalize(value, DataVisibilityScope.Own)
+            ? DataVisibilityScope.Normalize(
+                value,
+                DataVisibilityScope.Own,
+                includeSpecific: string.Equals(section, RolePermissionCatalog.Calendar, StringComparison.OrdinalIgnoreCase))
             : DataVisibilityScope.All;
 
     private static bool IsProtectedRole(string roleName)
@@ -646,4 +775,14 @@ public class RolePermissionsController : ControllerBase
             section.CanExport,
             false,
             DataVisibilityScope.Normalize(section.ViewScope, DataVisibilityScope.Own));
+}
+
+public sealed class RoleCalendarVisibleUserOptionDto
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public int? DepartmentId { get; set; }
+    public string? Department { get; set; }
+    public string RoleName { get; set; } = string.Empty;
 }

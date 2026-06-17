@@ -53,4 +53,5 @@ public class User
     public ICollection<PaymentResponsible> InvoiceResponsibles { get; set; } = new List<PaymentResponsible>();
     public ICollection<UserExternalIdentity> ExternalIdentities { get; set; } = new List<UserExternalIdentity>();
     public ICollection<UserCompanyAccess> CompanyAccesses { get; set; } = new List<UserCompanyAccess>();
+    public ICollection<RoleCalendarVisibleUser> CalendarVisibleInRoles { get; set; } = new List<RoleCalendarVisibleUser>();
 }

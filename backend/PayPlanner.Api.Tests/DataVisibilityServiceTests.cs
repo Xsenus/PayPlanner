@@ -147,6 +147,81 @@ public class DataVisibilityServiceTests
         Assert.False(permission.CanEdit);
     }
 
+    [Fact]
+    public async Task ResolveDataVisibilityAsync_UsesSpecificCalendarUsers()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "secretary", Description = "secretary" };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = role.Id,
+            Section = RolePermissionCatalog.Calendar,
+            CanView = true,
+            ViewScope = DataVisibilityScope.Specific,
+        });
+
+        var current = new User
+        {
+            Email = "calendar-current@example.com",
+            PasswordHash = "hash",
+            FullName = "Current",
+            RoleId = role.Id,
+            IsActive = true,
+            IsApproved = true,
+        };
+        var selected = new User
+        {
+            Email = "calendar-selected@example.com",
+            PasswordHash = "hash",
+            FullName = "Selected",
+            RoleId = role.Id,
+            IsActive = true,
+            IsApproved = true,
+        };
+        var notSelected = new User
+        {
+            Email = "calendar-not-selected@example.com",
+            PasswordHash = "hash",
+            FullName = "Not Selected",
+            RoleId = role.Id,
+            IsActive = true,
+            IsApproved = true,
+        };
+        var inactiveSelected = new User
+        {
+            Email = "calendar-inactive@example.com",
+            PasswordHash = "hash",
+            FullName = "Inactive",
+            RoleId = role.Id,
+            IsActive = false,
+            IsApproved = true,
+        };
+        db.Users.AddRange(current, selected, notSelected, inactiveSelected);
+        await db.SaveChangesAsync();
+
+        db.RoleCalendarVisibleUsers.AddRange(
+            new RoleCalendarVisibleUser { RoleId = role.Id, UserId = selected.Id },
+            new RoleCalendarVisibleUser { RoleId = role.Id, UserId = inactiveSelected.Id });
+        await db.SaveChangesAsync();
+
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(new[]
+        {
+            new Claim(ClaimTypes.NameIdentifier, current.Id.ToString()),
+        }, "test"));
+
+        var access = await db.ResolveDataVisibilityAsync(principal, RolePermissionCatalog.Calendar);
+
+        Assert.NotNull(access);
+        Assert.Equal(DataVisibilityScope.Specific, access!.ViewScope);
+        Assert.Contains(current.Id, access.VisibleUserIds);
+        Assert.Contains(selected.Id, access.VisibleUserIds);
+        Assert.DoesNotContain(notSelected.Id, access.VisibleUserIds);
+        Assert.DoesNotContain(inactiveSelected.Id, access.VisibleUserIds);
+    }
+
     private static async Task<PaymentContext> CreateContextAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");

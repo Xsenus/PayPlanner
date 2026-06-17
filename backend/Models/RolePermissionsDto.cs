@@ -13,6 +13,7 @@ public class MenuSectionPermissionsDto
 public class CalendarPermissionsDto : MenuSectionPermissionsDto
 {
     public bool CanViewAnalytics { get; set; }
+    public List<int>? VisibleUserIds { get; set; }
 }
 
 public class RolePermissionsDto

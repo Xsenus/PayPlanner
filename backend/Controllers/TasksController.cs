@@ -116,11 +116,12 @@ public class TasksController : ControllerBase
         [FromQuery] int? legalEntityId = null,
         [FromQuery] string? priority = null,
         [FromQuery] bool? underControl = null,
+        [FromQuery] bool calendarView = false,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
         CancellationToken ct = default)
     {
-        var access = await GetTaskAccessAsync(ct);
+        var access = await GetTaskAccessAsync(ct, calendarView ? RolePermissionCatalog.Calendar : RolePermissionCatalog.Tasks);
         if (access is null)
         {
             return Unauthorized();
@@ -231,9 +232,9 @@ public class TasksController : ControllerBase
     }
 
     [HttpGet("assignees")]
-    public async Task<ActionResult<IReadOnlyList<TaskJournalAssigneeDto>>> GetAssignees(CancellationToken ct)
+    public async Task<ActionResult<IReadOnlyList<TaskJournalAssigneeDto>>> GetAssignees([FromQuery] bool calendarView = false, CancellationToken ct = default)
     {
-        var access = await GetTaskAccessAsync(ct);
+        var access = await GetTaskAccessAsync(ct, calendarView ? RolePermissionCatalog.Calendar : RolePermissionCatalog.Tasks);
         if (access is null)
         {
             return Unauthorized();
@@ -244,9 +245,11 @@ public class TasksController : ControllerBase
             return Forbid();
         }
 
+        var visibleUserIds = access.Visibility.VisibleUserIds.ToArray();
         var users = await _db.Users
             .AsNoTracking()
             .Where(user => user.IsActive && user.IsApproved)
+            .Where(user => access.Visibility.SeesAll || visibleUserIds.Contains(user.Id))
             .OrderBy(user => user.FullName)
             .ThenBy(user => user.Email)
             .Select(user => new TaskJournalAssigneeDto
@@ -2716,7 +2719,7 @@ public class TasksController : ControllerBase
         return query.ApplyTaskVisibility(access.Visibility);
     }
 
-    private async Task<TaskAccess?> GetTaskAccessAsync(CancellationToken ct)
+    private async Task<TaskAccess?> GetTaskAccessAsync(CancellationToken ct, string section = RolePermissionCatalog.Tasks)
     {
         var userId = User.GetUserId();
         if (!userId.HasValue)
@@ -2724,14 +2727,14 @@ public class TasksController : ControllerBase
             return null;
         }
 
-        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
+        var visibility = await _db.ResolveDataVisibilityAsync(User, section, ct);
         if (visibility is null)
         {
             return null;
         }
 
         var isAdmin = visibility.IsAdmin;
-        var permission = await _db.GetUserSectionPermissionAsync(userId.Value, RolePermissionCatalog.Tasks, ct);
+        var permission = await _db.GetUserSectionPermissionAsync(userId.Value, section, ct);
         return new TaskAccess(userId.Value, User.GetDisplayName(), isAdmin, permission, visibility);
     }
 

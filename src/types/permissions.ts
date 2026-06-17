@@ -25,7 +25,7 @@ export type MenuPermissionKey =
   | 'canDelete'
   | 'canExport';
 
-export type DataVisibilityScope = 'own' | 'department' | 'all';
+export type DataVisibilityScope = 'own' | 'department' | 'all' | 'specific';
 
 export interface MenuSectionPermissions {
   canView: boolean;
@@ -38,6 +38,7 @@ export interface MenuSectionPermissions {
 
 export interface CalendarPermissions extends MenuSectionPermissions {
   canViewAnalytics: boolean;
+  visibleUserIds?: number[];
 }
 
 type OtherSectionKey = Exclude<MenuSectionKey, 'calendar'>;
@@ -99,6 +100,7 @@ export const defaultRolePermissions: RolePermissions = {
   calendar: {
     ...defaultMenuPermissions,
     canViewAnalytics: true,
+    visibleUserIds: [],
   },
   reports: { ...defaultMenuPermissions },
   tasks: { ...defaultMenuPermissions },

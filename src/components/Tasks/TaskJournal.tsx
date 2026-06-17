@@ -638,7 +638,11 @@ function downloadBlob(fileName: string, blob: Blob) {
   URL.revokeObjectURL(url);
 }
 
-async function loadAllTaskJournalItems(contextFilter?: TaskJournalContextFilter, underControlOnly = false) {
+async function loadAllTaskJournalItems(
+  contextFilter?: TaskJournalContextFilter,
+  underControlOnly = false,
+  calendarView = false,
+) {
   const pageSize = 200;
   let page = 1;
   let total = Number.POSITIVE_INFINITY;
@@ -651,6 +655,7 @@ async function loadAllTaskJournalItems(contextFilter?: TaskJournalContextFilter,
       underControl: underControlOnly || undefined,
       clientId: contextFilter?.clientId ?? undefined,
       legalEntityId: contextFilter?.legalEntityId ?? undefined,
+      calendarView,
     });
     items.push(...response.items);
     total = response.total;
@@ -1010,7 +1015,7 @@ function isTaskAuthoredByUser(task: TaskJournalItem, userId: number | null, user
 }
 
 function normalizeTaskCalendarViewScope(viewScope?: MenuSectionPermissions['viewScope']) {
-  return viewScope === 'department' || viewScope === 'all' ? viewScope : 'own';
+  return viewScope === 'department' || viewScope === 'all' || viewScope === 'specific' ? viewScope : 'own';
 }
 
 function normalizeDepartmentName(value?: string | null) {
@@ -1643,7 +1648,14 @@ export function TaskJournal({
   const canExportTasks = isAdminUser || permissions.tasks.canExport;
   const canExportCases = isAdminUser || permissions.cases.canExport;
   const taskCalendarViewScope = normalizeTaskCalendarViewScope(permissions.calendar.viewScope);
-  const canViewEmployeeTaskCalendars = isAdminUser || taskCalendarViewScope === 'department' || taskCalendarViewScope === 'all';
+  const calendarVisibleUserIds = useMemo(
+    () => permissions.calendar.visibleUserIds ?? [],
+    [permissions.calendar.visibleUserIds],
+  );
+  const canViewEmployeeTaskCalendars = isAdminUser
+    || taskCalendarViewScope === 'department'
+    || taskCalendarViewScope === 'all'
+    || taskCalendarViewScope === 'specific';
   const isApprovalsMode = mode === 'approvals';
   const taskContextDefaults = useMemo<Partial<TaskJournalUpsertPayload>>(() => {
     if (!contextFilter) {
@@ -1692,6 +1704,7 @@ export function TaskJournal({
   const [dateFromFilter, setDateFromFilter] = useState(initialPreferences.dateFrom);
   const [dateToFilter, setDateToFilter] = useState(initialPreferences.dateTo);
   const [viewMode, setViewMode] = useState<ViewMode>(initialPreferences.viewMode);
+  const shouldUseCalendarVisibility = viewMode === 'calendar' || initialView === 'calendar';
   const [calendarColorMode, setCalendarColorMode] = useState<TaskCalendarColorMode>(initialPreferences.calendarColorMode);
   const [calendarConflictPolicy, setCalendarConflictPolicy] = useState<TaskCalendarConflictPolicy>(initialPreferences.calendarConflictPolicy);
   const [calendarLoadWarningMode, setCalendarLoadWarningMode] = useState<TaskCalendarLoadWarningMode>(initialPreferences.calendarLoadWarningMode);
@@ -1948,8 +1961,8 @@ export function TaskJournal({
       const settingsPromise = apiService.getTaskJournalSettings();
       const automationPromise = settingsPromise.then((settingsResponse) => loadAutomationCandidates(settingsResponse, searchRef.current));
       const [taskItems, assigneeResponse, settingsResponse, notificationDefaultsResponse, timeZoneResponse, calendarSyncSettingsResponse, automationResponse] = await Promise.all([
-        loadAllTaskJournalItems(contextFilter, underControlOnly),
-        apiService.getTaskJournalAssignees(),
+        loadAllTaskJournalItems(contextFilter, underControlOnly, shouldUseCalendarVisibility),
+        apiService.getTaskJournalAssignees({ calendarView: shouldUseCalendarVisibility }),
         settingsPromise,
         apiService.getUserSetting(TASK_NOTIFICATION_DEFAULTS_SETTING_KEY).catch(() => null),
         apiService.getUserSetting(USER_TIME_ZONE_SETTING_KEY).catch(() => null),
@@ -1968,7 +1981,7 @@ export function TaskJournal({
     } finally {
       setLoading(false);
     }
-  }, [contextFilter, loadAutomationCandidates, toast, underControlOnly]);
+  }, [contextFilter, loadAutomationCandidates, shouldUseCalendarVisibility, toast, underControlOnly]);
 
   useEffect(() => {
     void refreshTasks();
@@ -2017,10 +2030,12 @@ export function TaskJournal({
       assigneeOptions
         .filter((assignee) => isAssigneeInDepartment(assignee, user?.departmentId, user?.department))
         .forEach((assignee) => visibleUserIds.add(assignee.id));
+    } else if (taskCalendarViewScope === 'specific') {
+      calendarVisibleUserIds.forEach((userId) => visibleUserIds.add(userId));
     }
 
     return visibleUserIds;
-  }, [assigneeOptions, currentUserId, isAdminUser, taskCalendarViewScope, user?.department, user?.departmentId]);
+  }, [assigneeOptions, calendarVisibleUserIds, currentUserId, isAdminUser, taskCalendarViewScope, user?.department, user?.departmentId]);
 
   const selectedAssigneeTimeZoneId = useMemo(() => {
     if (!canViewEmployeeTaskCalendars || assigneeFilter === 'all' || !/^\d+$/.test(assigneeFilter)) {

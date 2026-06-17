@@ -5884,6 +5884,44 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("Roles");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.RoleCalendarVisibleUser", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CreatedByUserName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int>("RoleId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId")
+                        .HasDatabaseName("IX_RoleCalendarVisibleUsers_UserId");
+
+                    b.HasIndex("RoleId", "UserId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_RoleCalendarVisibleUsers_Role_User");
+
+                    b.ToTable("RoleCalendarVisibleUsers");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.RolePermission", b =>
                 {
                     b.Property<int>("Id")
@@ -9150,6 +9188,25 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("Client");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.RoleCalendarVisibleUser", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.Role", "Role")
+                        .WithMany("CalendarVisibleUsers")
+                        .HasForeignKey("RoleId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PayPlanner.Api.Models.User", "User")
+                        .WithMany("CalendarVisibleInRoles")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Role");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.RolePermission", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.Role", "Role")
@@ -9722,6 +9779,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
             modelBuilder.Entity("PayPlanner.Api.Models.Role", b =>
                 {
+                    b.Navigation("CalendarVisibleUsers");
+
                     b.Navigation("Permissions");
 
                     b.Navigation("Users");
@@ -9765,6 +9824,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
             modelBuilder.Entity("PayPlanner.Api.Models.User", b =>
                 {
                     b.Navigation("Acts");
+
+                    b.Navigation("CalendarVisibleInRoles");
 
                     b.Navigation("CompanyAccesses");
 

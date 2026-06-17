@@ -193,7 +193,8 @@ public static class RolePermissionCatalog
             CanDelete = values.CanDelete,
             CanExport = values.CanExport,
             CanViewAnalytics = values.CanViewAnalytics,
-            ViewScope = values.ViewScope
+            ViewScope = values.ViewScope,
+            VisibleUserIds = []
         };
 }
 

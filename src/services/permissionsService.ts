@@ -16,7 +16,7 @@ const cache: PermissionsCache = new Map();
 const loading: LoadingCache = new Map();
 
 function normalizeViewScope(value?: string | null): DataVisibilityScope {
-  return value === 'department' || value === 'all' ? value : 'own';
+  return value === 'department' || value === 'all' || value === 'specific' ? value : 'own';
 }
 
 function normalizeSectionPermissions<T extends MenuSectionPermissions>(
@@ -32,9 +32,13 @@ function normalizeSectionPermissions<T extends MenuSectionPermissions>(
 
 function normalizePermissions(perms?: Partial<RolePermissions> | null): RolePermissions {
   const source = perms ?? {};
+  const calendar = normalizeSectionPermissions(defaultRolePermissions.calendar, source.calendar);
+  calendar.visibleUserIds = Array.isArray(source.calendar?.visibleUserIds)
+    ? source.calendar.visibleUserIds.filter((id): id is number => Number.isInteger(id) && id > 0)
+    : [];
 
   return {
-    calendar: normalizeSectionPermissions(defaultRolePermissions.calendar, source.calendar),
+    calendar,
     tasks: normalizeSectionPermissions(defaultRolePermissions.tasks, source.tasks),
     notes: normalizeSectionPermissions(defaultRolePermissions.notes, source.notes),
     reports: normalizeSectionPermissions(defaultRolePermissions.reports, source.reports),
@@ -57,7 +61,7 @@ function normalizePermissions(perms?: Partial<RolePermissions> | null): RolePerm
 
 function clonePermissions(perms: RolePermissions): RolePermissions {
   return {
-    calendar: { ...perms.calendar },
+    calendar: { ...perms.calendar, visibleUserIds: [...(perms.calendar.visibleUserIds ?? [])] },
     tasks: { ...perms.tasks },
     notes: { ...perms.notes },
     reports: { ...perms.reports },

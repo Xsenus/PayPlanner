@@ -13,6 +13,7 @@ import {
   Lock,
   Mail,
   RotateCcw,
+  Search,
   Settings,
   Shield,
   ShieldCheck,
@@ -31,6 +32,7 @@ import {
   setRolePermissions,
   subscribeOnPermissionsChange,
 } from '../../services/permissionsService';
+import { apiService, type RoleCalendarVisibleUserOptionDto } from '../../services/api';
 import {
   MENU_PERMISSION_KEYS,
   type DataVisibilityScope,
@@ -251,6 +253,11 @@ const CALENDAR_SCOPE_OPTIONS: Array<{ value: DataVisibilityScope; label: string;
     description: 'Пользователь видит свои календарные задачи и задачи сотрудников своего отдела.',
   },
   {
+    value: 'specific',
+    label: 'Конкретные сотрудники',
+    description: 'Пользователь видит свой календарь и календарные задачи только выбранных сотрудников.',
+  },
+  {
     value: 'all',
     label: 'Календари всех сотрудников',
     description: 'Пользователь может контролировать календарные задачи всех сотрудников.',
@@ -465,7 +472,11 @@ function hasDataScope(sectionKey: MenuSectionKey) {
   return DATA_SCOPE_SECTIONS.has(sectionKey);
 }
 
-function normalizeDataScope(value?: DataVisibilityScope | null): DataVisibilityScope {
+function normalizeDataScope(sectionKey: MenuSectionKey, value?: DataVisibilityScope | null): DataVisibilityScope {
+  if (sectionKey === 'calendar' && value === 'specific') {
+    return 'specific';
+  }
+
   return value === 'department' || value === 'all' ? value : 'own';
 }
 
@@ -486,12 +497,44 @@ export function RolePermissionsModal({
   const [resetting, setResetting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [activeGroup, setActiveGroup] = useState<GroupKey>('core');
+  const [calendarUsers, setCalendarUsers] = useState<RoleCalendarVisibleUserOptionDto[]>([]);
+  const [calendarUsersLoading, setCalendarUsersLoading] = useState(false);
+  const [calendarUserSearch, setCalendarUserSearch] = useState('');
 
   useEffect(() => {
     setPermissionsState(getRolePermissions(role.id));
     setErrorMessage(null);
     setActiveGroup('core');
+    setCalendarUserSearch('');
   }, [role.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setCalendarUsersLoading(true);
+
+    apiService
+      .getRoleCalendarVisibleUserOptions()
+      .then((items) => {
+        if (!cancelled) {
+          setCalendarUsers(items);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setCalendarUsers([]);
+          setErrorMessage(error instanceof Error ? error.message : 'Не удалось загрузить сотрудников для выбора календарей');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setCalendarUsersLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const unsubscribe = subscribeOnPermissionsChange((changedRoleId) => {
@@ -514,6 +557,23 @@ export function RolePermissionsModal({
         .length,
     [permissions],
   );
+  const selectedCalendarUserIds = useMemo(
+    () => new Set(permissions.calendar.visibleUserIds ?? []),
+    [permissions.calendar.visibleUserIds],
+  );
+  const filteredCalendarUsers = useMemo(() => {
+    const query = calendarUserSearch.trim().toLowerCase();
+    if (!query) {
+      return calendarUsers;
+    }
+
+    return calendarUsers.filter((user) => [
+      user.name,
+      user.email,
+      user.department ?? '',
+      user.roleName,
+    ].some((value) => value.toLowerCase().includes(query)));
+  }, [calendarUserSearch, calendarUsers]);
 
   const updateSection = <K extends MenuSectionKey>(
     key: K,
@@ -554,6 +614,41 @@ export function RolePermissionsModal({
       ...section,
       canViewAnalytics: !section.canViewAnalytics,
     }));
+  };
+
+  const toggleCalendarVisibleUser = (userId: number) => {
+    updateSection('calendar', (section) => {
+      const current = new Set(section.visibleUserIds ?? []);
+      if (current.has(userId)) {
+        current.delete(userId);
+      } else {
+        current.add(userId);
+      }
+
+      return {
+        ...section,
+        visibleUserIds: Array.from(current).sort((a, b) => a - b),
+      };
+    });
+  };
+
+  const clearCalendarVisibleUsers = () => {
+    updateSection('calendar', (section) => ({
+      ...section,
+      visibleUserIds: [],
+    }));
+  };
+
+  const selectFilteredCalendarUsers = () => {
+    updateSection('calendar', (section) => {
+      const currentUserIds = new Set(section.visibleUserIds ?? []);
+      filteredCalendarUsers.forEach((user) => currentUserIds.add(user.id));
+
+      return {
+        ...section,
+        visibleUserIds: Array.from(currentUserIds).sort((a, b) => a - b),
+      };
+    });
   };
 
   const setSectionViewScope = (sectionKey: MenuSectionKey, viewScope: DataVisibilityScope) => {
@@ -881,7 +976,7 @@ export function RolePermissionsModal({
                   const Icon = sectionConfig.icon;
                   const enabledPermissionCount = getEnabledPermissionCount(sectionKey, permissions);
                   const totalPermissionCount = getTotalPermissionCount(sectionKey);
-                  const sectionScope = normalizeDataScope(section.viewScope);
+                  const sectionScope = normalizeDataScope(sectionKey, section.viewScope);
                   const scopeOptions = getDataScopeOptions(sectionKey);
                   const sectionScopeDescription =
                     scopeOptions.find((option) => option.value === sectionScope)?.description ?? '';
@@ -991,6 +1086,87 @@ export function RolePermissionsModal({
                               {section.canView
                                 ? sectionScopeDescription
                                 : 'Сначала откройте просмотр раздела, затем выберите область видимости.'}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {sectionKey === 'calendar' && sectionScope === 'specific' ? (
+                          <div className="rounded-2xl border border-blue-100 bg-blue-50/50 px-4 py-4 xl:col-span-2">
+                            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                              <div>
+                                <div className="text-sm font-semibold text-slate-800">Выбранные календари сотрудников</div>
+                                <div className="mt-1 text-xs leading-5 text-slate-500">
+                                  Сотрудники из списка будут видны в календаре CRM. Если убрать сотрудника, его события исчезнут из календаря этой роли.
+                                </div>
+                              </div>
+                              <div className="text-xs font-semibold text-blue-700">
+                                Выбрано: {selectedCalendarUserIds.size}
+                              </div>
+                            </div>
+
+                            <div className="mt-3 flex flex-col gap-2 lg:flex-row">
+                              <label className="relative min-w-0 flex-1">
+                                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                                <input
+                                  type="search"
+                                  value={calendarUserSearch}
+                                  onChange={(event) => setCalendarUserSearch(event.target.value)}
+                                  placeholder="Поиск по ФИО, email, отделу или роли"
+                                  disabled={isReadOnly || saving || resetting || !section.canView}
+                                  className="w-full rounded-xl border border-slate-300 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-900 disabled:bg-slate-100 disabled:text-slate-500"
+                                />
+                              </label>
+                              <button
+                                type="button"
+                                onClick={selectFilteredCalendarUsers}
+                                disabled={isReadOnly || saving || resetting || !section.canView || filteredCalendarUsers.length === 0}
+                                className="inline-flex items-center justify-center rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                Выбрать найденных
+                              </button>
+                              <button
+                                type="button"
+                                onClick={clearCalendarVisibleUsers}
+                                disabled={isReadOnly || saving || resetting || !section.canView || selectedCalendarUserIds.size === 0}
+                                className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                Очистить
+                              </button>
+                            </div>
+
+                            <div className="mt-3 max-h-64 overflow-auto rounded-xl border border-slate-200 bg-white">
+                              {calendarUsersLoading ? (
+                                <div className="px-3 py-4 text-sm text-slate-500">Загрузка сотрудников...</div>
+                              ) : filteredCalendarUsers.length === 0 ? (
+                                <div className="px-3 py-4 text-sm text-slate-500">Сотрудники не найдены.</div>
+                              ) : (
+                                <div className="divide-y divide-slate-100">
+                                  {filteredCalendarUsers.map((user) => {
+                                    const checked = selectedCalendarUserIds.has(user.id);
+                                    const details = [user.department, user.roleName, user.email].filter(Boolean).join(' · ');
+                                    return (
+                                      <label
+                                        key={user.id}
+                                        className={`flex cursor-pointer items-start gap-3 px-3 py-2.5 transition hover:bg-slate-50 ${
+                                          checked ? 'bg-blue-50/60' : 'bg-white'
+                                        }`}
+                                      >
+                                        <input
+                                          type="checkbox"
+                                          checked={checked}
+                                          onChange={() => toggleCalendarVisibleUser(user.id)}
+                                          disabled={isReadOnly || saving || resetting || !section.canView}
+                                          className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+                                        />
+                                        <span className="min-w-0">
+                                          <span className="block truncate text-sm font-semibold text-slate-900">{user.name}</span>
+                                          <span className="block truncate text-xs text-slate-500">{details || 'Без дополнительных данных'}</span>
+                                        </span>
+                                      </label>
+                                    );
+                                  })}
+                                </div>
+                              )}
                             </div>
                           </div>
                         ) : null}

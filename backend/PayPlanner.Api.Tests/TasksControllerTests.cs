@@ -59,7 +59,7 @@ public class TasksControllerTests
         await db.SaveChangesAsync();
         var controller = CreateController(db, new RecordingNotificationService(), admin);
 
-        var result = await controller.GetAssignees(CancellationToken.None);
+        var result = await controller.GetAssignees(ct: CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var items = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalAssigneeDto>>(ok.Value);
@@ -67,6 +67,77 @@ public class TasksControllerTests
         Assert.Equal("Asia/Kamchatka", dto.TimeZoneId);
         Assert.Equal(department.Id, dto.DepartmentId);
         Assert.Equal("Контроль", dto.Department);
+    }
+
+    [Fact]
+    public async Task GetAssignees_UsesSpecificCalendarVisibilityForCalendarView()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role
+        {
+            Name = "secretary-calendar",
+            Description = "Секретарь с точечными календарями",
+            Permissions =
+            [
+                new RolePermission
+                {
+                    Section = RolePermissionCatalog.Tasks,
+                    CanView = true,
+                    ViewScope = DataVisibilityScope.All,
+                },
+                new RolePermission
+                {
+                    Section = RolePermissionCatalog.Calendar,
+                    CanView = true,
+                    ViewScope = DataVisibilityScope.Specific,
+                },
+            ],
+        };
+        var current = new User
+        {
+            Email = "calendar-viewer@example.com",
+            PasswordHash = "test",
+            FullName = "Секретарь",
+            IsActive = true,
+            IsApproved = true,
+            Role = role,
+        };
+        var selected = new User
+        {
+            Email = "calendar-selected-assignee@example.com",
+            PasswordHash = "test",
+            FullName = "Выбранный сотрудник",
+            IsActive = true,
+            IsApproved = true,
+            Role = role,
+        };
+        var hidden = new User
+        {
+            Email = "calendar-hidden-assignee@example.com",
+            PasswordHash = "test",
+            FullName = "Скрытый сотрудник",
+            IsActive = true,
+            IsApproved = true,
+            Role = role,
+        };
+        db.Users.AddRange(current, selected, hidden);
+        await db.SaveChangesAsync();
+
+        db.RoleCalendarVisibleUsers.Add(new RoleCalendarVisibleUser
+        {
+            RoleId = role.Id,
+            UserId = selected.Id,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), current);
+
+        var result = await controller.GetAssignees(calendarView: true, ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var items = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalAssigneeDto>>(ok.Value);
+        Assert.Contains(items, item => item.Id == current.Id);
+        Assert.Contains(items, item => item.Id == selected.Id);
+        Assert.DoesNotContain(items, item => item.Id == hidden.Id);
     }
 
     [Fact]

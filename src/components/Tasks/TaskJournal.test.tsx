@@ -69,7 +69,8 @@ const permissionsState = vi.hoisted(() => ({
   taskCanExport: true,
   caseCanExport: true,
   taskViewScope: 'all' as 'own' | 'department' | 'all',
-  calendarViewScope: 'all' as 'own' | 'department' | 'all',
+  calendarViewScope: 'all' as 'own' | 'department' | 'all' | 'specific',
+  calendarVisibleUserIds: [] as number[],
 }));
 
 vi.mock('../../services/api', () => ({
@@ -126,7 +127,12 @@ vi.mock('../../hooks/useRolePermissions', () => ({
     };
 
     return {
-      calendar: { ...section, canViewAnalytics: true, viewScope: permissionsState.calendarViewScope },
+      calendar: {
+        ...section,
+        canViewAnalytics: true,
+        viewScope: permissionsState.calendarViewScope,
+        visibleUserIds: permissionsState.calendarVisibleUserIds,
+      },
       tasks: {
         ...section,
         canEdit: permissionsState.taskCanEdit,
@@ -347,6 +353,7 @@ describe('TaskJournal', () => {
     permissionsState.caseCanExport = true;
     permissionsState.taskViewScope = 'all';
     permissionsState.calendarViewScope = 'all';
+    permissionsState.calendarVisibleUserIds = [];
     clientsState.clients = [
       { id: 10, name: 'Иванов Иван Иванович', phone: '+7 900 000-00-00', email: 'client@example.com' } as Client,
     ];
@@ -470,6 +477,27 @@ describe('TaskJournal', () => {
       underControl: true,
     }));
     expect(apiMock.getTaskJournalCaseAutomationCandidates).not.toHaveBeenCalled();
+  });
+
+  it('loads assignees and tasks with calendar visibility in calendar view', async () => {
+    authState.isAdmin = false;
+    permissionsState.calendarViewScope = 'specific';
+    permissionsState.calendarVisibleUserIds = [11];
+
+    await renderJournal([createTask({ assigneeUserId: 11, assigneeName: 'Выбранный сотрудник' })], {
+      initialView: 'calendar',
+      assignees: [
+        { id: 7, name: 'Администратор', email: 'admin@example.com' },
+        { id: 11, name: 'Выбранный сотрудник', email: 'selected@example.com' },
+      ],
+    });
+
+    await waitFor(() => {
+      expect(apiMock.getTaskJournalItems).toHaveBeenCalledWith(expect.objectContaining({
+        calendarView: true,
+      }));
+      expect(apiMock.getTaskJournalAssignees).toHaveBeenCalledWith({ calendarView: true });
+    });
   });
 
   it('marks a task for manual control from the row actions', async () => {
@@ -2241,10 +2269,9 @@ describe('TaskJournal', () => {
     fireEvent.click(screen.getByRole('button', { name: /Календарь/i }));
 
     expect(screen.getByText('Календарь задач')).toBeTruthy();
-    expect(screen.getByText('Загрузка за день')).toBeTruthy();
+    const calendarTask = await screen.findByTestId('task-calendar-task-101');
     expect(screen.getAllByText('Тестовая задача').length).toBeGreaterThan(0);
     expect(screen.getByTestId('task-calendar-mobile-strip')).toBeTruthy();
-    const calendarTask = screen.getByTestId('task-calendar-task-101');
     expect(calendarTask.getAttribute('title')).toContain('Статус: Новая');
     expect(calendarTask.getAttribute('title')).toContain('Исполнитель: Администратор');
     expect(calendarTask.getAttribute('title')).toContain('Поручил: Постановщик');

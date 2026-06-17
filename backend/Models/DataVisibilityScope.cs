@@ -5,18 +5,27 @@ public static class DataVisibilityScope
     public const string Own = "own";
     public const string Department = "department";
     public const string All = "all";
+    public const string Specific = "specific";
 
     public static readonly string[] AllValues =
     [
         Own,
         Department,
-        All
+        All,
+        Specific
     ];
 
-    public static bool IsSupported(string? value)
-        => AllValues.Contains(value ?? string.Empty, StringComparer.OrdinalIgnoreCase);
+    public static bool IsSupported(string? value, bool includeSpecific = false)
+    {
+        if (!includeSpecific && string.Equals(value, Specific, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
 
-    public static string Normalize(string? value, string fallback = Own)
+        return AllValues.Contains(value ?? string.Empty, StringComparer.OrdinalIgnoreCase);
+    }
+
+    public static string Normalize(string? value, string fallback = Own, bool includeSpecific = false)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
@@ -24,6 +33,6 @@ public static class DataVisibilityScope
         }
 
         var normalized = value.Trim().ToLowerInvariant();
-        return IsSupported(normalized) ? normalized : fallback;
+        return IsSupported(normalized, includeSpecific) ? normalized : fallback;
     }
 }

@@ -87,6 +87,7 @@ public static class DataVisibilityService
             .Select(permission => new
             {
                 permission.CanView,
+                permission.RoleId,
                 permission.ViewScope,
             })
             .FirstOrDefaultAsync(ct);
@@ -101,6 +102,7 @@ public static class DataVisibilityService
                     .Select(permission => new
                     {
                         permission.CanView,
+                        permission.RoleId,
                         permission.ViewScope,
                     })
                     .FirstOrDefaultAsync(ct);
@@ -116,8 +118,24 @@ public static class DataVisibilityService
         var visibleUserIds = new List<int> { user.Id };
 
         if (!isAdmin
-            && string.Equals(scope, DataVisibilityScope.Department, StringComparison.OrdinalIgnoreCase)
-            && (user.DepartmentId.HasValue || !string.IsNullOrWhiteSpace(user.Department)))
+            && string.Equals(scope, DataVisibilityScope.Specific, StringComparison.OrdinalIgnoreCase)
+            && permission is not null
+            && string.Equals(section, RolePermissionCatalog.Calendar, StringComparison.OrdinalIgnoreCase))
+        {
+            var selectedUserIds = await db.RoleCalendarVisibleUsers
+                .AsNoTracking()
+                .Where(item => item.RoleId == permission.RoleId
+                    && item.User != null
+                    && item.User.IsActive
+                    && item.User.IsApproved)
+                .Select(item => item.UserId)
+                .ToListAsync(ct);
+
+            visibleUserIds.AddRange(selectedUserIds);
+        }
+        else if (!isAdmin
+                 && string.Equals(scope, DataVisibilityScope.Department, StringComparison.OrdinalIgnoreCase)
+                 && (user.DepartmentId.HasValue || !string.IsNullOrWhiteSpace(user.Department)))
         {
             var department = user.Department?.Trim();
             var departmentId = user.DepartmentId;
@@ -151,6 +169,9 @@ public static class DataVisibilityService
             return DataVisibilityScope.All;
         }
 
-        return DataVisibilityScope.Normalize(rawScope, DataVisibilityScope.Own);
+        return DataVisibilityScope.Normalize(
+            rawScope,
+            DataVisibilityScope.Own,
+            includeSpecific: string.Equals(section, RolePermissionCatalog.Calendar, StringComparison.OrdinalIgnoreCase));
     }
 }

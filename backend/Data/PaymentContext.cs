@@ -1801,6 +1801,31 @@ public class PaymentContext : DbContext
                   .OnDelete(DeleteBehavior.Cascade);
         });
 
+        // ================== Role Calendar Visible Users ==================
+        modelBuilder.Entity<RoleCalendarVisibleUser>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.CreatedByUserName).HasMaxLength(200);
+
+            entity.HasIndex(e => new { e.RoleId, e.UserId })
+                  .IsUnique()
+                  .HasDatabaseName("IX_RoleCalendarVisibleUsers_Role_User");
+
+            entity.HasIndex(e => e.UserId)
+                  .HasDatabaseName("IX_RoleCalendarVisibleUsers_UserId");
+
+            entity.HasOne(e => e.Role)
+                  .WithMany(r => r.CalendarVisibleUsers)
+                  .HasForeignKey(e => e.RoleId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.User)
+                  .WithMany(u => u.CalendarVisibleInRoles)
+                  .HasForeignKey(e => e.UserId)
+                  .OnDelete(DeleteBehavior.Restrict);
+        });
+
         // ================== Users ==================
         modelBuilder.Entity<User>(entity =>
         {
@@ -3490,6 +3515,8 @@ public class PaymentContext : DbContext
     /// Настройки прав ролей по разделам.
     /// </summary>
     public DbSet<RolePermission> RolePermissions { get; set; }
+
+    public DbSet<RoleCalendarVisibleUser> RoleCalendarVisibleUsers { get; set; }
 
     /// <summary>
     /// Журнал действий пользователей.

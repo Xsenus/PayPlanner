@@ -1172,6 +1172,29 @@ describe('apiService case calendar', () => {
     expect(String(url)).toContain('reminderMinutes=120');
     expect(String(url)).toContain('reminderMinutes=30');
   });
+
+  it('passes calendar visibility flag to task journal endpoints', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ items: [], total: 0, page: 1, pageSize: 100 }), {
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiService.getTaskJournalItems({ calendarView: true });
+
+    const [itemsUrl] = fetchMock.mock.calls[0];
+    expect(String(itemsUrl)).toContain('/tasks?');
+    expect(String(itemsUrl)).toContain('calendarView=true');
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify([]), {
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    await apiService.getTaskJournalAssignees({ calendarView: true });
+
+    const [assigneesUrl] = fetchMock.mock.calls[1];
+    expect(String(assigneesUrl)).toContain('/tasks/assignees?');
+    expect(String(assigneesUrl)).toContain('calendarView=true');
+  });
 });
 
 describe('apiService reports', () => {
