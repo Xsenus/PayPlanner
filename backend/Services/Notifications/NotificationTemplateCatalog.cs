@@ -33,6 +33,8 @@ public static class NotificationTemplateKeys
     public const string PaymentChanged = "payment.changed";
     public const string InvoiceCreated = "invoice.created";
     public const string InvoiceChanged = "invoice.changed";
+    public const string ActCreated = "act.created";
+    public const string ActChanged = "act.changed";
 }
 
 public sealed record NotificationTemplateVariableDefinition(string Key, string Label);
@@ -90,6 +92,18 @@ public static class NotificationTemplateCatalog
         new("invoice.status", "Статус счета"),
         new("invoice.workflowStatus", "Статус документа"),
         new("invoice.changes", "Список изменений")
+    ];
+
+    private static readonly IReadOnlyList<NotificationTemplateVariableDefinition> ActVariables =
+    [
+        new("actor.name", "Кто выполнил действие"),
+        new("act.number", "Номер акта"),
+        new("act.title", "Краткое описание акта"),
+        new("act.date", "Дата акта"),
+        new("act.amount", "Сумма акта"),
+        new("act.status", "Статус акта"),
+        new("act.workflowStatus", "Статус документа"),
+        new("act.changes", "Список изменений")
     ];
 
     public static readonly IReadOnlyList<NotificationTemplateDefinition> All =
@@ -322,7 +336,21 @@ public static class NotificationTemplateCatalog
             "Уведомление ответственному при изменении важного состояния счета.",
             "Изменен счет №{{invoice.number}}",
             "{{actor.name}} изменил(а) счет №{{invoice.number}}: {{invoice.title}}\n\nИзменения:\n{{invoice.changes}}\n\nСрок оплаты: {{invoice.dueDate}}\nСумма: {{invoice.amount}}\nСтатус: {{invoice.workflowStatus}}",
-            InvoiceVariables)
+            InvoiceVariables),
+        new(
+            NotificationTemplateKeys.ActCreated,
+            "Создан акт",
+            "Уведомление ответственному при создании акта.",
+            "Создан акт №{{act.number}}",
+            "{{actor.name}} создал(а) акт №{{act.number}}: {{act.title}}\n\nДата акта: {{act.date}}\nСумма: {{act.amount}}\nСтатус: {{act.workflowStatus}}",
+            ActVariables),
+        new(
+            NotificationTemplateKeys.ActChanged,
+            "Изменение акта",
+            "Уведомление ответственному при изменении важного состояния акта.",
+            "Изменен акт №{{act.number}}",
+            "{{actor.name}} изменил(а) акт №{{act.number}}: {{act.title}}\n\nИзменения:\n{{act.changes}}\n\nДата акта: {{act.date}}\nСумма: {{act.amount}}\nСтатус: {{act.workflowStatus}}",
+            ActVariables)
     ];
 
     public static NotificationTemplateDefinition? Find(string key)

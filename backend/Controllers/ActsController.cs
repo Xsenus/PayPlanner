@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Globalization;
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -18,6 +20,7 @@ using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Acts;
 using PayPlanner.Api.Services.Invoices;
+using PayPlanner.Api.Services.Notifications;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -34,19 +37,22 @@ public class ActsController : ControllerBase
     private readonly IInvoiceDocumentPdfService? _invoiceDocumentPdfService;
     private readonly IEmailService? _emailService;
     private readonly IYandexDiskService? _yandexDiskService;
+    private readonly INotificationService? _notificationService;
 
     public ActsController(
         PaymentContext db,
         IFormRequirementsService formRequirements,
         IInvoiceDocumentPdfService? invoiceDocumentPdfService = null,
         IEmailService? emailService = null,
-        IYandexDiskService? yandexDiskService = null)
+        IYandexDiskService? yandexDiskService = null,
+        INotificationService? notificationService = null)
     {
         _db = db;
         _formRequirements = formRequirements;
         _invoiceDocumentPdfService = invoiceDocumentPdfService;
         _emailService = emailService;
         _yandexDiskService = yandexDiskService;
+        _notificationService = notificationService;
     }
 
     private Task<DataVisibilityAccess?> ResolveActsVisibilityAsync(CancellationToken ct)
@@ -58,6 +64,150 @@ public class ActsController : ControllerBase
         => await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Acts, isAllowed, ct)
             ? null
             : Forbid();
+
+    private async Task<IReadOnlyCollection<int>> ResolveActNotificationRecipientsAsync(
+        Act act,
+        IEnumerable<int> candidateUserIds,
+        CancellationToken ct)
+    {
+        var userIds = candidateUserIds
+            .Where(userId => userId > 0)
+            .Distinct()
+            .ToArray();
+        if (userIds.Length == 0)
+        {
+            return Array.Empty<int>();
+        }
+
+        var allowedUserIds = await _db.Users
+            .AsNoTracking()
+            .Where(user => userIds.Contains(user.Id)
+                && user.IsActive
+                && user.IsApproved
+                && user.Role != null
+                && (user.Role.Name == "admin"
+                    || user.Role.Permissions.Any(permission =>
+                        permission.Section == RolePermissionCatalog.Acts
+                        && permission.CanView)))
+            .Select(user => user.Id)
+            .ToListAsync(ct);
+
+        var result = new List<int>();
+        foreach (var userId in allowedUserIds)
+        {
+            var principal = new ClaimsPrincipal(new ClaimsIdentity(
+                new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture)) },
+                authenticationType: "ActNotificationAccessCheck"));
+            var visibility = await _db.ResolveDataVisibilityAsync(principal, RolePermissionCatalog.Acts, ct);
+            if (visibility is null)
+            {
+                continue;
+            }
+
+            var canOpenAct = await _db.Acts
+                .AsNoTracking()
+                .Where(item => item.Id == act.Id)
+                .ApplyActVisibility(visibility)
+                .AnyAsync(ct);
+            if (canOpenAct)
+            {
+                result.Add(userId);
+            }
+        }
+
+        return result;
+    }
+
+    private async Task NotifyActCreatedAsync(Act act, CancellationToken ct)
+    {
+        if (_notificationService is null || !act.ResponsibleId.HasValue)
+        {
+            return;
+        }
+
+        var recipients = await ResolveActNotificationRecipientsAsync(act, [act.ResponsibleId.Value], ct);
+        if (recipients.Count == 0)
+        {
+            return;
+        }
+
+        await _notificationService.NotifyActCreatedAsync(
+            act,
+            User.GetDisplayName(),
+            User.GetUserId() ?? 0,
+            recipients,
+            ct);
+    }
+
+    private async Task NotifyActChangedAsync(Act act, IReadOnlyList<string> changeLabels, CancellationToken ct)
+    {
+        if (_notificationService is null || changeLabels.Count == 0 || !act.ResponsibleId.HasValue)
+        {
+            return;
+        }
+
+        var recipients = await ResolveActNotificationRecipientsAsync(act, [act.ResponsibleId.Value], ct);
+        if (recipients.Count == 0)
+        {
+            return;
+        }
+
+        await _notificationService.NotifyActChangedAsync(
+            act,
+            changeLabels,
+            User.GetDisplayName(),
+            User.GetUserId() ?? 0,
+            recipients,
+            ct);
+    }
+
+    private static IReadOnlyList<string> BuildActStatusChangeLabels(
+        ActStatus originalStatus,
+        ActStatus currentStatus,
+        string? originalWorkflowStatus,
+        string? currentWorkflowStatus)
+    {
+        var labels = new List<string>();
+        if (originalStatus != currentStatus)
+        {
+            labels.Add($"Статус акта: {FormatActStatus(originalStatus)} -> {FormatActStatus(currentStatus)}");
+        }
+
+        var normalizedOriginalWorkflow = ActWorkflowStatus.Normalize(originalWorkflowStatus) ?? originalWorkflowStatus;
+        var normalizedCurrentWorkflow = ActWorkflowStatus.Normalize(currentWorkflowStatus) ?? currentWorkflowStatus;
+        if (!string.Equals(normalizedOriginalWorkflow, normalizedCurrentWorkflow, StringComparison.Ordinal))
+        {
+            labels.Add($"Состояние документа: {FormatActWorkflowStatus(normalizedOriginalWorkflow)} -> {FormatActWorkflowStatus(normalizedCurrentWorkflow)}");
+        }
+
+        return labels;
+    }
+
+    private static string FormatActStatus(ActStatus status)
+        => status switch
+        {
+            ActStatus.Created => "Создан",
+            ActStatus.Transferred => "Передан",
+            ActStatus.Signed => "Подписан",
+            ActStatus.Terminated => "Отменен",
+            _ => status.ToString()
+        };
+
+    private static string FormatActWorkflowStatus(string? status)
+        => (ActWorkflowStatus.Normalize(status) ?? status)?.Trim() switch
+        {
+            ActWorkflowStatus.Draft => "Черновик",
+            ActWorkflowStatus.NotSigned => "Не подписан",
+            ActWorkflowStatus.RequiresClientSignature => "Требует подписи клиента",
+            ActWorkflowStatus.OnApproval => "На согласовании",
+            ActWorkflowStatus.Approved => "Согласован",
+            ActWorkflowStatus.ApprovalRejected => "Согласование отклонено",
+            ActWorkflowStatus.NeedsCorrection => "Требует корректировки",
+            ActWorkflowStatus.OnSigning => "Отправлен на подпись",
+            ActWorkflowStatus.Signed => "Подписан",
+            ActWorkflowStatus.Cancelled => "Отменен",
+            _ => "не указан"
+        };
 
     [HttpGet]
     public async Task<IActionResult> Get(
@@ -257,11 +407,14 @@ public class ActsController : ControllerBase
             return NotFound();
         }
 
+        var originalStatus = act.Status;
+        var originalWorkflowStatus = act.WorkflowStatus;
         act.Status = ActStatus.Transferred;
         act.WorkflowStatus = ActWorkflowStatus.OnSigning;
         act.SentForSigningAt ??= DateTime.UtcNow;
         act.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
+        await NotifyActChangedAsync(act, BuildActStatusChangeLabels(originalStatus, act.Status, originalWorkflowStatus, act.WorkflowStatus), ct);
         return Ok(Map(act));
     }
 
@@ -279,6 +432,8 @@ public class ActsController : ControllerBase
             return NotFound();
         }
 
+        var originalStatus = act.Status;
+        var originalWorkflowStatus = act.WorkflowStatus;
         var now = DateTime.UtcNow;
         act.Status = ActStatus.Signed;
         act.WorkflowStatus = ActWorkflowStatus.Signed;
@@ -286,6 +441,7 @@ public class ActsController : ControllerBase
         act.SignedAt ??= now;
         act.UpdatedAt = now;
         await _db.SaveChangesAsync(ct);
+        await NotifyActChangedAsync(act, BuildActStatusChangeLabels(originalStatus, act.Status, originalWorkflowStatus, act.WorkflowStatus), ct);
         return Ok(Map(act));
     }
 
@@ -303,12 +459,15 @@ public class ActsController : ControllerBase
             return NotFound();
         }
 
+        var originalStatus = act.Status;
+        var originalWorkflowStatus = act.WorkflowStatus;
         act.Status = ActStatus.Created;
         act.WorkflowStatus = ActWorkflowStatus.NotSigned;
         act.SentForSigningAt = null;
         act.SignedAt = null;
         act.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
+        await NotifyActChangedAsync(act, BuildActStatusChangeLabels(originalStatus, act.Status, originalWorkflowStatus, act.WorkflowStatus), ct);
         return Ok(Map(act));
     }
 
@@ -337,6 +496,8 @@ public class ActsController : ControllerBase
             return NotFound();
         }
 
+        var originalStatus = act.Status;
+        var originalWorkflowStatus = act.WorkflowStatus;
         var reason = Normalize(request.Reason);
         var statusChanged = !string.Equals(act.WorkflowStatus, workflowStatus, StringComparison.OrdinalIgnoreCase);
         if (statusChanged)
@@ -395,6 +556,11 @@ public class ActsController : ControllerBase
         }
 
         await _db.SaveChangesAsync(ct);
+        if (statusChanged)
+        {
+            await NotifyActChangedAsync(act, BuildActStatusChangeLabels(originalStatus, act.Status, originalWorkflowStatus, act.WorkflowStatus), ct);
+        }
+
         return Ok(Map(act));
     }
 
@@ -424,6 +590,8 @@ public class ActsController : ControllerBase
             return NotFound();
         }
 
+        var originalStatus = act.Status;
+        var originalWorkflowStatus = act.WorkflowStatus;
         var now = DateTime.UtcNow;
         act.Status = ActStatus.Terminated;
         act.WorkflowStatus = ActWorkflowStatus.Cancelled;
@@ -434,6 +602,7 @@ public class ActsController : ControllerBase
         act.UpdatedAt = now;
 
         await _db.SaveChangesAsync(ct);
+        await NotifyActChangedAsync(act, BuildActStatusChangeLabels(originalStatus, act.Status, originalWorkflowStatus, act.WorkflowStatus), ct);
         return Ok(Map(act));
     }
 
@@ -543,6 +712,7 @@ public class ActsController : ControllerBase
         await _db.Entry(correction).Reference(act => act.OriginalAct).LoadAsync(ct);
         await _db.Entry(correction).Collection(act => act.LineItems).LoadAsync(ct);
         await _db.Entry(correction).Collection(act => act.CorrectionActs).LoadAsync(ct);
+        await NotifyActCreatedAsync(correction, ct);
 
         return Created($"/api/acts/{correction.Id}", Map(correction));
     }
@@ -767,6 +937,7 @@ public class ActsController : ControllerBase
         await _db.Entry(act).Reference(a => a.Responsible).LoadAsync(ct);
         await _db.Entry(act).Reference(a => a.Invoice).LoadAsync(ct);
         await _db.Entry(act).Collection(a => a.LineItems).LoadAsync(ct);
+        await NotifyActCreatedAsync(act, ct);
 
         return Created($"/api/acts/{act.Id}", Map(act));
     }
@@ -808,6 +979,8 @@ public class ActsController : ControllerBase
             return NotFound();
         }
 
+        var originalStatus = act.Status;
+        var originalWorkflowStatus = act.WorkflowStatus;
         Payment? invoice = null;
         if (request.InvoiceId.HasValue)
         {
@@ -849,6 +1022,7 @@ public class ActsController : ControllerBase
         await _db.Entry(act).Reference(a => a.Responsible).LoadAsync(ct);
         await _db.Entry(act).Reference(a => a.Invoice).LoadAsync(ct);
         await _db.Entry(act).Collection(a => a.LineItems).LoadAsync(ct);
+        await NotifyActChangedAsync(act, BuildActStatusChangeLabels(originalStatus, act.Status, originalWorkflowStatus, act.WorkflowStatus), ct);
 
         return Ok(Map(act));
     }

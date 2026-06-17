@@ -6,6 +6,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
@@ -14,6 +16,7 @@ using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Acts;
 using PayPlanner.Api.Services.Invoices;
+using PayPlanner.Api.Services.Notifications;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
@@ -219,6 +222,57 @@ public class ActsControllerTests
         Assert.Equal(ActWorkflowStatus.Signed, stored.WorkflowStatus);
         Assert.NotNull(stored.SentForSigningAt);
         Assert.NotNull(stored.SignedAt);
+    }
+
+    [Fact]
+    public async Task MarkSigned_NotifiesResponsibleWithActsAccess()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var actor = await CreateUserAsync(db, "Администратор", "act-admin@example.com", isActive: true, isApproved: true);
+        var responsible = await CreateUserAsync(db, "Ответственный по акту", "act-responsible@example.com", isActive: true, isApproved: true);
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = responsible.RoleId,
+            Section = RolePermissionCatalog.Acts,
+            CanView = true,
+            ViewScope = DataVisibilityScope.Own
+        });
+        await db.SaveChangesAsync();
+        var act = await CreateManualActAsync(db, client.Id, "ACT-NOTIFY-SIGNED", 12_000m, ActStatus.Transferred);
+        act.WorkflowStatus = ActWorkflowStatus.OnSigning;
+        act.ResponsibleId = responsible.Id;
+        await db.SaveChangesAsync();
+        var controller = new ActsController(
+            db,
+            new NoopFormRequirementsService(),
+            notificationService: CreateNotificationService(db))
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                    [
+                        new Claim(ClaimTypes.NameIdentifier, actor.Id.ToString()),
+                        new Claim(ClaimTypes.Name, actor.FullName),
+                        new Claim(ClaimTypes.Role, "admin"),
+                    ], "TestAuth")),
+                },
+            },
+        };
+
+        var action = await controller.MarkSigned(act.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var dto = Assert.IsType<ActDto>(ok.Value);
+        Assert.Equal(ActWorkflowStatus.Signed, dto.WorkflowStatus);
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(responsible.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.ActChanged, notification.Type);
+        Assert.Equal("act", notification.ObjectType);
+        Assert.Equal(act.Id, notification.ObjectId);
+        Assert.Contains("Подписан", notification.BodyPreview);
     }
 
     [Fact]
@@ -2939,6 +2993,20 @@ public class ActsControllerTests
         return controller;
     }
 
+    private static NotificationService CreateNotificationService(PaymentContext db)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .Build();
+
+        return new NotificationService(
+            db,
+            configuration,
+            new RecordingEmailService(),
+            new NoopTelegramNotificationService(),
+            NullLogger<NotificationService>.Instance);
+    }
+
     private sealed class NoopFormRequirementsService : IFormRequirementsService
     {
         public Task<List<string>> GetRequiredFieldsAsync(string section, CancellationToken ct = default)
@@ -3010,6 +3078,18 @@ public class ActsControllerTests
             AttachmentContentType = attachmentContentType;
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class NoopTelegramNotificationService : ITelegramNotificationService
+    {
+        public Task<TelegramSendResult> SendMessageAsync(long chatId, string text, CancellationToken cancellationToken = default)
+            => Task.FromResult(new TelegramSendResult(true, "sent"));
+
+        public Task<TelegramSendResult> SendMessageWithTokenAsync(long chatId, string text, string botToken, CancellationToken cancellationToken = default, TelegramBotConnectionSettings? connection = null)
+            => Task.FromResult(new TelegramSendResult(true, "sent"));
+
+        public Task<TelegramNotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new TelegramNotificationSettingsDto());
     }
 
     private sealed class RecordingYandexDiskService : IYandexDiskService

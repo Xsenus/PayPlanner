@@ -373,11 +373,13 @@
   - Проверено: `dotnet build backend\PayPlanner.Api.csproj`, targeted-тесты `NotifyInvoice|RunOnceAsync_NotifiesInvoiceResponsibleWhenInvoiceBecomesOverdue`, полный `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj`, `npm run build`, `npm run lint`, JSON/UTF-8, локальный запуск backend на временной SQLite-БД с `GET /api/health`.
   - DoD: счета не требуют ручного мониторинга списка.
 
-- [ ] Акты.
+- [x] Акты.
   - Акт создан.
   - Акт требует корректировки.
   - Акт подписан/закрыт.
   - Акт отменен.
+  - Сделано: добавлен контур уведомлений по ответственным актов с проверкой доступа к разделу "Акты"; уведомления отправляются при создании акта, создании корректировочного акта, отправке на подпись, отметке о подписании/неподписании, смене workflow-статуса и отмене.
+  - Проверено: `dotnet build backend\PayPlanner.Api.csproj`, targeted-тесты `NotifyAct|MarkSigned_NotifiesResponsibleWithActsAccess`, полный `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj`, `npm run build`, `npm run lint`, JSON/UTF-8, локальный запуск backend на временной SQLite-БД с `GET /api/health`.
   - DoD: ответственный видит статус акта без ручной проверки.
 
 - [ ] Договоры.

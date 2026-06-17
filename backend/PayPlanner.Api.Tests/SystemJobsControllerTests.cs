@@ -1379,6 +1379,12 @@ public class SystemJobsControllerTests
 
         public Task NotifyInvoiceChangedAsync(Payment invoicePayment, IReadOnlyList<string> changeLabels, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
+
+        public Task NotifyActCreatedAsync(Act act, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task NotifyActChangedAsync(Act act, IReadOnlyList<string> changeLabels, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 
     private sealed class TestPaymentContextFactory(DbContextOptions<PaymentContext> options) : IDbContextFactory<PaymentContext>

@@ -2162,6 +2162,115 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyActCreatedAsync_CreatesActNotificationAndDeduplicates()
+    {
+        await using var db = await CreateContextAsync();
+        var actor = await CreateUserAsync(db, "act-actor@example.com");
+        var recipient = new User
+        {
+            Email = "act-recipient@example.com",
+            FullName = "Ответственный по акту",
+            PasswordHash = "hash",
+            RoleId = actor.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(recipient);
+        await db.SaveChangesAsync();
+        var act = new Act
+        {
+            Number = "A-45",
+            Title = "Акт юридических услуг",
+            Date = new DateTime(2026, 6, 21),
+            Amount = 24000m,
+            Status = ActStatus.Created,
+            WorkflowStatus = ActWorkflowStatus.Draft,
+            ResponsibleId = recipient.Id
+        };
+        db.Acts.Add(act);
+        await db.SaveChangesAsync();
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            realtime,
+            webPush);
+
+        await service.NotifyActCreatedAsync(act, actor.FullName, actor.Id, [recipient.Id, actor.Id]);
+        await service.NotifyActCreatedAsync(act, actor.FullName, actor.Id, [recipient.Id]);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(recipient.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.ActCreated, notification.Type);
+        Assert.Equal("act", notification.ObjectType);
+        Assert.Equal(act.Id, notification.ObjectId);
+        Assert.Contains("A-45", notification.BodyPreview);
+        Assert.DoesNotContain(await db.UserNotifications.ToListAsync(), item => item.RecipientUserId == actor.Id);
+        var realtimeNotification = Assert.Single(realtime.Notifications);
+        Assert.Equal(notification.Id, realtimeNotification.Id);
+        var pushed = Assert.Single(webPush.Notifications);
+        Assert.Equal(notification.Id, pushed.Id);
+    }
+
+    [Fact]
+    public async Task NotifyActChangedAsync_CreatesActNotificationAndDeduplicatesByState()
+    {
+        await using var db = await CreateContextAsync();
+        var actor = await CreateUserAsync(db, "act-change-actor@example.com");
+        var recipient = new User
+        {
+            Email = "act-change-recipient@example.com",
+            FullName = "Ответственный по изменению акта",
+            PasswordHash = "hash",
+            RoleId = actor.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(recipient);
+        await db.SaveChangesAsync();
+        var act = new Act
+        {
+            Number = "A-46",
+            Title = "Акт проверки",
+            Date = new DateTime(2026, 6, 22),
+            Amount = 32000m,
+            Status = ActStatus.Signed,
+            WorkflowStatus = ActWorkflowStatus.Signed,
+            ResponsibleId = recipient.Id
+        };
+        db.Acts.Add(act);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+
+        await service.NotifyActChangedAsync(
+            act,
+            ["Состояние документа: Отправлен на подпись -> Подписан", "Статус акта: Передан -> Подписан"],
+            actor.FullName,
+            actor.Id,
+            [recipient.Id, actor.Id]);
+        await service.NotifyActChangedAsync(
+            act,
+            ["Состояние документа: Отправлен на подпись -> Подписан", "Статус акта: Передан -> Подписан"],
+            actor.FullName,
+            actor.Id,
+            [recipient.Id]);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(recipient.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.ActChanged, notification.Type);
+        Assert.Equal("act", notification.ObjectType);
+        Assert.Equal(act.Id, notification.ObjectId);
+        Assert.Contains("Подписан", notification.BodyPreview);
+        Assert.Contains("A-46", notification.BodyPreview);
+    }
+
+    [Fact]
     public async Task NotifyTaskApprovalRequestedAsync_CreatesInAppNotificationForApproverAndAssignee()
     {
         await using var db = await CreateContextAsync();

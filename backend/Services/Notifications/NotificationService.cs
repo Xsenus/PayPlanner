@@ -1449,6 +1449,111 @@ public sealed class NotificationService : INotificationService
         }
     }
 
+    public async Task NotifyActCreatedAsync(
+        Act act,
+        string actorName,
+        int actorUserId,
+        IReadOnlyCollection<int> recipientUserIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (act.Id <= 0 || recipientUserIds.Count == 0)
+        {
+            return;
+        }
+
+        var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.ActCreated,
+            $"Создан акт №{BuildActNumber(act)}",
+            BuildActCreatedBody(act, normalizedActorName),
+            BuildActTemplateValues(act, normalizedActorName, []),
+            purpose: NotificationPurposes.ManualTest,
+            cancellationToken: cancellationToken);
+
+        foreach (var recipientUserId in recipientUserIds
+            .Where(userId => userId > 0 && userId != actorUserId)
+            .Distinct())
+        {
+            await CreateUserNotificationAsync(
+                recipientUserId,
+                UserNotificationTypes.ActCreated,
+                $"act:{act.Id}:created:{recipientUserId}",
+                message.Subject,
+                message.Body,
+                "blue",
+                "act",
+                act.Id,
+                null,
+                null,
+                new
+                {
+                    actId = act.Id,
+                    actNumber = BuildActNumber(act),
+                    actorUserId,
+                    actorName = normalizedActorName
+                },
+                cancellationToken);
+        }
+    }
+
+    public async Task NotifyActChangedAsync(
+        Act act,
+        IReadOnlyList<string> changeLabels,
+        string actorName,
+        int actorUserId,
+        IReadOnlyCollection<int> recipientUserIds,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedChanges = NormalizePaymentChangeLabels(changeLabels);
+        if (act.Id <= 0 || normalizedChanges.Count == 0 || recipientUserIds.Count == 0)
+        {
+            return;
+        }
+
+        var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.ActChanged,
+            $"Изменен акт №{BuildActNumber(act)}",
+            BuildActChangedBody(act, normalizedActorName, normalizedChanges),
+            BuildActTemplateValues(act, normalizedActorName, normalizedChanges),
+            purpose: NotificationPurposes.ManualTest,
+            cancellationToken: cancellationToken);
+        var stateHash = BuildStableTextHash(string.Join("|",
+        [
+            act.Status.ToString(),
+            act.WorkflowStatus ?? string.Empty,
+            act.Date.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            act.Amount.ToString("0.00", CultureInfo.InvariantCulture),
+            string.Join(";", normalizedChanges)
+        ]));
+
+        foreach (var recipientUserId in recipientUserIds
+            .Where(userId => userId > 0 && userId != actorUserId)
+            .Distinct())
+        {
+            await CreateUserNotificationAsync(
+                recipientUserId,
+                UserNotificationTypes.ActChanged,
+                $"act:{act.Id}:changed:{recipientUserId}:{stateHash}",
+                message.Subject,
+                message.Body,
+                "amber",
+                "act",
+                act.Id,
+                null,
+                null,
+                new
+                {
+                    actId = act.Id,
+                    actNumber = BuildActNumber(act),
+                    actorUserId,
+                    actorName = normalizedActorName,
+                    changes = normalizedChanges
+                },
+                cancellationToken);
+        }
+    }
+
     public async Task<IReadOnlyList<NotificationDelivery>> NotifyCaseInactivityControlTaskCreatedAsync(
         TaskJournalItem task,
         int daysWithoutActiveTask,
@@ -3602,6 +3707,67 @@ public sealed class NotificationService : INotificationService
             InvoiceWorkflowStatus.PartiallyPaid => "Частично оплачен",
             InvoiceWorkflowStatus.Overdue => "Просрочен",
             InvoiceWorkflowStatus.Cancelled => "Отменен",
+            _ => "не указан"
+        };
+
+    private static Dictionary<string, string?> BuildActTemplateValues(
+        Act act,
+        string actorName,
+        IReadOnlyList<string> changeLabels)
+        => new()
+        {
+            ["actor.name"] = actorName,
+            ["act.number"] = BuildActNumber(act),
+            ["act.title"] = BuildActTitle(act),
+            ["act.date"] = FormatPaymentDate(act.Date),
+            ["act.amount"] = act.Amount.ToString("N2", RuCulture),
+            ["act.status"] = FormatActStatus(act.Status),
+            ["act.workflowStatus"] = FormatActWorkflowStatus(act.WorkflowStatus),
+            ["act.changes"] = changeLabels.Count == 0
+                ? string.Empty
+                : string.Join('\n', changeLabels.Select(label => $"- {label}"))
+        };
+
+    private static string BuildActCreatedBody(Act act, string actorName)
+        => NotificationTemplateCatalog.CompactBlankLines(
+            $"{actorName} создал(а) акт №{BuildActNumber(act)}: {BuildActTitle(act)}\n\nДата акта: {FormatPaymentDate(act.Date)}\nСумма: {act.Amount.ToString("N2", RuCulture)}\nСтатус: {FormatActWorkflowStatus(act.WorkflowStatus)}");
+
+    private static string BuildActChangedBody(
+        Act act,
+        string actorName,
+        IReadOnlyList<string> changeLabels)
+        => NotificationTemplateCatalog.CompactBlankLines(
+            $"{actorName} изменил(а) акт №{BuildActNumber(act)}: {BuildActTitle(act)}\n\nИзменения:\n{string.Join('\n', changeLabels.Select(label => $"- {label}"))}\n\nДата акта: {FormatPaymentDate(act.Date)}\nСумма: {act.Amount.ToString("N2", RuCulture)}\nСтатус: {FormatActWorkflowStatus(act.WorkflowStatus)}");
+
+    private static string BuildActNumber(Act act)
+        => NormalizeNotificationText(act.Number, act.Id > 0 ? act.Id.ToString(CultureInfo.InvariantCulture) : "без номера");
+
+    private static string BuildActTitle(Act act)
+        => NormalizeNotificationText(act.Title, "Акт");
+
+    private static string FormatActStatus(ActStatus status)
+        => status switch
+        {
+            ActStatus.Created => "Создан",
+            ActStatus.Transferred => "Передан",
+            ActStatus.Signed => "Подписан",
+            ActStatus.Terminated => "Отменен",
+            _ => status.ToString()
+        };
+
+    private static string FormatActWorkflowStatus(string? status)
+        => (ActWorkflowStatus.Normalize(status) ?? status)?.Trim() switch
+        {
+            ActWorkflowStatus.Draft => "Черновик",
+            ActWorkflowStatus.NotSigned => "Не подписан",
+            ActWorkflowStatus.RequiresClientSignature => "Требует подписи клиента",
+            ActWorkflowStatus.OnApproval => "На согласовании",
+            ActWorkflowStatus.Approved => "Согласован",
+            ActWorkflowStatus.ApprovalRejected => "Согласование отклонено",
+            ActWorkflowStatus.NeedsCorrection => "Требует корректировки",
+            ActWorkflowStatus.OnSigning => "Отправлен на подпись",
+            ActWorkflowStatus.Signed => "Подписан",
+            ActWorkflowStatus.Cancelled => "Отменен",
             _ => "не указан"
         };
 
