@@ -933,6 +933,76 @@ public sealed class NotificationService : INotificationService
         }
     }
 
+    public async Task NotifyExternalCalendarSyncWarningAsync(
+        string providerName,
+        string operation,
+        string summary,
+        string? details = null,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedProviderName = NormalizeNotificationText(providerName, "Внешний календарь");
+        var normalizedOperation = NormalizeNotificationText(operation, "синхронизация");
+        var normalizedSummary = NormalizeNotificationText(summary, "Ошибка синхронизации внешнего календаря");
+        var normalizedDetails = string.IsNullOrWhiteSpace(details) ? string.Empty : Truncate(details.Trim(), 700);
+        var eventKey = $"external-calendar-sync:{NormalizeEventKeySegment(normalizedProviderName)}:{NormalizeEventKeySegment(normalizedOperation)}:{DateTime.UtcNow:yyyyMMdd}";
+
+        var admins = await _context.Users
+            .AsNoTracking()
+            .Include(item => item.Role)
+            .Where(item =>
+                item.IsActive
+                && item.IsApproved
+                && item.Role != null
+                && item.Role.Name == "admin")
+            .Select(item => item.Id)
+            .ToListAsync(cancellationToken);
+        if (admins.Count == 0)
+        {
+            return;
+        }
+
+        var detailsBlock = string.IsNullOrWhiteSpace(normalizedDetails)
+            ? string.Empty
+            : $"Детали: {normalizedDetails}\n\n";
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.ExternalCalendarSyncWarning,
+            $"Проблема синхронизации календаря: {normalizedProviderName}",
+            BuildExternalCalendarSyncWarningBody(normalizedProviderName, normalizedOperation, normalizedSummary, normalizedDetails),
+            new Dictionary<string, string?>
+            {
+                ["calendar.provider"] = normalizedProviderName,
+                ["calendar.operation"] = normalizedOperation,
+                ["calendar.summary"] = normalizedSummary,
+                ["calendar.details"] = normalizedDetails,
+                ["calendar.detailsBlock"] = detailsBlock,
+            },
+            purpose: NotificationPurposes.ManualTest,
+            cancellationToken: cancellationToken);
+
+        foreach (var adminId in admins)
+        {
+            await CreateUserNotificationAsync(
+                adminId,
+                UserNotificationTypes.SystemAdminWarning,
+                eventKey,
+                message.Subject,
+                message.Body,
+                "rose",
+                "system",
+                null,
+                null,
+                null,
+                new
+                {
+                    providerName = normalizedProviderName,
+                    operation = normalizedOperation,
+                    summary = normalizedSummary,
+                    details = normalizedDetails
+                },
+                cancellationToken);
+        }
+    }
+
     public async Task<IReadOnlyList<NotificationDelivery>> NotifyCaseInactivityControlTaskCreatedAsync(
         TaskJournalItem task,
         int daysWithoutActiveTask,
@@ -2624,6 +2694,30 @@ public sealed class NotificationService : INotificationService
             "Обновите раздел календаря, чтобы увидеть актуальный список сотрудников."
         });
 
+    private static string BuildExternalCalendarSyncWarningBody(
+        string providerName,
+        string operation,
+        string summary,
+        string details)
+    {
+        var lines = new List<string>
+        {
+            $"Внешний календарь {providerName} сообщил о проблеме.",
+            string.Empty,
+            $"Операция: {operation}",
+            $"Что произошло: {summary}",
+        };
+
+        if (!string.IsNullOrWhiteSpace(details))
+        {
+            lines.Add($"Детали: {details.Trim()}");
+        }
+
+        lines.Add(string.Empty);
+        lines.Add("Проверьте подключение календаря и журнал синхронизации.");
+        return string.Join('\n', lines);
+    }
+
     private static string BuildCaseInactivityControlBody(
         TaskJournalItem task,
         int daysWithoutActiveTask,
@@ -2837,6 +2931,12 @@ public sealed class NotificationService : INotificationService
 
     private static string FormatNotificationName(string? value)
         => string.IsNullOrWhiteSpace(value) ? "не указан" : value.Trim();
+
+    private static string NormalizeNotificationText(string? value, string fallback)
+    {
+        var normalized = string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+        return Truncate(normalized, 500);
+    }
 
     private static string FormatCalendarAccessUserList(
         IReadOnlyCollection<int> userIds,

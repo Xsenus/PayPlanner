@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services.Notifications;
 
 namespace PayPlanner.Api.Services;
 
@@ -33,8 +34,10 @@ public sealed class ExternalCalendarSyncCoordinator : IExternalCalendarSyncCoord
             {
                 await RunProviderAsync(
                     "Google Calendar",
+                    "Синхронизация задачи",
                     taskId,
-                    () => google.SyncTaskForConnectedUsersAsync(taskId, cancellationToken));
+                    () => google.SyncTaskForConnectedUsersAsync(taskId, cancellationToken),
+                    cancellationToken);
             }
         }
 
@@ -45,8 +48,10 @@ public sealed class ExternalCalendarSyncCoordinator : IExternalCalendarSyncCoord
             {
                 await RunProviderAsync(
                     "Яндекс Календарь",
+                    "Синхронизация задачи",
                     taskId,
-                    () => yandex.SyncTaskForConnectedUsersAsync(taskId, cancellationToken));
+                    () => yandex.SyncTaskForConnectedUsersAsync(taskId, cancellationToken),
+                    cancellationToken);
             }
         }
     }
@@ -91,6 +96,12 @@ public sealed class ExternalCalendarSyncCoordinator : IExternalCalendarSyncCoord
 
         if (failures.Count > 0)
         {
+            await NotifyCalendarWarningAsync(
+                "Внешние календари",
+                "Удаление задачи",
+                $"Не удалось удалить задачу #{taskId} из одного или нескольких внешних календарей.",
+                string.Join("; ", failures),
+                cancellationToken);
             throw new InvalidOperationException($"ExternalCalendarTaskDeleteFailed: {string.Join("; ", failures)}");
         }
     }
@@ -129,6 +140,12 @@ public sealed class ExternalCalendarSyncCoordinator : IExternalCalendarSyncCoord
 
         if (failures.Count > 0)
         {
+            await NotifyCalendarWarningAsync(
+                "Внешние календари",
+                "Очистка данных пользователя",
+                $"Не удалось полностью очистить внешние календари пользователя #{userId}.",
+                string.Join("; ", failures),
+                cancellationToken);
             throw new InvalidOperationException($"ExternalCalendarCleanupFailed: {string.Join("; ", failures)}");
         }
     }
@@ -150,7 +167,12 @@ public sealed class ExternalCalendarSyncCoordinator : IExternalCalendarSyncCoord
         }
     }
 
-    private async Task RunProviderAsync(string providerName, int taskId, Func<Task> action)
+    private async Task RunProviderAsync(
+        string providerName,
+        string operation,
+        int taskId,
+        Func<Task> action,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -159,6 +181,40 @@ public sealed class ExternalCalendarSyncCoordinator : IExternalCalendarSyncCoord
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex, "{ProviderName} task propagation failed for task {TaskId}", providerName, taskId);
+            await NotifyCalendarWarningAsync(
+                providerName,
+                operation,
+                $"Не удалось синхронизировать задачу #{taskId} во внешний календарь.",
+                ex.Message,
+                cancellationToken);
+        }
+    }
+
+    private async Task NotifyCalendarWarningAsync(
+        string providerName,
+        string operation,
+        string summary,
+        string? details,
+        CancellationToken cancellationToken)
+    {
+        var notificationService = _serviceProvider.GetService<INotificationService>();
+        if (notificationService is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await notificationService.NotifyExternalCalendarSyncWarningAsync(
+                providerName,
+                operation,
+                summary,
+                details,
+                cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "External calendar admin warning notification failed.");
         }
     }
 

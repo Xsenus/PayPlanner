@@ -476,5 +476,8 @@ public class RolePermissionsAuditTests
             CalendarAccessChanges.Add((roleId, addedVisibleUserIds.ToArray(), removedVisibleUserIds.ToArray()));
             return Task.CompletedTask;
         }
+
+        public Task NotifyExternalCalendarSyncWarningAsync(string providerName, string operation, string summary, string? details = null, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 }

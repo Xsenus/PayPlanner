@@ -21,6 +21,7 @@ public static class NotificationTemplateKeys
     public const string TaskRevisionRequested = "task.revisionRequested";
     public const string TaskApprovalOverdue = "task.approvalOverdue";
     public const string CalendarAccessChanged = "calendar.accessChanged";
+    public const string ExternalCalendarSyncWarning = "calendar.externalSyncWarning";
     public const string TaskChanged = "task.changed";
     public const string TaskComment = "task.comment";
     public const string CaseInactivityControl = "case.inactivityControl";
@@ -183,6 +184,19 @@ public static class NotificationTemplateCatalog
             "Изменена видимость календарей",
             "{{actor.name}} изменил(а) список календарей сотрудников, доступных вашей роли.\n\nДобавлены: {{calendar.added}}\nУбраны: {{calendar.removed}}",
             [new("actor.name", "Кто выполнил действие"), new("calendar.added", "Добавленные календари"), new("calendar.removed", "Убранные календари")]),
+        new(
+            NotificationTemplateKeys.ExternalCalendarSyncWarning,
+            "Ошибка внешнего календаря",
+            "Системное предупреждение администраторам о проблемах синхронизации Google или Яндекс календаря.",
+            "Проблема синхронизации календаря: {{calendar.provider}}",
+            "Внешний календарь {{calendar.provider}} сообщил о проблеме.\n\nОперация: {{calendar.operation}}\nЧто произошло: {{calendar.summary}}\n{{calendar.detailsBlock}}Проверьте подключение календаря и журнал синхронизации.",
+            [
+                new("calendar.provider", "Провайдер календаря"),
+                new("calendar.operation", "Операция синхронизации"),
+                new("calendar.summary", "Краткое описание ошибки"),
+                new("calendar.details", "Технические детали"),
+                new("calendar.detailsBlock", "Строка технических деталей, если заполнена")
+            ]),
         new(
             NotificationTemplateKeys.TaskChanged,
             "Изменения по задаче",

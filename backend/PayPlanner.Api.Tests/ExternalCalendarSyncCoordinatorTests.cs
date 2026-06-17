@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Text.Json;
@@ -9,6 +10,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Notifications;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
@@ -67,6 +69,59 @@ public sealed class ExternalCalendarSyncCoordinatorTests
         Assert.StartsWith("ExternalCalendarTaskDeleteFailed", error.Message, StringComparison.Ordinal);
         Assert.Equal([42], google.DeletedTaskIds);
         Assert.Equal([42], yandex.DeletedTaskIds);
+    }
+
+    [Fact]
+    public async Task SyncTaskForConnectedUsers_WhenProviderFails_NotifiesAdminsOnly()
+    {
+        await using var db = await CreateContextAsync();
+        var adminRole = new Role { Name = "admin", Description = "Admin" };
+        var userRole = new Role { Name = "user", Description = "User" };
+        db.Roles.AddRange(adminRole, userRole);
+        await db.SaveChangesAsync();
+        var admin = new User
+        {
+            Email = "external-calendar-admin@example.com",
+            FullName = "Администратор",
+            PasswordHash = "hash",
+            RoleId = adminRole.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        var employee = new User
+        {
+            Email = "external-calendar-user@example.com",
+            FullName = "Сотрудник",
+            PasswordHash = "hash",
+            RoleId = userRole.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.AddRange(admin, employee);
+        await db.SaveChangesAsync();
+        var google = new FakeGoogleCalendarSyncService { FailSync = true };
+        var yandex = new FakeYandexCalendarSyncService();
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var notificationService = CreateNotificationService(db, realtime);
+        var coordinator = CreateCoordinator(google, yandex, db, notificationService);
+
+        await coordinator.SyncTaskForConnectedUsersAsync(42);
+
+        Assert.Equal([42], google.SyncedTaskIds);
+        Assert.Equal([42], yandex.SyncedTaskIds);
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(admin.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.SystemAdminWarning, notification.Type);
+        Assert.Equal("system", notification.ObjectType);
+        Assert.Contains("Google Calendar", notification.Title);
+        Assert.Contains("Не удалось синхронизировать задачу #42", notification.BodyPreview);
+        Assert.DoesNotContain(await db.UserNotifications.ToListAsync(), item => item.RecipientUserId == employee.Id);
+        var published = Assert.Single(realtime.Notifications);
+        Assert.Equal(notification.Id, published.Id);
     }
 
     [Fact]
@@ -132,7 +187,8 @@ public sealed class ExternalCalendarSyncCoordinatorTests
     private static ExternalCalendarSyncCoordinator CreateCoordinator(
         IGoogleCalendarSyncService google,
         IYandexCalendarSyncService yandex,
-        PaymentContext? db = null)
+        PaymentContext? db = null,
+        INotificationService? notificationService = null)
     {
         var services = new ServiceCollection()
             .AddSingleton(google)
@@ -141,10 +197,31 @@ public sealed class ExternalCalendarSyncCoordinatorTests
         {
             services.AddSingleton(db);
         }
+        if (notificationService is not null)
+        {
+            services.AddSingleton(notificationService);
+        }
 
         return new ExternalCalendarSyncCoordinator(
             services.BuildServiceProvider(),
             NullLogger<ExternalCalendarSyncCoordinator>.Instance);
+    }
+
+    private static NotificationService CreateNotificationService(
+        PaymentContext db,
+        IRealtimeNotificationPublisher realtimePublisher)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .Build();
+
+        return new NotificationService(
+            db,
+            configuration,
+            new NoOpEmailService(),
+            new NoOpTelegramNotificationService(),
+            NullLogger<NotificationService>.Instance,
+            realtimePublisher);
     }
 
     private static async Task<PaymentContext> CreateContextAsync()
@@ -163,6 +240,7 @@ public sealed class ExternalCalendarSyncCoordinatorTests
     {
         public List<int> SyncedTaskIds { get; } = [];
         public List<int> DeletedTaskIds { get; } = [];
+        public bool FailSync { get; set; }
         public bool FailDelete { get; set; }
 
         public Task<GoogleCalendarStatusDto> GetStatusAsync(int userId, HttpRequest request, CancellationToken cancellationToken = default)
@@ -192,6 +270,11 @@ public sealed class ExternalCalendarSyncCoordinatorTests
         public Task SyncTaskForConnectedUsersAsync(int taskId, CancellationToken cancellationToken = default)
         {
             SyncedTaskIds.Add(taskId);
+            if (FailSync)
+            {
+                throw new InvalidOperationException("GoogleCalendarSyncFailed");
+            }
+
             return Task.CompletedTask;
         }
 
@@ -217,6 +300,7 @@ public sealed class ExternalCalendarSyncCoordinatorTests
     {
         public List<int> SyncedTaskIds { get; } = [];
         public List<int> DeletedTaskIds { get; } = [];
+        public bool FailSync { get; set; }
         public bool FailDelete { get; set; }
 
         public Task<YandexCalendarStatusDto> GetStatusAsync(int userId, HttpRequest request, CancellationToken cancellationToken = default)
@@ -246,6 +330,11 @@ public sealed class ExternalCalendarSyncCoordinatorTests
         public Task SyncTaskForConnectedUsersAsync(int taskId, CancellationToken cancellationToken = default)
         {
             SyncedTaskIds.Add(taskId);
+            if (FailSync)
+            {
+                throw new InvalidOperationException("YandexCalendarSyncFailed");
+            }
+
             return Task.CompletedTask;
         }
 
@@ -262,5 +351,52 @@ public sealed class ExternalCalendarSyncCoordinatorTests
 
         public Task CleanupDeletedUserAsync(int userId, int actorUserId, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
+    }
+
+    private sealed class RecordingRealtimeNotificationPublisher : IRealtimeNotificationPublisher
+    {
+        public List<UserNotification> Notifications { get; } = [];
+
+        public Task PublishUserNotificationAsync(UserNotification notification, CancellationToken cancellationToken = default)
+        {
+            Notifications.Add(notification);
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class NoOpEmailService : IEmailService
+    {
+        public Task SendRegistrationPendingEmailAsync(string toEmail, string fullName)
+            => Task.CompletedTask;
+
+        public Task SendRegistrationApprovedEmailAsync(string toEmail, string fullName)
+            => Task.CompletedTask;
+
+        public Task SendRegistrationRejectedEmailAsync(string toEmail, string fullName, string? reason)
+            => Task.CompletedTask;
+
+        public Task SendAdminNewRegistrationNotificationAsync(string adminEmail, string newUserFullName, string newUserEmail)
+            => Task.CompletedTask;
+
+        public Task SendEmailWithAttachmentAsync(
+            string toEmail,
+            string subject,
+            string body,
+            string attachmentFileName,
+            byte[] attachmentBytes,
+            string attachmentContentType)
+            => Task.CompletedTask;
+    }
+
+    private sealed class NoOpTelegramNotificationService : ITelegramNotificationService
+    {
+        public Task<TelegramNotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new TelegramNotificationSettingsDto());
+
+        public Task<TelegramSendResult> SendMessageAsync(long chatId, string text, CancellationToken cancellationToken = default)
+            => Task.FromResult(new TelegramSendResult(true, NotificationDeliveryStatus.Sent));
+
+        public Task<TelegramSendResult> SendMessageWithTokenAsync(long chatId, string text, string botToken, CancellationToken cancellationToken = default, TelegramBotConnectionSettings? connection = null)
+            => Task.FromResult(new TelegramSendResult(true, NotificationDeliveryStatus.Sent));
     }
 }

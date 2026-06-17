@@ -1641,6 +1641,73 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyExternalCalendarSyncWarningAsync_NotifiesAdminsOnlyAndDeduplicates()
+    {
+        await using var db = await CreateContextAsync();
+        var adminRole = new Role { Name = "admin", Description = "Admin" };
+        var userRole = new Role { Name = "user", Description = "User" };
+        db.Roles.AddRange(adminRole, userRole);
+        await db.SaveChangesAsync();
+        var admin = new User
+        {
+            Email = "calendar-sync-admin@example.com",
+            FullName = "Администратор",
+            PasswordHash = "hash",
+            RoleId = adminRole.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        var employee = new User
+        {
+            Email = "calendar-sync-employee@example.com",
+            FullName = "Сотрудник",
+            PasswordHash = "hash",
+            RoleId = userRole.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.AddRange(admin, employee);
+        await db.SaveChangesAsync();
+
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            realtime,
+            webPush);
+
+        await service.NotifyExternalCalendarSyncWarningAsync(
+            "Google Calendar",
+            "Фоновая синхронизация",
+            "Синхронизация завершилась с ошибками: 2.",
+            "Подключений обработано: 3.");
+        await service.NotifyExternalCalendarSyncWarningAsync(
+            "Google Calendar",
+            "Фоновая синхронизация",
+            "Синхронизация завершилась с ошибками: 2.",
+            "Подключений обработано: 3.");
+
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(admin.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.SystemAdminWarning, notification.Type);
+        Assert.Equal("system", notification.ObjectType);
+        Assert.Null(notification.ObjectId);
+        Assert.Contains("Google Calendar", notification.Title);
+        Assert.Contains("Синхронизация завершилась с ошибками", notification.BodyPreview);
+        Assert.DoesNotContain(await db.UserNotifications.ToListAsync(), item => item.RecipientUserId == employee.Id);
+        var realtimeNotification = Assert.Single(realtime.Notifications);
+        Assert.Equal(notification.Id, realtimeNotification.Id);
+        var pushed = Assert.Single(webPush.Notifications);
+        Assert.Equal(notification.Id, pushed.Id);
+    }
+
+    [Fact]
     public async Task NotifyTaskApprovalRequestedAsync_CreatesInAppNotificationForApproverAndAssignee()
     {
         await using var db = await CreateContextAsync();

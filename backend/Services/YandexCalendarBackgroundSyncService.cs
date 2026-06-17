@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services.Notifications;
 
 namespace PayPlanner.Api.Services;
 
@@ -54,6 +55,11 @@ public sealed class YandexCalendarBackgroundSyncService : BackgroundService
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     _logger.LogWarning(ex, "Yandex Calendar background sync failed.");
+                    await NotifyWarningAsync(
+                        "Фоновая синхронизация",
+                        "Фоновая синхронизация Яндекс Календаря завершилась ошибкой.",
+                        ex.Message,
+                        stoppingToken);
                 }
             }
 
@@ -80,7 +86,45 @@ public sealed class YandexCalendarBackgroundSyncService : BackgroundService
     {
         using var scope = _scopeFactory.CreateScope();
         var yandexCalendarSync = scope.ServiceProvider.GetRequiredService<IYandexCalendarSyncService>();
-        return await yandexCalendarSync.SyncDueConnectionsAsync(ResolveBatchSize(), cancellationToken);
+        var result = await yandexCalendarSync.SyncDueConnectionsAsync(ResolveBatchSize(), cancellationToken);
+        if (result.ErrorCount > 0)
+        {
+            await NotifyWarningAsync(
+                "Фоновая синхронизация",
+                $"Синхронизация завершилась с ошибками: {result.ErrorCount}.",
+                $"Подключений обработано: {result.ProcessedConnections}; задач: {result.ProcessedTasks}; импортировано событий: {result.ImportedEvents}.",
+                cancellationToken);
+        }
+
+        return result;
+    }
+
+    private async Task NotifyWarningAsync(
+        string operation,
+        string summary,
+        string? details,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var notificationService = scope.ServiceProvider.GetService<INotificationService>();
+            if (notificationService is null)
+            {
+                return;
+            }
+
+            await notificationService.NotifyExternalCalendarSyncWarningAsync(
+                "Яндекс Календарь",
+                operation,
+                summary,
+                details,
+                cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Yandex Calendar admin warning notification failed.");
+        }
     }
 
     private int ResolveIntervalMinutes(CalendarSyncSettingsDto? settings = null)
