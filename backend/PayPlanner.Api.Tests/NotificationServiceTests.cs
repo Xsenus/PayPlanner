@@ -1417,6 +1417,230 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyTaskScheduleConflictAsync_SendsWebPushWhenEnabled()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db, "conflict-push-author@example.com");
+        var assignee = new User
+        {
+            Email = "conflict-push-assignee@example.com",
+            FullName = "Conflict Push Assignee",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(assignee);
+        await db.SaveChangesAsync();
+
+        var dueAt = DateTime.UtcNow.AddHours(2);
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Дело клиента",
+            Title = "Новая встреча",
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            DueAt = dueAt,
+            PlannedDurationMinutes = 60,
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "new"
+        };
+        var conflictTask = new TaskJournalItem
+        {
+            ObjectName = "Дело клиента",
+            Title = "Существующая встреча",
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            DueAt = dueAt.AddMinutes(30),
+            PlannedDurationMinutes = 60,
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "new"
+        };
+        db.TaskJournalItems.AddRange(task, conflictTask);
+        await db.SaveChangesAsync();
+
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            webPushNotificationService: webPush);
+
+        await service.NotifyTaskScheduleConflictAsync(task, [conflictTask], author.FullName, author.Id);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        var pushed = Assert.Single(webPush.Notifications);
+        Assert.Equal(notification.Id, pushed.Id);
+        Assert.Equal(assignee.Id, pushed.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.TaskScheduleConflict, pushed.Type);
+    }
+
+    [Fact]
+    public async Task NotifyTaskCancelledAsync_NotifiesTaskParticipantsWithoutTaskForeignKey()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db, "cancel-author@example.com");
+        var assignee = new User
+        {
+            Email = "cancel-assignee@example.com",
+            FullName = "Исполнитель",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        var observer = new User
+        {
+            Email = "cancel-observer@example.com",
+            FullName = "Наблюдатель",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.AddRange(assignee, observer);
+        await db.SaveChangesAsync();
+
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Дело клиента",
+            Title = "Отмененная встреча",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            DueAt = DateTime.UtcNow.AddHours(3),
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "cancelled",
+            Participants =
+            [
+                new TaskJournalParticipant
+                {
+                    UserId = observer.Id,
+                    Role = "observer",
+                    DisplayName = observer.FullName,
+                    Email = observer.Email,
+                    SortOrder = 0
+                }
+            ]
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService(), realtime);
+
+        var deliveries = await service.NotifyTaskCancelledAsync(task, author.FullName, author.Id, "Удалена");
+
+        Assert.Empty(deliveries);
+        var notifications = await db.UserNotifications
+            .OrderBy(item => item.RecipientUserId)
+            .ToListAsync();
+        Assert.Equal([assignee.Id, observer.Id], notifications.Select(item => item.RecipientUserId).ToArray());
+        Assert.All(notifications, notification =>
+        {
+            Assert.Equal(UserNotificationTypes.TaskCancelled, notification.Type);
+            Assert.Equal("task", notification.ObjectType);
+            Assert.Equal(task.Id, notification.ObjectId);
+            Assert.Null(notification.TaskJournalItemId);
+            Assert.Contains("Задача отменена", notification.Title, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Удалена", notification.BodyPreview, StringComparison.OrdinalIgnoreCase);
+        });
+        Assert.Equal(
+            notifications.Select(item => item.Id).OrderBy(id => id),
+            realtime.Notifications.Select(item => item.Id).OrderBy(id => id));
+    }
+
+    [Fact]
+    public async Task NotifyCalendarAccessChangedAsync_NotifiesActiveUsersInRole()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateUserAsync(db, "calendar-access-admin@example.com");
+        var role = new Role { Name = "calendar-secretary", Description = "Calendar role" };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+        var recipient = new User
+        {
+            Email = "calendar-access-recipient@example.com",
+            FullName = "Секретарь",
+            PasswordHash = "hash",
+            RoleId = role.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        var inactive = new User
+        {
+            Email = "calendar-access-inactive@example.com",
+            FullName = "Неактивный",
+            PasswordHash = "hash",
+            RoleId = role.Id,
+            IsActive = false,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        var added = new User
+        {
+            Email = "calendar-added@example.com",
+            FullName = "Добавленный календарь",
+            PasswordHash = "hash",
+            RoleId = admin.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        var removed = new User
+        {
+            Email = "calendar-removed@example.com",
+            FullName = "Убранный календарь",
+            PasswordHash = "hash",
+            RoleId = admin.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.AddRange(recipient, inactive, added, removed);
+        await db.SaveChangesAsync();
+
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            webPushNotificationService: webPush);
+
+        await service.NotifyCalendarAccessChangedAsync(
+            role.Id,
+            [added.Id],
+            [removed.Id],
+            admin.FullName,
+            admin.Id);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(recipient.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.CalendarAccessChanged, notification.Type);
+        Assert.Equal("calendar", notification.ObjectType);
+        Assert.Equal(role.Id, notification.ObjectId);
+        Assert.Contains("Добавленный календарь", notification.BodyPreview);
+        Assert.Contains("Убранный календарь", notification.BodyPreview);
+        var pushed = Assert.Single(webPush.Notifications);
+        Assert.Equal(notification.Id, pushed.Id);
+    }
+
+    [Fact]
     public async Task NotifyTaskApprovalRequestedAsync_CreatesInAppNotificationForApproverAndAssignee()
     {
         await using var db = await CreateContextAsync();

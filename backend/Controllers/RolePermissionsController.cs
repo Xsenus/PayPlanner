@@ -6,6 +6,7 @@ using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Notifications;
 using System.Globalization;
 using System.Text;
 
@@ -20,11 +21,16 @@ public class RolePermissionsController : ControllerBase
 
     private readonly PaymentContext _db;
     private readonly RoleManagementAccessService _roleAccess;
+    private readonly INotificationService? _notificationService;
 
-    public RolePermissionsController(PaymentContext db, RoleManagementAccessService roleAccess)
+    public RolePermissionsController(
+        PaymentContext db,
+        RoleManagementAccessService roleAccess,
+        INotificationService? notificationService = null)
     {
         _db = db;
         _roleAccess = roleAccess;
+        _notificationService = notificationService;
     }
 
     [HttpGet("audit")]
@@ -212,8 +218,16 @@ public class RolePermissionsController : ControllerBase
             _db.RolePermissions.RemoveRange(unused);
         }
 
+        int[]? previousCalendarVisibleUserIds = null;
         if (request.Calendar.VisibleUserIds is not null)
         {
+            previousCalendarVisibleUserIds = await _db.RoleCalendarVisibleUsers
+                .AsNoTracking()
+                .Where(item => item.RoleId == roleId)
+                .OrderBy(item => item.UserId)
+                .Select(item => item.UserId)
+                .ToArrayAsync(ct);
+
             var validation = await SyncCalendarVisibleUsersAsync(roleId, request.Calendar.VisibleUserIds, ct);
             if (validation is not null)
             {
@@ -223,6 +237,24 @@ public class RolePermissionsController : ControllerBase
 
         StampPermissionsAudit(role);
         await _db.SaveChangesAsync(ct);
+        if (_notificationService is not null && previousCalendarVisibleUserIds is not null)
+        {
+            var currentCalendarVisibleUserIds = request.Calendar.VisibleUserIds!
+                .Where(id => id > 0)
+                .Distinct()
+                .OrderBy(id => id)
+                .ToArray();
+            var addedVisibleUserIds = currentCalendarVisibleUserIds.Except(previousCalendarVisibleUserIds).ToArray();
+            var removedVisibleUserIds = previousCalendarVisibleUserIds.Except(currentCalendarVisibleUserIds).ToArray();
+            await _notificationService.NotifyCalendarAccessChangedAsync(
+                roleId,
+                addedVisibleUserIds,
+                removedVisibleUserIds,
+                User.GetDisplayName(),
+                User.GetUserId() ?? 0,
+                ct);
+        }
+
         return NoContent();
     }
 

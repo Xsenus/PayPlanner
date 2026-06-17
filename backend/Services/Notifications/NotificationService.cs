@@ -792,6 +792,147 @@ public sealed class NotificationService : INotificationService
                 cancellationToken);
     }
 
+    public async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskCancelledAsync(
+        TaskJournalItem task,
+        string actorName,
+        int actorUserId,
+        string action,
+        CancellationToken cancellationToken = default)
+    {
+        var recipients = ResolveTaskNotificationUserIds(task, actorUserId);
+        if (recipients.Count == 0)
+        {
+            return Array.Empty<NotificationDelivery>();
+        }
+
+        var normalizedAction = string.IsNullOrWhiteSpace(action) ? "Отменена" : action.Trim();
+        var subject = $"Задача отменена: {task.Title}";
+        var eventKey = $"task:{task.Id}:cancelled:{NormalizeEventKeySegment(normalizedAction)}";
+        var channels = ResolveTaskMessageChannels(task);
+        var deliveries = new List<NotificationDelivery>();
+        foreach (var userId in recipients)
+        {
+            var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(userId, cancellationToken);
+            var body = BuildTaskCancelledBody(task, actorName, normalizedAction, recipientTimeZone);
+            var message = await RenderTemplateAsync(
+                NotificationTemplateKeys.TaskCancelled,
+                subject,
+                body,
+                NotificationTemplateCatalog.MergeValues(
+                    BuildTaskTemplateValues(task, recipientTimeZone, actorName),
+                    new Dictionary<string, string?> { ["task.cancelAction"] = normalizedAction }),
+                purpose: NotificationPurposes.TaskReminder,
+                cancellationToken: cancellationToken);
+
+            if (HasTaskChannel(task, NotificationChannels.InApp))
+            {
+                await CreateUserNotificationAsync(
+                    userId,
+                    UserNotificationTypes.TaskCancelled,
+                    eventKey,
+                    message.Subject,
+                    message.Body,
+                    "orange",
+                    "task",
+                    task.Id,
+                    null,
+                    null,
+                    new { actorUserId, actorName, action = normalizedAction },
+                    cancellationToken);
+            }
+
+            var enabledChannels = await ResolveUserNotificationChannelsAsync(
+                userId,
+                UserNotificationTypes.TaskCancelled,
+                channels,
+                cancellationToken);
+            if (enabledChannels.Count > 0)
+            {
+                deliveries.AddRange(await SendToUserAsync(userId, message, enabledChannels, eventKey, cancellationToken));
+            }
+        }
+
+        return deliveries;
+    }
+
+    public async Task NotifyCalendarAccessChangedAsync(
+        int roleId,
+        IReadOnlyCollection<int> addedVisibleUserIds,
+        IReadOnlyCollection<int> removedVisibleUserIds,
+        string actorName,
+        int actorUserId,
+        CancellationToken cancellationToken = default)
+    {
+        if (roleId <= 0 || (addedVisibleUserIds.Count == 0 && removedVisibleUserIds.Count == 0))
+        {
+            return;
+        }
+
+        var recipients = await _context.Users
+            .AsNoTracking()
+            .Where(user =>
+                user.RoleId == roleId
+                && user.IsActive
+                && user.IsApproved
+                && user.Id != actorUserId)
+            .Select(user => user.Id)
+            .ToListAsync(cancellationToken);
+        if (recipients.Count == 0)
+        {
+            return;
+        }
+
+        var calendarUserIds = addedVisibleUserIds
+            .Concat(removedVisibleUserIds)
+            .Where(userId => userId > 0)
+            .Distinct()
+            .ToArray();
+        var namesById = await _context.Users
+            .AsNoTracking()
+            .Where(user => calendarUserIds.Contains(user.Id))
+            .Select(user => new
+            {
+                user.Id,
+                Name = user.FullName == "" ? user.Email : user.FullName
+            })
+            .ToDictionaryAsync(item => item.Id, item => item.Name, cancellationToken);
+
+        var addedText = FormatCalendarAccessUserList(addedVisibleUserIds, namesById);
+        var removedText = FormatCalendarAccessUserList(removedVisibleUserIds, namesById);
+        var subject = "Изменена видимость календарей";
+        var body = BuildCalendarAccessChangedBody(actorName, addedText, removedText);
+        var eventKey = $"calendar-access:{roleId}:{string.Join('-', addedVisibleUserIds.OrderBy(id => id))}:{string.Join('-', removedVisibleUserIds.OrderBy(id => id))}:{DateTime.UtcNow:yyyyMMddHHmmssfff}";
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.CalendarAccessChanged,
+            subject,
+            body,
+            new Dictionary<string, string?>
+            {
+                ["actor.name"] = actorName,
+                ["calendar.added"] = addedText,
+                ["calendar.removed"] = removedText,
+            },
+            purpose: NotificationPurposes.TaskReminder,
+            cancellationToken: cancellationToken);
+
+        foreach (var userId in recipients)
+        {
+            await CreateUserNotificationAsync(
+                userId,
+                UserNotificationTypes.CalendarAccessChanged,
+                eventKey,
+                message.Subject,
+                message.Body,
+                "violet",
+                "calendar",
+                roleId,
+                null,
+                null,
+                new { roleId, actorUserId, actorName, addedVisibleUserIds, removedVisibleUserIds },
+                cancellationToken);
+        }
+    }
+
     public async Task<IReadOnlyList<NotificationDelivery>> NotifyCaseInactivityControlTaskCreatedAsync(
         TaskJournalItem task,
         int daysWithoutActiveTask,
@@ -1532,6 +1673,33 @@ public sealed class NotificationService : INotificationService
         TaskJournalItem task,
         object? metadata,
         CancellationToken cancellationToken)
+        => await CreateUserNotificationAsync(
+            recipientUserId,
+            type,
+            eventKey,
+            title,
+            body,
+            tone,
+            "task",
+            task.Id,
+            task.Id,
+            task,
+            metadata,
+            cancellationToken);
+
+    private async Task CreateUserNotificationAsync(
+        int recipientUserId,
+        string type,
+        string eventKey,
+        string title,
+        string body,
+        string tone,
+        string objectType,
+        int? objectId,
+        int? taskJournalItemId,
+        TaskJournalItem? task,
+        object? metadata,
+        CancellationToken cancellationToken)
     {
         if (recipientUserId <= 0 || string.IsNullOrWhiteSpace(eventKey))
         {
@@ -1570,9 +1738,10 @@ public sealed class NotificationService : INotificationService
             Title = Truncate(title.Trim(), 300),
             BodyPreview = Truncate(body.Trim(), 1000),
             Tone = string.IsNullOrWhiteSpace(tone) ? "blue" : tone.Trim(),
-            ObjectType = "task",
-            ObjectId = task.Id,
-            TaskJournalItemId = task.Id,
+            ObjectType = objectType,
+            ObjectId = objectId,
+            TaskJournalItemId = taskJournalItemId,
+            TaskJournalItem = task,
             MetadataJson = metadata is null ? "{}" : JsonSerializer.Serialize(metadata, JsonOptions),
             CreatedAt = DateTime.UtcNow
         };
@@ -2416,6 +2585,45 @@ public sealed class NotificationService : INotificationService
         return string.Join('\n', lines);
     }
 
+    private static string BuildTaskCancelledBody(
+        TaskJournalItem task,
+        string actorName,
+        string action,
+        TimeZoneInfo timeZone)
+    {
+        var dueText = FormatTaskDueAt(task.DueAt, timeZone);
+        var lines = new List<string>
+        {
+            $"{actorName} отменил(а) календарную задачу.",
+            string.Empty,
+            $"Клиент/дело: {task.ObjectName}",
+            $"Задача: {task.Title}",
+            $"Срок: {dueText}",
+            $"Действие: {action}",
+        };
+
+        if (!string.IsNullOrWhiteSpace(task.AssigneeName))
+        {
+            lines.Add($"Исполнитель: {task.AssigneeName.Trim()}");
+        }
+
+        return string.Join('\n', lines);
+    }
+
+    private static string BuildCalendarAccessChangedBody(
+        string actorName,
+        string addedText,
+        string removedText)
+        => string.Join('\n', new[]
+        {
+            $"{actorName} изменил(а) список календарей сотрудников, доступных вашей роли.",
+            string.Empty,
+            $"Добавлены: {addedText}",
+            $"Убраны: {removedText}",
+            string.Empty,
+            "Обновите раздел календаря, чтобы увидеть актуальный список сотрудников."
+        });
+
     private static string BuildCaseInactivityControlBody(
         TaskJournalItem task,
         int daysWithoutActiveTask,
@@ -2629,6 +2837,31 @@ public sealed class NotificationService : INotificationService
 
     private static string FormatNotificationName(string? value)
         => string.IsNullOrWhiteSpace(value) ? "не указан" : value.Trim();
+
+    private static string FormatCalendarAccessUserList(
+        IReadOnlyCollection<int> userIds,
+        IReadOnlyDictionary<int, string> namesById)
+    {
+        var names = userIds
+            .Where(userId => userId > 0)
+            .Distinct()
+            .Select(userId => namesById.TryGetValue(userId, out var name) && !string.IsNullOrWhiteSpace(name)
+                ? name.Trim()
+                : $"ID {userId}")
+            .OrderBy(name => name, StringComparer.CurrentCultureIgnoreCase)
+            .ToArray();
+        return names.Length == 0 ? "нет" : string.Join(", ", names);
+    }
+
+    private static string NormalizeEventKeySegment(string value)
+    {
+        var normalized = new string(value
+            .Trim()
+            .Select(ch => char.IsLetterOrDigit(ch) ? char.ToLowerInvariant(ch) : '-')
+            .ToArray());
+        normalized = string.Join('-', normalized.Split('-', StringSplitOptions.RemoveEmptyEntries));
+        return string.IsNullOrWhiteSpace(normalized) ? "event" : normalized;
+    }
 
     private static IReadOnlyList<string> FormatTaskChangeLabels(IReadOnlyList<string> changeLabels, TimeZoneInfo timeZone)
         => changeLabels

@@ -14,11 +14,13 @@ public static class NotificationTemplateKeys
     public const string TaskAssigned = "task.assigned";
     public const string TaskReminder = "task.reminder";
     public const string TaskCompleted = "task.completed";
+    public const string TaskCancelled = "task.cancelled";
     public const string TaskScheduleConflict = "task.scheduleConflict";
     public const string TaskApprovalRequested = "task.approvalRequested";
     public const string TaskApproved = "task.approved";
     public const string TaskRevisionRequested = "task.revisionRequested";
     public const string TaskApprovalOverdue = "task.approvalOverdue";
+    public const string CalendarAccessChanged = "calendar.accessChanged";
     public const string TaskChanged = "task.changed";
     public const string TaskComment = "task.comment";
     public const string CaseInactivityControl = "case.inactivityControl";
@@ -133,6 +135,13 @@ public static class NotificationTemplateCatalog
             "Задача выполнена: {{task.title}}\n\nИсполнитель: {{task.assigneeName}}\nОбъект: {{task.objectName}}",
             TaskVariables),
         new(
+            NotificationTemplateKeys.TaskCancelled,
+            "Задача отменена",
+            "Уведомление участникам при отмене или удалении календарной задачи.",
+            "Задача отменена: {{task.title}}",
+            "{{actor.name}} отменил(а) календарную задачу: {{task.title}}\n\nОбъект: {{task.objectName}}\nСрок: {{task.dueAt}}\nДействие: {{task.cancelAction}}",
+            [.. TaskVariables, new("task.cancelAction", "Как отменена задача")]),
+        new(
             NotificationTemplateKeys.TaskScheduleConflict,
             "Конфликт расписания",
             "Уведомление о пересечении задачи с другими событиями.",
@@ -167,6 +176,13 @@ public static class NotificationTemplateCatalog
             "Просрочено согласование: {{task.title}}",
             "Срок согласования задачи истек.\n\nЗадача: {{task.title}}\nСогласующий: {{approval.approverName}}\nСрок согласования: {{approval.dueAt}}\nОбъект: {{task.objectName}}",
             [.. TaskVariables, new("approval.approverName", "Текущий согласующий"), new("approval.dueAt", "Срок согласования")]),
+        new(
+            NotificationTemplateKeys.CalendarAccessChanged,
+            "Изменена видимость календарей",
+            "Уведомление сотрудникам роли, когда администратор меняет список доступных календарей.",
+            "Изменена видимость календарей",
+            "{{actor.name}} изменил(а) список календарей сотрудников, доступных вашей роли.\n\nДобавлены: {{calendar.added}}\nУбраны: {{calendar.removed}}",
+            [new("actor.name", "Кто выполнил действие"), new("calendar.added", "Добавленные календари"), new("calendar.removed", "Убранные календари")]),
         new(
             NotificationTemplateKeys.TaskChanged,
             "Изменения по задаче",

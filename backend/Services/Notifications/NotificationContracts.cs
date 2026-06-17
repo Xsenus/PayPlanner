@@ -92,11 +92,13 @@ public static class UserNotificationTypes
     public const string TaskChanged = "taskChanged";
     public const string TaskComment = "taskComment";
     public const string TaskCompleted = "taskCompleted";
+    public const string TaskCancelled = "taskCancelled";
     public const string TaskScheduleConflict = "taskScheduleConflict";
     public const string TaskApprovalRequested = "taskApprovalRequested";
     public const string TaskApproved = "taskApproved";
     public const string TaskRevisionRequested = "taskRevisionRequested";
     public const string TaskApprovalOverdue = "taskApprovalOverdue";
+    public const string CalendarAccessChanged = "calendarAccessChanged";
     public const string CaseInactivityControl = "caseInactivityControl";
     public const string CaseAccessRequested = "caseAccessRequested";
     public const string CaseAccessResolved = "caseAccessResolved";
@@ -119,11 +121,13 @@ public static class UserNotificationTypes
         new(TaskChanged, "Изменение задачи", "Изменения статусов, сроков, исполнителей и других полей задачи.", "blue", "normal", NotificationChannels.All, false, true),
         new(TaskComment, "Комментарий по задаче", "Новые комментарии и сообщения по задаче.", "emerald", "normal", NotificationChannels.All, true, true),
         new(TaskCompleted, "Задача выполнена", "Уведомление постановщику о завершении задачи.", "blue", "normal", NotificationChannels.All, true, false),
+        new(TaskCancelled, "Задача отменена", "Календарная задача отменена или удалена.", "orange", "high", NotificationChannels.All, true, false),
         new(TaskScheduleConflict, "Конфликт расписания", "Задача пересекается по времени с другой активной задачей исполнителя.", "rose", "high", NotificationChannels.All, true, false),
         new(TaskApprovalRequested, "Ожидает согласования", "Задача отправлена согласующему на решение.", "violet", "high", NotificationChannels.All, true, false),
         new(TaskApproved, "Задача согласована", "Согласующий подтвердил результат задачи.", "emerald", "normal", NotificationChannels.All, false, false),
         new(TaskRevisionRequested, "Возврат на доработку", "Согласующий вернул задачу исполнителю на доработку.", "orange", "high", NotificationChannels.All, false, false),
         new(TaskApprovalOverdue, "Просрочено согласование", "Срок согласования задачи истек, требуется решение согласующего или контроль исполнителя.", "rose", "high", NotificationChannels.All, true, false),
+        new(CalendarAccessChanged, "Изменена видимость календарей", "Администратор изменил, календари каких сотрудников доступны пользователям роли.", "violet", "high", NotificationChannels.All, true, false),
         new(CaseInactivityControl, "Автоконтроль дела", "По делу долго не было активных задач, создана контрольная задача.", "amber", "high", NotificationChannels.All, true, false),
         new(CaseAccessRequested, "Запрос доступа к делу", "Исполнитель запросил доступ к скрытому делу.", "violet", "high", NotificationChannels.All, false, false),
         new(CaseAccessResolved, "Решение по доступу к делу", "Руководитель разрешил или отклонил доступ к скрытому делу.", "emerald", "normal", NotificationChannels.All, false, false),
@@ -507,6 +511,7 @@ public interface INotificationService
     Task<IReadOnlyList<NotificationDelivery>> NotifyTaskAssignedAsync(TaskJournalItem task, string actorName, int actorUserId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<NotificationDelivery>> NotifyTaskReminderAsync(TaskJournalItem task, string reminderKey, DateTime nowUtc, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<NotificationDelivery>> NotifyTaskCompletedAsync(TaskJournalItem task, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<NotificationDelivery>> NotifyTaskCancelledAsync(TaskJournalItem task, string actorName, int actorUserId, string action, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<NotificationDelivery>> NotifyTaskScheduleConflictAsync(TaskJournalItem task, IReadOnlyList<TaskJournalItem> conflicts, string actorName, int actorUserId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<NotificationDelivery>> NotifyTaskApprovalRequestedAsync(TaskJournalItem task, string actorName, int actorUserId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<NotificationDelivery>> NotifyTaskApprovalDecisionAsync(TaskJournalItem task, TaskJournalParticipant approver, string decision, string actorName, int actorUserId, string? resolution = null, CancellationToken cancellationToken = default);
@@ -515,4 +520,5 @@ public interface INotificationService
     Task<IReadOnlyList<NotificationDelivery>> NotifyTaskChangedAsync(TaskJournalItem task, IReadOnlyList<string> changeLabels, string actorName, int actorUserId, string? comment = null, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<NotificationDelivery>> NotifyTaskCommentAsync(TaskJournalItem task, TaskJournalComment comment, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<NotificationDelivery>> NotifyCaseInactivityControlTaskCreatedAsync(TaskJournalItem task, int daysWithoutActiveTask, CancellationToken cancellationToken = default);
+    Task NotifyCalendarAccessChangedAsync(int roleId, IReadOnlyCollection<int> addedVisibleUserIds, IReadOnlyCollection<int> removedVisibleUserIds, string actorName, int actorUserId, CancellationToken cancellationToken = default);
 }

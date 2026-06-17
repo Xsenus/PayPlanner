@@ -9,6 +9,7 @@ using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Notifications;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
@@ -233,6 +234,64 @@ public class RolePermissionsAuditTests
     }
 
     [Fact]
+    public async Task Update_NotifiesRoleUsersWhenSpecificCalendarVisibleUsersChanged()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "secretary-notified", Description = "Secretary" };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.AddRange(RolePermissionCatalog.CreateEntities(role.Id, allowRoleManagement: false));
+        var first = new User
+        {
+            Email = "calendar-notify-first@example.com",
+            PasswordHash = "hash",
+            FullName = "Первый сотрудник",
+            RoleId = role.Id,
+            IsActive = true,
+            IsApproved = true,
+        };
+        var second = new User
+        {
+            Email = "calendar-notify-second@example.com",
+            PasswordHash = "hash",
+            FullName = "Второй сотрудник",
+            RoleId = role.Id,
+            IsActive = true,
+            IsApproved = true,
+        };
+        db.Users.AddRange(first, second);
+        await db.SaveChangesAsync();
+        db.RoleCalendarVisibleUsers.Add(new RoleCalendarVisibleUser
+        {
+            RoleId = role.Id,
+            UserId = first.Id,
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+
+        var notificationService = new RecordingNotificationService();
+        var controller = CreateController(db, CreateAdminPrincipal(), notificationService);
+        var request = new RolePermissionsDto
+        {
+            Calendar = new CalendarPermissionsDto
+            {
+                CanView = true,
+                ViewScope = DataVisibilityScope.Specific,
+                VisibleUserIds = new List<int> { second.Id },
+            },
+        };
+
+        var updateResult = await controller.Update(role.Id, request, CancellationToken.None);
+
+        Assert.IsType<NoContentResult>(updateResult);
+        var notification = Assert.Single(notificationService.CalendarAccessChanges);
+        Assert.Equal(role.Id, notification.RoleId);
+        Assert.Equal([second.Id], notification.AddedVisibleUserIds);
+        Assert.Equal([first.Id], notification.RemovedVisibleUserIds);
+    }
+
+    [Fact]
     public async Task Update_RejectsInactiveCalendarVisibleUser()
     {
         await using var db = await CreateContextAsync();
@@ -270,8 +329,11 @@ public class RolePermissionsAuditTests
         Assert.Empty(await db.RoleCalendarVisibleUsers.AsNoTracking().ToListAsync());
     }
 
-    private static RolePermissionsController CreateController(PaymentContext db, ClaimsPrincipal user)
-        => new(db, new RoleManagementAccessService(db))
+    private static RolePermissionsController CreateController(
+        PaymentContext db,
+        ClaimsPrincipal user,
+        INotificationService? notificationService = null)
+        => new(db, new RoleManagementAccessService(db), notificationService)
         {
             ControllerContext = new ControllerContext
             {
@@ -316,5 +378,103 @@ public class RolePermissionsAuditTests
         var db = new PaymentContext(options);
         await db.Database.EnsureCreatedAsync();
         return db;
+    }
+
+    private sealed class RecordingNotificationService : INotificationService
+    {
+        public List<(int RoleId, IReadOnlyCollection<int> AddedVisibleUserIds, IReadOnlyCollection<int> RemovedVisibleUserIds)> CalendarAccessChanges { get; } = [];
+
+        public Task<NotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
+        public Task<IReadOnlyList<NotificationChannelDto>> GetChannelsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<NotificationChannelDto>>(Array.Empty<NotificationChannelDto>());
+
+        public Task<NotificationSettingsDto> UpdateEmailSettingsAsync(PayPlanner.Api.Models.Requests.UpdateEmailNotificationSettingsRequest request, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
+        public Task<NotificationSettingsDto> UpdateTelegramSettingsAsync(PayPlanner.Api.Models.Requests.UpdateTelegramNotificationSettingsRequest request, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
+        public Task<IReadOnlyList<NotificationTemplateDto>> GetTemplatesAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<NotificationTemplateDto>>(Array.Empty<NotificationTemplateDto>());
+
+        public Task<NotificationTemplateDto> UpdateTemplateAsync(string key, PayPlanner.Api.Models.Requests.UpdateNotificationTemplateRequest request, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
+        public Task<NotificationTemplateDto> ResetTemplateAsync(string key, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
+        public Task<NotificationMessage> RenderTemplateAsync(string key, string fallbackSubject, string fallbackBody, IReadOnlyDictionary<string, string?> values, bool isSensitive = false, string purpose = NotificationPurposes.ManualTest, CancellationToken cancellationToken = default)
+            => Task.FromResult(new NotificationMessage(fallbackSubject, fallbackBody, IsSensitive: isSensitive, Purpose: purpose));
+
+        public Task<IReadOnlyList<NotificationDelivery>> SendToUserAsync(int userId, NotificationMessage message, IEnumerable<string>? channels = null, string? eventKey = null, CancellationToken cancellationToken = default, int? senderId = null)
+            => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+
+        public Task<IReadOnlyList<NotificationDelivery>> SendAsync(NotificationRecipient recipient, NotificationMessage message, IEnumerable<string>? channels = null, string? eventKey = null, CancellationToken cancellationToken = default, int? senderId = null)
+            => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+
+        public Task<IReadOnlyList<NotificationDelivery>> RetryDeliveryAsync(int deliveryId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+
+        public Task<NotificationSettingsDto> UpsertSenderAsync(PayPlanner.Api.Models.Requests.UpsertNotificationSenderRequest request, int? senderId = null, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
+        public Task<bool> DeleteSenderAsync(int senderId, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyPendingRegistrationAsync(User user, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyRegistrationApprovedAsync(User user, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyRegistrationRejectedAsync(User user, string? reason, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyPasswordIssuedAsync(User user, string password, IEnumerable<string>? channels = null, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskAssignedAsync(TaskJournalItem task, string actorName, int actorUserId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskReminderAsync(TaskJournalItem task, string reminderKey, DateTime nowUtc, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskCompletedAsync(TaskJournalItem task, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskCancelledAsync(TaskJournalItem task, string actorName, int actorUserId, string action, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskScheduleConflictAsync(TaskJournalItem task, IReadOnlyList<TaskJournalItem> conflicts, string actorName, int actorUserId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskApprovalRequestedAsync(TaskJournalItem task, string actorName, int actorUserId, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskApprovalDecisionAsync(TaskJournalItem task, TaskJournalParticipant approver, string decision, string actorName, int actorUserId, string? resolution = null, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskApprovalOverdueAsync(TaskJournalItem task, DateTime nowUtc, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskReassignedAsync(TaskJournalItem task, int? previousAssigneeUserId, string? previousAssigneeName, IReadOnlyList<string> changeLabels, string actorName, int actorUserId, string? comment = null, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskChangedAsync(TaskJournalItem task, IReadOnlyList<string> changeLabels, string actorName, int actorUserId, string? comment = null, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskCommentAsync(TaskJournalItem task, TaskJournalComment comment, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyCaseInactivityControlTaskCreatedAsync(TaskJournalItem task, int daysWithoutActiveTask, CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+
+        public Task NotifyCalendarAccessChangedAsync(int roleId, IReadOnlyCollection<int> addedVisibleUserIds, IReadOnlyCollection<int> removedVisibleUserIds, string actorName, int actorUserId, CancellationToken cancellationToken = default)
+        {
+            CalendarAccessChanges.Add((roleId, addedVisibleUserIds.ToArray(), removedVisibleUserIds.ToArray()));
+            return Task.CompletedTask;
+        }
     }
 }

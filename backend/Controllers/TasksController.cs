@@ -1596,6 +1596,8 @@ public class TasksController : ControllerBase
 
         var becameDone = !string.Equals(entity.Status, "done", StringComparison.OrdinalIgnoreCase)
             && string.Equals(nextStatus, "done", StringComparison.OrdinalIgnoreCase);
+        var becameCancelled = !string.Equals(entity.Status, "cancelled", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(nextStatus, "cancelled", StringComparison.OrdinalIgnoreCase);
         var requestDueAt = NormalizeUtcInstant(request.DueAt);
         var previousAssigneeUserId = entity.AssigneeUserId;
         var previousAssigneeName = entity.AssigneeName;
@@ -1657,7 +1659,11 @@ public class TasksController : ControllerBase
         await _db.SaveChangesAsync(ct);
         if (changeLabels.Count > 0)
         {
-            if (assigneeChanged)
+            if (becameCancelled)
+            {
+                await _notificationService.NotifyTaskCancelledAsync(entity, access.DisplayName, access.UserId, "Отменена", ct);
+            }
+            else if (assigneeChanged)
             {
                 await _notificationService.NotifyTaskReassignedAsync(entity, previousAssigneeUserId, previousAssigneeName, changeLabels, access.DisplayName, access.UserId, changeComment, ct);
             }
@@ -1724,6 +1730,8 @@ public class TasksController : ControllerBase
         var approvalQueueRestarted = ResetApprovalQueueIfStartingApproval(entity.Status, nextStatus, entity.Participants);
         var becameDone = !string.Equals(entity.Status, "done", StringComparison.OrdinalIgnoreCase)
             && string.Equals(nextStatus, "done", StringComparison.OrdinalIgnoreCase);
+        var becameCancelled = !string.Equals(entity.Status, "cancelled", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(nextStatus, "cancelled", StringComparison.OrdinalIgnoreCase);
         var oldStatus = entity.Status;
         var oldResult = entity.Result;
 
@@ -1780,7 +1788,14 @@ public class TasksController : ControllerBase
             }
             else
             {
-                await _notificationService.NotifyTaskChangedAsync(entity, changeLabels, access.DisplayName, access.UserId, null, ct);
+                if (becameCancelled)
+                {
+                    await _notificationService.NotifyTaskCancelledAsync(entity, access.DisplayName, access.UserId, "Отменена", ct);
+                }
+                else
+                {
+                    await _notificationService.NotifyTaskChangedAsync(entity, changeLabels, access.DisplayName, access.UserId, null, ct);
+                }
             }
         }
 
@@ -1920,7 +1935,7 @@ public class TasksController : ControllerBase
             .ToListAsync(ct);
 
         var updated = 0;
-        var notifications = new List<(TaskJournalItem Task, IReadOnlyList<string> ChangeLabels, bool BecameDone, bool ApprovalRequested, bool AssigneeChanged, int? PreviousAssigneeUserId, string? PreviousAssigneeName)>();
+        var notifications = new List<(TaskJournalItem Task, IReadOnlyList<string> ChangeLabels, bool BecameDone, bool BecameCancelled, bool ApprovalRequested, bool AssigneeChanged, int? PreviousAssigneeUserId, string? PreviousAssigneeName)>();
         var now = DateTime.UtcNow;
         foreach (var entity in entities)
         {
@@ -1955,6 +1970,7 @@ public class TasksController : ControllerBase
             }
 
             var becameDone = false;
+            var becameCancelled = false;
             if (nextStatus is not null)
             {
                 var oldStatus = entity.Status;
@@ -1970,6 +1986,8 @@ public class TasksController : ControllerBase
                 var approvalQueueRestarted = ResetApprovalQueueIfStartingApproval(entity.Status, nextStatus, entity.Participants);
                 becameDone = !string.Equals(entity.Status, "done", StringComparison.OrdinalIgnoreCase)
                     && string.Equals(nextStatus, "done", StringComparison.OrdinalIgnoreCase);
+                becameCancelled = !string.Equals(entity.Status, "cancelled", StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(nextStatus, "cancelled", StringComparison.OrdinalIgnoreCase);
                 entity.Status = nextStatus;
                 approvalRequested = approvalQueueRestarted
                     || (!IsApprovalActiveStatus(oldStatus) && IsApprovalActiveStatus(entity.Status));
@@ -2004,13 +2022,22 @@ public class TasksController : ControllerBase
             entity.UpdatedAt = now;
             AddTaskHistory(entity, access, $"Массовое изменение: {string.Join(", ", changes)}.");
             updated++;
-            notifications.Add((entity, changes, becameDone, approvalRequested, assigneeChanged, previousAssigneeUserId, previousAssigneeName));
+            notifications.Add((entity, changes, becameDone, becameCancelled, approvalRequested, assigneeChanged, previousAssigneeUserId, previousAssigneeName));
         }
 
         await _db.SaveChangesAsync(ct);
         foreach (var notification in notifications)
         {
-            if (notification.AssigneeChanged)
+            if (notification.BecameCancelled)
+            {
+                await _notificationService.NotifyTaskCancelledAsync(
+                    notification.Task,
+                    access.DisplayName,
+                    access.UserId,
+                    "Отменена",
+                    ct);
+            }
+            else if (notification.AssigneeChanged)
             {
                 await _notificationService.NotifyTaskReassignedAsync(
                     notification.Task,
@@ -2084,7 +2111,7 @@ public class TasksController : ControllerBase
             .Where(task => ids.Contains(task.Id))
             .ToListAsync(ct);
 
-        var deleted = 0;
+        var toDelete = new List<TaskJournalItem>();
         foreach (var entity in entities)
         {
             if (!CanFullyModifyTask(entity, access, access.Permission?.CanDelete == true, settings))
@@ -2107,11 +2134,16 @@ public class TasksController : ControllerBase
                 }
             }
 
-            _db.TaskJournalItems.Remove(entity);
-            deleted++;
+            toDelete.Add(entity);
         }
 
-        if (deleted > 0)
+        foreach (var entity in toDelete)
+        {
+            await _notificationService.NotifyTaskCancelledAsync(entity, access.DisplayName, access.UserId, "Удалена", ct);
+            _db.TaskJournalItems.Remove(entity);
+        }
+
+        if (toDelete.Count > 0)
         {
             await _db.SaveChangesAsync(ct);
         }
@@ -2119,8 +2151,8 @@ public class TasksController : ControllerBase
         return Ok(new
         {
             requested = ids.Count,
-            updated = deleted,
-            skipped = ids.Count - deleted,
+            updated = toDelete.Count,
+            skipped = ids.Count - toDelete.Count,
         });
     }
 
@@ -2280,6 +2312,7 @@ public class TasksController : ControllerBase
             }
         }
 
+        await _notificationService.NotifyTaskCancelledAsync(entity, access.DisplayName, access.UserId, "Удалена", ct);
         _db.TaskJournalItems.Remove(entity);
         await _db.SaveChangesAsync(ct);
         return NoContent();

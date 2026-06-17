@@ -420,6 +420,7 @@ public class NotificationInboxController : ControllerBase
                 || item.Type == UserNotificationTypes.TaskChanged
                 || item.Type == UserNotificationTypes.TaskComment
                 || item.Type == UserNotificationTypes.TaskCompleted
+                || item.Type == UserNotificationTypes.TaskCancelled
                 || item.Type == UserNotificationTypes.TaskScheduleConflict
                 || item.Type == UserNotificationTypes.TaskApprovalRequested
                 || item.Type == UserNotificationTypes.TaskApproved
@@ -427,7 +428,8 @@ public class NotificationInboxController : ControllerBase
                 || item.Type == UserNotificationTypes.TaskApprovalOverdue),
             "calendar" => query.Where(item =>
                 item.ObjectType == "calendar"
-                || item.Type.Contains("Calendar")),
+                || item.Type.Contains("Calendar")
+                || item.Type == UserNotificationTypes.CalendarAccessChanged),
             "note" => query.Where(item =>
                 item.ObjectType == "note"
                 || item.Type.StartsWith("note")),
@@ -475,10 +477,12 @@ public class NotificationInboxController : ControllerBase
         return query.Where(item =>
             item.Type == UserNotificationTypes.TaskAssigned
             || item.Type == UserNotificationTypes.TaskReminder
+            || item.Type == UserNotificationTypes.TaskCancelled
             || item.Type == UserNotificationTypes.TaskScheduleConflict
             || item.Type == UserNotificationTypes.TaskApprovalRequested
             || item.Type == UserNotificationTypes.TaskRevisionRequested
             || item.Type == UserNotificationTypes.TaskApprovalOverdue
+            || item.Type == UserNotificationTypes.CalendarAccessChanged
             || item.Type == UserNotificationTypes.CaseInactivityControl
             || item.Type == UserNotificationTypes.CaseAccessRequested
             || item.Type == UserNotificationTypes.CaseCourtEvent

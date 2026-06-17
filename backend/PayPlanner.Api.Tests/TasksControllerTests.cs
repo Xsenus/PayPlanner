@@ -3209,6 +3209,48 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task DeleteTask_NotifiesCalendarCancellation()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author-delete-cancel@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id);
+        var notificationService = new RecordingNotificationService();
+        var controller = CreateController(db, notificationService, author);
+
+        var result = await controller.DeleteTask(task.Id, CancellationToken.None);
+
+        Assert.IsType<NoContentResult>(result);
+        var cancelled = Assert.Single(notificationService.CancelledTaskIds);
+        Assert.Equal(task.Id, cancelled.TaskId);
+        Assert.Equal("Удалена", cancelled.Action);
+    }
+
+    [Fact]
+    public async Task UpdateStatus_CancelledSendsCancellationNotification()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author-status-cancel@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id);
+        var notificationService = new RecordingNotificationService();
+        var controller = CreateController(db, notificationService, author);
+
+        var result = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "cancelled",
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(ok.Value);
+        Assert.Equal("cancelled", dto.Status);
+        Assert.Empty(notificationService.ChangedTasks);
+        var cancelled = Assert.Single(notificationService.CancelledTaskIds);
+        Assert.Equal(task.Id, cancelled.TaskId);
+        Assert.Equal("Отменена", cancelled.Action);
+    }
+
+    [Fact]
     public async Task BulkUpdateTasks_NotifiesApprovalWhenSentToApproval()
     {
         await using var db = await CreateContextAsync();
@@ -3662,6 +3704,7 @@ public class TasksControllerTests
     private sealed class RecordingNotificationService : INotificationService
     {
         public List<int> CompletedTaskIds { get; } = [];
+        public List<(int TaskId, string Action)> CancelledTaskIds { get; } = [];
         public List<int> AssignedTaskIds { get; } = [];
         public List<int> ApprovalRequestedTaskIds { get; } = [];
         public List<(int TaskId, string Decision)> ApprovalDecisionTaskIds { get; } = [];
@@ -3738,6 +3781,12 @@ public class TasksControllerTests
             return Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
         }
 
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskCancelledAsync(TaskJournalItem task, string actorName, int actorUserId, string action, CancellationToken cancellationToken = default)
+        {
+            CancelledTaskIds.Add((task.Id, action));
+            return Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+        }
+
         public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskScheduleConflictAsync(TaskJournalItem task, IReadOnlyList<TaskJournalItem> conflicts, string actorName, int actorUserId, CancellationToken cancellationToken = default)
         {
             ScheduleConflictTasks.Add((task.Id, conflicts.Select(item => item.Id).ToList()));
@@ -3785,5 +3834,8 @@ public class TasksControllerTests
             CaseInactivityControls.Add((task.Id, daysWithoutActiveTask));
             return Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
         }
+
+        public Task NotifyCalendarAccessChangedAsync(int roleId, IReadOnlyCollection<int> addedVisibleUserIds, IReadOnlyCollection<int> removedVisibleUserIds, string actorName, int actorUserId, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 }
