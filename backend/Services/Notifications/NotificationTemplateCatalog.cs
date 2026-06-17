@@ -29,6 +29,7 @@ public static class NotificationTemplateKeys
     public const string CourtStatusChanged = "court.statusChanged";
     public const string CourtDecisionPublished = "court.decisionPublished";
     public const string CourtSyncFailed = "court.syncFailed";
+    public const string CaseProceduralDeadline = "case.proceduralDeadline";
     public const string NoteMention = "note.mention";
     public const string NoteAssigned = "note.assigned";
     public const string NoteReminder = "note.reminder";
@@ -142,6 +143,21 @@ public static class NotificationTemplateCatalog
         new("courtEvent.status", "Статус"),
         new("courtEvent.result", "Результат"),
         new("courtEvent.sourceType", "Источник")
+    ];
+
+    private static readonly IReadOnlyList<NotificationTemplateVariableDefinition> ProceduralDeadlineVariables =
+    [
+        new("actor.name", "Кто выполнил действие"),
+        new("case.title", "Название дела"),
+        new("case.number", "Номер дела"),
+        new("deadline.title", "Название срока"),
+        new("deadline.type", "Тип срока"),
+        new("deadline.action", "Действие"),
+        new("deadline.dueAt", "Дата срока"),
+        new("deadline.status", "Статус срока"),
+        new("deadline.warningDaysBefore", "За сколько дней предупреждать"),
+        new("deadline.sourceType", "Источник"),
+        new("deadline.notes", "Примечание")
     ];
 
     public static readonly IReadOnlyList<NotificationTemplateDefinition> All =
@@ -329,6 +345,13 @@ public static class NotificationTemplateCatalog
             "Не удалось проверить судебный источник: {{case.title}}",
             "Судебный источник по делу {{case.title}} не удалось проверить.\n\nСуд: {{courtEvent.courtName}}\nНомер в суде: {{courtEvent.courtCaseNumber}}\nЧто произошло: {{courtEvent.result}}",
             CourtEventVariables),
+        new(
+            NotificationTemplateKeys.CaseProceduralDeadline,
+            "Процессуальный срок",
+            "Уведомление ответственным по делу при создании, переносе, закрытии или приближении процессуального срока.",
+            "{{deadline.action}}: {{case.title}}",
+            "{{actor.name}} {{deadline.action}} по делу {{case.title}}.\n\nСрок: {{deadline.title}}\nДата: {{deadline.dueAt}}\nСтатус: {{deadline.status}}\nПредупреждать за дней: {{deadline.warningDaysBefore}}\nПримечание: {{deadline.notes}}",
+            ProceduralDeadlineVariables),
         new(
             NotificationTemplateKeys.NoteMention,
             "Упоминание в заметке",

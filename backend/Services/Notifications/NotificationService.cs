@@ -1766,6 +1766,71 @@ public sealed class NotificationService : INotificationService
         }
     }
 
+    public async Task NotifyCaseProceduralDeadlineAsync(
+        ClientCase clientCase,
+        ClientCaseProceduralDeadline deadline,
+        string action,
+        string actorName,
+        int actorUserId,
+        IReadOnlyCollection<int> recipientUserIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (clientCase.Id <= 0 || deadline.Id <= 0 || recipientUserIds.Count == 0)
+        {
+            return;
+        }
+
+        var normalizedAction = NormalizeCaseProceduralDeadlineAction(action);
+        var normalizedActorName = NormalizeNotificationText(actorName, "CRM");
+        var actionText = ResolveCaseProceduralDeadlineActionText(normalizedAction);
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.CaseProceduralDeadline,
+            BuildCaseProceduralDeadlineSubject(clientCase, deadline, normalizedAction),
+            BuildCaseProceduralDeadlineBody(clientCase, deadline, normalizedAction, normalizedActorName),
+            BuildCaseProceduralDeadlineTemplateValues(clientCase, deadline, normalizedAction, normalizedActorName),
+            purpose: NotificationPurposes.TaskReminder,
+            cancellationToken: cancellationToken);
+        var version = string.Equals(normalizedAction, "reminder", StringComparison.OrdinalIgnoreCase)
+            ? DateTime.UtcNow.ToString("yyyyMMdd", CultureInfo.InvariantCulture)
+            : (deadline.UpdatedAt ?? deadline.ClosedAt ?? deadline.CreatedAt).Ticks.ToString(CultureInfo.InvariantCulture);
+
+        foreach (var recipientUserId in recipientUserIds
+            .Where(userId => userId > 0 && userId != actorUserId)
+            .Distinct())
+        {
+            await CreateUserNotificationAsync(
+                recipientUserId,
+                UserNotificationTypes.CaseProceduralDeadline,
+                $"case:{clientCase.Id}:procedural-deadline:{deadline.Id}:{normalizedAction}:{version}:{recipientUserId}",
+                message.Subject,
+                message.Body,
+                ResolveCaseProceduralDeadlineTone(normalizedAction, deadline),
+                "case",
+                clientCase.Id,
+                null,
+                null,
+                new
+                {
+                    clientCaseId = clientCase.Id,
+                    proceduralDeadlineId = deadline.Id,
+                    action = normalizedAction,
+                    actionText,
+                    actorUserId,
+                    actorName = normalizedActorName,
+                    deadlineType = deadline.DeadlineType,
+                    dueAt = deadline.DueAt,
+                    allDay = deadline.AllDay,
+                    status = deadline.Status,
+                    warningDaysBefore = deadline.WarningDaysBefore,
+                    taskJournalItemId = deadline.TaskJournalItemId,
+                    clientCaseDocumentId = deadline.ClientCaseDocumentId,
+                    sourceType = deadline.SourceType,
+                    sourceId = deadline.SourceId
+                },
+                cancellationToken);
+        }
+    }
+
     public async Task NotifyCourtSyncFailedAsync(
         ClientCase clientCase,
         string providerName,
@@ -4142,9 +4207,98 @@ public sealed class NotificationService : INotificationService
             ["courtEvent.sourceType"] = providerName
         };
 
+    private static Dictionary<string, string?> BuildCaseProceduralDeadlineTemplateValues(
+        ClientCase clientCase,
+        ClientCaseProceduralDeadline deadline,
+        string action,
+        string actorName)
+        => new()
+        {
+            ["actor.name"] = actorName,
+            ["case.title"] = BuildClientCaseTitle(clientCase),
+            ["case.number"] = NormalizeNotificationText(clientCase.CaseNumber, clientCase.Id.ToString(CultureInfo.InvariantCulture)),
+            ["deadline.title"] = NormalizeNotificationText(deadline.Title, "Процессуальный срок"),
+            ["deadline.type"] = NormalizeNotificationText(deadline.DeadlineType, "не указан"),
+            ["deadline.action"] = ResolveCaseProceduralDeadlineActionText(action),
+            ["deadline.dueAt"] = FormatCourtEventDate(deadline.DueAt, deadline.AllDay),
+            ["deadline.status"] = FormatCaseProceduralDeadlineStatus(deadline.Status),
+            ["deadline.warningDaysBefore"] = Math.Max(deadline.WarningDaysBefore, 0).ToString(CultureInfo.InvariantCulture),
+            ["deadline.sourceType"] = NormalizeNotificationText(deadline.SourceType, "CRM"),
+            ["deadline.notes"] = NormalizeNotificationText(deadline.Notes, "нет")
+        };
+
     private static string BuildCourtSyncFailedBody(ClientCase clientCase, string providerName, string summary)
         => NotificationTemplateCatalog.CompactBlankLines(
             $"Судебный источник по делу {BuildClientCaseTitle(clientCase)} не удалось проверить.\n\nИсточник: {providerName}\nСуд: {NormalizeNotificationText(clientCase.CourtName, "не указан")}\nНомер в суде: {NormalizeNotificationText(clientCase.CourtCaseNumber, "не указан")}\nЧто произошло: {summary}");
+
+    private static string BuildCaseProceduralDeadlineSubject(
+        ClientCase clientCase,
+        ClientCaseProceduralDeadline deadline,
+        string action)
+        => NormalizeCaseProceduralDeadlineAction(action) switch
+        {
+            "created" => $"Новый процессуальный срок: {BuildClientCaseTitle(clientCase)}",
+            "closed" => $"Закрыт процессуальный срок: {BuildClientCaseTitle(clientCase)}",
+            "reminder" => $"Приближается процессуальный срок: {NormalizeNotificationText(deadline.Title, "Процессуальный срок")}",
+            _ => $"Обновлен процессуальный срок: {BuildClientCaseTitle(clientCase)}"
+        };
+
+    private static string BuildCaseProceduralDeadlineBody(
+        ClientCase clientCase,
+        ClientCaseProceduralDeadline deadline,
+        string action,
+        string actorName)
+    {
+        var normalizedAction = NormalizeCaseProceduralDeadlineAction(action);
+        var intro = normalizedAction switch
+        {
+            "created" => $"{actorName} добавил(а) процессуальный срок по делу.",
+            "closed" => $"{actorName} закрыл(а) процессуальный срок по делу.",
+            "reminder" => "Приближается процессуальный срок по делу.",
+            _ => $"{actorName} обновил(а) процессуальный срок по делу."
+        };
+
+        var builder = new StringBuilder()
+            .Append(intro)
+            .AppendLine()
+            .AppendLine()
+            .Append("Дело: ")
+            .Append(BuildClientCaseTitle(clientCase))
+            .AppendLine()
+            .Append("Срок: ")
+            .Append(NormalizeNotificationText(deadline.Title, "Процессуальный срок"))
+            .AppendLine()
+            .Append("Дата: ")
+            .Append(FormatCourtEventDate(deadline.DueAt, deadline.AllDay))
+            .AppendLine()
+            .Append("Статус: ")
+            .Append(FormatCaseProceduralDeadlineStatus(deadline.Status))
+            .AppendLine()
+            .Append("Предупреждать за дней: ")
+            .Append(Math.Max(deadline.WarningDaysBefore, 0).ToString(CultureInfo.InvariantCulture));
+
+        if (!string.IsNullOrWhiteSpace(deadline.Notes))
+        {
+            builder.AppendLine().Append("Примечание: ").Append(deadline.Notes.Trim());
+        }
+
+        if (!string.IsNullOrWhiteSpace(deadline.CloseReason))
+        {
+            builder.AppendLine().Append("Причина закрытия: ").Append(deadline.CloseReason.Trim());
+        }
+
+        if (!string.IsNullOrWhiteSpace(deadline.SourceType) && deadline.SourceId.HasValue)
+        {
+            builder
+                .AppendLine()
+                .Append("Источник: ")
+                .Append(deadline.SourceType.Trim())
+                .Append(" #")
+                .Append(deadline.SourceId.Value.ToString(CultureInfo.InvariantCulture));
+        }
+
+        return NotificationTemplateCatalog.CompactBlankLines(builder.ToString());
+    }
 
     private static string BuildCourtEventSubject(ClientCase clientCase, ClientCaseCourtEvent courtEvent, string notificationType)
         => notificationType switch
@@ -4254,10 +4408,42 @@ public sealed class NotificationService : INotificationService
             ? "добавил(а)"
             : "обновил(а)";
 
+    private static string NormalizeCaseProceduralDeadlineAction(string action)
+        => string.IsNullOrWhiteSpace(action) ? "updated" : action.Trim();
+
+    private static string ResolveCaseProceduralDeadlineActionText(string action)
+        => NormalizeCaseProceduralDeadlineAction(action) switch
+        {
+            "created" => "добавил(а) процессуальный срок",
+            "closed" => "закрыл(а) процессуальный срок",
+            "reminder" => "напоминание о процессуальном сроке",
+            _ => "обновил(а) процессуальный срок"
+        };
+
+    private static string ResolveCaseProceduralDeadlineTone(string action, ClientCaseProceduralDeadline deadline)
+        => NormalizeCaseProceduralDeadlineAction(action) switch
+        {
+            "closed" => "emerald",
+            "reminder" when deadline.DueAt.Date < DateTime.UtcNow.Date => "rose",
+            "reminder" => "amber",
+            "created" => "cyan",
+            _ => "blue"
+        };
+
     private static string FormatCourtEventDate(DateTime value, bool allDay)
         => allDay
             ? value.ToString("dd.MM.yyyy", RuCulture)
             : value.ToString("dd.MM.yyyy HH:mm", RuCulture);
+
+    private static string FormatCaseProceduralDeadlineStatus(string? status)
+        => status?.Trim() switch
+        {
+            "active" => "активен",
+            "closed" => "закрыт",
+            "cancelled" => "отменен",
+            "suspended" => "приостановлен",
+            _ => NormalizeNotificationText(status, "не указан")
+        };
 
     private static string FormatCourtMovementStatus(string? status)
         => status?.Trim() switch

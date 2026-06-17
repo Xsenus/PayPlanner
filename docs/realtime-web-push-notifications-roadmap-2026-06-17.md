@@ -410,11 +410,13 @@
   - Проверено: targeted-тесты `NotifyCaseCourtEvent|CreateCourtEvent_UsesNotificationService|RunCourtSync_UpdatesCaseAndCreatesCourtEventFromSudrf|RunCourtSync_NotifiesResponsibleWhenExternalSourceFails`, полный `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj`, `npm run lint`, `npm run build`, JSON/UTF-8, локальный запуск backend на временной SQLite-БД с `GET /api/health`.
   - DoD: важные судебные события могут приходить realtime/push.
 
-- [ ] Процессуальные сроки.
+- [x] Процессуальные сроки.
   - Новый срок.
   - Перенос срока.
   - Закрытие срока.
   - Приближение срока.
+  - Сделано: процессуальные сроки из карточки дела подключены к общему `NotificationService`; новый/обновленный/закрытый срок отправляет уведомление ответственным с проверкой права на раздел "Дела" и видимости конкретного дела. Добавлена фоновая проверка активных сроков в окне предупреждения, чтобы ответственные заранее получали напоминание в центре уведомлений, realtime и Web Push при включенных каналах.
+  - Проверено: targeted-тесты `NotifyCaseProceduralDeadlineAsync|CreateProceduralDeadline_UsesNotificationService|CaseProceduralDeadlineReminderNotificationService|HostedServiceLifecycle`, соседние тесты процессуальных сроков и судебных событий, полный `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj`, `npm run lint`, `npm run build`, JSON/UTF-8, `git diff --check`, локальный запуск backend на временной SQLite-БД с `GET /api/health`.
   - DoD: ответственные получают сигнал заранее.
 
 - [ ] Документы дела.

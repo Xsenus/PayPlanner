@@ -2421,6 +2421,57 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task CreateProceduralDeadline_UsesNotificationServiceForResponsibleUser()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "deadline-service-owner@example.com", "Владелец");
+        var responsible = await CreateUserAsync(db, "deadline-service-responsible@example.com", "Ответственный");
+        var client = new Client
+        {
+            Name = "Клиент по процессуальному сроку",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело для уведомления о сроке",
+            CaseNumber = "CASE-DEADLINE-SERVICE-1",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner, notificationService: CreateNotificationService(db));
+
+        var createResult = await controller.CreateProceduralDeadline(
+            clientCase.Id,
+            new CasesV2Controller.UpsertClientCaseProceduralDeadlineRequest
+            {
+                DeadlineType = "appeal",
+                Title = "Подать апелляцию",
+                DueAt = new DateTime(2026, 7, 10, 10, 0, 0, DateTimeKind.Utc),
+                AllDay = false,
+                WarningDaysBefore = 3,
+                Notes = "Проверить комплект документов",
+            },
+            CancellationToken.None);
+
+        var created = Assert.IsType<CasesV2Controller.ClientCaseProceduralDeadlineDto>(
+            Assert.IsType<CreatedResult>(createResult.Result).Value);
+        var notification = await db.UserNotifications.SingleAsync(item =>
+            item.Type == UserNotificationTypes.CaseProceduralDeadline);
+        Assert.Equal(responsible.Id, notification.RecipientUserId);
+        Assert.Equal("case", notification.ObjectType);
+        Assert.Equal(clientCase.Id, notification.ObjectId);
+        Assert.Contains("CASE-DEADLINE-SERVICE-1", notification.Title);
+        Assert.Contains("Подать апелляцию", notification.BodyPreview);
+        Assert.Contains($"\"proceduralDeadlineId\":{created.Id}", notification.MetadataJson, StringComparison.Ordinal);
+        Assert.Contains("\"action\":\"created\"", notification.MetadataJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CreateCourtEvent_UsesNotificationServiceForResponsibleCourtHearing()
     {
         await using var db = await CreateContextAsync();

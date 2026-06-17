@@ -153,6 +153,8 @@ builder.Services.AddSingleton<PaymentAdvanceReviewMonitoringService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<PaymentAdvanceReviewMonitoringService>());
 builder.Services.AddSingleton<ContractExpirationNotificationService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ContractExpirationNotificationService>());
+builder.Services.AddSingleton<CaseProceduralDeadlineReminderNotificationService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<CaseProceduralDeadlineReminderNotificationService>());
 builder.Services.AddSingleton<CalendarSyncSchedulerService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<CalendarSyncSchedulerService>());
 builder.Services.AddSingleton<GoogleCalendarBackgroundSyncService>();

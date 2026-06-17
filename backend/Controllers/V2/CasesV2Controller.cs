@@ -970,13 +970,22 @@ public class CasesV2Controller : ControllerBase
         string actorName,
         CancellationToken ct)
     {
-        var recipientUserIds = new HashSet<int>();
-        AddIfPositive(recipientUserIds, clientCase.ResponsibleUserId);
-        AddIfPositive(recipientUserIds, clientCase.Client?.ResponsibleUserId);
-        AddIfPositive(recipientUserIds, clientCase.LegalEntity?.ResponsibleUserId);
-
+        var recipientUserIds = await ResolveCaseNotificationRecipientIdsAsync(clientCase.Id, ct);
         if (recipientUserIds.Count == 0)
         {
+            return;
+        }
+
+        if (_notificationService is not null)
+        {
+            await _notificationService.NotifyCaseProceduralDeadlineAsync(
+                clientCase,
+                deadline,
+                action,
+                actorName,
+                actorUserId ?? 0,
+                recipientUserIds,
+                ct);
             return;
         }
 

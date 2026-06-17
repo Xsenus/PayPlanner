@@ -1327,6 +1327,85 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyCaseProceduralDeadlineAsync_CreatesNotificationAndDeduplicates()
+    {
+        await using var db = await CreateContextAsync();
+        var recipient = await CreateUserAsync(db, "deadline-recipient@example.com");
+        var client = new Client
+        {
+            Name = "Клиент по сроку",
+            IsActive = true,
+            ResponsibleUserId = recipient.Id,
+        };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+        var clientCase = new ClientCase
+        {
+            ClientId = client.Id,
+            Title = "Дело со сроком",
+            CaseNumber = "CASE-DEADLINE-1",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = recipient.Id,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var deadline = new ClientCaseProceduralDeadline
+        {
+            ClientCaseId = clientCase.Id,
+            DeadlineType = "appeal",
+            Title = "Апелляционная жалоба",
+            DueAt = new DateTime(2026, 7, 2, 12, 0, 0, DateTimeKind.Utc),
+            AllDay = false,
+            Status = "active",
+            WarningDaysBefore = 5,
+            Notes = "Подготовить пакет документов",
+            CreatedAt = new DateTime(2026, 6, 18, 2, 0, 0, DateTimeKind.Utc),
+            UpdatedAt = new DateTime(2026, 6, 18, 2, 0, 0, DateTimeKind.Utc),
+        };
+        db.ClientCaseProceduralDeadlines.Add(deadline);
+        await db.SaveChangesAsync();
+
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            realtime,
+            webPush);
+
+        await service.NotifyCaseProceduralDeadlineAsync(
+            clientCase,
+            deadline,
+            "updated",
+            "Deadline Actor",
+            999,
+            [recipient.Id]);
+        await service.NotifyCaseProceduralDeadlineAsync(
+            clientCase,
+            deadline,
+            "updated",
+            "Deadline Actor",
+            999,
+            [recipient.Id]);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(UserNotificationTypes.CaseProceduralDeadline, notification.Type);
+        Assert.Equal(recipient.Id, notification.RecipientUserId);
+        Assert.Equal("case", notification.ObjectType);
+        Assert.Equal(clientCase.Id, notification.ObjectId);
+        Assert.Contains("CASE-DEADLINE-1", notification.Title);
+        Assert.Contains("Апелляционная жалоба", notification.BodyPreview);
+        Assert.Contains("Подготовить пакет документов", notification.BodyPreview);
+        Assert.Contains($"\"proceduralDeadlineId\":{deadline.Id}", notification.MetadataJson, StringComparison.Ordinal);
+        var realtimeNotification = Assert.Single(realtime.Notifications);
+        Assert.Equal(notification.Id, realtimeNotification.Id);
+        var pushed = Assert.Single(webPush.Notifications);
+        Assert.Equal(notification.Id, pushed.Id);
+    }
+
+    [Fact]
     public async Task NotifyCaseInactivityControlTaskCreatedAsync_CreatesDedicatedInAppNotification()
     {
         await using var db = await CreateContextAsync();
