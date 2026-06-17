@@ -30,6 +30,7 @@ public static class NotificationTemplateKeys
     public const string CourtDecisionPublished = "court.decisionPublished";
     public const string CourtSyncFailed = "court.syncFailed";
     public const string CaseProceduralDeadline = "case.proceduralDeadline";
+    public const string CaseDocument = "case.document";
     public const string NoteMention = "note.mention";
     public const string NoteAssigned = "note.assigned";
     public const string NoteReminder = "note.reminder";
@@ -158,6 +159,20 @@ public static class NotificationTemplateCatalog
         new("deadline.warningDaysBefore", "За сколько дней предупреждать"),
         new("deadline.sourceType", "Источник"),
         new("deadline.notes", "Примечание")
+    ];
+
+    private static readonly IReadOnlyList<NotificationTemplateVariableDefinition> CaseDocumentVariables =
+    [
+        new("actor.name", "Кто выполнил действие"),
+        new("case.title", "Название дела"),
+        new("case.number", "Номер дела"),
+        new("document.fileName", "Имя файла"),
+        new("document.type", "Тип документа"),
+        new("document.status", "Статус документа"),
+        new("document.action", "Действие"),
+        new("document.version", "Версия"),
+        new("document.size", "Размер файла"),
+        new("document.requiresAction", "Требует действия")
     ];
 
     public static readonly IReadOnlyList<NotificationTemplateDefinition> All =
@@ -352,6 +367,13 @@ public static class NotificationTemplateCatalog
             "{{deadline.action}}: {{case.title}}",
             "{{actor.name}} {{deadline.action}} по делу {{case.title}}.\n\nСрок: {{deadline.title}}\nДата: {{deadline.dueAt}}\nСтатус: {{deadline.status}}\nПредупреждать за дней: {{deadline.warningDaysBefore}}\nПримечание: {{deadline.notes}}",
             ProceduralDeadlineVariables),
+        new(
+            NotificationTemplateKeys.CaseDocument,
+            "Документы дела",
+            "Уведомление ответственным по делу при загрузке, формировании, обновлении, удалении документа или статусе, требующем действия.",
+            "{{document.action}}: {{document.fileName}}",
+            "{{actor.name}} {{document.action}} по делу {{case.title}}.\n\nДокумент: {{document.fileName}}\nТип: {{document.type}}\nСтатус: {{document.status}}\nВерсия: {{document.version}}\nТребуется действие: {{document.requiresAction}}",
+            CaseDocumentVariables),
         new(
             NotificationTemplateKeys.NoteMention,
             "Упоминание в заметке",

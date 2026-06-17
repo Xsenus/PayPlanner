@@ -3330,6 +3330,53 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task UploadDocument_UsesNotificationServiceForResponsibleUser()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "case-document-owner@example.com", "Владелец");
+        var responsible = await CreateUserAsync(db, "case-document-responsible@example.com", "Ответственный");
+        var client = new Client
+        {
+            Name = "Клиент по документу",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело для документа",
+            CaseNumber = "CASE-DOCUMENT-SERVICE-1",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var contentRoot = Path.Combine(Path.GetTempPath(), "payplanner-case-documents", Guid.NewGuid().ToString("N"));
+        var controller = CreateController(db, owner, contentRoot, notificationService: CreateNotificationService(db));
+
+        var uploadResult = await controller.UploadDocument(
+            clientCase.Id,
+            CreateFormFile("document", "claim.pdf"),
+            "Иск",
+            DocumentWorkflowStatus.NeedsCorrection,
+            documentKey: null,
+            CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(uploadResult.Result);
+        var dto = Assert.IsType<ClientCaseDocumentDto>(created.Value);
+        var notification = await db.UserNotifications.SingleAsync(item => item.Type == UserNotificationTypes.CaseDocument);
+        Assert.Equal(responsible.Id, notification.RecipientUserId);
+        Assert.Equal("case", notification.ObjectType);
+        Assert.Equal(clientCase.Id, notification.ObjectId);
+        Assert.Contains("claim.pdf", notification.Title);
+        Assert.Contains("Требуется действие", notification.BodyPreview);
+        Assert.Contains($"\"clientCaseDocumentId\":{dto.Id}", notification.MetadataJson, StringComparison.Ordinal);
+        Assert.Contains("\"action\":\"uploaded\"", notification.MetadataJson, StringComparison.Ordinal);
+        Assert.Contains("\"requiresAction\":true", notification.MetadataJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Documents_ForbidMutationsWithoutCaseEditPermission()
     {
         await using var db = await CreateContextAsync();

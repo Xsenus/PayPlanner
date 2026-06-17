@@ -419,9 +419,11 @@
   - Проверено: targeted-тесты `NotifyCaseProceduralDeadlineAsync|CreateProceduralDeadline_UsesNotificationService|CaseProceduralDeadlineReminderNotificationService|HostedServiceLifecycle`, соседние тесты процессуальных сроков и судебных событий, полный `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj`, `npm run lint`, `npm run build`, JSON/UTF-8, `git diff --check`, локальный запуск backend на временной SQLite-БД с `GET /api/health`.
   - DoD: ответственные получают сигнал заранее.
 
-- [ ] Документы дела.
+- [x] Документы дела.
   - Документ загружен/обновлен/удален.
   - Документ требует действия.
+  - Сделано: документы дела подключены к общему `NotificationService`; загрузка, новая версия, генерация шаблона/связанного документа, обновление карточки и удаление отправляют уведомления ответственным с проверкой права на раздел "Дела" и видимости конкретного дела. Статусы, требующие исправления, подписи или иного действия, выделяются отдельным акцентом в уведомлении.
+  - Проверено: targeted-тесты `NotifyCaseDocumentAsync|UploadDocument_UsesNotificationService|Documents_UploadsVersionsListsAndDeletesVisibleCaseFiles|UpdateDocument_ChangesStatusAndWritesCaseHistory|Documents_GeneratesTemplateFromCaseDataAndStoresVersionedFile`, полный `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj`, `npm run lint`, `npm run build`, JSON/UTF-8, `git diff --check`, локальный запуск backend на временной SQLite-БД с `GET /api/health`.
   - DoD: уведомления работают с учетом доступа к делу.
 
 - [ ] Запросы доступа к делу.

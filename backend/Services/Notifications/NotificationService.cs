@@ -1831,6 +1831,74 @@ public sealed class NotificationService : INotificationService
         }
     }
 
+    public async Task NotifyCaseDocumentAsync(
+        ClientCase clientCase,
+        ClientCaseDocument document,
+        string action,
+        string actorName,
+        int actorUserId,
+        IReadOnlyCollection<int> recipientUserIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (clientCase.Id <= 0 || document.Id <= 0 || recipientUserIds.Count == 0)
+        {
+            return;
+        }
+
+        var normalizedAction = NormalizeCaseDocumentAction(action);
+        var normalizedActorName = NormalizeNotificationText(actorName, "CRM");
+        var requiresAction = IsCaseDocumentActionRequired(document);
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.CaseDocument,
+            BuildCaseDocumentSubject(clientCase, document, normalizedAction, requiresAction),
+            BuildCaseDocumentBody(clientCase, document, normalizedAction, normalizedActorName, requiresAction),
+            BuildCaseDocumentTemplateValues(clientCase, document, normalizedAction, normalizedActorName, requiresAction),
+            purpose: NotificationPurposes.TaskReminder,
+            cancellationToken: cancellationToken);
+        var stateHash = BuildStableTextHash(string.Join("|",
+            document.DocumentKey,
+            document.Version.ToString(CultureInfo.InvariantCulture),
+            document.DocumentType,
+            document.Status,
+            document.OriginalFileName,
+            document.UploadedAt.Ticks.ToString(CultureInfo.InvariantCulture),
+            normalizedAction));
+
+        foreach (var recipientUserId in recipientUserIds
+            .Where(userId => userId > 0 && userId != actorUserId)
+            .Distinct())
+        {
+            await CreateUserNotificationAsync(
+                recipientUserId,
+                UserNotificationTypes.CaseDocument,
+                $"case:{clientCase.Id}:document:{document.Id}:{normalizedAction}:{stateHash}:{recipientUserId}",
+                message.Subject,
+                message.Body,
+                ResolveCaseDocumentTone(normalizedAction, requiresAction),
+                "case",
+                clientCase.Id,
+                null,
+                null,
+                new
+                {
+                    clientCaseId = clientCase.Id,
+                    clientCaseDocumentId = document.Id,
+                    action = normalizedAction,
+                    actorUserId,
+                    actorName = normalizedActorName,
+                    documentKey = document.DocumentKey,
+                    version = document.Version,
+                    documentType = document.DocumentType,
+                    status = document.Status,
+                    fileName = document.OriginalFileName,
+                    contentType = document.ContentType,
+                    sizeBytes = document.SizeBytes,
+                    requiresAction
+                },
+                cancellationToken);
+        }
+    }
+
     public async Task NotifyCourtSyncFailedAsync(
         ClientCase clientCase,
         string providerName,
@@ -4227,6 +4295,26 @@ public sealed class NotificationService : INotificationService
             ["deadline.notes"] = NormalizeNotificationText(deadline.Notes, "нет")
         };
 
+    private static Dictionary<string, string?> BuildCaseDocumentTemplateValues(
+        ClientCase clientCase,
+        ClientCaseDocument document,
+        string action,
+        string actorName,
+        bool requiresAction)
+        => new()
+        {
+            ["actor.name"] = actorName,
+            ["case.title"] = BuildClientCaseTitle(clientCase),
+            ["case.number"] = NormalizeNotificationText(clientCase.CaseNumber, clientCase.Id.ToString(CultureInfo.InvariantCulture)),
+            ["document.fileName"] = NormalizeNotificationText(document.OriginalFileName, "Документ"),
+            ["document.type"] = NormalizeNotificationText(document.DocumentType, "не указан"),
+            ["document.status"] = NormalizeNotificationText(document.Status, "не указан"),
+            ["document.action"] = ResolveCaseDocumentActionText(action, requiresAction),
+            ["document.version"] = document.Version.ToString(CultureInfo.InvariantCulture),
+            ["document.size"] = FormatFileSize(document.SizeBytes),
+            ["document.requiresAction"] = requiresAction ? "да" : "нет"
+        };
+
     private static string BuildCourtSyncFailedBody(ClientCase clientCase, string providerName, string summary)
         => NotificationTemplateCatalog.CompactBlankLines(
             $"Судебный источник по делу {BuildClientCaseTitle(clientCase)} не удалось проверить.\n\nИсточник: {providerName}\nСуд: {NormalizeNotificationText(clientCase.CourtName, "не указан")}\nНомер в суде: {NormalizeNotificationText(clientCase.CourtCaseNumber, "не указан")}\nЧто произошло: {summary}");
@@ -4295,6 +4383,70 @@ public sealed class NotificationService : INotificationService
                 .Append(deadline.SourceType.Trim())
                 .Append(" #")
                 .Append(deadline.SourceId.Value.ToString(CultureInfo.InvariantCulture));
+        }
+
+        return NotificationTemplateCatalog.CompactBlankLines(builder.ToString());
+    }
+
+    private static string BuildCaseDocumentSubject(
+        ClientCase clientCase,
+        ClientCaseDocument document,
+        string action,
+        bool requiresAction)
+    {
+        if (requiresAction)
+        {
+            return $"Документ требует внимания: {NormalizeNotificationText(document.OriginalFileName, "Документ")}";
+        }
+
+        return NormalizeCaseDocumentAction(action) switch
+        {
+            "uploaded" => $"Загружен документ: {BuildClientCaseTitle(clientCase)}",
+            "version-created" => $"Новая версия документа: {BuildClientCaseTitle(clientCase)}",
+            "generated" => $"Сформирован документ: {BuildClientCaseTitle(clientCase)}",
+            "updated" => $"Обновлен документ: {BuildClientCaseTitle(clientCase)}",
+            "deleted" => $"Удален документ: {BuildClientCaseTitle(clientCase)}",
+            _ => $"Документ дела: {BuildClientCaseTitle(clientCase)}"
+        };
+    }
+
+    private static string BuildCaseDocumentBody(
+        ClientCase clientCase,
+        ClientCaseDocument document,
+        string action,
+        string actorName,
+        bool requiresAction)
+    {
+        var builder = new StringBuilder()
+            .Append(actorName)
+            .Append(' ')
+            .Append(ResolveCaseDocumentActionText(action, requiresAction))
+            .Append(" по делу.")
+            .AppendLine()
+            .AppendLine()
+            .Append("Дело: ")
+            .Append(BuildClientCaseTitle(clientCase))
+            .AppendLine()
+            .Append("Документ: ")
+            .Append(NormalizeNotificationText(document.OriginalFileName, "Документ"))
+            .AppendLine()
+            .Append("Тип: ")
+            .Append(NormalizeNotificationText(document.DocumentType, "не указан"))
+            .AppendLine()
+            .Append("Статус: ")
+            .Append(NormalizeNotificationText(document.Status, "не указан"))
+            .AppendLine()
+            .Append("Версия: ")
+            .Append(document.Version.ToString(CultureInfo.InvariantCulture))
+            .AppendLine()
+            .Append("Размер: ")
+            .Append(FormatFileSize(document.SizeBytes));
+
+        if (requiresAction)
+        {
+            builder
+                .AppendLine()
+                .Append("Требуется действие по документу.");
         }
 
         return NotificationTemplateCatalog.CompactBlankLines(builder.ToString());
@@ -4430,10 +4582,80 @@ public sealed class NotificationService : INotificationService
             _ => "blue"
         };
 
+    private static string NormalizeCaseDocumentAction(string action)
+        => string.IsNullOrWhiteSpace(action) ? "updated" : action.Trim();
+
+    private static string ResolveCaseDocumentActionText(string action, bool requiresAction)
+    {
+        if (requiresAction)
+        {
+            return "изменил(а) документ, который требует действия";
+        }
+
+        return NormalizeCaseDocumentAction(action) switch
+        {
+            "uploaded" => "загрузил(а) документ",
+            "version-created" => "загрузил(а) новую версию документа",
+            "generated" => "сформировал(а) документ",
+            "updated" => "обновил(а) карточку документа",
+            "deleted" => "удалил(а) документ",
+            _ => "изменил(а) документ"
+        };
+    }
+
+    private static string ResolveCaseDocumentTone(string action, bool requiresAction)
+    {
+        if (requiresAction)
+        {
+            return "amber";
+        }
+
+        return NormalizeCaseDocumentAction(action) switch
+        {
+            "deleted" => "rose",
+            "updated" => "blue",
+            "version-created" => "cyan",
+            _ => "emerald"
+        };
+    }
+
+    private static bool IsCaseDocumentActionRequired(ClientCaseDocument document)
+    {
+        var normalizedStatus = NormalizeNotificationText(document.Status, string.Empty).ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalizedStatus))
+        {
+            return false;
+        }
+
+        return string.Equals(normalizedStatus, DocumentWorkflowStatus.NeedsCorrection, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalizedStatus, DocumentWorkflowStatus.RequiresClientSignature, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalizedStatus, DocumentWorkflowStatus.ApprovalRejected, StringComparison.OrdinalIgnoreCase)
+            || normalizedStatus.Contains("треб", StringComparison.OrdinalIgnoreCase)
+            || normalizedStatus.Contains("исправ", StringComparison.OrdinalIgnoreCase)
+            || normalizedStatus.Contains("коррект", StringComparison.OrdinalIgnoreCase)
+            || normalizedStatus.Contains("подпис", StringComparison.OrdinalIgnoreCase)
+            || normalizedStatus.Contains("отклон", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string FormatCourtEventDate(DateTime value, bool allDay)
         => allDay
             ? value.ToString("dd.MM.yyyy", RuCulture)
             : value.ToString("dd.MM.yyyy HH:mm", RuCulture);
+
+    private static string FormatFileSize(long sizeBytes)
+    {
+        if (sizeBytes < 1024)
+        {
+            return $"{Math.Max(sizeBytes, 0).ToString(CultureInfo.InvariantCulture)} Б";
+        }
+
+        if (sizeBytes < 1024 * 1024)
+        {
+            return $"{(sizeBytes / 1024m).ToString("0.#", RuCulture)} КБ";
+        }
+
+        return $"{(sizeBytes / 1024m / 1024m).ToString("0.#", RuCulture)} МБ";
+    }
 
     private static string FormatCaseProceduralDeadlineStatus(string? status)
         => status?.Trim() switch

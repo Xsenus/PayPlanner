@@ -1103,9 +1103,22 @@ public class CasesV2Controller : ControllerBase
         string actorName,
         CancellationToken ct)
     {
-        var recipientUserIds = await ResolveCaseResponsibleNotificationUserIdsAsync(clientCase, ct);
+        var recipientUserIds = await ResolveCaseNotificationRecipientIdsAsync(clientCase.Id, ct);
         if (recipientUserIds.Count == 0)
         {
+            return;
+        }
+
+        if (_notificationService is not null)
+        {
+            await _notificationService.NotifyCaseDocumentAsync(
+                clientCase,
+                document,
+                action,
+                actorName,
+                actorUserId ?? 0,
+                recipientUserIds,
+                ct);
             return;
         }
 
@@ -1146,36 +1159,6 @@ public class CasesV2Controller : ControllerBase
                 metadata,
                 ct);
         }
-    }
-
-    private async Task<HashSet<int>> ResolveCaseResponsibleNotificationUserIdsAsync(ClientCase clientCase, CancellationToken ct)
-    {
-        var recipientUserIds = new HashSet<int>();
-        AddIfPositive(recipientUserIds, clientCase.ResponsibleUserId);
-        AddIfPositive(recipientUserIds, clientCase.Client?.ResponsibleUserId);
-        AddIfPositive(recipientUserIds, clientCase.LegalEntity?.ResponsibleUserId);
-
-        if (clientCase.Client is null && clientCase.ClientId.HasValue)
-        {
-            var responsibleUserId = await _db.Clients
-                .AsNoTracking()
-                .Where(item => item.Id == clientCase.ClientId.Value)
-                .Select(item => item.ResponsibleUserId)
-                .FirstOrDefaultAsync(ct);
-            AddIfPositive(recipientUserIds, responsibleUserId);
-        }
-
-        if (clientCase.LegalEntity is null && clientCase.LegalEntityId.HasValue)
-        {
-            var responsibleUserId = await _db.LegalEntities
-                .AsNoTracking()
-                .Where(item => item.Id == clientCase.LegalEntityId.Value)
-                .Select(item => item.ResponsibleUserId)
-                .FirstOrDefaultAsync(ct);
-            AddIfPositive(recipientUserIds, responsibleUserId);
-        }
-
-        return recipientUserIds;
     }
 
     private static string BuildCaseDocumentNotificationBody(

@@ -1406,6 +1406,86 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyCaseDocumentAsync_CreatesNotificationAndDeduplicates()
+    {
+        await using var db = await CreateContextAsync();
+        var recipient = await CreateUserAsync(db, "case-document-recipient@example.com");
+        var client = new Client
+        {
+            Name = "Клиент по документу",
+            IsActive = true,
+            ResponsibleUserId = recipient.Id,
+        };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+        var clientCase = new ClientCase
+        {
+            ClientId = client.Id,
+            Title = "Дело с документом",
+            CaseNumber = "CASE-DOCUMENT-1",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = recipient.Id,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var document = new ClientCaseDocument
+        {
+            ClientCaseId = clientCase.Id,
+            DocumentKey = "claim",
+            Version = 2,
+            DocumentType = "Иск",
+            Status = DocumentWorkflowStatus.NeedsCorrection,
+            OriginalFileName = "claim-v2.pdf",
+            StoredFileName = "claim-v2.pdf",
+            StoragePath = "1/claim-v2.pdf",
+            ContentType = "application/pdf",
+            SizeBytes = 2048,
+            UploadedByName = recipient.FullName,
+            UploadedAt = new DateTime(2026, 6, 18, 3, 0, 0, DateTimeKind.Utc),
+        };
+        db.ClientCaseDocuments.Add(document);
+        await db.SaveChangesAsync();
+
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            realtime,
+            webPush);
+
+        await service.NotifyCaseDocumentAsync(
+            clientCase,
+            document,
+            "updated",
+            "Document Actor",
+            999,
+            [recipient.Id]);
+        await service.NotifyCaseDocumentAsync(
+            clientCase,
+            document,
+            "updated",
+            "Document Actor",
+            999,
+            [recipient.Id]);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(UserNotificationTypes.CaseDocument, notification.Type);
+        Assert.Equal(recipient.Id, notification.RecipientUserId);
+        Assert.Equal("case", notification.ObjectType);
+        Assert.Equal(clientCase.Id, notification.ObjectId);
+        Assert.Contains("claim-v2.pdf", notification.Title);
+        Assert.Contains("Требуется действие", notification.BodyPreview);
+        Assert.Contains($"\"clientCaseDocumentId\":{document.Id}", notification.MetadataJson, StringComparison.Ordinal);
+        Assert.Contains("\"requiresAction\":true", notification.MetadataJson, StringComparison.Ordinal);
+        var realtimeNotification = Assert.Single(realtime.Notifications);
+        Assert.Equal(notification.Id, realtimeNotification.Id);
+        var pushed = Assert.Single(webPush.Notifications);
+        Assert.Equal(notification.Id, pushed.Id);
+    }
+
+    [Fact]
     public async Task NotifyCaseInactivityControlTaskCreatedAsync_CreatesDedicatedInAppNotification()
     {
         await using var db = await CreateContextAsync();
