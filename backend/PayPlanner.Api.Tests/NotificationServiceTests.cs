@@ -942,6 +942,194 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyTaskCommentAsync_NotifiesTaskParticipantsExceptCommentAuthor()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db, "comment-author-task-owner@example.com");
+        var assignee = new User
+        {
+            Email = "comment-assignee@example.com",
+            FullName = "Исполнитель",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        var approver = new User
+        {
+            Email = "comment-approver@example.com",
+            FullName = "Согласующий",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        var observer = new User
+        {
+            Email = "comment-observer@example.com",
+            FullName = "Наблюдатель",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.AddRange(assignee, approver, observer);
+        await db.SaveChangesAsync();
+
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Дело клиента",
+            Title = "Проверить документы",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            DueAt = DateTime.UtcNow.AddDays(2),
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "inProgress",
+            Participants =
+            [
+                new TaskJournalParticipant
+                {
+                    UserId = assignee.Id,
+                    Role = "assignee",
+                    DisplayName = assignee.FullName,
+                    Email = assignee.Email,
+                    SortOrder = 0,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                },
+                new TaskJournalParticipant
+                {
+                    UserId = approver.Id,
+                    Role = "approver",
+                    DisplayName = approver.FullName,
+                    Email = approver.Email,
+                    SortOrder = 1,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                },
+                new TaskJournalParticipant
+                {
+                    UserId = observer.Id,
+                    Role = "observer",
+                    DisplayName = observer.FullName,
+                    Email = observer.Email,
+                    SortOrder = 2,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                }
+            ]
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var comment = new TaskJournalComment
+        {
+            TaskJournalItemId = task.Id,
+            Kind = "comment",
+            Text = "Клиент прислал документы.",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            CreatedAt = DateTime.UtcNow
+        };
+        db.TaskJournalComments.Add(comment);
+        await db.SaveChangesAsync();
+
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService(), realtime);
+
+        var deliveries = await service.NotifyTaskCommentAsync(task, comment);
+
+        Assert.Empty(deliveries);
+        var notifications = await db.UserNotifications
+            .OrderBy(item => item.RecipientUserId)
+            .ToListAsync();
+        Assert.Equal([assignee.Id, approver.Id, observer.Id], notifications.Select(item => item.RecipientUserId).ToArray());
+        Assert.DoesNotContain(notifications, item => item.RecipientUserId == author.Id);
+        Assert.All(notifications, notification =>
+        {
+            Assert.Equal(UserNotificationTypes.TaskComment, notification.Type);
+            Assert.Equal("emerald", notification.Tone);
+            Assert.Contains("Комментарий по задаче", notification.Title, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Клиент прислал документы.", notification.BodyPreview, StringComparison.OrdinalIgnoreCase);
+        });
+        Assert.Equal(
+            notifications.Select(item => item.Id).OrderBy(id => id),
+            realtime.Notifications.Select(item => item.Id).OrderBy(id => id));
+    }
+
+    [Fact]
+    public async Task NotifyTaskCommentAsync_SendsWebPushWhenChannelEnabled()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db, "comment-author-web-push@example.com");
+        var assignee = new User
+        {
+            Email = "comment-assignee-web-push@example.com",
+            FullName = "Web Push Comment Assignee",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(assignee);
+        await db.SaveChangesAsync();
+
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Client case",
+            Title = "Discuss comment push",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            DueAt = DateTime.UtcNow.AddDays(1),
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "new"
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var comment = new TaskJournalComment
+        {
+            TaskJournalItemId = task.Id,
+            Kind = "comment",
+            Text = "Please check the file.",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            CreatedAt = DateTime.UtcNow
+        };
+        db.TaskJournalComments.Add(comment);
+        await db.SaveChangesAsync();
+
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            webPushNotificationService: webPush);
+
+        await service.NotifyTaskCommentAsync(task, comment);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        var pushed = Assert.Single(webPush.Notifications);
+        Assert.Equal(notification.Id, pushed.Id);
+        Assert.Equal(assignee.Id, pushed.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.TaskComment, pushed.Type);
+    }
+
+    [Fact]
     public async Task NotifyCaseInactivityControlTaskCreatedAsync_CreatesDedicatedInAppNotification()
     {
         await using var db = await CreateContextAsync();
