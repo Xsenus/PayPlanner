@@ -4,12 +4,16 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Hubs;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Notifications;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
@@ -210,6 +214,113 @@ public sealed class StickyNotesControllerTests
         Assert.Equal(board.Id, realtimeEvent.Note.BoardId);
         Assert.Equal(dto.Id, realtimeEvent.Note.Id);
         Assert.Equal(dto.Id, realtimeEvent.NoteId);
+    }
+
+    [Fact]
+    public async Task CreateNote_WithMention_NotifiesMentionedVisibleUser()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db);
+        var mentioned = await CreateUserAsync(db);
+        mentioned.Email = "anna.notes@example.com";
+        mentioned.FullName = "Анна Заметки";
+        var other = await CreateUserAsync(db);
+        other.Email = "other.notes@example.com";
+        other.FullName = "Другой сотрудник";
+        var board = new StickyNoteBoard
+        {
+            Title = "Общее",
+            Visibility = StickyNoteBoardVisibility.Shared,
+            Background = "cork",
+        };
+        db.StickyNoteBoards.Add(board);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, author, notificationService: CreateNotificationService(db));
+
+        var result = await controller.CreateNote(
+            board.Id,
+            new CreateStickyNoteRequest { Text = $"@{mentioned.Email} проверь, пожалуйста" },
+            CancellationToken.None);
+
+        var created = Assert.IsType<CreatedAtActionResult>(result.Result);
+        var dto = Assert.IsType<StickyNoteDto>(created.Value);
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(mentioned.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.NoteMention, notification.Type);
+        Assert.Equal("note", notification.ObjectType);
+        Assert.Equal(dto.Id, notification.ObjectId);
+        Assert.Contains("Вас упомянули", notification.Title);
+        Assert.Contains("Общее", notification.BodyPreview);
+        Assert.DoesNotContain(await db.UserNotifications.ToListAsync(), item => item.RecipientUserId == other.Id);
+    }
+
+    [Fact]
+    public async Task CreateNote_WithMention_DoesNotNotifyUserWithoutBoardAccess()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db);
+        var outsider = await CreateUserAsync(db);
+        outsider.Email = "outsider.notes@example.com";
+        outsider.FullName = "Внешний сотрудник";
+        var board = new StickyNoteBoard
+        {
+            Title = "Личная",
+            Visibility = StickyNoteBoardVisibility.Personal,
+            OwnerUserId = owner.Id,
+            OwnerUserName = owner.FullName,
+            Background = "gray",
+        };
+        db.StickyNoteBoards.Add(board);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner, notificationService: CreateNotificationService(db));
+
+        var result = await controller.CreateNote(
+            board.Id,
+            new CreateStickyNoteRequest { Text = $"@{outsider.Email} это личная доска" },
+            CancellationToken.None);
+
+        Assert.IsType<CreatedAtActionResult>(result.Result);
+        Assert.Empty(await db.UserNotifications.ToListAsync());
+    }
+
+    [Fact]
+    public async Task UpdateNoteLayout_DoesNotCreateMentionNotification()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db);
+        var mentioned = await CreateUserAsync(db);
+        mentioned.Email = "layout.notes@example.com";
+        var board = new StickyNoteBoard
+        {
+            Title = "Общее",
+            Visibility = StickyNoteBoardVisibility.Shared,
+            Background = "cork",
+        };
+        var note = new StickyNote
+        {
+            Board = board,
+            Text = $"@{mentioned.Email} уже есть в тексте",
+            Color = "yellow",
+            Version = 1,
+            Width = 220,
+            Height = 180,
+        };
+        db.StickyNotes.Add(note);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, author, notificationService: CreateNotificationService(db));
+
+        var result = await controller.UpdateNoteLayout(note.Id, new UpdateStickyNoteLayoutRequest
+        {
+            X = 40,
+            Y = 50,
+            Width = 240,
+            Height = 180,
+            ZIndex = 2,
+            Version = 1,
+        }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Empty(await db.UserNotifications.ToListAsync());
     }
 
     [Fact]
@@ -730,7 +841,11 @@ public sealed class StickyNotesControllerTests
         return user;
     }
 
-    private static StickyNotesController CreateController(PaymentContext db, User user, FakeNotesHubContext? hub = null)
+    private static StickyNotesController CreateController(
+        PaymentContext db,
+        User user,
+        FakeNotesHubContext? hub = null,
+        INotificationService? notificationService = null)
     {
         var claims = new List<Claim>
         {
@@ -739,7 +854,7 @@ public sealed class StickyNotesControllerTests
             new(ClaimTypes.Email, user.Email),
         };
 
-        return new StickyNotesController(db, hub ?? new FakeNotesHubContext())
+        return new StickyNotesController(db, hub ?? new FakeNotesHubContext(), notificationService)
         {
             ControllerContext = new ControllerContext
             {
@@ -749,6 +864,20 @@ public sealed class StickyNotesControllerTests
                 },
             },
         };
+    }
+
+    private static NotificationService CreateNotificationService(PaymentContext db)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .Build();
+
+        return new NotificationService(
+            db,
+            configuration,
+            new NoOpEmailService(),
+            new NoOpTelegramNotificationService(),
+            NullLogger<NotificationService>.Instance);
     }
 
     private sealed class FakeNotesHubContext : IHubContext<NotesHub>
@@ -817,5 +946,41 @@ public sealed class StickyNotesControllerTests
 
         public Task RemoveFromGroupAsync(string connectionId, string groupName, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
+    }
+
+    private sealed class NoOpEmailService : IEmailService
+    {
+        public Task SendRegistrationPendingEmailAsync(string toEmail, string fullName)
+            => Task.CompletedTask;
+
+        public Task SendRegistrationApprovedEmailAsync(string toEmail, string fullName)
+            => Task.CompletedTask;
+
+        public Task SendRegistrationRejectedEmailAsync(string toEmail, string fullName, string? reason)
+            => Task.CompletedTask;
+
+        public Task SendAdminNewRegistrationNotificationAsync(string adminEmail, string newUserFullName, string newUserEmail)
+            => Task.CompletedTask;
+
+        public Task SendEmailWithAttachmentAsync(
+            string toEmail,
+            string subject,
+            string body,
+            string attachmentFileName,
+            byte[] attachmentBytes,
+            string attachmentContentType)
+            => Task.CompletedTask;
+    }
+
+    private sealed class NoOpTelegramNotificationService : ITelegramNotificationService
+    {
+        public Task<TelegramNotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new TelegramNotificationSettingsDto());
+
+        public Task<TelegramSendResult> SendMessageAsync(long chatId, string text, CancellationToken cancellationToken = default)
+            => Task.FromResult(new TelegramSendResult(true, NotificationDeliveryStatus.Sent));
+
+        public Task<TelegramSendResult> SendMessageWithTokenAsync(long chatId, string text, string botToken, CancellationToken cancellationToken = default, TelegramBotConnectionSettings? connection = null)
+            => Task.FromResult(new TelegramSendResult(true, NotificationDeliveryStatus.Sent));
     }
 }

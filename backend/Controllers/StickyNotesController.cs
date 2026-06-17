@@ -8,6 +8,7 @@ using PayPlanner.Api.Hubs;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
+using PayPlanner.Api.Services.Notifications;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -36,11 +37,16 @@ public sealed class StickyNotesController : ControllerBase
 
     private readonly PaymentContext _db;
     private readonly IHubContext<NotesHub> _hub;
+    private readonly INotificationService? _notificationService;
 
-    public StickyNotesController(PaymentContext db, IHubContext<NotesHub> hub)
+    public StickyNotesController(
+        PaymentContext db,
+        IHubContext<NotesHub> hub,
+        INotificationService? notificationService = null)
     {
         _db = db;
         _hub = hub;
+        _notificationService = notificationService;
     }
 
     [HttpGet("boards")]
@@ -440,6 +446,7 @@ public sealed class StickyNotesController : ControllerBase
 
         var dto = ToNoteDto(note, access.Value.UserId, access.Value.DisplayName);
         await PublishAsync(boardId, "noteCreated", dto, note.Id, access.Value, ct);
+        await NotifyMentionedUsersAsync(boardId, note.Id, board.Title, note.Text, access.Value, ct);
         return CreatedAtAction(nameof(GetNotes), new { boardId }, dto);
     }
 
@@ -485,6 +492,7 @@ public sealed class StickyNotesController : ControllerBase
 
         var dto = ToNoteDto(note, access.Value.UserId, access.Value.DisplayName);
         await PublishAsync(note.BoardId, "noteUpdated", dto, note.Id, access.Value, ct);
+        await NotifyMentionedUsersAsync(note.BoardId, note.Id, note.Board.Title, note.Text, access.Value, ct);
         return Ok(dto);
     }
 
@@ -796,6 +804,69 @@ public sealed class StickyNotesController : ControllerBase
             .ToListAsync(ct);
     }
 
+    private async Task NotifyMentionedUsersAsync(
+        int boardId,
+        int noteId,
+        string boardTitle,
+        string noteText,
+        NotesAccess access,
+        CancellationToken ct)
+    {
+        if (_notificationService is null || string.IsNullOrWhiteSpace(noteText))
+        {
+            return;
+        }
+
+        var recipientUserIds = await ResolveMentionedUserIdsAsync(boardId, noteText, access.UserId, ct);
+        if (recipientUserIds.Count == 0)
+        {
+            return;
+        }
+
+        await _notificationService.NotifyStickyNoteMentionAsync(
+            noteId,
+            boardId,
+            boardTitle,
+            noteText,
+            access.DisplayName,
+            access.UserId,
+            recipientUserIds,
+            ct);
+    }
+
+    private async Task<IReadOnlyCollection<int>> ResolveMentionedUserIdsAsync(
+        int boardId,
+        string noteText,
+        int actorUserId,
+        CancellationToken ct)
+    {
+        var visibleUserIds = (await GetBoardRealtimeRecipientUserIdsAsync(boardId, ct))
+            .Where(userId => userId > 0 && userId != actorUserId)
+            .Distinct()
+            .ToArray();
+        if (visibleUserIds.Length == 0)
+        {
+            return Array.Empty<int>();
+        }
+
+        var users = await _db.Users
+            .AsNoTracking()
+            .Where(user => visibleUserIds.Contains(user.Id))
+            .Select(user => new
+            {
+                user.Id,
+                user.FullName,
+                user.Email,
+            })
+            .ToListAsync(ct);
+
+        return users
+            .Where(user => IsUserMentioned(noteText, user.FullName, user.Email))
+            .Select(user => user.Id)
+            .Distinct()
+            .ToArray();
+    }
+
     private static StickyNoteBoardDto ToBoardDto(StickyNoteBoard board, int notesCount, bool canEdit, bool canCreate, bool canUpdateSettings, bool canDeleteBoard, bool canDeleteNotes, bool canManageMembers)
         => new()
         {
@@ -897,6 +968,72 @@ public sealed class StickyNotesController : ControllerBase
         => string.Equals(value, "editor", StringComparison.OrdinalIgnoreCase)
             ? "editor"
             : "viewer";
+
+    private static bool IsUserMentioned(string text, string? fullName, string? email)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        var aliases = BuildMentionAliases(fullName, email);
+        if (aliases.Count == 0)
+        {
+            return false;
+        }
+
+        var normalizedText = text.ToLowerInvariant();
+        return aliases.Any(alias => ContainsMentionAlias(normalizedText, alias));
+    }
+
+    private static IReadOnlyCollection<string> BuildMentionAliases(string? fullName, string? email)
+    {
+        var aliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        AddMentionAlias(aliases, email);
+        if (!string.IsNullOrWhiteSpace(email))
+        {
+            var atIndex = email.IndexOf('@', StringComparison.Ordinal);
+            if (atIndex > 0)
+            {
+                AddMentionAlias(aliases, email[..atIndex]);
+            }
+        }
+
+        AddMentionAlias(aliases, fullName);
+        return aliases;
+    }
+
+    private static void AddMentionAlias(HashSet<string> aliases, string? value)
+    {
+        var normalized = string.Join(' ', (value ?? string.Empty)
+            .Trim()
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (!string.IsNullOrWhiteSpace(normalized))
+        {
+            aliases.Add($"@{normalized.ToLowerInvariant()}");
+        }
+    }
+
+    private static bool ContainsMentionAlias(string normalizedText, string alias)
+    {
+        var index = normalizedText.IndexOf(alias, StringComparison.Ordinal);
+        while (index >= 0)
+        {
+            var end = index + alias.Length;
+            if (end >= normalizedText.Length || !IsMentionContinuation(normalizedText[end]))
+            {
+                return true;
+            }
+
+            index = normalizedText.IndexOf(alias, index + 1, StringComparison.Ordinal);
+        }
+
+        return false;
+    }
+
+    private static bool IsMentionContinuation(char value)
+        => char.IsLetterOrDigit(value)
+            || value is '.' or '_' or '-' or '@';
 
     private static string NormalizeTitle(string value)
     {

@@ -25,6 +25,7 @@ public static class NotificationTemplateKeys
     public const string TaskChanged = "task.changed";
     public const string TaskComment = "task.comment";
     public const string CaseInactivityControl = "case.inactivityControl";
+    public const string NoteMention = "note.mention";
 }
 
 public sealed record NotificationTemplateVariableDefinition(string Key, string Label);
@@ -217,7 +218,18 @@ public static class NotificationTemplateCatalog
             "Уведомление о контрольной задаче по делу без активности.",
             "Автоконтроль дела: {{task.objectName}}",
             "По делу {{task.objectName}} давно не было активных задач.\n\nСоздана контрольная задача: {{task.title}}\nПериод без активной задачи: {{case.daysWithoutActiveTask}} дн.",
-            [.. TaskVariables, new("case.daysWithoutActiveTask", "Дней без активной задачи")])
+            [.. TaskVariables, new("case.daysWithoutActiveTask", "Дней без активной задачи")]),
+        new(
+            NotificationTemplateKeys.NoteMention,
+            "Упоминание в заметке",
+            "Уведомление сотруднику, которого упомянули на доске заметок.",
+            "Вас упомянули в заметке",
+            "{{actor.name}} упомянул(а) вас на доске «{{note.boardTitle}}».\n\nЗаметка: {{note.preview}}",
+            [
+                new("actor.name", "Кто упомянул"),
+                new("note.boardTitle", "Название доски"),
+                new("note.preview", "Короткий текст заметки")
+            ])
     ];
 
     public static NotificationTemplateDefinition? Find(string key)

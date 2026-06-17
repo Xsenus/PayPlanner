@@ -1708,6 +1708,64 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyStickyNoteMentionAsync_CreatesNoteNotificationAndDeduplicates()
+    {
+        await using var db = await CreateContextAsync();
+        var actor = await CreateUserAsync(db, "note-mention-actor@example.com");
+        var recipient = new User
+        {
+            Email = "note-mention-recipient@example.com",
+            FullName = "note-mention-recipient@example.com",
+            PasswordHash = "hash",
+            RoleId = actor.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(recipient);
+        await db.SaveChangesAsync();
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            realtime,
+            webPush);
+
+        await service.NotifyStickyNoteMentionAsync(
+            77,
+            5,
+            "Общее",
+            "@note-mention-recipient проверь документ",
+            actor.FullName,
+            actor.Id,
+            [recipient.Id, actor.Id]);
+        await service.NotifyStickyNoteMentionAsync(
+            77,
+            5,
+            "Общее",
+            "@note-mention-recipient проверь документ",
+            actor.FullName,
+            actor.Id,
+            [recipient.Id]);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(recipient.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.NoteMention, notification.Type);
+        Assert.Equal("note", notification.ObjectType);
+        Assert.Equal(77, notification.ObjectId);
+        Assert.Null(notification.TaskJournalItemId);
+        Assert.Contains("Общее", notification.BodyPreview);
+        Assert.DoesNotContain(await db.UserNotifications.ToListAsync(), item => item.RecipientUserId == actor.Id);
+        var realtimeNotification = Assert.Single(realtime.Notifications);
+        Assert.Equal(notification.Id, realtimeNotification.Id);
+        var pushed = Assert.Single(webPush.Notifications);
+        Assert.Equal(notification.Id, pushed.Id);
+    }
+
+    [Fact]
     public async Task NotifyTaskApprovalRequestedAsync_CreatesInAppNotificationForApproverAndAssignee()
     {
         await using var db = await CreateContextAsync();

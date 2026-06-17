@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
@@ -998,6 +1000,65 @@ public sealed class NotificationService : INotificationService
                     operation = normalizedOperation,
                     summary = normalizedSummary,
                     details = normalizedDetails
+                },
+                cancellationToken);
+        }
+    }
+
+    public async Task NotifyStickyNoteMentionAsync(
+        int noteId,
+        int boardId,
+        string boardTitle,
+        string noteText,
+        string actorName,
+        int actorUserId,
+        IReadOnlyCollection<int> recipientUserIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (noteId <= 0 || boardId <= 0 || recipientUserIds.Count == 0)
+        {
+            return;
+        }
+
+        var normalizedBoardTitle = NormalizeNotificationText(boardTitle, "Заметки");
+        var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
+        var preview = BuildStickyNotePreview(noteText);
+        var textHash = BuildStableTextHash(noteText);
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.NoteMention,
+            "Вас упомянули в заметке",
+            BuildStickyNoteMentionBody(normalizedActorName, normalizedBoardTitle, preview),
+            new Dictionary<string, string?>
+            {
+                ["actor.name"] = normalizedActorName,
+                ["note.boardTitle"] = normalizedBoardTitle,
+                ["note.preview"] = preview,
+            },
+            purpose: NotificationPurposes.ManualTest,
+            cancellationToken: cancellationToken);
+
+        foreach (var recipientUserId in recipientUserIds
+            .Where(userId => userId > 0 && userId != actorUserId)
+            .Distinct())
+        {
+            await CreateUserNotificationAsync(
+                recipientUserId,
+                UserNotificationTypes.NoteMention,
+                $"note:{noteId}:mention:{recipientUserId}:{textHash}",
+                message.Subject,
+                message.Body,
+                "cyan",
+                "note",
+                noteId,
+                null,
+                null,
+                new
+                {
+                    noteId,
+                    boardId,
+                    boardTitle = normalizedBoardTitle,
+                    actorUserId,
+                    actorName = normalizedActorName
                 },
                 cancellationToken);
         }
@@ -2718,6 +2779,20 @@ public sealed class NotificationService : INotificationService
         return string.Join('\n', lines);
     }
 
+    private static string BuildStickyNoteMentionBody(
+        string actorName,
+        string boardTitle,
+        string preview)
+        => string.Join('\n', new[]
+        {
+            $"{actorName} упомянул(а) вас на доске заметок.",
+            string.Empty,
+            $"Доска: {boardTitle}",
+            $"Заметка: {preview}",
+            string.Empty,
+            "Откройте раздел «Заметки», чтобы посмотреть сообщение."
+        });
+
     private static string BuildCaseInactivityControlBody(
         TaskJournalItem task,
         int daysWithoutActiveTask,
@@ -2936,6 +3011,22 @@ public sealed class NotificationService : INotificationService
     {
         var normalized = string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
         return Truncate(normalized, 500);
+    }
+
+    private static string BuildStickyNotePreview(string? value)
+    {
+        var normalized = string.Join(' ', (value ?? string.Empty)
+            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return string.IsNullOrWhiteSpace(normalized)
+            ? "Без текста"
+            : Truncate(normalized, 300);
+    }
+
+    private static string BuildStableTextHash(string? value)
+    {
+        var normalized = value ?? string.Empty;
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
+        return Convert.ToHexString(hash)[..16].ToLowerInvariant();
     }
 
     private static string FormatCalendarAccessUserList(
