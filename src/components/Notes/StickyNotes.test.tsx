@@ -338,6 +338,7 @@ describe('StickyNotes', () => {
 
     await screen.findByDisplayValue('Цветная заметка');
     await user.click(screen.getByRole('button', { name: 'Выбрать цвет заметки: Желтая' }));
+    expect(screen.getByRole('group', { name: 'Палитра цветов заметки' })).toBeTruthy();
     await user.click(screen.getByRole('button', { name: 'Цвет заметки: Синяя' }));
 
     await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledWith(11, expect.objectContaining({

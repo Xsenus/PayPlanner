@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent } from 'react';
 import {
+  Check,
   Filter,
   LayoutGrid,
   List,
@@ -35,13 +36,13 @@ import { useToast } from '../../hooks/useToast';
 import { useDialog } from '../../hooks/useDialog';
 import type { HubConnection } from '@microsoft/signalr';
 
-const COLORS: Array<{ value: StickyNoteColor; label: string; className: string; swatchClassName: string }> = [
-  { value: 'yellow', label: 'Желтая', className: 'bg-amber-100 border-amber-200 text-slate-950', swatchClassName: 'bg-amber-200 border-amber-400' },
-  { value: 'blue', label: 'Синяя', className: 'bg-sky-100 border-sky-200 text-slate-950', swatchClassName: 'bg-sky-200 border-sky-400' },
-  { value: 'green', label: 'Зеленая', className: 'bg-emerald-100 border-emerald-200 text-slate-950', swatchClassName: 'bg-emerald-200 border-emerald-400' },
-  { value: 'pink', label: 'Розовая', className: 'bg-rose-100 border-rose-200 text-slate-950', swatchClassName: 'bg-rose-200 border-rose-400' },
-  { value: 'cyan', label: 'Бирюзовая', className: 'bg-cyan-100 border-cyan-200 text-slate-950', swatchClassName: 'bg-cyan-200 border-cyan-400' },
-  { value: 'white', label: 'Белая', className: 'bg-white border-slate-200 text-slate-950', swatchClassName: 'bg-white border-slate-400' },
+const COLORS: Array<{ value: StickyNoteColor; label: string; className: string; swatchClassName: string; swatchTextClassName: string }> = [
+  { value: 'yellow', label: 'Желтая', className: 'bg-amber-100 border-amber-200 text-slate-950', swatchClassName: 'bg-amber-200 border-amber-400', swatchTextClassName: 'text-amber-950' },
+  { value: 'blue', label: 'Синяя', className: 'bg-sky-100 border-sky-200 text-slate-950', swatchClassName: 'bg-sky-200 border-sky-400', swatchTextClassName: 'text-sky-950' },
+  { value: 'green', label: 'Зеленая', className: 'bg-emerald-100 border-emerald-200 text-slate-950', swatchClassName: 'bg-emerald-200 border-emerald-400', swatchTextClassName: 'text-emerald-950' },
+  { value: 'pink', label: 'Розовая', className: 'bg-rose-100 border-rose-200 text-slate-950', swatchClassName: 'bg-rose-200 border-rose-400', swatchTextClassName: 'text-rose-950' },
+  { value: 'cyan', label: 'Бирюзовая', className: 'bg-cyan-100 border-cyan-200 text-slate-950', swatchClassName: 'bg-cyan-200 border-cyan-400', swatchTextClassName: 'text-cyan-950' },
+  { value: 'white', label: 'Белая', className: 'bg-white border-slate-200 text-slate-950', swatchClassName: 'bg-white border-slate-400', swatchTextClassName: 'text-slate-700' },
 ];
 
 const DEFAULT_NOTE_SIZE = { width: 220, height: 180 };
@@ -1162,23 +1163,33 @@ export function StickyNotes() {
             </button>
             {isColorPaletteOpen ? (
               <div
-                className="absolute left-0 top-7 z-[60] grid grid-cols-3 gap-1 rounded-md border border-slate-200 bg-white p-1.5 shadow-lg"
+                className="absolute left-0 top-8 z-[90] w-[190px] rounded-lg border border-slate-200 bg-white p-2 shadow-xl"
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => event.stopPropagation()}
+                role="group"
+                aria-label="Палитра цветов заметки"
               >
-                {COLORS.map((item) => (
-                  <button
-                    key={item.value}
-                    type="button"
-                    onClick={() => selectNoteColor(note, item.value)}
-                    className={`h-6 w-6 rounded-sm border ${item.swatchClassName} ${
-                      note.color === item.value ? 'ring-2 ring-slate-900 ring-offset-1' : 'hover:ring-2 hover:ring-slate-400 hover:ring-offset-1'
-                    }`}
-                    title={item.label}
-                    aria-label={`Цвет заметки: ${item.label}`}
-                    aria-pressed={note.color === item.value}
-                  />
-                ))}
+                <div className="grid grid-cols-3 gap-2">
+                  {COLORS.map((item) => {
+                    const selected = note.color === item.value;
+                    return (
+                      <button
+                        key={item.value}
+                        type="button"
+                        onClick={() => selectNoteColor(note, item.value)}
+                        className={`flex h-12 flex-col items-center justify-center gap-1 rounded-md border text-[10px] font-medium transition ${item.swatchClassName} ${item.swatchTextClassName} ${
+                          selected ? 'ring-2 ring-slate-900 ring-offset-1' : 'hover:ring-2 hover:ring-slate-400 hover:ring-offset-1'
+                        }`}
+                        title={item.label}
+                        aria-label={`Цвет заметки: ${item.label}`}
+                        aria-pressed={selected}
+                      >
+                        {selected ? <Check className="h-3.5 w-3.5" /> : <span className="h-3.5 w-3.5" />}
+                        <span className="max-w-full truncate px-0.5">{item.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             ) : null}
           </div>
