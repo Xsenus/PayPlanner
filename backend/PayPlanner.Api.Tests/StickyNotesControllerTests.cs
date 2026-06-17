@@ -485,6 +485,142 @@ public sealed class StickyNotesControllerTests
     }
 
     [Fact]
+    public async Task UpdateNote_PinOnSharedBoard_NotifiesVisibleUsersOnly()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db);
+        var recipient = await CreateUserAsync(db);
+        var deniedUser = await CreateUserAsync(db, canView: false);
+        var board = new StickyNoteBoard
+        {
+            Title = "Общее",
+            Visibility = StickyNoteBoardVisibility.Shared,
+            Background = "cork",
+        };
+        var note = new StickyNote
+        {
+            Board = board,
+            Text = "Важная информация",
+            Color = "yellow",
+            Version = 1,
+            Width = 220,
+            Height = 180,
+        };
+        db.StickyNotes.Add(note);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, author, notificationService: CreateNotificationService(db));
+
+        var result = await controller.UpdateNote(note.Id, new UpdateStickyNoteRequest
+        {
+            Text = "Важная информация",
+            Color = "yellow",
+            X = 10,
+            Y = 20,
+            Width = 220,
+            Height = 180,
+            ZIndex = 2,
+            IsPinned = true,
+            Version = 1,
+        }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(recipient.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.NoteImportantChanged, notification.Type);
+        Assert.Equal("note", notification.ObjectType);
+        Assert.Equal(note.Id, notification.ObjectId);
+        Assert.Contains("закрепил", notification.BodyPreview, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(await db.UserNotifications.ToListAsync(), item => item.RecipientUserId == author.Id);
+        Assert.DoesNotContain(await db.UserNotifications.ToListAsync(), item => item.RecipientUserId == deniedUser.Id);
+    }
+
+    [Fact]
+    public async Task UpdateNote_PinnedPersonalBoard_DoesNotNotifyMembers()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db);
+        var member = await CreateUserAsync(db);
+        var board = new StickyNoteBoard
+        {
+            Title = "Личная",
+            Visibility = StickyNoteBoardVisibility.Personal,
+            OwnerUserId = owner.Id,
+            OwnerUserName = owner.FullName,
+            Background = "gray",
+            Members = new List<StickyNoteBoardMember>
+            {
+                new() { UserId = member.Id, Role = "editor" },
+            },
+        };
+        var note = new StickyNote
+        {
+            Board = board,
+            Text = "Личная важная заметка",
+            Color = "yellow",
+            IsPinned = true,
+            Version = 1,
+            Width = 220,
+            Height = 180,
+        };
+        db.StickyNotes.Add(note);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner, notificationService: CreateNotificationService(db));
+
+        var result = await controller.UpdateNote(note.Id, new UpdateStickyNoteRequest
+        {
+            Text = "Измененная личная заметка",
+            Color = "yellow",
+            X = 10,
+            Y = 20,
+            Width = 220,
+            Height = 180,
+            ZIndex = 2,
+            IsPinned = true,
+            Version = 1,
+        }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Empty(await db.UserNotifications.ToListAsync());
+    }
+
+    [Fact]
+    public async Task DeleteNote_PinnedSharedBoardNote_NotifiesVisibleUsers()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db);
+        var recipient = await CreateUserAsync(db);
+        var board = new StickyNoteBoard
+        {
+            Title = "Общее",
+            Visibility = StickyNoteBoardVisibility.Shared,
+            Background = "cork",
+        };
+        var note = new StickyNote
+        {
+            Board = board,
+            Text = "Удаляемая важная заметка",
+            Color = "yellow",
+            IsPinned = true,
+            Version = 3,
+            Width = 220,
+            Height = 180,
+        };
+        db.StickyNotes.Add(note);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, author, notificationService: CreateNotificationService(db));
+
+        var result = await controller.DeleteNote(note.Id, CancellationToken.None);
+
+        Assert.IsType<NoContentResult>(result);
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(recipient.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.NoteImportantChanged, notification.Type);
+        Assert.Equal(note.Id, notification.ObjectId);
+        Assert.Contains("удалил", notification.BodyPreview, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(await db.UserNotifications.ToListAsync(), item => item.RecipientUserId == author.Id);
+    }
+
+    [Fact]
     public async Task UpdateNoteLayout_DoesNotCreateMentionNotification()
     {
         await using var db = await CreateContextAsync();

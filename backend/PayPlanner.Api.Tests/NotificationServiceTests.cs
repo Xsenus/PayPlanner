@@ -1876,6 +1876,68 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyStickyNoteImportantChangeAsync_CreatesNotificationsAndDeduplicates()
+    {
+        await using var db = await CreateContextAsync();
+        var actor = await CreateUserAsync(db, "note-important-actor@example.com");
+        var recipient = new User
+        {
+            Email = "note-important-recipient@example.com",
+            FullName = "Участник доски",
+            PasswordHash = "hash",
+            RoleId = actor.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(recipient);
+        await db.SaveChangesAsync();
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            realtime,
+            webPush);
+
+        await service.NotifyStickyNoteImportantChangeAsync(
+            79,
+            5,
+            "Общее",
+            "Важная информация для всех",
+            "pinned",
+            actor.FullName,
+            actor.Id,
+            [recipient.Id, actor.Id],
+            2);
+        await service.NotifyStickyNoteImportantChangeAsync(
+            79,
+            5,
+            "Общее",
+            "Важная информация для всех",
+            "pinned",
+            actor.FullName,
+            actor.Id,
+            [recipient.Id],
+            2);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(recipient.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.NoteImportantChanged, notification.Type);
+        Assert.Equal("note", notification.ObjectType);
+        Assert.Equal(79, notification.ObjectId);
+        Assert.Contains("Общее", notification.BodyPreview);
+        Assert.Contains("закрепил", notification.BodyPreview, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(await db.UserNotifications.ToListAsync(), item => item.RecipientUserId == actor.Id);
+        var realtimeNotification = Assert.Single(realtime.Notifications);
+        Assert.Equal(notification.Id, realtimeNotification.Id);
+        var pushed = Assert.Single(webPush.Notifications);
+        Assert.Equal(notification.Id, pushed.Id);
+    }
+
+    [Fact]
     public async Task NotifyTaskApprovalRequestedAsync_CreatesInAppNotificationForApproverAndAssignee()
     {
         await using var db = await CreateContextAsync();

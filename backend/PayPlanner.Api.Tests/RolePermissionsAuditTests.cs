@@ -488,5 +488,8 @@ public class RolePermissionsAuditTests
 
         public Task NotifyStickyNoteReminderAsync(StickyNote note, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
+
+        public Task NotifyStickyNoteImportantChangeAsync(int noteId, int boardId, string boardTitle, string noteText, string action, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, int noteVersion, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 }

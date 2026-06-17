@@ -18,6 +18,10 @@ namespace PayPlanner.Api.Controllers;
 public sealed class StickyNotesController : ControllerBase
 {
     private const int MaxNotesPerBoard = 200;
+    private const string ImportantNotePinnedAction = "pinned";
+    private const string ImportantNoteUpdatedAction = "updated";
+    private const string ImportantNoteUnpinnedAction = "unpinned";
+    private const string ImportantNoteDeletedAction = "deleted";
 
     private static readonly HashSet<string> AllowedColors = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -498,6 +502,9 @@ public sealed class StickyNotesController : ControllerBase
             return BadRequest(new { message = assignment.Error });
         }
 
+        var previousText = note.Text;
+        var previousColor = note.Color;
+        var previousIsPinned = note.IsPinned;
         var previousAssignedUserId = note.AssignedUserId;
         var previousReminderAt = note.ReminderAt;
         note.Text = NormalizeText(request.Text);
@@ -528,6 +535,22 @@ public sealed class StickyNotesController : ControllerBase
             access.Value,
             assignment.WasAssigned && (previousAssignedUserId != note.AssignedUserId || previousReminderAt != note.ReminderAt),
             ct);
+        var importantAction = ResolveImportantNoteAction(
+            previousIsPinned,
+            note.IsPinned,
+            previousText,
+            note.Text,
+            previousColor,
+            note.Color,
+            previousAssignedUserId,
+            note.AssignedUserId,
+            previousReminderAt,
+            note.ReminderAt);
+        if (importantAction is not null)
+        {
+            await NotifyImportantSharedBoardChangeAsync(note, note.Board.Title, importantAction, access.Value, ct);
+        }
+
         return Ok(dto);
     }
 
@@ -597,10 +620,17 @@ public sealed class StickyNotesController : ControllerBase
         }
 
         var boardId = note.BoardId;
+        var boardTitle = note.Board.Title;
+        var shouldNotifyImportantDelete = note.Board.Visibility == StickyNoteBoardVisibility.Shared && note.IsPinned;
         _db.StickyNotes.Remove(note);
         await _db.SaveChangesAsync(ct);
 
         await PublishAsync(boardId, "noteDeleted", null, noteId, access.Value, ct);
+        if (shouldNotifyImportantDelete)
+        {
+            await NotifyImportantSharedBoardChangeAsync(note, boardTitle, ImportantNoteDeletedAction, access.Value, ct);
+        }
+
         return NoContent();
     }
 
@@ -966,6 +996,94 @@ public sealed class StickyNotesController : ControllerBase
             note.ReminderAt,
             ct);
     }
+
+    private async Task NotifyImportantSharedBoardChangeAsync(
+        StickyNote note,
+        string boardTitle,
+        string action,
+        NotesAccess access,
+        CancellationToken ct)
+    {
+        if (_notificationService is null || note.BoardId <= 0)
+        {
+            return;
+        }
+
+        if (note.Board?.Visibility != StickyNoteBoardVisibility.Shared)
+        {
+            return;
+        }
+
+        var recipientUserIds = await GetBoardRealtimeRecipientUserIdsAsync(note.BoardId, ct);
+        if (recipientUserIds.Count == 0)
+        {
+            return;
+        }
+
+        await _notificationService.NotifyStickyNoteImportantChangeAsync(
+            note.Id,
+            note.BoardId,
+            boardTitle,
+            note.Text,
+            action,
+            access.DisplayName,
+            access.UserId,
+            recipientUserIds,
+            note.Version,
+            ct);
+    }
+
+    private static string? ResolveImportantNoteAction(
+        bool wasPinned,
+        bool isPinned,
+        string previousText,
+        string currentText,
+        string previousColor,
+        string currentColor,
+        int? previousAssignedUserId,
+        int? currentAssignedUserId,
+        DateTime? previousReminderAt,
+        DateTime? currentReminderAt)
+    {
+        if (!wasPinned && isPinned)
+        {
+            return ImportantNotePinnedAction;
+        }
+
+        if (wasPinned && !isPinned)
+        {
+            return ImportantNoteUnpinnedAction;
+        }
+
+        if (wasPinned && isPinned && HasImportantNoteContentChanged(
+            previousText,
+            currentText,
+            previousColor,
+            currentColor,
+            previousAssignedUserId,
+            currentAssignedUserId,
+            previousReminderAt,
+            currentReminderAt))
+        {
+            return ImportantNoteUpdatedAction;
+        }
+
+        return null;
+    }
+
+    private static bool HasImportantNoteContentChanged(
+        string previousText,
+        string currentText,
+        string previousColor,
+        string currentColor,
+        int? previousAssignedUserId,
+        int? currentAssignedUserId,
+        DateTime? previousReminderAt,
+        DateTime? currentReminderAt)
+        => !string.Equals(previousText, currentText, StringComparison.Ordinal)
+            || !string.Equals(previousColor, currentColor, StringComparison.OrdinalIgnoreCase)
+            || previousAssignedUserId != currentAssignedUserId
+            || previousReminderAt != currentReminderAt;
 
     private static StickyNoteBoardDto ToBoardDto(StickyNoteBoard board, int notesCount, bool canEdit, bool canCreate, bool canUpdateSettings, bool canDeleteBoard, bool canDeleteNotes, bool canManageMembers)
         => new()

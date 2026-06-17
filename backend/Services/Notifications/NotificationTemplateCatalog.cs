@@ -28,6 +28,7 @@ public static class NotificationTemplateKeys
     public const string NoteMention = "note.mention";
     public const string NoteAssigned = "note.assigned";
     public const string NoteReminder = "note.reminder";
+    public const string NoteImportantChanged = "note.importantChanged";
 }
 
 public sealed record NotificationTemplateVariableDefinition(string Key, string Label);
@@ -253,6 +254,18 @@ public static class NotificationTemplateCatalog
             [
                 new("note.boardTitle", "Название доски"),
                 new("note.reminderAt", "Срок напоминания"),
+                new("note.preview", "Короткий текст заметки")
+            ]),
+        new(
+            NotificationTemplateKeys.NoteImportantChanged,
+            "Важная заметка",
+            "Уведомление участникам общей доски о закрепленной важной заметке.",
+            "Важная заметка на общей доске",
+            "{{actor.name}} {{note.action}} на доске «{{note.boardTitle}}».\n\nЗаметка: {{note.preview}}",
+            [
+                new("actor.name", "Кто изменил"),
+                new("note.action", "Что произошло"),
+                new("note.boardTitle", "Название доски"),
                 new("note.preview", "Короткий текст заметки")
             ])
     ];

@@ -435,7 +435,8 @@ public class NotificationInboxController : ControllerBase
                 || item.Type.StartsWith("note")
                 || item.Type == UserNotificationTypes.NoteMention
                 || item.Type == UserNotificationTypes.NoteAssigned
-                || item.Type == UserNotificationTypes.NoteReminder),
+                || item.Type == UserNotificationTypes.NoteReminder
+                || item.Type == UserNotificationTypes.NoteImportantChanged),
             "finance" => query.Where(item =>
                 item.ObjectType == "payment"
                 || item.ObjectType == "invoice"
@@ -498,6 +499,7 @@ public class NotificationInboxController : ControllerBase
             || item.Type == UserNotificationTypes.NoteMention
             || item.Type == UserNotificationTypes.NoteAssigned
             || item.Type == UserNotificationTypes.NoteReminder
+            || item.Type == UserNotificationTypes.NoteImportantChanged
             || item.Type == UserNotificationTypes.PaymentAdvanceReviewRequired
             || item.Type == UserNotificationTypes.PaymentAdvanceReviewEscalation
             || item.Type == UserNotificationTypes.SystemAdminWarning);

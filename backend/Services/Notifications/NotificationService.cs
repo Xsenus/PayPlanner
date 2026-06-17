@@ -1172,6 +1172,71 @@ public sealed class NotificationService : INotificationService
             cancellationToken);
     }
 
+    public async Task NotifyStickyNoteImportantChangeAsync(
+        int noteId,
+        int boardId,
+        string boardTitle,
+        string noteText,
+        string action,
+        string actorName,
+        int actorUserId,
+        IReadOnlyCollection<int> recipientUserIds,
+        int noteVersion,
+        CancellationToken cancellationToken = default)
+    {
+        if (noteId <= 0 || boardId <= 0 || recipientUserIds.Count == 0)
+        {
+            return;
+        }
+
+        var normalizedBoardTitle = NormalizeNotificationText(boardTitle, "Общее");
+        var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
+        var normalizedAction = NormalizeStickyNoteImportantAction(action);
+        var preview = BuildStickyNotePreview(noteText);
+        var eventAction = NormalizeStickyNoteImportantActionKey(action);
+        var eventVersion = Math.Max(1, noteVersion);
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.NoteImportantChanged,
+            "Важная заметка на общей доске",
+            BuildStickyNoteImportantChangeBody(normalizedActorName, normalizedAction, normalizedBoardTitle, preview),
+            new Dictionary<string, string?>
+            {
+                ["actor.name"] = normalizedActorName,
+                ["note.action"] = normalizedAction,
+                ["note.boardTitle"] = normalizedBoardTitle,
+                ["note.preview"] = preview,
+            },
+            purpose: NotificationPurposes.ManualTest,
+            cancellationToken: cancellationToken);
+
+        foreach (var recipientUserId in recipientUserIds
+            .Where(userId => userId > 0 && userId != actorUserId)
+            .Distinct())
+        {
+            await CreateUserNotificationAsync(
+                recipientUserId,
+                UserNotificationTypes.NoteImportantChanged,
+                $"note:{noteId}:important:{eventAction}:{eventVersion}:{recipientUserId}",
+                message.Subject,
+                message.Body,
+                "orange",
+                "note",
+                noteId,
+                null,
+                null,
+                new
+                {
+                    noteId,
+                    boardId,
+                    boardTitle = normalizedBoardTitle,
+                    action = eventAction,
+                    actorUserId,
+                    actorName = normalizedActorName
+                },
+                cancellationToken);
+        }
+    }
+
     public async Task<IReadOnlyList<NotificationDelivery>> NotifyCaseInactivityControlTaskCreatedAsync(
         TaskJournalItem task,
         int daysWithoutActiveTask,
@@ -2932,6 +2997,21 @@ public sealed class NotificationService : INotificationService
             "Откройте раздел «Заметки», чтобы вернуться к напоминанию."
         });
 
+    private static string BuildStickyNoteImportantChangeBody(
+        string actorName,
+        string action,
+        string boardTitle,
+        string preview)
+        => string.Join('\n', new[]
+        {
+            $"{actorName} {action} на общей доске заметок.",
+            string.Empty,
+            $"Доска: {boardTitle}",
+            $"Заметка: {preview}",
+            string.Empty,
+            "Откройте раздел «Заметки», чтобы посмотреть важное изменение."
+        });
+
     private static string BuildCaseInactivityControlBody(
         TaskJournalItem task,
         int daysWithoutActiveTask,
@@ -3170,6 +3250,24 @@ public sealed class NotificationService : INotificationService
         => reminderAt.HasValue
             ? DateTime.SpecifyKind(reminderAt.Value, DateTimeKind.Utc).ToString("yyyyMMddHHmm", CultureInfo.InvariantCulture)
             : "no-date";
+
+    private static string NormalizeStickyNoteImportantAction(string? action)
+        => NormalizeStickyNoteImportantActionKey(action) switch
+        {
+            "pinned" => "закрепил(а) важную заметку",
+            "updated" => "изменил(а) важную заметку",
+            "unpinned" => "открепил(а) важную заметку",
+            "deleted" => "удалил(а) важную заметку",
+            _ => "изменил(а) важную заметку"
+        };
+
+    private static string NormalizeStickyNoteImportantActionKey(string? action)
+    {
+        var normalized = action?.Trim().ToLowerInvariant();
+        return normalized is "pinned" or "updated" or "unpinned" or "deleted"
+            ? normalized
+            : "updated";
+    }
 
     private static string BuildStableTextHash(string? value)
     {
