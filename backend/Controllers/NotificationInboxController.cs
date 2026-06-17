@@ -451,6 +451,8 @@ public class NotificationInboxController : ControllerBase
                 || item.ObjectType == "account"
                 || item.ObjectType == "act"
                 || item.ObjectType == "contract"
+                || item.Type == UserNotificationTypes.PaymentAssigned
+                || item.Type == UserNotificationTypes.PaymentChanged
                 || item.Type == UserNotificationTypes.PaymentAdvanceReviewRequired
                 || item.Type == UserNotificationTypes.PaymentAdvanceReviewEscalation),
             "case" => query.Where(item =>
@@ -508,6 +510,8 @@ public class NotificationInboxController : ControllerBase
             || item.Type == UserNotificationTypes.NoteAssigned
             || item.Type == UserNotificationTypes.NoteReminder
             || item.Type == UserNotificationTypes.NoteImportantChanged
+            || item.Type == UserNotificationTypes.PaymentAssigned
+            || item.Type == UserNotificationTypes.PaymentChanged
             || item.Type == UserNotificationTypes.PaymentAdvanceReviewRequired
             || item.Type == UserNotificationTypes.PaymentAdvanceReviewEscalation
             || item.Type == UserNotificationTypes.SystemAdminWarning);

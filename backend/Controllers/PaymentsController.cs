@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -11,6 +12,7 @@ using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Notifications;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -35,11 +37,16 @@ public class PaymentsController : ControllerBase
 
     private readonly PaymentContext _db;
     private readonly IFormRequirementsService _formRequirements;
+    private readonly INotificationService? _notificationService;
     private bool _skipRemainderTransferFormRequirements;
-    public PaymentsController(PaymentContext db, IFormRequirementsService formRequirements)
+    public PaymentsController(
+        PaymentContext db,
+        IFormRequirementsService formRequirements,
+        INotificationService? notificationService = null)
     {
         _db = db;
         _formRequirements = formRequirements;
+        _notificationService = notificationService;
     }
 
     private Task<DataVisibilityAccess?> ResolvePaymentsVisibilityAsync(CancellationToken ct)
@@ -54,6 +61,63 @@ public class PaymentsController : ControllerBase
             .ApplyPaymentVisibility(visibility)
             .AnyAsync(payment => payment.Id == id, ct);
 
+    private async Task<IReadOnlyCollection<int>> ResolvePaymentNotificationRecipientsAsync(
+        Payment payment,
+        IEnumerable<int> candidateUserIds,
+        CancellationToken ct)
+    {
+        var userIds = candidateUserIds
+            .Where(userId => userId > 0)
+            .Distinct()
+            .ToArray();
+        if (userIds.Length == 0)
+        {
+            return Array.Empty<int>();
+        }
+
+        var allowedUserIds = await _db.Users
+            .AsNoTracking()
+            .Where(user => userIds.Contains(user.Id)
+                && user.IsActive
+                && user.IsApproved
+                && (user.Role != null && (user.Role.Name == "admin"
+                    || user.Role.Permissions.Any(permission =>
+                        permission.Section == RolePermissionCatalog.Payments
+                        && permission.CanView))))
+            .Select(user => user.Id)
+            .ToListAsync(ct);
+
+        if (allowedUserIds.Count == 0)
+        {
+            return Array.Empty<int>();
+        }
+
+        var visibleRecipientIds = new List<int>();
+        foreach (var userId in allowedUserIds)
+        {
+            var principal = new ClaimsPrincipal(new ClaimsIdentity(
+                new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture)) },
+                authenticationType: "NotificationAccessCheck"));
+            var visibility = await _db.ResolveDataVisibilityAsync(principal, RolePermissionCatalog.Payments, ct);
+            if (visibility is null)
+            {
+                continue;
+            }
+
+            var canOpenPayment = await _db.Payments
+                .AsNoTracking()
+                .Where(item => item.Id == payment.Id)
+                .ApplyPaymentVisibility(visibility)
+                .AnyAsync(ct);
+            if (canOpenPayment)
+            {
+                visibleRecipientIds.Add(userId);
+            }
+        }
+
+        return visibleRecipientIds;
+    }
+
     private async Task<IActionResult?> RequirePaymentsPermissionAsync(
         Func<RolePermissionValues, bool> isAllowed,
         CancellationToken ct)
@@ -63,6 +127,95 @@ public class PaymentsController : ControllerBase
 
     private Task<IActionResult?> RequirePaymentsEditAsync(CancellationToken ct)
         => RequirePaymentsPermissionAsync(permission => permission.CanEdit, ct);
+
+    private async Task NotifyPaymentAssignedAsync(Payment payment, CancellationToken ct)
+    {
+        if (_notificationService is null)
+        {
+            return;
+        }
+
+        await _db.Entry(payment).Collection(item => item.Responsibles).LoadAsync(ct);
+        var recipients = await ResolvePaymentNotificationRecipientsAsync(
+            payment,
+            payment.Responsibles.Select(item => item.UserId),
+            ct);
+        if (recipients.Count == 0)
+        {
+            return;
+        }
+
+        await _notificationService.NotifyPaymentAssignedAsync(
+            payment,
+            User.GetDisplayName(),
+            User.GetUserId() ?? 0,
+            recipients,
+            ct);
+    }
+
+    private async Task NotifyPaymentChangedAsync(
+        Payment payment,
+        IReadOnlyList<string> changeLabels,
+        CancellationToken ct)
+    {
+        if (_notificationService is null || changeLabels.Count == 0)
+        {
+            return;
+        }
+
+        await _db.Entry(payment).Collection(item => item.Responsibles).LoadAsync(ct);
+        var recipients = await ResolvePaymentNotificationRecipientsAsync(
+            payment,
+            payment.Responsibles.Select(item => item.UserId),
+            ct);
+        if (recipients.Count == 0)
+        {
+            return;
+        }
+
+        await _notificationService.NotifyPaymentChangedAsync(
+            payment,
+            changeLabels,
+            User.GetDisplayName(),
+            User.GetUserId() ?? 0,
+            recipients,
+            ct);
+    }
+
+    private static IReadOnlyList<string> BuildPaymentChangeLabels(
+        PaymentStatus originalStatus,
+        PaymentStatus currentStatus,
+        DateTime originalDate,
+        DateTime currentDate,
+        decimal originalAmount,
+        decimal currentAmount,
+        int? originalPaymentSourceId,
+        int? currentPaymentSourceId)
+    {
+        var labels = new List<string>();
+        if (originalStatus != currentStatus)
+        {
+            labels.Add($"Статус: {originalStatus.ToDisplayString()} -> {currentStatus.ToDisplayString()}");
+        }
+
+        if (originalDate.Date != currentDate.Date)
+        {
+            labels.Add($"Дата: {originalDate:dd.MM.yyyy} -> {currentDate:dd.MM.yyyy}");
+        }
+
+        if (Math.Abs(originalAmount - currentAmount) > AmountTolerance)
+        {
+            var culture = CultureInfo.GetCultureInfo("ru-RU");
+            labels.Add($"Сумма: {originalAmount.ToString("N2", culture)} -> {currentAmount.ToString("N2", culture)}");
+        }
+
+        if (originalPaymentSourceId != currentPaymentSourceId)
+        {
+            labels.Add("Источник платежа изменен");
+        }
+
+        return labels;
+    }
 
     [HttpGet]
     public async Task<IActionResult> Get(
@@ -165,6 +318,7 @@ public class PaymentsController : ControllerBase
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, model, now, ct);
         await _db.SaveChangesAsync(ct);
         PopulateAuditMetadata(_db, model);
+        await NotifyPaymentAssignedAsync(model, ct);
         return Created($"/api/payments/{model.Id}", model);
     }
 
@@ -215,6 +369,8 @@ public class PaymentsController : ControllerBase
         var originalPlannedDate = (e.PlannedDate == default ? e.Date : e.PlannedDate).Date;
         var originalPaidAmount = e.PaidAmount;
         var originalStatus = e.Status;
+        var originalAmount = e.Amount;
+        var originalPaymentSourceId = e.PaymentSourceId;
         var originalRescheduleCount = Math.Max(0, e.RescheduleCount);
         var originalSystemNotes = e.SystemNotes ?? string.Empty;
         var originalInvoiceId = e.InvoiceId;
@@ -358,6 +514,18 @@ public class PaymentsController : ControllerBase
 
         await _db.SaveChangesAsync(ct);
         PopulateAuditMetadata(_db, e);
+        await NotifyPaymentChangedAsync(
+            e,
+            BuildPaymentChangeLabels(
+                originalStatus,
+                e.Status,
+                originalDueDate,
+                e.Date.Date,
+                originalAmount,
+                e.Amount,
+                originalPaymentSourceId,
+                e.PaymentSourceId),
+            ct);
         return Ok(e);
     }
 
@@ -453,6 +621,13 @@ public class PaymentsController : ControllerBase
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, payment, now, ct);
         await _db.SaveChangesAsync(ct);
         PopulateAuditMetadata(_db, payment);
+        if (originalStatus != payment.Status)
+        {
+            await NotifyPaymentChangedAsync(
+                payment,
+                [$"Статус: {originalStatus.ToDisplayString()} -> {payment.Status.ToDisplayString()}"],
+                ct);
+        }
         return Ok(payment);
     }
 

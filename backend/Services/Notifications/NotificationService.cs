@@ -1237,6 +1237,112 @@ public sealed class NotificationService : INotificationService
         }
     }
 
+    public async Task NotifyPaymentAssignedAsync(
+        Payment payment,
+        string actorName,
+        int actorUserId,
+        IReadOnlyCollection<int> recipientUserIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (payment.Id <= 0 || recipientUserIds.Count == 0)
+        {
+            return;
+        }
+
+        var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.PaymentAssigned,
+            "Вам назначен платеж",
+            BuildPaymentAssignedBody(payment, normalizedActorName),
+            BuildPaymentTemplateValues(payment, normalizedActorName, []),
+            purpose: NotificationPurposes.ManualTest,
+            cancellationToken: cancellationToken);
+
+        foreach (var recipientUserId in recipientUserIds
+            .Where(userId => userId > 0 && userId != actorUserId)
+            .Distinct())
+        {
+            await CreateUserNotificationAsync(
+                recipientUserId,
+                UserNotificationTypes.PaymentAssigned,
+                $"payment:{payment.Id}:assigned:{recipientUserId}",
+                message.Subject,
+                message.Body,
+                "blue",
+                "payment",
+                payment.Id,
+                null,
+                null,
+                new
+                {
+                    paymentId = payment.Id,
+                    actorUserId,
+                    actorName = normalizedActorName
+                },
+                cancellationToken);
+        }
+    }
+
+    public async Task NotifyPaymentChangedAsync(
+        Payment payment,
+        IReadOnlyList<string> changeLabels,
+        string actorName,
+        int actorUserId,
+        IReadOnlyCollection<int> recipientUserIds,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedChanges = NormalizePaymentChangeLabels(changeLabels);
+        if (payment.Id <= 0 || normalizedChanges.Count == 0 || recipientUserIds.Count == 0)
+        {
+            return;
+        }
+
+        var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
+        var changeText = string.Join('\n', normalizedChanges.Select(label => $"- {label}"));
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.PaymentChanged,
+            $"Изменен платеж: {BuildPaymentTitle(payment)}",
+            BuildPaymentChangedBody(payment, normalizedActorName, normalizedChanges),
+            BuildPaymentTemplateValues(payment, normalizedActorName, normalizedChanges),
+            purpose: NotificationPurposes.ManualTest,
+            cancellationToken: cancellationToken);
+        var stateHash = BuildStableTextHash(string.Join("|",
+        [
+            payment.Status.ToString(),
+            payment.Date.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            payment.Amount.ToString("0.00", CultureInfo.InvariantCulture),
+            (payment.PaymentSourceId ?? 0).ToString(CultureInfo.InvariantCulture),
+            (payment.PaymentStatusId ?? 0).ToString(CultureInfo.InvariantCulture),
+            string.Join(";", normalizedChanges)
+        ]));
+
+        foreach (var recipientUserId in recipientUserIds
+            .Where(userId => userId > 0 && userId != actorUserId)
+            .Distinct())
+        {
+            await CreateUserNotificationAsync(
+                recipientUserId,
+                UserNotificationTypes.PaymentChanged,
+                $"payment:{payment.Id}:changed:{recipientUserId}:{stateHash}",
+                message.Subject,
+                message.Body,
+                "amber",
+                "payment",
+                payment.Id,
+                null,
+                null,
+                new
+                {
+                    paymentId = payment.Id,
+                    actorUserId,
+                    actorName = normalizedActorName,
+                    changes = normalizedChanges,
+                    changeText
+                },
+                cancellationToken);
+        }
+    }
+
     public async Task<IReadOnlyList<NotificationDelivery>> NotifyCaseInactivityControlTaskCreatedAsync(
         TaskJournalItem task,
         int daysWithoutActiveTask,
@@ -3275,6 +3381,68 @@ public sealed class NotificationService : INotificationService
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
         return Convert.ToHexString(hash)[..16].ToLowerInvariant();
     }
+
+    private static Dictionary<string, string?> BuildPaymentTemplateValues(
+        Payment payment,
+        string actorName,
+        IReadOnlyList<string> changeLabels)
+        => new()
+        {
+            ["actor.name"] = actorName,
+            ["payment.title"] = BuildPaymentTitle(payment),
+            ["payment.date"] = FormatPaymentDate(payment.Date),
+            ["payment.amount"] = payment.Amount.ToString("N2", RuCulture),
+            ["payment.status"] = FormatPaymentStatus(payment.Status),
+            ["payment.changes"] = changeLabels.Count == 0
+                ? string.Empty
+                : string.Join('\n', changeLabels.Select(label => $"- {label}"))
+        };
+
+    private static string BuildPaymentAssignedBody(Payment payment, string actorName)
+        => NotificationTemplateCatalog.CompactBlankLines(
+            $"{actorName} назначил(а) вам платеж: {BuildPaymentTitle(payment)}\n\nДата: {FormatPaymentDate(payment.Date)}\nСумма: {payment.Amount.ToString("N2", RuCulture)}\nСтатус: {FormatPaymentStatus(payment.Status)}");
+
+    private static string BuildPaymentChangedBody(
+        Payment payment,
+        string actorName,
+        IReadOnlyList<string> changeLabels)
+        => NotificationTemplateCatalog.CompactBlankLines(
+            $"{actorName} изменил(а) платеж: {BuildPaymentTitle(payment)}\n\nИзменения:\n{string.Join('\n', changeLabels.Select(label => $"- {label}"))}\n\nДата: {FormatPaymentDate(payment.Date)}\nСумма: {payment.Amount.ToString("N2", RuCulture)}\nСтатус: {FormatPaymentStatus(payment.Status)}");
+
+    private static string BuildPaymentTitle(Payment payment)
+    {
+        var description = NormalizeNotificationText(payment.Description, "Платеж");
+        if (!string.Equals(description, "Платеж", StringComparison.OrdinalIgnoreCase))
+        {
+            return description;
+        }
+
+        return payment.Id > 0
+            ? $"Платеж #{payment.Id}"
+            : "Платеж";
+    }
+
+    private static string FormatPaymentDate(DateTime date)
+        => date == default ? "не указана" : date.ToString("dd.MM.yyyy", RuCulture);
+
+    private static string FormatPaymentStatus(PaymentStatus status)
+        => status switch
+        {
+            PaymentStatus.Pending => "Ожидается",
+            PaymentStatus.Completed => "Выполнен",
+            PaymentStatus.Overdue => "Просрочен",
+            PaymentStatus.Processing => "Частично оплачено",
+            PaymentStatus.Cancelled => "Отменён",
+            _ => status.ToString()
+        };
+
+    private static IReadOnlyList<string> NormalizePaymentChangeLabels(IReadOnlyList<string> changeLabels)
+        => changeLabels
+            .Select(label => NormalizeNotificationText(label, string.Empty))
+            .Where(label => !string.IsNullOrWhiteSpace(label))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .ToList();
 
     private static string FormatCalendarAccessUserList(
         IReadOnlyCollection<int> userIds,

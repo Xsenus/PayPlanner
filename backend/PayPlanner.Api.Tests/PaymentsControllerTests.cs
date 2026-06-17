@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Controllers.V2;
 using PayPlanner.Api.Data;
@@ -5361,6 +5363,62 @@ public class PaymentsControllerTests
         Assert.Empty(await db.ClientBalanceTransactions.AsNoTracking().ToListAsync());
     }
 
+    [Fact]
+    public async Task Update_NotifiesPaymentResponsibleAboutImportantChanges()
+    {
+        await using var db = await CreateContextAsync();
+        var actor = await CreatePaymentsUserAsync(db, canExport: true, canEdit: true, DataVisibilityScope.All);
+        var responsible = await CreatePaymentsUserAsync(db, canExport: false, canEdit: false, DataVisibilityScope.Own);
+        var sourceBefore = new PaymentSource { Name = "Банк", IsActive = true };
+        var sourceAfter = new PaymentSource { Name = "Касса", IsActive = true };
+        db.PaymentSources.AddRange(sourceBefore, sourceAfter);
+        await db.SaveChangesAsync();
+
+        var payment = new Payment
+        {
+            Description = "Контрольный платеж",
+            Date = new DateTime(2026, 6, 17),
+            PlannedDate = new DateTime(2026, 6, 17),
+            Amount = 10000m,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            DocumentKind = DocumentKind.Payment,
+            PaymentSourceId = sourceBefore.Id,
+            Responsibles = [new PaymentResponsible { UserId = responsible.Id }]
+        };
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+
+        var controller = CreatePaymentsController(db, actor.Id, CreateNotificationService(db));
+        var update = new Payment
+        {
+            Date = new DateTime(2026, 6, 19),
+            PlannedDate = new DateTime(2026, 6, 19),
+            Amount = 12000m,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Completed,
+            Description = "Контрольный платеж",
+            DocumentKind = DocumentKind.Payment,
+            PaymentSourceId = sourceAfter.Id,
+            PaidAmount = 12000m,
+            PaidDate = new DateTime(2026, 6, 19),
+            LastPaymentDate = new DateTime(2026, 6, 19)
+        };
+
+        var result = await controller.Update(payment.Id, update, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result);
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(responsible.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.PaymentChanged, notification.Type);
+        Assert.Equal("payment", notification.ObjectType);
+        Assert.Equal(payment.Id, notification.ObjectId);
+        Assert.Contains("Статус", notification.BodyPreview);
+        Assert.Contains("Дата", notification.BodyPreview);
+        Assert.Contains("Сумма", notification.BodyPreview);
+        Assert.Contains("Источник", notification.BodyPreview);
+    }
+
     private static async Task<PaymentContext> CreateContextAsync(bool useObjectAuditModel = true)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
@@ -5462,7 +5520,24 @@ public class PaymentsControllerTests
         };
     }
 
-    private static PaymentsController CreatePaymentsController(PaymentContext db, int userId)
+    private static NotificationService CreateNotificationService(PaymentContext db)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .Build();
+
+        return new NotificationService(
+            db,
+            configuration,
+            new NoopEmailService(),
+            new NoopTelegramNotificationService(),
+            NullLogger<NotificationService>.Instance);
+    }
+
+    private static PaymentsController CreatePaymentsController(
+        PaymentContext db,
+        int userId,
+        INotificationService? notificationService = null)
     {
         var claims = new List<Claim>
         {
@@ -5470,7 +5545,7 @@ public class PaymentsControllerTests
             new(ClaimTypes.Name, "Test user"),
         };
 
-        return new PaymentsController(db, new NoopFormRequirementsService())
+        return new PaymentsController(db, new NoopFormRequirementsService(), notificationService)
         {
             ControllerContext = new ControllerContext
             {
@@ -5563,6 +5638,56 @@ public class PaymentsControllerTests
         db.Users.Add(user);
         await db.SaveChangesAsync();
         return user;
+    }
+
+    private sealed class NoopEmailService : IEmailService
+    {
+        public Task SendEmailAsync(
+            string toEmail,
+            string subject,
+            string body,
+            bool isHtml = false,
+            CancellationToken cancellationToken = default,
+            EmailSendSettings? settings = null)
+            => Task.CompletedTask;
+
+        public Task SendRegistrationPendingEmailAsync(string toEmail, string fullName)
+            => Task.CompletedTask;
+
+        public Task SendRegistrationApprovedEmailAsync(string toEmail, string fullName)
+            => Task.CompletedTask;
+
+        public Task SendRegistrationRejectedEmailAsync(string toEmail, string fullName, string? reason)
+            => Task.CompletedTask;
+
+        public Task SendAdminNewRegistrationNotificationAsync(string adminEmail, string newUserFullName, string newUserEmail)
+            => Task.CompletedTask;
+
+        public Task SendEmailWithAttachmentAsync(
+            string toEmail,
+            string subject,
+            string body,
+            string attachmentFileName,
+            byte[] attachmentBytes,
+            string attachmentContentType)
+            => Task.CompletedTask;
+    }
+
+    private sealed class NoopTelegramNotificationService : ITelegramNotificationService
+    {
+        public Task<TelegramSendResult> SendMessageAsync(long chatId, string text, CancellationToken cancellationToken = default)
+            => Task.FromResult(new TelegramSendResult(true, "sent"));
+
+        public Task<TelegramSendResult> SendMessageWithTokenAsync(
+            long chatId,
+            string text,
+            string botToken,
+            CancellationToken cancellationToken = default,
+            TelegramBotConnectionSettings? connection = null)
+            => Task.FromResult(new TelegramSendResult(true, "sent"));
+
+        public Task<TelegramNotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new TelegramNotificationSettingsDto());
     }
 
     private static async Task<User> CreateBalanceUserAsync(

@@ -1,5 +1,9 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
+using PayPlanner.Api.Services.Notifications;
+using System.Globalization;
+using System.Security.Claims;
 using PayPlanner.Api.Models;
 
 namespace PayPlanner.Api.Services
@@ -31,7 +35,7 @@ namespace PayPlanner.Api.Services
             {
                 try
                 {
-                    await TickAsync(stoppingToken);
+                    await RunOnceAsync(stoppingToken);
                 }
                 catch (Exception ex)
                 {
@@ -50,10 +54,11 @@ namespace PayPlanner.Api.Services
             _logger.LogInformation("PaymentStatusUpdater stopped.");
         }
 
-        private async Task TickAsync(CancellationToken ct)
+        public async Task<int> RunOnceAsync(CancellationToken ct = default)
         {
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
+            var notificationService = scope.ServiceProvider.GetService<INotificationService>();
 
             var nowUtc = DateTime.UtcNow;
 
@@ -72,7 +77,7 @@ namespace PayPlanner.Api.Services
 
             if (candidates.Count == 0)
             {
-                return;
+                return 0;
             }
 
             var responsibleUserIds = candidates
@@ -118,8 +123,84 @@ namespace PayPlanner.Api.Services
             {
                 await InvoicePaymentStateService.RefreshInvoiceAggregatesAsync(db, affectedInvoiceIds, nowUtc, ct);
                 await db.SaveChangesAsync(ct);
+                if (notificationService is not null)
+                {
+                    foreach (var payment in affectedPayments)
+                    {
+                        var recipients = await ResolvePaymentNotificationRecipientsAsync(db, payment, ct);
+                        if (recipients.Count == 0)
+                        {
+                            continue;
+                        }
+
+                        await notificationService.NotifyPaymentChangedAsync(
+                            payment,
+                            ["Статус: Ожидается -> Просрочен"],
+                            "CRM",
+                            0,
+                            recipients,
+                            ct);
+                    }
+                }
+
                 _logger.LogInformation("Marked {Count} payment(s) as Overdue.", affected);
             }
+
+            return affected;
+        }
+
+        private static async Task<IReadOnlyCollection<int>> ResolvePaymentNotificationRecipientsAsync(
+            PaymentContext db,
+            Payment payment,
+            CancellationToken ct)
+        {
+            var candidateUserIds = payment.Responsibles
+                .Select(item => item.UserId)
+                .Where(userId => userId > 0)
+                .Distinct()
+                .ToArray();
+            if (candidateUserIds.Length == 0)
+            {
+                return Array.Empty<int>();
+            }
+
+            var allowedUserIds = await db.Users
+                .AsNoTracking()
+                .Where(user => candidateUserIds.Contains(user.Id)
+                    && user.IsActive
+                    && user.IsApproved
+                    && user.Role != null
+                    && (user.Role.Name == "admin"
+                        || user.Role.Permissions.Any(permission =>
+                            permission.Section == RolePermissionCatalog.Payments
+                            && permission.CanView)))
+                .Select(user => user.Id)
+                .ToListAsync(ct);
+
+            var result = new List<int>();
+            foreach (var userId in allowedUserIds)
+            {
+                var principal = new ClaimsPrincipal(new ClaimsIdentity(
+                    new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture)) },
+                    authenticationType: "NotificationAccessCheck"));
+                var visibility = await db.ResolveDataVisibilityAsync(principal, RolePermissionCatalog.Payments, ct);
+                if (visibility is null)
+                {
+                    continue;
+                }
+
+                var canOpenPayment = await db.Payments
+                    .AsNoTracking()
+                    .Where(item => item.Id == payment.Id)
+                    .ApplyPaymentVisibility(visibility)
+                    .AnyAsync(ct);
+                if (canOpenPayment)
+                {
+                    result.Add(userId);
+                }
+            }
+
+            return result;
         }
 
         private static DateTime ResolvePaymentLocalToday(

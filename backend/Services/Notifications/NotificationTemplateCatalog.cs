@@ -29,6 +29,8 @@ public static class NotificationTemplateKeys
     public const string NoteAssigned = "note.assigned";
     public const string NoteReminder = "note.reminder";
     public const string NoteImportantChanged = "note.importantChanged";
+    public const string PaymentAssigned = "payment.assigned";
+    public const string PaymentChanged = "payment.changed";
 }
 
 public sealed record NotificationTemplateVariableDefinition(string Key, string Label);
@@ -63,6 +65,16 @@ public static class NotificationTemplateCatalog
         new("task.assignedSubject", "Тема уведомления о назначении задачи"),
         new("task.assignmentDetails", "Детали назначения или переназначения"),
         new("actor.name", "Кто выполнил действие")
+    ];
+
+    private static readonly IReadOnlyList<NotificationTemplateVariableDefinition> PaymentVariables =
+    [
+        new("actor.name", "Кто выполнил действие"),
+        new("payment.title", "Краткое описание платежа"),
+        new("payment.date", "Дата платежа"),
+        new("payment.amount", "Сумма платежа"),
+        new("payment.status", "Статус платежа"),
+        new("payment.changes", "Список изменений")
     ];
 
     public static readonly IReadOnlyList<NotificationTemplateDefinition> All =
@@ -267,7 +279,21 @@ public static class NotificationTemplateCatalog
                 new("note.action", "Что произошло"),
                 new("note.boardTitle", "Название доски"),
                 new("note.preview", "Короткий текст заметки")
-            ])
+            ]),
+        new(
+            NotificationTemplateKeys.PaymentAssigned,
+            "Назначен платеж",
+            "Уведомление ответственному при назначении платежа.",
+            "Вам назначен платеж",
+            "{{actor.name}} назначил(а) вам платеж: {{payment.title}}\n\nДата: {{payment.date}}\nСумма: {{payment.amount}}\nСтатус: {{payment.status}}",
+            PaymentVariables),
+        new(
+            NotificationTemplateKeys.PaymentChanged,
+            "Изменение платежа",
+            "Уведомление ответственному при изменении важных параметров платежа.",
+            "Изменен платеж: {{payment.title}}",
+            "{{actor.name}} изменил(а) платеж: {{payment.title}}\n\nИзменения:\n{{payment.changes}}\n\nДата: {{payment.date}}\nСумма: {{payment.amount}}\nСтатус: {{payment.status}}",
+            PaymentVariables)
     ];
 
     public static NotificationTemplateDefinition? Find(string key)
