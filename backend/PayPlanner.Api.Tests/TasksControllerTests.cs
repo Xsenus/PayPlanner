@@ -141,6 +141,94 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task GetTasks_CalendarViewDoesNotExposeAuthorOnlyHiddenAssignee()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role
+        {
+            Name = "secretary-calendar-tasks",
+            Description = "Секретарь с точечными календарями",
+            Permissions =
+            [
+                new RolePermission
+                {
+                    Section = RolePermissionCatalog.Calendar,
+                    CanView = true,
+                    ViewScope = DataVisibilityScope.Specific,
+                },
+            ],
+        };
+        var current = new User
+        {
+            Email = "calendar-task-viewer@example.com",
+            PasswordHash = "test",
+            FullName = "Секретарь",
+            IsActive = true,
+            IsApproved = true,
+            Role = role,
+        };
+        var selected = new User
+        {
+            Email = "calendar-task-selected@example.com",
+            PasswordHash = "test",
+            FullName = "Выбранный сотрудник",
+            IsActive = true,
+            IsApproved = true,
+            Role = role,
+        };
+        var hidden = new User
+        {
+            Email = "calendar-task-hidden@example.com",
+            PasswordHash = "test",
+            FullName = "Скрытый сотрудник",
+            IsActive = true,
+            IsApproved = true,
+            Role = role,
+        };
+        db.Users.AddRange(current, selected, hidden);
+        await db.SaveChangesAsync();
+
+        db.RoleCalendarVisibleUsers.Add(new RoleCalendarVisibleUser
+        {
+            RoleId = role.Id,
+            UserId = selected.Id,
+        });
+        var currentTask = await CreateTaskAsync(db, current.Id, null, current.Id);
+        currentTask.Title = "Задача секретаря";
+        currentTask.AuthorUserId = current.Id;
+        currentTask.AuthorName = current.FullName;
+        var selectedTask = await CreateTaskAsync(db, current.Id, null, selected.Id);
+        selectedTask.Title = "Задача выбранного";
+        selectedTask.AuthorUserId = current.Id;
+        selectedTask.AuthorName = current.FullName;
+        var hiddenTask = await CreateTaskAsync(db, current.Id, null, hidden.Id);
+        hiddenTask.Title = "Задача скрытого";
+        hiddenTask.AuthorUserId = current.Id;
+        hiddenTask.AuthorName = current.FullName;
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), current);
+
+        var result = await controller.GetTasks(
+            search: null,
+            status: null,
+            type: null,
+            assigneeUserId: null,
+            from: null,
+            to: null,
+            calendarView: true,
+            page: 1,
+            pageSize: 50,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var page = Assert.IsType<PagedResponse<TaskJournalItemDto>>(ok.Value);
+
+        Assert.Contains(page.Items, item => item.Id == currentTask.Id);
+        Assert.Contains(page.Items, item => item.Id == selectedTask.Id);
+        Assert.DoesNotContain(page.Items, item => item.Id == hiddenTask.Id);
+    }
+
+    [Fact]
     public async Task UpdateSettings_PersistsCaseInactivityAutomationSettings()
     {
         await using var db = await CreateContextAsync();

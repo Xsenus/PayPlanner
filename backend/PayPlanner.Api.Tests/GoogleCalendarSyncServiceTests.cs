@@ -765,8 +765,7 @@ public class GoogleCalendarSyncServiceTests
         Assert.Contains(calendars, item => item.OwnerUserId == secretary.Id);
         Assert.Contains(calendars, item => item.OwnerUserId == selected.Id);
         Assert.DoesNotContain(calendars, item => item.OwnerUserId == hidden.Id);
-        var hiddenTaskLink = await db.GoogleCalendarTaskLinks.SingleAsync(item => item.TaskJournalItemId == hiddenTask.Id);
-        Assert.Equal("deleted", hiddenTaskLink.SyncStatus);
+        Assert.False(await db.GoogleCalendarTaskLinks.AnyAsync(item => item.TaskJournalItemId == hiddenTask.Id));
         Assert.Contains(handler.Requests, request =>
             request.Method == HttpMethod.Delete &&
             request.RequestUri!.AbsolutePath.EndsWith("/calendars/calendar-hidden-specific", StringComparison.Ordinal));

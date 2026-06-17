@@ -437,8 +437,7 @@ public class YandexCalendarSyncServiceTests
         Assert.Contains(calendars, item => item.OwnerUserId == secretary.Id);
         Assert.Contains(calendars, item => item.OwnerUserId == selected.Id);
         Assert.DoesNotContain(calendars, item => item.OwnerUserId == hidden.Id);
-        var hiddenTaskLink = await db.YandexCalendarTaskLinks.SingleAsync(item => item.TaskJournalItemId == hiddenTask.Id);
-        Assert.Equal("deleted", hiddenTaskLink.SyncStatus);
+        Assert.False(await db.YandexCalendarTaskLinks.AnyAsync(item => item.TaskJournalItemId == hiddenTask.Id));
         Assert.Contains(handler.Requests, request =>
             request.Method == HttpMethod.Delete &&
             request.RequestUri!.AbsoluteUri == "https://caldav.yandex.ru/calendars/user/calendar-yandex-hidden-specific/");

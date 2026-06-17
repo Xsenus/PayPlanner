@@ -59,6 +59,14 @@ public static class DataVisibilityQueryExtensions
         if (access.SeesAll) return query;
 
         var visibleUserIds = access.VisibleUserIds.ToArray();
+        if (string.Equals(access.Section, RolePermissionCatalog.Calendar, StringComparison.OrdinalIgnoreCase))
+        {
+            return query.Where(task =>
+                (task.AssigneeUserId.HasValue && visibleUserIds.Contains(task.AssigneeUserId.Value))
+                || task.Participants.Any(participant =>
+                    participant.UserId.HasValue && visibleUserIds.Contains(participant.UserId.Value)));
+        }
+
         return query.Where(task =>
             (task.AssigneeUserId.HasValue && visibleUserIds.Contains(task.AssigneeUserId.Value))
             || (task.AuthorUserId.HasValue && visibleUserIds.Contains(task.AuthorUserId.Value))
