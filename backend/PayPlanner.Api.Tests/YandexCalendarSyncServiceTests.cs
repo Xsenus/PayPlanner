@@ -372,6 +372,79 @@ public class YandexCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncNowAsync_NonAdminAssigneeModeUsesSpecificCalendarVisibility()
+    {
+        await using var db = await CreateContextAsync();
+        var secretary = await CreateUserAsync(db, "secretary-yandex-specific@example.com", "secretary");
+        secretary.FullName = "Секретарь";
+        var selected = await CreateUserAsync(db, "selected-yandex-specific@example.com", "selected-user");
+        selected.FullName = "Выбранный сотрудник";
+        var hidden = await CreateUserAsync(db, "hidden-yandex-specific@example.com", "hidden-user");
+        hidden.FullName = "Скрытый сотрудник";
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = secretary.RoleId,
+            Section = RolePermissionCatalog.Calendar,
+            CanView = true,
+            ViewScope = DataVisibilityScope.Specific,
+        });
+        db.RoleCalendarVisibleUsers.Add(new RoleCalendarVisibleUser
+        {
+            RoleId = secretary.RoleId,
+            UserId = selected.Id,
+        });
+        await db.SaveChangesAsync();
+
+        var connection = await CreateConnectionAsync(db, secretary.Id, calendarMode: "adminByAssignee");
+        await CreateTaskAsync(db, selected.Id, "Задача выбранного сотрудника");
+        var hiddenTask = await CreateTaskAsync(db, hidden.Id, "Задача скрытого сотрудника");
+        hiddenTask.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = selected.Id,
+            Role = "observer",
+            DisplayName = selected.FullName,
+            Email = selected.Email,
+        });
+        var revokedCalendar = await CreateCalendarAsync(
+            db,
+            connection.Id,
+            "calendar-yandex-hidden-specific",
+            "PayPlanner - Hidden employee",
+            hidden.Id,
+            "https://caldav.yandex.ru/calendars/user/calendar-yandex-hidden-specific/");
+        db.YandexCalendarTaskLinks.Add(new YandexCalendarTaskLink
+        {
+            ConnectionId = connection.Id,
+            CalendarSyncCalendarId = revokedCalendar.Id,
+            TaskJournalItemId = hiddenTask.Id,
+            YandexCalendarId = revokedCalendar.YandexCalendarId,
+            YandexEventId = "event-yandex-hidden-specific",
+            YandexEventUrl = $"{revokedCalendar.CalendarUrl}event-yandex-hidden-specific.ics",
+            SyncStatus = "active",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var handler = new RecordingYandexHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        var result = await service.SyncNowAsync(secretary.Id, CreateHttpRequest(secretary.Id), CancellationToken.None);
+
+        Assert.Equal(1, result.ProcessedTasks);
+        var calendars = await db.YandexCalendarSyncCalendars
+            .Where(item => item.OwnerUserId != null)
+            .ToListAsync();
+        Assert.Contains(calendars, item => item.OwnerUserId == secretary.Id);
+        Assert.Contains(calendars, item => item.OwnerUserId == selected.Id);
+        Assert.DoesNotContain(calendars, item => item.OwnerUserId == hidden.Id);
+        var hiddenTaskLink = await db.YandexCalendarTaskLinks.SingleAsync(item => item.TaskJournalItemId == hiddenTask.Id);
+        Assert.Equal("deleted", hiddenTaskLink.SyncStatus);
+        Assert.Contains(handler.Requests, request =>
+            request.Method == HttpMethod.Delete &&
+            request.RequestUri!.AbsoluteUri == "https://caldav.yandex.ru/calendars/user/calendar-yandex-hidden-specific/");
+    }
+
+    [Fact]
     public async Task SyncNowAsync_ReusesExistingYandexCalendarByName()
     {
         await using var db = await CreateContextAsync();
@@ -874,14 +947,17 @@ END:VCALENDAR
         PaymentContext db,
         int connectionId,
         string yandexCalendarId,
-        string name)
+        string name,
+        int? ownerUserId = null,
+        string? calendarUrl = null)
     {
         var calendar = new YandexCalendarSyncCalendar
         {
             ConnectionId = connectionId,
+            OwnerUserId = ownerUserId,
             YandexCalendarId = yandexCalendarId,
             Name = name,
-            CalendarUrl = "https://caldav.yandex.ru/calendars/user/payplanner/",
+            CalendarUrl = calendarUrl ?? "https://caldav.yandex.ru/calendars/user/payplanner/",
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         };

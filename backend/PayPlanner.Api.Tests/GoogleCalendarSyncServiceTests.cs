@@ -709,6 +709,70 @@ public class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncNowAsync_NonAdminAssigneeModeUsesSpecificCalendarVisibility()
+    {
+        await using var db = await CreateContextAsync();
+        var secretary = await CreateUserAsync(db, "secretary-google-specific@example.com", "secretary", "Секретарь");
+        var selected = await CreateUserAsync(db, "selected-google-specific@example.com", "selected-user", "Выбранный сотрудник");
+        var hidden = await CreateUserAsync(db, "hidden-google-specific@example.com", "hidden-user", "Скрытый сотрудник");
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = secretary.RoleId,
+            Section = RolePermissionCatalog.Calendar,
+            CanView = true,
+            ViewScope = DataVisibilityScope.Specific,
+        });
+        db.RoleCalendarVisibleUsers.Add(new RoleCalendarVisibleUser
+        {
+            RoleId = secretary.RoleId,
+            UserId = selected.Id,
+        });
+        await db.SaveChangesAsync();
+
+        await EnableGoogleSettingsAsync(db);
+        var connection = await CreateConnectionAsync(db, secretary.Id, calendarMode: "adminByAssignee");
+        await CreateTaskAsync(db, selected.Id, "Задача выбранного сотрудника", selected.FullName);
+        var hiddenTask = await CreateTaskAsync(db, hidden.Id, "Задача скрытого сотрудника", hidden.FullName);
+        hiddenTask.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = selected.Id,
+            Role = "observer",
+            DisplayName = selected.FullName,
+            Email = selected.Email,
+        });
+        var revokedCalendar = await CreateCalendarAsync(db, connection.Id, "calendar-hidden-specific", "PayPlanner - Hidden employee", hidden.Id);
+        db.GoogleCalendarTaskLinks.Add(new GoogleCalendarTaskLink
+        {
+            ConnectionId = connection.Id,
+            CalendarSyncCalendarId = revokedCalendar.Id,
+            TaskJournalItemId = hiddenTask.Id,
+            GoogleCalendarId = revokedCalendar.GoogleCalendarId,
+            GoogleEventId = "event-hidden-specific",
+            SyncStatus = "active",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var handler = new RecordingGoogleHandler();
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        var result = await service.SyncNowAsync(secretary.Id, CreateHttpRequest(secretary.Id), CancellationToken.None);
+
+        Assert.Equal(1, result.ProcessedTasks);
+        var calendars = await db.GoogleCalendarSyncCalendars
+            .Where(item => item.OwnerUserId != null)
+            .ToListAsync();
+        Assert.Contains(calendars, item => item.OwnerUserId == secretary.Id);
+        Assert.Contains(calendars, item => item.OwnerUserId == selected.Id);
+        Assert.DoesNotContain(calendars, item => item.OwnerUserId == hidden.Id);
+        var hiddenTaskLink = await db.GoogleCalendarTaskLinks.SingleAsync(item => item.TaskJournalItemId == hiddenTask.Id);
+        Assert.Equal("deleted", hiddenTaskLink.SyncStatus);
+        Assert.Contains(handler.Requests, request =>
+            request.Method == HttpMethod.Delete &&
+            request.RequestUri!.AbsolutePath.EndsWith("/calendars/calendar-hidden-specific", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task SyncNowAsync_AdminConnectionRemovesDuplicateAssigneeCalendars()
     {
         await using var db = await CreateContextAsync();

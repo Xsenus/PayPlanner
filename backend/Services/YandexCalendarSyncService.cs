@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -513,6 +514,17 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         var importedEvents = 0;
         try
         {
+            await EnsureAdminAssigneeCalendarsAsync(connection, cancellationToken);
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            errors++;
+            connection.LastError = Trim(ex.Message, 2000);
+            await AddLogAsync(connection.Id, null, null, "system", "ensure-calendars", "error", "Не удалось подготовить календари сотрудников в Яндекс.Календаре.", ex.Message, cancellationToken);
+        }
+
+        try
+        {
             importedEvents += await ImportYandexChangesAsync(connection, forceFull, cancellationToken);
         }
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
@@ -524,16 +536,6 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
 
         var settings = await LoadCalendarSyncSettingsAsync(cancellationToken);
         errors += await DeleteLinksOutsideSyncWindowAsync(connection, cancellationToken);
-        try
-        {
-            await EnsureAdminAssigneeCalendarsAsync(connection, cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            errors++;
-            connection.LastError = Trim(ex.Message, 2000);
-            await AddLogAsync(connection.Id, null, null, "system", "ensure-calendars", "error", "Не удалось подготовить календари сотрудников в Яндекс.Календаре.", ex.Message, cancellationToken);
-        }
 
         var tasks = await LoadTasksForConnectionAsync(connection, cancellationToken);
         var processedTasks = 0;
@@ -595,6 +597,16 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         if (IsBeforeSyncFromDate(connection, task))
         {
             await DeleteTaskLinkOutsideSyncWindowAsync(connection, task.Id, cancellationToken);
+            connection.LastIncrementalSyncAt = DateTime.UtcNow;
+            connection.UpdatedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync(cancellationToken);
+            return;
+        }
+
+        var visibility = await ResolveConnectionCalendarVisibilityAsync(connection.UserId, cancellationToken);
+        if (!CanSyncTaskForConnection(connection, task, visibility))
+        {
+            await DeleteTaskLinkForRevokedAccessAsync(connection, task.Id, cancellationToken);
             connection.LastIncrementalSyncAt = DateTime.UtcNow;
             connection.UpdatedAt = DateTime.UtcNow;
             await _db.SaveChangesAsync(cancellationToken);
@@ -941,20 +953,38 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         YandexCalendarConnection connection,
         CancellationToken cancellationToken)
     {
-        var isAdmin = await IsAdminConnectionAsync(connection.UserId, cancellationToken);
-        if (!isAdmin || !string.Equals(connection.CalendarMode, "adminByAssignee", StringComparison.Ordinal))
+        if (!string.Equals(connection.CalendarMode, "adminByAssignee", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var visibility = await ResolveConnectionCalendarVisibilityAsync(connection.UserId, cancellationToken);
+        if (visibility is null)
+        {
+            return;
+        }
+        if (!IsAssigneeCalendarMode(connection, visibility))
         {
             return;
         }
 
         var accessToken = await ResolveAccessTokenAsync(connection, cancellationToken);
-        var owners = await _db.Users
+        var visibleUserIds = visibility.SeesAll
+            ? null
+            : visibility.VisibleUserIds.Where(id => id > 0).Distinct().ToArray();
+        var ownersQuery = _db.Users
             .AsNoTracking()
             .Include(item => item.Role)
             .Where(item =>
                 item.IsActive &&
                 item.IsApproved &&
-                (item.IsEmployee || (item.Role != null && item.Role.Name.ToLower() != "admin")))
+                (item.IsEmployee || (item.Role != null && item.Role.Name.ToLower() != "admin")));
+        if (visibleUserIds is not null)
+        {
+            ownersQuery = ownersQuery.Where(item => visibleUserIds.Contains(item.Id));
+        }
+
+        var owners = await ownersQuery
             .OrderBy(item => item.FullName)
             .Select(item => new { item.Id, item.FullName })
             .ToListAsync(cancellationToken);
@@ -962,6 +992,25 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         foreach (var owner in owners)
         {
             await EnsureCalendarForOwnerAsync(connection, owner.Id, owner.FullName, accessToken, cancellationToken);
+        }
+
+        if (visibleUserIds is not null)
+        {
+            var allowed = visibleUserIds.ToHashSet();
+            var revokedCalendars = connection.Calendars
+                .Where(item => item.OwnerUserId.HasValue && !allowed.Contains(item.OwnerUserId.Value))
+                .ToList();
+            var failures = new List<string>();
+            await CleanupConnectionCalendarsAsync(
+                connection,
+                revokedCalendars,
+                reason: "Доступ к календарю сотрудника отозван в правах роли.",
+                failures,
+                cancellationToken);
+            if (failures.Count > 0)
+            {
+                throw new InvalidOperationException($"YandexCalendarRevokedCalendarCleanupFailed: {string.Join("; ", failures)}");
+            }
         }
     }
 
@@ -971,8 +1020,8 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         string accessToken,
         CancellationToken cancellationToken)
     {
-        var isAdmin = await IsAdminConnectionAsync(connection.UserId, cancellationToken);
-        var ownerUserId = isAdmin && connection.CalendarMode == "adminByAssignee" ? task.AssigneeUserId : null;
+        var visibility = await ResolveConnectionCalendarVisibilityAsync(connection.UserId, cancellationToken);
+        var ownerUserId = IsAssigneeCalendarMode(connection, visibility) ? task.AssigneeUserId : null;
         var ownerName = ownerUserId.HasValue ? NormalizeOptional(task.AssigneeName) : null;
 
         return await EnsureCalendarForOwnerAsync(connection, ownerUserId, ownerName, accessToken, cancellationToken);
@@ -1044,7 +1093,6 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
 
     private async Task<IReadOnlyList<TaskJournalItem>> LoadTasksForConnectionAsync(YandexCalendarConnection connection, CancellationToken cancellationToken)
     {
-        var isAdmin = await IsAdminConnectionAsync(connection.UserId, cancellationToken);
         var now = DateTime.UtcNow;
         var from = ResolveSyncFromDate(connection) ?? now.AddDays(-30);
         var to = now.AddDays(365);
@@ -1052,11 +1100,25 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             .Include(item => item.Participants)
             .Where(item => item.DueAt >= from && item.DueAt <= to);
 
-        if (!isAdmin)
+        var visibility = await ResolveConnectionCalendarVisibilityAsync(connection.UserId, cancellationToken);
+        if (visibility is null)
         {
-            query = query.Where(item =>
-                item.AssigneeUserId == connection.UserId ||
-                item.Participants.Any(participant => participant.UserId == connection.UserId));
+            return [];
+        }
+
+        if (!visibility.SeesAll)
+        {
+            var visibleUserIds = visibility.VisibleUserIds.Where(id => id > 0).Distinct().ToArray();
+            if (IsAssigneeCalendarMode(connection, visibility))
+            {
+                query = query.Where(item => item.AssigneeUserId.HasValue && visibleUserIds.Contains(item.AssigneeUserId.Value));
+            }
+            else
+            {
+                query = query.Where(item =>
+                    (item.AssigneeUserId.HasValue && visibleUserIds.Contains(item.AssigneeUserId.Value)) ||
+                    item.Participants.Any(participant => participant.UserId.HasValue && visibleUserIds.Contains(participant.UserId.Value)));
+            }
         }
 
         return await query
@@ -1103,8 +1165,8 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         var ownerUserId = calendar?.OwnerUserId;
         if (!ownerUserId.HasValue)
         {
-            var isAdmin = await IsAdminConnectionAsync(connection.UserId, cancellationToken);
-            ownerUserId = isAdmin && connection.CalendarMode == "adminByAssignee"
+            var visibility = await ResolveConnectionCalendarVisibilityAsync(connection.UserId, cancellationToken);
+            ownerUserId = IsAssigneeCalendarMode(connection, visibility)
                 ? task.AssigneeUserId
                 : connection.UserId;
         }
@@ -1236,10 +1298,43 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             cancellationToken);
     }
 
+    private async Task DeleteTaskLinkForRevokedAccessAsync(YandexCalendarConnection connection, int taskId, CancellationToken cancellationToken)
+    {
+        var link = await _db.YandexCalendarTaskLinks
+            .FirstOrDefaultAsync(item =>
+                item.ConnectionId == connection.Id &&
+                item.TaskJournalItemId == taskId &&
+                item.SyncStatus == "active",
+                cancellationToken);
+        if (link is null)
+        {
+            return;
+        }
+
+        var accessToken = await ResolveAccessTokenAsync(connection, cancellationToken);
+        var deleted = string.IsNullOrWhiteSpace(link.YandexEventUrl)
+            ? false
+            : await DeleteYandexEventAsync(accessToken, link.YandexEventUrl, cancellationToken);
+        MarkYandexLinkDeleted(link);
+        await AddLogAsync(
+            connection.Id,
+            link.CalendarSyncCalendarId,
+            link.TaskJournalItemId,
+            "crm-to-yandex",
+            deleted ? "delete-event" : "delete-event-missing",
+            "success",
+            deleted
+                ? "Событие удалено из Яндекс Календаря, потому что доступ к календарю сотрудника отозван в правах роли."
+                : "Событие уже отсутствовало в Яндекс Календаре при отзыве доступа к календарю сотрудника.",
+            null,
+            cancellationToken);
+    }
+
     private IQueryable<YandexCalendarConnection> LoadConnectionQuery()
         => _db.YandexCalendarConnections
             .Include(item => item.User)
             .ThenInclude(item => item.Role)
+            .Include(item => item.TaskLinks)
             .Include(item => item.Calendars)
             .ThenInclude(item => item.OwnerUser);
 
@@ -2093,6 +2188,54 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             .Where(item => item.Id == userId)
             .Select(item => item.Role != null && item.Role.Name == "admin")
             .FirstOrDefaultAsync(cancellationToken);
+
+    private async Task<DataVisibilityAccess?> ResolveConnectionCalendarVisibilityAsync(
+        int userId,
+        CancellationToken cancellationToken)
+    {
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture)),
+        ], "calendar-sync"));
+
+        return await _db.ResolveDataVisibilityAsync(principal, RolePermissionCatalog.Calendar, cancellationToken);
+    }
+
+    private static bool IsAssigneeCalendarMode(
+        YandexCalendarConnection connection,
+        DataVisibilityAccess? visibility)
+        => string.Equals(connection.CalendarMode, "adminByAssignee", StringComparison.Ordinal)
+            && visibility is not null
+            && (visibility.SeesAll || visibility.VisibleUserIds.Count > 1);
+
+    private static bool CanSyncTaskForConnection(
+        YandexCalendarConnection connection,
+        TaskJournalItem task,
+        DataVisibilityAccess? visibility)
+    {
+        if (visibility is null)
+        {
+            return false;
+        }
+
+        if (visibility.SeesAll)
+        {
+            return true;
+        }
+
+        if (IsAssigneeCalendarMode(connection, visibility))
+        {
+            return task.AssigneeUserId.HasValue && visibility.VisibleUserIds.Contains(task.AssigneeUserId.Value);
+        }
+
+        if (task.AssigneeUserId.HasValue && visibility.VisibleUserIds.Contains(task.AssigneeUserId.Value))
+        {
+            return true;
+        }
+
+        return task.Participants.Any(participant => participant.UserId.HasValue && visibility.VisibleUserIds.Contains(participant.UserId.Value))
+            || TaskBelongsToUser(task, connection.UserId);
+    }
 
     private static bool TaskBelongsToUser(TaskJournalItem task, int userId)
         => task.AssigneeUserId == userId || task.Participants.Any(item => item.UserId == userId);
