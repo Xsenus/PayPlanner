@@ -227,6 +227,106 @@ describe('RealtimeNotificationToasts', () => {
     expect(openNotifications).toHaveBeenCalledTimes(1);
   });
 
+  it('shows calendar toast and opens the calendar from action', async () => {
+    const openCalendar = vi.fn();
+    render(<RealtimeNotificationToasts userId={5} onOpenCalendar={openCalendar} />);
+
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.({
+        id: 48,
+        recipientUserId: 5,
+        type: 'crmCalendarEventChanged',
+        eventKey: 'calendar:task:125:changed',
+        title: 'Задача изменилась в календаре',
+        bodyPreview: 'Срок задачи перенесен.',
+        tone: 'amber',
+        objectType: 'calendar',
+        objectId: 125,
+        taskJournalItemId: null,
+        createdAt: '2026-05-25T10:00:00Z',
+      });
+    });
+
+    expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Задача изменилась в календаре',
+      actionLabel: 'Открыть календарь',
+      dedupeKey: 'calendar:125',
+      domain: 'calendar',
+    }));
+
+    const toastOptions = toastMock.showToast.mock.calls[0][0] as { onAction: () => void };
+    act(() => toastOptions.onAction());
+
+    expect(openCalendar).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows note toast and opens the notes board from action', async () => {
+    const openNotes = vi.fn();
+    render(<RealtimeNotificationToasts userId={5} onOpenNotes={openNotes} />);
+
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.({
+        id: 49,
+        recipientUserId: 5,
+        type: 'stickyNoteUpdated',
+        eventKey: 'note:board:3:updated',
+        title: 'Обновлена заметка',
+        bodyPreview: 'На общей доске изменили заметку.',
+        tone: 'blue',
+        objectType: 'note',
+        objectId: 3,
+        taskJournalItemId: null,
+        createdAt: '2026-05-25T10:00:00Z',
+      });
+    });
+
+    expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Обновлена заметка',
+      actionLabel: 'Открыть доску',
+      dedupeKey: 'note:3',
+      domain: 'note',
+    }));
+
+    const toastOptions = toastMock.showToast.mock.calls[0][0] as { onAction: () => void };
+    act(() => toastOptions.onAction());
+
+    expect(openNotes).toHaveBeenCalledTimes(1);
+  });
+
+  it('recognizes sticky note toast by type when object type is not normalized', async () => {
+    const openNotes = vi.fn();
+    render(<RealtimeNotificationToasts userId={5} onOpenNotes={openNotes} />);
+
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.({
+        id: 50,
+        recipientUserId: 5,
+        type: 'stickyNoteCreated',
+        eventKey: 'note:board:4:created',
+        title: 'Новая заметка',
+        bodyPreview: 'На общей доске появилась заметка.',
+        tone: 'blue',
+        objectType: 'sticky-note',
+        objectId: 4,
+        taskJournalItemId: null,
+        createdAt: '2026-05-25T10:00:00Z',
+      });
+    });
+
+    expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Новая заметка',
+      actionLabel: 'Открыть доску',
+      dedupeKey: 'sticky-note:4',
+      domain: 'note',
+    }));
+  });
+
   it('does not show toast for notification types that are not realtime-worthy', async () => {
     render(<RealtimeNotificationToasts userId={5} onOpenTask={vi.fn()} />);
 

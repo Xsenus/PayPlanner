@@ -24,6 +24,8 @@ type RealtimeNotificationToastsProps = {
   onOpenInvoice?: (invoiceId: number) => void;
   onOpenAct?: (actId: number) => void;
   onOpenContract?: (contractId: number) => void;
+  onOpenCalendar?: () => void;
+  onOpenNotes?: () => void;
   onOpenNotifications?: () => void;
 };
 
@@ -105,7 +107,9 @@ const HIGH_PRIORITY_TYPES = new Set([
 ]);
 
 function shouldShowRealtimeToast(notification: RealtimeUserNotification): boolean {
-  return REALTIME_TOAST_TYPES.has(notification.type);
+  return REALTIME_TOAST_TYPES.has(notification.type)
+    || isCalendarNotification(notification)
+    || isNoteNotification(notification);
 }
 
 function resolveToastVariant(notification: RealtimeUserNotification): 'info' | 'success' | 'error' {
@@ -159,15 +163,27 @@ function resolveToastDomain(notification: RealtimeUserNotification): ToastDomain
     return 'case';
   }
 
-  if (notification.objectType === 'calendar' || notification.type.includes('Calendar')) {
+  if (isCalendarNotification(notification)) {
     return 'calendar';
   }
 
-  if (notification.objectType === 'note' || notification.type.startsWith('note')) {
+  if (isNoteNotification(notification)) {
     return 'note';
   }
 
   return 'system';
+}
+
+function isCalendarNotification(notification: RealtimeUserNotification): boolean {
+  return notification.objectType === 'calendar'
+    || notification.type.toLowerCase().includes('calendar');
+}
+
+function isNoteNotification(notification: RealtimeUserNotification): boolean {
+  const normalizedType = notification.type.toLowerCase();
+  return notification.objectType === 'note'
+    || normalizedType.startsWith('note')
+    || normalizedType.startsWith('stickynote');
 }
 
 type RealtimeToastAction = {
@@ -187,6 +203,20 @@ function resolveToastAction(
     return {
       label: 'Открыть задачу',
       run: () => handlers.onOpenTask?.(notification.taskJournalItemId!),
+    };
+  }
+
+  if (isCalendarNotification(notification) && handlers.onOpenCalendar) {
+    return {
+      label: 'Открыть календарь',
+      run: handlers.onOpenCalendar,
+    };
+  }
+
+  if (isNoteNotification(notification) && handlers.onOpenNotes) {
+    return {
+      label: 'Открыть доску',
+      run: handlers.onOpenNotes,
     };
   }
 
@@ -253,6 +283,8 @@ export function RealtimeNotificationToasts({
   onOpenInvoice,
   onOpenAct,
   onOpenContract,
+  onOpenCalendar,
+  onOpenNotes,
   onOpenNotifications,
 }: RealtimeNotificationToastsProps) {
   const toast = useToast();
@@ -268,6 +300,8 @@ export function RealtimeNotificationToasts({
     onOpenInvoice,
     onOpenAct,
     onOpenContract,
+    onOpenCalendar,
+    onOpenNotes,
     onOpenNotifications: onOpenNotifications ?? (() => undefined),
   });
 
@@ -279,9 +313,11 @@ export function RealtimeNotificationToasts({
       onOpenInvoice,
       onOpenAct,
       onOpenContract,
+      onOpenCalendar,
+      onOpenNotes,
       onOpenNotifications: onOpenNotifications ?? (() => undefined),
     };
-  }, [onOpenAct, onOpenCase, onOpenContract, onOpenInvoice, onOpenNotifications, onOpenPayment, onOpenTask]);
+  }, [onOpenAct, onOpenCalendar, onOpenCase, onOpenContract, onOpenInvoice, onOpenNotes, onOpenNotifications, onOpenPayment, onOpenTask]);
 
   useEffect(() => {
     if (!userId || !canStartNotificationsHubConnection()) {
