@@ -258,6 +258,114 @@ public class NotificationInboxControllerTests
     }
 
     [Fact]
+    public async Task GetNotifications_FiltersNoteNotificationsByBoardAccess()
+    {
+        await using var db = await CreateContextAsync();
+        var currentUser = await CreateUserAsync(db, "visible-note-notifications@example.com");
+        var otherUser = await CreateUserAsync(db, "hidden-note-owner@example.com");
+        await SetNotesPermissionAsync(db, currentUser, canView: true);
+
+        var ownBoard = new StickyNoteBoard
+        {
+            Title = "Мои заметки",
+            Visibility = StickyNoteBoardVisibility.Personal,
+            OwnerUserId = currentUser.Id,
+            OwnerUserName = currentUser.FullName,
+            Background = "gray",
+        };
+        var sharedBoard = new StickyNoteBoard
+        {
+            Title = "Общее",
+            Visibility = StickyNoteBoardVisibility.Shared,
+            Background = "cork",
+        };
+        var hiddenBoard = new StickyNoteBoard
+        {
+            Title = "Чужая личная доска",
+            Visibility = StickyNoteBoardVisibility.Personal,
+            OwnerUserId = otherUser.Id,
+            OwnerUserName = otherUser.FullName,
+            Background = "gray",
+        };
+        var archivedBoard = new StickyNoteBoard
+        {
+            Title = "Архивная доска",
+            Visibility = StickyNoteBoardVisibility.Shared,
+            Background = "cork",
+            IsArchived = true,
+        };
+        var ownNote = CreateNote(ownBoard, "Своя заметка");
+        var sharedNote = CreateNote(sharedBoard, "Общая заметка");
+        var hiddenNote = CreateNote(hiddenBoard, "Чужая заметка");
+        var archivedNote = CreateNote(archivedBoard, "Архивная заметка");
+        db.StickyNotes.AddRange(ownNote, sharedNote, hiddenNote, archivedNote);
+        await db.SaveChangesAsync();
+
+        var ownNotification = CreateNoteNotification(currentUser.Id, ownNote.Id, "own-note");
+        var sharedNotification = CreateNoteNotification(currentUser.Id, sharedNote.Id, "shared-note");
+        var hiddenNotification = CreateNoteNotification(currentUser.Id, hiddenNote.Id, "hidden-note");
+        var archivedNotification = CreateNoteNotification(currentUser.Id, archivedNote.Id, "archived-note");
+        db.UserNotifications.AddRange(ownNotification, sharedNotification, hiddenNotification, archivedNotification);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, currentUser.Id);
+
+        var listResult = await controller.GetNotifications("active", domain: "note", type: null, search: null);
+        var page = Assert.IsType<PagedResponse<UserNotificationDto>>(Assert.IsType<OkObjectResult>(listResult.Result).Value);
+        var unreadResult = await controller.GetUnreadCount(CancellationToken.None);
+        var unreadCount = Assert.IsType<int>(Assert.IsType<OkObjectResult>(unreadResult.Result).Value);
+        var hiddenReadResult = await controller.MarkRead(hiddenNotification.Id, CancellationToken.None);
+        var archiveResult = await controller.ArchiveSelected(new PayPlanner.Api.Models.Requests.BulkIdsRequest
+        {
+            Ids = [ownNotification.Id, hiddenNotification.Id, archivedNotification.Id],
+        }, CancellationToken.None);
+        var archiveDto = Assert.IsType<UserNotificationBulkActionResultDto>(Assert.IsType<OkObjectResult>(archiveResult.Result).Value);
+
+        Assert.Equal(2, page.Items.Count);
+        Assert.Contains(page.Items, item => item.Id == ownNotification.Id);
+        Assert.Contains(page.Items, item => item.Id == sharedNotification.Id);
+        Assert.DoesNotContain(page.Items, item => item.Id == hiddenNotification.Id);
+        Assert.DoesNotContain(page.Items, item => item.Id == archivedNotification.Id);
+        Assert.Equal(2, unreadCount);
+        Assert.IsType<NotFoundResult>(hiddenReadResult.Result);
+        Assert.Equal(1, archiveDto.UpdatedCount);
+    }
+
+    [Fact]
+    public async Task GetNotifications_HidesNoteNotificationsWhenUserCannotViewNotes()
+    {
+        await using var db = await CreateContextAsync();
+        var currentUser = await CreateUserAsync(db, "no-note-access@example.com");
+        await SetNotesPermissionAsync(db, currentUser, canView: false);
+
+        var sharedBoard = new StickyNoteBoard
+        {
+            Title = "Общее",
+            Visibility = StickyNoteBoardVisibility.Shared,
+            Background = "cork",
+        };
+        var sharedNote = CreateNote(sharedBoard, "Общая заметка без доступа");
+        db.StickyNotes.Add(sharedNote);
+        await db.SaveChangesAsync();
+
+        var notification = CreateNoteNotification(currentUser.Id, sharedNote.Id, "shared-note-without-access");
+        db.UserNotifications.Add(notification);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, currentUser.Id);
+
+        var listResult = await controller.GetNotifications("active", domain: "note", type: null, search: null);
+        var page = Assert.IsType<PagedResponse<UserNotificationDto>>(Assert.IsType<OkObjectResult>(listResult.Result).Value);
+        var unreadResult = await controller.GetUnreadCount(CancellationToken.None);
+        var unreadCount = Assert.IsType<int>(Assert.IsType<OkObjectResult>(unreadResult.Result).Value);
+        var readResult = await controller.MarkRead(notification.Id, CancellationToken.None);
+
+        Assert.Empty(page.Items);
+        Assert.Equal(0, unreadCount);
+        Assert.IsType<NotFoundResult>(readResult.Result);
+    }
+
+    [Fact]
     public async Task GetNotifications_FiltersTaskNotificationsByDateEmployeeClientAndRole()
     {
         await using var db = await CreateContextAsync();
@@ -516,6 +624,46 @@ public class NotificationInboxControllerTests
         notification.ObjectType = objectType;
         notification.ObjectId = objectId;
         return notification;
+    }
+
+    private static UserNotification CreateNoteNotification(int userId, int noteId, string title)
+    {
+        var notification = CreateNotification(
+            userId,
+            $"note:{noteId}:{title}",
+            UserNotificationTypes.NoteImportantChanged,
+            title,
+            $"{title} body");
+        notification.ObjectType = "note";
+        notification.ObjectId = noteId;
+        return notification;
+    }
+
+    private static StickyNote CreateNote(StickyNoteBoard board, string text)
+        => new()
+        {
+            Board = board,
+            Text = text,
+            Color = "yellow",
+            Version = 1,
+            Width = 220,
+            Height = 180,
+            CreatedAt = DateTime.UtcNow,
+        };
+
+    private static async Task SetNotesPermissionAsync(PaymentContext db, User user, bool canView)
+    {
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = user.RoleId,
+            Section = RolePermissionCatalog.Notes,
+            CanView = canView,
+            CanCreate = canView,
+            CanEdit = canView,
+            CanDelete = canView,
+            ViewScope = DataVisibilityScope.All,
+        });
+        await db.SaveChangesAsync();
     }
 
     private static TaskJournalItem CreateTask(int userId, string title)

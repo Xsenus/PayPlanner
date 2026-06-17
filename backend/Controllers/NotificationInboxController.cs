@@ -328,13 +328,21 @@ public class NotificationInboxController : ControllerBase
     }
 
     private async Task<NotificationTargetVisibility> ResolveNotificationTargetVisibilityAsync(CancellationToken ct)
-        => new(
+    {
+        var userId = User.GetUserId().GetValueOrDefault();
+        var canViewNotes = userId > 0
+            && await _context.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Notes, static permission => permission.CanView, ct);
+
+        return new NotificationTargetVisibility(
+            userId,
+            canViewNotes,
             await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct),
             await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct),
             await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct),
             await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct),
             await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Acts, ct),
             await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Contracts, ct));
+    }
 
     private async Task<IReadOnlyList<string>> LoadDisabledNotificationTypesAsync(int userId, CancellationToken ct)
     {
@@ -618,6 +626,16 @@ public class NotificationInboxController : ControllerBase
         PaymentContext context,
         NotificationTargetVisibility visibility)
     {
+        var visibleNoteIds = context.StickyNotes
+            .Where(note =>
+                visibility.CanViewNotes
+                && note.Board != null
+                && !note.Board.IsArchived
+                && (note.Board.Visibility == StickyNoteBoardVisibility.Shared
+                    || note.Board.OwnerUserId == visibility.UserId
+                    || note.Board.Members.Any(member => member.UserId == visibility.UserId)))
+            .Select(note => note.Id);
+
         if (visibility.HasNoAccess)
         {
             return query.Where(item =>
@@ -628,7 +646,9 @@ public class NotificationInboxController : ControllerBase
 
         if (visibility.SeesAllTargets)
         {
-            return query;
+            return query.Where(item =>
+                item.ObjectType != "note"
+                || (item.ObjectId.HasValue && visibleNoteIds.Contains(item.ObjectId.Value)));
         }
 
         var visibleTaskIds = context.TaskJournalItems
@@ -687,7 +707,10 @@ public class NotificationInboxController : ControllerBase
                 && visibleActIds.Contains(item.ObjectId.Value))
             || (item.ObjectType == "contract"
                 && item.ObjectId.HasValue
-                && visibleContractIds.Contains(item.ObjectId.Value)));
+                && visibleContractIds.Contains(item.ObjectId.Value))
+            || (item.ObjectType == "note"
+                && item.ObjectId.HasValue
+                && visibleNoteIds.Contains(item.ObjectId.Value)));
     }
 
     private static void MarkAsRead(UserNotification item)
@@ -738,6 +761,8 @@ public class NotificationInboxController : ControllerBase
         };
 
     private sealed record NotificationTargetVisibility(
+        int UserId,
+        bool CanViewNotes,
         DataVisibilityAccess? Tasks,
         DataVisibilityAccess? Cases,
         DataVisibilityAccess? Accounts,
@@ -746,7 +771,8 @@ public class NotificationInboxController : ControllerBase
         DataVisibilityAccess? Contracts)
     {
         public bool HasNoAccess
-            => Tasks is null
+            => !CanViewNotes
+                && Tasks is null
                 && Cases is null
                 && Accounts is null
                 && Payments is null
