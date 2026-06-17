@@ -8,7 +8,10 @@ type ToastRecord = Required<Pick<ToastOptions, 'description' | 'durationMs' | 'v
   title: string;
   actionLabel?: string;
   onAction?: () => void;
+  dedupeKey?: string;
 };
+
+const MAX_VISIBLE_TOASTS = 3;
 
 function toToastOptions(options: ToastOptions | string): ToastOptions {
   if (typeof options === 'string') {
@@ -62,14 +65,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastRecord[]>([]);
   const timersRef = useRef<Map<string, number>>(new Map());
 
-  const dismissToast = useCallback((id: string) => {
+  const clearToastTimer = useCallback((id: string) => {
     const timer = timersRef.current.get(id);
     if (timer) {
       window.clearTimeout(timer);
       timersRef.current.delete(id);
     }
-    setToasts((prev) => prev.filter((toast) => toast.id !== id));
   }, []);
+
+  const dismissToast = useCallback((id: string) => {
+    clearToastTimer(id);
+    setToasts((prev) => prev.filter((toast) => toast.id !== id));
+  }, [clearToastTimer]);
 
   const showToast = useCallback((options: ToastOptions | string) => {
     const normalized = toToastOptions(options);
@@ -83,9 +90,28 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       durationMs: normalized.durationMs ?? (variant === 'error' ? 5200 : 3400),
       actionLabel: normalized.actionLabel,
       onAction: normalized.onAction,
+      dedupeKey: normalized.dedupeKey,
     };
 
-    setToasts((prev) => [...prev.slice(-3), toast]);
+    setToasts((prev) => {
+      if (toast.dedupeKey) {
+        const existing = prev.find((item) => item.dedupeKey === toast.dedupeKey);
+        if (existing) {
+          clearToastTimer(existing.id);
+          return prev.map((item) => (item.id === existing.id ? toast : item));
+        }
+      }
+
+      const next = [...prev, toast];
+      const visible = next.slice(-MAX_VISIBLE_TOASTS);
+      const visibleIds = new Set(visible.map((item) => item.id));
+      next.forEach((item) => {
+        if (!visibleIds.has(item.id)) {
+          clearToastTimer(item.id);
+        }
+      });
+      return visible;
+    });
 
     if (toast.durationMs > 0) {
       const timer = window.setTimeout(() => {
@@ -95,7 +121,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     }
 
     return id;
-  }, [dismissToast]);
+  }, [clearToastTimer, dismissToast]);
 
   const success = useCallback((description: string, title?: string) => {
     return showToast({ title, description, variant: 'success' });

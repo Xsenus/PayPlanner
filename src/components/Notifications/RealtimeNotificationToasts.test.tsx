@@ -95,6 +95,7 @@ describe('RealtimeNotificationToasts', () => {
     expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({
       title: 'Новая задача: Проверить документы',
       actionLabel: 'Открыть задачу',
+      dedupeKey: 'task:123',
     }));
 
     const toastOptions = toastMock.showToast.mock.calls[0][0] as { onAction: () => void };
@@ -165,6 +166,7 @@ describe('RealtimeNotificationToasts', () => {
       variant: 'error',
       durationMs: 16000,
       actionLabel: 'Открыть платеж',
+      dedupeKey: 'payment:321',
     }));
 
     const toastOptions = toastMock.showToast.mock.calls[0][0] as { onAction: () => void };

@@ -27,6 +27,18 @@ function buildToastDescription(notification: RealtimeUserNotification): string {
   return value.length > 220 ? `${value.slice(0, 217)}...` : value;
 }
 
+function buildToastDedupeKey(notification: RealtimeUserNotification): string {
+  if (notification.taskJournalItemId) {
+    return `task:${notification.taskJournalItemId}`;
+  }
+
+  if (notification.objectType && notification.objectId) {
+    return `${notification.objectType}:${notification.objectId}`;
+  }
+
+  return notification.eventKey || `notification:${notification.id}`;
+}
+
 const REALTIME_TOAST_TYPES = new Set([
   'taskAssigned',
   'taskReminder',
@@ -249,6 +261,7 @@ export function RealtimeNotificationToasts({
           durationMs: resolveToastDuration(notification),
           actionLabel: action.label,
           onAction: action.run,
+          dedupeKey: buildToastDedupeKey(notification),
         });
       },
     );
