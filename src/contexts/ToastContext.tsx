@@ -1,7 +1,19 @@
-import { AlertCircle, CheckCircle2, Info, X } from 'lucide-react';
+import {
+  AlertCircle,
+  CalendarDays,
+  CheckCircle2,
+  ClipboardList,
+  CreditCard,
+  Info,
+  Scale,
+  ShieldAlert,
+  StickyNote,
+  X,
+  type LucideIcon,
+} from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ToastContext, type ToastContextValue, type ToastOptions, type ToastVariant } from './toastContextCore';
+import { ToastContext, type ToastContextValue, type ToastDomain, type ToastOptions, type ToastVariant } from './toastContextCore';
 
 type ToastRecord = Required<Pick<ToastOptions, 'description' | 'durationMs' | 'variant'>> & {
   id: string;
@@ -9,6 +21,7 @@ type ToastRecord = Required<Pick<ToastOptions, 'description' | 'durationMs' | 'v
   actionLabel?: string;
   onAction?: () => void;
   dedupeKey?: string;
+  domain?: ToastDomain;
 };
 
 const MAX_VISIBLE_TOASTS = 3;
@@ -35,7 +48,7 @@ function defaultTitle(variant: ToastVariant): string {
   }
 }
 
-function toastStyles(variant: ToastVariant): { icon: typeof Info; wrapper: string; iconColor: string; progress: string } {
+function toastStyles(variant: ToastVariant): { icon: LucideIcon; wrapper: string; iconColor: string; progress: string } {
   switch (variant) {
     case 'success':
       return {
@@ -58,6 +71,74 @@ function toastStyles(variant: ToastVariant): { icon: typeof Info; wrapper: strin
         iconColor: 'text-sky-600',
         progress: 'bg-sky-500',
       };
+  }
+}
+
+function toastDomainStyles(domain?: ToastDomain): {
+  icon?: LucideIcon;
+  label?: string;
+  iconColor?: string;
+  borderColor?: string;
+  progress?: string;
+  badge?: string;
+} {
+  switch (domain) {
+    case 'task':
+      return {
+        icon: ClipboardList,
+        label: 'Задача',
+        iconColor: 'text-blue-600',
+        borderColor: 'border-l-blue-500',
+        progress: 'bg-blue-500',
+        badge: 'bg-blue-50 text-blue-700 ring-blue-100',
+      };
+    case 'calendar':
+      return {
+        icon: CalendarDays,
+        label: 'Календарь',
+        iconColor: 'text-cyan-600',
+        borderColor: 'border-l-cyan-500',
+        progress: 'bg-cyan-500',
+        badge: 'bg-cyan-50 text-cyan-700 ring-cyan-100',
+      };
+    case 'note':
+      return {
+        icon: StickyNote,
+        label: 'Заметка',
+        iconColor: 'text-amber-600',
+        borderColor: 'border-l-amber-500',
+        progress: 'bg-amber-500',
+        badge: 'bg-amber-50 text-amber-700 ring-amber-100',
+      };
+    case 'payment':
+      return {
+        icon: CreditCard,
+        label: 'Деньги',
+        iconColor: 'text-emerald-600',
+        borderColor: 'border-l-emerald-500',
+        progress: 'bg-emerald-500',
+        badge: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
+      };
+    case 'case':
+      return {
+        icon: Scale,
+        label: 'Дело',
+        iconColor: 'text-violet-600',
+        borderColor: 'border-l-violet-500',
+        progress: 'bg-violet-500',
+        badge: 'bg-violet-50 text-violet-700 ring-violet-100',
+      };
+    case 'system':
+      return {
+        icon: ShieldAlert,
+        label: 'Система',
+        iconColor: 'text-slate-600',
+        borderColor: 'border-l-slate-500',
+        progress: 'bg-slate-500',
+        badge: 'bg-slate-100 text-slate-700 ring-slate-200',
+      };
+    default:
+      return {};
   }
 }
 
@@ -91,6 +172,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       actionLabel: normalized.actionLabel,
       onAction: normalized.onAction,
       dedupeKey: normalized.dedupeKey,
+      domain: normalized.domain,
     };
 
     setToasts((prev) => {
@@ -158,19 +240,33 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             <div className="pointer-events-none fixed right-4 top-4 z-[2000] flex w-[min(100vw-2rem,24rem)] flex-col gap-3" aria-live="polite" aria-atomic="true">
               {toasts.map((toast) => {
                 const styles = toastStyles(toast.variant);
-                const Icon = styles.icon;
+                const domainStyles = toastDomainStyles(toast.domain);
+                const Icon = domainStyles.icon ?? styles.icon;
+                const iconColor = toast.variant === 'info' && domainStyles.iconColor
+                  ? domainStyles.iconColor
+                  : styles.iconColor;
+                const progress = toast.variant === 'info' && domainStyles.progress
+                  ? domainStyles.progress
+                  : styles.progress;
                 return (
                   <div
                     key={toast.id}
                     role={toast.variant === 'error' ? 'alert' : 'status'}
-                    className={`pointer-events-auto overflow-hidden rounded-2xl border shadow-xl backdrop-blur ${styles.wrapper}`}
+                    className={`pointer-events-auto overflow-hidden rounded-2xl border border-l-4 shadow-xl backdrop-blur ${styles.wrapper} ${domainStyles.borderColor ?? 'border-l-sky-400'}`}
                   >
                     <div className="flex items-start gap-3 px-4 py-3">
-                      <div className={`mt-0.5 shrink-0 ${styles.iconColor}`}>
+                      <div className={`mt-0.5 shrink-0 ${iconColor}`}>
                         <Icon className="h-5 w-5" />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="text-sm font-semibold text-slate-900">{toast.title}</div>
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                          {domainStyles.label ? (
+                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ${domainStyles.badge}`}>
+                              {domainStyles.label}
+                            </span>
+                          ) : null}
+                          <div className="min-w-0 text-sm font-semibold text-slate-900">{toast.title}</div>
+                        </div>
                         <div className="mt-1 break-words text-sm text-slate-700">{toast.description}</div>
                         {toast.actionLabel && toast.onAction ? (
                           <button
@@ -196,7 +292,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                     </div>
                     <div className="h-1 w-full bg-black/5">
                       <div
-                        className={`h-full ${styles.progress}`}
+                        className={`h-full ${progress}`}
                         style={{
                           width: '100%',
                           animation: `toast-progress ${toast.durationMs}ms linear forwards`,

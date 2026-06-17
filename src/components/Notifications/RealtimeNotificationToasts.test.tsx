@@ -96,6 +96,7 @@ describe('RealtimeNotificationToasts', () => {
       title: 'Новая задача: Проверить документы',
       actionLabel: 'Открыть задачу',
       dedupeKey: 'task:123',
+      domain: 'task',
     }));
 
     const toastOptions = toastMock.showToast.mock.calls[0][0] as { onAction: () => void };
@@ -167,6 +168,7 @@ describe('RealtimeNotificationToasts', () => {
       durationMs: 16000,
       actionLabel: 'Открыть платеж',
       dedupeKey: 'payment:321',
+      domain: 'payment',
     }));
 
     const toastOptions = toastMock.showToast.mock.calls[0][0] as { onAction: () => void };

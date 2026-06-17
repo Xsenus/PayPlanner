@@ -1,6 +1,7 @@
 import { createContext } from 'react';
 
 export type ToastVariant = 'info' | 'success' | 'error';
+export type ToastDomain = 'task' | 'calendar' | 'note' | 'payment' | 'case' | 'system';
 
 export interface ToastOptions {
   title?: string;
@@ -10,6 +11,7 @@ export interface ToastOptions {
   actionLabel?: string;
   onAction?: () => void;
   dedupeKey?: string;
+  domain?: ToastDomain;
 }
 
 export interface ToastContextValue {

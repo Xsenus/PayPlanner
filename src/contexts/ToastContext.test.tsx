@@ -47,6 +47,19 @@ function ToastHarness({
       >
         Flood
       </button>
+      <button
+        type="button"
+        onClick={() => {
+          toast.showToast({
+            title: 'Проверка платежа',
+            description: 'Платеж требует внимания.',
+            domain: 'payment',
+            durationMs: 0,
+          });
+        }}
+      >
+        Domain
+      </button>
     </div>
   );
 }
@@ -86,5 +99,18 @@ describe('ToastProvider', () => {
     expect(screen.getAllByText('Второе').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Третье').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Четвертое').length).toBeGreaterThan(0);
+  });
+
+  it('shows a compact domain marker for domain-specific toasts', () => {
+    render(
+      <ToastProvider>
+        <ToastHarness />
+      </ToastProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Domain' }));
+
+    expect(screen.getByText('Деньги')).toBeTruthy();
+    expect(screen.getByText('Проверка платежа')).toBeTruthy();
   });
 });

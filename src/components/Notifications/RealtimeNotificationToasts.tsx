@@ -9,6 +9,7 @@ import {
   stopNotificationsHubConnection,
   type RealtimeUserNotification,
 } from '../../services/realtimeNotifications';
+import type { ToastDomain } from '../../contexts/toastContextCore';
 import { emitUserNotificationsChanged } from '../../utils/userNotifications';
 
 type RealtimeNotificationToastsProps = {
@@ -107,6 +108,46 @@ function resolveToastVariant(notification: RealtimeUserNotification): 'info' | '
 
 function resolveToastDuration(notification: RealtimeUserNotification): number {
   return HIGH_PRIORITY_TYPES.has(notification.type) ? 16000 : 12000;
+}
+
+function resolveToastDomain(notification: RealtimeUserNotification): ToastDomain {
+  if (
+    notification.taskJournalItemId ||
+    notification.objectType === 'task' ||
+    notification.type.startsWith('task')
+  ) {
+    return 'task';
+  }
+
+  if (
+    notification.objectType === 'payment' ||
+    notification.objectType === 'invoice' ||
+    notification.objectType === 'account' ||
+    notification.objectType === 'act' ||
+    notification.objectType === 'contract' ||
+    notification.type.startsWith('payment')
+  ) {
+    return 'payment';
+  }
+
+  if (
+    notification.objectType === 'case' ||
+    notification.objectType === 'client-case' ||
+    notification.type.startsWith('case') ||
+    notification.type.startsWith('court')
+  ) {
+    return 'case';
+  }
+
+  if (notification.objectType === 'calendar' || notification.type.includes('Calendar')) {
+    return 'calendar';
+  }
+
+  if (notification.objectType === 'note' || notification.type.startsWith('note')) {
+    return 'note';
+  }
+
+  return 'system';
 }
 
 type RealtimeToastAction = {
@@ -262,6 +303,7 @@ export function RealtimeNotificationToasts({
           actionLabel: action.label,
           onAction: action.run,
           dedupeKey: buildToastDedupeKey(notification),
+          domain: resolveToastDomain(notification),
         });
       },
     );
