@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { ReactNode, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import {
   Users,
   Plus,
@@ -406,7 +406,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
     [isColumnAllowed],
   );
   const availableTableLayoutColumns = useMemo(
-    () => TABLE_LAYOUT_COLUMNS.filter((column) => isColumnAllowed(column.id)),
+    () => TABLE_LAYOUT_COLUMNS.filter((column) => isColumnAllowed(column.key)),
     [isColumnAllowed],
   );
 

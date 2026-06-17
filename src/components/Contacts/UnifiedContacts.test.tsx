@@ -31,15 +31,23 @@ vi.mock('../../contexts/AuthContext', () => ({
 }));
 
 vi.mock('../../hooks/useRolePermissions', () => ({
-  useRolePermissions: () => ({
-    legalEntities: {
+  useRolePermissions: () => {
+    const section = {
       canView: true,
       canCreate: true,
       canEdit: true,
       canDelete: true,
       canExport: true,
-    },
-  }),
+    };
+
+    return {
+      legalEntities: section,
+      accounts: section,
+      acts: section,
+      payments: section,
+      contracts: section,
+    };
+  },
 }));
 
 vi.mock('../../hooks/useToast', () => ({

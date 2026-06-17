@@ -565,7 +565,9 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
     [caseColumnConfigs],
   );
   const visibleCaseColumns = useMemo(
-    () => orderedVisibleColumns.map((key) => caseColumnsByKey[key]).filter(Boolean),
+    () => orderedVisibleColumns
+      .map((key) => caseColumnsByKey[key])
+      .filter((column): column is (typeof CASE_COLUMN_CONFIGS)[number] => Boolean(column)),
     [caseColumnsByKey, orderedVisibleColumns],
   );
 

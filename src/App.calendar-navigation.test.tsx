@@ -42,6 +42,7 @@ vi.mock('./hooks/useRolePermissions', () => {
     useRolePermissions: () => ({
       calendar: { ...section, canViewAnalytics: true },
       tasks: section,
+      notes: section,
       reports: section,
       calculator: section,
       legalEntities: section,

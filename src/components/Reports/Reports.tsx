@@ -1444,7 +1444,6 @@ function CashFlowReportSection({
   onReload,
   filters,
   profileTimeZoneId,
-  canExportPaymentReports,
 }: {
   report: CashFlowReport | null;
   loading: boolean;
@@ -1452,7 +1451,6 @@ function CashFlowReportSection({
   onReload: () => void;
   filters?: ManagementReportExportFilters;
   profileTimeZoneId?: string | null;
-  canExportPaymentReports: boolean;
 }) {
   const topAccounts = (report?.byAccount ?? []).slice(0, 6);
   const recentDays = (report?.days ?? []).slice(-8);
@@ -1776,6 +1774,7 @@ function CashReportSection({
   onReload,
   filters,
   profileTimeZoneId,
+  canExportPaymentReports,
 }: {
   report: CashBookSummary | null;
   loading: boolean;
@@ -1783,6 +1782,7 @@ function CashReportSection({
   onReload: () => void;
   filters?: ManagementReportExportFilters;
   profileTimeZoneId?: string | null;
+  canExportPaymentReports: boolean;
 }) {
   const recentDays = (report?.days ?? []).slice(-8);
 
@@ -1917,7 +1917,6 @@ function BankReportSection({
   onReload,
   filters,
   profileTimeZoneId,
-  canExportPaymentReports,
 }: {
   report: CashFlowReport | null;
   loading: boolean;
@@ -1925,7 +1924,6 @@ function BankReportSection({
   onReload: () => void;
   filters?: ManagementReportExportFilters;
   profileTimeZoneId?: string | null;
-  canExportPaymentReports: boolean;
 }) {
   const recentDays = (report?.days ?? []).slice(-8);
   const accounts = report?.byAccount ?? [];
@@ -6819,6 +6817,7 @@ function CashOrderReportSection({
   onReload,
   filters,
   profileTimeZoneId,
+  canExportPaymentReports,
 }: {
   report: CashOrderReport | null;
   loading: boolean;
@@ -6826,6 +6825,7 @@ function CashOrderReportSection({
   onReload: () => void;
   filters?: ManagementReportExportFilters;
   profileTimeZoneId?: string | null;
+  canExportPaymentReports: boolean;
 }) {
   const rows = report?.statuses ?? [];
 
