@@ -382,6 +382,10 @@ public sealed class StickyNotesController : ControllerBase
                 ZIndex = note.ZIndex,
                 Version = note.Version,
                 IsPinned = note.IsPinned,
+                AssignedUserId = note.AssignedUserId,
+                AssignedUserName = note.AssignedUserName,
+                ReminderAt = note.ReminderAt,
+                ReminderSentAt = note.ReminderSentAt,
                 AuthorUserId = note.AuthorUserId,
                 AuthorUserName = note.AuthorUserName,
                 LastUpdatedByUserId = EF.Property<int?>(note, "UpdatedByUserId"),
@@ -426,6 +430,11 @@ public sealed class StickyNotesController : ControllerBase
             .Where(note => note.BoardId == boardId)
             .Select(note => (int?)note.ZIndex)
             .MaxAsync(ct) ?? 0;
+        var assignment = await ResolveNoteAssignmentAsync(board, request.AssignedUserId, request.ReminderAt, ct);
+        if (assignment.Error is not null)
+        {
+            return BadRequest(new { message = assignment.Error });
+        }
 
         var note = new StickyNote
         {
@@ -439,6 +448,10 @@ public sealed class StickyNotesController : ControllerBase
             ZIndex = maxZIndex + 1,
             AuthorUserId = access.Value.UserId,
             AuthorUserName = access.Value.DisplayName,
+            AssignedUserId = assignment.UserId,
+            AssignedUserName = assignment.UserName,
+            ReminderAt = assignment.ReminderAt,
+            ReminderSentAt = null,
         };
 
         _db.StickyNotes.Add(note);
@@ -447,6 +460,7 @@ public sealed class StickyNotesController : ControllerBase
         var dto = ToNoteDto(note, access.Value.UserId, access.Value.DisplayName);
         await PublishAsync(boardId, "noteCreated", dto, note.Id, access.Value, ct);
         await NotifyMentionedUsersAsync(boardId, note.Id, board.Title, note.Text, access.Value, ct);
+        await NotifyAssignedUserAsync(note, board.Title, access.Value, assignment.WasAssigned, ct);
         return CreatedAtAction(nameof(GetNotes), new { boardId }, dto);
     }
 
@@ -478,6 +492,14 @@ public sealed class StickyNotesController : ControllerBase
             return Conflict(ToNoteDto(note));
         }
 
+        var assignment = await ResolveNoteAssignmentAsync(note.Board, request.AssignedUserId, request.ReminderAt, ct);
+        if (assignment.Error is not null)
+        {
+            return BadRequest(new { message = assignment.Error });
+        }
+
+        var previousAssignedUserId = note.AssignedUserId;
+        var previousReminderAt = note.ReminderAt;
         note.Text = NormalizeText(request.Text);
         note.Color = NormalizeColor(request.Color);
         note.X = Clamp(request.X, 0, 5000);
@@ -486,6 +508,13 @@ public sealed class StickyNotesController : ControllerBase
         note.Height = Clamp(request.Height, 120, 640);
         note.ZIndex = Math.Max(1, request.ZIndex);
         note.IsPinned = request.IsPinned;
+        note.AssignedUserId = assignment.UserId;
+        note.AssignedUserName = assignment.UserName;
+        note.ReminderAt = assignment.ReminderAt;
+        if (previousAssignedUserId != note.AssignedUserId || previousReminderAt != note.ReminderAt)
+        {
+            note.ReminderSentAt = null;
+        }
         note.Version++;
 
         await _db.SaveChangesAsync(ct);
@@ -493,6 +522,12 @@ public sealed class StickyNotesController : ControllerBase
         var dto = ToNoteDto(note, access.Value.UserId, access.Value.DisplayName);
         await PublishAsync(note.BoardId, "noteUpdated", dto, note.Id, access.Value, ct);
         await NotifyMentionedUsersAsync(note.BoardId, note.Id, note.Board.Title, note.Text, access.Value, ct);
+        await NotifyAssignedUserAsync(
+            note,
+            note.Board.Title,
+            access.Value,
+            assignment.WasAssigned && (previousAssignedUserId != note.AssignedUserId || previousReminderAt != note.ReminderAt),
+            ct);
         return Ok(dto);
     }
 
@@ -867,6 +902,71 @@ public sealed class StickyNotesController : ControllerBase
             .ToArray();
     }
 
+    private async Task<NoteAssignmentResult> ResolveNoteAssignmentAsync(
+        StickyNoteBoard board,
+        int? assignedUserId,
+        DateTime? reminderAt,
+        CancellationToken ct)
+    {
+        var normalizedReminderAt = NormalizeReminderAt(reminderAt);
+        if (!assignedUserId.HasValue || assignedUserId.Value <= 0)
+        {
+            return normalizedReminderAt.HasValue
+                ? NoteAssignmentResult.Invalid("Для напоминания нужно выбрать ответственного сотрудника.")
+                : NoteAssignmentResult.Empty;
+        }
+
+        var user = await _db.Users
+            .AsNoTracking()
+            .Where(item =>
+                item.Id == assignedUserId.Value
+                && item.IsActive
+                && item.IsApproved
+                && item.Role != null
+                && (item.Role.Name == "admin"
+                    || item.Role.Permissions.Any(permission =>
+                        permission.Section == RolePermissionCatalog.Notes
+                        && permission.CanView)))
+            .Select(item => new
+            {
+                item.Id,
+                item.FullName,
+                item.Email,
+            })
+            .FirstOrDefaultAsync(ct);
+        if (user is null || !CanViewBoard(board, assignedUserId.Value))
+        {
+            return NoteAssignmentResult.Invalid("Ответственный должен иметь доступ к этой доске заметок.");
+        }
+
+        var displayName = string.IsNullOrWhiteSpace(user.FullName) ? user.Email : user.FullName;
+        return new NoteAssignmentResult(user.Id, displayName, normalizedReminderAt, true, null);
+    }
+
+    private async Task NotifyAssignedUserAsync(
+        StickyNote note,
+        string boardTitle,
+        NotesAccess access,
+        bool shouldNotify,
+        CancellationToken ct)
+    {
+        if (!shouldNotify || _notificationService is null || !note.AssignedUserId.HasValue)
+        {
+            return;
+        }
+
+        await _notificationService.NotifyStickyNoteAssignedAsync(
+            note.Id,
+            note.BoardId,
+            boardTitle,
+            note.Text,
+            note.AssignedUserId.Value,
+            access.DisplayName,
+            access.UserId,
+            note.ReminderAt,
+            ct);
+    }
+
     private static StickyNoteBoardDto ToBoardDto(StickyNoteBoard board, int notesCount, bool canEdit, bool canCreate, bool canUpdateSettings, bool canDeleteBoard, bool canDeleteNotes, bool canManageMembers)
         => new()
         {
@@ -939,6 +1039,10 @@ public sealed class StickyNotesController : ControllerBase
             ZIndex = note.ZIndex,
             Version = note.Version,
             IsPinned = note.IsPinned,
+            AssignedUserId = note.AssignedUserId,
+            AssignedUserName = note.AssignedUserName,
+            ReminderAt = note.ReminderAt,
+            ReminderSentAt = note.ReminderSentAt,
             AuthorUserId = note.AuthorUserId,
             AuthorUserName = note.AuthorUserName,
             LastUpdatedByUserId = lastUpdatedByUserId,
@@ -1046,6 +1150,21 @@ public sealed class StickyNotesController : ControllerBase
     private static string NormalizeText(string? value)
         => Truncate((value ?? string.Empty).Trim(), 4000);
 
+    private static DateTime? NormalizeReminderAt(DateTime? value)
+    {
+        if (!value.HasValue)
+        {
+            return null;
+        }
+
+        return value.Value.Kind switch
+        {
+            DateTimeKind.Utc => value.Value,
+            DateTimeKind.Local => value.Value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value.Value, DateTimeKind.Utc),
+        };
+    }
+
     private static string? NormalizeNullable(string? value, int maxLength)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -1075,4 +1194,16 @@ public sealed class StickyNotesController : ControllerBase
         bool CanCreate,
         bool CanEdit,
         bool CanDelete);
+
+    private readonly record struct NoteAssignmentResult(
+        int? UserId,
+        string UserName,
+        DateTime? ReminderAt,
+        bool WasAssigned,
+        string? Error)
+    {
+        public static NoteAssignmentResult Empty => new(null, string.Empty, null, false, null);
+
+        public static NoteAssignmentResult Invalid(string error) => new(null, string.Empty, null, false, error);
+    }
 }

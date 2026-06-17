@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent } from 'react';
 import {
   Check,
+  CalendarClock,
   Filter,
   LayoutGrid,
   List,
@@ -16,6 +17,7 @@ import {
   StickyNote,
   Trash2,
   Undo2,
+  UserCheck,
   UserPlus,
   Users,
   X,
@@ -78,6 +80,29 @@ function colorSwatchClass(color: StickyNoteColor): string {
 
 function sortNotes(notes: StickyNoteItem[]) {
   return [...notes].sort((a, b) => a.zIndex - b.zIndex || a.id - b.id);
+}
+
+function formatDateTimeLocal(value?: string | null) {
+  if (!value) {
+    return '';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  const pad = (part: number) => part.toString().padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function toUtcIsoFromLocalInput(value: string) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
 function isInteractiveTarget(target: EventTarget | null) {
@@ -637,6 +662,8 @@ export function StickyNotes() {
         x: Math.max(0, x ?? 56 + (offset % 360)),
         y: Math.max(0, y ?? 56 + (offset % 240)),
         ...DEFAULT_NOTE_SIZE,
+        assignedUserId: null,
+        reminderAt: null,
       });
       if (activeBoardIdRef.current !== requestedBoardId) {
         await refreshBoardCounts();
@@ -683,6 +710,8 @@ export function StickyNotes() {
         height: note.height,
         zIndex: note.zIndex,
         isPinned: note.isPinned,
+        assignedUserId: note.assignedUserId ?? null,
+        reminderAt: note.reminderAt ?? null,
         version: note.version,
       });
       if (activeBoardIdRef.current !== requestedBoardId || saved.boardId !== requestedBoardId) {
@@ -835,6 +864,42 @@ export function StickyNotes() {
 
     const next = { ...note, color };
     patchNote(note.id, { color });
+    void saveNote(next);
+  };
+
+  const assignNote = (note: StickyNoteItem, rawUserId: string) => {
+    if (!canEditActiveBoard) {
+      return;
+    }
+
+    const assignedUserId = rawUserId ? Number(rawUserId) : null;
+    const assignee = assignedUserId
+      ? memberCandidates.find((candidate) => candidate.userId === assignedUserId)
+      : null;
+    const next = {
+      ...note,
+      assignedUserId,
+      assignedUserName: assignee?.displayName ?? '',
+      reminderAt: assignedUserId ? note.reminderAt ?? null : null,
+      reminderSentAt: assignedUserId ? note.reminderSentAt ?? null : null,
+    };
+    patchNote(note.id, {
+      assignedUserId: next.assignedUserId,
+      assignedUserName: next.assignedUserName,
+      reminderAt: next.reminderAt,
+      reminderSentAt: next.reminderSentAt,
+    });
+    void saveNote(next);
+  };
+
+  const setNoteReminder = (note: StickyNoteItem, rawValue: string) => {
+    if (!canEditActiveBoard || !note.assignedUserId) {
+      return;
+    }
+
+    const reminderAt = toUtcIsoFromLocalInput(rawValue);
+    const next = { ...note, reminderAt, reminderSentAt: null };
+    patchNote(note.id, { reminderAt, reminderSentAt: null });
     void saveNote(next);
   };
 
@@ -1233,6 +1298,40 @@ export function StickyNotes() {
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
+        </div>
+        <div className="mb-1 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-1">
+          <label className="flex min-w-0 items-center gap-1 rounded border border-black/10 bg-white/35 px-1.5 py-1 text-[10px] text-slate-600">
+            <UserCheck className="h-3 w-3 shrink-0" />
+            <select
+              value={note.assignedUserId ?? ''}
+              onPointerDown={(event) => event.stopPropagation()}
+              onChange={(event) => assignNote(note, event.target.value)}
+              disabled={!canEditActiveBoard}
+              className="min-w-0 flex-1 bg-transparent text-[11px] text-slate-700 outline-none disabled:opacity-60"
+              title={note.assignedUserName ? `Ответственный: ${note.assignedUserName}` : 'Ответственный не выбран'}
+              aria-label="Ответственный за заметку"
+            >
+              <option value="">Без ответственного</option>
+              {memberCandidates.map((candidate) => (
+                <option key={candidate.userId} value={candidate.userId}>
+                  {candidate.displayName}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex min-w-0 items-center gap-1 rounded border border-black/10 bg-white/35 px-1.5 py-1 text-[10px] text-slate-600">
+            <CalendarClock className="h-3 w-3 shrink-0" />
+            <input
+              type="datetime-local"
+              value={formatDateTimeLocal(note.reminderAt)}
+              onPointerDown={(event) => event.stopPropagation()}
+              onChange={(event) => setNoteReminder(note, event.target.value)}
+              disabled={!canEditActiveBoard || !note.assignedUserId}
+              className="min-w-0 flex-1 bg-transparent text-[11px] text-slate-700 outline-none disabled:opacity-60"
+              title={note.reminderAt ? 'Срок напоминания' : 'Срок не указан'}
+              aria-label="Срок напоминания"
+            />
+          </label>
         </div>
         <textarea
           value={note.text}

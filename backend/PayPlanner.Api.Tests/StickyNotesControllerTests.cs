@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
@@ -281,6 +282,206 @@ public sealed class StickyNotesControllerTests
 
         Assert.IsType<CreatedAtActionResult>(result.Result);
         Assert.Empty(await db.UserNotifications.ToListAsync());
+    }
+
+    [Fact]
+    public async Task CreateNote_WithAssignment_StoresReminderAndNotifiesAssignee()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db);
+        var assignee = await CreateUserAsync(db);
+        assignee.FullName = "Ответственный сотрудник";
+        var board = new StickyNoteBoard
+        {
+            Title = "Общее",
+            Visibility = StickyNoteBoardVisibility.Shared,
+            Background = "cork",
+        };
+        db.StickyNoteBoards.Add(board);
+        await db.SaveChangesAsync();
+        var reminderAt = new DateTime(2026, 6, 17, 8, 30, 0, DateTimeKind.Utc);
+        var controller = CreateController(db, author, notificationService: CreateNotificationService(db));
+
+        var result = await controller.CreateNote(
+            board.Id,
+            new CreateStickyNoteRequest
+            {
+                Text = "Позвонить клиенту",
+                AssignedUserId = assignee.Id,
+                ReminderAt = reminderAt,
+            },
+            CancellationToken.None);
+
+        var created = Assert.IsType<CreatedAtActionResult>(result.Result);
+        var dto = Assert.IsType<StickyNoteDto>(created.Value);
+        Assert.Equal(assignee.Id, dto.AssignedUserId);
+        Assert.Equal("Ответственный сотрудник", dto.AssignedUserName);
+        Assert.Equal(reminderAt, dto.ReminderAt);
+        Assert.Null(dto.ReminderSentAt);
+
+        var storedNote = await db.StickyNotes.AsNoTracking().SingleAsync(item => item.Id == dto.Id);
+        Assert.Equal(assignee.Id, storedNote.AssignedUserId);
+        Assert.Equal("Ответственный сотрудник", storedNote.AssignedUserName);
+        Assert.Equal(reminderAt, storedNote.ReminderAt);
+        Assert.Null(storedNote.ReminderSentAt);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(assignee.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.NoteAssigned, notification.Type);
+        Assert.Equal("note", notification.ObjectType);
+        Assert.Equal(dto.Id, notification.ObjectId);
+        Assert.Contains("Общее", notification.BodyPreview);
+    }
+
+    [Fact]
+    public async Task CreateNote_WithReminderWithoutAssignee_ReturnsBadRequest()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db);
+        var board = new StickyNoteBoard
+        {
+            Title = "Общее",
+            Visibility = StickyNoteBoardVisibility.Shared,
+            Background = "cork",
+        };
+        db.StickyNoteBoards.Add(board);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, author, notificationService: CreateNotificationService(db));
+
+        var result = await controller.CreateNote(
+            board.Id,
+            new CreateStickyNoteRequest
+            {
+                Text = "Напоминание без ответственного",
+                ReminderAt = DateTime.UtcNow.AddHours(1),
+            },
+            CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.Contains("ответственного", badRequest.Value?.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(await db.StickyNotes.ToListAsync());
+        Assert.Empty(await db.UserNotifications.ToListAsync());
+    }
+
+    [Fact]
+    public async Task UpdateNote_AssignmentChangeResetsReminderSentAtAndNotifiesAssignee()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db);
+        var assignee = await CreateUserAsync(db);
+        assignee.FullName = "Новый ответственный";
+        var board = new StickyNoteBoard
+        {
+            Title = "Общее",
+            Visibility = StickyNoteBoardVisibility.Shared,
+            Background = "cork",
+        };
+        var note = new StickyNote
+        {
+            Board = board,
+            Text = "Старая заметка",
+            Color = "yellow",
+            Version = 1,
+            Width = 220,
+            Height = 180,
+            ReminderSentAt = DateTime.UtcNow.AddMinutes(-5),
+        };
+        db.StickyNotes.Add(note);
+        await db.SaveChangesAsync();
+        var reminderAt = new DateTime(2026, 6, 18, 7, 15, 0, DateTimeKind.Utc);
+        var controller = CreateController(db, author, notificationService: CreateNotificationService(db));
+
+        var result = await controller.UpdateNote(
+            note.Id,
+            new UpdateStickyNoteRequest
+            {
+                Text = "Обновленная заметка",
+                Color = "green",
+                X = 10,
+                Y = 20,
+                Width = 230,
+                Height = 190,
+                ZIndex = 2,
+                Version = 1,
+                AssignedUserId = assignee.Id,
+                ReminderAt = reminderAt,
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<StickyNoteDto>(ok.Value);
+        Assert.Equal(assignee.Id, dto.AssignedUserId);
+        Assert.Equal("Новый ответственный", dto.AssignedUserName);
+        Assert.Equal(reminderAt, dto.ReminderAt);
+        Assert.Null(dto.ReminderSentAt);
+
+        var storedNote = await db.StickyNotes.AsNoTracking().SingleAsync(item => item.Id == note.Id);
+        Assert.Equal(assignee.Id, storedNote.AssignedUserId);
+        Assert.Equal("Новый ответственный", storedNote.AssignedUserName);
+        Assert.Equal(reminderAt, storedNote.ReminderAt);
+        Assert.Null(storedNote.ReminderSentAt);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(assignee.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.NoteAssigned, notification.Type);
+    }
+
+    [Fact]
+    public async Task StickyNoteReminderNotificationService_RunOnce_SendsDueReminderOnce()
+    {
+        await using var db = await CreateContextAsync();
+        var assignee = await CreateUserAsync(db);
+        var board = new StickyNoteBoard
+        {
+            Title = "Общее",
+            Visibility = StickyNoteBoardVisibility.Shared,
+            Background = "cork",
+        };
+        var dueNote = new StickyNote
+        {
+            Board = board,
+            Text = "Проверить документы",
+            Color = "yellow",
+            Version = 1,
+            Width = 220,
+            Height = 180,
+            AssignedUserId = assignee.Id,
+            AssignedUserName = assignee.FullName,
+            ReminderAt = DateTime.UtcNow.AddMinutes(-1),
+        };
+        db.StickyNotes.Add(dueNote);
+        await db.SaveChangesAsync();
+
+        var services = new ServiceCollection();
+        services.AddSingleton(db);
+        services.AddSingleton<INotificationService>(CreateNotificationService(db));
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Notifications:StickyNoteReminders:PollSeconds"] = "15",
+                ["Notifications:StickyNoteReminders:BatchSize"] = "10",
+            })
+            .Build());
+        using var provider = services.BuildServiceProvider();
+        var service = new StickyNoteReminderNotificationService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            provider.GetRequiredService<IConfiguration>(),
+            NullLogger<StickyNoteReminderNotificationService>.Instance);
+
+        var sent = await service.RunOnceAsync(CancellationToken.None);
+        var duplicate = await service.RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal(1, sent);
+        Assert.Equal(0, duplicate);
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(assignee.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.NoteReminder, notification.Type);
+        Assert.Equal("note", notification.ObjectType);
+        Assert.Equal(dueNote.Id, notification.ObjectId);
+        Assert.NotNull(await db.StickyNotes
+            .Where(item => item.Id == dueNote.Id)
+            .Select(item => item.ReminderSentAt)
+            .SingleAsync());
     }
 
     [Fact]

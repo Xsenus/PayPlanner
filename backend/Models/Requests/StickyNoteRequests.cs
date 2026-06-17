@@ -43,6 +43,8 @@ public sealed class CreateStickyNoteRequest
     public double? Y { get; set; }
     public double? Width { get; set; }
     public double? Height { get; set; }
+    public int? AssignedUserId { get; set; }
+    public DateTime? ReminderAt { get; set; }
 }
 
 public sealed class UpdateStickyNoteRequest
@@ -59,6 +61,8 @@ public sealed class UpdateStickyNoteRequest
     public double Height { get; set; }
     public int ZIndex { get; set; }
     public bool IsPinned { get; set; }
+    public int? AssignedUserId { get; set; }
+    public DateTime? ReminderAt { get; set; }
     public int? Version { get; set; }
 }
 

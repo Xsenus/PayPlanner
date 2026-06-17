@@ -113,6 +113,8 @@ public static class UserNotificationTypes
     public const string PaymentAdvanceReviewRequired = "paymentAdvanceReviewRequired";
     public const string PaymentAdvanceReviewEscalation = "paymentAdvanceReviewEscalation";
     public const string NoteMention = "noteMention";
+    public const string NoteAssigned = "noteAssigned";
+    public const string NoteReminder = "noteReminder";
     public const string SystemAdminWarning = "systemAdminWarning";
 
     public static readonly IReadOnlyList<UserNotificationTypeDefinition> All =
@@ -143,6 +145,8 @@ public static class UserNotificationTypes
         new(PaymentAdvanceReviewRequired, "Контроль аванса", "Входящий оплаченный платеж не привязан к счету или акту и требует решения по авансу.", "rose", "high", NotificationChannels.All, true, false),
         new(PaymentAdvanceReviewEscalation, "Просроченный аванс", "Нераспределенный аванс слишком долго ожидает решения и требует внимания руководителя.", "rose", "high", NotificationChannels.All, true, false),
         new(NoteMention, "Упоминание в заметке", "Сотрудника упомянули на доске заметок.", "cyan", "high", NotificationChannels.All, true, false),
+        new(NoteAssigned, "Назначена заметка", "Сотрудника назначили ответственным по заметке.", "violet", "high", NotificationChannels.All, true, false),
+        new(NoteReminder, "Напоминание по заметке", "Наступил срок напоминания по назначенной заметке.", "amber", "high", NotificationChannels.All, true, false),
         new(SystemAdminWarning, "Системное предупреждение", "Администраторам требуется обратить внимание на фоновый процесс, интеграцию или настройку.", "rose", "high", NotificationChannels.All, true, false)
     ];
 
@@ -525,4 +529,6 @@ public interface INotificationService
     Task NotifyCalendarAccessChangedAsync(int roleId, IReadOnlyCollection<int> addedVisibleUserIds, IReadOnlyCollection<int> removedVisibleUserIds, string actorName, int actorUserId, CancellationToken cancellationToken = default);
     Task NotifyExternalCalendarSyncWarningAsync(string providerName, string operation, string summary, string? details = null, CancellationToken cancellationToken = default);
     Task NotifyStickyNoteMentionAsync(int noteId, int boardId, string boardTitle, string noteText, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, CancellationToken cancellationToken = default);
+    Task NotifyStickyNoteAssignedAsync(int noteId, int boardId, string boardTitle, string noteText, int assignedUserId, string actorName, int actorUserId, DateTime? reminderAt, CancellationToken cancellationToken = default);
+    Task NotifyStickyNoteReminderAsync(StickyNote note, CancellationToken cancellationToken = default);
 }

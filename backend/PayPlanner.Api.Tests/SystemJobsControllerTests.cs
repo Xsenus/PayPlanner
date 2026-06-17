@@ -1358,6 +1358,12 @@ public class SystemJobsControllerTests
 
         public Task NotifyStickyNoteMentionAsync(int noteId, int boardId, string boardTitle, string noteText, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
+
+        public Task NotifyStickyNoteAssignedAsync(int noteId, int boardId, string boardTitle, string noteText, int assignedUserId, string actorName, int actorUserId, DateTime? reminderAt, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task NotifyStickyNoteReminderAsync(StickyNote note, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
     }
 
     private sealed class TestPaymentContextFactory(DbContextOptions<PaymentContext> options) : IDbContextFactory<PaymentContext>

@@ -2875,6 +2875,7 @@ public class PaymentContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Text).HasMaxLength(4000);
             entity.Property(e => e.Color).HasMaxLength(24).HasDefaultValue("yellow").IsRequired();
+            entity.Property(e => e.AssignedUserName).HasMaxLength(256);
             entity.Property(e => e.AuthorUserName).HasMaxLength(256);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
 
@@ -2883,7 +2884,14 @@ public class PaymentContext : DbContext
                 .HasForeignKey(e => e.AuthorUserId)
                 .OnDelete(DeleteBehavior.SetNull);
 
+            entity.HasOne(e => e.AssignedUser)
+                .WithMany()
+                .HasForeignKey(e => e.AssignedUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
             entity.HasIndex(e => e.BoardId).HasDatabaseName("IX_StickyNotes_BoardId");
+            entity.HasIndex(e => e.AssignedUserId).HasDatabaseName("IX_StickyNotes_AssignedUserId");
+            entity.HasIndex(e => new { e.ReminderAt, e.ReminderSentAt }).HasDatabaseName("IX_StickyNotes_ReminderAt_ReminderSentAt");
             entity.HasIndex(e => new { e.BoardId, e.ZIndex }).HasDatabaseName("IX_StickyNotes_BoardId_ZIndex");
             entity.HasIndex(e => e.UpdatedAt).HasDatabaseName("IX_StickyNotes_UpdatedAt");
         });

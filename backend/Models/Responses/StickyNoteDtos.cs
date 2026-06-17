@@ -51,6 +51,10 @@ public sealed class StickyNoteDto
     public int ZIndex { get; set; }
     public int Version { get; set; }
     public bool IsPinned { get; set; }
+    public int? AssignedUserId { get; set; }
+    public string AssignedUserName { get; set; } = string.Empty;
+    public DateTime? ReminderAt { get; set; }
+    public DateTime? ReminderSentAt { get; set; }
     public int? AuthorUserId { get; set; }
     public string AuthorUserName { get; set; } = string.Empty;
     public int? LastUpdatedByUserId { get; set; }

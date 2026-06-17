@@ -432,7 +432,10 @@ public class NotificationInboxController : ControllerBase
                 || item.Type == UserNotificationTypes.CalendarAccessChanged),
             "note" => query.Where(item =>
                 item.ObjectType == "note"
-                || item.Type.StartsWith("note")),
+                || item.Type.StartsWith("note")
+                || item.Type == UserNotificationTypes.NoteMention
+                || item.Type == UserNotificationTypes.NoteAssigned
+                || item.Type == UserNotificationTypes.NoteReminder),
             "finance" => query.Where(item =>
                 item.ObjectType == "payment"
                 || item.ObjectType == "invoice"
@@ -492,6 +495,9 @@ public class NotificationInboxController : ControllerBase
             || item.Type == UserNotificationTypes.CourtSyncFailed
             || item.Type == UserNotificationTypes.CaseProceduralDeadline
             || item.Type == UserNotificationTypes.CaseInactivityReminder
+            || item.Type == UserNotificationTypes.NoteMention
+            || item.Type == UserNotificationTypes.NoteAssigned
+            || item.Type == UserNotificationTypes.NoteReminder
             || item.Type == UserNotificationTypes.PaymentAdvanceReviewRequired
             || item.Type == UserNotificationTypes.PaymentAdvanceReviewEscalation
             || item.Type == UserNotificationTypes.SystemAdminWarning);

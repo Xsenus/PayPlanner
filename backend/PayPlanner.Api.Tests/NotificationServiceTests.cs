@@ -1766,6 +1766,116 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyStickyNoteAssignedAsync_CreatesNoteNotificationAndDeduplicates()
+    {
+        await using var db = await CreateContextAsync();
+        var actor = await CreateUserAsync(db, "note-assigned-actor@example.com");
+        var recipient = new User
+        {
+            Email = "note-assigned-recipient@example.com",
+            FullName = "Ответственный",
+            PasswordHash = "hash",
+            RoleId = actor.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(recipient);
+        await db.SaveChangesAsync();
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            realtime,
+            webPush);
+        var reminderAt = new DateTime(2026, 6, 17, 9, 0, 0, DateTimeKind.Utc);
+
+        await service.NotifyStickyNoteAssignedAsync(
+            78,
+            5,
+            "Общее",
+            "Подготовить звонок",
+            recipient.Id,
+            actor.FullName,
+            actor.Id,
+            reminderAt);
+        await service.NotifyStickyNoteAssignedAsync(
+            78,
+            5,
+            "Общее",
+            "Подготовить звонок",
+            recipient.Id,
+            actor.FullName,
+            actor.Id,
+            reminderAt);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(recipient.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.NoteAssigned, notification.Type);
+        Assert.Equal("note", notification.ObjectType);
+        Assert.Equal(78, notification.ObjectId);
+        Assert.Contains("Общее", notification.BodyPreview);
+        Assert.Contains("Подготовить звонок", notification.BodyPreview);
+        var realtimeNotification = Assert.Single(realtime.Notifications);
+        Assert.Equal(notification.Id, realtimeNotification.Id);
+        var pushed = Assert.Single(webPush.Notifications);
+        Assert.Equal(notification.Id, pushed.Id);
+    }
+
+    [Fact]
+    public async Task NotifyStickyNoteReminderAsync_CreatesNoteNotificationAndDeduplicates()
+    {
+        await using var db = await CreateContextAsync();
+        var assignee = await CreateUserAsync(db, "note-reminder-assignee@example.com");
+        var board = new StickyNoteBoard
+        {
+            Title = "Общее",
+            Visibility = StickyNoteBoardVisibility.Shared,
+            Background = "cork"
+        };
+        var note = new StickyNote
+        {
+            Board = board,
+            Text = "Проверить оплату",
+            Color = "yellow",
+            Version = 1,
+            Width = 220,
+            Height = 180,
+            AssignedUserId = assignee.Id,
+            AssignedUserName = assignee.FullName,
+            AssignedUser = assignee,
+            ReminderAt = new DateTime(2026, 6, 17, 10, 30, 0, DateTimeKind.Utc)
+        };
+        db.StickyNotes.Add(note);
+        await db.SaveChangesAsync();
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            realtime,
+            webPush);
+
+        await service.NotifyStickyNoteReminderAsync(note);
+        await service.NotifyStickyNoteReminderAsync(note);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(assignee.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.NoteReminder, notification.Type);
+        Assert.Equal("note", notification.ObjectType);
+        Assert.Equal(note.Id, notification.ObjectId);
+        Assert.Contains("Проверить оплату", notification.BodyPreview);
+        var realtimeNotification = Assert.Single(realtime.Notifications);
+        Assert.Equal(notification.Id, realtimeNotification.Id);
+        var pushed = Assert.Single(webPush.Notifications);
+        Assert.Equal(notification.Id, pushed.Id);
+    }
+
+    [Fact]
     public async Task NotifyTaskApprovalRequestedAsync_CreatesInAppNotificationForApproverAndAssignee()
     {
         await using var db = await CreateContextAsync();

@@ -26,6 +26,8 @@ public static class NotificationTemplateKeys
     public const string TaskComment = "task.comment";
     public const string CaseInactivityControl = "case.inactivityControl";
     public const string NoteMention = "note.mention";
+    public const string NoteAssigned = "note.assigned";
+    public const string NoteReminder = "note.reminder";
 }
 
 public sealed record NotificationTemplateVariableDefinition(string Key, string Label);
@@ -228,6 +230,29 @@ public static class NotificationTemplateCatalog
             [
                 new("actor.name", "Кто упомянул"),
                 new("note.boardTitle", "Название доски"),
+                new("note.preview", "Короткий текст заметки")
+            ]),
+        new(
+            NotificationTemplateKeys.NoteAssigned,
+            "Назначена заметка",
+            "Уведомление ответственному сотруднику при назначении заметки.",
+            "Вам назначена заметка",
+            "{{actor.name}} назначил(а) вам заметку на доске «{{note.boardTitle}}».\n\nСрок: {{note.reminderAt}}\nЗаметка: {{note.preview}}",
+            [
+                new("actor.name", "Кто назначил"),
+                new("note.boardTitle", "Название доски"),
+                new("note.reminderAt", "Срок напоминания"),
+                new("note.preview", "Короткий текст заметки")
+            ]),
+        new(
+            NotificationTemplateKeys.NoteReminder,
+            "Напоминание по заметке",
+            "Уведомление ответственному сотруднику при наступлении срока заметки.",
+            "Напоминание по заметке",
+            "Наступил срок заметки на доске «{{note.boardTitle}}».\n\nСрок: {{note.reminderAt}}\nЗаметка: {{note.preview}}",
+            [
+                new("note.boardTitle", "Название доски"),
+                new("note.reminderAt", "Срок напоминания"),
                 new("note.preview", "Короткий текст заметки")
             ])
     ];

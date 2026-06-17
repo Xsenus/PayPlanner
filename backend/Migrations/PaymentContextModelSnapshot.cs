@@ -6191,6 +6191,14 @@ namespace PayPlanner.Api.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<int?>("AssignedUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AssignedUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
                     b.Property<int?>("AuthorUserId")
                         .HasColumnType("INTEGER");
 
@@ -6242,6 +6250,12 @@ namespace PayPlanner.Api.Migrations
                     b.Property<bool>("IsPinned")
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTime?>("ReminderAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("ReminderSentAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Text")
                         .IsRequired()
                         .HasMaxLength(4000)
@@ -6274,6 +6288,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AssignedUserId")
+                        .HasDatabaseName("IX_StickyNotes_AssignedUserId");
+
                     b.HasIndex("AuthorUserId");
 
                     b.HasIndex("BoardId")
@@ -6290,6 +6307,9 @@ namespace PayPlanner.Api.Migrations
 
                     b.HasIndex("BoardId", "ZIndex")
                         .HasDatabaseName("IX_StickyNotes_BoardId_ZIndex");
+
+                    b.HasIndex("ReminderAt", "ReminderSentAt")
+                        .HasDatabaseName("IX_StickyNotes_ReminderAt_ReminderSentAt");
 
                     b.ToTable("StickyNotes");
                 });
@@ -9142,6 +9162,11 @@ namespace PayPlanner.Api.Migrations
 
             modelBuilder.Entity("PayPlanner.Api.Models.StickyNote", b =>
                 {
+                    b.HasOne("PayPlanner.Api.Models.User", "AssignedUser")
+                        .WithMany()
+                        .HasForeignKey("AssignedUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("PayPlanner.Api.Models.User", "AuthorUser")
                         .WithMany()
                         .HasForeignKey("AuthorUserId")
@@ -9152,6 +9177,8 @@ namespace PayPlanner.Api.Migrations
                         .HasForeignKey("BoardId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("AssignedUser");
 
                     b.Navigation("AuthorUser");
 

@@ -1064,6 +1064,114 @@ public sealed class NotificationService : INotificationService
         }
     }
 
+    public async Task NotifyStickyNoteAssignedAsync(
+        int noteId,
+        int boardId,
+        string boardTitle,
+        string noteText,
+        int assignedUserId,
+        string actorName,
+        int actorUserId,
+        DateTime? reminderAt,
+        CancellationToken cancellationToken = default)
+    {
+        if (noteId <= 0 || boardId <= 0 || assignedUserId <= 0 || assignedUserId == actorUserId)
+        {
+            return;
+        }
+
+        var normalizedBoardTitle = NormalizeNotificationText(boardTitle, "Заметки");
+        var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
+        var preview = BuildStickyNotePreview(noteText);
+        var timeZone = await ResolveTaskRecipientTimeZoneAsync(assignedUserId, cancellationToken);
+        var reminderText = FormatStickyNoteReminderAt(reminderAt, timeZone);
+        var eventKey = $"note:{noteId}:assigned:{assignedUserId}:{FormatStickyNoteEventDate(reminderAt)}";
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.NoteAssigned,
+            "Вам назначена заметка",
+            BuildStickyNoteAssignedBody(normalizedActorName, normalizedBoardTitle, preview, reminderText),
+            new Dictionary<string, string?>
+            {
+                ["actor.name"] = normalizedActorName,
+                ["note.boardTitle"] = normalizedBoardTitle,
+                ["note.reminderAt"] = reminderText,
+                ["note.preview"] = preview,
+            },
+            purpose: NotificationPurposes.ManualTest,
+            cancellationToken: cancellationToken);
+
+        await CreateUserNotificationAsync(
+            assignedUserId,
+            UserNotificationTypes.NoteAssigned,
+            eventKey,
+            message.Subject,
+            message.Body,
+            "violet",
+            "note",
+            noteId,
+            null,
+            null,
+            new
+            {
+                noteId,
+                boardId,
+                boardTitle = normalizedBoardTitle,
+                actorUserId,
+                actorName = normalizedActorName,
+                reminderAt
+            },
+            cancellationToken);
+    }
+
+    public async Task NotifyStickyNoteReminderAsync(
+        StickyNote note,
+        CancellationToken cancellationToken = default)
+    {
+        if (note.Id <= 0 || !note.AssignedUserId.HasValue || !note.ReminderAt.HasValue)
+        {
+            return;
+        }
+
+        var recipientUserId = note.AssignedUserId.Value;
+        var boardTitle = NormalizeNotificationText(note.Board?.Title, "Заметки");
+        var preview = BuildStickyNotePreview(note.Text);
+        var timeZone = await ResolveTaskRecipientTimeZoneAsync(recipientUserId, cancellationToken);
+        var reminderText = FormatStickyNoteReminderAt(note.ReminderAt, timeZone);
+        var eventKey = $"note:{note.Id}:reminder:{recipientUserId}:{FormatStickyNoteEventDate(note.ReminderAt)}";
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.NoteReminder,
+            "Напоминание по заметке",
+            BuildStickyNoteReminderBody(boardTitle, preview, reminderText),
+            new Dictionary<string, string?>
+            {
+                ["note.boardTitle"] = boardTitle,
+                ["note.reminderAt"] = reminderText,
+                ["note.preview"] = preview,
+            },
+            purpose: NotificationPurposes.TaskReminder,
+            cancellationToken: cancellationToken);
+
+        await CreateUserNotificationAsync(
+            recipientUserId,
+            UserNotificationTypes.NoteReminder,
+            eventKey,
+            message.Subject,
+            message.Body,
+            "amber",
+            "note",
+            note.Id,
+            null,
+            null,
+            new
+            {
+                noteId = note.Id,
+                boardId = note.BoardId,
+                boardTitle,
+                reminderAt = note.ReminderAt
+            },
+            cancellationToken);
+    }
+
     public async Task<IReadOnlyList<NotificationDelivery>> NotifyCaseInactivityControlTaskCreatedAsync(
         TaskJournalItem task,
         int daysWithoutActiveTask,
@@ -2793,6 +2901,37 @@ public sealed class NotificationService : INotificationService
             "Откройте раздел «Заметки», чтобы посмотреть сообщение."
         });
 
+    private static string BuildStickyNoteAssignedBody(
+        string actorName,
+        string boardTitle,
+        string preview,
+        string reminderText)
+        => string.Join('\n', new[]
+        {
+            $"{actorName} назначил(а) вам заметку.",
+            string.Empty,
+            $"Доска: {boardTitle}",
+            $"Срок: {reminderText}",
+            $"Заметка: {preview}",
+            string.Empty,
+            "Откройте раздел «Заметки», чтобы посмотреть или обновить напоминание."
+        });
+
+    private static string BuildStickyNoteReminderBody(
+        string boardTitle,
+        string preview,
+        string reminderText)
+        => string.Join('\n', new[]
+        {
+            "Наступил срок заметки.",
+            string.Empty,
+            $"Доска: {boardTitle}",
+            $"Срок: {reminderText}",
+            $"Заметка: {preview}",
+            string.Empty,
+            "Откройте раздел «Заметки», чтобы вернуться к напоминанию."
+        });
+
     private static string BuildCaseInactivityControlBody(
         TaskJournalItem task,
         int daysWithoutActiveTask,
@@ -3021,6 +3160,16 @@ public sealed class NotificationService : INotificationService
             ? "Без текста"
             : Truncate(normalized, 300);
     }
+
+    private static string FormatStickyNoteReminderAt(DateTime? reminderAt, TimeZoneInfo timeZone)
+        => reminderAt.HasValue
+            ? FormatTaskDueAt(DateTime.SpecifyKind(reminderAt.Value, DateTimeKind.Utc), timeZone)
+            : "без срока";
+
+    private static string FormatStickyNoteEventDate(DateTime? reminderAt)
+        => reminderAt.HasValue
+            ? DateTime.SpecifyKind(reminderAt.Value, DateTimeKind.Utc).ToString("yyyyMMddHHmm", CultureInfo.InvariantCulture)
+            : "no-date";
 
     private static string BuildStableTextHash(string? value)
     {

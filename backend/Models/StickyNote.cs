@@ -24,6 +24,15 @@ public class StickyNote
     public int Version { get; set; } = 1;
     public bool IsPinned { get; set; }
 
+    public int? AssignedUserId { get; set; }
+    public User? AssignedUser { get; set; }
+
+    [MaxLength(256)]
+    public string AssignedUserName { get; set; } = string.Empty;
+
+    public DateTime? ReminderAt { get; set; }
+    public DateTime? ReminderSentAt { get; set; }
+
     public int? AuthorUserId { get; set; }
     public User? AuthorUser { get; set; }
 

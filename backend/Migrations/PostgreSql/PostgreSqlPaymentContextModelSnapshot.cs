@@ -6342,6 +6342,14 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("AssignedUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("AssignedUserName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<int?>("AuthorUserId")
                         .HasColumnType("integer");
 
@@ -6393,6 +6401,12 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<bool>("IsPinned")
                         .HasColumnType("boolean");
 
+                    b.Property<DateTime?>("ReminderAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("ReminderSentAt")
+                        .HasColumnType("timestamp without time zone");
+
                     b.Property<string>("Text")
                         .IsRequired()
                         .HasMaxLength(4000)
@@ -6425,6 +6439,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AssignedUserId")
+                        .HasDatabaseName("IX_StickyNotes_AssignedUserId");
+
                     b.HasIndex("AuthorUserId");
 
                     b.HasIndex("BoardId")
@@ -6441,6 +6458,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("BoardId", "ZIndex")
                         .HasDatabaseName("IX_StickyNotes_BoardId_ZIndex");
+
+                    b.HasIndex("ReminderAt", "ReminderSentAt")
+                        .HasDatabaseName("IX_StickyNotes_ReminderAt_ReminderSentAt");
 
                     b.ToTable("StickyNotes");
                 });
@@ -9338,6 +9358,11 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
             modelBuilder.Entity("PayPlanner.Api.Models.StickyNote", b =>
                 {
+                    b.HasOne("PayPlanner.Api.Models.User", "AssignedUser")
+                        .WithMany()
+                        .HasForeignKey("AssignedUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("PayPlanner.Api.Models.User", "AuthorUser")
                         .WithMany()
                         .HasForeignKey("AuthorUserId")
@@ -9348,6 +9373,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasForeignKey("BoardId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("AssignedUser");
 
                     b.Navigation("AuthorUser");
 

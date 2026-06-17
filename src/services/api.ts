@@ -770,6 +770,10 @@ export interface StickyNoteItem {
   zIndex: number;
   version: number;
   isPinned: boolean;
+  assignedUserId?: number | null;
+  assignedUserName: string;
+  reminderAt?: string | null;
+  reminderSentAt?: string | null;
   authorUserId?: number | null;
   authorUserName: string;
   lastUpdatedByUserId?: number | null;
@@ -827,6 +831,8 @@ export interface CreateStickyNotePayload {
   y?: number;
   width?: number;
   height?: number;
+  assignedUserId?: number | null;
+  reminderAt?: string | null;
 }
 
 export interface UpdateStickyNotePayload {
@@ -838,6 +844,8 @@ export interface UpdateStickyNotePayload {
   height: number;
   zIndex: number;
   isPinned: boolean;
+  assignedUserId?: number | null;
+  reminderAt?: string | null;
   version?: number;
 }
 
