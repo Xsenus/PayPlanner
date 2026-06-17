@@ -52,6 +52,8 @@ public static class NotificationTemplateCatalog
         new("task.priority", "Приоритет задачи"),
         new("task.assigneeName", "Исполнитель"),
         new("task.authorName", "Постановщик"),
+        new("task.assignedSubject", "Тема уведомления о назначении задачи"),
+        new("task.assignmentDetails", "Детали назначения или переназначения"),
         new("actor.name", "Кто выполнил действие")
     ];
 
@@ -112,8 +114,8 @@ public static class NotificationTemplateCatalog
             NotificationTemplateKeys.TaskAssigned,
             "Новая задача",
             "Уведомление исполнителю и участникам при назначении задачи.",
-            "Новая задача: {{task.title}}",
-            "{{actor.name}} назначил задачу: {{task.title}}\n\nОбъект: {{task.objectName}}\nСрок: {{task.dueAt}}\nИсполнитель: {{task.assigneeName}}",
+            "{{task.assignedSubject}}",
+            "{{actor.name}} назначил задачу: {{task.title}}\n\nОбъект: {{task.objectName}}\nСрок: {{task.dueAt}}\nИсполнитель: {{task.assigneeName}}\n{{task.assignmentDetails}}",
             TaskVariables),
         new(
             NotificationTemplateKeys.TaskReminder,

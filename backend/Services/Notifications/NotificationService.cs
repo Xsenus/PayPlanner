@@ -543,7 +543,7 @@ public sealed class NotificationService : INotificationService
                 NotificationTemplateKeys.TaskAssigned,
                 taskAssignedSubject,
                 taskAssignedBody,
-                BuildTaskTemplateValues(task, recipientTimeZone, actorName),
+                BuildTaskAssignmentTemplateValues(task, recipientTimeZone, actorName, taskAssignedSubject),
                 purpose: NotificationPurposes.TaskReminder,
                 cancellationToken: cancellationToken);
 
@@ -564,6 +564,170 @@ public sealed class NotificationService : INotificationService
             var enabledChannels = await ResolveUserNotificationChannelsAsync(
                 userId,
                 UserNotificationTypes.TaskAssigned,
+                channels,
+                cancellationToken);
+            if (enabledChannels.Count > 0)
+            {
+                deliveries.AddRange(await SendToUserAsync(userId, message, enabledChannels, eventKey, cancellationToken));
+            }
+        }
+
+        return deliveries;
+    }
+
+    public async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskReassignedAsync(
+        TaskJournalItem task,
+        int? previousAssigneeUserId,
+        string? previousAssigneeName,
+        IReadOnlyList<string> changeLabels,
+        string actorName,
+        int actorUserId,
+        string? comment = null,
+        CancellationToken cancellationToken = default)
+    {
+        var channels = ResolveTaskMessageChannels(task);
+        var currentAssigneeUserId = task.AssigneeUserId;
+        var allRecipients = ResolveTaskNotificationUserIds(task, actorUserId);
+        var eventStamp = DateTime.UtcNow.ToString("yyyyMMddHHmmssfff", CultureInfo.InvariantCulture);
+        var deliveries = new List<NotificationDelivery>();
+
+        if (currentAssigneeUserId.HasValue && currentAssigneeUserId.Value != actorUserId)
+        {
+            var userId = currentAssigneeUserId.Value;
+            var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(userId, cancellationToken);
+            var subject = $"Задача назначена вам: {task.Title}";
+            var body = BuildTaskReassignedToNewAssigneeBody(task, changeLabels, actorName, previousAssigneeName, comment, recipientTimeZone);
+            var message = await RenderTemplateAsync(
+                NotificationTemplateKeys.TaskAssigned,
+                subject,
+                body,
+                BuildTaskAssignmentTemplateValues(
+                    task,
+                    recipientTimeZone,
+                    actorName,
+                    subject,
+                    $"Предыдущий исполнитель: {FormatNotificationName(previousAssigneeName)}\nНовый исполнитель: {FormatNotificationName(task.AssigneeName)}"),
+                purpose: NotificationPurposes.TaskReminder,
+                cancellationToken: cancellationToken);
+            var eventKey = $"task:{task.Id}:reassigned-to:{userId}:{eventStamp}";
+
+            if (HasTaskChannel(task, NotificationChannels.InApp))
+            {
+                await CreateUserNotificationAsync(
+                    userId,
+                    UserNotificationTypes.TaskAssigned,
+                    eventKey,
+                    message.Subject,
+                    message.Body,
+                    "blue",
+                    task,
+                    new { actorUserId, actorName, previousAssigneeUserId, previousAssigneeName, task.AssigneeUserId, task.AssigneeName, isReassignment = true },
+                    cancellationToken);
+            }
+
+            var enabledChannels = await ResolveUserNotificationChannelsAsync(
+                userId,
+                UserNotificationTypes.TaskAssigned,
+                channels,
+                cancellationToken);
+            if (enabledChannels.Count > 0)
+            {
+                deliveries.AddRange(await SendToUserAsync(userId, message, enabledChannels, eventKey, cancellationToken));
+            }
+        }
+
+        if (previousAssigneeUserId.HasValue
+            && previousAssigneeUserId.Value != actorUserId
+            && previousAssigneeUserId.Value != currentAssigneeUserId)
+        {
+            var userId = previousAssigneeUserId.Value;
+            var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(userId, cancellationToken);
+            var recipientChangeLabels = FormatTaskChangeLabels(changeLabels, recipientTimeZone);
+            var subject = $"Задача снята с вас: {task.Title}";
+            var body = BuildTaskReassignedFromPreviousAssigneeBody(task, recipientChangeLabels, actorName, previousAssigneeName, comment, recipientTimeZone);
+            var message = await RenderTemplateAsync(
+                NotificationTemplateKeys.TaskChanged,
+                subject,
+                body,
+                NotificationTemplateCatalog.MergeValues(
+                    BuildTaskTemplateValues(task, recipientTimeZone, actorName),
+                    new Dictionary<string, string?>
+                    {
+                        ["task.changes"] = string.Join(Environment.NewLine, recipientChangeLabels.Select(label => $"- {label}")),
+                        ["task.commentBlock"] = string.IsNullOrWhiteSpace(comment) ? string.Empty : $"Комментарий: {comment.Trim()}",
+                        ["task.changeSubject"] = subject,
+                    }),
+                purpose: NotificationPurposes.TaskReminder,
+                cancellationToken: cancellationToken);
+            var eventKey = $"task:{task.Id}:reassigned-from:{userId}:{eventStamp}";
+
+            if (HasTaskChannel(task, NotificationChannels.InApp))
+            {
+                await CreateUserNotificationAsync(
+                    userId,
+                    UserNotificationTypes.TaskChanged,
+                    eventKey,
+                    message.Subject,
+                    message.Body,
+                    "amber",
+                    task,
+                    new { actorUserId, actorName, previousAssigneeUserId, previousAssigneeName, task.AssigneeUserId, task.AssigneeName, hasAssigneeChange = true },
+                    cancellationToken);
+            }
+
+            var enabledChannels = await ResolveUserNotificationChannelsAsync(
+                userId,
+                UserNotificationTypes.TaskChanged,
+                channels,
+                cancellationToken);
+            if (enabledChannels.Count > 0)
+            {
+                deliveries.AddRange(await SendToUserAsync(userId, message, enabledChannels, eventKey, cancellationToken));
+            }
+        }
+
+        var remainingRecipients = allRecipients
+            .Where(userId => userId != currentAssigneeUserId && userId != previousAssigneeUserId)
+            .ToList();
+        foreach (var userId in remainingRecipients)
+        {
+            var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(userId, cancellationToken);
+            var recipientChangeLabels = FormatTaskChangeLabels(changeLabels, recipientTimeZone);
+            var subject = $"Изменен исполнитель задачи: {task.Title}";
+            var body = BuildTaskChangedBody(task, recipientChangeLabels, actorName, comment, recipientTimeZone);
+            var message = await RenderTemplateAsync(
+                NotificationTemplateKeys.TaskChanged,
+                subject,
+                body,
+                NotificationTemplateCatalog.MergeValues(
+                    BuildTaskTemplateValues(task, recipientTimeZone, actorName),
+                    new Dictionary<string, string?>
+                    {
+                        ["task.changes"] = string.Join(Environment.NewLine, recipientChangeLabels.Select(label => $"- {label}")),
+                        ["task.commentBlock"] = string.IsNullOrWhiteSpace(comment) ? string.Empty : $"Комментарий: {comment.Trim()}",
+                        ["task.changeSubject"] = subject,
+                    }),
+                purpose: NotificationPurposes.TaskReminder,
+                cancellationToken: cancellationToken);
+            var eventKey = $"task:{task.Id}:reassigned-observer:{userId}:{eventStamp}";
+
+            if (HasTaskChannel(task, NotificationChannels.InApp))
+            {
+                await CreateUserNotificationAsync(
+                    userId,
+                    UserNotificationTypes.TaskChanged,
+                    eventKey,
+                    message.Subject,
+                    message.Body,
+                    "amber",
+                    task,
+                    new { actorUserId, actorName, changeLabels, previousAssigneeUserId, previousAssigneeName, task.AssigneeUserId, task.AssigneeName, hasAssigneeChange = true },
+                    cancellationToken);
+            }
+
+            var enabledChannels = await ResolveUserNotificationChannelsAsync(
+                userId,
+                UserNotificationTypes.TaskChanged,
                 channels,
                 cancellationToken);
             if (enabledChannels.Count > 0)
@@ -2005,6 +2169,20 @@ public sealed class NotificationService : INotificationService
             ["actor.name"] = string.IsNullOrWhiteSpace(actorName) ? "Система" : actorName.Trim(),
         };
 
+    private static Dictionary<string, string?> BuildTaskAssignmentTemplateValues(
+        TaskJournalItem task,
+        TimeZoneInfo timeZone,
+        string? actorName,
+        string assignedSubject,
+        string? assignmentDetails = null)
+        => NotificationTemplateCatalog.MergeValues(
+            BuildTaskTemplateValues(task, timeZone, actorName),
+            new Dictionary<string, string?>
+            {
+                ["task.assignedSubject"] = assignedSubject,
+                ["task.assignmentDetails"] = assignmentDetails ?? string.Empty,
+            });
+
     private static string BuildConflictSummary(IReadOnlyList<TaskJournalItem> conflicts, TimeZoneInfo timeZone)
         => string.Join(
             Environment.NewLine,
@@ -2079,6 +2257,54 @@ public sealed class NotificationService : INotificationService
             lines.Add(task.Description.Trim());
         }
 
+        return string.Join('\n', lines);
+    }
+
+    private static string BuildTaskReassignedToNewAssigneeBody(
+        TaskJournalItem task,
+        IReadOnlyList<string> changeLabels,
+        string actorName,
+        string? previousAssigneeName,
+        string? comment,
+        TimeZoneInfo timeZone)
+    {
+        var dueText = FormatTaskDueAt(task.DueAt, timeZone);
+        var lines = new List<string>
+        {
+            $"{actorName} назначил(а) задачу вам.",
+            string.Empty,
+            $"Клиент/дело: {task.ObjectName}",
+            $"Задача: {task.Title}",
+            $"Срок: {dueText}",
+            $"Предыдущий исполнитель: {FormatNotificationName(previousAssigneeName)}",
+            $"Новый исполнитель: {FormatNotificationName(task.AssigneeName)}",
+        };
+
+        AppendTaskChangeDetails(lines, FormatTaskChangeLabels(changeLabels, timeZone), comment);
+        return string.Join('\n', lines);
+    }
+
+    private static string BuildTaskReassignedFromPreviousAssigneeBody(
+        TaskJournalItem task,
+        IReadOnlyList<string> changeLabels,
+        string actorName,
+        string? previousAssigneeName,
+        string? comment,
+        TimeZoneInfo timeZone)
+    {
+        var dueText = FormatTaskDueAt(task.DueAt, timeZone);
+        var lines = new List<string>
+        {
+            $"{actorName} изменил(а) исполнителя задачи.",
+            string.Empty,
+            $"Клиент/дело: {task.ObjectName}",
+            $"Задача: {task.Title}",
+            $"Срок: {dueText}",
+            $"Предыдущий исполнитель: {FormatNotificationName(previousAssigneeName)}",
+            $"Новый исполнитель: {FormatNotificationName(task.AssigneeName)}",
+        };
+
+        AppendTaskChangeDetails(lines, changeLabels, comment);
         return string.Join('\n', lines);
     }
 
@@ -2266,6 +2492,28 @@ public sealed class NotificationService : INotificationService
 
         return string.Join('\n', lines);
     }
+
+    private static void AppendTaskChangeDetails(List<string> lines, IReadOnlyList<string> changeLabels, string? comment)
+    {
+        if (changeLabels.Count > 0)
+        {
+            lines.Add(string.Empty);
+            lines.Add("Изменения:");
+            foreach (var changeLabel in changeLabels)
+            {
+                lines.Add($"- {changeLabel}");
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(comment))
+        {
+            lines.Add(string.Empty);
+            lines.Add($"Комментарий: {comment.Trim()}");
+        }
+    }
+
+    private static string FormatNotificationName(string? value)
+        => string.IsNullOrWhiteSpace(value) ? "не указан" : value.Trim();
 
     private static IReadOnlyList<string> FormatTaskChangeLabels(IReadOnlyList<string> changeLabels, TimeZoneInfo timeZone)
         => changeLabels

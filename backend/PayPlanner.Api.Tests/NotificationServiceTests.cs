@@ -605,6 +605,82 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyTaskReassignedAsync_NotifiesNewAndPreviousAssignees()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db, "task-reassign-author@example.com");
+        var previousAssignee = new User
+        {
+            Email = "task-reassign-previous@example.com",
+            FullName = "Старый исполнитель",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        var newAssignee = new User
+        {
+            Email = "task-reassign-new@example.com",
+            FullName = "Новый исполнитель",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.AddRange(previousAssignee, newAssignee);
+        await db.SaveChangesAsync();
+
+        var task = new TaskJournalItem
+        {
+            ObjectName = "ЗЕМЦОВ - банкротство",
+            Title = "Передать документы",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            AssigneeUserId = newAssignee.Id,
+            AssigneeName = newAssignee.FullName,
+            DueAt = DateTime.UtcNow.AddHours(4),
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "inProgress"
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+
+        var deliveries = await service.NotifyTaskReassignedAsync(
+            task,
+            previousAssignee.Id,
+            previousAssignee.FullName,
+            [$"Исполнитель: {previousAssignee.FullName} -> {newAssignee.FullName}"],
+            author.FullName,
+            author.Id,
+            "Передали задачу другому исполнителю.");
+
+        Assert.Empty(deliveries);
+        var notifications = await db.UserNotifications
+            .OrderBy(item => item.RecipientUserId)
+            .ToListAsync();
+        Assert.Equal(2, notifications.Count);
+
+        var newAssigneeNotification = Assert.Single(notifications, item => item.RecipientUserId == newAssignee.Id);
+        Assert.Equal(UserNotificationTypes.TaskAssigned, newAssigneeNotification.Type);
+        Assert.Contains("Задача назначена вам", newAssigneeNotification.Title, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Старый исполнитель", newAssigneeNotification.BodyPreview, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Новый исполнитель", newAssigneeNotification.BodyPreview, StringComparison.OrdinalIgnoreCase);
+
+        var previousAssigneeNotification = Assert.Single(notifications, item => item.RecipientUserId == previousAssignee.Id);
+        Assert.Equal(UserNotificationTypes.TaskChanged, previousAssigneeNotification.Type);
+        Assert.Equal("amber", previousAssigneeNotification.Tone);
+        Assert.Contains("Задача снята с вас", previousAssigneeNotification.Title, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Передали задачу другому исполнителю.", previousAssigneeNotification.BodyPreview, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task NotifyTaskAssignedAsync_PublishesRealtimeNotificationForAssignee()
     {
         await using var db = await CreateContextAsync();

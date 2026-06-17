@@ -1597,7 +1597,10 @@ public class TasksController : ControllerBase
         var becameDone = !string.Equals(entity.Status, "done", StringComparison.OrdinalIgnoreCase)
             && string.Equals(nextStatus, "done", StringComparison.OrdinalIgnoreCase);
         var requestDueAt = NormalizeUtcInstant(request.DueAt);
+        var previousAssigneeUserId = entity.AssigneeUserId;
+        var previousAssigneeName = entity.AssigneeName;
         var changeLabels = BuildTaskChangeLabels(entity, request, binding, participants, nextStatus);
+        var assigneeChanged = HasTaskAssigneeChange(changeLabels);
         var changeComment = NormalizeOptional(request.ChangeComment);
 
         entity.ClientId = binding.ClientId;
@@ -1654,7 +1657,14 @@ public class TasksController : ControllerBase
         await _db.SaveChangesAsync(ct);
         if (changeLabels.Count > 0)
         {
-            await _notificationService.NotifyTaskChangedAsync(entity, changeLabels, access.DisplayName, access.UserId, changeComment, ct);
+            if (assigneeChanged)
+            {
+                await _notificationService.NotifyTaskReassignedAsync(entity, previousAssigneeUserId, previousAssigneeName, changeLabels, access.DisplayName, access.UserId, changeComment, ct);
+            }
+            else
+            {
+                await _notificationService.NotifyTaskChangedAsync(entity, changeLabels, access.DisplayName, access.UserId, changeComment, ct);
+            }
         }
         else if (userComment is not null)
         {
@@ -1910,7 +1920,7 @@ public class TasksController : ControllerBase
             .ToListAsync(ct);
 
         var updated = 0;
-        var notifications = new List<(TaskJournalItem Task, IReadOnlyList<string> ChangeLabels, bool BecameDone, bool ApprovalRequested)>();
+        var notifications = new List<(TaskJournalItem Task, IReadOnlyList<string> ChangeLabels, bool BecameDone, bool ApprovalRequested, bool AssigneeChanged, int? PreviousAssigneeUserId, string? PreviousAssigneeName)>();
         var now = DateTime.UtcNow;
         foreach (var entity in entities)
         {
@@ -1921,10 +1931,14 @@ public class TasksController : ControllerBase
 
             var changes = new List<string>();
             var approvalRequested = false;
+            var previousAssigneeUserId = entity.AssigneeUserId;
+            var previousAssigneeName = entity.AssigneeName;
+            var assigneeChanged = false;
 
             if (assignee is not null && ReplacePrimaryAssignee(entity, assignee, now))
             {
-                changes.Add("Исполнитель");
+                assigneeChanged = true;
+                changes.Add($"Исполнитель: {FormatChangeValue(previousAssigneeName)} -> {FormatChangeValue(entity.AssigneeName)}");
             }
 
             if (nextPriority is not null && !string.Equals(entity.Priority, nextPriority, StringComparison.OrdinalIgnoreCase))
@@ -1990,19 +2004,34 @@ public class TasksController : ControllerBase
             entity.UpdatedAt = now;
             AddTaskHistory(entity, access, $"Массовое изменение: {string.Join(", ", changes)}.");
             updated++;
-            notifications.Add((entity, changes, becameDone, approvalRequested));
+            notifications.Add((entity, changes, becameDone, approvalRequested, assigneeChanged, previousAssigneeUserId, previousAssigneeName));
         }
 
         await _db.SaveChangesAsync(ct);
         foreach (var notification in notifications)
         {
-            await _notificationService.NotifyTaskChangedAsync(
-                notification.Task,
-                notification.ChangeLabels,
-                access.DisplayName,
-                access.UserId,
-                null,
-                ct);
+            if (notification.AssigneeChanged)
+            {
+                await _notificationService.NotifyTaskReassignedAsync(
+                    notification.Task,
+                    notification.PreviousAssigneeUserId,
+                    notification.PreviousAssigneeName,
+                    notification.ChangeLabels,
+                    access.DisplayName,
+                    access.UserId,
+                    null,
+                    ct);
+            }
+            else
+            {
+                await _notificationService.NotifyTaskChangedAsync(
+                    notification.Task,
+                    notification.ChangeLabels,
+                    access.DisplayName,
+                    access.UserId,
+                    null,
+                    ct);
+            }
 
             if (notification.ApprovalRequested)
             {
@@ -4500,6 +4529,14 @@ public class TasksController : ControllerBase
             changes.Add($"{label}: {FormatChangeValue(current)} -> {FormatChangeValue(next)}");
         }
     }
+
+    private static bool HasTaskAssigneeChange(IEnumerable<string> changes)
+        => changes.Any(change =>
+        {
+            var normalized = change.Trim();
+            return normalized.Equals("Исполнитель", StringComparison.OrdinalIgnoreCase)
+                || normalized.StartsWith("Исполнитель:", StringComparison.OrdinalIgnoreCase);
+        });
 
     private static string FormatChangeValue<T>(T value)
     {

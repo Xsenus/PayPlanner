@@ -606,6 +606,43 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task UpdateTask_WhenAssigneeChanges_NotifiesReassignment()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "reassign-author@example.com", "Автор");
+        var oldAssignee = await CreateAdminUserAsync(db, "old-assignee@example.com", "Старый исполнитель");
+        var newAssignee = await CreateAdminUserAsync(db, "new-assignee@example.com", "Новый исполнитель");
+        var client = await CreateClientAsync(db, "Сидоров Семен Семенович");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, oldAssignee.Id);
+        var notificationService = new RecordingNotificationService();
+        var controller = CreateController(db, notificationService, author);
+
+        var result = await controller.UpdateTask(task.Id, new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            Title = task.Title,
+            AssigneeUserId = newAssignee.Id,
+            DueAt = task.DueAt,
+            Status = task.Status,
+            ChangeComment = "Передали задачу другому исполнителю.",
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.IsType<TaskJournalItemDto>(ok.Value);
+
+        Assert.Empty(notificationService.ChangedTasks);
+        var reassignment = Assert.Single(notificationService.ReassignedTasks);
+        Assert.Equal(task.Id, reassignment.TaskId);
+        Assert.Equal(oldAssignee.Id, reassignment.PreviousAssigneeUserId);
+        Assert.Equal("Исполнитель", reassignment.PreviousAssigneeName);
+        Assert.Equal("Передали задачу другому исполнителю.", reassignment.Comment);
+        Assert.Contains(reassignment.ChangeLabels, item =>
+            item.Contains("Исполнитель:", StringComparison.OrdinalIgnoreCase)
+            && item.Contains("Исполнитель", StringComparison.OrdinalIgnoreCase)
+            && item.Contains("Новый исполнитель", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task UpdateTask_RestrictsExecutorFullEditWhenSettingEnabled()
     {
         await using var db = await CreateContextAsync();
@@ -3099,11 +3136,20 @@ public class TasksControllerTests
             Assert.Equal(newAssignee.Id, participant.UserId);
             Assert.Contains(task.Comments, item => item.Kind == "system" && item.Text.Contains("Массовое изменение", StringComparison.OrdinalIgnoreCase));
         });
-        Assert.Equal(2, notificationService.ChangedTasks.Count);
-        Assert.All(notificationService.ChangedTasks, notification =>
+        Assert.Empty(notificationService.ChangedTasks);
+        Assert.Equal(2, notificationService.ReassignedTasks.Count);
+        Assert.All(notificationService.ReassignedTasks, notification =>
+        {
+            Assert.Equal(oldAssignee.Id, notification.PreviousAssigneeUserId);
+            Assert.Equal("Исполнитель", notification.PreviousAssigneeName);
+            Assert.Contains(notification.ChangeLabels, item =>
+                item.Contains("Исполнитель:", StringComparison.OrdinalIgnoreCase)
+                && item.Contains("Исполнитель", StringComparison.OrdinalIgnoreCase)
+                && item.Contains("Новый исполнитель", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(notification.ChangeLabels, item =>
                 item.Contains("Срок:", StringComparison.OrdinalIgnoreCase)
-                && item.Contains("->", StringComparison.OrdinalIgnoreCase)));
+                && item.Contains("->", StringComparison.OrdinalIgnoreCase));
+        });
     }
 
     [Fact]
@@ -3620,6 +3666,7 @@ public class TasksControllerTests
         public List<int> ApprovalRequestedTaskIds { get; } = [];
         public List<(int TaskId, string Decision)> ApprovalDecisionTaskIds { get; } = [];
         public List<(int TaskId, IReadOnlyList<string> ChangeLabels, string? Comment)> ChangedTasks { get; } = [];
+        public List<(int TaskId, int? PreviousAssigneeUserId, string? PreviousAssigneeName, IReadOnlyList<string> ChangeLabels, string? Comment)> ReassignedTasks { get; } = [];
         public List<int> CommentTaskIds { get; } = [];
         public List<(int TaskId, IReadOnlyList<int> ConflictIds)> ScheduleConflictTasks { get; } = [];
         public List<(int TaskId, int DaysWithoutActiveTask)> CaseInactivityControls { get; } = [];
@@ -3711,6 +3758,12 @@ public class TasksControllerTests
         public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskChangedAsync(TaskJournalItem task, IReadOnlyList<string> changeLabels, string actorName, int actorUserId, string? comment = null, CancellationToken cancellationToken = default)
         {
             ChangedTasks.Add((task.Id, changeLabels, comment));
+            return Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+        }
+
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskReassignedAsync(TaskJournalItem task, int? previousAssigneeUserId, string? previousAssigneeName, IReadOnlyList<string> changeLabels, string actorName, int actorUserId, string? comment = null, CancellationToken cancellationToken = default)
+        {
+            ReassignedTasks.Add((task.Id, previousAssigneeUserId, previousAssigneeName, changeLabels, comment));
             return Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
         }
 
