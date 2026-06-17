@@ -381,16 +381,26 @@ public class NotificationInboxControllerTests
     {
         await using var db = await CreateContextAsync();
         var user = await CreateUserAsync(db, "domain-action@example.com");
-        var financeAction = CreateObjectNotification(user.Id, "payment", 10, "Аванс требует решения");
+        var client = CreateClient("Domain action client");
+        client.ResponsibleUserId = user.Id;
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var payment = CreatePayment(client, DocumentKind.Payment, "domain-action-payment");
+        var act = CreateAct(client, "domain-action-act");
+        db.Payments.Add(payment);
+        db.Acts.Add(act);
+        await db.SaveChangesAsync();
+
+        var financeAction = CreateObjectNotification(user.Id, "payment", payment.Id, "Аванс требует решения");
         financeAction.Type = UserNotificationTypes.PaymentAdvanceReviewRequired;
-        var financeInfo = CreateObjectNotification(user.Id, "act", 11, "Акт обновлен");
+        var financeInfo = CreateObjectNotification(user.Id, "act", act.Id, "Акт обновлен");
         financeInfo.Type = UserNotificationTypes.TaskChanged;
         var taskAction = CreateNotification(
             user.Id,
             "task:12:assigned",
             UserNotificationTypes.TaskAssigned,
             title: "Новая задача");
-        taskAction.TaskJournalItemId = 12;
         db.UserNotifications.AddRange(financeAction, financeInfo, taskAction);
         await db.SaveChangesAsync();
 

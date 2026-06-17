@@ -24,6 +24,8 @@ public interface IWebPushNotificationService
 public sealed class WebPushNotificationService : IWebPushNotificationService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private const string FinancialPushTitle = "Финансовое уведомление PayPlanner";
+    private const string FinancialPushBody = "Откройте CRM, чтобы посмотреть детали финансового события после проверки прав доступа.";
 
     private readonly PaymentContext _context;
     private readonly IConfiguration _configuration;
@@ -76,7 +78,9 @@ public sealed class WebPushNotificationService : IWebPushNotificationService
         }
 
         var config = ResolveVapidConfig();
-        var payload = BuildPayload(notification);
+        var pushTitle = ResolvePushTitle(notification);
+        var pushBodyPreview = ResolvePushBodyPreview(notification);
+        var payload = BuildPayload(notification, pushTitle, pushBodyPreview);
         foreach (var subscription in subscriptions)
         {
             if (await HasCompletedWebPushDeliveryAsync(notification.EventKey, subscription.Endpoint, cancellationToken))
@@ -91,8 +95,8 @@ public sealed class WebPushNotificationService : IWebPushNotificationService
                 SenderName = "Web Push",
                 RecipientUserId = notification.RecipientUserId,
                 RecipientAddress = subscription.Endpoint,
-                Subject = notification.Title,
-                BodyPreview = notification.BodyPreview,
+                Subject = pushTitle,
+                BodyPreview = pushBodyPreview,
                 Status = NotificationDeliveryStatus.Pending,
                 CreatedAt = DateTime.UtcNow,
             };
@@ -175,11 +179,11 @@ public sealed class WebPushNotificationService : IWebPushNotificationService
                 && item.Status != NotificationDeliveryStatus.Failed,
                 cancellationToken);
 
-    private static string BuildPayload(UserNotification notification)
+    private static string BuildPayload(UserNotification notification, string title, string bodyPreview)
         => JsonSerializer.Serialize(new
         {
-            title = notification.Title,
-            body = notification.BodyPreview,
+            title,
+            body = bodyPreview,
             notificationId = notification.Id,
             eventKey = notification.EventKey,
             type = notification.Type,
@@ -190,6 +194,30 @@ public sealed class WebPushNotificationService : IWebPushNotificationService
             url = "/notifications",
             createdAt = notification.CreatedAt,
         }, JsonOptions);
+
+    private static string ResolvePushTitle(UserNotification notification)
+        => IsSensitiveFinancialNotification(notification)
+            ? FinancialPushTitle
+            : notification.Title;
+
+    private static string ResolvePushBodyPreview(UserNotification notification)
+        => IsSensitiveFinancialNotification(notification)
+            ? FinancialPushBody
+            : notification.BodyPreview;
+
+    private static bool IsSensitiveFinancialNotification(UserNotification notification)
+    {
+        if (notification.Type is UserNotificationTypes.PaymentAdvanceReviewRequired or UserNotificationTypes.PaymentAdvanceReviewEscalation)
+        {
+            return true;
+        }
+
+        return notification.ObjectType.Trim().ToLowerInvariant() switch
+        {
+            "payment" or "invoice" or "account" or "act" or "contract" or "cash-order" or "money-operation" => true,
+            _ => false,
+        };
+    }
 
     private static string ResolveNotReadyReason(VapidConfig config)
     {
