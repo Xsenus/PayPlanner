@@ -8,6 +8,10 @@ const toastMock = vi.hoisted(() => ({
   showToast: vi.fn(),
 }));
 
+const apiMock = vi.hoisted(() => ({
+  getUserNotifications: vi.fn(),
+}));
+
 const connectionState = vi.hoisted(() => ({
   handlers: new Map<string, (notification: RealtimeUserNotification) => void>(),
   canStart: true,
@@ -21,6 +25,10 @@ const connectionState = vi.hoisted(() => ({
 
 vi.mock('../../hooks/useToast', () => ({
   useToast: () => toastMock,
+}));
+
+vi.mock('../../services/api', () => ({
+  apiService: apiMock,
 }));
 
 vi.mock('../../services/realtimeNotifications', async (importOriginal) => {
@@ -55,6 +63,13 @@ async function flushRealtimeStart() {
 describe('RealtimeNotificationToasts', () => {
   beforeEach(() => {
     toastMock.showToast.mockReset();
+    apiMock.getUserNotifications.mockReset();
+    apiMock.getUserNotifications.mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 15,
+    });
     connectionState.handlers.clear();
     connectionState.canStart = true;
     connectionState.create.mockReset();
@@ -300,6 +315,98 @@ describe('RealtimeNotificationToasts', () => {
     );
 
     errorSpy.mockRestore();
+  });
+
+  it('polls unread notifications and shows fallback toasts when realtime startup is unavailable', async () => {
+    const createdAt = new Date(Date.now() + 1000).toISOString();
+    apiMock.getUserNotifications.mockResolvedValue({
+      items: [
+        {
+          id: 701,
+          type: 'taskAssigned',
+          typeLabel: 'Задача',
+          eventKey: 'task:701:assigned',
+          title: 'Новая задача через fallback',
+          bodyPreview: 'Проверьте задачу.',
+          tone: 'blue',
+          objectType: 'task',
+          objectId: 701,
+          taskId: 701,
+          isRead: false,
+          readAt: null,
+          isArchived: false,
+          archivedAt: null,
+          createdAt,
+        },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 15,
+    });
+    connectionState.start.mockRejectedValue(new TypeError('Failed to fetch'));
+
+    const { unmount } = render(<RealtimeNotificationToasts userId={5} onOpenTask={vi.fn()} />);
+
+    await flushRealtimeStart();
+    await waitFor(() =>
+      expect(apiMock.getUserNotifications).toHaveBeenCalledWith({
+        status: 'unread',
+        page: 1,
+        pageSize: 15,
+      }),
+    );
+    await waitFor(() =>
+      expect(toastMock.showToast).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: 'Новая задача через fallback',
+          dedupeKey: 'task:701',
+          domain: 'task',
+        }),
+      ),
+    );
+
+    unmount();
+  });
+
+  it('does not show accumulated old unread notifications as fallback toasts', async () => {
+    const createdAt = new Date(Date.now() - 60_000).toISOString();
+    apiMock.getUserNotifications.mockResolvedValue({
+      items: [
+        {
+          id: 702,
+          type: 'taskAssigned',
+          typeLabel: 'Задача',
+          eventKey: 'task:702:assigned',
+          title: 'Старая задача',
+          bodyPreview: 'Это уведомление уже было в центре.',
+          tone: 'blue',
+          objectType: 'task',
+          objectId: 702,
+          taskId: 702,
+          isRead: false,
+          readAt: null,
+          isArchived: false,
+          archivedAt: null,
+          createdAt,
+        },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 15,
+    });
+    connectionState.start.mockRejectedValue(new TypeError('Failed to fetch'));
+
+    const { unmount } = render(<RealtimeNotificationToasts userId={5} onOpenTask={vi.fn()} />);
+
+    await flushRealtimeStart();
+    await waitFor(() => expect(apiMock.getUserNotifications).toHaveBeenCalledTimes(1));
+    expect(toastMock.showToast).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Старая задача',
+      }),
+    );
+
+    unmount();
   });
 
   it('emits user notification change details for realtime notifications', async () => {

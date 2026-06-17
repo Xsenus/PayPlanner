@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { HubConnection, HubConnectionState } from '@microsoft/signalr';
 import { useToast } from '../../hooks/useToast';
+import { apiService, type UserNotificationDto } from '../../services/api';
 import {
   canStartNotificationsHubConnection,
   createNotificationsHubConnection,
@@ -11,6 +12,9 @@ import {
 } from '../../services/realtimeNotifications';
 import type { ToastDomain } from '../../contexts/toastContextCore';
 import { emitUserNotificationsChanged } from '../../utils/userNotifications';
+
+const FALLBACK_POLL_INTERVAL_MS = 30_000;
+const FALLBACK_PAGE_SIZE = 15;
 
 type RealtimeNotificationToastsProps = {
   userId: number;
@@ -26,6 +30,22 @@ type RealtimeNotificationToastsProps = {
 function buildToastDescription(notification: RealtimeUserNotification): string {
   const value = notification.bodyPreview?.trim() || notification.title.trim();
   return value.length > 220 ? `${value.slice(0, 217)}...` : value;
+}
+
+function toRealtimeNotification(item: UserNotificationDto, recipientUserId: number): RealtimeUserNotification {
+  return {
+    id: item.id,
+    recipientUserId,
+    type: item.type,
+    eventKey: item.eventKey,
+    title: item.title,
+    bodyPreview: item.bodyPreview,
+    tone: item.tone,
+    objectType: item.objectType,
+    objectId: item.objectId,
+    taskJournalItemId: item.taskId,
+    createdAt: item.createdAt,
+  };
 }
 
 function buildToastDedupeKey(notification: RealtimeUserNotification): string {
@@ -238,6 +258,9 @@ export function RealtimeNotificationToasts({
   const toast = useToast();
   const connectionRef = useRef<HubConnection | null>(null);
   const shownNotificationIdsRef = useRef<Set<number>>(new Set());
+  const fallbackKnownNotificationIdsRef = useRef<Set<number>>(new Set());
+  const fallbackBaselineReadyRef = useRef(false);
+  const fallbackNoticeShownRef = useRef(false);
   const handlersRef = useRef({
     onOpenTask,
     onOpenCase,
@@ -267,46 +290,146 @@ export function RealtimeNotificationToasts({
 
     let disposed = false;
     let retryTimer: number | null = null;
+    let fallbackTimer: number | null = null;
+    let fallbackPollingActive = false;
+    let fallbackPollInFlight = false;
+    let fallbackActivatedAtMs = 0;
     shownNotificationIdsRef.current.clear();
+    fallbackKnownNotificationIdsRef.current.clear();
+    fallbackBaselineReadyRef.current = false;
+    fallbackNoticeShownRef.current = false;
     const connection = createNotificationsHubConnection();
     connectionRef.current = connection;
 
-    connection.on(
-      REALTIME_USER_NOTIFICATION_CREATED_EVENT,
-      (notification: RealtimeUserNotification) => {
-        if (!notification || notification.recipientUserId !== userId) {
-          return;
-        }
+    const showIncomingNotification = (
+      notification: RealtimeUserNotification,
+      reason: 'created' | 'fallback-poll',
+    ) => {
+      if (!notification || notification.recipientUserId !== userId) {
+        return;
+      }
 
-        emitUserNotificationsChanged({
-          source: 'realtime',
-          reason: 'created',
-          unreadDelta: 1,
-          notificationId: notification.id,
+      emitUserNotificationsChanged({
+        source: 'realtime',
+        reason,
+        unreadDelta: 1,
+        notificationId: notification.id,
+      });
+
+      if (shownNotificationIdsRef.current.has(notification.id)) {
+        return;
+      }
+      shownNotificationIdsRef.current.add(notification.id);
+
+      if (!shouldShowRealtimeToast(notification)) {
+        return;
+      }
+
+      const action = resolveToastAction(notification, handlersRef.current);
+      toast.showToast({
+        title: notification.title || 'Уведомление',
+        description: buildToastDescription(notification),
+        variant: resolveToastVariant(notification),
+        durationMs: resolveToastDuration(notification),
+        actionLabel: action.label,
+        onAction: action.run,
+        dedupeKey: buildToastDedupeKey(notification),
+        domain: resolveToastDomain(notification),
+      });
+    };
+
+    const showFallbackNotice = () => {
+      if (fallbackNoticeShownRef.current) {
+        return;
+      }
+
+      fallbackNoticeShownRef.current = true;
+      toast.showToast({
+        title: 'Моментальные уведомления недоступны',
+        description: 'Новые уведомления временно проверяются автоматически раз в 30 секунд.',
+        variant: 'info',
+        durationMs: 12000,
+        dedupeKey: 'notifications:fallback-polling',
+        domain: 'system',
+      });
+    };
+
+    const pollFallbackNotifications = async () => {
+      if (disposed || !fallbackPollingActive || fallbackPollInFlight) {
+        return;
+      }
+
+      fallbackPollInFlight = true;
+      try {
+        const page = await apiService.getUserNotifications({
+          status: 'unread',
+          page: 1,
+          pageSize: FALLBACK_PAGE_SIZE,
         });
-
-        if (shownNotificationIdsRef.current.has(notification.id)) {
-          return;
-        }
-        shownNotificationIdsRef.current.add(notification.id);
-
-        if (!shouldShowRealtimeToast(notification)) {
+        if (disposed || !fallbackPollingActive) {
           return;
         }
 
-        const action = resolveToastAction(notification, handlersRef.current);
-        toast.showToast({
-          title: notification.title || 'Уведомление',
-          description: buildToastDescription(notification),
-          variant: resolveToastVariant(notification),
-          durationMs: resolveToastDuration(notification),
-          actionLabel: action.label,
-          onAction: action.run,
-          dedupeKey: buildToastDedupeKey(notification),
-          domain: resolveToastDomain(notification),
-        });
-      },
-    );
+        const firstPoll = !fallbackBaselineReadyRef.current;
+        const activationThresholdMs = fallbackActivatedAtMs - 1000;
+
+        for (const item of page.items) {
+          const notificationCreatedAtMs = Date.parse(item.createdAt);
+          const isKnown = fallbackKnownNotificationIdsRef.current.has(item.id);
+          const isFreshForFallback =
+            Number.isFinite(notificationCreatedAtMs) && notificationCreatedAtMs >= activationThresholdMs;
+
+          fallbackKnownNotificationIdsRef.current.add(item.id);
+
+          if (isKnown) {
+            continue;
+          }
+
+          if (firstPoll && !isFreshForFallback) {
+            continue;
+          }
+
+          showIncomingNotification(toRealtimeNotification(item, userId), 'fallback-poll');
+        }
+
+        fallbackBaselineReadyRef.current = true;
+      } catch (error) {
+        if (!disposed) {
+          console.error('Fallback notifications polling failed.', error);
+        }
+      } finally {
+        fallbackPollInFlight = false;
+      }
+    };
+
+    const startFallbackPolling = () => {
+      if (fallbackTimer !== null || disposed) {
+        return;
+      }
+
+      fallbackActivatedAtMs = Date.now();
+      fallbackPollingActive = true;
+      fallbackBaselineReadyRef.current = false;
+      fallbackKnownNotificationIdsRef.current.clear();
+      showFallbackNotice();
+      void pollFallbackNotifications();
+      fallbackTimer = window.setInterval(() => {
+        void pollFallbackNotifications();
+      }, FALLBACK_POLL_INTERVAL_MS);
+    };
+
+    const stopFallbackPolling = () => {
+      fallbackPollingActive = false;
+      if (fallbackTimer !== null) {
+        window.clearInterval(fallbackTimer);
+        fallbackTimer = null;
+      }
+      fallbackPollInFlight = false;
+    };
+
+    connection.on(REALTIME_USER_NOTIFICATION_CREATED_EVENT, (notification: RealtimeUserNotification) => {
+      showIncomingNotification(notification, 'created');
+    });
 
     const start = async () => {
       if (disposed) {
@@ -315,10 +438,12 @@ export function RealtimeNotificationToasts({
 
       try {
         await connection.start();
+        stopFallbackPolling();
       } catch (error) {
         if (!disposed) {
           if (isExpectedRealtimeStartupError(error)) {
             console.debug('Realtime notifications are unavailable; retrying in background.', error);
+            startFallbackPolling();
           } else {
             console.error('Realtime notifications failed to start.', error);
           }
@@ -328,6 +453,7 @@ export function RealtimeNotificationToasts({
     };
 
     connection.onreconnected(() => {
+      stopFallbackPolling();
       emitUserNotificationsChanged({ source: 'realtime', reason: 'reconnected' });
     });
 
@@ -340,6 +466,7 @@ export function RealtimeNotificationToasts({
         console.error('Realtime notifications connection closed.', error);
       }
 
+      startFallbackPolling();
       retryTimer = window.setTimeout(start, 5000);
     });
 
@@ -350,6 +477,7 @@ export function RealtimeNotificationToasts({
       if (retryTimer !== null) {
         window.clearTimeout(retryTimer);
       }
+      stopFallbackPolling();
       connection.off(REALTIME_USER_NOTIFICATION_CREATED_EVENT);
       if (connection.state !== HubConnectionState.Disconnected) {
         void stopNotificationsHubConnection(connection);
