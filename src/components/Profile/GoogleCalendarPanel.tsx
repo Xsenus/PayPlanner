@@ -10,7 +10,7 @@ import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 
 type Props = {
-  isAdmin?: boolean;
+  canUseEmployeeCalendarMode?: boolean;
 };
 
 const formatDateTime = (value?: string | null) => {
@@ -26,7 +26,7 @@ const formatDateTime = (value?: string | null) => {
 
 const toDateInputValue = (value?: string | null) => (value ? value.slice(0, 10) : '');
 
-export function GoogleCalendarPanel({ isAdmin = false }: Props) {
+export function GoogleCalendarPanel({ canUseEmployeeCalendarMode = false }: Props) {
   const toast = useToast();
   const { confirm } = useDialog();
   const popupRef = useRef<Window | null>(null);
@@ -195,7 +195,7 @@ export function GoogleCalendarPanel({ isAdmin = false }: Props) {
             Google Calendar
           </div>
           <div className="mt-1 text-sm text-slate-500">
-            Задачи CRM синхронизируются с календарём текущего пользователя. Для администратора можно вести отдельные календари по сотрудникам.
+            Задачи CRM синхронизируются с календарём текущего пользователя. Если роль видит календари сотрудников, можно вести отдельные календари по сотрудникам.
           </div>
         </div>
         <button
@@ -282,9 +282,9 @@ export function GoogleCalendarPanel({ isAdmin = false }: Props) {
                 <option value="disabled">Остановлена</option>
               </select>
             </label>
-            {isAdmin ? (
+            {canUseEmployeeCalendarMode ? (
               <label className="rounded-2xl border border-slate-200 px-4 py-3 text-sm">
-                <span className="font-semibold text-slate-700">Режим администратора</span>
+                <span className="font-semibold text-slate-700">Режим календарей</span>
                 <select
                   value={form.calendarMode}
                   onChange={(event) => setForm((current) => ({ ...current, calendarMode: event.target.value }))}

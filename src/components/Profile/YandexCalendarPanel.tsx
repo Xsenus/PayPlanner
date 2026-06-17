@@ -10,7 +10,7 @@ import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 
 type Props = {
-  isAdmin?: boolean;
+  canUseEmployeeCalendarMode?: boolean;
 };
 
 const formatDateTime = (value?: string | null) => {
@@ -27,7 +27,7 @@ const formatDateTime = (value?: string | null) => {
 
 const toDateInputValue = (value?: string | null) => (value ? value.slice(0, 10) : '');
 
-export function YandexCalendarPanel({ isAdmin = false }: Props) {
+export function YandexCalendarPanel({ canUseEmployeeCalendarMode = false }: Props) {
   const toast = useToast();
   const { confirm } = useDialog();
   const popupRef = useRef<Window | null>(null);
@@ -283,9 +283,9 @@ export function YandexCalendarPanel({ isAdmin = false }: Props) {
                 <option value="disabled">Остановлена</option>
               </select>
             </label>
-            {isAdmin ? (
+            {canUseEmployeeCalendarMode ? (
               <label className="rounded-2xl border border-slate-200 px-4 py-3 text-sm">
-                <span className="font-semibold text-slate-700">Режим администратора</span>
+                <span className="font-semibold text-slate-700">Режим календарей</span>
                 <select
                   value={form.calendarMode}
                   onChange={(event) => setForm((current) => ({ ...current, calendarMode: event.target.value }))}

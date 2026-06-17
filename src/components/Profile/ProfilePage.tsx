@@ -11,6 +11,7 @@ import {
 import { apiService } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
+import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
@@ -227,6 +228,7 @@ export function ProfilePage() {
   const toast = useToast();
 
   const [profile, setProfile] = useState<User | null>(null);
+  const permissions = useRolePermissions(profile?.role?.id);
   const [publicSettings, setPublicSettings] = useState<AuthProviderPublicSettings>(EMPTY_PUBLIC_SETTINGS);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [timeZoneId, setTimeZoneId] = useState(() => normalizeUserTimeZoneId());
@@ -244,6 +246,10 @@ export function ProfilePage() {
   const [pendingPhotoCrop, setPendingPhotoCrop] = useState<PendingPhotoCropState | null>(null);
   const [profilePhotoFailed, setProfilePhotoFailed] = useState(false);
   const [activeSectionTab, setActiveSectionTab] = useState<ProfileSectionTab>('profile');
+  const canUseEmployeeCalendarMode = profile?.role?.name === 'admin'
+    || permissions.calendar.viewScope === 'all'
+    || permissions.calendar.viewScope === 'department'
+    || permissions.calendar.viewScope === 'specific';
 
   const popupRef = useRef<Window | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -887,8 +893,8 @@ export function ProfilePage() {
 
         {activeSectionTab === 'calendars' ? (
           <div className="grid gap-6 xl:grid-cols-2" role="tabpanel" aria-label="Календари профиля">
-            <GoogleCalendarPanel isAdmin={profile?.role?.name === 'admin'} />
-            <YandexCalendarPanel isAdmin={profile?.role?.name === 'admin'} />
+            <GoogleCalendarPanel canUseEmployeeCalendarMode={canUseEmployeeCalendarMode} />
+            <YandexCalendarPanel canUseEmployeeCalendarMode={canUseEmployeeCalendarMode} />
           </div>
         ) : null}
 
