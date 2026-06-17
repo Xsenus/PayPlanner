@@ -13,7 +13,13 @@ import { emitUserNotificationsChanged } from '../../utils/userNotifications';
 
 type RealtimeNotificationToastsProps = {
   userId: number;
-  onOpenTask: (taskId: number) => void;
+  onOpenTask?: (taskId: number) => void;
+  onOpenCase?: (caseId: number) => void;
+  onOpenPayment?: (paymentId: number) => void;
+  onOpenInvoice?: (invoiceId: number) => void;
+  onOpenAct?: (actId: number) => void;
+  onOpenContract?: (contractId: number) => void;
+  onOpenNotifications?: () => void;
 };
 
 function buildToastDescription(notification: RealtimeUserNotification): string {
@@ -21,15 +27,185 @@ function buildToastDescription(notification: RealtimeUserNotification): string {
   return value.length > 220 ? `${value.slice(0, 217)}...` : value;
 }
 
-export function RealtimeNotificationToasts({ userId, onOpenTask }: RealtimeNotificationToastsProps) {
+const REALTIME_TOAST_TYPES = new Set([
+  'taskAssigned',
+  'taskReminder',
+  'taskChanged',
+  'taskComment',
+  'taskCompleted',
+  'taskScheduleConflict',
+  'taskApprovalRequested',
+  'taskApproved',
+  'taskRevisionRequested',
+  'caseInactivityControl',
+  'caseAccessRequested',
+  'caseAccessResolved',
+  'caseCourtEvent',
+  'courtHearing',
+  'courtStatusChanged',
+  'courtDecisionPublished',
+  'courtSyncFailed',
+  'caseProceduralDeadline',
+  'caseDocument',
+  'caseInactivityReminder',
+  'paymentAdvanceReviewRequired',
+  'paymentAdvanceReviewEscalation',
+  'systemAdminWarning',
+]);
+
+const HIGH_PRIORITY_TYPES = new Set([
+  'taskAssigned',
+  'taskReminder',
+  'taskScheduleConflict',
+  'taskApprovalRequested',
+  'taskRevisionRequested',
+  'caseInactivityControl',
+  'courtHearing',
+  'courtStatusChanged',
+  'courtDecisionPublished',
+  'courtSyncFailed',
+  'caseProceduralDeadline',
+  'caseInactivityReminder',
+  'paymentAdvanceReviewRequired',
+  'paymentAdvanceReviewEscalation',
+  'systemAdminWarning',
+]);
+
+function shouldShowRealtimeToast(notification: RealtimeUserNotification): boolean {
+  return REALTIME_TOAST_TYPES.has(notification.type);
+}
+
+function resolveToastVariant(notification: RealtimeUserNotification): 'info' | 'success' | 'error' {
+  if (notification.type === 'taskCompleted' || notification.type === 'taskApproved') {
+    return 'success';
+  }
+
+  if (
+    notification.tone === 'rose' ||
+    notification.type === 'courtSyncFailed' ||
+    notification.type === 'paymentAdvanceReviewRequired' ||
+    notification.type === 'paymentAdvanceReviewEscalation' ||
+    notification.type === 'systemAdminWarning'
+  ) {
+    return 'error';
+  }
+
+  return 'info';
+}
+
+function resolveToastDuration(notification: RealtimeUserNotification): number {
+  return HIGH_PRIORITY_TYPES.has(notification.type) ? 16000 : 12000;
+}
+
+type RealtimeToastAction = {
+  label: string;
+  run: () => void;
+};
+
+type RealtimeToastHandlers = Omit<RealtimeNotificationToastsProps, 'userId' | 'onOpenNotifications'> & {
+  onOpenNotifications: () => void;
+};
+
+function resolveToastAction(
+  notification: RealtimeUserNotification,
+  handlers: RealtimeToastHandlers,
+): RealtimeToastAction {
+  if (notification.taskJournalItemId && handlers.onOpenTask) {
+    return {
+      label: 'Открыть задачу',
+      run: () => handlers.onOpenTask?.(notification.taskJournalItemId!),
+    };
+  }
+
+  if (notification.objectId) {
+    switch (notification.objectType) {
+      case 'case':
+      case 'client-case':
+        if (handlers.onOpenCase) {
+          return {
+            label: 'Открыть дело',
+            run: () => handlers.onOpenCase?.(notification.objectId!),
+          };
+        }
+        break;
+      case 'payment':
+        if (handlers.onOpenPayment) {
+          return {
+            label: 'Открыть платеж',
+            run: () => handlers.onOpenPayment?.(notification.objectId!),
+          };
+        }
+        break;
+      case 'invoice':
+      case 'account':
+        if (handlers.onOpenInvoice) {
+          return {
+            label: 'Открыть счет',
+            run: () => handlers.onOpenInvoice?.(notification.objectId!),
+          };
+        }
+        break;
+      case 'act':
+        if (handlers.onOpenAct) {
+          return {
+            label: 'Открыть акт',
+            run: () => handlers.onOpenAct?.(notification.objectId!),
+          };
+        }
+        break;
+      case 'contract':
+        if (handlers.onOpenContract) {
+          return {
+            label: 'Открыть договор',
+            run: () => handlers.onOpenContract?.(notification.objectId!),
+          };
+        }
+        break;
+      default:
+        break;
+    }
+  }
+
+  return {
+    label: 'Открыть уведомления',
+    run: handlers.onOpenNotifications,
+  };
+}
+
+export function RealtimeNotificationToasts({
+  userId,
+  onOpenTask,
+  onOpenCase,
+  onOpenPayment,
+  onOpenInvoice,
+  onOpenAct,
+  onOpenContract,
+  onOpenNotifications,
+}: RealtimeNotificationToastsProps) {
   const toast = useToast();
   const connectionRef = useRef<HubConnection | null>(null);
   const shownNotificationIdsRef = useRef<Set<number>>(new Set());
-  const openTaskRef = useRef(onOpenTask);
+  const handlersRef = useRef({
+    onOpenTask,
+    onOpenCase,
+    onOpenPayment,
+    onOpenInvoice,
+    onOpenAct,
+    onOpenContract,
+    onOpenNotifications: onOpenNotifications ?? (() => undefined),
+  });
 
   useEffect(() => {
-    openTaskRef.current = onOpenTask;
-  }, [onOpenTask]);
+    handlersRef.current = {
+      onOpenTask,
+      onOpenCase,
+      onOpenPayment,
+      onOpenInvoice,
+      onOpenAct,
+      onOpenContract,
+      onOpenNotifications: onOpenNotifications ?? (() => undefined),
+    };
+  }, [onOpenAct, onOpenCase, onOpenContract, onOpenInvoice, onOpenNotifications, onOpenPayment, onOpenTask]);
 
   useEffect(() => {
     if (!userId || !canStartNotificationsHubConnection()) {
@@ -56,17 +232,18 @@ export function RealtimeNotificationToasts({ userId, onOpenTask }: RealtimeNotif
         }
         shownNotificationIdsRef.current.add(notification.id);
 
-        if (notification.type !== 'taskAssigned' || !notification.taskJournalItemId) {
+        if (!shouldShowRealtimeToast(notification)) {
           return;
         }
 
+        const action = resolveToastAction(notification, handlersRef.current);
         toast.showToast({
-          title: notification.title || 'Новая задача',
+          title: notification.title || 'Уведомление',
           description: buildToastDescription(notification),
-          variant: 'info',
-          durationMs: 12000,
-          actionLabel: 'Открыть задачу',
-          onAction: () => openTaskRef.current(notification.taskJournalItemId!),
+          variant: resolveToastVariant(notification),
+          durationMs: resolveToastDuration(notification),
+          actionLabel: action.label,
+          onAction: action.run,
         });
       },
     );

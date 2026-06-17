@@ -96,6 +96,135 @@ describe('RealtimeNotificationToasts', () => {
     expect(openTask).toHaveBeenCalledWith(123);
   });
 
+  it('shows task change toast and opens the task from action', async () => {
+    const openTask = vi.fn();
+    render(<RealtimeNotificationToasts userId={5} onOpenTask={openTask} />);
+
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.({
+        id: 44,
+        recipientUserId: 5,
+        type: 'taskChanged',
+        eventKey: 'task:125:changed',
+        title: 'Изменена задача',
+        bodyPreview: 'Срок задачи перенесен.',
+        tone: 'blue',
+        objectType: 'task',
+        objectId: 125,
+        taskJournalItemId: 125,
+        createdAt: '2026-05-25T10:00:00Z',
+      });
+    });
+
+    expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Изменена задача',
+      variant: 'info',
+      durationMs: 12000,
+      actionLabel: 'Открыть задачу',
+    }));
+
+    const toastOptions = toastMock.showToast.mock.calls[0][0] as { onAction: () => void };
+    act(() => toastOptions.onAction());
+
+    expect(openTask).toHaveBeenCalledWith(125);
+  });
+
+  it('shows payment review toast and opens the payment from action', async () => {
+    const openPayment = vi.fn();
+    render(<RealtimeNotificationToasts userId={5} onOpenPayment={openPayment} />);
+
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.({
+        id: 45,
+        recipientUserId: 5,
+        type: 'paymentAdvanceReviewRequired',
+        eventKey: 'payment:321:advance-review',
+        title: 'Проверьте платеж',
+        bodyPreview: 'По платежу требуется проверка аванса.',
+        tone: 'rose',
+        objectType: 'payment',
+        objectId: 321,
+        taskJournalItemId: null,
+        createdAt: '2026-05-25T10:00:00Z',
+      });
+    });
+
+    expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Проверьте платеж',
+      variant: 'error',
+      durationMs: 16000,
+      actionLabel: 'Открыть платеж',
+    }));
+
+    const toastOptions = toastMock.showToast.mock.calls[0][0] as { onAction: () => void };
+    act(() => toastOptions.onAction());
+
+    expect(openPayment).toHaveBeenCalledWith(321);
+  });
+
+  it('falls back to notification center when a supported toast has no linked handler', async () => {
+    const openNotifications = vi.fn();
+    render(<RealtimeNotificationToasts userId={5} onOpenNotifications={openNotifications} />);
+
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.({
+        id: 46,
+        recipientUserId: 5,
+        type: 'systemAdminWarning',
+        eventKey: 'system:warning',
+        title: 'Важное системное уведомление',
+        bodyPreview: 'Проверьте настройки интеграции.',
+        tone: 'rose',
+        objectType: 'system',
+        objectId: null,
+        taskJournalItemId: null,
+        createdAt: '2026-05-25T10:00:00Z',
+      });
+    });
+
+    expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Важное системное уведомление',
+      variant: 'error',
+      durationMs: 16000,
+      actionLabel: 'Открыть уведомления',
+    }));
+
+    const toastOptions = toastMock.showToast.mock.calls[0][0] as { onAction: () => void };
+    act(() => toastOptions.onAction());
+
+    expect(openNotifications).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not show toast for notification types that are not realtime-worthy', async () => {
+    render(<RealtimeNotificationToasts userId={5} onOpenTask={vi.fn()} />);
+
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.({
+        id: 47,
+        recipientUserId: 5,
+        type: 'registrationApproved',
+        eventKey: 'registration:approved',
+        title: 'Регистрация подтверждена',
+        bodyPreview: 'Аккаунт активирован.',
+        tone: 'emerald',
+        objectType: 'user',
+        objectId: 5,
+        taskJournalItemId: null,
+        createdAt: '2026-05-25T10:00:00Z',
+      });
+    });
+
+    expect(toastMock.showToast).not.toHaveBeenCalled();
+  });
+
   it('does not show task assignment toast for another user', async () => {
     render(<RealtimeNotificationToasts userId={5} onOpenTask={vi.fn()} />);
     await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));

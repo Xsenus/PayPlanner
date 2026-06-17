@@ -1760,6 +1760,12 @@ function AppContent() {
         <RealtimeNotificationToasts
           userId={user.id}
           onOpenTask={(taskId) => openTaskDetail(taskId, { returnTo: activeTab })}
+          onOpenCase={openRelatedCase}
+          onOpenPayment={(paymentId) => openPaymentPage(paymentId)}
+          onOpenInvoice={(invoiceId) => openInvoicePage(invoiceId)}
+          onOpenAct={(actId) => openActDetail(actId, { tab: 'notifications' })}
+          onOpenContract={(contractId) => openContractDetail(contractId, { returnTo: activeTab })}
+          onOpenNotifications={handleOpenNotifications}
         />
         <DoubleHorizontalScrollbars />
         <Navigation activeTab={activeTab} onTabChange={handleTabChange} />
