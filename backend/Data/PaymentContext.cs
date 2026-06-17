@@ -2698,7 +2698,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.EventKey).HasMaxLength(240).IsRequired();
             entity.Property(e => e.Channel).HasMaxLength(32).IsRequired();
             entity.Property(e => e.SenderName).HasMaxLength(200).IsRequired();
-            entity.Property(e => e.RecipientAddress).HasMaxLength(320).IsRequired();
+            entity.Property(e => e.RecipientAddress).HasMaxLength(2048).IsRequired();
             entity.Property(e => e.Subject).HasMaxLength(300).IsRequired();
             entity.Property(e => e.BodyPreview).HasMaxLength(1000).IsRequired();
             entity.Property(e => e.Status).HasMaxLength(32).IsRequired();
@@ -2793,6 +2793,34 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.NotificationSenderId, e.UserId })
                 .HasDatabaseName("IX_NotificationBotSubscriptions_Sender_User");
             entity.HasIndex(e => e.ChatId).HasDatabaseName("IX_NotificationBotSubscriptions_ChatId");
+        });
+
+        modelBuilder.Entity<UserPushSubscription>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Endpoint).HasMaxLength(2048).IsRequired();
+            entity.Property(e => e.P256dh).HasMaxLength(512).IsRequired();
+            entity.Property(e => e.Auth).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.Browser).HasMaxLength(120).IsRequired();
+            entity.Property(e => e.Platform).HasMaxLength(120).IsRequired();
+            entity.Property(e => e.DeviceName).HasMaxLength(160).IsRequired();
+            entity.Property(e => e.UserAgent).HasMaxLength(512).IsRequired();
+            entity.Property(e => e.LastError).HasMaxLength(1000);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => e.Endpoint)
+                .IsUnique()
+                .HasDatabaseName("IX_UserPushSubscriptions_Endpoint");
+            entity.HasIndex(e => new { e.UserId, e.IsActive, e.LastSeenAt })
+                .HasDatabaseName("IX_UserPushSubscriptions_User_Active_LastSeen");
+            entity.HasIndex(e => e.LastErrorAt)
+                .HasDatabaseName("IX_UserPushSubscriptions_LastErrorAt");
         });
 
         modelBuilder.Entity<StickyNoteBoard>(entity =>
@@ -3532,6 +3560,7 @@ public class PaymentContext : DbContext
     public DbSet<UserNotification> UserNotifications { get; set; }
     public DbSet<NotificationSender> NotificationSenders { get; set; }
     public DbSet<NotificationBotSubscription> NotificationBotSubscriptions { get; set; }
+    public DbSet<UserPushSubscription> UserPushSubscriptions { get; set; }
 
     /// <summary>
     /// Пользовательские настройки.

@@ -1103,6 +1103,63 @@ describe('apiService auth handling', () => {
     expect(String(url)).toContain('/notifications/channels');
   });
 
+  it('manages user web push subscriptions', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url.includes('/notifications/inbox/push/public-key')) {
+        return new Response(JSON.stringify({ enabled: true, ready: true, publicKey: 'public-key' }), {
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      if (url.includes('/notifications/inbox/push/subscriptions/revoke')) {
+        expect(init?.method).toBe('POST');
+        expect(init?.body).toBe(JSON.stringify({ endpoint: 'https://push.example/subscription' }));
+        return new Response(null, { status: 204 });
+      }
+
+      if (url.includes('/notifications/inbox/push/subscriptions') && init?.method === 'POST') {
+        expect(init.body).toBe(JSON.stringify({
+          endpoint: 'https://push.example/subscription',
+          keys: {
+            p256dh: 'p256dh',
+            auth: 'auth',
+          },
+        }));
+        return new Response(JSON.stringify({
+          id: 7,
+          endpoint: 'https://push.example/subscription',
+          browser: 'Chrome',
+          platform: 'Windows',
+          deviceName: 'Chrome / Windows',
+          isActive: true,
+          createdAt: '2026-06-17T08:00:00Z',
+          updatedAt: '2026-06-17T08:00:00Z',
+        }), {
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      return new Response(JSON.stringify([]), {
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(apiService.getWebPushPublicKey()).resolves.toMatchObject({ ready: true });
+    await expect(apiService.getUserPushSubscriptions()).resolves.toEqual([]);
+    await expect(apiService.upsertUserPushSubscription({
+      endpoint: 'https://push.example/subscription',
+      keys: {
+        p256dh: 'p256dh',
+        auth: 'auth',
+      },
+    })).resolves.toMatchObject({ id: 7, isActive: true });
+    await expect(apiService.revokeUserPushSubscriptionByEndpoint('https://push.example/subscription')).resolves.toBeUndefined();
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
   it('emits a session-expired event when the API returns 401', async () => {
     const listener = vi.fn();
     window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, listener);

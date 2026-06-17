@@ -46,6 +46,29 @@ public class TelegramNotificationSettingsDto
     public int LinkedUsersCount { get; set; }
 }
 
+public class WebPushPublicKeyDto
+{
+    public bool Enabled { get; set; }
+    public bool Ready { get; set; }
+    public string PublicKey { get; set; } = string.Empty;
+}
+
+public class UserPushSubscriptionDto
+{
+    public int Id { get; set; }
+    public string Endpoint { get; set; } = string.Empty;
+    public string Browser { get; set; } = string.Empty;
+    public string Platform { get; set; } = string.Empty;
+    public string DeviceName { get; set; } = string.Empty;
+    public bool IsActive { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; }
+    public DateTime? LastSeenAt { get; set; }
+    public DateTime? RevokedAt { get; set; }
+    public DateTime? LastErrorAt { get; set; }
+    public string? LastError { get; set; }
+}
+
 public class NotificationDeliveryDto
 {
     public int Id { get; set; }

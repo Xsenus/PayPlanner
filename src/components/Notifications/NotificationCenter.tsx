@@ -15,7 +15,9 @@ import {
   Send,
   Settings2,
   Save,
+  Smartphone,
   Trash2,
+  type LucideIcon,
 } from 'lucide-react';
 import {
   apiService,
@@ -40,6 +42,12 @@ import {
   type UserNotificationPreferenceChannel,
   type UserNotificationTypePreferences,
 } from '../../utils/userNotificationPreferences';
+import {
+  getWebPushStatus,
+  subscribeCurrentDeviceToWebPush,
+  unsubscribeCurrentDeviceFromWebPush,
+  type WebPushStatus,
+} from '../../services/webPushNotifications';
 
 type NotificationStatusFilter = NonNullable<UserNotificationsQuery['status']>;
 type NotificationTaskRoleFilter = 'all' | 'assignee' | 'author' | 'observer' | 'approver';
@@ -69,10 +77,11 @@ const TASK_ROLE_FILTERS: Array<{ value: NotificationTaskRoleFilter; label: strin
   { value: 'approver', label: 'Согласующий' },
 ];
 
-const CHANNEL_OPTIONS: Array<{ value: UserNotificationPreferenceChannel; label: string; Icon: typeof Monitor }> = [
+const CHANNEL_OPTIONS: Array<{ value: UserNotificationPreferenceChannel; label: string; Icon: LucideIcon }> = [
   { value: 'inApp', label: 'Центр', Icon: Monitor },
   { value: 'email', label: 'Email', Icon: Mail },
   { value: 'telegram', label: 'Telegram', Icon: Send },
+  { value: 'webPush', label: 'Push', Icon: Smartphone },
 ];
 
 const EMPTY_PAGE: PagedResult<UserNotificationDto> = {
@@ -150,6 +159,9 @@ export function NotificationCenter({
   const [preferences, setPreferences] = useState<UserNotificationTypePreferences>(DEFAULT_USER_NOTIFICATION_TYPE_PREFERENCES);
   const [preferencesLoading, setPreferencesLoading] = useState(false);
   const [preferencesSaving, setPreferencesSaving] = useState(false);
+  const [webPushStatus, setWebPushStatus] = useState<WebPushStatus | null>(null);
+  const [webPushLoading, setWebPushLoading] = useState(false);
+  const [webPushBusy, setWebPushBusy] = useState(false);
   const pageSelectionRef = useRef<HTMLInputElement | null>(null);
 
   const totalPages = Math.max(1, Math.ceil(itemsPage.total / itemsPage.pageSize));
@@ -161,6 +173,10 @@ export function NotificationCenter({
   const enabledTypesCount = useMemo(
     () => types.filter((item) => isUserNotificationTypeEnabled(preferences, item.key)).length,
     [preferences, types],
+  );
+  const activePushSubscriptionsCount = useMemo(
+    () => webPushStatus?.subscriptions.filter((item) => item.isActive).length ?? 0,
+    [webPushStatus],
   );
   const selectedEmployeeId = employeeId === 'all' ? undefined : Number(employeeId);
   const selectedClientId = clientId === 'all' ? undefined : Number(clientId);
@@ -257,6 +273,24 @@ export function NotificationCenter({
       alive = false;
     };
   }, [knownTypeKeys]);
+
+  const refreshWebPushStatus = useCallback(async () => {
+    try {
+      setWebPushLoading(true);
+      setWebPushStatus(await getWebPushStatus());
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось загрузить статус push-уведомлений.');
+      setWebPushStatus(null);
+    } finally {
+      setWebPushLoading(false);
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    if (preferencesOpen) {
+      void refreshWebPushStatus();
+    }
+  }, [preferencesOpen, refreshWebPushStatus]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -594,6 +628,32 @@ export function NotificationCenter({
     }
   };
 
+  const handleEnableWebPush = async () => {
+    try {
+      setWebPushBusy(true);
+      await subscribeCurrentDeviceToWebPush();
+      await refreshWebPushStatus();
+      toast.success('Push-уведомления включены на этом устройстве.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось включить push-уведомления.');
+    } finally {
+      setWebPushBusy(false);
+    }
+  };
+
+  const handleDisableWebPush = async () => {
+    try {
+      setWebPushBusy(true);
+      await unsubscribeCurrentDeviceFromWebPush();
+      await refreshWebPushStatus();
+      toast.success('Push-уведомления отключены на этом устройстве.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось отключить push-уведомления.');
+    } finally {
+      setWebPushBusy(false);
+    }
+  };
+
   const handleResetFilters = () => {
     setStatus('active');
     setType('all');
@@ -847,6 +907,62 @@ export function NotificationCenter({
               <Save className={`h-4 w-4 ${preferencesSaving ? 'animate-pulse' : ''}`} />
               Сохранить
             </button>
+          </div>
+
+          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                  <Smartphone className="h-4 w-4 text-blue-600" />
+                  Push-уведомления на устройстве
+                </div>
+                <p className="mt-1 text-xs leading-5 text-slate-500">
+                  {webPushLoading
+                    ? 'Проверяем подключение устройства...'
+                    : webPushStatus?.message ?? 'Статус устройства ещё не проверен.'}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
+                  <span className="rounded-full bg-white px-2 py-0.5">
+                    Активных устройств: {activePushSubscriptionsCount}
+                  </span>
+                  {webPushStatus?.permission ? (
+                    <span className="rounded-full bg-white px-2 py-0.5">
+                      Разрешение браузера: {webPushStatus.permission}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => void refreshWebPushStatus()}
+                  disabled={webPushLoading || webPushBusy}
+                  className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${webPushLoading ? 'animate-spin' : ''}`} />
+                  Проверить
+                </button>
+                {webPushStatus?.status === 'subscribed' ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleDisableWebPush()}
+                    disabled={webPushLoading || webPushBusy}
+                    className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-red-200 bg-white px-3 text-xs font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Отключить это устройство
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void handleEnableWebPush()}
+                    disabled={webPushLoading || webPushBusy || webPushStatus?.status === 'unsupported' || webPushStatus?.status === 'server-disabled' || webPushStatus?.status === 'server-not-ready' || webPushStatus?.status === 'permission-denied'}
+                    className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 text-xs font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Включить на этом устройстве
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
 
           {preferencesLoading ? (

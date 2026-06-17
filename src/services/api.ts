@@ -851,6 +851,7 @@ export interface UpdateStickyNoteLayoutPayload {
 }
 
 export type NotificationChannel = 'email' | 'telegram';
+export type UserNotificationDeliveryChannel = 'inApp' | 'email' | 'telegram' | 'webPush';
 
 export interface NotificationChannelDto {
   key: string;
@@ -907,6 +908,39 @@ export interface TelegramNotificationSettingsDto {
   botTokenSet: boolean;
   botUsername: string;
   linkedUsersCount: number;
+}
+
+export interface WebPushPublicKeyDto {
+  enabled: boolean;
+  ready: boolean;
+  publicKey: string;
+}
+
+export interface UserPushSubscriptionDto {
+  id: number;
+  endpoint: string;
+  browser: string;
+  platform: string;
+  deviceName: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  lastSeenAt?: string | null;
+  revokedAt?: string | null;
+  lastErrorAt?: string | null;
+  lastError?: string | null;
+}
+
+export interface UpsertPushSubscriptionRequest {
+  endpoint: string;
+  keys: {
+    p256dh: string;
+    auth: string;
+  };
+  browser?: string | null;
+  platform?: string | null;
+  deviceName?: string | null;
+  userAgent?: string | null;
 }
 
 export interface EmailNotificationSenderDto {
@@ -1014,7 +1048,7 @@ export interface UserNotificationTypeDto {
   description: string;
   tone: string;
   priority: string;
-  channels: string[];
+  channels: UserNotificationDeliveryChannel[];
   deduplicate: boolean;
   digestible: boolean;
 }
@@ -3888,6 +3922,34 @@ export class ApiService {
     return this.request<UserNotificationBulkActionResultDto>('/notifications/inbox/bulk/delete', {
       method: 'POST',
       body: JSON.stringify({ ids }),
+    });
+  }
+
+  async getWebPushPublicKey() {
+    return this.request<WebPushPublicKeyDto>('/notifications/inbox/push/public-key');
+  }
+
+  async getUserPushSubscriptions() {
+    return this.request<UserPushSubscriptionDto[]>('/notifications/inbox/push/subscriptions');
+  }
+
+  async upsertUserPushSubscription(payload: UpsertPushSubscriptionRequest) {
+    return this.request<UserPushSubscriptionDto>('/notifications/inbox/push/subscriptions', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async revokeUserPushSubscription(id: number) {
+    return this.request<void>(`/notifications/inbox/push/subscriptions/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async revokeUserPushSubscriptionByEndpoint(endpoint: string) {
+    return this.request<void>('/notifications/inbox/push/subscriptions/revoke', {
+      method: 'POST',
+      body: JSON.stringify({ endpoint }),
     });
   }
 

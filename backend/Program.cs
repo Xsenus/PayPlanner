@@ -98,6 +98,7 @@ builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<ITelegramNotificationService, TelegramNotificationService>();
 builder.Services.AddScoped<ITelegramBotUpdateService, TelegramBotUpdateService>();
 builder.Services.AddScoped<IRealtimeNotificationPublisher, SignalRRealtimeNotificationPublisher>();
+builder.Services.AddScoped<IWebPushNotificationService, WebPushNotificationService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<ExternalAuthService>();

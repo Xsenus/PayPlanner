@@ -30,11 +30,11 @@ public class NotificationServiceTests
         Assert.Contains(channels, item => item.Key == NotificationChannels.InApp && item.IsEnabled && item.IsSendable && !item.IsFuture);
         Assert.Contains(channels, item => item.Key == NotificationChannels.Email && item.IsEnabled && item.IsSendable && item.RequiresProvider);
         Assert.Contains(channels, item => item.Key == NotificationChannels.Telegram && item.IsEnabled && item.IsSendable && item.RequiresProvider);
-        Assert.Contains(channels, item => item.Key == NotificationChannels.WebPush && !item.IsEnabled && !item.IsSendable && item.IsFuture);
+        Assert.Contains(channels, item => item.Key == NotificationChannels.WebPush && item.IsEnabled && item.IsSendable && !item.RequiresProvider && !item.IsFuture);
         Assert.Contains(channels, item => item.Key == NotificationChannels.Sms && !item.IsEnabled && !item.IsSendable && item.IsFuture);
         Assert.Contains(channels, item => item.Key == NotificationChannels.Max && !item.IsEnabled && !item.IsSendable && item.IsFuture);
-        Assert.Equal(new[] { NotificationChannels.InApp, NotificationChannels.Email, NotificationChannels.Telegram }, NotificationChannels.All);
-        Assert.Equal(new[] { NotificationChannels.WebPush, NotificationChannels.Sms, NotificationChannels.Max }, NotificationChannels.Future);
+        Assert.Equal(new[] { NotificationChannels.InApp, NotificationChannels.Email, NotificationChannels.Telegram, NotificationChannels.WebPush }, NotificationChannels.All);
+        Assert.Equal(new[] { NotificationChannels.Sms, NotificationChannels.Max }, NotificationChannels.Future);
     }
 
     [Fact]
@@ -584,6 +584,118 @@ public class NotificationServiceTests
         Assert.Equal(UserNotificationTypes.TaskAssigned, published.Type);
         Assert.Equal(task.Id, published.TaskJournalItemId);
         Assert.True(published.Id > 0);
+    }
+
+    [Fact]
+    public async Task NotifyTaskAssignedAsync_SendsWebPushWhenChannelEnabled()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db, "task-author-web-push@example.com");
+        var assignee = new User
+        {
+            Email = "new-assignee-web-push@example.com",
+            FullName = "Web Push Assignee",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(assignee);
+        await db.SaveChangesAsync();
+
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Client case",
+            Title = "Prepare push response",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "new"
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            webPushNotificationService: webPush);
+
+        await service.NotifyTaskAssignedAsync(task, author.FullName, author.Id);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        var pushed = Assert.Single(webPush.Notifications);
+        Assert.Equal(notification.Id, pushed.Id);
+        Assert.Equal(assignee.Id, pushed.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.TaskAssigned, pushed.Type);
+    }
+
+    [Fact]
+    public async Task NotifyTaskAssignedAsync_DoesNotSendWebPushWhenChannelDisabled()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db, "task-author-web-push-disabled@example.com");
+        var assignee = new User
+        {
+            Email = "new-assignee-web-push-disabled@example.com",
+            FullName = "Web Push Disabled Assignee",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(assignee);
+        await db.SaveChangesAsync();
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = assignee.Id,
+            Key = UserNotificationPreferenceSettings.SettingKey,
+            Value = JsonSerializer.Serialize(new
+            {
+                disabledChannels = new Dictionary<string, string[]>
+                {
+                    [UserNotificationTypes.TaskAssigned] = [NotificationChannels.WebPush]
+                }
+            }),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Client case",
+            Title = "Prepare disabled push response",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "new"
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            webPushNotificationService: webPush);
+
+        await service.NotifyTaskAssignedAsync(task, author.FullName, author.Id);
+
+        Assert.Empty(webPush.Notifications);
+        Assert.Equal(UserNotificationTypes.TaskAssigned, (await db.UserNotifications.SingleAsync()).Type);
     }
 
     [Fact]
@@ -1447,7 +1559,8 @@ public class NotificationServiceTests
         PaymentContext db,
         IEmailService emailService,
         ITelegramNotificationService telegramService,
-        IRealtimeNotificationPublisher? realtimePublisher = null)
+        IRealtimeNotificationPublisher? realtimePublisher = null,
+        IWebPushNotificationService? webPushNotificationService = null)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>())
@@ -1459,7 +1572,8 @@ public class NotificationServiceTests
             emailService,
             telegramService,
             NullLogger<NotificationService>.Instance,
-            realtimePublisher);
+            realtimePublisher,
+            webPushNotificationService);
     }
 
     private static ExternalAuthService CreateExternalAuthService(
@@ -1669,6 +1783,22 @@ public class NotificationServiceTests
         public List<UserNotification> Notifications { get; } = [];
 
         public Task PublishUserNotificationAsync(
+            UserNotification notification,
+            CancellationToken cancellationToken = default)
+        {
+            Notifications.Add(notification);
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class RecordingWebPushNotificationService : IWebPushNotificationService
+    {
+        public List<UserNotification> Notifications { get; } = [];
+
+        public WebPushPublicKeyStatus GetPublicKeyStatus()
+            => new(true, true, "public-key");
+
+        public Task SendUserNotificationAsync(
             UserNotification notification,
             CancellationToken cancellationToken = default)
         {

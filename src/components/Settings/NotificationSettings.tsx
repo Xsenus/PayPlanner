@@ -64,6 +64,7 @@ const ROLE_CHANNEL_OPTIONS: Array<{ value: UserNotificationPreferenceChannel; la
   { value: 'inApp', label: 'Центр', Icon: Monitor },
   { value: 'email', label: 'Email', Icon: Mail },
   { value: 'telegram', label: 'Telegram', Icon: Send },
+  { value: 'webPush', label: 'Push', Icon: Smartphone },
 ];
 
 type SenderRoute =

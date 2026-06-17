@@ -43,6 +43,7 @@ public sealed class NotificationService : INotificationService
     private readonly IEmailService _emailService;
     private readonly ITelegramNotificationService _telegramService;
     private readonly IRealtimeNotificationPublisher _realtimePublisher;
+    private readonly IWebPushNotificationService? _webPushNotificationService;
     private readonly ILogger<NotificationService> _logger;
 
     private sealed record NotificationSenderTarget(
@@ -85,13 +86,15 @@ public sealed class NotificationService : INotificationService
         IEmailService emailService,
         ITelegramNotificationService telegramService,
         ILogger<NotificationService> logger,
-        IRealtimeNotificationPublisher? realtimePublisher = null)
+        IRealtimeNotificationPublisher? realtimePublisher = null,
+        IWebPushNotificationService? webPushNotificationService = null)
     {
         _context = context;
         _configuration = configuration;
         _emailService = emailService;
         _telegramService = telegramService;
         _realtimePublisher = realtimePublisher ?? NoOpRealtimeNotificationPublisher.Instance;
+        _webPushNotificationService = webPushNotificationService;
         _logger = logger;
     }
 
@@ -1322,6 +1325,12 @@ public sealed class NotificationService : INotificationService
         _context.UserNotifications.Add(notification);
         await _context.SaveChangesAsync(cancellationToken);
         await _realtimePublisher.PublishUserNotificationAsync(notification, cancellationToken);
+
+        if (_webPushNotificationService is not null
+            && await IsUserNotificationChannelEnabledAsync(recipientUserId, type, NotificationChannels.WebPush, cancellationToken))
+        {
+            await _webPushNotificationService.SendUserNotificationAsync(notification, cancellationToken);
+        }
     }
 
     private async Task<bool> IsUserNotificationTypeEnabledAsync(

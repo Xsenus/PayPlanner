@@ -4854,7 +4854,7 @@ namespace PayPlanner.Api.Migrations
 
                     b.Property<string>("RecipientAddress")
                         .IsRequired()
-                        .HasMaxLength(320)
+                        .HasMaxLength(2048)
                         .HasColumnType("TEXT");
 
                     b.Property<int?>("RecipientUserId")
@@ -7584,6 +7584,91 @@ namespace PayPlanner.Api.Migrations
                     b.ToTable("UserNotifications");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.UserPushSubscription", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Auth")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Browser")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("DeviceName")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Endpoint")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastErrorAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastSeenAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("P256dh")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Platform")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("UserAgent")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Endpoint")
+                        .IsUnique()
+                        .HasDatabaseName("IX_UserPushSubscriptions_Endpoint");
+
+                    b.HasIndex("LastErrorAt")
+                        .HasDatabaseName("IX_UserPushSubscriptions_LastErrorAt");
+
+                    b.HasIndex("UserId", "IsActive", "LastSeenAt")
+                        .HasDatabaseName("IX_UserPushSubscriptions_User_Active_LastSeen");
+
+                    b.ToTable("UserPushSubscriptions");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.UserSetting", b =>
                 {
                     b.Property<int>("Id")
@@ -9299,6 +9384,17 @@ namespace PayPlanner.Api.Migrations
                     b.Navigation("RecipientUser");
 
                     b.Navigation("TaskJournalItem");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.UserPushSubscription", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.UserSetting", b =>

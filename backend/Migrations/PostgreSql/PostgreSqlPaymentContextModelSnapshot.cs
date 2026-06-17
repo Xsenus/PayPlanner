@@ -4963,8 +4963,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.Property<string>("RecipientAddress")
                         .IsRequired()
-                        .HasMaxLength(320)
-                        .HasColumnType("character varying(320)");
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
 
                     b.Property<int?>("RecipientUserId")
                         .HasColumnType("integer");
@@ -7764,6 +7764,93 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("UserNotifications");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.UserPushSubscription", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Auth")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Browser")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("DeviceName")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<string>("Endpoint")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime?>("LastErrorAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("LastSeenAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("P256dh")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<string>("Platform")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<DateTime?>("RevokedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("UserAgent")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Endpoint")
+                        .IsUnique()
+                        .HasDatabaseName("IX_UserPushSubscriptions_Endpoint");
+
+                    b.HasIndex("LastErrorAt")
+                        .HasDatabaseName("IX_UserPushSubscriptions_LastErrorAt");
+
+                    b.HasIndex("UserId", "IsActive", "LastSeenAt")
+                        .HasDatabaseName("IX_UserPushSubscriptions_User_Active_LastSeen");
+
+                    b.ToTable("UserPushSubscriptions");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.UserSetting", b =>
                 {
                     b.Property<int>("Id")
@@ -9493,6 +9580,17 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("RecipientUser");
 
                     b.Navigation("TaskJournalItem");
+                });
+
+            modelBuilder.Entity("PayPlanner.Api.Models.UserPushSubscription", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("PayPlanner.Api.Models.UserSetting", b =>
