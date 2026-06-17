@@ -426,9 +426,11 @@
   - Проверено: targeted-тесты `NotifyCaseDocumentAsync|UploadDocument_UsesNotificationService|Documents_UploadsVersionsListsAndDeletesVisibleCaseFiles|UpdateDocument_ChangesStatusAndWritesCaseHistory|Documents_GeneratesTemplateFromCaseDataAndStoresVersionedFile`, полный `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj`, `npm run lint`, `npm run build`, JSON/UTF-8, `git diff --check`, локальный запуск backend на временной SQLite-БД с `GET /api/health`.
   - DoD: уведомления работают с учетом доступа к делу.
 
-- [ ] Запросы доступа к делу.
+- [x] Запросы доступа к делу.
   - Запрос.
   - Решение.
+  - Сделано: запрос доступа к скрытому делу подключен к общему `NotificationService`; руководители и ответственные с правом управления доступом получают уведомление о новом запросе, а заявитель получает отдельное уведомление после разрешения или отклонения. Уведомления идут через центр уведомлений, realtime и Web Push при включенных каналах, с привязкой к делу и дедупликацией повторной отправки.
+  - Проверено: targeted-тесты `NotifyCaseAccessRequestedAsync|NotifyCaseAccessResolvedAsync|RequestAccess_RecordsRequestForHiddenCase|ResolveAccessRequest_GrantUnhidesCaseAndClearsPendingRequest|ResolveAccessRequest_DenyKeepsCaseHiddenAndClearsPendingRequest|GetAccessRequests_ReturnsVisiblePendingRequests`, полный `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj`, `npm run lint`, `npm run build`, JSON/UTF-8, `git diff --check`, локальный запуск backend на временной SQLite-БД с `GET /api/health`.
   - DoD: руководитель и заявитель получают realtime/push при включенных каналах.
 
 ## Milestone 9. Настройки пользователя, роли и администрирование

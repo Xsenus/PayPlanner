@@ -1899,6 +1899,117 @@ public sealed class NotificationService : INotificationService
         }
     }
 
+    public async Task NotifyCaseAccessRequestedAsync(
+        ClientCase clientCase,
+        string requesterName,
+        int requesterUserId,
+        string? reason,
+        DateTime requestedAt,
+        IReadOnlyCollection<int> managerUserIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (clientCase.Id <= 0 || requesterUserId <= 0 || managerUserIds.Count == 0)
+        {
+            return;
+        }
+
+        var normalizedRequesterName = NormalizeNotificationText(requesterName, "Сотрудник");
+        var normalizedReason = NormalizeNotificationText(reason, "не указана");
+        var requestedAtUtc = NormalizeUtcInstant(requestedAt);
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.CaseAccessRequested,
+            $"Запрошен доступ к делу: {BuildClientCaseTitle(clientCase)}",
+            BuildCaseAccessRequestBody(clientCase, normalizedRequesterName, normalizedReason, requestedAtUtc),
+            BuildCaseAccessTemplateValues(clientCase, normalizedRequesterName, normalizedReason, null, "запрошен", requestedAtUtc, null),
+            purpose: NotificationPurposes.TaskReminder,
+            cancellationToken: cancellationToken);
+
+        foreach (var managerUserId in managerUserIds
+            .Where(userId => userId > 0 && userId != requesterUserId)
+            .Distinct())
+        {
+            await CreateUserNotificationAsync(
+                managerUserId,
+                UserNotificationTypes.CaseAccessRequested,
+                $"case:{clientCase.Id}:access-request:{requesterUserId}:{requestedAtUtc.Ticks}:{managerUserId}",
+                message.Subject,
+                message.Body,
+                "violet",
+                "case",
+                clientCase.Id,
+                null,
+                null,
+                new
+                {
+                    clientCaseId = clientCase.Id,
+                    requestedByUserId = requesterUserId,
+                    requestedByUserName = normalizedRequesterName,
+                    reason = normalizedReason,
+                    requestedAt = requestedAtUtc
+                },
+                cancellationToken);
+        }
+    }
+
+    public async Task NotifyCaseAccessResolvedAsync(
+        ClientCase clientCase,
+        bool granted,
+        string actorName,
+        int actorUserId,
+        int requestedByUserId,
+        string requestedByUserName,
+        string? requestReason,
+        string? comment,
+        DateTime resolvedAt,
+        CancellationToken cancellationToken = default)
+    {
+        if (clientCase.Id <= 0 || requestedByUserId <= 0 || requestedByUserId == actorUserId)
+        {
+            return;
+        }
+
+        var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
+        var normalizedRequesterName = NormalizeNotificationText(requestedByUserName, "Сотрудник");
+        var normalizedReason = NormalizeNotificationText(requestReason, "не указана");
+        var normalizedComment = NormalizeNotificationText(comment, "нет");
+        var resolvedAtUtc = NormalizeUtcInstant(resolvedAt);
+        var decisionText = granted ? "разрешен" : "отклонен";
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.CaseAccessResolved,
+            granted
+                ? $"Доступ к делу разрешен: {BuildClientCaseTitle(clientCase)}"
+                : $"Доступ к делу отклонен: {BuildClientCaseTitle(clientCase)}",
+            BuildCaseAccessResolutionBody(clientCase, granted, normalizedActorName, normalizedComment, resolvedAtUtc),
+            BuildCaseAccessTemplateValues(clientCase, normalizedRequesterName, normalizedReason, normalizedComment, decisionText, null, resolvedAtUtc, normalizedActorName),
+            purpose: NotificationPurposes.TaskReminder,
+            cancellationToken: cancellationToken);
+
+        await CreateUserNotificationAsync(
+            requestedByUserId,
+            UserNotificationTypes.CaseAccessResolved,
+            $"case:{clientCase.Id}:access-request:resolved:{(granted ? "granted" : "denied")}:{resolvedAtUtc.Ticks}:{requestedByUserId}",
+            message.Subject,
+            message.Body,
+            granted ? "emerald" : "orange",
+            "case",
+            clientCase.Id,
+            null,
+            null,
+            new
+            {
+                clientCaseId = clientCase.Id,
+                requestedByUserId,
+                requestedByUserName = normalizedRequesterName,
+                requestReason = normalizedReason,
+                resolvedByUserId = actorUserId,
+                resolvedByUserName = normalizedActorName,
+                resolvedAt = resolvedAtUtc,
+                granted,
+                comment = normalizedComment
+            },
+            cancellationToken);
+    }
+
     public async Task NotifyCourtSyncFailedAsync(
         ClientCase clientCase,
         string providerName,
@@ -4315,6 +4426,29 @@ public sealed class NotificationService : INotificationService
             ["document.requiresAction"] = requiresAction ? "да" : "нет"
         };
 
+    private static Dictionary<string, string?> BuildCaseAccessTemplateValues(
+        ClientCase clientCase,
+        string requesterName,
+        string reason,
+        string? comment,
+        string decision,
+        DateTime? requestedAt,
+        DateTime? resolvedAt,
+        string? actorName = null)
+        => new()
+        {
+            ["actor.name"] = NormalizeNotificationText(actorName, "Сотрудник"),
+            ["case.title"] = BuildClientCaseTitle(clientCase),
+            ["case.number"] = NormalizeNotificationText(clientCase.CaseNumber, clientCase.Id.ToString(CultureInfo.InvariantCulture)),
+            ["case.ownerName"] = BuildCaseOwnerName(clientCase),
+            ["access.requesterName"] = requesterName,
+            ["access.reason"] = reason,
+            ["access.comment"] = NormalizeNotificationText(comment, "нет"),
+            ["access.decision"] = decision,
+            ["access.requestedAt"] = requestedAt.HasValue ? FormatCourtEventDate(requestedAt.Value, allDay: false) : "не указана",
+            ["access.resolvedAt"] = resolvedAt.HasValue ? FormatCourtEventDate(resolvedAt.Value, allDay: false) : "не указана"
+        };
+
     private static string BuildCourtSyncFailedBody(ClientCase clientCase, string providerName, string summary)
         => NotificationTemplateCatalog.CompactBlankLines(
             $"Судебный источник по делу {BuildClientCaseTitle(clientCase)} не удалось проверить.\n\nИсточник: {providerName}\nСуд: {NormalizeNotificationText(clientCase.CourtName, "не указан")}\nНомер в суде: {NormalizeNotificationText(clientCase.CourtCaseNumber, "не указан")}\nЧто произошло: {summary}");
@@ -4452,6 +4586,23 @@ public sealed class NotificationService : INotificationService
         return NotificationTemplateCatalog.CompactBlankLines(builder.ToString());
     }
 
+    private static string BuildCaseAccessRequestBody(
+        ClientCase clientCase,
+        string requesterName,
+        string reason,
+        DateTime requestedAt)
+        => NotificationTemplateCatalog.CompactBlankLines(
+            $"Пользователь {requesterName} запросил доступ к скрытому делу.\n\nКонтрагент: {BuildCaseOwnerName(clientCase)}\nДело: {BuildClientCaseTitle(clientCase)}\nПричина: {reason}\nДата запроса: {FormatCourtEventDate(requestedAt, allDay: false)}");
+
+    private static string BuildCaseAccessResolutionBody(
+        ClientCase clientCase,
+        bool granted,
+        string actorName,
+        string comment,
+        DateTime resolvedAt)
+        => NotificationTemplateCatalog.CompactBlankLines(
+            $"{actorName} {(granted ? "разрешил(а) доступ к делу." : "отклонил(а) запрос доступа к делу.")}\n\nКонтрагент: {BuildCaseOwnerName(clientCase)}\nДело: {BuildClientCaseTitle(clientCase)}\nКомментарий: {comment}\nДата решения: {FormatCourtEventDate(resolvedAt, allDay: false)}");
+
     private static string BuildCourtEventSubject(ClientCase clientCase, ClientCaseCourtEvent courtEvent, string notificationType)
         => notificationType switch
         {
@@ -4516,6 +4667,12 @@ public sealed class NotificationService : INotificationService
             ? title
             : $"№{clientCase.CaseNumber.Trim()} · {title}";
     }
+
+    private static string BuildCaseOwnerName(ClientCase clientCase)
+        => clientCase.Client?.Name
+            ?? clientCase.LegalEntity?.ShortName
+            ?? clientCase.LegalEntity?.FullName
+            ?? "Контрагент не указан";
 
     private static string ResolveCourtEventNotificationType(ClientCaseCourtEvent courtEvent)
     {
@@ -4656,6 +4813,9 @@ public sealed class NotificationService : INotificationService
 
         return $"{(sizeBytes / 1024m / 1024m).ToString("0.#", RuCulture)} МБ";
     }
+
+    private static DateTime NormalizeUtcInstant(DateTime value)
+        => CalendarTimeZoneHelper.NormalizeUtcInstant(value);
 
     private static string FormatCaseProceduralDeadlineStatus(string? status)
         => status?.Trim() switch

@@ -1486,6 +1486,166 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyCaseAccessRequestedAsync_CreatesManagerNotificationAndDeduplicates()
+    {
+        await using var db = await CreateContextAsync();
+        var requester = await CreateUserAsync(db, "case-access-requester@example.com");
+        var manager = new User
+        {
+            Email = "case-access-manager@example.com",
+            FullName = "case-access-manager@example.com",
+            PasswordHash = "hash",
+            RoleId = requester.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(manager);
+        await db.SaveChangesAsync();
+        var client = new Client
+        {
+            Name = "Клиент доступа",
+            IsActive = true,
+            ResponsibleUserId = requester.Id,
+        };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+        var clientCase = new ClientCase
+        {
+            ClientId = client.Id,
+            Client = client,
+            Title = "Скрытое дело",
+            CaseNumber = "CASE-ACCESS-1",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = requester.Id,
+            IsHiddenFromExecutor = true,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            realtime,
+            webPush);
+        var requestedAt = new DateTime(2026, 6, 18, 4, 0, 0, DateTimeKind.Utc);
+
+        await service.NotifyCaseAccessRequestedAsync(
+            clientCase,
+            requester.FullName,
+            requester.Id,
+            "Нужно проверить срок",
+            requestedAt,
+            [manager.Id]);
+        await service.NotifyCaseAccessRequestedAsync(
+            clientCase,
+            requester.FullName,
+            requester.Id,
+            "Нужно проверить срок",
+            requestedAt,
+            [manager.Id]);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(UserNotificationTypes.CaseAccessRequested, notification.Type);
+        Assert.Equal(manager.Id, notification.RecipientUserId);
+        Assert.Equal("case", notification.ObjectType);
+        Assert.Equal(clientCase.Id, notification.ObjectId);
+        Assert.Contains("CASE-ACCESS-1", notification.Title);
+        Assert.Contains("Нужно проверить срок", notification.BodyPreview);
+        Assert.Contains($"\"requestedByUserId\":{requester.Id}", notification.MetadataJson, StringComparison.Ordinal);
+        var realtimeNotification = Assert.Single(realtime.Notifications);
+        Assert.Equal(notification.Id, realtimeNotification.Id);
+        var pushed = Assert.Single(webPush.Notifications);
+        Assert.Equal(notification.Id, pushed.Id);
+    }
+
+    [Fact]
+    public async Task NotifyCaseAccessResolvedAsync_CreatesRequesterNotificationAndDeduplicates()
+    {
+        await using var db = await CreateContextAsync();
+        var requester = await CreateUserAsync(db, "case-access-resolved-requester@example.com");
+        var manager = new User
+        {
+            Email = "case-access-resolved-manager@example.com",
+            FullName = "case-access-resolved-manager@example.com",
+            PasswordHash = "hash",
+            RoleId = requester.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(manager);
+        await db.SaveChangesAsync();
+        var client = new Client
+        {
+            Name = "Клиент решения",
+            IsActive = true,
+            ResponsibleUserId = requester.Id,
+        };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+        var clientCase = new ClientCase
+        {
+            ClientId = client.Id,
+            Client = client,
+            Title = "Скрытое дело для решения",
+            CaseNumber = "CASE-ACCESS-2",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = requester.Id,
+            IsHiddenFromExecutor = false,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            realtime,
+            webPush);
+        var resolvedAt = new DateTime(2026, 6, 18, 4, 30, 0, DateTimeKind.Utc);
+
+        await service.NotifyCaseAccessResolvedAsync(
+            clientCase,
+            true,
+            manager.FullName,
+            manager.Id,
+            requester.Id,
+            requester.FullName,
+            "Нужно проверить срок",
+            "Можно работать",
+            resolvedAt);
+        await service.NotifyCaseAccessResolvedAsync(
+            clientCase,
+            true,
+            manager.FullName,
+            manager.Id,
+            requester.Id,
+            requester.FullName,
+            "Нужно проверить срок",
+            "Можно работать",
+            resolvedAt);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(UserNotificationTypes.CaseAccessResolved, notification.Type);
+        Assert.Equal(requester.Id, notification.RecipientUserId);
+        Assert.Equal("case", notification.ObjectType);
+        Assert.Equal(clientCase.Id, notification.ObjectId);
+        Assert.Contains("разрешен", notification.Title, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Можно работать", notification.BodyPreview);
+        Assert.Contains("\"granted\":true", notification.MetadataJson, StringComparison.Ordinal);
+        var realtimeNotification = Assert.Single(realtime.Notifications);
+        Assert.Equal(notification.Id, realtimeNotification.Id);
+        var pushed = Assert.Single(webPush.Notifications);
+        Assert.Equal(notification.Id, pushed.Id);
+    }
+
+    [Fact]
     public async Task NotifyCaseInactivityControlTaskCreatedAsync_CreatesDedicatedInAppNotification()
     {
         await using var db = await CreateContextAsync();

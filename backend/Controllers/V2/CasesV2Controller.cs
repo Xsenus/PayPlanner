@@ -3197,24 +3197,38 @@ public class CasesV2Controller : ControllerBase
         _db.SetAuditReason($"Запрошен доступ к делу: {actorName}");
 
         var managerUserIds = await ResolveCaseAccessManagerUserIdsAsync(clientCase, currentUserId.Value, ct);
-        foreach (var managerUserId in managerUserIds)
+        if (_notificationService is not null)
         {
-            await AddCaseUserNotificationAsync(
-                managerUserId,
-                UserNotificationTypes.CaseAccessRequested,
-                $"case:{clientCase.Id}:access-request:{now:yyyyMMddHHmmssfff}:{currentUserId.Value}",
-                $"Запрошен доступ к делу: {BuildCaseNotificationTitle(clientCase)}",
-                BuildCaseAccessRequestNotificationBody(clientCase, actorName, reason),
-                "violet",
+            await _notificationService.NotifyCaseAccessRequestedAsync(
                 clientCase,
-                new
-                {
-                    requestedByUserId = currentUserId.Value,
-                    requestedByUserName = actorName,
-                    reason,
-                    requestedAt = now,
-                },
+                actorName,
+                currentUserId.Value,
+                reason,
+                now,
+                managerUserIds,
                 ct);
+        }
+        else
+        {
+            foreach (var managerUserId in managerUserIds)
+            {
+                await AddCaseUserNotificationAsync(
+                    managerUserId,
+                    UserNotificationTypes.CaseAccessRequested,
+                    $"case:{clientCase.Id}:access-request:{now:yyyyMMddHHmmssfff}:{currentUserId.Value}",
+                    $"Запрошен доступ к делу: {BuildCaseNotificationTitle(clientCase)}",
+                    BuildCaseAccessRequestNotificationBody(clientCase, actorName, reason),
+                    "violet",
+                    clientCase,
+                    new
+                    {
+                        requestedByUserId = currentUserId.Value,
+                        requestedByUserName = actorName,
+                        reason,
+                        requestedAt = now,
+                    },
+                    ct);
+            }
         }
 
         await _db.SaveChangesAsync(ct);
@@ -3313,27 +3327,44 @@ public class CasesV2Controller : ControllerBase
 
         if (requestedByUserId.HasValue && (!actorUserId.HasValue || requestedByUserId.Value != actorUserId.Value))
         {
-            await AddCaseUserNotificationAsync(
-                requestedByUserId.Value,
-                UserNotificationTypes.CaseAccessResolved,
-                $"case:{clientCase.Id}:access-request:resolved:{(grant ? "granted" : "denied")}:{resolvedAt:yyyyMMddHHmmssfff}:{requestedByUserId.Value}",
-                grant
-                    ? $"Доступ к делу разрешен: {BuildCaseNotificationTitle(clientCase)}"
-                    : $"Доступ к делу отклонен: {BuildCaseNotificationTitle(clientCase)}",
-                BuildCaseAccessResolutionNotificationBody(clientCase, grant, actorName, comment),
-                grant ? "emerald" : "orange",
-                clientCase,
-                new
-                {
-                    requestedByUserId,
+            if (_notificationService is not null)
+            {
+                await _notificationService.NotifyCaseAccessResolvedAsync(
+                    clientCase,
+                    grant,
+                    actorName,
+                    actorUserId ?? 0,
+                    requestedByUserId.Value,
                     requestedByUserName,
                     requestReason,
-                    resolvedByUserName = actorName,
-                    resolvedAt,
-                    granted = grant,
                     comment,
-                },
-                ct);
+                    resolvedAt,
+                    ct);
+            }
+            else
+            {
+                await AddCaseUserNotificationAsync(
+                    requestedByUserId.Value,
+                    UserNotificationTypes.CaseAccessResolved,
+                    $"case:{clientCase.Id}:access-request:resolved:{(grant ? "granted" : "denied")}:{resolvedAt:yyyyMMddHHmmssfff}:{requestedByUserId.Value}",
+                    grant
+                        ? $"Доступ к делу разрешен: {BuildCaseNotificationTitle(clientCase)}"
+                        : $"Доступ к делу отклонен: {BuildCaseNotificationTitle(clientCase)}",
+                    BuildCaseAccessResolutionNotificationBody(clientCase, grant, actorName, comment),
+                    grant ? "emerald" : "orange",
+                    clientCase,
+                    new
+                    {
+                        requestedByUserId,
+                        requestedByUserName,
+                        requestReason,
+                        resolvedByUserName = actorName,
+                        resolvedAt,
+                        granted = grant,
+                        comment,
+                    },
+                    ct);
+            }
         }
 
         await _db.SaveChangesAsync(ct);

@@ -31,6 +31,8 @@ public static class NotificationTemplateKeys
     public const string CourtSyncFailed = "court.syncFailed";
     public const string CaseProceduralDeadline = "case.proceduralDeadline";
     public const string CaseDocument = "case.document";
+    public const string CaseAccessRequested = "case.accessRequested";
+    public const string CaseAccessResolved = "case.accessResolved";
     public const string NoteMention = "note.mention";
     public const string NoteAssigned = "note.assigned";
     public const string NoteReminder = "note.reminder";
@@ -173,6 +175,20 @@ public static class NotificationTemplateCatalog
         new("document.version", "Версия"),
         new("document.size", "Размер файла"),
         new("document.requiresAction", "Требует действия")
+    ];
+
+    private static readonly IReadOnlyList<NotificationTemplateVariableDefinition> CaseAccessVariables =
+    [
+        new("actor.name", "Кто выполнил действие"),
+        new("case.title", "Название дела"),
+        new("case.number", "Номер дела"),
+        new("case.ownerName", "Контрагент"),
+        new("access.requesterName", "Кто запросил доступ"),
+        new("access.reason", "Причина запроса"),
+        new("access.comment", "Комментарий к решению"),
+        new("access.decision", "Решение"),
+        new("access.requestedAt", "Дата запроса"),
+        new("access.resolvedAt", "Дата решения")
     ];
 
     public static readonly IReadOnlyList<NotificationTemplateDefinition> All =
@@ -374,6 +390,20 @@ public static class NotificationTemplateCatalog
             "{{document.action}}: {{document.fileName}}",
             "{{actor.name}} {{document.action}} по делу {{case.title}}.\n\nДокумент: {{document.fileName}}\nТип: {{document.type}}\nСтатус: {{document.status}}\nВерсия: {{document.version}}\nТребуется действие: {{document.requiresAction}}",
             CaseDocumentVariables),
+        new(
+            NotificationTemplateKeys.CaseAccessRequested,
+            "Запрос доступа к делу",
+            "Уведомление руководителю или ответственному, когда сотрудник просит доступ к скрытому делу.",
+            "Запрошен доступ к делу: {{case.title}}",
+            "{{access.requesterName}} запросил(а) доступ к скрытому делу {{case.title}}.\n\nКонтрагент: {{case.ownerName}}\nПричина: {{access.reason}}\nДата запроса: {{access.requestedAt}}",
+            CaseAccessVariables),
+        new(
+            NotificationTemplateKeys.CaseAccessResolved,
+            "Решение по доступу к делу",
+            "Уведомление заявителю, когда руководитель разрешил или отклонил доступ к скрытому делу.",
+            "Доступ к делу {{access.decision}}: {{case.title}}",
+            "{{actor.name}}: доступ к делу {{access.decision}}.\n\nДело: {{case.title}}\nКонтрагент: {{case.ownerName}}\nКомментарий: {{access.comment}}\nДата решения: {{access.resolvedAt}}",
+            CaseAccessVariables),
         new(
             NotificationTemplateKeys.NoteMention,
             "Упоминание в заметке",

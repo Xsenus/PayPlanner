@@ -396,7 +396,7 @@ public class CasesV2ControllerTests
         db.Clients.AddRange(client, otherClient);
         db.ClientCases.AddRange(visibleCase, otherCase);
         await db.SaveChangesAsync();
-        var controller = CreateController(db, manager);
+        var controller = CreateController(db, manager, notificationService: CreateNotificationService(db));
 
         var result = await controller.GetAccessRequests(CancellationToken.None);
 
@@ -439,7 +439,7 @@ public class CasesV2ControllerTests
         db.Clients.Add(client);
         db.ClientCases.Add(clientCase);
         await db.SaveChangesAsync();
-        var controller = CreateController(db, manager);
+        var controller = CreateController(db, manager, notificationService: CreateNotificationService(db));
 
         var result = await controller.ResolveAccessRequest(clientCase.Id, new CasesV2Controller.ResolveCaseAccessRequest
         {
@@ -495,7 +495,7 @@ public class CasesV2ControllerTests
         db.Clients.Add(client);
         db.ClientCases.Add(clientCase);
         await db.SaveChangesAsync();
-        var controller = CreateController(db, manager);
+        var controller = CreateController(db, manager, notificationService: CreateNotificationService(db));
 
         var result = await controller.ResolveAccessRequest(clientCase.Id, new CasesV2Controller.ResolveCaseAccessRequest
         {
