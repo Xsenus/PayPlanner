@@ -162,6 +162,7 @@ export function NotificationCenter({
   const [webPushStatus, setWebPushStatus] = useState<WebPushStatus | null>(null);
   const [webPushLoading, setWebPushLoading] = useState(false);
   const [webPushBusy, setWebPushBusy] = useState(false);
+  const [webPushRevokingId, setWebPushRevokingId] = useState<number | null>(null);
   const pageSelectionRef = useRef<HTMLInputElement | null>(null);
 
   const totalPages = Math.max(1, Math.ceil(itemsPage.total / itemsPage.pageSize));
@@ -176,6 +177,10 @@ export function NotificationCenter({
   );
   const activePushSubscriptionsCount = useMemo(
     () => webPushStatus?.subscriptions.filter((item) => item.isActive).length ?? 0,
+    [webPushStatus],
+  );
+  const pushSubscriptions = useMemo(
+    () => webPushStatus?.subscriptions.slice(0, 6) ?? [],
     [webPushStatus],
   );
   const selectedEmployeeId = employeeId === 'all' ? undefined : Number(employeeId);
@@ -654,6 +659,19 @@ export function NotificationCenter({
     }
   };
 
+  const handleRevokeWebPushSubscription = async (id: number) => {
+    try {
+      setWebPushRevokingId(id);
+      await apiService.revokeUserPushSubscription(id);
+      await refreshWebPushStatus();
+      toast.success('Push-устройство отключено.');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Не удалось отключить push-устройство.');
+    } finally {
+      setWebPushRevokingId(null);
+    }
+  };
+
   const handleResetFilters = () => {
     setStatus('active');
     setType('all');
@@ -963,6 +981,51 @@ export function NotificationCenter({
                 )}
               </div>
             </div>
+            {pushSubscriptions.length > 0 ? (
+              <div className="mt-3 divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
+                {pushSubscriptions.map((subscription) => {
+                  const isCurrentDevice = subscription.endpoint === webPushStatus?.currentEndpoint;
+                  return (
+                    <div key={subscription.id} className="flex flex-col gap-2 px-3 py-2 text-xs sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2 font-medium text-slate-800">
+                          <span className="truncate">{subscription.deviceName || subscription.browser || 'Браузер'}</span>
+                          {isCurrentDevice ? <span className="rounded-full bg-blue-50 px-2 py-0.5 text-blue-700">это устройство</span> : null}
+                          <span className={`rounded-full px-2 py-0.5 ${subscription.isActive ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                            {subscription.isActive ? 'активно' : 'отключено'}
+                          </span>
+                        </div>
+                        <div className="mt-1 text-slate-500">
+                          {subscription.platform || 'Платформа не определена'} · последняя активность: {formatDateTime(subscription.lastSeenAt ?? subscription.updatedAt)}
+                        </div>
+                        {subscription.lastError ? <div className="mt-1 text-red-600">{subscription.lastError}</div> : null}
+                      </div>
+                      {subscription.isActive ? (
+                        isCurrentDevice ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleDisableWebPush()}
+                            disabled={webPushLoading || webPushBusy}
+                            className="inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-red-200 px-3 font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Отключить
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => void handleRevokeWebPushSubscription(subscription.id)}
+                            disabled={webPushLoading || webPushBusy || webPushRevokingId === subscription.id}
+                            className="inline-flex h-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 px-3 font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {webPushRevokingId === subscription.id ? 'Отключаем...' : 'Отключить'}
+                          </button>
+                        )
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
           </div>
 
           {preferencesLoading ? (

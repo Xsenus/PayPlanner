@@ -57,6 +57,63 @@ public sealed class PushSubscriptionsController : ControllerBase
         return Ok(subscriptions.Select(Map).ToList());
     }
 
+    [HttpGet("diagnostics")]
+    public async Task<ActionResult<WebPushDiagnosticsDto>> GetDiagnostics(CancellationToken ct)
+    {
+        if (!await CanViewNotificationSettingsAsync(ct))
+        {
+            return Forbid();
+        }
+
+        var status = _webPushNotificationService.GetPublicKeyStatus();
+        var totalSubscriptionsCount = await _context.UserPushSubscriptions.AsNoTracking().CountAsync(ct);
+        var activeSubscriptionsQuery = _context.UserPushSubscriptions
+            .AsNoTracking()
+            .Where(item => item.IsActive && item.RevokedAt == null);
+        var activeSubscriptionsCount = await activeSubscriptionsQuery.CountAsync(ct);
+        var revokedSubscriptionsCount = await _context.UserPushSubscriptions
+            .AsNoTracking()
+            .CountAsync(item => !item.IsActive || item.RevokedAt != null, ct);
+        var failedSubscriptionsCount = await _context.UserPushSubscriptions
+            .AsNoTracking()
+            .CountAsync(item => item.LastErrorAt != null, ct);
+        var usersWithActiveSubscriptionsCount = await activeSubscriptionsQuery
+            .Select(item => item.UserId)
+            .Distinct()
+            .CountAsync(ct);
+
+        var lastSuccessfulDeliveryAt = await _context.NotificationDeliveries
+            .AsNoTracking()
+            .Where(item => item.Channel == NotificationChannels.WebPush && item.Status == NotificationDeliveryStatus.Sent)
+            .OrderByDescending(item => item.SentAt ?? item.CreatedAt)
+            .Select(item => (DateTime?)(item.SentAt ?? item.CreatedAt))
+            .FirstOrDefaultAsync(ct);
+
+        var lastFailedDelivery = await _context.NotificationDeliveries
+            .AsNoTracking()
+            .Where(item => item.Channel == NotificationChannels.WebPush && item.Status == NotificationDeliveryStatus.Failed)
+            .OrderByDescending(item => item.CreatedAt)
+            .Select(item => new { item.CreatedAt, item.Error })
+            .FirstOrDefaultAsync(ct);
+
+        return Ok(new WebPushDiagnosticsDto
+        {
+            Enabled = status.Enabled,
+            Ready = status.Ready,
+            PublicKeyConfigured = status.PublicKeyConfigured,
+            PrivateKeyConfigured = status.PrivateKeyConfigured,
+            SubjectConfigured = status.SubjectConfigured,
+            TotalSubscriptionsCount = totalSubscriptionsCount,
+            ActiveSubscriptionsCount = activeSubscriptionsCount,
+            RevokedSubscriptionsCount = revokedSubscriptionsCount,
+            FailedSubscriptionsCount = failedSubscriptionsCount,
+            UsersWithActiveSubscriptionsCount = usersWithActiveSubscriptionsCount,
+            LastSuccessfulDeliveryAt = lastSuccessfulDeliveryAt,
+            LastFailedDeliveryAt = lastFailedDelivery?.CreatedAt,
+            LastDeliveryError = lastFailedDelivery?.Error,
+        });
+    }
+
     [HttpPost("subscriptions")]
     public async Task<ActionResult<UserPushSubscriptionDto>> UpsertSubscription(
         [FromBody] UpsertPushSubscriptionRequest request,
@@ -205,5 +262,22 @@ public sealed class PushSubscriptionsController : ControllerBase
         }
 
         return normalized.Length <= maxLength ? normalized : normalized[..maxLength];
+    }
+
+    private async Task<bool> CanViewNotificationSettingsAsync(CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return false;
+        }
+
+        if (await _context.IsUserAdminAsync(userId.Value, ct))
+        {
+            return true;
+        }
+
+        var permission = await _context.GetUserSectionPermissionAsync(userId.Value, RolePermissionCatalog.Notifications, ct);
+        return permission?.CanView == true;
     }
 }

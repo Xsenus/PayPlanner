@@ -931,6 +931,22 @@ export interface UserPushSubscriptionDto {
   lastError?: string | null;
 }
 
+export interface WebPushDiagnosticsDto {
+  enabled: boolean;
+  ready: boolean;
+  publicKeyConfigured: boolean;
+  privateKeyConfigured: boolean;
+  subjectConfigured: boolean;
+  totalSubscriptionsCount: number;
+  activeSubscriptionsCount: number;
+  revokedSubscriptionsCount: number;
+  failedSubscriptionsCount: number;
+  usersWithActiveSubscriptionsCount: number;
+  lastSuccessfulDeliveryAt?: string | null;
+  lastFailedDeliveryAt?: string | null;
+  lastDeliveryError?: string | null;
+}
+
 export interface UpsertPushSubscriptionRequest {
   endpoint: string;
   keys: {
@@ -3931,6 +3947,10 @@ export class ApiService {
 
   async getUserPushSubscriptions() {
     return this.request<UserPushSubscriptionDto[]>('/notifications/inbox/push/subscriptions');
+  }
+
+  async getWebPushDiagnostics() {
+    return this.request<WebPushDiagnosticsDto>('/notifications/inbox/push/diagnostics');
   }
 
   async upsertUserPushSubscription(payload: UpsertPushSubscriptionRequest) {

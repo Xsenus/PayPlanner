@@ -1112,6 +1112,26 @@ describe('apiService auth handling', () => {
         });
       }
 
+      if (url.includes('/notifications/inbox/push/diagnostics')) {
+        return new Response(JSON.stringify({
+          enabled: true,
+          ready: false,
+          publicKeyConfigured: true,
+          privateKeyConfigured: false,
+          subjectConfigured: true,
+          totalSubscriptionsCount: 2,
+          activeSubscriptionsCount: 1,
+          revokedSubscriptionsCount: 1,
+          failedSubscriptionsCount: 1,
+          usersWithActiveSubscriptionsCount: 1,
+          lastSuccessfulDeliveryAt: null,
+          lastFailedDeliveryAt: '2026-06-17T09:00:00Z',
+          lastDeliveryError: 'Network error',
+        }), {
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
       if (url.includes('/notifications/inbox/push/subscriptions/revoke')) {
         expect(init?.method).toBe('POST');
         expect(init?.body).toBe(JSON.stringify({ endpoint: 'https://push.example/subscription' }));
@@ -1147,6 +1167,11 @@ describe('apiService auth handling', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(apiService.getWebPushPublicKey()).resolves.toMatchObject({ ready: true });
+    await expect(apiService.getWebPushDiagnostics()).resolves.toMatchObject({
+      ready: false,
+      privateKeyConfigured: false,
+      activeSubscriptionsCount: 1,
+    });
     await expect(apiService.getUserPushSubscriptions()).resolves.toEqual([]);
     await expect(apiService.upsertUserPushSubscription({
       endpoint: 'https://push.example/subscription',
@@ -1157,7 +1182,7 @@ describe('apiService auth handling', () => {
     })).resolves.toMatchObject({ id: 7, isActive: true });
     await expect(apiService.revokeUserPushSubscriptionByEndpoint('https://push.example/subscription')).resolves.toBeUndefined();
 
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
   });
 
   it('emits a session-expired event when the API returns 401', async () => {

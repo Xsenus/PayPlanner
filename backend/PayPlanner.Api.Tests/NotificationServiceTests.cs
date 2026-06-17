@@ -1796,7 +1796,7 @@ public class NotificationServiceTests
         public List<UserNotification> Notifications { get; } = [];
 
         public WebPushPublicKeyStatus GetPublicKeyStatus()
-            => new(true, true, "public-key");
+            => new(true, true, "public-key", true, true, true);
 
         public Task SendUserNotificationAsync(
             UserNotification notification,

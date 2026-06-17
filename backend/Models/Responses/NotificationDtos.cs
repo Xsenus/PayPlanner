@@ -69,6 +69,23 @@ public class UserPushSubscriptionDto
     public string? LastError { get; set; }
 }
 
+public class WebPushDiagnosticsDto
+{
+    public bool Enabled { get; set; }
+    public bool Ready { get; set; }
+    public bool PublicKeyConfigured { get; set; }
+    public bool PrivateKeyConfigured { get; set; }
+    public bool SubjectConfigured { get; set; }
+    public int TotalSubscriptionsCount { get; set; }
+    public int ActiveSubscriptionsCount { get; set; }
+    public int RevokedSubscriptionsCount { get; set; }
+    public int FailedSubscriptionsCount { get; set; }
+    public int UsersWithActiveSubscriptionsCount { get; set; }
+    public DateTime? LastSuccessfulDeliveryAt { get; set; }
+    public DateTime? LastFailedDeliveryAt { get; set; }
+    public string? LastDeliveryError { get; set; }
+}
+
 public class NotificationDeliveryDto
 {
     public int Id { get; set; }

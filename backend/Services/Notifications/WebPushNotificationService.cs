@@ -7,7 +7,13 @@ using WebPush;
 
 namespace PayPlanner.Api.Services.Notifications;
 
-public sealed record WebPushPublicKeyStatus(bool Enabled, bool Ready, string PublicKey);
+public sealed record WebPushPublicKeyStatus(
+    bool Enabled,
+    bool Ready,
+    string PublicKey,
+    bool PublicKeyConfigured,
+    bool PrivateKeyConfigured,
+    bool SubjectConfigured);
 
 public interface IWebPushNotificationService
 {
@@ -44,7 +50,13 @@ public sealed class WebPushNotificationService : IWebPushNotificationService
     public WebPushPublicKeyStatus GetPublicKeyStatus()
     {
         var config = ResolveVapidConfig();
-        return new WebPushPublicKeyStatus(config.Enabled, config.Ready, config.Ready ? config.PublicKey : string.Empty);
+        return new WebPushPublicKeyStatus(
+            config.Enabled,
+            config.Ready,
+            config.Ready ? config.PublicKey : string.Empty,
+            !string.IsNullOrWhiteSpace(config.PublicKey),
+            !string.IsNullOrWhiteSpace(config.PrivateKey),
+            !string.IsNullOrWhiteSpace(config.Subject));
     }
 
     public async Task SendUserNotificationAsync(UserNotification notification, CancellationToken cancellationToken = default)

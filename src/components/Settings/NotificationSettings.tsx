@@ -14,6 +14,7 @@ import {
   type UpsertNotificationSenderRequest,
   type UserNotificationPreferenceDto,
   type UserNotificationTypeDto,
+  type WebPushDiagnosticsDto,
 } from '../../services/api';
 import { useDialog } from '../../hooks/useDialog';
 import { useToast } from '../../hooks/useToast';
@@ -244,6 +245,7 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
   const { confirm } = useDialog();
   const [settings, setSettings] = useState<NotificationSettingsDto | null>(null);
   const [channelCatalog, setChannelCatalog] = useState<NotificationChannelDto[]>([]);
+  const [webPushDiagnostics, setWebPushDiagnostics] = useState<WebPushDiagnosticsDto | null>(null);
   const [form, setForm] = useState<SenderForm>(() => createBlankForm());
   const [route, setRoute] = useState<SenderRoute>(() => readNotificationRoute());
   const [loading, setLoading] = useState(false);
@@ -272,12 +274,14 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
     setLoading(true);
     setMessage(null);
     try {
-      const [next, channels] = await Promise.all([
+      const [next, channels, pushDiagnostics] = await Promise.all([
         apiService.getNotificationSettings(),
         apiService.getNotificationChannels(),
+        apiService.getWebPushDiagnostics().catch(() => null),
       ]);
       setSettings(next);
       setChannelCatalog(channels);
+      setWebPushDiagnostics(pushDiagnostics);
     } catch (error) {
       const text = extractDisplayErrorMessage(error, 'Не удалось загрузить настройки уведомлений');
       setMessage(text);
@@ -901,6 +905,70 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
                     </div>
                   );
                 })}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h4 className="text-base font-semibold text-gray-900">Диагностика Web Push</h4>
+                <p className="mt-1 max-w-3xl text-sm text-gray-500">
+                  Здесь видно, готов ли сервер к браузерным push-уведомлениям и есть ли активные устройства сотрудников.
+                </p>
+              </div>
+              <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${
+                webPushDiagnostics?.ready
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                  : 'border-amber-200 bg-amber-50 text-amber-700'
+              }`}>
+                {webPushDiagnostics?.ready ? 'Готово' : 'Требуется настройка'}
+              </span>
+            </div>
+
+            {webPushDiagnostics ? (
+              <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                  <div className="text-xs font-semibold uppercase text-gray-500">Ключи сервера</div>
+                  <div className="mt-2 space-y-1 text-sm text-gray-700">
+                    <div>Public key: {webPushDiagnostics.publicKeyConfigured ? 'есть' : 'нет'}</div>
+                    <div>Private key: {webPushDiagnostics.privateKeyConfigured ? 'есть' : 'нет'}</div>
+                    <div>Subject: {webPushDiagnostics.subjectConfigured ? 'есть' : 'нет'}</div>
+                  </div>
+                </div>
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                  <div className="text-xs font-semibold uppercase text-gray-500">Устройства</div>
+                  <div className="mt-2 text-2xl font-semibold text-gray-900">{webPushDiagnostics.activeSubscriptionsCount}</div>
+                  <div className="mt-1 text-xs text-gray-500">
+                    всего: {webPushDiagnostics.totalSubscriptionsCount}, отключено: {webPushDiagnostics.revokedSubscriptionsCount}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                  <div className="text-xs font-semibold uppercase text-gray-500">Пользователи</div>
+                  <div className="mt-2 text-2xl font-semibold text-gray-900">{webPushDiagnostics.usersWithActiveSubscriptionsCount}</div>
+                  <div className="mt-1 text-xs text-gray-500">
+                    с активными push-устройствами
+                  </div>
+                </div>
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                  <div className="text-xs font-semibold uppercase text-gray-500">Доставка</div>
+                  <div className="mt-2 text-sm text-gray-700">
+                    Успешно: {formatDateTime(webPushDiagnostics.lastSuccessfulDeliveryAt)}
+                  </div>
+                  <div className="mt-1 text-sm text-gray-700">
+                    Ошибка: {formatDateTime(webPushDiagnostics.lastFailedDeliveryAt)}
+                  </div>
+                  {webPushDiagnostics.lastDeliveryError ? (
+                    <div className="mt-1 truncate text-xs text-red-600" title={webPushDiagnostics.lastDeliveryError}>
+                      {webPushDiagnostics.lastDeliveryError}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : (
+              <div className="mt-4 flex items-center gap-2 text-sm text-gray-500">
+                <RefreshCw className="h-4 w-4 animate-spin" />
+                Загружаем диагностику Web Push...
               </div>
             )}
           </div>
