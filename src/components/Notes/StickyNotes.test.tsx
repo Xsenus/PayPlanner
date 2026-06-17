@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DialogProvider } from '../../contexts/DialogContext';
 import { ToastProvider } from '../../contexts/ToastContext';
 import { copyTextToClipboard, getEffectiveBoardNotesCount, StickyNotes } from './StickyNotes';
 import type { StickyNoteBoard, StickyNoteBoardMember, StickyNoteBoardMemberCandidate, StickyNoteItem } from '../../services/api';
@@ -119,10 +120,18 @@ const createdNote: StickyNoteItem = {
 
 function renderStickyNotes() {
   render(
-    <ToastProvider>
-      <StickyNotes />
-    </ToastProvider>,
+    <DialogProvider>
+      <ToastProvider>
+        <StickyNotes />
+      </ToastProvider>
+    </DialogProvider>,
   );
+}
+
+async function approveDeleteDialog(user: UserEvent, title: string) {
+  expect(await screen.findByRole('heading', { name: title })).toBeTruthy();
+  const deleteButtons = screen.getAllByRole('button', { name: 'Удалить' });
+  await user.click(deleteButtons[deleteButtons.length - 1]);
 }
 
 function createDeferred<T>() {
@@ -677,13 +686,15 @@ describe('StickyNotes', () => {
 
   it('restores a deleted note from the undo action', async () => {
     apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Удаляемая заметка' }]);
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
 
     const user = userEvent.setup();
     renderStickyNotes();
 
     await screen.findByDisplayValue('Удаляемая заметка');
     await user.click(screen.getByTitle('Удалить'));
+    expect(confirmSpy).not.toHaveBeenCalled();
+    await approveDeleteDialog(user, 'Удалить заметку?');
     await screen.findAllByText('Заметка удалена');
     await user.click(screen.getAllByRole('button', { name: /Восстановить/i })[0]);
 
@@ -699,13 +710,13 @@ describe('StickyNotes', () => {
         : [{ ...createdNote, text: 'Восстановить позже' }]
     ));
     apiMock.restoreStickyNote.mockImplementationOnce(() => restoreResponse.promise);
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     const user = userEvent.setup();
     renderStickyNotes();
 
     await screen.findByDisplayValue('Восстановить позже');
     await user.click(screen.getByTitle('Удалить'));
+    await approveDeleteDialog(user, 'Удалить заметку?');
     await screen.findAllByText('Заметка удалена');
     await user.click(screen.getAllByRole('button', { name: /Восстановить/i })[0]);
     await waitFor(() => expect(apiMock.restoreStickyNote).toHaveBeenCalledWith(11));
@@ -731,13 +742,13 @@ describe('StickyNotes', () => {
         : [{ ...createdNote, text: 'Восстановить с ошибкой' }]
     ));
     apiMock.restoreStickyNote.mockImplementationOnce(() => restoreResponse.promise);
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     const user = userEvent.setup();
     renderStickyNotes();
 
     await screen.findByDisplayValue('Восстановить с ошибкой');
     await user.click(screen.getByTitle('Удалить'));
+    await approveDeleteDialog(user, 'Удалить заметку?');
     await screen.findAllByText('Заметка удалена');
     await user.click(screen.getAllByRole('button', { name: /Восстановить/i })[0]);
     await waitFor(() => expect(apiMock.restoreStickyNote).toHaveBeenCalledWith(11));
@@ -757,13 +768,13 @@ describe('StickyNotes', () => {
   it('clears the local undo panel when a deleted note is restored through realtime', async () => {
     realtimeMock.canStart = true;
     apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Вернули в другой вкладке' }]);
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     const user = userEvent.setup();
     renderStickyNotes();
 
     await screen.findByDisplayValue('Вернули в другой вкладке');
     await user.click(screen.getByTitle('Удалить'));
+    await approveDeleteDialog(user, 'Удалить заметку?');
 
     await waitFor(() => expect(apiMock.deleteStickyNote).toHaveBeenCalledWith(11));
     expect(screen.getAllByText('Заметка удалена').length).toBeGreaterThan(1);
@@ -787,13 +798,13 @@ describe('StickyNotes', () => {
         : [{ ...createdNote, text: 'Удалить и уйти' }]
     ));
     apiMock.deleteStickyNote.mockImplementationOnce(() => deleteResponse.promise);
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     const user = userEvent.setup();
     renderStickyNotes();
 
     await screen.findByDisplayValue('Удалить и уйти');
     await user.click(screen.getByTitle('Удалить'));
+    await approveDeleteDialog(user, 'Удалить заметку?');
     await waitFor(() => expect(apiMock.deleteStickyNote).toHaveBeenCalledWith(11));
 
     await user.click(screen.getByRole('button', { name: /Мои заметки/i }));
@@ -829,13 +840,13 @@ describe('StickyNotes', () => {
         ? [{ ...createdNote, boardId: 9, text: 'Личная заметка перед удалением' }]
         : []
     ));
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     const user = userEvent.setup();
     renderStickyNotes();
 
     await screen.findByDisplayValue('Личная заметка перед удалением');
     await user.click(screen.getByTitle('Удалить доску'));
+    await approveDeleteDialog(user, 'Удалить доску?');
 
     await waitFor(() => expect(apiMock.deleteStickyNoteBoard).toHaveBeenCalledWith(9));
     await waitFor(() => expect(apiMock.getStickyNotes).toHaveBeenCalledWith(7));
@@ -861,13 +872,13 @@ describe('StickyNotes', () => {
           : [{ ...createdNote, id: 7, text: 'Рабочая открылась' }]
     ));
     apiMock.deleteStickyNoteBoard.mockImplementationOnce(() => deleteBoardResponse.promise);
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     const user = userEvent.setup();
     renderStickyNotes();
 
     await screen.findByDisplayValue('Доска удаляется');
     await user.click(screen.getByTitle('Удалить доску'));
+    await approveDeleteDialog(user, 'Удалить доску?');
     await waitFor(() => expect(apiMock.deleteStickyNoteBoard).toHaveBeenCalledWith(9));
 
     await user.click(screen.getByRole('button', { name: /Архив заметок/i }));

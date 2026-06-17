@@ -32,6 +32,7 @@ import {
   type StickyNotesRealtimeHandler,
 } from '../../services/stickyNotesRealtime';
 import { useToast } from '../../hooks/useToast';
+import { useDialog } from '../../hooks/useDialog';
 import type { HubConnection } from '@microsoft/signalr';
 
 const COLORS: Array<{ value: StickyNoteColor; label: string; className: string }> = [
@@ -140,6 +141,7 @@ export async function copyTextToClipboard(text: string, clipboard?: Pick<Clipboa
 
 export function StickyNotes() {
   const toast = useToast();
+  const { confirm } = useDialog();
   const { user } = useAuth();
   const connectionRef = useRef<HubConnection | null>(null);
   const boardCanvasRef = useRef<HTMLDivElement | null>(null);
@@ -813,7 +815,7 @@ export function StickyNotes() {
     setNotes((current) => sortNotes(current.map((note) => (note.id === noteId ? { ...note, ...patch } : note))));
   };
 
-  const restoreDeletedNote = async (noteId: number) => {
+  const restoreDeletedNote = useCallback(async (noteId: number) => {
     const requestedBoardId = activeBoardId;
 
     try {
@@ -832,10 +834,22 @@ export function StickyNotes() {
         toast.error('Не удалось восстановить заметку.');
       }
     }
-  };
+  }, [activeBoardId, refreshBoardCounts, toast]);
 
-  const deleteNote = async (noteId: number) => {
-    if (!canDeleteNotesOnActiveBoard || !window.confirm('Удалить заметку?')) {
+  const deleteNote = useCallback(async (noteId: number) => {
+    if (!canDeleteNotesOnActiveBoard) {
+      return;
+    }
+
+    const approved = await confirm({
+      title: 'Удалить заметку?',
+      description: 'Заметка будет удалена с текущей доски. После удаления ее можно будет быстро восстановить через уведомление.',
+      confirmLabel: 'Удалить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+
+    if (!approved) {
       return;
     }
 
@@ -867,10 +881,22 @@ export function StickyNotes() {
         toast.error('Не удалось удалить заметку.');
       }
     }
-  };
+  }, [activeBoardId, canDeleteNotesOnActiveBoard, clearNoteTransientState, confirm, refreshBoardCounts, restoreDeletedNote, toast]);
 
   const deleteBoard = async () => {
-    if (!activeBoard?.canDelete || !window.confirm('Удалить доску вместе с заметками?')) {
+    if (!activeBoard?.canDelete) {
+      return;
+    }
+
+    const approved = await confirm({
+      title: 'Удалить доску?',
+      description: 'Доска будет удалена вместе со всеми заметками на ней. Это действие нельзя отменить.',
+      confirmLabel: 'Удалить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+
+    if (!approved) {
       return;
     }
 
@@ -1107,6 +1133,7 @@ export function StickyNotes() {
           </select>
           <button
             type="button"
+            onPointerDown={(event) => event.stopPropagation()}
             onClick={() => {
               const next = { ...note, isPinned: !note.isPinned };
               patchNote(note.id, { isPinned: next.isPinned });
@@ -1120,7 +1147,11 @@ export function StickyNotes() {
           </button>
           <button
             type="button"
-            onClick={() => saveNote(note)}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              void saveNote(note);
+            }}
             disabled={!canEditActiveBoard || savingNoteIds.has(note.id)}
             className="inline-flex h-6 w-6 items-center justify-center rounded border border-black/10 bg-white/50 text-slate-700 hover:bg-white disabled:opacity-50"
             title="Сохранить"
@@ -1129,7 +1160,11 @@ export function StickyNotes() {
           </button>
           <button
             type="button"
-            onClick={() => deleteNote(note.id)}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              void deleteNote(note.id);
+            }}
             disabled={!canDeleteNotesOnActiveBoard}
             className="inline-flex h-6 w-6 items-center justify-center rounded border border-black/10 bg-white/50 text-rose-700 hover:bg-white disabled:opacity-50"
             title="Удалить"
@@ -1185,7 +1220,7 @@ export function StickyNotes() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedNoteId, canDeleteNotesOnActiveBoard]);
+  }, [selectedNoteId, canDeleteNotesOnActiveBoard, deleteNote]);
 
   return (
     <div className="flex h-[calc(100vh-4rem)] min-h-[620px] flex-col bg-slate-100 lg:flex-row">
