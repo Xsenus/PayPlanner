@@ -25,6 +25,10 @@ public static class NotificationTemplateKeys
     public const string TaskChanged = "task.changed";
     public const string TaskComment = "task.comment";
     public const string CaseInactivityControl = "case.inactivityControl";
+    public const string CourtHearing = "court.hearing";
+    public const string CourtStatusChanged = "court.statusChanged";
+    public const string CourtDecisionPublished = "court.decisionPublished";
+    public const string CourtSyncFailed = "court.syncFailed";
     public const string NoteMention = "note.mention";
     public const string NoteAssigned = "note.assigned";
     public const string NoteReminder = "note.reminder";
@@ -121,6 +125,23 @@ public static class NotificationTemplateCatalog
         new("contract.status", "Статус договора"),
         new("contract.changes", "Список изменений"),
         new("contract.daysLeft", "Дней до окончания")
+    ];
+
+    private static readonly IReadOnlyList<NotificationTemplateVariableDefinition> CourtEventVariables =
+    [
+        new("actor.name", "Кто выполнил действие"),
+        new("case.title", "Название дела"),
+        new("case.number", "Номер дела"),
+        new("courtEvent.title", "Название судебного события"),
+        new("courtEvent.action", "Действие"),
+        new("courtEvent.scheduledAt", "Дата судебного события"),
+        new("courtEvent.courtName", "Суд"),
+        new("courtEvent.courtCaseNumber", "Номер дела в суде"),
+        new("courtEvent.courtroom", "Зал или место"),
+        new("courtEvent.judgeName", "Судья"),
+        new("courtEvent.status", "Статус"),
+        new("courtEvent.result", "Результат"),
+        new("courtEvent.sourceType", "Источник")
     ];
 
     public static readonly IReadOnlyList<NotificationTemplateDefinition> All =
@@ -280,6 +301,34 @@ public static class NotificationTemplateCatalog
             "Автоконтроль дела: {{task.objectName}}",
             "По делу {{task.objectName}} давно не было активных задач.\n\nСоздана контрольная задача: {{task.title}}\nПериод без активной задачи: {{case.daysWithoutActiveTask}} дн.",
             [.. TaskVariables, new("case.daysWithoutActiveTask", "Дней без активной задачи")]),
+        new(
+            NotificationTemplateKeys.CourtHearing,
+            "Судебное заседание",
+            "Уведомление ответственным по делу при назначении или переносе судебного заседания.",
+            "Судебное заседание: {{case.title}}",
+            "{{actor.name}} {{courtEvent.action}} судебное заседание по делу {{case.title}}.\n\nСобытие: {{courtEvent.title}}\nДата: {{courtEvent.scheduledAt}}\nСуд: {{courtEvent.courtName}}\nНомер в суде: {{courtEvent.courtCaseNumber}}\nСтатус: {{courtEvent.status}}",
+            CourtEventVariables),
+        new(
+            NotificationTemplateKeys.CourtStatusChanged,
+            "Изменение судебного статуса",
+            "Уведомление ответственным по делу при изменении движения или статуса судебного события.",
+            "Изменился судебный статус: {{case.title}}",
+            "{{actor.name}} {{courtEvent.action}} судебное событие по делу {{case.title}}.\n\nСобытие: {{courtEvent.title}}\nДата: {{courtEvent.scheduledAt}}\nСтатус: {{courtEvent.status}}\nРезультат: {{courtEvent.result}}",
+            CourtEventVariables),
+        new(
+            NotificationTemplateKeys.CourtDecisionPublished,
+            "Публикация судебного решения",
+            "Уведомление ответственным по делу при появлении результата, решения или судебного акта.",
+            "Опубликован результат по суду: {{case.title}}",
+            "{{actor.name}} {{courtEvent.action}} судебный результат по делу {{case.title}}.\n\nСобытие: {{courtEvent.title}}\nДата: {{courtEvent.scheduledAt}}\nСуд: {{courtEvent.courtName}}\nРезультат: {{courtEvent.result}}",
+            CourtEventVariables),
+        new(
+            NotificationTemplateKeys.CourtSyncFailed,
+            "Ошибка судебной синхронизации",
+            "Уведомление ответственным по делу, когда судебный источник не удалось проверить.",
+            "Не удалось проверить судебный источник: {{case.title}}",
+            "Судебный источник по делу {{case.title}} не удалось проверить.\n\nСуд: {{courtEvent.courtName}}\nНомер в суде: {{courtEvent.courtCaseNumber}}\nЧто произошло: {{courtEvent.result}}",
+            CourtEventVariables),
         new(
             NotificationTemplateKeys.NoteMention,
             "Упоминание в заметке",

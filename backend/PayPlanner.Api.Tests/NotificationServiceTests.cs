@@ -1259,6 +1259,74 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyCaseCourtEventAsync_CreatesCourtHearingNotificationAndDeduplicates()
+    {
+        await using var db = await CreateContextAsync();
+        var recipient = await CreateUserAsync(db, "court-recipient@example.com");
+        var client = new Client
+        {
+            Name = "Клиент по суду",
+            IsActive = true,
+            ResponsibleUserId = recipient.Id,
+        };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+        var clientCase = new ClientCase
+        {
+            ClientId = client.Id,
+            Title = "Спор о взыскании",
+            CaseNumber = "CASE-COURT-1",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = recipient.Id,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var courtEvent = new ClientCaseCourtEvent
+        {
+            ClientCaseId = clientCase.Id,
+            EventType = "hearing",
+            Title = "Предварительное заседание",
+            ScheduledAt = new DateTime(2026, 7, 10, 9, 30, 0, DateTimeKind.Utc),
+            CourtInstance = "first",
+            CourtName = "Арбитражный суд",
+            CourtCaseNumber = "А55-100/2026",
+            MovementStatus = "scheduled",
+            SourceType = "manual",
+            CreatedAt = new DateTime(2026, 6, 18, 1, 0, 0, DateTimeKind.Utc),
+            UpdatedAt = new DateTime(2026, 6, 18, 1, 0, 0, DateTimeKind.Utc),
+        };
+        db.ClientCaseCourtEvents.Add(courtEvent);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+
+        await service.NotifyCaseCourtEventAsync(
+            clientCase,
+            courtEvent,
+            "created",
+            "Court Actor",
+            999,
+            [recipient.Id]);
+        await service.NotifyCaseCourtEventAsync(
+            clientCase,
+            courtEvent,
+            "created",
+            "Court Actor",
+            999,
+            [recipient.Id]);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(UserNotificationTypes.CourtHearing, notification.Type);
+        Assert.Equal(recipient.Id, notification.RecipientUserId);
+        Assert.Equal("case", notification.ObjectType);
+        Assert.Equal(clientCase.Id, notification.ObjectId);
+        Assert.Contains("CASE-COURT-1", notification.Title);
+        Assert.Contains("Предварительное заседание", notification.BodyPreview);
+        Assert.Contains($"\"courtEventId\":{courtEvent.Id}", notification.MetadataJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task NotifyCaseInactivityControlTaskCreatedAsync_CreatesDedicatedInAppNotification()
     {
         await using var db = await CreateContextAsync();

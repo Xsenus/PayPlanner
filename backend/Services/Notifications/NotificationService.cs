@@ -1704,6 +1704,121 @@ public sealed class NotificationService : INotificationService
         }
     }
 
+    public async Task NotifyCaseCourtEventAsync(
+        ClientCase clientCase,
+        ClientCaseCourtEvent courtEvent,
+        string action,
+        string actorName,
+        int actorUserId,
+        IReadOnlyCollection<int> recipientUserIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (clientCase.Id <= 0 || courtEvent.Id <= 0 || recipientUserIds.Count == 0)
+        {
+            return;
+        }
+
+        var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
+        var notificationType = ResolveCourtEventNotificationType(courtEvent);
+        var templateKey = ResolveCourtEventTemplateKey(notificationType);
+        var title = BuildCourtEventSubject(clientCase, courtEvent, notificationType);
+        var body = BuildCourtEventBody(clientCase, courtEvent, action, normalizedActorName, notificationType);
+        var message = await RenderTemplateAsync(
+            templateKey,
+            title,
+            body,
+            BuildCourtEventTemplateValues(clientCase, courtEvent, action, normalizedActorName),
+            purpose: NotificationPurposes.TaskReminder,
+            cancellationToken: cancellationToken);
+
+        var version = (courtEvent.UpdatedAt ?? courtEvent.CreatedAt).Ticks.ToString(CultureInfo.InvariantCulture);
+        foreach (var recipientUserId in recipientUserIds
+            .Where(userId => userId > 0 && userId != actorUserId)
+            .Distinct())
+        {
+            await CreateUserNotificationAsync(
+                recipientUserId,
+                notificationType,
+                $"case:{clientCase.Id}:court-event:{courtEvent.Id}:{notificationType}:{version}:{recipientUserId}",
+                message.Subject,
+                message.Body,
+                ResolveCourtEventTone(notificationType),
+                "case",
+                clientCase.Id,
+                null,
+                null,
+                new
+                {
+                    clientCaseId = clientCase.Id,
+                    courtEventId = courtEvent.Id,
+                    action = NormalizeCourtEventAction(action),
+                    actorUserId,
+                    actorName = normalizedActorName,
+                    eventType = courtEvent.EventType,
+                    movementStatus = courtEvent.MovementStatus,
+                    scheduledAt = courtEvent.ScheduledAt,
+                    courtName = courtEvent.CourtName,
+                    courtCaseNumber = courtEvent.CourtCaseNumber,
+                    clientCaseDocumentId = courtEvent.ClientCaseDocumentId,
+                    proceduralDeadlineId = courtEvent.ProceduralDeadlineId
+                },
+                cancellationToken);
+        }
+    }
+
+    public async Task NotifyCourtSyncFailedAsync(
+        ClientCase clientCase,
+        string providerName,
+        string summary,
+        string actorName,
+        int actorUserId,
+        IReadOnlyCollection<int> recipientUserIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (clientCase.Id <= 0 || recipientUserIds.Count == 0)
+        {
+            return;
+        }
+
+        var normalizedActorName = NormalizeNotificationText(actorName, "CRM");
+        var normalizedSummary = NormalizeNotificationText(summary, "Судебный источник временно недоступен.");
+        var provider = NormalizeNotificationText(providerName, "судебный источник");
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.CourtSyncFailed,
+            $"Не удалось проверить судебный источник: {BuildClientCaseTitle(clientCase)}",
+            BuildCourtSyncFailedBody(clientCase, provider, normalizedSummary),
+            BuildCourtSyncFailedTemplateValues(clientCase, provider, normalizedSummary, normalizedActorName),
+            purpose: NotificationPurposes.TaskReminder,
+            cancellationToken: cancellationToken);
+        var stateHash = BuildStableTextHash($"{provider}|{normalizedSummary}");
+
+        foreach (var recipientUserId in recipientUserIds
+            .Where(userId => userId > 0 && userId != actorUserId)
+            .Distinct())
+        {
+            await CreateUserNotificationAsync(
+                recipientUserId,
+                UserNotificationTypes.CourtSyncFailed,
+                $"case:{clientCase.Id}:court-sync-failed:{recipientUserId}:{DateTime.UtcNow:yyyyMMdd}:{stateHash}",
+                message.Subject,
+                message.Body,
+                "rose",
+                "case",
+                clientCase.Id,
+                null,
+                null,
+                new
+                {
+                    clientCaseId = clientCase.Id,
+                    actorUserId,
+                    actorName = normalizedActorName,
+                    providerName = provider,
+                    summary = normalizedSummary
+                },
+                cancellationToken);
+        }
+    }
+
     public async Task<IReadOnlyList<NotificationDelivery>> NotifyCaseInactivityControlTaskCreatedAsync(
         TaskJournalItem task,
         int daysWithoutActiveTask,
@@ -3981,6 +4096,181 @@ public sealed class NotificationService : INotificationService
             ContractStatus.Terminated => "Расторгнут",
             ContractStatus.Cancelled => "Аннулирован",
             _ => "не указан"
+        };
+
+    private static Dictionary<string, string?> BuildCourtEventTemplateValues(
+        ClientCase clientCase,
+        ClientCaseCourtEvent courtEvent,
+        string action,
+        string actorName)
+        => new()
+        {
+            ["actor.name"] = actorName,
+            ["case.title"] = BuildClientCaseTitle(clientCase),
+            ["case.number"] = NormalizeNotificationText(clientCase.CaseNumber, clientCase.Id.ToString(CultureInfo.InvariantCulture)),
+            ["courtEvent.title"] = NormalizeNotificationText(courtEvent.Title, "Судебное событие"),
+            ["courtEvent.action"] = ResolveCourtEventActionText(action),
+            ["courtEvent.scheduledAt"] = FormatCourtEventDate(courtEvent.ScheduledAt, courtEvent.AllDay),
+            ["courtEvent.courtName"] = NormalizeNotificationText(courtEvent.CourtName, "не указан"),
+            ["courtEvent.courtCaseNumber"] = NormalizeNotificationText(courtEvent.CourtCaseNumber, "не указан"),
+            ["courtEvent.courtroom"] = NormalizeNotificationText(courtEvent.Courtroom, "не указан"),
+            ["courtEvent.judgeName"] = NormalizeNotificationText(courtEvent.JudgeName, "не указан"),
+            ["courtEvent.status"] = FormatCourtMovementStatus(courtEvent.MovementStatus),
+            ["courtEvent.result"] = NormalizeNotificationText(courtEvent.ResultSummary, "не указан"),
+            ["courtEvent.sourceType"] = NormalizeNotificationText(courtEvent.SourceType, "CRM")
+        };
+
+    private static Dictionary<string, string?> BuildCourtSyncFailedTemplateValues(
+        ClientCase clientCase,
+        string providerName,
+        string summary,
+        string actorName)
+        => new()
+        {
+            ["actor.name"] = actorName,
+            ["case.title"] = BuildClientCaseTitle(clientCase),
+            ["case.number"] = NormalizeNotificationText(clientCase.CaseNumber, clientCase.Id.ToString(CultureInfo.InvariantCulture)),
+            ["courtEvent.title"] = "Ошибка судебной синхронизации",
+            ["courtEvent.action"] = "не смог(ла) проверить",
+            ["courtEvent.scheduledAt"] = "не указана",
+            ["courtEvent.courtName"] = NormalizeNotificationText(clientCase.CourtName, providerName),
+            ["courtEvent.courtCaseNumber"] = NormalizeNotificationText(clientCase.CourtCaseNumber, "не указан"),
+            ["courtEvent.courtroom"] = "не указан",
+            ["courtEvent.judgeName"] = NormalizeNotificationText(clientCase.JudgeName, "не указан"),
+            ["courtEvent.status"] = "ошибка проверки",
+            ["courtEvent.result"] = summary,
+            ["courtEvent.sourceType"] = providerName
+        };
+
+    private static string BuildCourtSyncFailedBody(ClientCase clientCase, string providerName, string summary)
+        => NotificationTemplateCatalog.CompactBlankLines(
+            $"Судебный источник по делу {BuildClientCaseTitle(clientCase)} не удалось проверить.\n\nИсточник: {providerName}\nСуд: {NormalizeNotificationText(clientCase.CourtName, "не указан")}\nНомер в суде: {NormalizeNotificationText(clientCase.CourtCaseNumber, "не указан")}\nЧто произошло: {summary}");
+
+    private static string BuildCourtEventSubject(ClientCase clientCase, ClientCaseCourtEvent courtEvent, string notificationType)
+        => notificationType switch
+        {
+            UserNotificationTypes.CourtDecisionPublished => $"Опубликован результат по суду: {BuildClientCaseTitle(clientCase)}",
+            UserNotificationTypes.CourtStatusChanged => $"Изменился судебный статус: {BuildClientCaseTitle(clientCase)}",
+            _ => $"Судебное заседание: {BuildClientCaseTitle(clientCase)}"
+        };
+
+    private static string BuildCourtEventBody(
+        ClientCase clientCase,
+        ClientCaseCourtEvent courtEvent,
+        string action,
+        string actorName,
+        string notificationType)
+    {
+        var actionText = ResolveCourtEventActionText(action);
+        var intro = notificationType switch
+        {
+            UserNotificationTypes.CourtDecisionPublished => $"{actorName} {actionText} судебный результат по делу.",
+            UserNotificationTypes.CourtStatusChanged => $"{actorName} {actionText} судебный статус по делу.",
+            _ => $"{actorName} {actionText} судебное заседание по делу."
+        };
+
+        var builder = new StringBuilder()
+            .Append(intro)
+            .AppendLine()
+            .AppendLine()
+            .Append("Дело: ")
+            .Append(BuildClientCaseTitle(clientCase))
+            .AppendLine()
+            .Append("Событие: ")
+            .Append(NormalizeNotificationText(courtEvent.Title, "Судебное событие"))
+            .AppendLine()
+            .Append("Дата: ")
+            .Append(FormatCourtEventDate(courtEvent.ScheduledAt, courtEvent.AllDay))
+            .AppendLine()
+            .Append("Статус: ")
+            .Append(FormatCourtMovementStatus(courtEvent.MovementStatus));
+
+        if (!string.IsNullOrWhiteSpace(courtEvent.CourtName))
+        {
+            builder.AppendLine().Append("Суд: ").Append(courtEvent.CourtName.Trim());
+        }
+
+        if (!string.IsNullOrWhiteSpace(courtEvent.CourtCaseNumber))
+        {
+            builder.AppendLine().Append("Номер в суде: ").Append(courtEvent.CourtCaseNumber.Trim());
+        }
+
+        if (!string.IsNullOrWhiteSpace(courtEvent.ResultSummary))
+        {
+            builder.AppendLine().Append("Результат: ").Append(courtEvent.ResultSummary.Trim());
+        }
+
+        return NotificationTemplateCatalog.CompactBlankLines(builder.ToString());
+    }
+
+    private static string BuildClientCaseTitle(ClientCase clientCase)
+    {
+        var title = NormalizeNotificationText(clientCase.Title, $"Дело #{clientCase.Id.ToString(CultureInfo.InvariantCulture)}");
+        return string.IsNullOrWhiteSpace(clientCase.CaseNumber)
+            ? title
+            : $"№{clientCase.CaseNumber.Trim()} · {title}";
+    }
+
+    private static string ResolveCourtEventNotificationType(ClientCaseCourtEvent courtEvent)
+    {
+        if (!string.IsNullOrWhiteSpace(courtEvent.ResultSummary)
+            || courtEvent.ClientCaseDocumentId.HasValue
+            || string.Equals(courtEvent.MovementStatus, "held", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(courtEvent.MovementStatus, "completed", StringComparison.OrdinalIgnoreCase))
+        {
+            return UserNotificationTypes.CourtDecisionPublished;
+        }
+
+        if (!string.Equals(courtEvent.MovementStatus, "scheduled", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(courtEvent.MovementStatus, "pending", StringComparison.OrdinalIgnoreCase))
+        {
+            return UserNotificationTypes.CourtStatusChanged;
+        }
+
+        return UserNotificationTypes.CourtHearing;
+    }
+
+    private static string ResolveCourtEventTemplateKey(string notificationType)
+        => notificationType switch
+        {
+            UserNotificationTypes.CourtDecisionPublished => NotificationTemplateKeys.CourtDecisionPublished,
+            UserNotificationTypes.CourtStatusChanged => NotificationTemplateKeys.CourtStatusChanged,
+            _ => NotificationTemplateKeys.CourtHearing
+        };
+
+    private static string ResolveCourtEventTone(string notificationType)
+        => notificationType switch
+        {
+            UserNotificationTypes.CourtDecisionPublished => "emerald",
+            UserNotificationTypes.CourtStatusChanged => "blue",
+            _ => "cyan"
+        };
+
+    private static string NormalizeCourtEventAction(string action)
+        => string.IsNullOrWhiteSpace(action) ? "updated" : action.Trim();
+
+    private static string ResolveCourtEventActionText(string action)
+        => NormalizeCourtEventAction(action).Equals("created", StringComparison.OrdinalIgnoreCase)
+            ? "добавил(а)"
+            : "обновил(а)";
+
+    private static string FormatCourtEventDate(DateTime value, bool allDay)
+        => allDay
+            ? value.ToString("dd.MM.yyyy", RuCulture)
+            : value.ToString("dd.MM.yyyy HH:mm", RuCulture);
+
+    private static string FormatCourtMovementStatus(string? status)
+        => status?.Trim() switch
+        {
+            "scheduled" => "назначено",
+            "pending" => "ожидается",
+            "held" => "проведено",
+            "completed" => "завершено",
+            "postponed" => "отложено",
+            "cancelled" => "отменено",
+            "decision" => "решение опубликовано",
+            _ when string.IsNullOrWhiteSpace(status) => "не указан",
+            _ => status!.Trim()
         };
 
     private static string FormatCalendarAccessUserList(

@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
 using System.Security.Cryptography;
+using System.Security.Claims;
 using System.Globalization;
 using System.Net;
 using System.Text;
@@ -111,6 +112,7 @@ public class CasesV2Controller : ControllerBase
     private readonly ICourtSyncProviderRegistry? _courtSyncProviderRegistry;
     private readonly IConfiguration _configuration;
     private readonly IOptionsMonitor<AppFeatureFlagsOptions>? _featureFlags;
+    private readonly INotificationService? _notificationService;
     private CaseStatusClock? _caseStatusClock;
 
     public CasesV2Controller(
@@ -121,7 +123,8 @@ public class CasesV2Controller : ControllerBase
         IInvoiceDocumentPdfService? pdfService = null,
         ICourtSyncProviderRegistry? courtSyncProviderRegistry = null,
         IConfiguration? configuration = null,
-        IOptionsMonitor<AppFeatureFlagsOptions>? featureFlags = null)
+        IOptionsMonitor<AppFeatureFlagsOptions>? featureFlags = null,
+        INotificationService? notificationService = null)
     {
         _db = db;
         _caseDocumentStorage = caseDocumentStorage ?? new LocalCaseDocumentStorage(environment);
@@ -130,6 +133,7 @@ public class CasesV2Controller : ControllerBase
         _courtSyncProviderRegistry = courtSyncProviderRegistry;
         _configuration = configuration ?? new ConfigurationBuilder().Build();
         _featureFlags = featureFlags;
+        _notificationService = notificationService;
     }
 
     private Task<DataVisibilityAccess?> ResolveCasesVisibilityAsync(CancellationToken ct)
@@ -781,6 +785,69 @@ public class CasesV2Controller : ControllerBase
             : clientCase.Title;
     }
 
+    private async Task<IReadOnlyCollection<int>> ResolveCaseNotificationRecipientIdsAsync(int clientCaseId, CancellationToken ct)
+    {
+        var candidateUserIds = await _db.ClientCases
+            .AsNoTracking()
+            .Where(clientCase => clientCase.Id == clientCaseId)
+            .Select(clientCase => new
+            {
+                clientCase.ResponsibleUserId,
+                ClientResponsibleUserId = clientCase.Client != null ? clientCase.Client.ResponsibleUserId : null,
+                LegalEntityResponsibleUserId = clientCase.LegalEntity != null ? clientCase.LegalEntity.ResponsibleUserId : null,
+            })
+            .ToListAsync(ct);
+
+        var userIds = candidateUserIds
+            .SelectMany(item => new[] { item.ResponsibleUserId, item.ClientResponsibleUserId, item.LegalEntityResponsibleUserId })
+            .Where(userId => userId.HasValue && userId.Value > 0)
+            .Select(userId => userId!.Value)
+            .Distinct()
+            .ToArray();
+        if (userIds.Length == 0)
+        {
+            return Array.Empty<int>();
+        }
+
+        var allowedUserIds = await _db.Users
+            .AsNoTracking()
+            .Where(user => userIds.Contains(user.Id)
+                && user.IsActive
+                && user.IsApproved
+                && user.Role != null
+                && (user.Role.Name == "admin"
+                    || user.Role.Permissions.Any(permission =>
+                        permission.Section == RolePermissionCatalog.Cases
+                        && permission.CanView)))
+            .Select(user => user.Id)
+            .ToListAsync(ct);
+
+        var result = new List<int>();
+        foreach (var userId in allowedUserIds)
+        {
+            var principal = new ClaimsPrincipal(new ClaimsIdentity(
+                [new Claim(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture))],
+                authenticationType: "CaseNotificationAccessCheck"));
+            var visibility = await _db.ResolveDataVisibilityAsync(principal, RolePermissionCatalog.Cases, ct);
+            if (visibility is null)
+            {
+                continue;
+            }
+
+            var canOpenCase = await _db.ClientCases
+                .AsNoTracking()
+                .Where(clientCase => clientCase.Id == clientCaseId)
+                .ApplyClientCaseVisibility(visibility)
+                .AnyAsync(ct);
+            if (canOpenCase)
+            {
+                result.Add(userId);
+            }
+        }
+
+        return result;
+    }
+
     private async Task AddCourtEventUserNotificationsAsync(
         ClientCase clientCase,
         ClientCaseCourtEvent courtEvent,
@@ -789,13 +856,22 @@ public class CasesV2Controller : ControllerBase
         string actorName,
         CancellationToken ct)
     {
-        var recipientUserIds = new HashSet<int>();
-        AddIfPositive(recipientUserIds, clientCase.ResponsibleUserId);
-        AddIfPositive(recipientUserIds, clientCase.Client?.ResponsibleUserId);
-        AddIfPositive(recipientUserIds, clientCase.LegalEntity?.ResponsibleUserId);
-
+        var recipientUserIds = await ResolveCaseNotificationRecipientIdsAsync(clientCase.Id, ct);
         if (recipientUserIds.Count == 0)
         {
+            return;
+        }
+
+        if (_notificationService is not null)
+        {
+            await _notificationService.NotifyCaseCourtEventAsync(
+                clientCase,
+                courtEvent,
+                action,
+                actorName,
+                actorUserId ?? 0,
+                recipientUserIds,
+                ct);
             return;
         }
 
@@ -6392,6 +6468,21 @@ public class CasesV2Controller : ControllerBase
             {
                 var errorMessage = $"Проверка судебного источника не выполнена: {ex.Message} Проверьте ссылку на карточку дела суда и повторите попытку.";
                 AppendCaseEvent(clientCase, $"{errorMessage} Инициатор: {actorName}.");
+                if (_notificationService is not null)
+                {
+                    var recipients = await ResolveCaseNotificationRecipientIdsAsync(clientCase.Id, ct);
+                    if (recipients.Count > 0)
+                    {
+                        await _notificationService.NotifyCourtSyncFailedAsync(
+                            clientCase,
+                            courtSyncProvider.Label,
+                            errorMessage,
+                            actorName,
+                            User.GetUserId() ?? 0,
+                            recipients,
+                            ct);
+                    }
+                }
                 await _db.SaveChangesAsync(ct);
 
                 return Ok(new ClientCaseCourtSyncRunDto
@@ -6503,6 +6594,7 @@ public class CasesV2Controller : ControllerBase
         var actorUserId = User.GetUserId();
         var changedFields = new List<string>();
         var createdEvents = new List<ClientCaseCourtEvent>();
+        var updatedEvents = new List<ClientCaseCourtEvent>();
         var updatedCourtEvents = 0;
         var createdCourtParties = 0;
         var createdCourtActDocuments = 0;
@@ -6601,6 +6693,7 @@ public class CasesV2Controller : ControllerBase
                     existing.UpdatedByUserId = actorUserId;
                     existing.UpdatedByUserName = Truncate(actorName, 256);
                     AddCourtEventHistory(existing, "updated", $"Событие обновлено из ГАС «Правосудие»: {summary}.", actorUserId, actorName);
+                    updatedEvents.Add(existing);
                     updatedCourtEvents++;
                 }
             }
@@ -6613,6 +6706,16 @@ public class CasesV2Controller : ControllerBase
             {
                 AddCourtEventHistory(courtEvent, "created", $"Событие создано из ГАС «Правосудие»: {courtEvent.Title}.", actorUserId, actorName);
             }
+        }
+
+        foreach (var courtEvent in createdEvents)
+        {
+            await AddCourtEventUserNotificationsAsync(clientCase, courtEvent, "created", actorUserId, actorName, ct);
+        }
+
+        foreach (var courtEvent in updatedEvents)
+        {
+            await AddCourtEventUserNotificationsAsync(clientCase, courtEvent, "updated", actorUserId, actorName, ct);
         }
 
         var partyCandidates = BuildSudrfCourtPartyCandidates(courtData.Participants);

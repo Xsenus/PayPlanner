@@ -401,11 +401,13 @@
 
 Цель: привести существующие уведомления по делам к той же realtime/push-модели.
 
-- [ ] Судебные события.
+- [x] Судебные события.
   - Заседание назначено/перенесено.
   - Опубликовано решение.
   - Изменился судебный статус.
   - Ошибка судебной синхронизации.
+  - Сделано: судебные события из карточки дела и из внешней судебной синхронизации подключены к общему `NotificationService`; ответственные получают отдельные типы `courtHearing`, `courtStatusChanged`, `courtDecisionPublished` и `courtSyncFailed` с проверкой права на раздел "Дела" и видимости конкретного дела.
+  - Проверено: targeted-тесты `NotifyCaseCourtEvent|CreateCourtEvent_UsesNotificationService|RunCourtSync_UpdatesCaseAndCreatesCourtEventFromSudrf|RunCourtSync_NotifiesResponsibleWhenExternalSourceFails`, полный `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj`, `npm run lint`, `npm run build`, JSON/UTF-8, локальный запуск backend на временной SQLite-БД с `GET /api/health`.
   - DoD: важные судебные события могут приходить realtime/push.
 
 - [ ] Процессуальные сроки.

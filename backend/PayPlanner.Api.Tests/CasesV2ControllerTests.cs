@@ -9,6 +9,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using PayPlanner.Api.Controllers.V2;
 using PayPlanner.Api.Data;
@@ -2417,6 +2418,58 @@ public class CasesV2ControllerTests
         Assert.Contains(await db.UserNotifications
             .Where(item => item.Type == UserNotificationTypes.CaseProceduralDeadline)
             .ToListAsync(), item => item.MetadataJson.Contains("\"action\":\"closed\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task CreateCourtEvent_UsesNotificationServiceForResponsibleCourtHearing()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "court-service-owner@example.com", "Владелец");
+        var responsible = await CreateUserAsync(db, "court-service-responsible@example.com", "Ответственный");
+        var client = new Client
+        {
+            Name = "Клиент по суду",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело для уведомления о заседании",
+            CaseNumber = "CASE-HEARING-1",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id,
+            CourtName = "Арбитражный суд",
+            CourtCaseNumber = "А55-200/2026",
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, owner, notificationService: CreateNotificationService(db));
+
+        var createResult = await controller.CreateCourtEvent(
+            clientCase.Id,
+            new CasesV2Controller.UpsertClientCaseCourtEventRequest
+            {
+                EventType = "hearing",
+                Title = "Судебное заседание",
+                ScheduledAt = new DateTime(2026, 7, 10, 9, 30, 0, DateTimeKind.Utc),
+                AllDay = false,
+                CourtInstance = "first",
+                MovementStatus = "scheduled",
+            },
+            CancellationToken.None);
+
+        var created = Assert.IsType<CasesV2Controller.ClientCaseCourtEventDto>(
+            Assert.IsType<CreatedResult>(createResult.Result).Value);
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(UserNotificationTypes.CourtHearing, notification.Type);
+        Assert.Equal(responsible.Id, notification.RecipientUserId);
+        Assert.Equal("case", notification.ObjectType);
+        Assert.Equal(clientCase.Id, notification.ObjectId);
+        Assert.Contains("CASE-HEARING-1", notification.Title);
+        Assert.Contains("Судебное заседание", notification.BodyPreview);
+        Assert.Contains($"\"courtEventId\":{created.Id}", notification.MetadataJson, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -4867,6 +4920,7 @@ public class CasesV2ControllerTests
     {
         await using var db = await CreateContextAsync();
         var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        var responsible = await CreateUserAsync(db, "court-sync-responsible@example.com", "Ответственный");
         var client = new Client
         {
             Name = "Шафорост Антон Евгеньевич",
@@ -4879,6 +4933,7 @@ public class CasesV2ControllerTests
             Title = "Шафорост - апелляция",
             CourtUrl = "https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42",
             Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id,
         };
         db.Clients.Add(client);
         db.ClientCases.Add(clientCase);
@@ -4923,7 +4978,11 @@ public class CasesV2ControllerTests
                 },
             ],
         };
-        var controller = CreateController(db, owner, sudrfCourtSyncService: new FixedSudrfCourtSyncService(courtData));
+        var controller = CreateController(
+            db,
+            owner,
+            sudrfCourtSyncService: new FixedSudrfCourtSyncService(courtData),
+            notificationService: CreateNotificationService(db));
 
         var result = await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None);
 
@@ -4983,6 +5042,13 @@ public class CasesV2ControllerTests
         Assert.Equal("cassation", deadline.DeadlineType);
         Assert.Equal(new DateTime(2026, 9, 1), deadline.DueAt);
         Assert.Equal(document.Id, deadline.ClientCaseDocumentId);
+
+        var notification = await db.UserNotifications.SingleAsync(item => item.Type == UserNotificationTypes.CourtHearing);
+        Assert.Equal(responsible.Id, notification.RecipientUserId);
+        Assert.Equal("case", notification.ObjectType);
+        Assert.Equal(clientCase.Id, notification.ObjectId);
+        Assert.Contains("Судебное заседание", notification.BodyPreview, StringComparison.Ordinal);
+        Assert.Contains($"\"courtEventId\":{courtEvent.Id}", notification.MetadataJson, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -5063,6 +5129,52 @@ public class CasesV2ControllerTests
         var events = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.CaseCalendarEventDto>>(calendarOk.Value);
         Assert.Contains(events, item => item.Kind == "court" && item.SourceType == "hearing" && item.StartAt == expectedUtcHearingAt);
         Assert.Contains(events, item => item.Kind == "court" && item.SourceId == courtEvent.Id && item.StartAt == expectedUtcHearingAt);
+    }
+
+    [Fact]
+    public async Task RunCourtSync_NotifiesResponsibleWhenExternalSourceFails()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "court-sync-error-owner@example.com", "Владелец");
+        var responsible = await CreateUserAsync(db, "court-sync-error-responsible@example.com", "Ответственный");
+        var client = new Client
+        {
+            Name = "Клиент с ошибкой суда",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело с ошибкой источника",
+            CaseNumber = "CASE-SYNC-ERR",
+            CourtUrl = "https://example.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42",
+            CourtName = "Районный суд",
+            CourtCaseNumber = "2-100/2026",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var controller = CreateController(
+            db,
+            owner,
+            sudrfCourtSyncService: new ThrowingSudrfCourtSyncService("Источник временно недоступен"),
+            notificationService: CreateNotificationService(db));
+
+        var result = await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<CasesV2Controller.ClientCaseCourtSyncRunDto>(ok.Value);
+        Assert.Equal("external-sync-error", dto.Status);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(UserNotificationTypes.CourtSyncFailed, notification.Type);
+        Assert.Equal(responsible.Id, notification.RecipientUserId);
+        Assert.Equal("case", notification.ObjectType);
+        Assert.Equal(clientCase.Id, notification.ObjectId);
+        Assert.Contains("Источник временно недоступен", notification.BodyPreview, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -6699,11 +6811,12 @@ public class CasesV2ControllerTests
         IInvoiceDocumentPdfService? pdfService = null,
         ICourtSyncProviderRegistry? courtSyncProviderRegistry = null,
         IConfiguration? configuration = null,
-        IOptionsMonitor<AppFeatureFlagsOptions>? featureFlags = null)
+        IOptionsMonitor<AppFeatureFlagsOptions>? featureFlags = null,
+        INotificationService? notificationService = null)
         => new(db, new TestWebHostEnvironment
         {
             ContentRootPath = contentRootPath ?? Path.Combine(Path.GetTempPath(), "payplanner-case-documents", Guid.NewGuid().ToString("N")),
-        }, sudrfCourtSyncService: sudrfCourtSyncService, pdfService: pdfService, courtSyncProviderRegistry: courtSyncProviderRegistry, configuration: configuration, featureFlags: featureFlags)
+        }, sudrfCourtSyncService: sudrfCourtSyncService, pdfService: pdfService, courtSyncProviderRegistry: courtSyncProviderRegistry, configuration: configuration, featureFlags: featureFlags, notificationService: notificationService)
         {
             ControllerContext = new ControllerContext
             {
@@ -6718,6 +6831,52 @@ public class CasesV2ControllerTests
                 },
             },
         };
+
+    private static NotificationService CreateNotificationService(PaymentContext db)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .Build();
+
+        return new NotificationService(
+            db,
+            configuration,
+            new NoopEmailService(),
+            new NoopTelegramNotificationService(),
+            NullLogger<NotificationService>.Instance);
+    }
+
+    private sealed class NoopEmailService : IEmailService
+    {
+        public Task SendRegistrationPendingEmailAsync(string toEmail, string fullName) => Task.CompletedTask;
+        public Task SendRegistrationApprovedEmailAsync(string toEmail, string fullName) => Task.CompletedTask;
+        public Task SendRegistrationRejectedEmailAsync(string toEmail, string fullName, string? reason) => Task.CompletedTask;
+        public Task SendAdminNewRegistrationNotificationAsync(string adminEmail, string newUserFullName, string newUserEmail) => Task.CompletedTask;
+
+        public Task SendEmailAsync(
+            string toEmail,
+            string subject,
+            string body,
+            bool isHtml = false,
+            CancellationToken cancellationToken = default,
+            EmailSendSettings? settings = null)
+            => Task.CompletedTask;
+
+        public Task SendEmailWithAttachmentAsync(string toEmail, string subject, string body, string attachmentFileName, byte[] attachmentBytes, string attachmentContentType)
+            => Task.CompletedTask;
+    }
+
+    private sealed class NoopTelegramNotificationService : ITelegramNotificationService
+    {
+        public Task<TelegramSendResult> SendMessageAsync(long chatId, string text, CancellationToken cancellationToken = default)
+            => Task.FromResult(new TelegramSendResult(true, "sent"));
+
+        public Task<TelegramSendResult> SendMessageWithTokenAsync(long chatId, string text, string botToken, CancellationToken cancellationToken = default, TelegramBotConnectionSettings? connection = null)
+            => Task.FromResult(new TelegramSendResult(true, "sent"));
+
+        public Task<TelegramNotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new TelegramNotificationSettingsDto());
+    }
 
     private sealed class FakeInvoiceDocumentPdfService(string content) : IInvoiceDocumentPdfService
     {
@@ -6757,6 +6916,15 @@ public class CasesV2ControllerTests
 
         public Task<SudrfCourtCaseData> FetchCaseAsync(string sourceUrl, CancellationToken ct, string? courtCaseNumber = null)
             => Task.FromResult(data);
+    }
+
+    private sealed class ThrowingSudrfCourtSyncService(string message) : ISudrfCourtSyncService
+    {
+        public bool CanHandle(string? sourceUrl)
+            => sourceUrl?.Contains("sudrf.ru", StringComparison.OrdinalIgnoreCase) == true;
+
+        public Task<SudrfCourtCaseData> FetchCaseAsync(string sourceUrl, CancellationToken ct, string? courtCaseNumber = null)
+            => throw new SudrfCourtSyncException(message);
     }
 
     private static async Task<User> CreateUserAsync(
