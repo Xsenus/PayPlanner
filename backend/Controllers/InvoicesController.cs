@@ -16,6 +16,7 @@ using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Invoices;
+using PayPlanner.Api.Services.Notifications;
 
 namespace PayPlanner.Api.Controllers;
 
@@ -37,6 +38,7 @@ public class InvoicesController : ControllerBase
     private readonly IFormRequirementsService _formRequirements;
     private readonly IInvoiceDocumentPdfService? _invoiceDocumentPdfService;
     private readonly IYandexDiskService? _yandexDiskService;
+    private readonly INotificationService? _notificationService;
     private const string InstallmentPaymentMarker = "[pp:installment-payment]";
     private static readonly CultureInfo RuCulture = CultureInfo.GetCultureInfo("ru-RU");
     private static readonly JsonSerializerOptions InstallmentMetadataJsonOptions = new()
@@ -49,13 +51,15 @@ public class InvoicesController : ControllerBase
         IEmailService emailService,
         IFormRequirementsService formRequirements,
         IInvoiceDocumentPdfService? invoiceDocumentPdfService = null,
-        IYandexDiskService? yandexDiskService = null)
+        IYandexDiskService? yandexDiskService = null,
+        INotificationService? notificationService = null)
     {
         _db = db;
         _emailService = emailService;
         _formRequirements = formRequirements;
         _invoiceDocumentPdfService = invoiceDocumentPdfService;
         _yandexDiskService = yandexDiskService;
+        _notificationService = notificationService;
     }
 
     private Task<TimeZoneInfo> ResolveInvoiceTimeZoneAsync(CancellationToken ct)
@@ -73,6 +77,156 @@ public class InvoicesController : ControllerBase
         => await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Accounts, isAllowed, ct)
             ? null
             : Forbid();
+
+    private async Task<IReadOnlyCollection<int>> ResolveInvoiceNotificationRecipientsAsync(
+        Payment invoicePayment,
+        IEnumerable<int> candidateUserIds,
+        CancellationToken ct)
+    {
+        var userIds = candidateUserIds
+            .Where(userId => userId > 0)
+            .Distinct()
+            .ToArray();
+        if (userIds.Length == 0)
+        {
+            return Array.Empty<int>();
+        }
+
+        var allowedUserIds = await _db.Users
+            .AsNoTracking()
+            .Where(user => userIds.Contains(user.Id)
+                && user.IsActive
+                && user.IsApproved
+                && user.Role != null
+                && (user.Role.Name == "admin"
+                    || user.Role.Permissions.Any(permission =>
+                        permission.Section == RolePermissionCatalog.Accounts
+                        && permission.CanView)))
+            .Select(user => user.Id)
+            .ToListAsync(ct);
+
+        var visibleRecipientIds = new List<int>();
+        foreach (var userId in allowedUserIds)
+        {
+            var principal = new ClaimsPrincipal(new ClaimsIdentity(
+                new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture)) },
+                authenticationType: "NotificationAccessCheck"));
+            var visibility = await _db.ResolveDataVisibilityAsync(principal, RolePermissionCatalog.Accounts, ct);
+            if (visibility is null)
+            {
+                continue;
+            }
+
+            var canOpenInvoice = await _db.Payments
+                .AsNoTracking()
+                .Where(item => item.Id == invoicePayment.Id)
+                .ApplyPaymentVisibility(visibility)
+                .AnyAsync(ct);
+            if (canOpenInvoice)
+            {
+                visibleRecipientIds.Add(userId);
+            }
+        }
+
+        return visibleRecipientIds;
+    }
+
+    private async Task NotifyInvoiceCreatedAsync(Payment invoicePayment, CancellationToken ct)
+    {
+        if (_notificationService is null)
+        {
+            return;
+        }
+
+        await _db.Entry(invoicePayment).Collection(item => item.Responsibles).LoadAsync(ct);
+        await _db.Entry(invoicePayment).Reference(item => item.Invoice).LoadAsync(ct);
+        var recipients = await ResolveInvoiceNotificationRecipientsAsync(
+            invoicePayment,
+            invoicePayment.Responsibles.Select(item => item.UserId),
+            ct);
+        if (recipients.Count == 0)
+        {
+            return;
+        }
+
+        await _notificationService.NotifyInvoiceCreatedAsync(
+            invoicePayment,
+            User.GetDisplayName(),
+            User.GetUserId() ?? 0,
+            recipients,
+            ct);
+    }
+
+    private async Task NotifyInvoiceChangedAsync(
+        Payment invoicePayment,
+        IReadOnlyList<string> changeLabels,
+        CancellationToken ct)
+    {
+        if (_notificationService is null || changeLabels.Count == 0)
+        {
+            return;
+        }
+
+        await _db.Entry(invoicePayment).Collection(item => item.Responsibles).LoadAsync(ct);
+        await _db.Entry(invoicePayment).Reference(item => item.Invoice).LoadAsync(ct);
+        var recipients = await ResolveInvoiceNotificationRecipientsAsync(
+            invoicePayment,
+            invoicePayment.Responsibles.Select(item => item.UserId),
+            ct);
+        if (recipients.Count == 0)
+        {
+            return;
+        }
+
+        await _notificationService.NotifyInvoiceChangedAsync(
+            invoicePayment,
+            changeLabels,
+            User.GetDisplayName(),
+            User.GetUserId() ?? 0,
+            recipients,
+            ct);
+    }
+
+    private static IReadOnlyList<string> BuildInvoiceStatusChangeLabels(
+        PaymentStatus originalStatus,
+        PaymentStatus currentStatus,
+        string? originalWorkflowStatus,
+        string? currentWorkflowStatus)
+    {
+        var labels = new List<string>();
+        if (originalStatus != currentStatus)
+        {
+            labels.Add($"Статус оплаты: {originalStatus.ToDisplayString()} -> {currentStatus.ToDisplayString()}");
+        }
+
+        var originalWorkflow = InvoiceWorkflowStatus.Normalize(originalWorkflowStatus) ?? originalWorkflowStatus ?? string.Empty;
+        var currentWorkflow = InvoiceWorkflowStatus.Normalize(currentWorkflowStatus) ?? currentWorkflowStatus ?? string.Empty;
+        if (!string.Equals(originalWorkflow, currentWorkflow, StringComparison.Ordinal))
+        {
+            labels.Add($"Статус счета: {FormatInvoiceWorkflowStatus(originalWorkflow)} -> {FormatInvoiceWorkflowStatus(currentWorkflow)}");
+        }
+
+        return labels;
+    }
+
+    private static string FormatInvoiceWorkflowStatus(string? status)
+        => (InvoiceWorkflowStatus.Normalize(status) ?? status)?.Trim() switch
+        {
+            InvoiceWorkflowStatus.Draft => "Черновик",
+            InvoiceWorkflowStatus.NotSigned => "Не подписан",
+            InvoiceWorkflowStatus.RequiresClientSignature => "Требует подписи клиента",
+            InvoiceWorkflowStatus.OnApproval => "На согласовании",
+            InvoiceWorkflowStatus.Approved => "Согласован",
+            InvoiceWorkflowStatus.ApprovalRejected => "Согласование отклонено",
+            InvoiceWorkflowStatus.NeedsCorrection => "Требует корректировки",
+            InvoiceWorkflowStatus.OnSigning => "Отправлен на подпись",
+            InvoiceWorkflowStatus.SignedByClient => "Подписан клиентом",
+            InvoiceWorkflowStatus.Paid => "Оплачен",
+            InvoiceWorkflowStatus.PartiallyPaid => "Частично оплачен",
+            InvoiceWorkflowStatus.Overdue => "Просрочен",
+            InvoiceWorkflowStatus.Cancelled => "Отменен",
+            _ => "не указан"
+        };
 
     [HttpGet]
     public async Task<IActionResult> Get(
@@ -516,10 +670,13 @@ public class InvoicesController : ControllerBase
         }
 
         var now = DateTime.UtcNow;
+        var originalStatus = payment.Status;
+        var originalWorkflowStatus = payment.InvoiceWorkflowStatus;
         ApplyInvoiceWorkflowStatus(payment, InvoiceWorkflowStatus.OnSigning, now, reason: null);
         await SyncSiblingInvoiceWorkflowStatusesAsync(payment, InvoiceWorkflowStatus.OnSigning, now, reason: null, ct);
 
         var dto = await SaveAndReloadInvoiceAsync(payment, ct);
+        await NotifyInvoiceChangedAsync(payment, BuildInvoiceStatusChangeLabels(originalStatus, payment.Status, originalWorkflowStatus, payment.InvoiceWorkflowStatus), ct);
         return Ok(dto);
     }
 
@@ -543,9 +700,12 @@ public class InvoicesController : ControllerBase
         }
 
         var now = DateTime.UtcNow;
+        var originalStatus = payment.Status;
+        var originalWorkflowStatus = payment.InvoiceWorkflowStatus;
         ApplyInvoiceWorkflowStatus(payment, InvoiceWorkflowStatus.SignedByClient, now, reason: null);
         await SyncSiblingInvoiceWorkflowStatusesAsync(payment, InvoiceWorkflowStatus.SignedByClient, now, reason: null, ct);
         var dto = await SaveAndReloadInvoiceAsync(payment, ct);
+        await NotifyInvoiceChangedAsync(payment, BuildInvoiceStatusChangeLabels(originalStatus, payment.Status, originalWorkflowStatus, payment.InvoiceWorkflowStatus), ct);
         return Ok(dto);
     }
 
@@ -569,9 +729,12 @@ public class InvoicesController : ControllerBase
         }
 
         var now = DateTime.UtcNow;
+        var originalStatus = payment.Status;
+        var originalWorkflowStatus = payment.InvoiceWorkflowStatus;
         ApplyInvoiceWorkflowStatus(payment, InvoiceWorkflowStatus.NotSigned, now, reason: null);
         await SyncSiblingInvoiceWorkflowStatusesAsync(payment, InvoiceWorkflowStatus.NotSigned, now, reason: null, ct);
         var dto = await SaveAndReloadInvoiceAsync(payment, ct);
+        await NotifyInvoiceChangedAsync(payment, BuildInvoiceStatusChangeLabels(originalStatus, payment.Status, originalWorkflowStatus, payment.InvoiceWorkflowStatus), ct);
         return Ok(dto);
     }
 
@@ -616,6 +779,8 @@ public class InvoicesController : ControllerBase
 
         var reason = Normalize(request.Reason);
         var statusChanged = !string.Equals(payment.InvoiceWorkflowStatus, workflowStatus, StringComparison.OrdinalIgnoreCase);
+        var originalStatus = payment.Status;
+        var originalWorkflowStatus = payment.InvoiceWorkflowStatus;
         if (statusChanged)
         {
             var reasonError = await ValidateFinancialActionReasonAsync(reason, "изменения статуса документа", ct);
@@ -669,6 +834,10 @@ public class InvoicesController : ControllerBase
         }
 
         var dto = await SaveAndReloadInvoiceAsync(payment, ct);
+        if (statusChanged)
+        {
+            await NotifyInvoiceChangedAsync(payment, BuildInvoiceStatusChangeLabels(originalStatus, payment.Status, originalWorkflowStatus, payment.InvoiceWorkflowStatus), ct);
+        }
         return Ok(dto);
     }
 
@@ -724,6 +893,8 @@ public class InvoicesController : ControllerBase
             return BadRequest("Unknown invoice cancellation scope.");
         }
 
+        var originalStatus = payment.Status;
+        var originalWorkflowStatus = payment.InvoiceWorkflowStatus;
         await using var transaction = await _db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
         await LockInvoiceAggregateAsync(invoiceEntityId.Value, ct);
 
@@ -750,6 +921,7 @@ public class InvoicesController : ControllerBase
             await transaction.CommitAsync(ct);
 
             var updatedDto = await LoadInvoiceDtoAsync(payment.Id, ct);
+            await NotifyInvoiceChangedAsync(payment, BuildInvoiceStatusChangeLabels(originalStatus, payment.Status, originalWorkflowStatus, payment.InvoiceWorkflowStatus), ct);
             return Ok(updatedDto);
         }
 
@@ -919,6 +1091,7 @@ public class InvoicesController : ControllerBase
 
         var dto = await LoadInvoiceDtoAsync(payment.Id, ct);
         ApplyPersistedPaymentState(dto, payment);
+        await NotifyInvoiceChangedAsync(payment, BuildInvoiceStatusChangeLabels(originalStatus, payment.Status, originalWorkflowStatus, payment.InvoiceWorkflowStatus), ct);
         return Ok(dto);
     }
 
@@ -1115,6 +1288,7 @@ public class InvoicesController : ControllerBase
 
         var dto = await LoadInvoiceDtoAsync(payment.Id, ct);
         ApplyPersistedPaymentState(dto, payment);
+        await NotifyInvoiceCreatedAsync(payment, ct);
 
         return Created($"/api/invoices/{dto.Id}", dto);
     }
@@ -1356,6 +1530,7 @@ public class InvoicesController : ControllerBase
 
         var dto = await LoadInvoiceDtoAsync(payment.Id, ct);
         ApplyPersistedPaymentState(dto, payment);
+        await NotifyInvoiceChangedAsync(payment, BuildInvoiceStatusChangeLabels(originalStatus, payment.Status, originalWorkflowStatus, payment.InvoiceWorkflowStatus), ct);
 
         return Ok(dto);
     }

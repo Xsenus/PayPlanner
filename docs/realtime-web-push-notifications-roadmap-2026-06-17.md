@@ -363,12 +363,14 @@
   - Проверено: `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj`, `npm run build`, `npm run lint`, локальный запуск backend на SQLite `payplanner-local-release-check.db` с `GET /api/health`.
   - DoD: ответственный и руководитель получают нужные уведомления.
 
-- [ ] Счета.
+- [x] Счета.
   - Счет создан.
   - Счет отправлен на подпись/клиенту.
   - Счет оплачен частично/полностью.
   - Счет просрочен.
   - Счет отменен.
+  - Сделано: добавлен отдельный контур уведомлений по ответственным счета с проверкой доступа к разделу "Счета"; уведомления отправляются при создании счета, отправке на подпись, отметке о подписании/неподписании, смене workflow-статуса, отмене, частичной/полной оплате через связанные платежи и автоматической просрочке.
+  - Проверено: `dotnet build backend\PayPlanner.Api.csproj`, targeted-тесты `NotifyInvoice|RunOnceAsync_NotifiesInvoiceResponsibleWhenInvoiceBecomesOverdue`, полный `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj`, `npm run build`, `npm run lint`, JSON/UTF-8, локальный запуск backend на временной SQLite-БД с `GET /api/health`.
   - DoD: счета не требуют ручного мониторинга списка.
 
 - [ ] Акты.

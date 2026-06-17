@@ -453,6 +453,8 @@ public class NotificationInboxController : ControllerBase
                 || item.ObjectType == "contract"
                 || item.Type == UserNotificationTypes.PaymentAssigned
                 || item.Type == UserNotificationTypes.PaymentChanged
+                || item.Type == UserNotificationTypes.InvoiceCreated
+                || item.Type == UserNotificationTypes.InvoiceChanged
                 || item.Type == UserNotificationTypes.PaymentAdvanceReviewRequired
                 || item.Type == UserNotificationTypes.PaymentAdvanceReviewEscalation),
             "case" => query.Where(item =>
@@ -512,6 +514,8 @@ public class NotificationInboxController : ControllerBase
             || item.Type == UserNotificationTypes.NoteImportantChanged
             || item.Type == UserNotificationTypes.PaymentAssigned
             || item.Type == UserNotificationTypes.PaymentChanged
+            || item.Type == UserNotificationTypes.InvoiceCreated
+            || item.Type == UserNotificationTypes.InvoiceChanged
             || item.Type == UserNotificationTypes.PaymentAdvanceReviewRequired
             || item.Type == UserNotificationTypes.PaymentAdvanceReviewEscalation
             || item.Type == UserNotificationTypes.SystemAdminWarning);

@@ -2043,6 +2043,125 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyInvoiceCreatedAsync_CreatesInvoiceNotificationAndDeduplicates()
+    {
+        await using var db = await CreateContextAsync();
+        var actor = await CreateUserAsync(db, "invoice-actor@example.com");
+        var recipient = new User
+        {
+            Email = "invoice-recipient@example.com",
+            FullName = "Ответственный по счету",
+            PasswordHash = "hash",
+            RoleId = actor.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(recipient);
+        await db.SaveChangesAsync();
+        var payment = new Payment
+        {
+            Account = "Счет №45",
+            Date = new DateTime(2026, 6, 19),
+            Amount = 38000m,
+            Status = PaymentStatus.Pending,
+            Type = PaymentType.Income,
+            DocumentKind = DocumentKind.Invoice,
+            InvoiceWorkflowStatus = InvoiceWorkflowStatus.Draft,
+            Invoice = new Invoice
+            {
+                Number = "45",
+                Date = new DateTime(2026, 6, 19)
+            }
+        };
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            realtime,
+            webPush);
+
+        await service.NotifyInvoiceCreatedAsync(payment, actor.FullName, actor.Id, [recipient.Id, actor.Id]);
+        await service.NotifyInvoiceCreatedAsync(payment, actor.FullName, actor.Id, [recipient.Id]);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(recipient.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.InvoiceCreated, notification.Type);
+        Assert.Equal("invoice", notification.ObjectType);
+        Assert.Equal(payment.Id, notification.ObjectId);
+        Assert.Contains("45", notification.BodyPreview);
+        Assert.DoesNotContain(await db.UserNotifications.ToListAsync(), item => item.RecipientUserId == actor.Id);
+        var realtimeNotification = Assert.Single(realtime.Notifications);
+        Assert.Equal(notification.Id, realtimeNotification.Id);
+        var pushed = Assert.Single(webPush.Notifications);
+        Assert.Equal(notification.Id, pushed.Id);
+    }
+
+    [Fact]
+    public async Task NotifyInvoiceChangedAsync_CreatesInvoiceNotificationAndDeduplicatesByState()
+    {
+        await using var db = await CreateContextAsync();
+        var actor = await CreateUserAsync(db, "invoice-change-actor@example.com");
+        var recipient = new User
+        {
+            Email = "invoice-change-recipient@example.com",
+            FullName = "Ответственный по изменению счета",
+            PasswordHash = "hash",
+            RoleId = actor.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(recipient);
+        await db.SaveChangesAsync();
+        var payment = new Payment
+        {
+            Account = "Счет №46",
+            Date = new DateTime(2026, 6, 20),
+            Amount = 56000m,
+            Status = PaymentStatus.Pending,
+            Type = PaymentType.Income,
+            DocumentKind = DocumentKind.Invoice,
+            InvoiceWorkflowStatus = InvoiceWorkflowStatus.PartiallyPaid,
+            Invoice = new Invoice
+            {
+                Number = "46",
+                Date = new DateTime(2026, 6, 20)
+            }
+        };
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+
+        await service.NotifyInvoiceChangedAsync(
+            payment,
+            ["Статус счета: Черновик -> Частично оплачен", "Оплачено: 0,00 -> 12 000,00"],
+            actor.FullName,
+            actor.Id,
+            [recipient.Id, actor.Id]);
+        await service.NotifyInvoiceChangedAsync(
+            payment,
+            ["Статус счета: Черновик -> Частично оплачен", "Оплачено: 0,00 -> 12 000,00"],
+            actor.FullName,
+            actor.Id,
+            [recipient.Id]);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(recipient.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.InvoiceChanged, notification.Type);
+        Assert.Equal("invoice", notification.ObjectType);
+        Assert.Equal(payment.Id, notification.ObjectId);
+        Assert.Contains("Частично оплачен", notification.BodyPreview);
+        Assert.Contains("12 000", notification.BodyPreview);
+    }
+
+    [Fact]
     public async Task NotifyTaskApprovalRequestedAsync_CreatesInAppNotificationForApproverAndAssignee()
     {
         await using var db = await CreateContextAsync();

@@ -55,6 +55,12 @@ public class PaymentsController : ControllerBase
     private Task<TimeZoneInfo> ResolvePaymentTimeZoneAsync(CancellationToken ct)
         => CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
 
+    private sealed record InvoiceNotificationSnapshot(
+        int PaymentId,
+        PaymentStatus Status,
+        string WorkflowStatus,
+        decimal PaidAmount);
+
     private async Task<bool> CanAccessPaymentAsync(int id, DataVisibilityAccess visibility, CancellationToken ct)
         => await _db.Payments
             .AsNoTracking()
@@ -110,6 +116,59 @@ public class PaymentsController : ControllerBase
                 .ApplyPaymentVisibility(visibility)
                 .AnyAsync(ct);
             if (canOpenPayment)
+            {
+                visibleRecipientIds.Add(userId);
+            }
+        }
+
+        return visibleRecipientIds;
+    }
+
+    private async Task<IReadOnlyCollection<int>> ResolveInvoiceNotificationRecipientsAsync(
+        Payment invoicePayment,
+        IEnumerable<int> candidateUserIds,
+        CancellationToken ct)
+    {
+        var userIds = candidateUserIds
+            .Where(userId => userId > 0)
+            .Distinct()
+            .ToArray();
+        if (userIds.Length == 0)
+        {
+            return Array.Empty<int>();
+        }
+
+        var allowedUserIds = await _db.Users
+            .AsNoTracking()
+            .Where(user => userIds.Contains(user.Id)
+                && user.IsActive
+                && user.IsApproved
+                && user.Role != null
+                && (user.Role.Name == "admin"
+                    || user.Role.Permissions.Any(permission =>
+                        permission.Section == RolePermissionCatalog.Accounts
+                        && permission.CanView)))
+            .Select(user => user.Id)
+            .ToListAsync(ct);
+
+        var visibleRecipientIds = new List<int>();
+        foreach (var userId in allowedUserIds)
+        {
+            var principal = new ClaimsPrincipal(new ClaimsIdentity(
+                new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture)) },
+                authenticationType: "NotificationAccessCheck"));
+            var visibility = await _db.ResolveDataVisibilityAsync(principal, RolePermissionCatalog.Accounts, ct);
+            if (visibility is null)
+            {
+                continue;
+            }
+
+            var canOpenInvoice = await _db.Payments
+                .AsNoTracking()
+                .Where(item => item.Id == invoicePayment.Id)
+                .ApplyPaymentVisibility(visibility)
+                .AnyAsync(ct);
+            if (canOpenInvoice)
             {
                 visibleRecipientIds.Add(userId);
             }
@@ -181,6 +240,146 @@ public class PaymentsController : ControllerBase
             recipients,
             ct);
     }
+
+    private async Task<InvoiceNotificationSnapshot?> CaptureInvoiceNotificationSnapshotAsync(Payment payment, CancellationToken ct)
+    {
+        var invoicePayment = await ResolveInvoiceNotificationPaymentAsync(payment, tracking: false, ct);
+        if (invoicePayment is null)
+        {
+            return null;
+        }
+
+        return new InvoiceNotificationSnapshot(
+            invoicePayment.Id,
+            invoicePayment.Status,
+            InvoiceWorkflowStatus.Normalize(invoicePayment.InvoiceWorkflowStatus) ?? invoicePayment.InvoiceWorkflowStatus,
+            invoicePayment.PaidAmount);
+    }
+
+    private async Task NotifyInvoiceStateChangedAsync(
+        Payment payment,
+        InvoiceNotificationSnapshot? before,
+        CancellationToken ct)
+    {
+        if (_notificationService is null || before is null)
+        {
+            return;
+        }
+
+        var invoicePayment = await ResolveInvoiceNotificationPaymentAsync(payment, tracking: true, ct);
+        if (invoicePayment is null || invoicePayment.Id != before.PaymentId)
+        {
+            return;
+        }
+
+        var changeLabels = BuildInvoicePaymentStateChangeLabels(before, invoicePayment);
+        if (changeLabels.Count == 0)
+        {
+            return;
+        }
+
+        await _db.Entry(invoicePayment).Collection(item => item.Responsibles).LoadAsync(ct);
+        await _db.Entry(invoicePayment).Reference(item => item.Invoice).LoadAsync(ct);
+        var recipients = await ResolveInvoiceNotificationRecipientsAsync(
+            invoicePayment,
+            invoicePayment.Responsibles.Select(item => item.UserId),
+            ct);
+        if (recipients.Count == 0)
+        {
+            return;
+        }
+
+        await _notificationService.NotifyInvoiceChangedAsync(
+            invoicePayment,
+            changeLabels,
+            User.GetDisplayName(),
+            User.GetUserId() ?? 0,
+            recipients,
+            ct);
+    }
+
+    private async Task<Payment?> ResolveInvoiceNotificationPaymentAsync(
+        Payment payment,
+        bool tracking,
+        CancellationToken ct)
+    {
+        if (payment.DocumentKind == DocumentKind.Invoice)
+        {
+            if (tracking)
+            {
+                return payment;
+            }
+
+            return await _db.Payments
+                .AsNoTracking()
+                .Include(item => item.Invoice)
+                .Include(item => item.Responsibles)
+                .FirstOrDefaultAsync(item => item.Id == payment.Id, ct);
+        }
+
+        var invoiceId = payment.InvoiceId ?? payment.Invoice?.Id;
+        if (!invoiceId.HasValue || invoiceId.Value <= 0)
+        {
+            return null;
+        }
+
+        var query = _db.Payments
+            .Include(item => item.Invoice)
+            .Include(item => item.Responsibles)
+            .Where(item => item.InvoiceId == invoiceId.Value && item.DocumentKind == DocumentKind.Invoice);
+        if (!tracking)
+        {
+            query = query.AsNoTracking();
+        }
+
+        return await query
+            .OrderBy(item => item.Id)
+            .FirstOrDefaultAsync(ct);
+    }
+
+    private static IReadOnlyList<string> BuildInvoicePaymentStateChangeLabels(
+        InvoiceNotificationSnapshot before,
+        Payment invoicePayment)
+    {
+        var labels = new List<string>();
+        var currentWorkflowStatus = InvoiceWorkflowStatus.Normalize(invoicePayment.InvoiceWorkflowStatus) ?? invoicePayment.InvoiceWorkflowStatus;
+        if (!string.Equals(before.WorkflowStatus, currentWorkflowStatus, StringComparison.Ordinal))
+        {
+            labels.Add($"Статус счета: {FormatInvoiceWorkflowStatus(before.WorkflowStatus)} -> {FormatInvoiceWorkflowStatus(currentWorkflowStatus)}");
+        }
+
+        if (before.Status != invoicePayment.Status)
+        {
+            labels.Add($"Статус оплаты: {before.Status.ToDisplayString()} -> {invoicePayment.Status.ToDisplayString()}");
+        }
+
+        if (Math.Abs(before.PaidAmount - invoicePayment.PaidAmount) > AmountTolerance)
+        {
+            var culture = CultureInfo.GetCultureInfo("ru-RU");
+            labels.Add($"Оплачено: {before.PaidAmount.ToString("N2", culture)} -> {invoicePayment.PaidAmount.ToString("N2", culture)}");
+        }
+
+        return labels;
+    }
+
+    private static string FormatInvoiceWorkflowStatus(string? status)
+        => (InvoiceWorkflowStatus.Normalize(status) ?? status)?.Trim() switch
+        {
+            InvoiceWorkflowStatus.Draft => "Черновик",
+            InvoiceWorkflowStatus.NotSigned => "Не подписан",
+            InvoiceWorkflowStatus.RequiresClientSignature => "Требует подписи клиента",
+            InvoiceWorkflowStatus.OnApproval => "На согласовании",
+            InvoiceWorkflowStatus.Approved => "Согласован",
+            InvoiceWorkflowStatus.ApprovalRejected => "Согласование отклонено",
+            InvoiceWorkflowStatus.NeedsCorrection => "Требует корректировки",
+            InvoiceWorkflowStatus.OnSigning => "Отправлен на подпись",
+            InvoiceWorkflowStatus.SignedByClient => "Подписан клиентом",
+            InvoiceWorkflowStatus.Paid => "Оплачен",
+            InvoiceWorkflowStatus.PartiallyPaid => "Частично оплачен",
+            InvoiceWorkflowStatus.Overdue => "Просрочен",
+            InvoiceWorkflowStatus.Cancelled => "Отменен",
+            _ => "не указан"
+        };
 
     private static IReadOnlyList<string> BuildPaymentChangeLabels(
         PaymentStatus originalStatus,
@@ -311,6 +510,7 @@ public class PaymentsController : ControllerBase
 
         _db.Payments.Add(model);
         await _db.SaveChangesAsync(ct);
+        var invoiceBefore = await CaptureInvoiceNotificationSnapshotAsync(model, ct);
         await PaymentAdvanceReviewService.SyncBalanceAsync(_db, model, now, HttpContext, ct);
         await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, model, now, ct);
         await ApplyPaymentOverpaymentHandlingAsync(model, rawPaidAmount, now, paymentTimeZone, ct);
@@ -319,6 +519,7 @@ public class PaymentsController : ControllerBase
         await _db.SaveChangesAsync(ct);
         PopulateAuditMetadata(_db, model);
         await NotifyPaymentAssignedAsync(model, ct);
+        await NotifyInvoiceStateChangedAsync(model, invoiceBefore, ct);
         return Created($"/api/payments/{model.Id}", model);
     }
 
@@ -500,6 +701,7 @@ public class PaymentsController : ControllerBase
         var overpaymentValidationError = await ValidatePaymentOverpaymentHandlingAsync(e, rawPaidAmount, ct);
         if (overpaymentValidationError is not null) return overpaymentValidationError;
 
+        var invoiceBefore = await CaptureInvoiceNotificationSnapshotAsync(e, ct);
         await ApplyPaymentOverpaymentHandlingAsync(e, rawPaidAmount, now, paymentTimeZone, ct);
         await PaymentAdvanceReviewService.SyncBalanceAsync(_db, e, now, HttpContext, ct);
         await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, e, now, ct);
@@ -526,6 +728,7 @@ public class PaymentsController : ControllerBase
                 originalPaymentSourceId,
                 e.PaymentSourceId),
             ct);
+        await NotifyInvoiceStateChangedAsync(e, invoiceBefore, ct);
         return Ok(e);
     }
 
@@ -614,6 +817,7 @@ public class PaymentsController : ControllerBase
                 paymentTimeZone);
         }
 
+        var invoiceBefore = await CaptureInvoiceNotificationSnapshotAsync(payment, ct);
         await ClientBalanceService.UpsertPaymentOverpaymentAsync(_db, payment, payment.PaidAmount, now, HttpContext, ct);
         await PaymentAdvanceReviewService.SyncBalanceAsync(_db, payment, now, HttpContext, ct);
         await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, payment, now, ct);
@@ -628,6 +832,7 @@ public class PaymentsController : ControllerBase
                 [$"Статус: {originalStatus.ToDisplayString()} -> {payment.Status.ToDisplayString()}"],
                 ct);
         }
+        await NotifyInvoiceStateChangedAsync(payment, invoiceBefore, ct);
         return Ok(payment);
     }
 

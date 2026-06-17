@@ -31,6 +31,8 @@ public static class NotificationTemplateKeys
     public const string NoteImportantChanged = "note.importantChanged";
     public const string PaymentAssigned = "payment.assigned";
     public const string PaymentChanged = "payment.changed";
+    public const string InvoiceCreated = "invoice.created";
+    public const string InvoiceChanged = "invoice.changed";
 }
 
 public sealed record NotificationTemplateVariableDefinition(string Key, string Label);
@@ -75,6 +77,19 @@ public static class NotificationTemplateCatalog
         new("payment.amount", "Сумма платежа"),
         new("payment.status", "Статус платежа"),
         new("payment.changes", "Список изменений")
+    ];
+
+    private static readonly IReadOnlyList<NotificationTemplateVariableDefinition> InvoiceVariables =
+    [
+        new("actor.name", "Кто выполнил действие"),
+        new("invoice.number", "Номер счета"),
+        new("invoice.title", "Краткое описание счета"),
+        new("invoice.date", "Дата счета"),
+        new("invoice.dueDate", "Срок оплаты"),
+        new("invoice.amount", "Сумма счета"),
+        new("invoice.status", "Статус счета"),
+        new("invoice.workflowStatus", "Статус документа"),
+        new("invoice.changes", "Список изменений")
     ];
 
     public static readonly IReadOnlyList<NotificationTemplateDefinition> All =
@@ -293,7 +308,21 @@ public static class NotificationTemplateCatalog
             "Уведомление ответственному при изменении важных параметров платежа.",
             "Изменен платеж: {{payment.title}}",
             "{{actor.name}} изменил(а) платеж: {{payment.title}}\n\nИзменения:\n{{payment.changes}}\n\nДата: {{payment.date}}\nСумма: {{payment.amount}}\nСтатус: {{payment.status}}",
-            PaymentVariables)
+            PaymentVariables),
+        new(
+            NotificationTemplateKeys.InvoiceCreated,
+            "Создан счет",
+            "Уведомление ответственному при создании счета.",
+            "Создан счет №{{invoice.number}}",
+            "{{actor.name}} создал(а) счет №{{invoice.number}}: {{invoice.title}}\n\nДата счета: {{invoice.date}}\nСрок оплаты: {{invoice.dueDate}}\nСумма: {{invoice.amount}}\nСтатус: {{invoice.workflowStatus}}",
+            InvoiceVariables),
+        new(
+            NotificationTemplateKeys.InvoiceChanged,
+            "Изменение счета",
+            "Уведомление ответственному при изменении важного состояния счета.",
+            "Изменен счет №{{invoice.number}}",
+            "{{actor.name}} изменил(а) счет №{{invoice.number}}: {{invoice.title}}\n\nИзменения:\n{{invoice.changes}}\n\nСрок оплаты: {{invoice.dueDate}}\nСумма: {{invoice.amount}}\nСтатус: {{invoice.workflowStatus}}",
+            InvoiceVariables)
     ];
 
     public static NotificationTemplateDefinition? Find(string key)

@@ -1343,6 +1343,112 @@ public sealed class NotificationService : INotificationService
         }
     }
 
+    public async Task NotifyInvoiceCreatedAsync(
+        Payment invoicePayment,
+        string actorName,
+        int actorUserId,
+        IReadOnlyCollection<int> recipientUserIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (invoicePayment.Id <= 0 || recipientUserIds.Count == 0)
+        {
+            return;
+        }
+
+        var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.InvoiceCreated,
+            $"Создан счет №{BuildInvoiceNumber(invoicePayment)}",
+            BuildInvoiceCreatedBody(invoicePayment, normalizedActorName),
+            BuildInvoiceTemplateValues(invoicePayment, normalizedActorName, []),
+            purpose: NotificationPurposes.ManualTest,
+            cancellationToken: cancellationToken);
+
+        foreach (var recipientUserId in recipientUserIds
+            .Where(userId => userId > 0 && userId != actorUserId)
+            .Distinct())
+        {
+            await CreateUserNotificationAsync(
+                recipientUserId,
+                UserNotificationTypes.InvoiceCreated,
+                $"invoice:{invoicePayment.Id}:created:{recipientUserId}",
+                message.Subject,
+                message.Body,
+                "blue",
+                "invoice",
+                invoicePayment.Id,
+                null,
+                null,
+                new
+                {
+                    invoiceId = invoicePayment.Id,
+                    invoiceNumber = BuildInvoiceNumber(invoicePayment),
+                    actorUserId,
+                    actorName = normalizedActorName
+                },
+                cancellationToken);
+        }
+    }
+
+    public async Task NotifyInvoiceChangedAsync(
+        Payment invoicePayment,
+        IReadOnlyList<string> changeLabels,
+        string actorName,
+        int actorUserId,
+        IReadOnlyCollection<int> recipientUserIds,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedChanges = NormalizePaymentChangeLabels(changeLabels);
+        if (invoicePayment.Id <= 0 || normalizedChanges.Count == 0 || recipientUserIds.Count == 0)
+        {
+            return;
+        }
+
+        var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.InvoiceChanged,
+            $"Изменен счет №{BuildInvoiceNumber(invoicePayment)}",
+            BuildInvoiceChangedBody(invoicePayment, normalizedActorName, normalizedChanges),
+            BuildInvoiceTemplateValues(invoicePayment, normalizedActorName, normalizedChanges),
+            purpose: NotificationPurposes.ManualTest,
+            cancellationToken: cancellationToken);
+        var stateHash = BuildStableTextHash(string.Join("|",
+        [
+            invoicePayment.Status.ToString(),
+            invoicePayment.InvoiceWorkflowStatus ?? string.Empty,
+            invoicePayment.Date.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            invoicePayment.Amount.ToString("0.00", CultureInfo.InvariantCulture),
+            invoicePayment.PaidAmount.ToString("0.00", CultureInfo.InvariantCulture),
+            string.Join(";", normalizedChanges)
+        ]));
+
+        foreach (var recipientUserId in recipientUserIds
+            .Where(userId => userId > 0 && userId != actorUserId)
+            .Distinct())
+        {
+            await CreateUserNotificationAsync(
+                recipientUserId,
+                UserNotificationTypes.InvoiceChanged,
+                $"invoice:{invoicePayment.Id}:changed:{recipientUserId}:{stateHash}",
+                message.Subject,
+                message.Body,
+                "amber",
+                "invoice",
+                invoicePayment.Id,
+                null,
+                null,
+                new
+                {
+                    invoiceId = invoicePayment.Id,
+                    invoiceNumber = BuildInvoiceNumber(invoicePayment),
+                    actorUserId,
+                    actorName = normalizedActorName,
+                    changes = normalizedChanges
+                },
+                cancellationToken);
+        }
+    }
+
     public async Task<IReadOnlyList<NotificationDelivery>> NotifyCaseInactivityControlTaskCreatedAsync(
         TaskJournalItem task,
         int daysWithoutActiveTask,
@@ -3443,6 +3549,61 @@ public sealed class NotificationService : INotificationService
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(12)
             .ToList();
+
+    private static Dictionary<string, string?> BuildInvoiceTemplateValues(
+        Payment invoicePayment,
+        string actorName,
+        IReadOnlyList<string> changeLabels)
+        => new()
+        {
+            ["actor.name"] = actorName,
+            ["invoice.number"] = BuildInvoiceNumber(invoicePayment),
+            ["invoice.title"] = BuildInvoiceTitle(invoicePayment),
+            ["invoice.date"] = FormatPaymentDate(invoicePayment.AccountDate ?? invoicePayment.Invoice?.Date ?? invoicePayment.Date),
+            ["invoice.dueDate"] = FormatPaymentDate(invoicePayment.Date),
+            ["invoice.amount"] = invoicePayment.Amount.ToString("N2", RuCulture),
+            ["invoice.status"] = FormatPaymentStatus(invoicePayment.Status),
+            ["invoice.workflowStatus"] = FormatInvoiceWorkflowStatus(invoicePayment.InvoiceWorkflowStatus),
+            ["invoice.changes"] = changeLabels.Count == 0
+                ? string.Empty
+                : string.Join('\n', changeLabels.Select(label => $"- {label}"))
+        };
+
+    private static string BuildInvoiceCreatedBody(Payment invoicePayment, string actorName)
+        => NotificationTemplateCatalog.CompactBlankLines(
+            $"{actorName} создал(а) счет №{BuildInvoiceNumber(invoicePayment)}: {BuildInvoiceTitle(invoicePayment)}\n\nДата счета: {FormatPaymentDate(invoicePayment.AccountDate ?? invoicePayment.Invoice?.Date ?? invoicePayment.Date)}\nСрок оплаты: {FormatPaymentDate(invoicePayment.Date)}\nСумма: {invoicePayment.Amount.ToString("N2", RuCulture)}\nСтатус: {FormatInvoiceWorkflowStatus(invoicePayment.InvoiceWorkflowStatus)}");
+
+    private static string BuildInvoiceChangedBody(
+        Payment invoicePayment,
+        string actorName,
+        IReadOnlyList<string> changeLabels)
+        => NotificationTemplateCatalog.CompactBlankLines(
+            $"{actorName} изменил(а) счет №{BuildInvoiceNumber(invoicePayment)}: {BuildInvoiceTitle(invoicePayment)}\n\nИзменения:\n{string.Join('\n', changeLabels.Select(label => $"- {label}"))}\n\nСрок оплаты: {FormatPaymentDate(invoicePayment.Date)}\nСумма: {invoicePayment.Amount.ToString("N2", RuCulture)}\nСтатус: {FormatInvoiceWorkflowStatus(invoicePayment.InvoiceWorkflowStatus)}");
+
+    private static string BuildInvoiceNumber(Payment invoicePayment)
+        => NormalizeNotificationText(invoicePayment.Invoice?.Number ?? invoicePayment.Account, invoicePayment.Id > 0 ? invoicePayment.Id.ToString(CultureInfo.InvariantCulture) : "без номера");
+
+    private static string BuildInvoiceTitle(Payment invoicePayment)
+        => NormalizeNotificationText(invoicePayment.Description, "Счет");
+
+    private static string FormatInvoiceWorkflowStatus(string? status)
+        => (InvoiceWorkflowStatus.Normalize(status) ?? status)?.Trim() switch
+        {
+            InvoiceWorkflowStatus.Draft => "Черновик",
+            InvoiceWorkflowStatus.NotSigned => "Не подписан",
+            InvoiceWorkflowStatus.RequiresClientSignature => "Требует подписи клиента",
+            InvoiceWorkflowStatus.OnApproval => "На согласовании",
+            InvoiceWorkflowStatus.Approved => "Согласован",
+            InvoiceWorkflowStatus.ApprovalRejected => "Согласование отклонено",
+            InvoiceWorkflowStatus.NeedsCorrection => "Требует корректировки",
+            InvoiceWorkflowStatus.OnSigning => "Отправлен на подпись",
+            InvoiceWorkflowStatus.SignedByClient => "Подписан клиентом",
+            InvoiceWorkflowStatus.Paid => "Оплачен",
+            InvoiceWorkflowStatus.PartiallyPaid => "Частично оплачен",
+            InvoiceWorkflowStatus.Overdue => "Просрочен",
+            InvoiceWorkflowStatus.Cancelled => "Отменен",
+            _ => "не указан"
+        };
 
     private static string FormatCalendarAccessUserList(
         IReadOnlyCollection<int> userIds,

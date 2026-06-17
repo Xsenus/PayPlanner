@@ -112,6 +112,8 @@ public static class UserNotificationTypes
     public const string CaseInactivityReminder = "caseInactivityReminder";
     public const string PaymentAssigned = "paymentAssigned";
     public const string PaymentChanged = "paymentChanged";
+    public const string InvoiceCreated = "invoiceCreated";
+    public const string InvoiceChanged = "invoiceChanged";
     public const string PaymentAdvanceReviewRequired = "paymentAdvanceReviewRequired";
     public const string PaymentAdvanceReviewEscalation = "paymentAdvanceReviewEscalation";
     public const string NoteMention = "noteMention";
@@ -147,6 +149,8 @@ public static class UserNotificationTypes
         new(CaseInactivityReminder, "Напоминание о неактивности", "По делу давно не было значимой активности, требуется проверка ответственного.", "amber", "high", NotificationChannels.All, true, false),
         new(PaymentAssigned, "Назначен платеж", "Ответственного добавили к платежу, который требует контроля.", "blue", "high", NotificationChannels.All, true, false),
         new(PaymentChanged, "Изменение платежа", "Изменились важные параметры платежа: статус, дата, сумма или источник.", "amber", "high", NotificationChannels.All, true, false),
+        new(InvoiceCreated, "Создан счет", "Ответственному сотруднику доступен новый счет для контроля.", "blue", "high", NotificationChannels.All, true, false),
+        new(InvoiceChanged, "Изменение счета", "Изменился важный статус счета: отправка, подпись, оплата, просрочка или отмена.", "amber", "high", NotificationChannels.All, true, false),
         new(PaymentAdvanceReviewRequired, "Контроль аванса", "Входящий оплаченный платеж не привязан к счету или акту и требует решения по авансу.", "rose", "high", NotificationChannels.All, true, false),
         new(PaymentAdvanceReviewEscalation, "Просроченный аванс", "Нераспределенный аванс слишком долго ожидает решения и требует внимания руководителя.", "rose", "high", NotificationChannels.All, true, false),
         new(NoteMention, "Упоминание в заметке", "Сотрудника упомянули на доске заметок.", "cyan", "high", NotificationChannels.All, true, false),
@@ -540,4 +544,6 @@ public interface INotificationService
     Task NotifyStickyNoteImportantChangeAsync(int noteId, int boardId, string boardTitle, string noteText, string action, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, int noteVersion, CancellationToken cancellationToken = default);
     Task NotifyPaymentAssignedAsync(Payment payment, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, CancellationToken cancellationToken = default);
     Task NotifyPaymentChangedAsync(Payment payment, IReadOnlyList<string> changeLabels, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, CancellationToken cancellationToken = default);
+    Task NotifyInvoiceCreatedAsync(Payment invoicePayment, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, CancellationToken cancellationToken = default);
+    Task NotifyInvoiceChangedAsync(Payment invoicePayment, IReadOnlyList<string> changeLabels, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, CancellationToken cancellationToken = default);
 }

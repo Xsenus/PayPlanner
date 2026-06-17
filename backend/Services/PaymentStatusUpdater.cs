@@ -127,19 +127,35 @@ namespace PayPlanner.Api.Services
                 {
                     foreach (var payment in affectedPayments)
                     {
-                        var recipients = await ResolvePaymentNotificationRecipientsAsync(db, payment, ct);
+                        var isInvoice = payment.DocumentKind == DocumentKind.Invoice;
+                        var recipients = isInvoice
+                            ? await ResolveInvoiceNotificationRecipientsAsync(db, payment, ct)
+                            : await ResolvePaymentNotificationRecipientsAsync(db, payment, ct);
                         if (recipients.Count == 0)
                         {
                             continue;
                         }
 
-                        await notificationService.NotifyPaymentChangedAsync(
-                            payment,
-                            ["Статус: Ожидается -> Просрочен"],
-                            "CRM",
-                            0,
-                            recipients,
-                            ct);
+                        if (isInvoice)
+                        {
+                            await notificationService.NotifyInvoiceChangedAsync(
+                                payment,
+                                ["Статус счета: Черновик -> Просрочен"],
+                                "CRM",
+                                0,
+                                recipients,
+                                ct);
+                        }
+                        else
+                        {
+                            await notificationService.NotifyPaymentChangedAsync(
+                                payment,
+                                ["Статус: Ожидается -> Просрочен"],
+                                "CRM",
+                                0,
+                                recipients,
+                                ct);
+                        }
                     }
                 }
 
@@ -195,6 +211,60 @@ namespace PayPlanner.Api.Services
                     .ApplyPaymentVisibility(visibility)
                     .AnyAsync(ct);
                 if (canOpenPayment)
+                {
+                    result.Add(userId);
+                }
+            }
+
+            return result;
+        }
+
+        private static async Task<IReadOnlyCollection<int>> ResolveInvoiceNotificationRecipientsAsync(
+            PaymentContext db,
+            Payment payment,
+            CancellationToken ct)
+        {
+            var candidateUserIds = payment.Responsibles
+                .Select(item => item.UserId)
+                .Where(userId => userId > 0)
+                .Distinct()
+                .ToArray();
+            if (candidateUserIds.Length == 0)
+            {
+                return Array.Empty<int>();
+            }
+
+            var allowedUserIds = await db.Users
+                .AsNoTracking()
+                .Where(user => candidateUserIds.Contains(user.Id)
+                    && user.IsActive
+                    && user.IsApproved
+                    && user.Role != null
+                    && (user.Role.Name == "admin"
+                        || user.Role.Permissions.Any(permission =>
+                            permission.Section == RolePermissionCatalog.Accounts
+                            && permission.CanView)))
+                .Select(user => user.Id)
+                .ToListAsync(ct);
+
+            var result = new List<int>();
+            foreach (var userId in allowedUserIds)
+            {
+                var principal = new ClaimsPrincipal(new ClaimsIdentity(
+                    new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture)) },
+                    authenticationType: "NotificationAccessCheck"));
+                var visibility = await db.ResolveDataVisibilityAsync(principal, RolePermissionCatalog.Accounts, ct);
+                if (visibility is null)
+                {
+                    continue;
+                }
+
+                var canOpenInvoice = await db.Payments
+                    .AsNoTracking()
+                    .Where(item => item.Id == payment.Id)
+                    .ApplyPaymentVisibility(visibility)
+                    .AnyAsync(ct);
+                if (canOpenInvoice)
                 {
                     result.Add(userId);
                 }
