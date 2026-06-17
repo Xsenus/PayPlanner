@@ -1,0 +1,136 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { WebPushDevicePanel } from './WebPushDevicePanel';
+import type { WebPushStatus } from '../../services/webPushNotifications';
+
+const webPushMock = vi.hoisted(() => ({
+  getWebPushStatus: vi.fn(),
+  subscribeCurrentDeviceToWebPush: vi.fn(),
+  unsubscribeCurrentDeviceFromWebPush: vi.fn(),
+}));
+
+const apiMock = vi.hoisted(() => ({
+  revokeUserPushSubscription: vi.fn(),
+}));
+
+const toastMock = vi.hoisted(() => ({
+  error: vi.fn(),
+  success: vi.fn(),
+}));
+
+vi.mock('../../services/webPushNotifications', () => ({
+  getWebPushStatus: webPushMock.getWebPushStatus,
+  subscribeCurrentDeviceToWebPush: webPushMock.subscribeCurrentDeviceToWebPush,
+  unsubscribeCurrentDeviceFromWebPush: webPushMock.unsubscribeCurrentDeviceFromWebPush,
+}));
+
+vi.mock('../../services/api', () => ({
+  apiService: apiMock,
+}));
+
+vi.mock('../../hooks/useToast', () => ({
+  useToast: () => toastMock,
+}));
+
+function createStatus(overrides: Partial<WebPushStatus> = {}): WebPushStatus {
+  return {
+    status: 'not-subscribed',
+    permission: 'default',
+    message: 'Это устройство пока не получает push-уведомления.',
+    subscriptions: [],
+    publicKeyReady: true,
+    ...overrides,
+  };
+}
+
+describe('WebPushDevicePanel', () => {
+  beforeEach(() => {
+    Object.values(webPushMock).forEach((mock) => mock.mockReset());
+    apiMock.revokeUserPushSubscription.mockReset();
+    toastMock.error.mockReset();
+    toastMock.success.mockReset();
+    webPushMock.getWebPushStatus.mockResolvedValue(createStatus());
+    webPushMock.subscribeCurrentDeviceToWebPush.mockResolvedValue({});
+    webPushMock.unsubscribeCurrentDeviceFromWebPush.mockResolvedValue(undefined);
+    apiMock.revokeUserPushSubscription.mockResolvedValue(undefined);
+  });
+
+  it('loads push status and enables current device', async () => {
+    webPushMock.getWebPushStatus
+      .mockResolvedValueOnce(createStatus())
+      .mockResolvedValueOnce(createStatus({
+        status: 'subscribed',
+        message: 'Push-уведомления включены на этом устройстве.',
+      }));
+
+    render(<WebPushDevicePanel />);
+
+    expect(await screen.findByText('Это устройство пока не получает push-уведомления.')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Включить на этом устройстве' }));
+
+    await waitFor(() => expect(webPushMock.subscribeCurrentDeviceToWebPush).toHaveBeenCalledTimes(1));
+    expect(webPushMock.getWebPushStatus).toHaveBeenCalledTimes(2);
+    expect(toastMock.success).toHaveBeenCalledWith('Push-уведомления включены на этом устройстве.');
+  });
+
+  it('disables current device when it is already subscribed', async () => {
+    webPushMock.getWebPushStatus
+      .mockResolvedValueOnce(createStatus({
+        status: 'subscribed',
+        permission: 'granted',
+        currentEndpoint: 'https://push.example/current',
+        message: 'Push-уведомления включены на этом устройстве.',
+        subscriptions: [
+          {
+            id: 10,
+            endpoint: 'https://push.example/current',
+            browser: 'Chrome',
+            platform: 'Windows',
+            deviceName: 'Chrome Windows',
+            isActive: true,
+            createdAt: '2026-06-17T10:00:00Z',
+            updatedAt: '2026-06-17T10:00:00Z',
+            lastSeenAt: '2026-06-17T10:00:00Z',
+          },
+        ],
+      }))
+      .mockResolvedValueOnce(createStatus());
+
+    render(<WebPushDevicePanel />);
+
+    expect(await screen.findByText('Chrome Windows')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Отключить это устройство' }));
+
+    await waitFor(() => expect(webPushMock.unsubscribeCurrentDeviceFromWebPush).toHaveBeenCalledTimes(1));
+    expect(toastMock.success).toHaveBeenCalledWith('Push-уведомления отключены на этом устройстве.');
+  });
+
+  it('revokes another active device from the devices list', async () => {
+    webPushMock.getWebPushStatus.mockResolvedValue(createStatus({
+      status: 'subscribed',
+      currentEndpoint: 'https://push.example/current',
+      subscriptions: [
+        {
+          id: 11,
+          endpoint: 'https://push.example/other',
+          browser: 'Firefox',
+          platform: 'Android',
+          deviceName: 'Телефон',
+          isActive: true,
+          createdAt: '2026-06-17T10:00:00Z',
+          updatedAt: '2026-06-17T10:00:00Z',
+          lastSeenAt: null,
+        },
+      ],
+    }));
+
+    render(<WebPushDevicePanel />);
+
+    expect(await screen.findByText('Телефон')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Отключить' }));
+
+    await waitFor(() => expect(apiMock.revokeUserPushSubscription).toHaveBeenCalledWith(11));
+    expect(toastMock.success).toHaveBeenCalledWith('Push-устройство отключено.');
+  });
+});

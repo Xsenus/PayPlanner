@@ -27,6 +27,7 @@ import { GoogleCalendarPanel } from './GoogleCalendarPanel';
 import { YandexCalendarPanel } from './YandexCalendarPanel';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 import { TaskNotificationDefaultsPanel } from '../Tasks/TaskNotificationDefaultsPanel';
+import { WebPushDevicePanel } from '../Notifications/WebPushDevicePanel';
 
 type ProviderId = 'google' | 'vk' | 'yandex' | 'telegram';
 
@@ -850,6 +851,14 @@ export function ProfilePage() {
                   Сохранить профиль
                 </button>
               </div>
+            </div>
+
+            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+              <WebPushDevicePanel
+                title="Push-уведомления"
+                description="Включите системные уведомления браузера, чтобы видеть новые задачи, изменения сроков и важные события даже без открытого центра уведомлений."
+                className="border-blue-100 bg-blue-50/40"
+              />
             </div>
           </div>
         ) : null}

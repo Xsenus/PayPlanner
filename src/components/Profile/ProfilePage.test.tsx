@@ -129,6 +129,7 @@ describe('ProfilePage', () => {
     render(<ProfilePage />);
 
     expect(await screen.findByText('Контактные данные')).toBeTruthy();
+    expect(screen.getByText('Push-уведомления')).toBeTruthy();
     expect(screen.queryByText('Google Calendar mock')).toBeNull();
     expect(screen.queryByText('Способы входа')).toBeNull();
 
