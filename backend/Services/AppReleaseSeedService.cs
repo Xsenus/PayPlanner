@@ -139,6 +139,13 @@ public static class AppReleaseSeedService
             throw new InvalidDataException($"App release seed contains duplicate version '{duplicateVersion}'.");
         }
 
+        var corruptedRelease = releases.FirstOrDefault(ContainsCorruptedTextMarker);
+        if (corruptedRelease is not null)
+        {
+            throw new InvalidDataException(
+                $"App release seed contains suspicious replacement markers in release '{corruptedRelease.ReleaseId}'. Check release note encoding.");
+        }
+
         var ordered = releases
             .Select(release =>
             {
@@ -163,6 +170,37 @@ public static class AppReleaseSeedService
                     $"App release versions must be continuous. Expected next version after '{previous.Release.Version}', but found '{current.Release.Version}'.");
             }
         }
+    }
+
+    private static bool ContainsCorruptedTextMarker(AppReleaseSeedDto release)
+    {
+        return HasSuspiciousQuestionMarkRun(release.Title)
+            || HasSuspiciousQuestionMarkRun(release.Summary)
+            || release.Items.Any(item => HasSuspiciousQuestionMarkRun(item.Text));
+    }
+
+    private static bool HasSuspiciousQuestionMarkRun(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+
+        var runLength = 0;
+        foreach (var ch in value)
+        {
+            if (ch == '?')
+            {
+                runLength++;
+                if (runLength >= 4)
+                {
+                    return true;
+                }
+            }
+            else
+            {
+                runLength = 0;
+            }
+        }
+
+        return false;
     }
 
     private readonly record struct SeedReleaseWithVersion(AppReleaseSeedDto Release, ReleaseVersion Version);

@@ -329,10 +329,45 @@ public sealed class AppVersionControllerTests
     }
 
     [Fact]
+    public async Task SeedService_WhenReleaseFileContainsCorruptedTextMarkers_Throws()
+    {
+        await using var scope = await CreateScopeAsync();
+        var tempRoot = await CreateTempReleaseRootAsync(
+            """
+            [
+              {
+                "releaseId": "2026-05-22-corrupted",
+                "version": "1.13.1",
+                "releasedAt": "2026-05-22T00:00:00",
+                "title": "?????? ??????",
+                "summary": "Corrupted release text",
+                "isActive": true,
+                "items": [
+                  { "type": "fixed", "text": "Item text" }
+                ]
+              }
+            ]
+            """);
+
+        try
+        {
+            var exception = await Assert.ThrowsAsync<InvalidDataException>(() => AppReleaseSeedService.SyncAsync(scope.Db, tempRoot));
+            Assert.Contains("suspicious replacement markers", exception.Message);
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
+    [Fact]
     public void AgentReleaseFile_HasUniqueContinuousVersionsAndNewestFirst()
     {
         var releaseFilePath = FindReleaseFilePath();
-        using var document = JsonDocument.Parse(File.ReadAllText(releaseFilePath));
+        var releaseFileText = File.ReadAllText(releaseFilePath);
+        Assert.DoesNotContain("????", releaseFileText);
+
+        using var document = JsonDocument.Parse(releaseFileText);
         var releases = document.RootElement
             .EnumerateArray()
             .Select(item => new ReleaseFileEntry(
