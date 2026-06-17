@@ -2271,6 +2271,144 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyContractCreatedAsync_CreatesContractNotificationAndDeduplicates()
+    {
+        await using var db = await CreateContextAsync();
+        var actor = await CreateUserAsync(db, "contract-actor@example.com");
+        var recipient = new User
+        {
+            Email = "contract-recipient@example.com",
+            FullName = "Ответственный по договору",
+            PasswordHash = "hash",
+            RoleId = actor.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(recipient);
+        await db.SaveChangesAsync();
+        var contract = new Contract
+        {
+            Number = "D-45",
+            Title = "Договор сопровождения",
+            Date = new DateTime(2026, 6, 23),
+            StartDate = new DateTime(2026, 6, 24),
+            ValidUntil = new DateTime(2026, 12, 31),
+            Amount = 120000m,
+            Status = ContractStatus.Draft
+        };
+        db.Contracts.Add(contract);
+        await db.SaveChangesAsync();
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            realtime,
+            webPush);
+
+        await service.NotifyContractCreatedAsync(contract, actor.FullName, actor.Id, [recipient.Id, actor.Id]);
+        await service.NotifyContractCreatedAsync(contract, actor.FullName, actor.Id, [recipient.Id]);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(recipient.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.ContractCreated, notification.Type);
+        Assert.Equal("contract", notification.ObjectType);
+        Assert.Equal(contract.Id, notification.ObjectId);
+        Assert.Contains("D-45", notification.BodyPreview);
+        Assert.DoesNotContain(await db.UserNotifications.ToListAsync(), item => item.RecipientUserId == actor.Id);
+        var realtimeNotification = Assert.Single(realtime.Notifications);
+        Assert.Equal(notification.Id, realtimeNotification.Id);
+        var pushed = Assert.Single(webPush.Notifications);
+        Assert.Equal(notification.Id, pushed.Id);
+    }
+
+    [Fact]
+    public async Task NotifyContractChangedAsync_CreatesContractNotificationAndDeduplicatesByState()
+    {
+        await using var db = await CreateContextAsync();
+        var actor = await CreateUserAsync(db, "contract-change-actor@example.com");
+        var recipient = new User
+        {
+            Email = "contract-change-recipient@example.com",
+            FullName = "Ответственный по изменению договора",
+            PasswordHash = "hash",
+            RoleId = actor.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(recipient);
+        await db.SaveChangesAsync();
+        var contract = new Contract
+        {
+            Number = "D-46",
+            Title = "Договор проверки",
+            Date = new DateTime(2026, 6, 24),
+            ValidUntil = new DateTime(2026, 11, 30),
+            Amount = 90000m,
+            Status = ContractStatus.Concluded
+        };
+        db.Contracts.Add(contract);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+
+        await service.NotifyContractChangedAsync(
+            contract,
+            ["Статус договора: Отправлен на подпись -> Заключен", "Срок действия: 31.10.2026 -> 30.11.2026"],
+            actor.FullName,
+            actor.Id,
+            [recipient.Id, actor.Id]);
+        await service.NotifyContractChangedAsync(
+            contract,
+            ["Статус договора: Отправлен на подпись -> Заключен", "Срок действия: 31.10.2026 -> 30.11.2026"],
+            actor.FullName,
+            actor.Id,
+            [recipient.Id]);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(recipient.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.ContractChanged, notification.Type);
+        Assert.Equal("contract", notification.ObjectType);
+        Assert.Equal(contract.Id, notification.ObjectId);
+        Assert.Contains("Заключен", notification.BodyPreview);
+        Assert.Contains("D-46", notification.BodyPreview);
+    }
+
+    [Fact]
+    public async Task NotifyContractExpiringAsync_CreatesContractNotificationAndDeduplicates()
+    {
+        await using var db = await CreateContextAsync();
+        var recipient = await CreateUserAsync(db, "contract-expiring-recipient@example.com");
+        var contract = new Contract
+        {
+            Number = "D-47",
+            Title = "Срочный договор",
+            Date = new DateTime(2026, 6, 24),
+            ValidUntil = DateTime.UtcNow.Date.AddDays(3),
+            Amount = 45000m,
+            Status = ContractStatus.Concluded
+        };
+        db.Contracts.Add(contract);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+
+        await service.NotifyContractExpiringAsync(contract, 3, [recipient.Id]);
+        await service.NotifyContractExpiringAsync(contract, 3, [recipient.Id]);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(recipient.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.ContractExpiring, notification.Type);
+        Assert.Equal("contract", notification.ObjectType);
+        Assert.Equal(contract.Id, notification.ObjectId);
+        Assert.Contains("Осталось дней: 3", notification.BodyPreview);
+        Assert.Contains("D-47", notification.BodyPreview);
+    }
+
+    [Fact]
     public async Task NotifyTaskApprovalRequestedAsync_CreatesInAppNotificationForApproverAndAssignee()
     {
         await using var db = await CreateContextAsync();

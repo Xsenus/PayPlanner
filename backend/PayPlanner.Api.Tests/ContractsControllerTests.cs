@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
@@ -9,6 +11,8 @@ using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Contracts;
+using PayPlanner.Api.Services.Notifications;
+using System.Globalization;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
@@ -329,6 +333,75 @@ public class ContractsControllerTests
         Assert.Equal(ContractStatus.Concluded, stored.Status);
         Assert.NotNull(stored.SentForSigningAt);
         Assert.NotNull(stored.ConcludedAt);
+    }
+
+    [Fact]
+    public async Task MarkConcluded_NotifiesClientResponsibleWithContractsAccess()
+    {
+        await using var db = await CreateContextAsync();
+
+        var responsibleRole = new Role { Name = "contract-responsible" };
+        responsibleRole.Permissions.Add(new RolePermission
+        {
+            Section = RolePermissionCatalog.Contracts,
+            CanView = true,
+            ViewScope = DataVisibilityScope.Own,
+        });
+        var adminRole = new Role { Name = "admin" };
+        db.Roles.AddRange(responsibleRole, adminRole);
+        await db.SaveChangesAsync();
+
+        var responsible = new User
+        {
+            Email = "responsible@example.test",
+            FullName = "Responsible User",
+            RoleId = responsibleRole.Id,
+            IsActive = true,
+            IsApproved = true,
+        };
+        var actor = new User
+        {
+            Email = "admin@example.test",
+            FullName = "Admin User",
+            RoleId = adminRole.Id,
+            IsActive = true,
+            IsApproved = true,
+        };
+        db.Users.AddRange(responsible, actor);
+        await db.SaveChangesAsync();
+
+        var client = await CreateClientAsync(db);
+        client.ResponsibleUserId = responsible.Id;
+        var contract = new Contract
+        {
+            Number = "CT-NOTIFY-1",
+            Date = new DateTime(2026, 6, 18),
+            BillingMode = ContractBillingMode.Fixed,
+            Amount = 30_000m,
+            Status = ContractStatus.OnSigning,
+        };
+        db.Contracts.Add(contract);
+        await db.SaveChangesAsync();
+        db.ClientContracts.Add(new ClientContract { ContractId = contract.Id, ClientId = client.Id });
+        await db.SaveChangesAsync();
+
+        var controller = CreateAdminController(
+            db,
+            notificationService: CreateNotificationService(db),
+            actorUserId: actor.Id);
+
+        var actionResult = await controller.MarkConcluded(contract.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult.Result);
+        var dto = Assert.IsType<ContractDto>(ok.Value);
+        Assert.Equal(ContractStatus.Concluded, dto.Status);
+
+        var notification = await db.UserNotifications.AsNoTracking().SingleAsync(CancellationToken.None);
+        Assert.Equal(responsible.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.ContractChanged, notification.Type);
+        Assert.Equal("contract", notification.ObjectType);
+        Assert.Equal(contract.Id, notification.ObjectId);
+        Assert.Contains("CT-NOTIFY-1", notification.BodyPreview);
     }
 
     [Fact]
@@ -1760,12 +1833,15 @@ public class ContractsControllerTests
     private static ContractsController CreateAdminController(
         PaymentContext db,
         IEmailService? emailService = null,
-        IYandexDiskService? yandexDiskService = null)
+        IYandexDiskService? yandexDiskService = null,
+        INotificationService? notificationService = null,
+        int actorUserId = 1)
     {
         var controller = new ContractsController(
             db,
             new NoopFormRequirementsService(),
             emailService: emailService,
+            notificationService: notificationService,
             yandexDiskService: yandexDiskService)
         {
             ControllerContext = new ControllerContext
@@ -1774,7 +1850,7 @@ public class ContractsControllerTests
                 {
                     User = new ClaimsPrincipal(new ClaimsIdentity(
                     [
-                        new Claim(ClaimTypes.NameIdentifier, "1"),
+                        new Claim(ClaimTypes.NameIdentifier, actorUserId.ToString(CultureInfo.InvariantCulture)),
                         new Claim(ClaimTypes.Name, "Администратор"),
                         new Claim(ClaimTypes.Role, "admin"),
                     ], "Test")),
@@ -1783,6 +1859,20 @@ public class ContractsControllerTests
         };
 
         return controller;
+    }
+
+    private static NotificationService CreateNotificationService(PaymentContext db)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .Build();
+
+        return new NotificationService(
+            db,
+            configuration,
+            new CapturingEmailService(),
+            new NoopTelegramNotificationService(),
+            NullLogger<NotificationService>.Instance);
     }
 
     private static async Task EnableContractTerminationClientEmailsAsync(PaymentContext db)
@@ -1955,6 +2045,23 @@ public class ContractsControllerTests
             AttachmentContentType = attachmentContentType;
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class NoopTelegramNotificationService : ITelegramNotificationService
+    {
+        public Task<TelegramSendResult> SendMessageAsync(long chatId, string text, CancellationToken cancellationToken = default)
+            => Task.FromResult(new TelegramSendResult(true, "sent"));
+
+        public Task<TelegramSendResult> SendMessageWithTokenAsync(
+            long chatId,
+            string text,
+            string botToken,
+            CancellationToken cancellationToken = default,
+            TelegramBotConnectionSettings? connection = null)
+            => Task.FromResult(new TelegramSendResult(true, "sent"));
+
+        public Task<TelegramNotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new TelegramNotificationSettingsDto());
     }
 
     private sealed class CapturingYandexDiskService : IYandexDiskService

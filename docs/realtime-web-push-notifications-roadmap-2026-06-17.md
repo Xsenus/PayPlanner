@@ -382,11 +382,13 @@
   - Проверено: `dotnet build backend\PayPlanner.Api.csproj`, targeted-тесты `NotifyAct|MarkSigned_NotifiesResponsibleWithActsAccess`, полный `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj`, `npm run build`, `npm run lint`, JSON/UTF-8, локальный запуск backend на временной SQLite-БД с `GET /api/health`.
   - DoD: ответственный видит статус акта без ручной проверки.
 
-- [ ] Договоры.
+- [x] Договоры.
   - Договор создан.
   - Договор требует согласования/подписания.
   - Изменен срок/статус.
   - Истекает срок договора.
+  - Сделано: добавлен контур уведомлений по ответственным договора с проверкой доступа к разделу "Договоры"; уведомления отправляются при создании договора, отправке на подпись, заключении, отметке "не подписан", смене статуса, расторжении, аннулировании, изменении срока действия или суммы. Добавлена фоновая проверка договоров, срок действия которых заканчивается в ближайшие 7 дней.
+  - Проверено: targeted-тесты `NotifyContract|ContractExpiration|MarkConcluded_Notifies`, полный `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj`, `npm run lint`, `npm run build`, JSON/UTF-8, локальный запуск backend на временной SQLite-БД с `GET /api/health`.
   - DoD: договорные действия попадают в общий центр уведомлений.
 
 - [ ] Проверить права финансовых уведомлений.

@@ -2,6 +2,7 @@ using System;
 using System.Globalization;
 using System.Linq;
 using System.Linq.Expressions;
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
@@ -64,6 +65,242 @@ public class ContractsController : ControllerBase
 
     private Task<TimeZoneInfo> ResolveContractTimeZoneAsync(CancellationToken ct)
         => CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+
+    private async Task<IReadOnlyCollection<int>> ResolveContractNotificationRecipientsAsync(int contractId, CancellationToken ct)
+    {
+        var candidateUserIds = new List<int>();
+        candidateUserIds.AddRange(await _db.ClientContracts
+            .AsNoTracking()
+            .Where(link => link.ContractId == contractId
+                && link.Client.ResponsibleUserId.HasValue)
+            .Select(link => link.Client.ResponsibleUserId!.Value)
+            .ToListAsync(ct));
+        candidateUserIds.AddRange(await _db.LegalEntityContracts
+            .AsNoTracking()
+            .Where(link => link.ContractId == contractId
+                && link.LegalEntity.ResponsibleUserId.HasValue)
+            .Select(link => link.LegalEntity.ResponsibleUserId!.Value)
+            .ToListAsync(ct));
+        candidateUserIds.AddRange(await _db.ContractInvoices
+            .AsNoTracking()
+            .Where(link => link.ContractId == contractId)
+            .SelectMany(link => link.Invoice.Responsibles.Select(responsible => responsible.UserId))
+            .ToListAsync(ct));
+        candidateUserIds.AddRange(await _db.ContractInvoices
+            .AsNoTracking()
+            .Where(link => link.ContractId == contractId
+                && link.Invoice.Client != null
+                && link.Invoice.Client.ResponsibleUserId.HasValue)
+            .Select(link => link.Invoice.Client!.ResponsibleUserId!.Value)
+            .ToListAsync(ct));
+        candidateUserIds.AddRange(await _db.ContractInvoices
+            .AsNoTracking()
+            .Where(link => link.ContractId == contractId
+                && link.Invoice.LegalEntity != null
+                && link.Invoice.LegalEntity.ResponsibleUserId.HasValue)
+            .Select(link => link.Invoice.LegalEntity!.ResponsibleUserId!.Value)
+            .ToListAsync(ct));
+        candidateUserIds.AddRange(await _db.ContractPayments
+            .AsNoTracking()
+            .Where(link => link.ContractId == contractId)
+            .SelectMany(link => link.Payment.Responsibles.Select(responsible => responsible.UserId))
+            .ToListAsync(ct));
+        candidateUserIds.AddRange(await _db.ContractPayments
+            .AsNoTracking()
+            .Where(link => link.ContractId == contractId
+                && link.Payment.Client != null
+                && link.Payment.Client.ResponsibleUserId.HasValue)
+            .Select(link => link.Payment.Client!.ResponsibleUserId!.Value)
+            .ToListAsync(ct));
+        candidateUserIds.AddRange(await _db.ContractPayments
+            .AsNoTracking()
+            .Where(link => link.ContractId == contractId
+                && link.Payment.LegalEntity != null
+                && link.Payment.LegalEntity.ResponsibleUserId.HasValue)
+            .Select(link => link.Payment.LegalEntity!.ResponsibleUserId!.Value)
+            .ToListAsync(ct));
+        candidateUserIds.AddRange(await _db.ContractActs
+            .AsNoTracking()
+            .Where(link => link.ContractId == contractId
+                && link.Act.ResponsibleId.HasValue)
+            .Select(link => link.Act.ResponsibleId!.Value)
+            .ToListAsync(ct));
+        candidateUserIds.AddRange(await _db.ContractActs
+            .AsNoTracking()
+            .Where(link => link.ContractId == contractId
+                && link.Act.Client != null
+                && link.Act.Client.ResponsibleUserId.HasValue)
+            .Select(link => link.Act.Client!.ResponsibleUserId!.Value)
+            .ToListAsync(ct));
+        candidateUserIds.AddRange(await _db.ContractActs
+            .AsNoTracking()
+            .Where(link => link.ContractId == contractId
+                && link.Act.LegalEntity != null
+                && link.Act.LegalEntity.ResponsibleUserId.HasValue)
+            .Select(link => link.Act.LegalEntity!.ResponsibleUserId!.Value)
+            .ToListAsync(ct));
+        candidateUserIds.AddRange(await _db.Payments
+            .AsNoTracking()
+            .Where(payment => payment.ContractId == contractId)
+            .SelectMany(payment => payment.Responsibles.Select(responsible => responsible.UserId))
+            .ToListAsync(ct));
+        candidateUserIds.AddRange(await _db.Payments
+            .AsNoTracking()
+            .Where(payment => payment.ContractId == contractId
+                && payment.Client != null
+                && payment.Client.ResponsibleUserId.HasValue)
+            .Select(payment => payment.Client!.ResponsibleUserId!.Value)
+            .ToListAsync(ct));
+        candidateUserIds.AddRange(await _db.Payments
+            .AsNoTracking()
+            .Where(payment => payment.ContractId == contractId
+                && payment.LegalEntity != null
+                && payment.LegalEntity.ResponsibleUserId.HasValue)
+            .Select(payment => payment.LegalEntity!.ResponsibleUserId!.Value)
+            .ToListAsync(ct));
+
+        var userIds = candidateUserIds
+            .Where(userId => userId > 0)
+            .Distinct()
+            .ToArray();
+        if (userIds.Length == 0)
+        {
+            return Array.Empty<int>();
+        }
+
+        var allowedUserIds = await _db.Users
+            .AsNoTracking()
+            .Where(user => userIds.Contains(user.Id)
+                && user.IsActive
+                && user.IsApproved
+                && user.Role != null
+                && (user.Role.Name == "admin"
+                    || user.Role.Permissions.Any(permission =>
+                        permission.Section == RolePermissionCatalog.Contracts
+                        && permission.CanView)))
+            .Select(user => user.Id)
+            .ToListAsync(ct);
+
+        var result = new List<int>();
+        foreach (var userId in allowedUserIds)
+        {
+            var principal = new ClaimsPrincipal(new ClaimsIdentity(
+                new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture)) },
+                authenticationType: "ContractNotificationAccessCheck"));
+            var visibility = await _db.ResolveDataVisibilityAsync(principal, RolePermissionCatalog.Contracts, ct);
+            if (visibility is null)
+            {
+                continue;
+            }
+
+            var canOpenContract = await _db.Contracts
+                .AsNoTracking()
+                .Where(contract => contract.Id == contractId)
+                .ApplyContractVisibility(visibility)
+                .AnyAsync(ct);
+            if (canOpenContract)
+            {
+                result.Add(userId);
+            }
+        }
+
+        return result;
+    }
+
+    private async Task NotifyContractCreatedAsync(Contract contract, CancellationToken ct)
+    {
+        if (_notificationService is null)
+        {
+            return;
+        }
+
+        var recipients = await ResolveContractNotificationRecipientsAsync(contract.Id, ct);
+        if (recipients.Count == 0)
+        {
+            return;
+        }
+
+        await _notificationService.NotifyContractCreatedAsync(
+            contract,
+            User.GetDisplayName(),
+            User.GetUserId() ?? 0,
+            recipients,
+            ct);
+    }
+
+    private async Task NotifyContractChangedAsync(Contract contract, IReadOnlyList<string> changeLabels, CancellationToken ct)
+    {
+        if (_notificationService is null || changeLabels.Count == 0)
+        {
+            return;
+        }
+
+        var recipients = await ResolveContractNotificationRecipientsAsync(contract.Id, ct);
+        if (recipients.Count == 0)
+        {
+            return;
+        }
+
+        await _notificationService.NotifyContractChangedAsync(
+            contract,
+            changeLabels,
+            User.GetDisplayName(),
+            User.GetUserId() ?? 0,
+            recipients,
+            ct);
+    }
+
+    private static IReadOnlyList<string> BuildContractChangeLabels(
+        string? originalStatus,
+        string? currentStatus,
+        DateTime? originalValidUntil,
+        DateTime? currentValidUntil,
+        decimal? originalAmount,
+        decimal? currentAmount)
+    {
+        var labels = new List<string>();
+        var normalizedOriginalStatus = ContractStatus.Normalize(originalStatus) ?? originalStatus;
+        var normalizedCurrentStatus = ContractStatus.Normalize(currentStatus) ?? currentStatus;
+        if (!string.Equals(normalizedOriginalStatus, normalizedCurrentStatus, StringComparison.Ordinal))
+        {
+            labels.Add($"Статус договора: {FormatContractStatus(normalizedOriginalStatus)} -> {FormatContractStatus(normalizedCurrentStatus)}");
+        }
+
+        if (originalValidUntil?.Date != currentValidUntil?.Date)
+        {
+            labels.Add($"Срок действия: {FormatContractDate(originalValidUntil)} -> {FormatContractDate(currentValidUntil)}");
+        }
+
+        if (originalAmount != currentAmount)
+        {
+            labels.Add($"Сумма: {FormatContractAmount(originalAmount)} -> {FormatContractAmount(currentAmount)}");
+        }
+
+        return labels;
+    }
+
+    private static string FormatContractDate(DateTime? date)
+        => date.HasValue ? date.Value.ToString("dd.MM.yyyy", CultureInfo.GetCultureInfo("ru-RU")) : "не указана";
+
+    private static string FormatContractAmount(decimal? amount)
+        => amount.HasValue ? amount.Value.ToString("N2", CultureInfo.GetCultureInfo("ru-RU")) : "не указана";
+
+    private static string FormatContractStatus(string? status)
+        => (ContractStatus.Normalize(status) ?? status)?.Trim() switch
+        {
+            ContractStatus.Draft => "Черновик",
+            ContractStatus.NotSigned => "Не подписан",
+            ContractStatus.RequiresClientSignature => "Требует подписи клиента",
+            ContractStatus.OnApproval => "На согласовании",
+            ContractStatus.Approved => "Согласован",
+            ContractStatus.ApprovalRejected => "Согласование отклонено",
+            ContractStatus.NeedsCorrection => "Требует корректировки",
+            ContractStatus.OnSigning => "Отправлен на подпись",
+            ContractStatus.Concluded => "Заключен",
+            ContractStatus.Terminated => "Расторгнут",
+            ContractStatus.Cancelled => "Аннулирован",
+            _ => "не указан"
+        };
 
     private async Task<Contract?> LoadEditableContractAsync(int id, CancellationToken ct)
     {
@@ -436,12 +673,20 @@ public class ContractsController : ControllerBase
         var contract = await LoadEditableContractAsync(id, ct);
         if (contract is null) return NotFound();
 
+        var originalStatus = contract.Status;
+        var originalValidUntil = contract.ValidUntil;
+        var originalAmount = contract.Amount;
         contract.Status = ContractStatus.OnSigning;
         contract.SentForSigningAt ??= DateTime.UtcNow;
         contract.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
 
-        var dto = MapToDto(await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct));
+        var updatedContract = await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct);
+        await NotifyContractChangedAsync(
+            updatedContract,
+            BuildContractChangeLabels(originalStatus, updatedContract.Status, originalValidUntil, updatedContract.ValidUntil, originalAmount, updatedContract.Amount),
+            ct);
+        var dto = MapToDto(updatedContract);
         return Ok(dto);
     }
 
@@ -460,6 +705,9 @@ public class ContractsController : ControllerBase
         var contract = await LoadEditableContractAsync(id, ct);
         if (contract is null) return NotFound();
 
+        var originalStatus = contract.Status;
+        var originalValidUntil = contract.ValidUntil;
+        var originalAmount = contract.Amount;
         var now = DateTime.UtcNow;
         contract.Status = ContractStatus.Concluded;
         contract.SentForSigningAt ??= now;
@@ -467,7 +715,12 @@ public class ContractsController : ControllerBase
         contract.UpdatedAt = now;
         await _db.SaveChangesAsync(ct);
 
-        var dto = MapToDto(await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct));
+        var updatedContract = await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct);
+        await NotifyContractChangedAsync(
+            updatedContract,
+            BuildContractChangeLabels(originalStatus, updatedContract.Status, originalValidUntil, updatedContract.ValidUntil, originalAmount, updatedContract.Amount),
+            ct);
+        var dto = MapToDto(updatedContract);
         return Ok(dto);
     }
 
@@ -477,13 +730,21 @@ public class ContractsController : ControllerBase
         var contract = await LoadEditableContractAsync(id, ct);
         if (contract is null) return NotFound();
 
+        var originalStatus = contract.Status;
+        var originalValidUntil = contract.ValidUntil;
+        var originalAmount = contract.Amount;
         contract.Status = ContractStatus.NotSigned;
         contract.SentForSigningAt = null;
         contract.ConcludedAt = null;
         contract.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
 
-        var dto = MapToDto(await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct));
+        var updatedContract = await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct);
+        await NotifyContractChangedAsync(
+            updatedContract,
+            BuildContractChangeLabels(originalStatus, updatedContract.Status, originalValidUntil, updatedContract.ValidUntil, originalAmount, updatedContract.Amount),
+            ct);
+        var dto = MapToDto(updatedContract);
         return Ok(dto);
     }
 
@@ -501,6 +762,9 @@ public class ContractsController : ControllerBase
         var contract = await LoadEditableContractDetailAsync(id, ct);
         if (contract is null) return NotFound();
 
+        var originalStatus = contract.Status;
+        var originalValidUntil = contract.ValidUntil;
+        var originalAmount = contract.Amount;
         if (string.Equals(status, ContractStatus.Terminated, StringComparison.OrdinalIgnoreCase))
         {
             var terminationCheck = BuildTerminationCheck(contract);
@@ -583,7 +847,16 @@ public class ContractsController : ControllerBase
 
         await _db.SaveChangesAsync(ct);
 
-        var dto = MapToDto(await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct));
+        var updatedContract = await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct);
+        if (statusChanged)
+        {
+            await NotifyContractChangedAsync(
+                updatedContract,
+                BuildContractChangeLabels(originalStatus, updatedContract.Status, originalValidUntil, updatedContract.ValidUntil, originalAmount, updatedContract.Amount),
+                ct);
+        }
+
+        var dto = MapToDto(updatedContract);
         return Ok(dto);
     }
 
@@ -615,6 +888,9 @@ public class ContractsController : ControllerBase
             return BadRequest($"По договору есть неоплаченные счета: {terminationCheck.UnpaidInvoiceCount} шт. на сумму {terminationCheck.UnpaidInvoiceAmount:N2}. Заполните финансовые условия расторжения.");
         }
 
+        var originalStatus = contract.Status;
+        var originalValidUntil = contract.ValidUntil;
+        var originalAmount = contract.Amount;
         contract.Status = ContractStatus.Terminated;
         contract.TerminationDate = ContractDomainService.NormalizeLocalDate(request.TerminationDate);
         contract.TerminationReason = terminationReason;
@@ -626,7 +902,12 @@ public class ContractsController : ControllerBase
         await _db.SaveChangesAsync(ct);
         await SendContractTerminationNotificationAsync(contract, ct);
 
-        var dto = MapToDto(await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct));
+        var updatedContract = await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct);
+        await NotifyContractChangedAsync(
+            updatedContract,
+            BuildContractChangeLabels(originalStatus, updatedContract.Status, originalValidUntil, updatedContract.ValidUntil, originalAmount, updatedContract.Amount),
+            ct);
+        var dto = MapToDto(updatedContract);
         return Ok(dto);
     }
 
@@ -652,6 +933,9 @@ public class ContractsController : ControllerBase
             return BadRequest("Аннулирование доступно только для черновиков и договоров на подписании.");
         }
 
+        var originalStatus = contract.Status;
+        var originalValidUntil = contract.ValidUntil;
+        var originalAmount = contract.Amount;
         var now = DateTime.UtcNow;
         var contractTimeZone = await ResolveContractTimeZoneAsync(ct);
         contract.Status = ContractStatus.Cancelled;
@@ -662,7 +946,12 @@ public class ContractsController : ControllerBase
 
         await _db.SaveChangesAsync(ct);
 
-        var dto = MapToDto(await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct));
+        var updatedContract = await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct);
+        await NotifyContractChangedAsync(
+            updatedContract,
+            BuildContractChangeLabels(originalStatus, updatedContract.Status, originalValidUntil, updatedContract.ValidUntil, originalAmount, updatedContract.Amount),
+            ct);
+        var dto = MapToDto(updatedContract);
         return Ok(dto);
     }
 
@@ -760,7 +1049,9 @@ public class ContractsController : ControllerBase
         await AssignCanonicalContractLinks(contract, normalized.InvoiceIds, normalized.PaymentIds, ct);
         await _db.SaveChangesAsync(ct);
         _db.ChangeTracker.Clear();
-        var dto = MapToDto(await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct));
+        var createdContract = await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct);
+        await NotifyContractCreatedAsync(createdContract, ct);
+        var dto = MapToDto(createdContract);
         return Created($"/api/contracts/{dto.Id}", dto);
     }
 
@@ -784,6 +1075,9 @@ public class ContractsController : ControllerBase
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (contract is null) return NotFound();
 
+        var originalStatus = contract.Status;
+        var originalValidUntil = contract.ValidUntil;
+        var originalAmount = contract.Amount;
         var normalized = await ValidateAndNormalizePayload(request, id, ct);
         if (normalized.Error is not null) return normalized.Error;
         var status = NormalizeContractStatusOrNull(request.Status) ?? contract.Status;
@@ -818,7 +1112,12 @@ public class ContractsController : ControllerBase
         await AssignCanonicalContractLinks(contract, normalized.InvoiceIds, normalized.PaymentIds, ct);
         await _db.SaveChangesAsync(ct);
         _db.ChangeTracker.Clear();
-        var dto = MapToDto(await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct));
+        var updatedContract = await BuildContractDetailQuery().FirstAsync(c => c.Id == contract.Id, ct);
+        await NotifyContractChangedAsync(
+            updatedContract,
+            BuildContractChangeLabels(originalStatus, updatedContract.Status, originalValidUntil, updatedContract.ValidUntil, originalAmount, updatedContract.Amount),
+            ct);
+        var dto = MapToDto(updatedContract);
         return Ok(dto);
     }
 

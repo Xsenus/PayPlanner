@@ -35,6 +35,9 @@ public static class NotificationTemplateKeys
     public const string InvoiceChanged = "invoice.changed";
     public const string ActCreated = "act.created";
     public const string ActChanged = "act.changed";
+    public const string ContractCreated = "contract.created";
+    public const string ContractChanged = "contract.changed";
+    public const string ContractExpiring = "contract.expiring";
 }
 
 public sealed record NotificationTemplateVariableDefinition(string Key, string Label);
@@ -104,6 +107,20 @@ public static class NotificationTemplateCatalog
         new("act.status", "Статус акта"),
         new("act.workflowStatus", "Статус документа"),
         new("act.changes", "Список изменений")
+    ];
+
+    private static readonly IReadOnlyList<NotificationTemplateVariableDefinition> ContractVariables =
+    [
+        new("actor.name", "Кто выполнил действие"),
+        new("contract.number", "Номер договора"),
+        new("contract.title", "Краткое описание договора"),
+        new("contract.date", "Дата договора"),
+        new("contract.startDate", "Дата начала"),
+        new("contract.validUntil", "Дата окончания"),
+        new("contract.amount", "Сумма договора"),
+        new("contract.status", "Статус договора"),
+        new("contract.changes", "Список изменений"),
+        new("contract.daysLeft", "Дней до окончания")
     ];
 
     public static readonly IReadOnlyList<NotificationTemplateDefinition> All =
@@ -350,7 +367,28 @@ public static class NotificationTemplateCatalog
             "Уведомление ответственному при изменении важного состояния акта.",
             "Изменен акт №{{act.number}}",
             "{{actor.name}} изменил(а) акт №{{act.number}}: {{act.title}}\n\nИзменения:\n{{act.changes}}\n\nДата акта: {{act.date}}\nСумма: {{act.amount}}\nСтатус: {{act.workflowStatus}}",
-            ActVariables)
+            ActVariables),
+        new(
+            NotificationTemplateKeys.ContractCreated,
+            "Создан договор",
+            "Уведомление ответственным при создании договора.",
+            "Создан договор №{{contract.number}}",
+            "{{actor.name}} создал(а) договор №{{contract.number}}: {{contract.title}}\n\nДата договора: {{contract.date}}\nСрок действия: {{contract.validUntil}}\nСумма: {{contract.amount}}\nСтатус: {{contract.status}}",
+            ContractVariables),
+        new(
+            NotificationTemplateKeys.ContractChanged,
+            "Изменение договора",
+            "Уведомление ответственным при изменении важных параметров договора.",
+            "Изменен договор №{{contract.number}}",
+            "{{actor.name}} изменил(а) договор №{{contract.number}}: {{contract.title}}\n\nИзменения:\n{{contract.changes}}\n\nСрок действия: {{contract.validUntil}}\nСумма: {{contract.amount}}\nСтатус: {{contract.status}}",
+            ContractVariables),
+        new(
+            NotificationTemplateKeys.ContractExpiring,
+            "Истекает срок договора",
+            "Уведомление ответственным о приближении окончания договора.",
+            "Истекает срок договора №{{contract.number}}",
+            "Срок договора №{{contract.number}} подходит к концу.\n\nДоговор: {{contract.title}}\nДата окончания: {{contract.validUntil}}\nОсталось дней: {{contract.daysLeft}}\nСтатус: {{contract.status}}",
+            ContractVariables)
     ];
 
     public static NotificationTemplateDefinition? Find(string key)

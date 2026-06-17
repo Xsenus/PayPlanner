@@ -1554,6 +1554,156 @@ public sealed class NotificationService : INotificationService
         }
     }
 
+    public async Task NotifyContractCreatedAsync(
+        Contract contract,
+        string actorName,
+        int actorUserId,
+        IReadOnlyCollection<int> recipientUserIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (contract.Id <= 0 || recipientUserIds.Count == 0)
+        {
+            return;
+        }
+
+        var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.ContractCreated,
+            $"Создан договор №{BuildContractNumber(contract)}",
+            BuildContractCreatedBody(contract, normalizedActorName),
+            BuildContractTemplateValues(contract, normalizedActorName, [], null),
+            purpose: NotificationPurposes.ManualTest,
+            cancellationToken: cancellationToken);
+
+        foreach (var recipientUserId in recipientUserIds
+            .Where(userId => userId > 0 && userId != actorUserId)
+            .Distinct())
+        {
+            await CreateUserNotificationAsync(
+                recipientUserId,
+                UserNotificationTypes.ContractCreated,
+                $"contract:{contract.Id}:created:{recipientUserId}",
+                message.Subject,
+                message.Body,
+                "blue",
+                "contract",
+                contract.Id,
+                null,
+                null,
+                new
+                {
+                    contractId = contract.Id,
+                    contractNumber = BuildContractNumber(contract),
+                    actorUserId,
+                    actorName = normalizedActorName
+                },
+                cancellationToken);
+        }
+    }
+
+    public async Task NotifyContractChangedAsync(
+        Contract contract,
+        IReadOnlyList<string> changeLabels,
+        string actorName,
+        int actorUserId,
+        IReadOnlyCollection<int> recipientUserIds,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedChanges = NormalizePaymentChangeLabels(changeLabels);
+        if (contract.Id <= 0 || normalizedChanges.Count == 0 || recipientUserIds.Count == 0)
+        {
+            return;
+        }
+
+        var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.ContractChanged,
+            $"Изменен договор №{BuildContractNumber(contract)}",
+            BuildContractChangedBody(contract, normalizedActorName, normalizedChanges),
+            BuildContractTemplateValues(contract, normalizedActorName, normalizedChanges, null),
+            purpose: NotificationPurposes.ManualTest,
+            cancellationToken: cancellationToken);
+        var stateHash = BuildStableTextHash(string.Join("|",
+        [
+            contract.Status ?? string.Empty,
+            contract.ValidUntil?.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? string.Empty,
+            contract.Amount?.ToString("0.00", CultureInfo.InvariantCulture) ?? string.Empty,
+            string.Join(";", normalizedChanges)
+        ]));
+
+        foreach (var recipientUserId in recipientUserIds
+            .Where(userId => userId > 0 && userId != actorUserId)
+            .Distinct())
+        {
+            await CreateUserNotificationAsync(
+                recipientUserId,
+                UserNotificationTypes.ContractChanged,
+                $"contract:{contract.Id}:changed:{recipientUserId}:{stateHash}",
+                message.Subject,
+                message.Body,
+                "amber",
+                "contract",
+                contract.Id,
+                null,
+                null,
+                new
+                {
+                    contractId = contract.Id,
+                    contractNumber = BuildContractNumber(contract),
+                    actorUserId,
+                    actorName = normalizedActorName,
+                    changes = normalizedChanges
+                },
+                cancellationToken);
+        }
+    }
+
+    public async Task NotifyContractExpiringAsync(
+        Contract contract,
+        int daysLeft,
+        IReadOnlyCollection<int> recipientUserIds,
+        CancellationToken cancellationToken = default)
+    {
+        if (contract.Id <= 0 || !contract.ValidUntil.HasValue || recipientUserIds.Count == 0)
+        {
+            return;
+        }
+
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.ContractExpiring,
+            $"Истекает срок договора №{BuildContractNumber(contract)}",
+            BuildContractExpiringBody(contract, daysLeft),
+            BuildContractTemplateValues(contract, "CRM", [], daysLeft),
+            purpose: NotificationPurposes.ManualTest,
+            cancellationToken: cancellationToken);
+        var expirationDate = contract.ValidUntil.Value.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+        foreach (var recipientUserId in recipientUserIds
+            .Where(userId => userId > 0)
+            .Distinct())
+        {
+            await CreateUserNotificationAsync(
+                recipientUserId,
+                UserNotificationTypes.ContractExpiring,
+                $"contract:{contract.Id}:expiring:{recipientUserId}:{expirationDate}",
+                message.Subject,
+                message.Body,
+                "rose",
+                "contract",
+                contract.Id,
+                null,
+                null,
+                new
+                {
+                    contractId = contract.Id,
+                    contractNumber = BuildContractNumber(contract),
+                    validUntil = expirationDate,
+                    daysLeft
+                },
+                cancellationToken);
+        }
+    }
+
     public async Task<IReadOnlyList<NotificationDelivery>> NotifyCaseInactivityControlTaskCreatedAsync(
         TaskJournalItem task,
         int daysWithoutActiveTask,
@@ -3768,6 +3918,68 @@ public sealed class NotificationService : INotificationService
             ActWorkflowStatus.OnSigning => "Отправлен на подпись",
             ActWorkflowStatus.Signed => "Подписан",
             ActWorkflowStatus.Cancelled => "Отменен",
+            _ => "не указан"
+        };
+
+    private static Dictionary<string, string?> BuildContractTemplateValues(
+        Contract contract,
+        string actorName,
+        IReadOnlyList<string> changeLabels,
+        int? daysLeft)
+        => new()
+        {
+            ["actor.name"] = actorName,
+            ["contract.number"] = BuildContractNumber(contract),
+            ["contract.title"] = BuildContractTitle(contract),
+            ["contract.date"] = FormatPaymentDate(contract.Date),
+            ["contract.startDate"] = FormatNullableDate(contract.StartDate),
+            ["contract.validUntil"] = contract.IsOpenEnded ? "бессрочный" : FormatNullableDate(contract.ValidUntil),
+            ["contract.amount"] = contract.Amount.HasValue ? contract.Amount.Value.ToString("N2", RuCulture) : "не указана",
+            ["contract.status"] = FormatContractStatus(contract.Status),
+            ["contract.changes"] = changeLabels.Count == 0
+                ? string.Empty
+                : string.Join('\n', changeLabels.Select(label => $"- {label}")),
+            ["contract.daysLeft"] = daysLeft?.ToString(CultureInfo.InvariantCulture) ?? string.Empty
+        };
+
+    private static string BuildContractCreatedBody(Contract contract, string actorName)
+        => NotificationTemplateCatalog.CompactBlankLines(
+            $"{actorName} создал(а) договор №{BuildContractNumber(contract)}: {BuildContractTitle(contract)}\n\nДата договора: {FormatPaymentDate(contract.Date)}\nСрок действия: {(contract.IsOpenEnded ? "бессрочный" : FormatNullableDate(contract.ValidUntil))}\nСумма: {(contract.Amount.HasValue ? contract.Amount.Value.ToString("N2", RuCulture) : "не указана")}\nСтатус: {FormatContractStatus(contract.Status)}");
+
+    private static string BuildContractChangedBody(
+        Contract contract,
+        string actorName,
+        IReadOnlyList<string> changeLabels)
+        => NotificationTemplateCatalog.CompactBlankLines(
+            $"{actorName} изменил(а) договор №{BuildContractNumber(contract)}: {BuildContractTitle(contract)}\n\nИзменения:\n{string.Join('\n', changeLabels.Select(label => $"- {label}"))}\n\nСрок действия: {(contract.IsOpenEnded ? "бессрочный" : FormatNullableDate(contract.ValidUntil))}\nСумма: {(contract.Amount.HasValue ? contract.Amount.Value.ToString("N2", RuCulture) : "не указана")}\nСтатус: {FormatContractStatus(contract.Status)}");
+
+    private static string BuildContractExpiringBody(Contract contract, int daysLeft)
+        => NotificationTemplateCatalog.CompactBlankLines(
+            $"Срок договора №{BuildContractNumber(contract)} подходит к концу.\n\nДоговор: {BuildContractTitle(contract)}\nДата окончания: {FormatNullableDate(contract.ValidUntil)}\nОсталось дней: {daysLeft.ToString(CultureInfo.InvariantCulture)}\nСтатус: {FormatContractStatus(contract.Status)}");
+
+    private static string BuildContractNumber(Contract contract)
+        => NormalizeNotificationText(contract.Number, contract.Id > 0 ? contract.Id.ToString(CultureInfo.InvariantCulture) : "без номера");
+
+    private static string BuildContractTitle(Contract contract)
+        => NormalizeNotificationText(contract.Title, "Договор");
+
+    private static string FormatNullableDate(DateTime? date)
+        => date.HasValue ? FormatPaymentDate(date.Value) : "не указана";
+
+    private static string FormatContractStatus(string? status)
+        => (ContractStatus.Normalize(status) ?? status)?.Trim() switch
+        {
+            ContractStatus.Draft => "Черновик",
+            ContractStatus.NotSigned => "Не подписан",
+            ContractStatus.RequiresClientSignature => "Требует подписи клиента",
+            ContractStatus.OnApproval => "На согласовании",
+            ContractStatus.Approved => "Согласован",
+            ContractStatus.ApprovalRejected => "Согласование отклонено",
+            ContractStatus.NeedsCorrection => "Требует корректировки",
+            ContractStatus.OnSigning => "Отправлен на подпись",
+            ContractStatus.Concluded => "Заключен",
+            ContractStatus.Terminated => "Расторгнут",
+            ContractStatus.Cancelled => "Аннулирован",
             _ => "не указан"
         };
 
