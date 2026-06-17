@@ -2196,7 +2196,7 @@ public class InvoicesController : ControllerBase
             return forbidden;
         }
 
-        var payment = await BuildEditableInvoicePaymentsQuery(visibility)
+        var payment = await BuildEditableInvoiceDeletionTargetsQuery(visibility)
             .Include(p => p.Invoice)
             .FirstOrDefaultAsync(p => p.Id == id, ct);
         if (payment is null)
@@ -2248,7 +2248,7 @@ public class InvoicesController : ControllerBase
             return forbidden;
         }
 
-        var paymentsQuery = BuildEditableInvoicePaymentsQuery(visibility);
+        var paymentsQuery = BuildEditableInvoiceDeletionTargetsQuery(visibility);
 
         var payments = await paymentsQuery
             .Include(payment => payment.Invoice)
@@ -2840,6 +2840,23 @@ public class InvoicesController : ControllerBase
     private IQueryable<Payment> BuildEditableInvoicePaymentsQuery(DataVisibilityAccess? visibility = null)
     {
         return BuildVisibleInvoicePaymentsQuery(trackChanges: true, visibility);
+    }
+
+    private IQueryable<Payment> BuildEditableInvoiceDeletionTargetsQuery(DataVisibilityAccess? visibility = null)
+    {
+        var visiblePayments = visibility is null
+            ? _db.Payments
+            : _db.Payments.ApplyPaymentVisibility(visibility);
+
+        return visiblePayments
+            .Where(payment =>
+                (payment.InvoiceId.HasValue
+                    && payment.InvoiceId.Value > 0
+                    && payment.Invoice != null)
+                || (!payment.InvoiceId.HasValue
+                    && payment.DocumentKind == DocumentKind.Invoice
+                    && payment.Account != null
+                    && payment.Account != ""));
     }
 
     private IQueryable<Payment> BuildVisibleInvoicePaymentsQuery(bool trackChanges, DataVisibilityAccess? visibility = null)

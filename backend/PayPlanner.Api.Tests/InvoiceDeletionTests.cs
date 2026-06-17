@@ -41,9 +41,10 @@ public class InvoiceDeletionTests
 
         var controller = new InvoicesController(db, new NoopEmailService(), new NoopFormRequirementsService());
 
-        await controller.Delete(installmentPaymentId, CancellationToken.None);
+        var result = await controller.Delete(installmentPaymentId, CancellationToken.None);
         db.ChangeTracker.Clear();
 
+        Assert.IsType<NoContentResult>(result);
         Assert.Null(await db.Payments.FindAsync(installmentPaymentId));
         Assert.Empty(await db.Payments.Where(payment => payment.InvoiceId == invoiceEntityId).ToListAsync());
         Assert.Null(await db.Invoices.FindAsync(invoiceEntityId));
