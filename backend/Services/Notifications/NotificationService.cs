@@ -472,9 +472,11 @@ public sealed class NotificationService : INotificationService
         var channels = ResolveTaskMessageChannels(task);
         var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(task.AssigneeUserId.Value, cancellationToken);
 
+        var dueAt = DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc);
+        var dueAtKey = dueAt.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
         var eventKey = reminderKey == "dailyOverdue"
             ? $"task:{task.Id}:reminder:{reminderKey}:{CalendarTimeZoneHelper.ToUserLocal(nowUtc, recipientTimeZone):yyyyMMdd}"
-            : $"task:{task.Id}:reminder:{reminderKey}";
+            : $"task:{task.Id}:reminder:{reminderKey}:{dueAtKey}";
 
         var reminderSubject = BuildTaskReminderSubject(task, reminderKey, nowUtc);
         var reminderBody = BuildTaskReminderBody(task, reminderKey, nowUtc, recipientTimeZone);

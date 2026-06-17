@@ -241,6 +241,135 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyTaskReminderAsync_AllowsSameReminderAfterDueAtChanges()
+    {
+        await using var db = await CreateContextAsync();
+        await SeedEmailSettingsAsync(db);
+        var user = await CreateUserAsync(db, "changed-due-reminder@example.com");
+        var firstDueAt = new DateTime(2026, 6, 4, 10, 0, 0, DateTimeKind.Utc);
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Дело клиента",
+            Title = "Перенос срока напоминания",
+            AssigneeUserId = user.Id,
+            AssigneeName = user.FullName,
+            DueAt = firstDueAt,
+            RemindersJson = "[\"atDue\"]",
+            ChannelsJson = "[\"email\"]",
+            Status = "new"
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var emailService = new RecordingEmailService();
+        var service = CreateService(db, emailService, new RecordingTelegramService());
+
+        var firstDeliveries = await service.NotifyTaskReminderAsync(task, "atDue", firstDueAt);
+        task.DueAt = firstDueAt.AddDays(1);
+        var secondDeliveries = await service.NotifyTaskReminderAsync(task, "atDue", task.DueAt);
+
+        Assert.Single(firstDeliveries);
+        Assert.Single(secondDeliveries);
+        Assert.Equal(2, emailService.Messages.Count);
+        var eventKeys = await db.NotificationDeliveries
+            .OrderBy(item => item.Id)
+            .Select(item => item.EventKey)
+            .ToListAsync();
+        Assert.Equal(2, eventKeys.Distinct(StringComparer.Ordinal).Count());
+        Assert.Contains(":20260604100000", eventKeys[0], StringComparison.Ordinal);
+        Assert.Contains(":20260605100000", eventKeys[1], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task NotifyTaskReminderAsync_SendsWebPushForAtDueWhenEnabled()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "at-due-web-push@example.com");
+        var dueAt = DateTime.UtcNow.AddMinutes(-1);
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Дело клиента",
+            Title = "Наступил срок",
+            AssigneeUserId = user.Id,
+            AssigneeName = user.FullName,
+            DueAt = dueAt,
+            RemindersJson = "[\"atDue\"]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "new"
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            webPushNotificationService: webPush);
+
+        var deliveries = await service.NotifyTaskReminderAsync(task, "atDue", DateTime.UtcNow);
+
+        Assert.Empty(deliveries);
+        var notification = await db.UserNotifications.SingleAsync();
+        var pushed = Assert.Single(webPush.Notifications);
+        Assert.Equal(notification.Id, pushed.Id);
+        Assert.Equal(user.Id, pushed.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.TaskReminder, pushed.Type);
+        Assert.Contains("Наступил срок", notification.Title, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task NotifyTaskReminderAsync_DeduplicatesDailyOverdueWebPushByRecipientLocalDate()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "daily-overdue-web-push@example.com");
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = user.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Pacific/Pago_Pago",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Дело клиента",
+            Title = "Просроченная push-задача",
+            AssigneeUserId = user.Id,
+            AssigneeName = user.FullName,
+            DueAt = new DateTime(2026, 6, 4, 10, 0, 0, DateTimeKind.Utc),
+            RemindersJson = "[\"dailyOverdue\"]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "new"
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            webPushNotificationService: webPush);
+
+        await service.NotifyTaskReminderAsync(
+            task,
+            "dailyOverdue",
+            new DateTime(2026, 6, 4, 23, 30, 0, DateTimeKind.Utc));
+        await service.NotifyTaskReminderAsync(
+            task,
+            "dailyOverdue",
+            new DateTime(2026, 6, 5, 2, 0, 0, DateTimeKind.Utc));
+
+        var notification = await db.UserNotifications.SingleAsync();
+        var pushed = Assert.Single(webPush.Notifications);
+        Assert.Equal(notification.Id, pushed.Id);
+        Assert.Equal(UserNotificationTypes.TaskReminder, pushed.Type);
+        Assert.Contains("Просрочена", notification.Title, StringComparison.OrdinalIgnoreCase);
+        Assert.EndsWith(":20260604", notification.EventKey, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task NotifyTaskChangedAsync_CreatesInAppNotificationWithoutExternalChannels()
     {
         await using var db = await CreateContextAsync();
