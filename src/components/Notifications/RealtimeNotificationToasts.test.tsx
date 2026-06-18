@@ -654,6 +654,58 @@ describe('RealtimeNotificationToasts', () => {
     unmount();
   });
 
+  it('starts fallback polling after realtime connection closes and stops it after reconnect', async () => {
+    const changedEvents: CustomEvent<UserNotificationsChangedDetail>[] = [];
+    const handleChanged = (event: Event) => changedEvents.push(event as CustomEvent<UserNotificationsChangedDetail>);
+    window.addEventListener(USER_NOTIFICATIONS_EVENT, handleChanged);
+
+    const { unmount } = render(<RealtimeNotificationToasts userId={5} onOpenTask={vi.fn()} />);
+
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(connectionState.onclose).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      const closeCallback = connectionState.onclose.mock.calls[0][0] as () => void;
+      closeCallback();
+    });
+
+    expect(getRealtimeNotificationDiagnostics()).toMatchObject({
+      status: 'fallback',
+      fallbackPollingActive: true,
+    });
+    await waitFor(() =>
+      expect(apiMock.getUserNotifications).toHaveBeenCalledWith({
+        status: 'unread',
+        page: 1,
+        pageSize: 15,
+      }),
+    );
+    expect(toastMock.showToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Моментальные уведомления недоступны',
+        dedupeKey: 'notifications:fallback-polling',
+        domain: 'system',
+      }),
+    );
+
+    act(() => {
+      const reconnectCallback = connectionState.onreconnected.mock.calls[0][0] as () => void;
+      reconnectCallback();
+    });
+
+    expect(getRealtimeNotificationDiagnostics()).toMatchObject({
+      status: 'connected',
+      fallbackPollingActive: false,
+    });
+    expect(changedEvents.at(-1)?.detail).toMatchObject({
+      source: 'realtime',
+      reason: 'reconnected',
+    });
+
+    window.removeEventListener(USER_NOTIFICATIONS_EVENT, handleChanged);
+    unmount();
+  });
+
   it('emits user notification change details for realtime notifications', async () => {
     const changedEvents: CustomEvent<UserNotificationsChangedDetail>[] = [];
     const handleChanged = (event: Event) => changedEvents.push(event as CustomEvent<UserNotificationsChangedDetail>);
