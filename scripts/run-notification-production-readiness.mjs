@@ -188,7 +188,7 @@ async function checkPushWorker(config) {
   return `Service worker ok (${response.status})`;
 }
 
-async function checkWebSocketUpgrade(config, hubPath) {
+export async function checkWebSocketUpgrade(config, hubPath) {
   if (!config.token) {
     if (config.requireWebSocket) {
       throw new Error(`WebSocket check for ${hubPath} requires --token or PAYPLANNER_PRODUCTION_SMOKE_TOKEN.`);

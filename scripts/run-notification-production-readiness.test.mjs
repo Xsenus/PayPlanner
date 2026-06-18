@@ -6,6 +6,7 @@ import {
   buildConfig,
   buildHubUrl,
   buildUrl,
+  checkWebSocketUpgrade,
   parseArgs,
   parseHttpStatusLine,
   readBoolean,
@@ -72,5 +73,16 @@ describe('run-notification-production-readiness configuration', () => {
       statusText: 'Unauthorized',
     });
     expect(() => parseHttpStatusLine('not http')).toThrow(/Invalid HTTP status/);
+  });
+
+  it('fails required WebSocket checks before production deploy when token is missing', async () => {
+    await expect(checkWebSocketUpgrade({
+      apiUrl: DEFAULT_API_URL,
+      frontendUrl: DEFAULT_FRONTEND_URL,
+      timeoutMs: 100,
+      token: '',
+      requireWebSocket: true,
+      allowHttp: false,
+    }, '/hubs/notifications')).rejects.toThrow(/requires --token/);
   });
 });

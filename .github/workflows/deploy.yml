@@ -277,4 +277,5 @@ jobs:
           node scripts/run-notification-production-readiness.mjs \
             --api-url="${{ env.PUBLIC_API_URL }}" \
             --frontend-url="${{ env.PUBLIC_FRONTEND_URL }}" \
+            --require-websocket=true \
             --timeout-ms=20000

@@ -128,6 +128,7 @@ public sealed class LegalFeatureFlagCiGateTests
         Assert.Contains("scripts/run-notification-production-readiness.mjs", workflow, StringComparison.Ordinal);
         Assert.Contains("--api-url=\"${{ env.PUBLIC_API_URL }}\"", workflow, StringComparison.Ordinal);
         Assert.Contains("--frontend-url=\"${{ env.PUBLIC_FRONTEND_URL }}\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("--require-websocket=true", workflow, StringComparison.Ordinal);
         AssertInOrder(
             workflow,
             [
