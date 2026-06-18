@@ -28,10 +28,17 @@ self.addEventListener('push', (event) => {
   event.waitUntil(self.registration.showNotification(title, options));
 });
 
+function resolveNotificationTargetUrl(rawUrl) {
+  const fallbackUrl = new URL('/notifications', self.location.origin);
+  const targetUrl = new URL(rawUrl || fallbackUrl.pathname, self.location.origin);
+
+  return targetUrl.origin === self.location.origin ? targetUrl.href : fallbackUrl.href;
+}
+
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
-  const targetUrl = new URL(event.notification.data?.url || '/notifications', self.location.origin).href;
+  const targetUrl = resolveNotificationTargetUrl(event.notification.data?.url);
 
   event.waitUntil((async () => {
     const clientsList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
