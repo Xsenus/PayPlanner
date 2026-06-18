@@ -169,6 +169,7 @@ public class NotificationServiceTests
     {
         await using var db = await CreateContextAsync();
         var user = await CreateUserAsync(db, "generic-notification@example.com");
+        var paymentId = await CreateProtectedNotificationObjectAsync(db, "payment", user);
         var realtime = new RecordingRealtimeNotificationPublisher();
         var webPush = new RecordingWebPushNotificationService();
         var service = CreateService(
@@ -185,15 +186,145 @@ public class NotificationServiceTests
             Title: "Платеж требует решения",
             BodyPreview: "Проверьте аванс.",
             ObjectType: "payment",
-            ObjectId: 42,
+            ObjectId: paymentId,
             TaskJournalItemId: null,
-            Metadata: new { paymentId = 42 }));
+            Metadata: new { paymentId }));
 
         Assert.True(created);
         var notification = await db.UserNotifications.SingleAsync();
         Assert.Equal(UserNotificationTypes.PaymentAdvanceReviewRequired, notification.Type);
         Assert.Equal("payment", notification.ObjectType);
-        Assert.Equal(42, notification.ObjectId);
+        Assert.Equal(paymentId, notification.ObjectId);
+        Assert.Single(realtime.Notifications);
+        Assert.Single(webPush.Notifications);
+    }
+
+    [Theory]
+    [InlineData("payment", RolePermissionCatalog.Payments, UserNotificationTypes.PaymentAssigned)]
+    [InlineData("invoice", RolePermissionCatalog.Accounts, UserNotificationTypes.InvoiceCreated)]
+    [InlineData("act", RolePermissionCatalog.Acts, UserNotificationTypes.ActCreated)]
+    [InlineData("case", RolePermissionCatalog.Cases, UserNotificationTypes.CaseCourtEvent)]
+    [InlineData("task", RolePermissionCatalog.Tasks, UserNotificationTypes.TaskAssigned)]
+    public async Task NotifyAsync_SkipsProtectedObjectNotification_WhenRecipientHasNoSectionAccess(
+        string objectType,
+        string section,
+        string notificationType)
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, $"{objectType}-notification-owner@example.com");
+        var recipient = await CreateUserWithoutSectionAccessAsync(db, $"{objectType}-notification-blocked@example.com", section);
+        var objectId = await CreateProtectedNotificationObjectAsync(db, objectType, owner);
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            realtime,
+            webPush);
+
+        var created = await service.NotifyAsync(new NotificationEventEnvelope(
+            RecipientUserId: recipient.Id,
+            Type: notificationType,
+            EventKey: $"{objectType}:{objectId}:blocked-access",
+            Title: "Закрытый объект",
+            BodyPreview: "Получатель не должен видеть это уведомление.",
+            ObjectType: objectType,
+            ObjectId: objectId,
+            TaskJournalItemId: null));
+
+        Assert.False(created);
+        Assert.Empty(await db.UserNotifications.ToListAsync());
+        Assert.Empty(realtime.Notifications);
+        Assert.Empty(webPush.Notifications);
+    }
+
+    [Fact]
+    public async Task NotifyAsync_SkipsPersonalNoteNotification_WhenRecipientCannotOpenBoard()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "personal-note-owner@example.com");
+        var recipient = new User
+        {
+            Email = "personal-note-recipient@example.com",
+            FullName = "Получатель личной заметки",
+            PasswordHash = "hash",
+            RoleId = owner.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(recipient);
+        await db.SaveChangesAsync();
+        var note = await CreateStickyNoteAsync(db, owner, StickyNoteBoardVisibility.Personal);
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            realtime,
+            webPush);
+
+        var created = await service.NotifyAsync(new NotificationEventEnvelope(
+            RecipientUserId: recipient.Id,
+            Type: UserNotificationTypes.NoteReminder,
+            EventKey: $"note:{note.Id}:personal-blocked",
+            Title: "Личная заметка",
+            BodyPreview: "Эту заметку нельзя раскрывать.",
+            ObjectType: "note",
+            ObjectId: note.Id,
+            TaskJournalItemId: null));
+
+        Assert.False(created);
+        Assert.Empty(await db.UserNotifications.ToListAsync());
+        Assert.Empty(realtime.Notifications);
+        Assert.Empty(webPush.Notifications);
+    }
+
+    [Fact]
+    public async Task NotifyAsync_AllowsSharedNoteNotification_WhenRecipientCanOpenBoard()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "shared-note-owner@example.com");
+        var recipient = new User
+        {
+            Email = "shared-note-recipient@example.com",
+            FullName = "Получатель общей заметки",
+            PasswordHash = "hash",
+            RoleId = owner.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(recipient);
+        await db.SaveChangesAsync();
+        var note = await CreateStickyNoteAsync(db, owner, StickyNoteBoardVisibility.Shared);
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            realtime,
+            webPush);
+
+        var created = await service.NotifyAsync(new NotificationEventEnvelope(
+            RecipientUserId: recipient.Id,
+            Type: UserNotificationTypes.NoteReminder,
+            EventKey: $"note:{note.Id}:shared-visible",
+            Title: "Общая заметка",
+            BodyPreview: "Эту заметку можно показать.",
+            ObjectType: "note",
+            ObjectId: note.Id,
+            TaskJournalItemId: null));
+
+        Assert.True(created);
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal("note", notification.ObjectType);
+        Assert.Equal(note.Id, notification.ObjectId);
         Assert.Single(realtime.Notifications);
         Assert.Single(webPush.Notifications);
     }
@@ -2514,6 +2645,7 @@ public class NotificationServiceTests
         };
         db.Users.Add(recipient);
         await db.SaveChangesAsync();
+        var note = await CreateStickyNoteAsync(db, actor, StickyNoteBoardVisibility.Shared);
         var realtime = new RecordingRealtimeNotificationPublisher();
         var webPush = new RecordingWebPushNotificationService();
         var service = CreateService(
@@ -2524,16 +2656,16 @@ public class NotificationServiceTests
             webPush);
 
         await service.NotifyStickyNoteMentionAsync(
-            77,
-            5,
+            note.Id,
+            note.BoardId,
             "Общее",
             "@note-mention-recipient проверь документ",
             actor.FullName,
             actor.Id,
             [recipient.Id, actor.Id]);
         await service.NotifyStickyNoteMentionAsync(
-            77,
-            5,
+            note.Id,
+            note.BoardId,
             "Общее",
             "@note-mention-recipient проверь документ",
             actor.FullName,
@@ -2544,7 +2676,7 @@ public class NotificationServiceTests
         Assert.Equal(recipient.Id, notification.RecipientUserId);
         Assert.Equal(UserNotificationTypes.NoteMention, notification.Type);
         Assert.Equal("note", notification.ObjectType);
-        Assert.Equal(77, notification.ObjectId);
+        Assert.Equal(note.Id, notification.ObjectId);
         Assert.Null(notification.TaskJournalItemId);
         Assert.Contains("Общее", notification.BodyPreview);
         Assert.DoesNotContain(await db.UserNotifications.ToListAsync(), item => item.RecipientUserId == actor.Id);
@@ -2572,6 +2704,7 @@ public class NotificationServiceTests
         };
         db.Users.Add(recipient);
         await db.SaveChangesAsync();
+        var note = await CreateStickyNoteAsync(db, actor, StickyNoteBoardVisibility.Shared);
         var realtime = new RecordingRealtimeNotificationPublisher();
         var webPush = new RecordingWebPushNotificationService();
         var service = CreateService(
@@ -2583,8 +2716,8 @@ public class NotificationServiceTests
         var reminderAt = new DateTime(2026, 6, 17, 9, 0, 0, DateTimeKind.Utc);
 
         await service.NotifyStickyNoteAssignedAsync(
-            78,
-            5,
+            note.Id,
+            note.BoardId,
             "Общее",
             "Подготовить звонок",
             recipient.Id,
@@ -2592,8 +2725,8 @@ public class NotificationServiceTests
             actor.Id,
             reminderAt);
         await service.NotifyStickyNoteAssignedAsync(
-            78,
-            5,
+            note.Id,
+            note.BoardId,
             "Общее",
             "Подготовить звонок",
             recipient.Id,
@@ -2605,7 +2738,7 @@ public class NotificationServiceTests
         Assert.Equal(recipient.Id, notification.RecipientUserId);
         Assert.Equal(UserNotificationTypes.NoteAssigned, notification.Type);
         Assert.Equal("note", notification.ObjectType);
-        Assert.Equal(78, notification.ObjectId);
+        Assert.Equal(note.Id, notification.ObjectId);
         Assert.Contains("Общее", notification.BodyPreview);
         Assert.Contains("Подготовить звонок", notification.BodyPreview);
         var realtimeNotification = Assert.Single(realtime.Notifications);
@@ -2682,6 +2815,7 @@ public class NotificationServiceTests
         };
         db.Users.Add(recipient);
         await db.SaveChangesAsync();
+        var note = await CreateStickyNoteAsync(db, actor, StickyNoteBoardVisibility.Shared);
         var realtime = new RecordingRealtimeNotificationPublisher();
         var webPush = new RecordingWebPushNotificationService();
         var service = CreateService(
@@ -2692,8 +2826,8 @@ public class NotificationServiceTests
             webPush);
 
         await service.NotifyStickyNoteImportantChangeAsync(
-            79,
-            5,
+            note.Id,
+            note.BoardId,
             "Общее",
             "Важная информация для всех",
             "pinned",
@@ -2702,8 +2836,8 @@ public class NotificationServiceTests
             [recipient.Id, actor.Id],
             2);
         await service.NotifyStickyNoteImportantChangeAsync(
-            79,
-            5,
+            note.Id,
+            note.BoardId,
             "Общее",
             "Важная информация для всех",
             "pinned",
@@ -2716,7 +2850,7 @@ public class NotificationServiceTests
         Assert.Equal(recipient.Id, notification.RecipientUserId);
         Assert.Equal(UserNotificationTypes.NoteImportantChanged, notification.Type);
         Assert.Equal("note", notification.ObjectType);
-        Assert.Equal(79, notification.ObjectId);
+        Assert.Equal(note.Id, notification.ObjectId);
         Assert.Contains("Общее", notification.BodyPreview);
         Assert.Contains("закрепил", notification.BodyPreview, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(await db.UserNotifications.ToListAsync(), item => item.RecipientUserId == actor.Id);
@@ -4440,6 +4574,115 @@ public class NotificationServiceTests
         db.Users.Add(user);
         await db.SaveChangesAsync();
         return user;
+    }
+
+    private static async Task<int> CreateProtectedNotificationObjectAsync(PaymentContext db, string objectType, User owner)
+    {
+        var now = DateTime.UtcNow;
+        switch (objectType)
+        {
+            case "payment":
+            case "invoice":
+            {
+                var payment = new Payment
+                {
+                    Amount = 12000m,
+                    Date = now.Date,
+                    PlannedDate = now.Date,
+                    Type = PaymentType.Income,
+                    Status = PaymentStatus.Pending,
+                    Description = $"{objectType} notification access fixture",
+                    DocumentKind = objectType == "invoice" ? DocumentKind.Invoice : DocumentKind.Payment,
+                    Responsibles =
+                    {
+                        new PaymentResponsible { UserId = owner.Id }
+                    }
+                };
+                db.Payments.Add(payment);
+                await db.SaveChangesAsync();
+                return payment.Id;
+            }
+
+            case "act":
+            {
+                var act = new Act
+                {
+                    Number = $"ACT-{Guid.NewGuid():N}",
+                    Date = now.Date,
+                    Amount = 12000m,
+                    ResponsibleId = owner.Id
+                };
+                db.Acts.Add(act);
+                await db.SaveChangesAsync();
+                return act.Id;
+            }
+
+            case "case":
+            {
+                var client = new Client
+                {
+                    Name = "Клиент закрытого дела",
+                    Phone = "+70000000000",
+                    ResponsibleUserId = owner.Id
+                };
+                var clientCase = new ClientCase
+                {
+                    Client = client,
+                    CaseNumber = $"CASE-{Guid.NewGuid():N}",
+                    CaseType = "Тестовое дело",
+                    Stage = "В работе",
+                    ResponsibleUserId = owner.Id
+                };
+                db.ClientCases.Add(clientCase);
+                await db.SaveChangesAsync();
+                return clientCase.Id;
+            }
+
+            case "task":
+            {
+                var task = new TaskJournalItem
+                {
+                    ObjectName = "Тестовый объект",
+                    Title = "Закрытая тестовая задача",
+                    AssigneeUserId = owner.Id,
+                    AssigneeName = owner.FullName,
+                    AuthorUserId = owner.Id,
+                    AuthorName = owner.FullName,
+                    DueAt = now.AddHours(2),
+                    Status = "new"
+                };
+                db.TaskJournalItems.Add(task);
+                await db.SaveChangesAsync();
+                return task.Id;
+            }
+
+            default:
+                throw new ArgumentOutOfRangeException(nameof(objectType), objectType, "Unsupported notification object type.");
+        }
+    }
+
+    private static async Task<StickyNote> CreateStickyNoteAsync(
+        PaymentContext db,
+        User owner,
+        string visibility)
+    {
+        var board = new StickyNoteBoard
+        {
+            Title = $"{visibility} board",
+            Visibility = visibility,
+            OwnerUserId = owner.Id,
+            OwnerUserName = owner.FullName
+        };
+        var note = new StickyNote
+        {
+            Board = board,
+            Text = "Тестовая заметка",
+            AuthorUserId = owner.Id,
+            AuthorUserName = owner.FullName
+        };
+        db.StickyNotes.Add(note);
+        await db.SaveChangesAsync();
+        return note;
     }
 
     private sealed class RecordingEmailService : IEmailService

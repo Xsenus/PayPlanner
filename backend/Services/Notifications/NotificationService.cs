@@ -2971,6 +2971,17 @@ public sealed class NotificationService : INotificationService
             return false;
         }
 
+        if (!await CanRecipientSeeNotificationObjectAsync(notificationEvent, type, cancellationToken))
+        {
+            _logger.LogWarning(
+                "User notification {EventKey} for user {RecipientUserId} was skipped because linked object {ObjectType}:{ObjectId} is not visible to recipient.",
+                notificationEvent.EventKey,
+                notificationEvent.RecipientUserId,
+                notificationEvent.ObjectType,
+                notificationEvent.ObjectId);
+            return false;
+        }
+
         var notification = new UserNotification
         {
             RecipientUserId = notificationEvent.RecipientUserId,
@@ -2998,6 +3009,140 @@ public sealed class NotificationService : INotificationService
         }
 
         return true;
+    }
+
+    private async Task<bool> CanRecipientSeeNotificationObjectAsync(
+        NotificationEventEnvelope notificationEvent,
+        string type,
+        CancellationToken cancellationToken)
+    {
+        if (!notificationEvent.ObjectId.HasValue
+            || string.IsNullOrWhiteSpace(notificationEvent.ObjectType)
+            || IsNotificationObjectVisibilityBypassed(type))
+        {
+            return true;
+        }
+
+        var objectId = notificationEvent.ObjectId.Value;
+        if (objectId <= 0)
+        {
+            return false;
+        }
+
+        var objectType = notificationEvent.ObjectType.Trim().ToLowerInvariant();
+        if (objectType == "task" && notificationEvent.Task is not null)
+        {
+            return true;
+        }
+
+        return objectType switch
+        {
+            "task" => await CanRecipientSeeDataScopedObjectAsync(
+                notificationEvent.RecipientUserId,
+                RolePermissionCatalog.Tasks,
+                async (access, ct) => await _context.TaskJournalItems
+                    .AsNoTracking()
+                    .Where(item => item.Id == objectId)
+                    .ApplyTaskVisibility(access)
+                    .AnyAsync(ct),
+                cancellationToken),
+            "payment" => await CanRecipientSeeDataScopedObjectAsync(
+                notificationEvent.RecipientUserId,
+                RolePermissionCatalog.Payments,
+                async (access, ct) => await _context.Payments
+                    .AsNoTracking()
+                    .Where(item => item.Id == objectId)
+                    .ApplyPaymentVisibility(access)
+                    .AnyAsync(ct),
+                cancellationToken),
+            "invoice" or "account" => await CanRecipientSeeDataScopedObjectAsync(
+                notificationEvent.RecipientUserId,
+                RolePermissionCatalog.Accounts,
+                async (access, ct) => await _context.Payments
+                    .AsNoTracking()
+                    .Where(item => item.Id == objectId)
+                    .ApplyPaymentVisibility(access)
+                    .AnyAsync(ct),
+                cancellationToken),
+            "act" => await CanRecipientSeeDataScopedObjectAsync(
+                notificationEvent.RecipientUserId,
+                RolePermissionCatalog.Acts,
+                async (access, ct) => await _context.Acts
+                    .AsNoTracking()
+                    .Where(item => item.Id == objectId)
+                    .ApplyActVisibility(access)
+                    .AnyAsync(ct),
+                cancellationToken),
+            "contract" => await CanRecipientSeeDataScopedObjectAsync(
+                notificationEvent.RecipientUserId,
+                RolePermissionCatalog.Contracts,
+                async (access, ct) => await _context.Contracts
+                    .AsNoTracking()
+                    .Where(item => item.Id == objectId)
+                    .ApplyContractVisibility(access)
+                    .AnyAsync(ct),
+                cancellationToken),
+            "case" or "clientcase" or "client-case" => await CanRecipientSeeDataScopedObjectAsync(
+                notificationEvent.RecipientUserId,
+                RolePermissionCatalog.Cases,
+                async (access, ct) => await _context.ClientCases
+                    .AsNoTracking()
+                    .Where(item => item.Id == objectId)
+                    .ApplyClientCaseVisibility(access)
+                    .AnyAsync(ct),
+                cancellationToken),
+            "note" or "stickynote" or "sticky-note" => await CanRecipientSeeStickyNoteAsync(
+                notificationEvent.RecipientUserId,
+                objectId,
+                cancellationToken),
+            _ => true
+        };
+    }
+
+    private static bool IsNotificationObjectVisibilityBypassed(string type)
+        => type is UserNotificationTypes.CaseAccessRequested
+            or UserNotificationTypes.CaseAccessResolved;
+
+    private async Task<bool> CanRecipientSeeDataScopedObjectAsync(
+        int recipientUserId,
+        string section,
+        Func<DataVisibilityAccess, CancellationToken, Task<bool>> canSeeObjectAsync,
+        CancellationToken cancellationToken)
+    {
+        var principal = CreateNotificationRecipientPrincipal(recipientUserId);
+        var access = await _context.ResolveDataVisibilityAsync(principal, section, cancellationToken);
+        return access is not null && await canSeeObjectAsync(access, cancellationToken);
+    }
+
+    private async Task<bool> CanRecipientSeeStickyNoteAsync(
+        int recipientUserId,
+        int noteId,
+        CancellationToken cancellationToken)
+    {
+        var principal = CreateNotificationRecipientPrincipal(recipientUserId);
+        var canViewNotes = await _context.HasUserSectionPermissionAsync(
+            principal,
+            RolePermissionCatalog.Notes,
+            permission => permission.CanView,
+            cancellationToken);
+        if (!canViewNotes)
+        {
+            return false;
+        }
+
+        return await _context.StickyNotes
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(note => note.Id == noteId)
+            .AnyAsync(note =>
+                note.Board != null
+                && !note.Board.IsArchived
+                && (note.Board.Visibility == StickyNoteBoardVisibility.Shared
+                    || note.Board.OwnerUserId == recipientUserId
+                    || note.Board.Members.Any(member => member.UserId == recipientUserId)
+                    || note.AssignedUserId == recipientUserId
+                    || note.AuthorUserId == recipientUserId),
+                cancellationToken);
     }
 
     private async Task<bool> IsUserNotificationTypeEnabledAsync(
