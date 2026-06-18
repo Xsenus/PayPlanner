@@ -693,7 +693,7 @@
 
 Цель: не сломать существующие уведомления и права.
 
-- [~] Backend unit/integration tests.
+- [x] Backend unit/integration tests.
   - Создание push subscription.
   - Отзыв push subscription.
   - Доставка taskAssigned/taskChanged/taskComment.
@@ -716,6 +716,7 @@
   - Проверено 18.06.2026: после усиления frontend-проверок центра уведомлений повторно пройден `NotificationServiceTests`, 102 теста без ошибок.
   - Проверено 18.06.2026: после добавления release note `1.13.427` про HTTPS/service worker scope пройден `AppVersionControllerTests`, 17 тестов без ошибок.
   - Проверено 18.06.2026: после добавления deploy env для Web Push пройдены `DocumentationProcessTests`, `LegalFeatureFlagCiGateTests` и `AppVersionControllerTests`, 25 тестов без ошибок.
+  - Проверено 18.06.2026: добавлен backend-тест деактивации "мертвой" Web Push-подписки при ответе push-провайдера `410 Gone`; затем пройдены `PushSubscriptionsControllerTests`, `WebPushNotificationServiceTests`, `NotificationServiceTests` и `SystemJobsControllerTests`, 122 теста без ошибок. Пункт закрывает создание и отзыв подписок, доставку task-уведомлений, дедупликацию, настройки каналов, retry и отключение недоступных подписок.
 
 - [x] Тесты прав доступа.
   - Задачи с ограниченной видимостью.
@@ -760,6 +761,7 @@
   - Проверено 18.06.2026: после усиления тестов центра уведомлений локальная БД `PaymentContext` проверена через `dotnet ef database update`, новых миграций нет, ошибок нет.
   - Проверено 18.06.2026: после проверки HTTPS/service worker scope локальная БД `PaymentContext` проверена через `dotnet ef database update`, новых миграций нет, ошибок нет.
   - Проверено 18.06.2026: после добавления Web Push env для deploy workflow локальная БД `PaymentContext` проверена через `dotnet ef database update`, новых миграций нет, ошибок нет.
+  - Проверено 18.06.2026: после закрытия backend-тестов Web Push локальная БД `PaymentContext` проверена через `dotnet ef database update`, новых миграций нет, ошибок нет.
 
 - [ ] Browser manual smoke.
   - Chrome/Edge desktop.

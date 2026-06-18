@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Net;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -136,6 +137,39 @@ public class WebPushNotificationServiceTests
         var delivery = await db.NotificationDeliveries.SingleAsync();
         Assert.Equal(NotificationDeliveryStatus.Failed, delivery.Status);
         Assert.Contains("Simulated push provider failure", delivery.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SendUserNotificationAsync_DeactivatesDeadSubscriptionWhenPushProviderReturnsGone()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserWithSubscriptionAsync(db, "dead-subscription-push@example.com");
+        var subscription = await db.UserPushSubscriptions.SingleAsync(item => item.UserId == user.Id);
+        var notification = CreateNotification(user.Id, new UserNotification
+        {
+            Type = UserNotificationTypes.TaskAssigned,
+            EventKey = "task:89:assigned",
+            Title = "Новая задача",
+            BodyPreview = "Проверьте задачу.",
+            Tone = "blue",
+            ObjectType = "task",
+            ObjectId = 89,
+        });
+        db.UserNotifications.Add(notification);
+        await db.SaveChangesAsync();
+
+        var service = new DeadSubscriptionWebPushNotificationService(db, HttpStatusCode.Gone);
+
+        await service.SendUserNotificationAsync(notification);
+
+        var delivery = await db.NotificationDeliveries.SingleAsync();
+        Assert.Equal(NotificationDeliveryStatus.Failed, delivery.Status);
+        Assert.Contains("Push subscription is gone", delivery.Error, StringComparison.Ordinal);
+        await db.Entry(subscription).ReloadAsync();
+        Assert.False(subscription.IsActive);
+        Assert.NotNull(subscription.RevokedAt);
+        Assert.NotNull(subscription.LastErrorAt);
+        Assert.Contains("Push subscription is gone", subscription.LastError, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -398,6 +432,41 @@ public class WebPushNotificationServiceTests
                     && item.Channel == NotificationChannels.WebPush
                     && item.Status == NotificationDeliveryStatus.Pending,
                     cancellationToken);
+        }
+    }
+
+    private sealed class DeadSubscriptionWebPushNotificationService : WebPushNotificationService
+    {
+        private readonly HttpStatusCode _statusCode;
+
+        public DeadSubscriptionWebPushNotificationService(PaymentContext db, HttpStatusCode statusCode)
+            : base(
+                db,
+                new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["WebPush:Enabled"] = "true",
+                        ["WebPush:PublicKey"] = "public-key",
+                        ["WebPush:PrivateKey"] = "private-key",
+                        ["WebPush:Subject"] = "mailto:test@example.com",
+                    })
+                    .Build(),
+                NullLogger<WebPushNotificationService>.Instance)
+        {
+            _statusCode = statusCode;
+        }
+
+        protected override Task SendSubscriptionAsync(
+            UserPushSubscription subscription,
+            string payload,
+            string subject,
+            string publicKey,
+            string privateKey,
+            CancellationToken cancellationToken)
+        {
+            var pushSubscription = new WebPush.PushSubscription(subscription.Endpoint, subscription.P256dh, subscription.Auth);
+            var response = new HttpResponseMessage(_statusCode);
+            throw new WebPush.WebPushException("Push subscription is gone", pushSubscription, response);
         }
     }
 }
