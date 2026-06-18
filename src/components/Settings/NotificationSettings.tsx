@@ -28,6 +28,7 @@ import {
   type UserNotificationPreferenceChannel,
   type UserNotificationTypePreferences,
 } from '../../utils/userNotificationPreferences';
+import { AdminWebPushGuide } from '../Notifications/NotificationHelp';
 
 type SenderForm = {
   id?: number;
@@ -1016,6 +1017,7 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
                 Загружаем диагностику Web Push...
               </div>
             )}
+            <AdminWebPushGuide />
           </div>
 
           <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">

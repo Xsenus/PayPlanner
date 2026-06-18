@@ -14,6 +14,7 @@ import {
   type RealtimeNotificationDiagnostics,
   type RealtimeNotificationConnectionStatus,
 } from '../../utils/realtimeNotificationDiagnostics';
+import { UserPushHelp } from './NotificationHelp';
 
 type WebPushDevicePanelProps = {
   autoLoad?: boolean;
@@ -245,6 +246,7 @@ export function WebPushDevicePanel({
           {webPushDiagnostics?.lastDeliveryError ? (
             <p className="mt-1 text-xs text-red-600">Web Push: {webPushDiagnostics.lastDeliveryError}</p>
           ) : null}
+          <UserPushHelp />
         </div>
         <div className="flex flex-wrap gap-2">
           <button
