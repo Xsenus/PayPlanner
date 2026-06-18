@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -130,6 +131,8 @@ public class WebPushNotificationServiceTests
         await service.SendUserNotificationAsync(notification);
 
         Assert.True(service.PendingDeliveryWasPersistedBeforeSend);
+        using var payload = JsonDocument.Parse(service.CapturedPayload);
+        Assert.Equal(NotificationPriorities.High, payload.RootElement.GetProperty("priority").GetString());
         var delivery = await db.NotificationDeliveries.SingleAsync();
         Assert.Equal(NotificationDeliveryStatus.Failed, delivery.Status);
         Assert.Contains("Simulated push provider failure", delivery.Error, StringComparison.Ordinal);
@@ -332,6 +335,7 @@ public class WebPushNotificationServiceTests
         }
 
         public bool PendingDeliveryWasPersistedBeforeSend { get; private set; }
+        public string CapturedPayload { get; private set; } = "{}";
 
         protected override async Task SendSubscriptionAsync(
             UserPushSubscription subscription,
@@ -341,6 +345,7 @@ public class WebPushNotificationServiceTests
             string privateKey,
             CancellationToken cancellationToken)
         {
+            CapturedPayload = payload;
             PendingDeliveryWasPersistedBeforeSend = await _db.NotificationDeliveries
                 .AsNoTracking()
                 .AnyAsync(item =>

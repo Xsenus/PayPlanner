@@ -334,6 +334,7 @@ public class WebPushNotificationService : IWebPushNotificationService
             notificationId = notification.Id,
             eventKey = notification.EventKey,
             type = notification.Type,
+            priority = UserNotificationTypes.Find(notification.Type)?.Priority ?? NotificationPriorities.Normal,
             tone = notification.Tone,
             objectType = notification.ObjectType,
             objectId = notification.ObjectId,

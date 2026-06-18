@@ -122,6 +122,32 @@ function groupNotificationTypesByDomain(types: UserNotificationTypeDto[]) {
     .sort((left, right) => (order.get(left.key) ?? 999) - (order.get(right.key) ?? 999));
 }
 
+function notificationPriorityLabel(priority?: string) {
+  switch ((priority ?? '').toLowerCase()) {
+    case 'critical':
+      return 'Критичный приоритет';
+    case 'high':
+      return 'Высокий приоритет';
+    case 'silent':
+      return 'Тихое уведомление';
+    default:
+      return 'Обычный приоритет';
+  }
+}
+
+function notificationPriorityBadgeClass(priority?: string) {
+  switch ((priority ?? '').toLowerCase()) {
+    case 'critical':
+      return 'bg-rose-50 text-rose-700';
+    case 'high':
+      return 'bg-amber-50 text-amber-700';
+    case 'silent':
+      return 'bg-slate-100 text-slate-500';
+    default:
+      return 'bg-blue-50 text-blue-700';
+  }
+}
+
 const EMPTY_PAGE: PagedResult<UserNotificationDto> = {
   items: [],
   total: 0,
@@ -1137,8 +1163,8 @@ export function NotificationCenter({
                                   </span>
                                 ) : null}
                               </span>
-                              <span className="mt-2 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
-                                {item.priority === 'high' ? 'Высокий приоритет' : 'Обычный приоритет'}
+                              <span className={`mt-2 inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${notificationPriorityBadgeClass(item.priority)}`}>
+                                {notificationPriorityLabel(item.priority)}
                               </span>
                             </span>
                           </label>

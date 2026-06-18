@@ -3013,6 +3013,11 @@ public sealed class NotificationService : INotificationService
         string channel,
         CancellationToken cancellationToken)
     {
+        if (!IsChannelAvailableForNotificationType(type, channel))
+        {
+            return false;
+        }
+
         var preferences = await GetUserNotificationPreferencesAsync(recipientUserId, cancellationToken);
         return UserNotificationPreferenceSettings.IsChannelEnabled(preferences, type, channel)
                && !await IsUserNotificationChannelMutedAsync(recipientUserId, type, channel, cancellationToken);
@@ -3039,6 +3044,7 @@ public sealed class NotificationService : INotificationService
         var nowUtc = DateTime.UtcNow;
 
         return normalizedChannels
+            .Where(channel => IsChannelAvailableForNotificationType(type, channel))
             .Where(channel => UserNotificationPreferenceSettings.IsChannelEnabled(preferences, type, channel))
             .Where(channel => !UserNotificationDoNotDisturbSettings.IsChannelMuted(
                 quietHours,
@@ -3047,6 +3053,13 @@ public sealed class NotificationService : INotificationService
                 nowUtc,
                 timeZone))
             .ToList();
+    }
+
+    private static bool IsChannelAvailableForNotificationType(string type, string channel)
+    {
+        var typeDefinition = UserNotificationTypes.Find(type);
+        return typeDefinition is null
+               || typeDefinition.EffectiveChannels.Contains(channel, StringComparer.OrdinalIgnoreCase);
     }
 
     private async Task<bool> IsUserNotificationChannelMutedAsync(

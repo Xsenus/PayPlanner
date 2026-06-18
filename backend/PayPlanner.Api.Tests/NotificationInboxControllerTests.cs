@@ -26,7 +26,7 @@ public class NotificationInboxControllerTests
         var types = Assert.IsAssignableFrom<IReadOnlyList<UserNotificationTypeDto>>(
             Assert.IsType<OkObjectResult>(result.Result).Value);
         var approval = Assert.Single(types, item => item.Key == UserNotificationTypes.TaskApprovalRequested);
-        Assert.Equal("high", approval.Priority);
+        Assert.Equal(NotificationPriorities.High, approval.Priority);
         Assert.Contains(NotificationChannels.InApp, approval.Channels);
         Assert.Contains(NotificationChannels.Toast, approval.Channels);
         Assert.Equal(UserNotificationDomains.Task, approval.Domain);
@@ -35,28 +35,46 @@ public class NotificationInboxControllerTests
         Assert.False(approval.Digestible);
         Assert.True(approval.ShowToastByDefault);
         Assert.True(approval.PushEligible);
-        Assert.Equal("high", approval.ToastPriority);
-        Assert.Equal("high", approval.PushPriority);
+        Assert.Equal(NotificationPriorities.High, approval.ToastPriority);
+        Assert.Equal(NotificationPriorities.High, approval.PushPriority);
         Assert.Equal(60, approval.GroupingWindowSeconds);
         Assert.True(approval.RequiresAction);
 
         var taskChanged = Assert.Single(types, item => item.Key == UserNotificationTypes.TaskChanged);
         Assert.True(taskChanged.ShowToastByDefault);
         Assert.True(taskChanged.PushEligible);
-        Assert.Equal("normal", taskChanged.ToastPriority);
-        Assert.Equal("normal", taskChanged.PushPriority);
+        Assert.Equal(NotificationPriorities.Normal, taskChanged.ToastPriority);
+        Assert.Equal(NotificationPriorities.Normal, taskChanged.PushPriority);
         Assert.Equal(300, taskChanged.GroupingWindowSeconds);
         Assert.False(taskChanged.RequiresAction);
+
+        var advanceReview = Assert.Single(types, item => item.Key == UserNotificationTypes.PaymentAdvanceReviewRequired);
+        Assert.Equal(NotificationPriorities.Critical, advanceReview.Priority);
+        Assert.True(advanceReview.ShowToastByDefault);
+        Assert.True(advanceReview.PushEligible);
+        Assert.Equal(NotificationPriorities.Critical, advanceReview.ToastPriority);
+        Assert.Equal(NotificationPriorities.Critical, advanceReview.PushPriority);
+        Assert.Equal(0, advanceReview.GroupingWindowSeconds);
+        Assert.True(advanceReview.RequiresAction);
+
+        var completedTask = Assert.Single(types, item => item.Key == UserNotificationTypes.TaskCompleted);
+        Assert.Equal(NotificationPriorities.Silent, completedTask.Priority);
+        Assert.False(completedTask.ShowToastByDefault);
+        Assert.False(completedTask.PushEligible);
+        Assert.Equal(NotificationPriorities.Silent, completedTask.ToastPriority);
+        Assert.Equal(NotificationPriorities.Silent, completedTask.PushPriority);
+        Assert.Equal(600, completedTask.GroupingWindowSeconds);
+        Assert.Equal(new[] { NotificationChannels.InApp }, completedTask.Channels);
 
         Assert.Contains(types, item => item.Key == UserNotificationTypes.PaymentAssigned && item.Domain == UserNotificationDomains.Payment && item.DomainLabel == "Платежи");
         Assert.Contains(types, item => item.Key == UserNotificationTypes.InvoiceChanged && item.Domain == UserNotificationDomains.Invoice && item.DomainLabel == "Счета");
         Assert.Contains(types, item => item.Key == UserNotificationTypes.ActChanged && item.Domain == UserNotificationDomains.Act && item.DomainLabel == "Акты");
         Assert.Contains(types, item => item.Key == UserNotificationTypes.ContractExpiring && item.Domain == UserNotificationDomains.Contract && item.DomainLabel == "Договоры");
-        Assert.Contains(types, item => item.Key == UserNotificationTypes.CourtHearing && item.Priority == "high" && item.Domain == UserNotificationDomains.Court);
-        Assert.Contains(types, item => item.Key == UserNotificationTypes.CourtStatusChanged && item.Priority == "high");
-        Assert.Contains(types, item => item.Key == UserNotificationTypes.CourtDecisionPublished && item.Priority == "high");
-        Assert.Contains(types, item => item.Key == UserNotificationTypes.CourtSyncFailed && item.Tone == "rose");
-        Assert.Contains(types, item => item.Key == UserNotificationTypes.CaseInactivityReminder && item.Priority == "high" && item.Domain == UserNotificationDomains.Case);
+        Assert.Contains(types, item => item.Key == UserNotificationTypes.CourtHearing && item.Priority == NotificationPriorities.High && item.Domain == UserNotificationDomains.Court);
+        Assert.Contains(types, item => item.Key == UserNotificationTypes.CourtStatusChanged && item.Priority == NotificationPriorities.High);
+        Assert.Contains(types, item => item.Key == UserNotificationTypes.CourtDecisionPublished && item.Priority == NotificationPriorities.High);
+        Assert.Contains(types, item => item.Key == UserNotificationTypes.CourtSyncFailed && item.Priority == NotificationPriorities.Critical && item.Tone == "rose");
+        Assert.Contains(types, item => item.Key == UserNotificationTypes.CaseInactivityReminder && item.Priority == NotificationPriorities.High && item.Domain == UserNotificationDomains.Case);
         Assert.Contains(types, item => item.Key == UserNotificationTypes.SystemAdminWarning && item.Tone == "rose");
     }
 
@@ -121,6 +139,29 @@ public class NotificationInboxControllerTests
         var result = await controller.GetUnreadCount(CancellationToken.None);
         var count = Assert.IsType<int>(Assert.IsType<OkObjectResult>(result.Result).Value);
         Assert.Equal(1, count);
+    }
+
+    [Fact]
+    public async Task GetNotifications_DisablesToastForSilentNotificationTypes()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "silent-type@example.com");
+        var notification = CreateNotification(
+            user.Id,
+            "task:1:completed",
+            UserNotificationTypes.TaskCompleted,
+            title: "Р—Р°РґР°С‡Р° Р·Р°РІРµСЂС€РµРЅР°");
+        db.UserNotifications.Add(notification);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, user.Id);
+
+        var listResult = await controller.GetNotifications("active", null, null);
+        var page = Assert.IsType<PagedResponse<UserNotificationDto>>(Assert.IsType<OkObjectResult>(listResult.Result).Value);
+        var item = Assert.Single(page.Items);
+
+        Assert.Equal(notification.Id, item.Id);
+        Assert.False(item.ToastEnabled);
     }
 
     [Fact]

@@ -43,6 +43,23 @@ public static class NotificationChannels
     ];
 }
 
+public static class NotificationPriorities
+{
+    public const string Critical = "critical";
+    public const string High = "high";
+    public const string Normal = "normal";
+    public const string Silent = "silent";
+
+    public static bool IsCritical(string? value)
+        => string.Equals(value, Critical, StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsHighOrCritical(string? value)
+        => IsCritical(value) || string.Equals(value, High, StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsSilent(string? value)
+        => string.Equals(value, Silent, StringComparison.OrdinalIgnoreCase);
+}
+
 public static class UserNotificationDomains
 {
     public const string Task = "task";
@@ -204,17 +221,17 @@ public static class UserNotificationTypes
 
     public static readonly IReadOnlyList<UserNotificationTypeDefinition> All =
     [
-        new(TaskAssigned, "Новая задача", "Назначение новой задачи исполнителю или участникам.", "blue", "normal", NotificationChannels.All, true, false),
-        new(TaskReminder, "Напоминание по задаче", "Сроки, просрочки и плановые напоминания по задачам.", "amber", "high", NotificationChannels.All, true, false),
+        new(TaskAssigned, "Новая задача", "Назначение новой задачи исполнителю или участникам.", "blue", NotificationPriorities.High, NotificationChannels.All, true, false),
+        new(TaskReminder, "Напоминание по задаче", "Сроки, просрочки и плановые напоминания по задачам.", "amber", NotificationPriorities.Critical, NotificationChannels.All, true, false),
         new(TaskChanged, "Изменение задачи", "Изменения статусов, сроков, исполнителей и других полей задачи.", "blue", "normal", NotificationChannels.All, false, true),
         new(TaskComment, "Комментарий по задаче", "Новые комментарии и сообщения по задаче.", "emerald", "normal", NotificationChannels.All, true, true),
-        new(TaskCompleted, "Задача выполнена", "Уведомление постановщику о завершении задачи.", "blue", "normal", NotificationChannels.All, true, false),
+        new(TaskCompleted, "Задача выполнена", "Уведомление постановщику о завершении задачи.", "blue", NotificationPriorities.Silent, NotificationChannels.All, true, false),
         new(TaskCancelled, "Задача отменена", "Календарная задача отменена или удалена.", "orange", "high", NotificationChannels.All, true, false),
         new(TaskScheduleConflict, "Конфликт расписания", "Задача пересекается по времени с другой активной задачей исполнителя.", "rose", "high", NotificationChannels.All, true, false),
         new(TaskApprovalRequested, "Ожидает согласования", "Задача отправлена согласующему на решение.", "violet", "high", NotificationChannels.All, true, false),
         new(TaskApproved, "Задача согласована", "Согласующий подтвердил результат задачи.", "emerald", "normal", NotificationChannels.All, false, false),
         new(TaskRevisionRequested, "Возврат на доработку", "Согласующий вернул задачу исполнителю на доработку.", "orange", "high", NotificationChannels.All, false, false),
-        new(TaskApprovalOverdue, "Просрочено согласование", "Срок согласования задачи истек, требуется решение согласующего или контроль исполнителя.", "rose", "high", NotificationChannels.All, true, false),
+        new(TaskApprovalOverdue, "Просрочено согласование", "Срок согласования задачи истек, требуется решение согласующего или контроль исполнителя.", "rose", NotificationPriorities.Critical, NotificationChannels.All, true, false),
         new(CalendarAccessChanged, "Изменена видимость календарей", "Администратор изменил, календари каких сотрудников доступны пользователям роли.", "violet", "high", NotificationChannels.All, true, false),
         new(CaseInactivityControl, "Автоконтроль дела", "По делу долго не было активных задач, создана контрольная задача.", "amber", "high", NotificationChannels.All, true, false),
         new(CaseAccessRequested, "Запрос доступа к делу", "Исполнитель запросил доступ к скрытому делу.", "violet", "high", NotificationChannels.All, false, false),
@@ -223,9 +240,9 @@ public static class UserNotificationTypes
         new(CourtHearing, "Судебное заседание", "Назначено, перенесено или обновлено судебное заседание по делу.", "cyan", "high", NotificationChannels.All, true, false),
         new(CourtStatusChanged, "Изменение судебного статуса", "Изменился статус судебного производства или движение дела в суде.", "blue", "high", NotificationChannels.All, true, false),
         new(CourtDecisionPublished, "Публикация решения", "По делу опубликовано решение, определение или другой судебный акт.", "emerald", "high", NotificationChannels.All, true, false),
-        new(CourtSyncFailed, "Ошибка судебной синхронизации", "Судебный источник не удалось проверить или обновить автоматически.", "rose", "high", NotificationChannels.All, true, false),
+        new(CourtSyncFailed, "Ошибка судебной синхронизации", "Судебный источник не удалось проверить или обновить автоматически.", "rose", NotificationPriorities.Critical, NotificationChannels.All, true, false),
         new(CaseProceduralDeadline, "Процессуальный срок", "По делу добавлен, перенесен, закрыт или приближается процессуальный срок.", "amber", "high", NotificationChannels.All, false, false),
-        new(CaseDocument, "Документы дела", "По делу загружен, сформирован, обновлен или удален документ.", "emerald", "normal", NotificationChannels.All, false, false),
+        new(CaseDocument, "Документы дела", "По делу загружен, сформирован, обновлен или удален документ.", "emerald", NotificationPriorities.Silent, NotificationChannels.All, false, false),
         new(CaseInactivityReminder, "Напоминание о неактивности", "По делу давно не было значимой активности, требуется проверка ответственного.", "amber", "high", NotificationChannels.All, true, false),
         new(PaymentAssigned, "Назначен платеж", "Ответственного добавили к платежу, который требует контроля.", "blue", "high", NotificationChannels.All, true, false),
         new(PaymentChanged, "Изменение платежа", "Изменились важные параметры платежа: статус, дата, сумма или источник.", "amber", "high", NotificationChannels.All, true, false),
@@ -236,13 +253,13 @@ public static class UserNotificationTypes
         new(ContractCreated, "Создан договор", "Ответственным сотрудникам доступен новый договор для контроля.", "blue", "high", NotificationChannels.All, true, false),
         new(ContractChanged, "Изменение договора", "Изменился важный статус, срок или условие договора.", "amber", "high", NotificationChannels.All, true, false),
         new(ContractExpiring, "Истекает срок договора", "Срок действия договора подходит к концу и требует внимания ответственных.", "rose", "high", NotificationChannels.All, true, false),
-        new(PaymentAdvanceReviewRequired, "Контроль аванса", "Входящий оплаченный платеж не привязан к счету или акту и требует решения по авансу.", "rose", "high", NotificationChannels.All, true, false),
-        new(PaymentAdvanceReviewEscalation, "Просроченный аванс", "Нераспределенный аванс слишком долго ожидает решения и требует внимания руководителя.", "rose", "high", NotificationChannels.All, true, false),
+        new(PaymentAdvanceReviewRequired, "Контроль аванса", "Входящий оплаченный платеж не привязан к счету или акту и требует решения по авансу.", "rose", NotificationPriorities.Critical, NotificationChannels.All, true, false),
+        new(PaymentAdvanceReviewEscalation, "Просроченный аванс", "Нераспределенный аванс слишком долго ожидает решения и требует внимания руководителя.", "rose", NotificationPriorities.Critical, NotificationChannels.All, true, false),
         new(NoteMention, "Упоминание в заметке", "Сотрудника упомянули на доске заметок.", "cyan", "high", NotificationChannels.All, true, false),
         new(NoteAssigned, "Назначена заметка", "Сотрудника назначили ответственным по заметке.", "violet", "high", NotificationChannels.All, true, false),
         new(NoteReminder, "Напоминание по заметке", "Наступил срок напоминания по назначенной заметке.", "amber", "high", NotificationChannels.All, true, false),
         new(NoteImportantChanged, "Важная заметка", "На общей доске закрепили, изменили или удалили важную заметку.", "orange", "high", NotificationChannels.All, true, false),
-        new(SystemAdminWarning, "Системное предупреждение", "Администраторам требуется обратить внимание на фоновый процесс, интеграцию или настройку.", "rose", "high", NotificationChannels.All, true, false)
+        new(SystemAdminWarning, "Системное предупреждение", "Администраторам требуется обратить внимание на фоновый процесс, интеграцию или настройку.", "rose", NotificationPriorities.Critical, NotificationChannels.All, true, false)
     ];
 
     public static readonly IReadOnlyList<string> RequiresActionTypes =
@@ -304,11 +321,19 @@ public sealed record UserNotificationTypeDefinition(
 {
     public string Domain => UserNotificationDomains.Resolve(Key);
     public string DomainLabel => UserNotificationDomains.Label(Domain);
-    public bool ShowToastByDefault => Channels.Contains(NotificationChannels.Toast, StringComparer.OrdinalIgnoreCase);
+    public IReadOnlyList<string> EffectiveChannels => NotificationPriorities.IsSilent(Priority)
+        ? Channels.Where(channel => string.Equals(channel, NotificationChannels.InApp, StringComparison.OrdinalIgnoreCase)).ToList()
+        : Channels;
+    public bool ShowToastByDefault => EffectiveChannels.Contains(NotificationChannels.Toast, StringComparer.OrdinalIgnoreCase);
     public string ToastPriority => Priority;
-    public bool PushEligible => Channels.Contains(NotificationChannels.WebPush, StringComparer.OrdinalIgnoreCase);
+    public bool PushEligible => EffectiveChannels.Contains(NotificationChannels.WebPush, StringComparer.OrdinalIgnoreCase);
     public string PushPriority => Priority;
-    public int GroupingWindowSeconds => Digestible ? 300 : Deduplicate ? 60 : 0;
+    public int GroupingWindowSeconds => Priority switch
+    {
+        var value when NotificationPriorities.IsCritical(value) => 0,
+        var value when NotificationPriorities.IsSilent(value) => 600,
+        _ => Digestible ? 300 : Deduplicate ? 60 : 0
+    };
     public bool RequiresAction => UserNotificationTypes.RequiresAction(Key);
 }
 
@@ -329,10 +354,18 @@ public sealed record NotificationEventEnvelope(
 {
     public UserNotificationTypeDefinition? TypeDefinition => UserNotificationTypes.Find(Type);
     public string EffectiveType => TypeDefinition?.Key ?? Type.Trim();
-    public string Priority => TypeDefinition?.Priority ?? "normal";
+    public string Priority => TypeDefinition?.Priority ?? NotificationPriorities.Normal;
     public string Domain => TypeDefinition?.Domain ?? UserNotificationDomains.System;
     public string EffectiveTone => string.IsNullOrWhiteSpace(Tone) ? TypeDefinition?.Tone ?? "blue" : Tone.Trim();
-    public IReadOnlyList<string> EffectiveChannels => Channels is { Count: > 0 } ? Channels : TypeDefinition?.Channels ?? NotificationChannels.All;
+    public IReadOnlyList<string> EffectiveChannels
+        => Channels is { Count: > 0 }
+            ? NormalizeChannelsByPriority(Channels, Priority)
+            : TypeDefinition?.EffectiveChannels ?? NotificationChannels.All;
+
+    private static IReadOnlyList<string> NormalizeChannelsByPriority(IReadOnlyList<string> channels, string priority)
+        => NotificationPriorities.IsSilent(priority)
+            ? channels.Where(channel => string.Equals(channel, NotificationChannels.InApp, StringComparison.OrdinalIgnoreCase)).ToList()
+            : channels;
 }
 
 public static class UserNotificationPreferenceSettings
@@ -559,7 +592,7 @@ public static class UserNotificationDoNotDisturbSettings
     }
 
     public static bool IsCritical(UserNotificationTypeDefinition? type)
-        => string.Equals(type?.Priority, "high", StringComparison.OrdinalIgnoreCase);
+        => NotificationPriorities.IsCritical(type?.Priority);
 
     private static UserNotificationDoNotDisturbSnapshot Normalize(UserNotificationDoNotDisturbStorage? storage)
         => new(
@@ -750,7 +783,7 @@ public static class RoleNotificationPreferenceDefaults
     private static bool ShouldDisableExternalChannels(
         UserNotificationTypeDefinition type,
         IReadOnlyCollection<string> externalDomains)
-        => type.Priority != "high"
+        => !NotificationPriorities.IsCritical(type.Priority)
            || type.Digestible
            || !externalDomains.Contains(type.Domain, StringComparer.OrdinalIgnoreCase);
 

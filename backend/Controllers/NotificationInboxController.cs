@@ -771,7 +771,8 @@ public class NotificationInboxController : ControllerBase
             Title = item.Title,
             BodyPreview = item.BodyPreview,
             Tone = item.Tone,
-            ToastEnabled = UserNotificationPreferenceSettings.IsChannelEnabled(
+            ToastEnabled = type?.EffectiveChannels.Contains(NotificationChannels.Toast, StringComparer.OrdinalIgnoreCase) != false
+                && UserNotificationPreferenceSettings.IsChannelEnabled(
                 effectivePreferences,
                 item.Type,
                 NotificationChannels.Toast)
@@ -802,7 +803,7 @@ public class NotificationInboxController : ControllerBase
             Priority = item.Priority,
             Domain = item.Domain,
             DomainLabel = item.DomainLabel,
-            Channels = item.Channels,
+            Channels = item.EffectiveChannels,
             Deduplicate = item.Deduplicate,
             Digestible = item.Digestible,
             ShowToastByDefault = item.ShowToastByDefault,

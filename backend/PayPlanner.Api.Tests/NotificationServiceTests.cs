@@ -57,7 +57,7 @@ public class NotificationServiceTests
 
         Assert.Equal(UserNotificationTypes.PaymentAdvanceReviewRequired, envelope.EffectiveType);
         Assert.Equal(UserNotificationDomains.Payment, envelope.Domain);
-        Assert.Equal("high", envelope.Priority);
+        Assert.Equal(NotificationPriorities.Critical, envelope.Priority);
         Assert.Equal("rose", envelope.EffectiveTone);
         Assert.Equal([NotificationChannels.InApp, NotificationChannels.WebPush], envelope.EffectiveChannels);
         Assert.Equal("/payments/42", envelope.ActionUrl);
@@ -843,13 +843,21 @@ public class NotificationServiceTests
             secretary.Preferences,
             UserNotificationTypes.PaymentAssigned,
             NotificationChannels.Email));
-        Assert.True(UserNotificationPreferenceSettings.IsChannelEnabled(
+        Assert.False(UserNotificationPreferenceSettings.IsChannelEnabled(
             finance.Preferences,
             UserNotificationTypes.PaymentAssigned,
             NotificationChannels.Email));
         Assert.True(UserNotificationPreferenceSettings.IsChannelEnabled(
+            finance.Preferences,
+            UserNotificationTypes.PaymentAdvanceReviewRequired,
+            NotificationChannels.Email));
+        Assert.False(UserNotificationPreferenceSettings.IsChannelEnabled(
             manager.Preferences,
             UserNotificationTypes.CourtHearing,
+            NotificationChannels.Telegram));
+        Assert.True(UserNotificationPreferenceSettings.IsChannelEnabled(
+            manager.Preferences,
+            UserNotificationTypes.CourtSyncFailed,
             NotificationChannels.Telegram));
     }
 
@@ -1775,8 +1783,7 @@ public class NotificationServiceTests
         Assert.Contains("\"requiresAction\":true", notification.MetadataJson, StringComparison.Ordinal);
         var realtimeNotification = Assert.Single(realtime.Notifications);
         Assert.Equal(notification.Id, realtimeNotification.Id);
-        var pushed = Assert.Single(webPush.Notifications);
-        Assert.Equal(notification.Id, pushed.Id);
+        Assert.Empty(webPush.Notifications);
     }
 
     [Fact]

@@ -87,6 +87,32 @@ function groupNotificationTypesByDomain(types: UserNotificationTypeDto[]) {
     .sort((left, right) => (order.get(left.key) ?? 999) - (order.get(right.key) ?? 999));
 }
 
+function notificationPriorityLabel(priority?: string) {
+  switch ((priority ?? '').toLowerCase()) {
+    case 'critical':
+      return 'Критичный приоритет';
+    case 'high':
+      return 'Высокий приоритет';
+    case 'silent':
+      return 'Тихое уведомление';
+    default:
+      return 'Обычный приоритет';
+  }
+}
+
+function notificationPriorityBadgeClass(priority?: string) {
+  switch ((priority ?? '').toLowerCase()) {
+    case 'critical':
+      return 'bg-rose-50 text-rose-700';
+    case 'high':
+      return 'bg-amber-50 text-amber-700';
+    case 'silent':
+      return 'bg-slate-100 text-slate-500';
+    default:
+      return 'bg-blue-50 text-blue-700';
+  }
+}
+
 type SenderRoute =
   | { mode: 'list' }
   | { mode: 'new'; channel: NotificationChannel }
@@ -1156,6 +1182,9 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
                                   <span className="block text-sm font-semibold text-gray-900">{item.label}</span>
                                   <span className="mt-1 block text-xs leading-5 text-gray-500">{item.description}</span>
                                   <span className="mt-2 flex flex-wrap gap-1.5">
+                                    <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${notificationPriorityBadgeClass(item.priority)}`}>
+                                      {notificationPriorityLabel(item.priority)}
+                                    </span>
                                     {item.requiresAction ? (
                                       <span className="inline-flex rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">Требует действия</span>
                                     ) : null}
