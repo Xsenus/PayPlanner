@@ -224,12 +224,15 @@
 
 Цель: если CRM открыта, пользователь видит событие сразу без перехода в центр уведомлений.
 
-- [ ] Починить/усилить nginx для SignalR на VPS.
+- [acceptance] Починить/усилить nginx для SignalR на VPS.
   - Добавить `proxy_set_header Upgrade $http_upgrade;`.
   - Добавить `proxy_set_header Connection $connection_upgrade;`.
   - Добавить `map $http_upgrade $connection_upgrade`.
   - Проверить `/hubs/notifications` и `/hubs/notes` через WebSocket.
   - DoD: SignalR подключается WebSocket-транспортом на проде, fallback остается запасным.
+  - Проверено 18.06.2026: в `docs/deploy-runbook.md` добавлен проверяемый nginx/WebSocket runbook для `/hubs/notifications` и `/hubs/notes`: `map $http_upgrade $connection_upgrade`, `proxy_http_version 1.1`, `Upgrade`, `Connection`, forwarded headers и длительные таймауты.
+  - Проверено 18.06.2026: добавлены backend-тесты `ProductionTlsResponsibilityTests`, которые фиксируют, что backend мапит оба SignalR hub, а deploy-runbook содержит обязательные WebSocket-настройки и production acceptance с `101 Switching Protocols`.
+  - [acceptance] Остается применить конфигурацию на VPS/nginx и вручную подтвердить WebSocket transport на `api.elitpravo.com` после деплоя или серверной настройки.
 
 - [x] Убрать жесткий frontend-фильтр только на `taskAssigned`.
   - Сейчас `RealtimeNotificationToasts` показывает toast только для `taskAssigned`.
@@ -647,12 +650,13 @@
 
 Цель: продовая инфраструктура поддерживает realtime и Web Push стабильно.
 
-- [ ] Обновить nginx для WebSocket.
+- [acceptance] Обновить nginx для WebSocket.
   - API domain: `api.elitpravo.com`.
   - Проверить `proxy_set_header Upgrade`.
   - Проверить `proxy_set_header Connection`.
   - Проверить timeouts.
   - DoD: SignalR WebSocket работает через публичный домен.
+  - Проверено 18.06.2026: репозиторная часть закрыта через deploy-runbook и тесты `ProductionTlsResponsibilityTests`; production-приемка должна подтвердить nginx reload и WebSocket `101 Switching Protocols` на `/hubs/notifications` и `/hubs/notes`.
 
 - [ ] Проверить HTTPS и service worker scope.
   - `crm.elitpravo.com` должен обслуживать service worker по HTTPS.
@@ -700,6 +704,7 @@
   - Проверено 18.06.2026: пройден полный backend-набор `PayPlanner.Api.Tests` после проверки заметок, 1586 тестов без ошибок.
   - Проверено 18.06.2026: пройден полный backend-набор `PayPlanner.Api.Tests` после проверки финансовых уведомлений, 1590 тестов без ошибок.
   - Проверено 18.06.2026: пройден полный backend-набор `PayPlanner.Api.Tests` после проверки уведомлений по клиентам, делам и судебным событиям, 1593 теста без ошибок.
+  - Проверено 18.06.2026: пройден полный backend-набор `PayPlanner.Api.Tests` после закрепления nginx/WebSocket runbook для SignalR, 1595 тестов без ошибок.
 
 - [ ] Тесты прав доступа.
   - Задачи с ограниченной видимостью.
@@ -732,6 +737,7 @@
   - Проверено 18.06.2026: после проверки уведомлений по заметкам локальная БД `PaymentContext` проверена через `dotnet ef database update`, новых миграций нет, ошибок нет.
   - Проверено 18.06.2026: после проверки финансовых уведомлений локальная БД `PaymentContext` проверена через `dotnet ef database update`, новых миграций нет, ошибок нет.
   - Проверено 18.06.2026: после проверки уведомлений по клиентам, делам и судебным событиям локальная БД `PaymentContext` проверена через `dotnet ef database update`, новых миграций нет, ошибок нет.
+  - Проверено 18.06.2026: после закрепления nginx/WebSocket runbook локальная БД `PaymentContext` проверена через `dotnet ef database update`, новых миграций нет, ошибок нет.
 
 - [ ] Browser manual smoke.
   - Chrome/Edge desktop.

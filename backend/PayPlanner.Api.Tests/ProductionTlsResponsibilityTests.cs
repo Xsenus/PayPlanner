@@ -27,6 +27,36 @@ public class ProductionTlsResponsibilityTests
         Assert.Contains("Strict-Transport-Security", runbook, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Program_MapsRealtimeSignalRHubs()
+    {
+        var root = FindRepositoryRoot();
+        var program = File.ReadAllText(Path.Combine(root, "backend", "Program.cs"));
+
+        Assert.Contains("app.MapHub<NotificationsHub>(NotificationsHub.Path)", program, StringComparison.Ordinal);
+        Assert.Contains("app.MapHub<NotesHub>(NotesHub.Path)", program, StringComparison.Ordinal);
+        Assert.Contains("NotificationsHub.Path", program, StringComparison.Ordinal);
+        Assert.Contains("NotesHub.Path", program, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DeployRunbook_DocumentsWebSocketProxyForSignalR()
+    {
+        var root = FindRepositoryRoot();
+        var runbook = File.ReadAllText(Path.Combine(root, "docs", "deploy-runbook.md"));
+
+        Assert.Contains("Realtime WebSocket Proxy", runbook, StringComparison.Ordinal);
+        Assert.Contains("api.elitpravo.com", runbook, StringComparison.Ordinal);
+        Assert.Contains("/hubs/notifications", runbook, StringComparison.Ordinal);
+        Assert.Contains("/hubs/notes", runbook, StringComparison.Ordinal);
+        Assert.Contains("map $http_upgrade $connection_upgrade", runbook, StringComparison.Ordinal);
+        Assert.Contains("proxy_http_version 1.1", runbook, StringComparison.Ordinal);
+        Assert.Contains("proxy_set_header Upgrade $http_upgrade", runbook, StringComparison.Ordinal);
+        Assert.Contains("proxy_set_header Connection $connection_upgrade", runbook, StringComparison.Ordinal);
+        Assert.Contains("proxy_read_timeout 3600s", runbook, StringComparison.Ordinal);
+        Assert.Contains("101 Switching Protocols", runbook, StringComparison.Ordinal);
+    }
+
     private static string FindRepositoryRoot()
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);

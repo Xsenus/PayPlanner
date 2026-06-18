@@ -26,6 +26,82 @@ Expected result:
 - HTTPS responses include `Strict-Transport-Security`;
 - API health is checked through the public HTTPS URL and through the internal `http://127.0.0.1:5080/api/health` URL used by the deploy workflow.
 
+## Realtime WebSocket Proxy
+
+SignalR realtime channels are part of the public API surface:
+
+- `/hubs/notifications` sends instant user notifications, badge refresh signals, and toast events;
+- `/hubs/notes` synchronizes sticky note boards between users.
+
+The public `api.elitpravo.com` nginx server must proxy these hub paths to the backend with WebSocket upgrade support. Keep HTTP fallback available, but do not rely on fallback as the main production transport.
+
+Required nginx map in the `http` context:
+
+```nginx
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    '' close;
+}
+```
+
+Required proxy settings for API locations that include `/hubs/notifications` and `/hubs/notes`:
+
+```nginx
+proxy_http_version 1.1;
+proxy_set_header Upgrade $http_upgrade;
+proxy_set_header Connection $connection_upgrade;
+proxy_set_header Host $host;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Forwarded-Proto $scheme;
+proxy_read_timeout 3600s;
+proxy_send_timeout 3600s;
+```
+
+Example dedicated locations:
+
+```nginx
+location /hubs/notifications {
+    proxy_pass http://127.0.0.1:5080;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+
+location /hubs/notes {
+    proxy_pass http://127.0.0.1:5080;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+}
+```
+
+After editing nginx on VPS:
+
+```bash
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+Production acceptance checks:
+
+1. Open CRM in a real browser with an active user session.
+2. In DevTools Network, confirm that `/hubs/notifications` connects with WebSocket transport and receives `101 Switching Protocols`.
+3. Open the Notes section and confirm that `/hubs/notes` also connects with WebSocket transport.
+4. Create a test notification or note change from another session and confirm that it appears without manual refresh.
+
 ## Required backend configuration
 
 Runtime secrets must come from environment variables, systemd environment files, user secrets, or a secret store. Do not commit real secret values to `appsettings*.json`.
