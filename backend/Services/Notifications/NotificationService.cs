@@ -2883,17 +2883,18 @@ public sealed class NotificationService : INotificationService
         object? metadata,
         CancellationToken cancellationToken)
         => await CreateUserNotificationAsync(
-            recipientUserId,
-            type,
-            eventKey,
-            title,
-            body,
-            tone,
-            "task",
-            task.Id,
-            task.Id,
-            task,
-            metadata,
+            new NotificationEventEnvelope(
+                recipientUserId,
+                type,
+                eventKey,
+                title,
+                body,
+                "task",
+                task.Id,
+                task.Id,
+                tone,
+                metadata,
+                task),
             cancellationToken);
 
     private async Task CreateUserNotificationAsync(
@@ -2909,13 +2910,37 @@ public sealed class NotificationService : INotificationService
         TaskJournalItem? task,
         object? metadata,
         CancellationToken cancellationToken)
+        => await CreateUserNotificationAsync(
+            new NotificationEventEnvelope(
+                recipientUserId,
+                type,
+                eventKey,
+                title,
+                body,
+                objectType,
+                objectId,
+                taskJournalItemId,
+                tone,
+                metadata,
+                task),
+            cancellationToken);
+
+    private async Task CreateUserNotificationAsync(
+        NotificationEventEnvelope notificationEvent,
+        CancellationToken cancellationToken)
     {
-        if (recipientUserId <= 0 || string.IsNullOrWhiteSpace(eventKey))
+        if (notificationEvent.RecipientUserId <= 0 || string.IsNullOrWhiteSpace(notificationEvent.EventKey))
         {
             return;
         }
 
-        if (!await IsUserNotificationChannelEnabledAsync(recipientUserId, type, NotificationChannels.InApp, cancellationToken))
+        var type = notificationEvent.EffectiveType;
+        if (string.IsNullOrWhiteSpace(type))
+        {
+            return;
+        }
+
+        if (!await IsUserNotificationChannelEnabledAsync(notificationEvent.RecipientUserId, type, NotificationChannels.InApp, cancellationToken))
         {
             return;
         }
@@ -2923,8 +2948,8 @@ public sealed class NotificationService : INotificationService
         var alreadyExists = await _context.UserNotifications
             .AsNoTracking()
             .AnyAsync(item =>
-                item.RecipientUserId == recipientUserId
-                && item.EventKey == eventKey,
+                item.RecipientUserId == notificationEvent.RecipientUserId
+                && item.EventKey == notificationEvent.EventKey,
                 cancellationToken);
         if (alreadyExists)
         {
@@ -2933,7 +2958,7 @@ public sealed class NotificationService : INotificationService
 
         var recipientExists = await _context.Users
             .AsNoTracking()
-            .AnyAsync(user => user.Id == recipientUserId, cancellationToken);
+            .AnyAsync(user => user.Id == notificationEvent.RecipientUserId, cancellationToken);
         if (!recipientExists)
         {
             return;
@@ -2941,26 +2966,26 @@ public sealed class NotificationService : INotificationService
 
         var notification = new UserNotification
         {
-            RecipientUserId = recipientUserId,
+            RecipientUserId = notificationEvent.RecipientUserId,
             Type = type,
-            EventKey = eventKey,
-            Title = Truncate(title.Trim(), 300),
-            BodyPreview = Truncate(body.Trim(), 1000),
-            Tone = string.IsNullOrWhiteSpace(tone) ? "blue" : tone.Trim(),
-            ObjectType = objectType,
-            ObjectId = objectId,
-            TaskJournalItemId = taskJournalItemId,
-            TaskJournalItem = task,
-            MetadataJson = metadata is null ? "{}" : JsonSerializer.Serialize(metadata, JsonOptions),
+            EventKey = notificationEvent.EventKey,
+            Title = Truncate(notificationEvent.Title.Trim(), 300),
+            BodyPreview = Truncate(notificationEvent.BodyPreview.Trim(), 1000),
+            Tone = notificationEvent.EffectiveTone,
+            ObjectType = notificationEvent.ObjectType,
+            ObjectId = notificationEvent.ObjectId,
+            TaskJournalItemId = notificationEvent.TaskJournalItemId,
+            TaskJournalItem = notificationEvent.Task,
+            MetadataJson = notificationEvent.Metadata is null ? "{}" : JsonSerializer.Serialize(notificationEvent.Metadata, JsonOptions),
             CreatedAt = DateTime.UtcNow
         };
         _context.UserNotifications.Add(notification);
         await _context.SaveChangesAsync(cancellationToken);
-        var toastEnabled = await IsUserNotificationChannelEnabledAsync(recipientUserId, type, NotificationChannels.Toast, cancellationToken);
+        var toastEnabled = await IsUserNotificationChannelEnabledAsync(notificationEvent.RecipientUserId, type, NotificationChannels.Toast, cancellationToken);
         await _realtimePublisher.PublishUserNotificationAsync(notification, toastEnabled, cancellationToken);
 
         if (_webPushNotificationService is not null
-            && await IsUserNotificationChannelEnabledAsync(recipientUserId, type, NotificationChannels.WebPush, cancellationToken))
+            && await IsUserNotificationChannelEnabledAsync(notificationEvent.RecipientUserId, type, NotificationChannels.WebPush, cancellationToken))
         {
             await _webPushNotificationService.SendUserNotificationAsync(notification, cancellationToken);
         }

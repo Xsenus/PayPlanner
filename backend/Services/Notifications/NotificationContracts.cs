@@ -266,6 +266,29 @@ public sealed record UserNotificationTypeDefinition(
     public string DomainLabel => UserNotificationDomains.Label(Domain);
 }
 
+public sealed record NotificationEventEnvelope(
+    int RecipientUserId,
+    string Type,
+    string EventKey,
+    string Title,
+    string BodyPreview,
+    string ObjectType,
+    int? ObjectId,
+    int? TaskJournalItemId,
+    string? Tone = null,
+    object? Metadata = null,
+    TaskJournalItem? Task = null,
+    IReadOnlyList<string>? Channels = null,
+    string? ActionUrl = null)
+{
+    public UserNotificationTypeDefinition? TypeDefinition => UserNotificationTypes.Find(Type);
+    public string EffectiveType => TypeDefinition?.Key ?? Type.Trim();
+    public string Priority => TypeDefinition?.Priority ?? "normal";
+    public string Domain => TypeDefinition?.Domain ?? UserNotificationDomains.System;
+    public string EffectiveTone => string.IsNullOrWhiteSpace(Tone) ? TypeDefinition?.Tone ?? "blue" : Tone.Trim();
+    public IReadOnlyList<string> EffectiveChannels => Channels is { Count: > 0 } ? Channels : TypeDefinition?.Channels ?? NotificationChannels.All;
+}
+
 public static class UserNotificationPreferenceSettings
 {
     public const string SettingKey = "notifications.typePreferences.v1";

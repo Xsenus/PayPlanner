@@ -39,6 +39,31 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public void NotificationEventEnvelope_UsesCatalogDefaultsAndExplicitOverrides()
+    {
+        var envelope = new NotificationEventEnvelope(
+            RecipientUserId: 10,
+            Type: UserNotificationTypes.PaymentAdvanceReviewRequired,
+            EventKey: "payment:advance:42",
+            Title: "Контроль аванса",
+            BodyPreview: "Есть нераспределенный аванс.",
+            ObjectType: "payment",
+            ObjectId: 42,
+            TaskJournalItemId: null,
+            Tone: null,
+            Metadata: new { paymentId = 42 },
+            Channels: [NotificationChannels.InApp, NotificationChannels.WebPush],
+            ActionUrl: "/payments/42");
+
+        Assert.Equal(UserNotificationTypes.PaymentAdvanceReviewRequired, envelope.EffectiveType);
+        Assert.Equal(UserNotificationDomains.Payment, envelope.Domain);
+        Assert.Equal("high", envelope.Priority);
+        Assert.Equal("rose", envelope.EffectiveTone);
+        Assert.Equal([NotificationChannels.InApp, NotificationChannels.WebPush], envelope.EffectiveChannels);
+        Assert.Equal("/payments/42", envelope.ActionUrl);
+    }
+
+    [Fact]
     public async Task NotifyPasswordIssuedAsync_SendsEmailAndTelegram_AndHidesPasswordInDeliveryLog()
     {
         await using var db = await CreateContextAsync();

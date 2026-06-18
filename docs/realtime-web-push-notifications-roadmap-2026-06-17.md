@@ -485,9 +485,11 @@
 
 Цель: убрать разрозненные прямые вставки и сделать единый надежный pipeline.
 
-- [ ] Ввести единый `NotificationEvent`/`NotificationEnvelope`.
+- [x] Ввести единый `NotificationEvent`/`NotificationEnvelope`.
   - ObjectType, ObjectId, recipientUserId, type, priority, channels, metadata, actionUrl.
   - DoD: все новые события идут через один сервис.
+  - Проверено 18.06.2026: добавлен `NotificationEventEnvelope`; внутренняя точка создания `UserNotification` принимает единый конверт события, старые вызовы оставлены совместимыми обертками.
+  - Проверено 18.06.2026: `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --filter "FullyQualifiedName~NotificationServiceTests"`, полный `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj`, `npm run lint`, `npm run build`, `git diff --check`, UTF-8 для измененных файлов, локальный запуск backend на временной SQLite-БД с `GET /api/health`.
 
 - [ ] Унифицировать создание `UserNotification`.
   - Задачи уже идут через `NotificationService`.
