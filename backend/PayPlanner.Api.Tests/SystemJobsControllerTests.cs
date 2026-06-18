@@ -748,6 +748,94 @@ public class SystemJobsControllerTests
     }
 
     [Fact]
+    public async Task NotificationRetrySchedulerService_RetriesFailedWebPushDeliveries()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var now = DateTime.UtcNow;
+        scope.Db.SystemSettings.AddRange(
+            new SystemSetting { Key = NotificationRetrySchedulerService.EnabledSettingKey, Value = "true", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = NotificationRetrySchedulerService.DelayMinutesSettingKey, Value = "1", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = NotificationRetrySchedulerService.BatchSizeSettingKey, Value = "10", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = NotificationRetrySchedulerService.MaxAttemptsSettingKey, Value = "3", CreatedAt = now, UpdatedAt = now });
+        var role = new Role { Name = $"webpush-retry-role-{Guid.NewGuid():N}", Description = "Web push retry role" };
+        scope.Db.Roles.Add(role);
+        await scope.Db.SaveChangesAsync();
+        var user = new User
+        {
+            Email = $"webpush-retry-{Guid.NewGuid():N}@example.com",
+            FullName = "Web Push Retry User",
+            PasswordHash = "hash",
+            RoleId = role.Id,
+            IsApproved = true,
+            IsActive = true,
+        };
+        scope.Db.Users.Add(user);
+        await scope.Db.SaveChangesAsync();
+        scope.Db.NotificationDeliveries.Add(new NotificationDelivery
+        {
+            EventKey = "task:webpush-delivery",
+            Channel = NotificationChannels.WebPush,
+            SenderName = "Web Push",
+            RecipientUserId = user.Id,
+            RecipientAddress = "https://push.example/retry",
+            Subject = "Retry Web Push",
+            BodyPreview = "Retry delivery",
+            Status = NotificationDeliveryStatus.Failed,
+            Error = "Temporary push failure",
+            CreatedAt = now.AddMinutes(-30),
+        });
+        scope.Db.UserPushSubscriptions.Add(new UserPushSubscription
+        {
+            UserId = user.Id,
+            Endpoint = "https://push.example/retry",
+            P256dh = "p256dh",
+            Auth = "auth",
+            Browser = "Chrome",
+            Platform = "Windows",
+            DeviceName = "Chrome Windows",
+            UserAgent = "Test",
+            IsActive = true,
+            CreatedAt = now.AddMinutes(-40),
+            UpdatedAt = now.AddMinutes(-30),
+            LastSeenAt = now.AddMinutes(-30),
+        });
+        scope.Db.UserNotifications.Add(new UserNotification
+        {
+            RecipientUserId = user.Id,
+            EventKey = "task:webpush-delivery",
+            Type = UserNotificationTypes.TaskChanged,
+            Title = "Retry Web Push",
+            BodyPreview = "Retry delivery",
+            Tone = "amber",
+            ObjectType = "task",
+            ObjectId = 77,
+            MetadataJson = "{}",
+            CreatedAt = now.AddMinutes(-30),
+        });
+        await scope.Db.SaveChangesAsync();
+        var original = await scope.Db.NotificationDeliveries.SingleAsync();
+
+        var webPush = new RecordingWebPushRetryService();
+        var services = new ServiceCollection();
+        services.AddScoped(_ => new PaymentContext(scope.Options, useObjectAuditModel: false));
+        services.AddSingleton<INotificationService>(new RecordingTaskReminderNotificationService());
+        services.AddSingleton<IWebPushNotificationService>(webPush);
+        await using var provider = services.BuildServiceProvider();
+        var service = new NotificationRetrySchedulerService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new ConfigurationBuilder().Build(),
+            NullLogger<NotificationRetrySchedulerService>.Instance);
+
+        Assert.Equal(1, await service.CountEligibleRetriesAsync(CancellationToken.None));
+        var result = await service.RunOnceAsync(CancellationToken.None);
+
+        Assert.True(result.Enabled);
+        Assert.Equal(1, result.RetriedCount);
+        Assert.Equal(0, result.SkippedCount);
+        Assert.Equal(original.Id, Assert.Single(webPush.RetryDeliveryIds));
+    }
+
+    [Fact]
     public async Task YandexDiskCrmSyncSchedulerService_CountsOnlyDueRetryItems()
     {
         await using var scope = await CreateDbScopeAsync();
@@ -1470,6 +1558,33 @@ public class SystemJobsControllerTests
 
         public Task NotifyCourtSyncFailedAsync(ClientCase clientCase, string providerName, string summary, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
+    }
+
+    private sealed class RecordingWebPushRetryService : IWebPushNotificationService
+    {
+        public List<int> RetryDeliveryIds { get; } = [];
+
+        public WebPushPublicKeyStatus GetPublicKeyStatus()
+            => new(true, true, "public-key", true, true, true);
+
+        public Task SendUserNotificationAsync(
+            UserNotification notification,
+            CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task<NotificationDelivery?> RetryDeliveryAsync(
+            int deliveryId,
+            CancellationToken cancellationToken = default)
+        {
+            RetryDeliveryIds.Add(deliveryId);
+            return Task.FromResult<NotificationDelivery?>(new NotificationDelivery
+            {
+                Id = deliveryId + 1000,
+                Channel = NotificationChannels.WebPush,
+                Status = NotificationDeliveryStatus.Sent,
+                CreatedAt = DateTime.UtcNow,
+            });
+        }
     }
 
     private sealed class TestPaymentContextFactory(DbContextOptions<PaymentContext> options) : IDbContextFactory<PaymentContext>

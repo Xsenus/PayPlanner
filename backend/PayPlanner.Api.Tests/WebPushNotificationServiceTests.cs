@@ -135,6 +135,98 @@ public class WebPushNotificationServiceTests
         Assert.Contains("Simulated push provider failure", delivery.Error, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task RetryDeliveryAsync_CreatesPendingOutboxBeforeCallingPushProvider()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserWithSubscriptionAsync(db, "retry-push@example.com");
+        var subscription = await db.UserPushSubscriptions.SingleAsync(item => item.UserId == user.Id);
+        var notification = CreateNotification(user.Id, new UserNotification
+        {
+            Type = UserNotificationTypes.TaskChanged,
+            EventKey = "task:99:changed",
+            Title = "Р—Р°РґР°С‡Р° РёР·РјРµРЅРµРЅР°",
+            BodyPreview = "РџСЂРѕРІРµСЂСЊС‚Рµ РёР·РјРµРЅРµРЅРёСЏ РІ Р·Р°РґР°С‡Рµ.",
+            Tone = "amber",
+            ObjectType = "task",
+            ObjectId = 99,
+        });
+        db.UserNotifications.Add(notification);
+        await db.SaveChangesAsync();
+
+        db.NotificationDeliveries.Add(new NotificationDelivery
+        {
+            EventKey = notification.EventKey,
+            Channel = NotificationChannels.WebPush,
+            SenderName = "Web Push",
+            RecipientUserId = user.Id,
+            RecipientAddress = subscription.Endpoint,
+            Subject = notification.Title,
+            BodyPreview = notification.BodyPreview,
+            Status = NotificationDeliveryStatus.Failed,
+            Error = "Temporary push provider failure",
+            CreatedAt = DateTime.UtcNow.AddMinutes(-30),
+        });
+        await db.SaveChangesAsync();
+        var original = await db.NotificationDeliveries.SingleAsync();
+        var service = new SuccessfulWebPushNotificationService(db, original.EventKey);
+
+        var retry = await service.RetryDeliveryAsync(original.Id);
+
+        Assert.NotNull(retry);
+        Assert.True(service.PendingRetryWasPersistedBeforeSend);
+        Assert.NotEqual(original.Id, retry.Id);
+        Assert.Equal(NotificationDeliveryStatus.Sent, retry.Status);
+        Assert.StartsWith($"{original.EventKey}:retry:", retry.EventKey, StringComparison.Ordinal);
+        await db.Entry(original).ReloadAsync();
+        Assert.Equal(NotificationDeliveryStatus.Failed, original.Status);
+        await db.Entry(subscription).ReloadAsync();
+        Assert.Null(subscription.LastError);
+        Assert.Null(subscription.LastErrorAt);
+    }
+
+    [Fact]
+    public async Task RetryDeliveryAsync_SkipsInactiveSubscription()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserWithSubscriptionAsync(db, "inactive-retry-push@example.com");
+        var subscription = await db.UserPushSubscriptions.SingleAsync(item => item.UserId == user.Id);
+        subscription.IsActive = false;
+        subscription.RevokedAt = DateTime.UtcNow;
+        var notification = CreateNotification(user.Id, new UserNotification
+        {
+            Type = UserNotificationTypes.TaskChanged,
+            EventKey = "task:100:changed",
+            Title = "Р—Р°РґР°С‡Р° РёР·РјРµРЅРµРЅР°",
+            BodyPreview = "РџСЂРѕРІРµСЂСЊС‚Рµ РёР·РјРµРЅРµРЅРёСЏ РІ Р·Р°РґР°С‡Рµ.",
+            Tone = "amber",
+            ObjectType = "task",
+            ObjectId = 100,
+        });
+        db.UserNotifications.Add(notification);
+        db.NotificationDeliveries.Add(new NotificationDelivery
+        {
+            EventKey = notification.EventKey,
+            Channel = NotificationChannels.WebPush,
+            SenderName = "Web Push",
+            RecipientUserId = user.Id,
+            RecipientAddress = subscription.Endpoint,
+            Subject = notification.Title,
+            BodyPreview = notification.BodyPreview,
+            Status = NotificationDeliveryStatus.Failed,
+            Error = "Subscription gone",
+            CreatedAt = DateTime.UtcNow.AddMinutes(-30),
+        });
+        await db.SaveChangesAsync();
+        var original = await db.NotificationDeliveries.SingleAsync();
+        var service = new SuccessfulWebPushNotificationService(db, original.EventKey);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.RetryDeliveryAsync(original.Id));
+
+        Assert.Equal("WebPushSubscriptionInactive", ex.Message);
+        Assert.Equal(1, await db.NotificationDeliveries.CountAsync());
+    }
+
     private static WebPushNotificationService CreateService(PaymentContext db)
     {
         var configuration = new ConfigurationBuilder()
@@ -258,6 +350,49 @@ public class WebPushNotificationServiceTests
                     cancellationToken);
 
             throw new InvalidOperationException("Simulated push provider failure");
+        }
+    }
+
+    private sealed class SuccessfulWebPushNotificationService : WebPushNotificationService
+    {
+        private readonly PaymentContext _db;
+        private readonly string _eventKeyPrefix;
+
+        public SuccessfulWebPushNotificationService(PaymentContext db, string eventKeyPrefix)
+            : base(
+                db,
+                new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["WebPush:Enabled"] = "true",
+                        ["WebPush:PublicKey"] = "public-key",
+                        ["WebPush:PrivateKey"] = "private-key",
+                        ["WebPush:Subject"] = "mailto:test@example.com",
+                    })
+                    .Build(),
+                NullLogger<WebPushNotificationService>.Instance)
+        {
+            _db = db;
+            _eventKeyPrefix = eventKeyPrefix;
+        }
+
+        public bool PendingRetryWasPersistedBeforeSend { get; private set; }
+
+        protected override async Task SendSubscriptionAsync(
+            UserPushSubscription subscription,
+            string payload,
+            string subject,
+            string publicKey,
+            string privateKey,
+            CancellationToken cancellationToken)
+        {
+            PendingRetryWasPersistedBeforeSend = await _db.NotificationDeliveries
+                .AsNoTracking()
+                .AnyAsync(item =>
+                    item.EventKey.StartsWith($"{_eventKeyPrefix}:retry:")
+                    && item.Channel == NotificationChannels.WebPush
+                    && item.Status == NotificationDeliveryStatus.Pending,
+                    cancellationToken);
         }
     }
 }

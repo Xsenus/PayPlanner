@@ -506,10 +506,13 @@
   - Проверено 18.06.2026: Web Push delivery теперь сохраняется в `NotificationDeliveries` со статусом `pending` до вызова внешнего push-провайдера. Email/Telegram уже сохраняли pending-запись до отправки через общий `SendAsync`.
   - Проверено 18.06.2026: `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --filter "FullyQualifiedName~WebPushNotificationServiceTests"`, полный `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj`, `npm run lint`, `npm run build`, `git diff --check`, JSON/UTF-8 для release/roadmap/WebPush-файлов, локальный запуск backend на временной SQLite-БД с `GET /api/health`.
 
-- [ ] Добавить retry worker для Web Push.
+- [x] Добавить retry worker для Web Push.
   - Использовать существующий `NotificationRetrySchedulerService` или расширить его.
   - Учитывать permanent/temporary ошибки.
   - DoD: временные сбои переотправляются, мертвые подписки отключаются.
+  - Проверено 18.06.2026: `NotificationRetrySchedulerService` теперь включает failed-доставки канала `webPush`, но берёт в работу только записи с активной push-подпиской и существующим уведомлением пользователя. Повторная отправка создаёт новую `pending`-запись в `NotificationDeliveries` до обращения к внешнему push-провайдеру; исходная failed-запись остаётся для аудита.
+  - Проверено 18.06.2026: временная ошибка Web Push переотправляется через общий retry worker, а неактивная/отозванная подписка исключается из повторной отправки.
+  - Проверено 18.06.2026: `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --filter "FullyQualifiedName~WebPushNotificationServiceTests|FullyQualifiedName~SystemJobsControllerTests"`, полный `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj`, `npm run lint`, `npm run build`, `git diff --check`, UTF-8/JSON для затронутых файлов, `dotnet ef database update --project backend\PayPlanner.Api.csproj --context PaymentContext` на временной SQLite-БД. Пробный полный запуск backend на чистой и скопированной SQLite-БД не дошёл до `/api/health` за отведённое время из-за длительных стартовых maintenance/backfill-шагов до публикации endpoints; исключений приложения в логах не было, миграции БД проверены отдельно через EF CLI.
 
 - [x] Добавить миграции PostgreSQL и SQLite.
   - `UserPushSubscriptions`.

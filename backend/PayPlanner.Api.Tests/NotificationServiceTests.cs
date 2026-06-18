@@ -4418,6 +4418,11 @@ public class NotificationServiceTests
             Notifications.Add(notification);
             return Task.CompletedTask;
         }
+
+        public Task<NotificationDelivery?> RetryDeliveryAsync(
+            int deliveryId,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<NotificationDelivery?>(null);
     }
 
     private sealed class StaticHttpClientFactory : IHttpClientFactory

@@ -19,6 +19,7 @@ public interface IWebPushNotificationService
 {
     WebPushPublicKeyStatus GetPublicKeyStatus();
     Task SendUserNotificationAsync(UserNotification notification, CancellationToken cancellationToken = default);
+    Task<NotificationDelivery?> RetryDeliveryAsync(int deliveryId, CancellationToken cancellationToken = default);
 }
 
 public class WebPushNotificationService : IWebPushNotificationService
@@ -157,6 +158,132 @@ public class WebPushNotificationService : IWebPushNotificationService
         await _context.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<NotificationDelivery?> RetryDeliveryAsync(int deliveryId, CancellationToken cancellationToken = default)
+    {
+        var original = await _context.NotificationDeliveries
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == deliveryId, cancellationToken);
+        if (original is null)
+        {
+            throw new InvalidOperationException("NotificationDeliveryNotFound");
+        }
+
+        if (!string.Equals(original.Channel, NotificationChannels.WebPush, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("NotificationDeliveryChannelInvalid");
+        }
+
+        if (string.Equals(original.Status, NotificationDeliveryStatus.Sent, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("NotificationDeliveryAlreadySent");
+        }
+
+        if (string.Equals(original.Status, NotificationDeliveryStatus.Pending, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("NotificationDeliveryPending");
+        }
+
+        if (string.Equals(original.Status, NotificationDeliveryStatus.Skipped, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("NotificationDeliverySkipped");
+        }
+
+        if (!original.RecipientUserId.HasValue || string.IsNullOrWhiteSpace(original.RecipientAddress))
+        {
+            throw new InvalidOperationException("NotificationDeliveryRecipientMissing");
+        }
+
+        var baseEventKey = ResolveBaseEventKey(original.EventKey);
+        var notification = await _context.UserNotifications
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item =>
+                item.EventKey == baseEventKey
+                && item.RecipientUserId == original.RecipientUserId.Value,
+                cancellationToken);
+        if (notification is null)
+        {
+            throw new InvalidOperationException("UserNotificationNotFound");
+        }
+
+        var subscription = await _context.UserPushSubscriptions
+            .FirstOrDefaultAsync(item =>
+                item.UserId == original.RecipientUserId.Value
+                && item.Endpoint == original.RecipientAddress
+                && item.IsActive
+                && item.RevokedAt == null,
+                cancellationToken);
+        if (subscription is null)
+        {
+            throw new InvalidOperationException("WebPushSubscriptionInactive");
+        }
+
+        var config = ResolveVapidConfig();
+        var pushTitle = string.IsNullOrWhiteSpace(original.Subject)
+            ? ResolvePushTitle(notification)
+            : original.Subject;
+        var pushBodyPreview = string.IsNullOrWhiteSpace(original.BodyPreview)
+            ? ResolvePushBodyPreview(notification)
+            : original.BodyPreview;
+        var payload = BuildPayload(notification, pushTitle, pushBodyPreview);
+        var retry = new NotificationDelivery
+        {
+            EventKey = $"{original.EventKey}:retry:{DateTime.UtcNow:yyyyMMddHHmmssfff}:{Guid.NewGuid():N}",
+            Channel = NotificationChannels.WebPush,
+            SenderName = "Web Push",
+            RecipientUserId = original.RecipientUserId,
+            RecipientAddress = subscription.Endpoint,
+            Subject = pushTitle,
+            BodyPreview = pushBodyPreview,
+            Status = NotificationDeliveryStatus.Pending,
+            CreatedAt = DateTime.UtcNow,
+        };
+        _context.NotificationDeliveries.Add(retry);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        if (!config.Ready)
+        {
+            retry.Status = NotificationDeliveryStatus.Skipped;
+            retry.Error = ResolveNotReadyReason(config);
+            await _context.SaveChangesAsync(cancellationToken);
+            return retry;
+        }
+
+        try
+        {
+            await SendSubscriptionAsync(subscription, payload, config.Subject, config.PublicKey, config.PrivateKey, cancellationToken);
+            retry.Status = NotificationDeliveryStatus.Sent;
+            retry.SentAt = DateTime.UtcNow;
+            subscription.LastSeenAt = DateTime.UtcNow;
+            subscription.LastErrorAt = null;
+            subscription.LastError = null;
+        }
+        catch (WebPushException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            retry.Status = NotificationDeliveryStatus.Failed;
+            retry.Error = TruncateError(ex.Message);
+            MarkSubscriptionError(subscription, retry.Error, ex.StatusCode);
+            _logger.LogWarning(
+                ex,
+                "Web Push retry failed for user {UserId}, subscription {SubscriptionId}.",
+                original.RecipientUserId,
+                subscription.Id);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            retry.Status = NotificationDeliveryStatus.Failed;
+            retry.Error = TruncateError(ex.Message);
+            MarkSubscriptionError(subscription, retry.Error, null);
+            _logger.LogWarning(
+                ex,
+                "Web Push retry failed for user {UserId}, subscription {SubscriptionId}.",
+                original.RecipientUserId,
+                subscription.Id);
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+        return retry;
+    }
+
     protected virtual async Task SendSubscriptionAsync(
         UserPushSubscription subscription,
         string payload,
@@ -192,6 +319,12 @@ public class WebPushNotificationService : IWebPushNotificationService
                 && item.RecipientAddress == endpoint
                 && item.Status != NotificationDeliveryStatus.Failed,
                 cancellationToken);
+
+    private static string ResolveBaseEventKey(string eventKey)
+    {
+        var retryIndex = eventKey.IndexOf(":retry:", StringComparison.Ordinal);
+        return retryIndex < 0 ? eventKey : eventKey[..retryIndex];
+    }
 
     private static string BuildPayload(UserNotification notification, string title, string bodyPreview)
         => JsonSerializer.Serialize(new

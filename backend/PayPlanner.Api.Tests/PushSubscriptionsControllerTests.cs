@@ -219,5 +219,8 @@ public class PushSubscriptionsControllerTests
 
         public Task SendUserNotificationAsync(UserNotification notification, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
+
+        public Task<NotificationDelivery?> RetryDeliveryAsync(int deliveryId, CancellationToken cancellationToken = default)
+            => Task.FromResult<NotificationDelivery?>(null);
     }
 }

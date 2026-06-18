@@ -98,14 +98,30 @@ public sealed class NotificationRetrySchedulerService : BackgroundService
 
         using var scope = _scopeFactory.CreateScope();
         var notificationService = scope.ServiceProvider.GetRequiredService<INotificationService>();
+        var webPushNotificationService = scope.ServiceProvider.GetService<IWebPushNotificationService>();
 
         foreach (var delivery in candidates)
         {
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                var retryDeliveries = await notificationService.RetryDeliveryAsync(delivery.Id, cancellationToken);
-                if (retryDeliveries.Count > 0)
+                var wasRetried = false;
+                if (string.Equals(delivery.Channel, NotificationChannels.WebPush, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (webPushNotificationService is null)
+                    {
+                        throw new InvalidOperationException("WebPushNotificationServiceMissing");
+                    }
+
+                    wasRetried = await webPushNotificationService.RetryDeliveryAsync(delivery.Id, cancellationToken) is not null;
+                }
+                else
+                {
+                    var retryDeliveries = await notificationService.RetryDeliveryAsync(delivery.Id, cancellationToken);
+                    wasRetried = retryDeliveries.Count > 0;
+                }
+
+                if (wasRetried)
                 {
                     retried++;
                 }
@@ -152,7 +168,9 @@ public sealed class NotificationRetrySchedulerService : BackgroundService
             .Where(item =>
                 item.Status == NotificationDeliveryStatus.Failed &&
                 item.CreatedAt <= cutoff &&
-                (item.Channel == NotificationChannels.Email || item.Channel == NotificationChannels.Telegram))
+                (item.Channel == NotificationChannels.Email
+                    || item.Channel == NotificationChannels.Telegram
+                    || item.Channel == NotificationChannels.WebPush))
             .OrderBy(item => item.CreatedAt)
             .ThenBy(item => item.Id)
             .Take(settings.BatchSize * 5)
@@ -162,6 +180,12 @@ public sealed class NotificationRetrySchedulerService : BackgroundService
         foreach (var delivery in failed)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (string.Equals(delivery.Channel, NotificationChannels.WebPush, StringComparison.OrdinalIgnoreCase)
+                && !await IsRetryableWebPushDeliveryAsync(context, delivery, cancellationToken))
+            {
+                continue;
+            }
+
             if (CountRetryAttempts(delivery.EventKey) >= settings.MaxAttempts)
             {
                 continue;
@@ -184,6 +208,38 @@ public sealed class NotificationRetrySchedulerService : BackgroundService
         }
 
         return result;
+    }
+
+    private static async Task<bool> IsRetryableWebPushDeliveryAsync(
+        PaymentContext context,
+        NotificationDelivery delivery,
+        CancellationToken cancellationToken)
+    {
+        if (!delivery.RecipientUserId.HasValue || string.IsNullOrWhiteSpace(delivery.RecipientAddress))
+        {
+            return false;
+        }
+
+        var hasActiveSubscription = await context.UserPushSubscriptions
+            .AsNoTracking()
+            .AnyAsync(item =>
+                item.UserId == delivery.RecipientUserId.Value
+                && item.Endpoint == delivery.RecipientAddress
+                && item.IsActive
+                && item.RevokedAt == null,
+                cancellationToken);
+        if (!hasActiveSubscription)
+        {
+            return false;
+        }
+
+        var baseEventKey = ResolveBaseEventKey(delivery.EventKey);
+        return await context.UserNotifications
+            .AsNoTracking()
+            .AnyAsync(item =>
+                item.EventKey == baseEventKey
+                && item.RecipientUserId == delivery.RecipientUserId.Value,
+                cancellationToken);
     }
 
     private async Task<NotificationRetrySettings> ResolveSettingsAsync(CancellationToken cancellationToken)
@@ -229,6 +285,12 @@ public sealed class NotificationRetrySchedulerService : BackgroundService
 
     private static int CountRetryAttempts(string eventKey)
         => eventKey.Split(":retry:", StringSplitOptions.None).Length - 1;
+
+    private static string ResolveBaseEventKey(string eventKey)
+    {
+        var retryIndex = eventKey.IndexOf(":retry:", StringComparison.Ordinal);
+        return retryIndex < 0 ? eventKey : eventKey[..retryIndex];
+    }
 
     private static bool ParseBool(string? value, bool fallback)
         => bool.TryParse(value, out var parsed) ? parsed : fallback;
