@@ -204,6 +204,77 @@ describe('NotificationCenter', () => {
     );
   });
 
+  it('passes inbox search, status, type, dates, employee, client and task role filters to requests and reset', async () => {
+    const item = createNotification({
+      id: 60,
+      title: 'Срочная задача клиента',
+      bodyPreview: 'Нужно проверить параметры фильтров',
+    });
+    apiMock.getTaskJournalAssignees.mockResolvedValueOnce([
+      { id: 7, name: 'Анна Иванова', email: 'anna@example.test' },
+    ]);
+    apiMock.getClientsV2.mockResolvedValueOnce({
+      items: [{ id: 15, name: 'ООО Ромашка' }],
+      total: 1,
+      page: 1,
+      pageSize: 500,
+    });
+    apiMock.getUserNotifications.mockResolvedValue(createPage([item]));
+
+    render(<NotificationCenter />);
+
+    expect(await screen.findByText('Срочная задача клиента')).toBeTruthy();
+    expect(await screen.findByRole('option', { name: 'Анна Иванова' })).toBeTruthy();
+    expect(await screen.findByRole('option', { name: 'ООО Ромашка' })).toBeTruthy();
+
+    fireEvent.change(screen.getByPlaceholderText('Поиск по уведомлению, задаче или событию'), {
+      target: { value: '  срочная задача  ' },
+    });
+    fireEvent.change(screen.getByDisplayValue('Активные'), { target: { value: 'unread' } });
+    fireEvent.change(screen.getByDisplayValue('Все типы'), { target: { value: 'taskReminder' } });
+    fireEvent.change(screen.getByLabelText('С даты'), { target: { value: '2026-06-01' } });
+    fireEvent.change(screen.getByLabelText('По дату'), { target: { value: '2026-06-15' } });
+    fireEvent.change(screen.getByLabelText('Сотрудник'), { target: { value: '7' } });
+    fireEvent.change(screen.getByLabelText('Клиент'), { target: { value: '15' } });
+    fireEvent.change(screen.getByLabelText('Роль'), { target: { value: 'assignee' } });
+
+    await waitFor(() =>
+      expect(apiMock.getUserNotifications).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          status: 'unread',
+          type: 'taskReminder',
+          search: 'срочная задача',
+          dateFrom: '2026-06-01',
+          dateTo: '2026-06-15',
+          employeeId: 7,
+          clientId: 15,
+          taskRole: 'assignee',
+          page: 1,
+        }),
+      ),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Сбросить' }));
+
+    await waitFor(() =>
+      expect(apiMock.getUserNotifications).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          status: 'active',
+          type: undefined,
+          domain: undefined,
+          requiresAction: undefined,
+          search: '',
+          dateFrom: undefined,
+          dateTo: undefined,
+          employeeId: undefined,
+          clientId: undefined,
+          taskRole: undefined,
+          page: 1,
+        }),
+      ),
+    );
+  });
+
   it.each([
     ['payment', 'К платежу', 'onOpenPayment'],
     ['invoice', 'К счету', 'onOpenInvoice'],
