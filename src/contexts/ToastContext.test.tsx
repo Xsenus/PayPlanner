@@ -6,9 +6,11 @@ import { useToast } from '../hooks/useToast';
 function ToastHarness({
   onFirstAction,
   onSecondAction,
+  onThirdAction,
 }: {
   onFirstAction?: () => void;
   onSecondAction?: () => void;
+  onThirdAction?: () => void;
 }) {
   const toast = useToast();
 
@@ -59,6 +61,23 @@ function ToastHarness({
         }}
       >
         Domain
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          toast.showToast({
+            title: 'РќРµСЃРєРѕР»СЊРєРѕ РґРµР№СЃС‚РІРёР№',
+            description: 'РЈ СЌС‚РѕРіРѕ С‚РѕСЃС‚Р° РµСЃС‚СЊ Р±С‹СЃС‚СЂС‹Рµ РґРµР№СЃС‚РІРёСЏ.',
+            durationMs: 0,
+            actions: [
+              { label: 'РћС‚РєСЂС‹С‚СЊ', onClick: onFirstAction ?? (() => undefined) },
+              { label: 'РџСЂРѕС‡РёС‚Р°РЅРѕ', onClick: onSecondAction ?? (() => undefined), variant: 'secondary' },
+              { label: 'РћС‚Р»РѕР¶РёС‚СЊ', onClick: onThirdAction ?? (() => undefined), variant: 'secondary' },
+            ],
+          });
+        }}
+      >
+        MultiAction
       </button>
     </div>
   );
@@ -112,5 +131,28 @@ describe('ToastProvider', () => {
 
     expect(screen.getByText('Деньги')).toBeTruthy();
     expect(screen.getByText('Проверка платежа')).toBeTruthy();
+  });
+
+  it('renders multiple actions and runs the selected action', () => {
+    const firstAction = vi.fn();
+    const secondAction = vi.fn();
+    const thirdAction = vi.fn();
+
+    render(
+      <ToastProvider>
+        <ToastHarness
+          onFirstAction={firstAction}
+          onSecondAction={secondAction}
+          onThirdAction={thirdAction}
+        />
+      </ToastProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'MultiAction' }));
+    fireEvent.click(screen.getByRole('button', { name: 'РџСЂРѕС‡РёС‚Р°РЅРѕ' }));
+
+    expect(firstAction).not.toHaveBeenCalled();
+    expect(secondAction).toHaveBeenCalledTimes(1);
+    expect(thirdAction).not.toHaveBeenCalled();
   });
 });

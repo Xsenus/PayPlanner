@@ -16,6 +16,8 @@ import { updateRealtimeNotificationDiagnostics } from '../../utils/realtimeNotif
 
 const FALLBACK_POLL_INTERVAL_MS = 30_000;
 const FALLBACK_PAGE_SIZE = 15;
+const TOAST_SNOOZE_MS = 30 * 60 * 1000;
+const TOAST_SNOOZE_STORAGE_KEY = 'payplanner.realtimeToastSnoozes.v1';
 
 type RealtimeNotificationToastsProps = {
   userId: number;
@@ -190,7 +192,8 @@ function isNoteNotification(notification: RealtimeUserNotification): boolean {
 
 type RealtimeToastAction = {
   label: string;
-  run: () => void;
+  run: () => void | Promise<void>;
+  variant?: 'primary' | 'secondary';
 };
 
 type RealtimeToastHandlers = Omit<RealtimeNotificationToastsProps, 'userId' | 'onOpenNotifications'> & {
@@ -275,6 +278,39 @@ function resolveToastAction(
     label: 'Открыть уведомления',
     run: handlers.onOpenNotifications,
   };
+}
+
+function readToastSnoozes(now = Date.now()): Record<string, number> {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+
+  try {
+    const raw = window.localStorage.getItem(TOAST_SNOOZE_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) as Record<string, unknown> : {};
+    return Object.entries(parsed).reduce<Record<string, number>>((acc, [key, value]) => {
+      if (typeof value === 'number' && value > now) {
+        acc[key] = value;
+      }
+      return acc;
+    }, {});
+  } catch {
+    return {};
+  }
+}
+
+function isToastSnoozed(dedupeKey: string, now = Date.now()): boolean {
+  return (readToastSnoozes(now)[dedupeKey] ?? 0) > now;
+}
+
+function snoozeToast(dedupeKey: string, now = Date.now()) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const next = readToastSnoozes(now);
+  next[dedupeKey] = now + TOAST_SNOOZE_MS;
+  window.localStorage.setItem(TOAST_SNOOZE_STORAGE_KEY, JSON.stringify(next));
 }
 
 export function RealtimeNotificationToasts({
@@ -376,15 +412,59 @@ export function RealtimeNotificationToasts({
         return;
       }
 
+      const dedupeKey = buildToastDedupeKey(notification);
+      if (isToastSnoozed(dedupeKey)) {
+        return;
+      }
+
       const action = resolveToastAction(notification, handlersRef.current);
+      const markRead = async () => {
+        try {
+          await apiService.markUserNotificationRead(notification.id);
+          emitUserNotificationsChanged({
+            source: 'realtime',
+            reason: 'toast-read',
+            unreadDelta: -1,
+            notificationId: notification.id,
+          });
+        } catch (error) {
+          console.error('Failed to mark realtime notification as read.', error);
+          toast.error('Не удалось отметить уведомление прочитанным.', 'Уведомления');
+        }
+      };
+      const openAction = () => {
+        void markRead();
+        return action.run();
+      };
+      const actions: RealtimeToastAction[] = [
+        {
+          label: action.label,
+          run: openAction,
+        },
+        {
+          label: 'Прочитано',
+          run: markRead,
+          variant: 'secondary',
+        },
+        {
+          label: 'Отложить',
+          run: () => snoozeToast(dedupeKey),
+          variant: 'secondary',
+        },
+      ];
       toast.showToast({
         title: notification.title || 'Уведомление',
         description: buildToastDescription(notification),
         variant: resolveToastVariant(notification),
         durationMs: resolveToastDuration(notification),
         actionLabel: action.label,
-        onAction: action.run,
-        dedupeKey: buildToastDedupeKey(notification),
+        onAction: openAction,
+        actions: actions.map((item) => ({
+          label: item.label,
+          onClick: item.run,
+          variant: item.variant,
+        })),
+        dedupeKey,
         domain: resolveToastDomain(notification),
       });
     };

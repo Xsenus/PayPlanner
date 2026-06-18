@@ -14,6 +14,7 @@ const toastMock = vi.hoisted(() => ({
 
 const apiMock = vi.hoisted(() => ({
   getUserNotifications: vi.fn(),
+  markUserNotificationRead: vi.fn(),
 }));
 
 const connectionState = vi.hoisted(() => ({
@@ -74,6 +75,9 @@ describe('RealtimeNotificationToasts', () => {
       page: 1,
       pageSize: 15,
     });
+    apiMock.markUserNotificationRead.mockReset();
+    apiMock.markUserNotificationRead.mockResolvedValue({});
+    window.localStorage.clear();
     connectionState.handlers.clear();
     connectionState.canStart = true;
     connectionState.create.mockReset();
@@ -162,6 +166,99 @@ describe('RealtimeNotificationToasts', () => {
       unreadDelta: 1,
     }));
     window.removeEventListener(USER_NOTIFICATIONS_EVENT, listener);
+  });
+
+  it('marks a realtime toast as read from quick action', async () => {
+    const changedEvents: UserNotificationsChangedDetail[] = [];
+    const listener = (event: Event) => {
+      changedEvents.push((event as CustomEvent<UserNotificationsChangedDetail>).detail);
+    };
+    window.addEventListener(USER_NOTIFICATIONS_EVENT, listener);
+    render(<RealtimeNotificationToasts userId={5} onOpenTask={vi.fn()} />);
+
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.({
+        id: 77,
+        recipientUserId: 5,
+        type: 'taskAssigned',
+        eventKey: 'task:777:assigned',
+        title: 'РќРѕРІР°СЏ Р·Р°РґР°С‡Р°',
+        bodyPreview: 'РџСЂРѕРІРµСЂСЊС‚Рµ Р·Р°РґР°С‡Сѓ.',
+        tone: 'blue',
+        objectType: 'task',
+        objectId: 777,
+        taskJournalItemId: 777,
+        createdAt: '2026-06-18T10:00:00Z',
+      });
+    });
+
+    const toastOptions = toastMock.showToast.mock.calls[0][0] as {
+      actions: Array<{ label: string; onClick: () => Promise<void> | void }>;
+    };
+    const readAction = toastOptions.actions.find((item) => item.label === 'Прочитано');
+
+    await act(async () => {
+      await readAction?.onClick();
+    });
+
+    expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(77);
+    expect(changedEvents).toContainEqual(expect.objectContaining({
+      notificationId: 77,
+      reason: 'toast-read',
+      unreadDelta: -1,
+    }));
+    window.removeEventListener(USER_NOTIFICATIONS_EVENT, listener);
+  });
+
+  it('snoozes repeated realtime toasts for the same object', async () => {
+    render(<RealtimeNotificationToasts userId={5} onOpenTask={vi.fn()} />);
+
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+    const handler = connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT);
+
+    act(() => {
+      handler?.({
+        id: 78,
+        recipientUserId: 5,
+        type: 'taskAssigned',
+        eventKey: 'task:778:assigned',
+        title: 'РџРµСЂРІРѕРµ СѓРІРµРґРѕРјР»РµРЅРёРµ',
+        bodyPreview: 'РџСЂРѕРІРµСЂСЊС‚Рµ Р·Р°РґР°С‡Сѓ.',
+        tone: 'blue',
+        objectType: 'task',
+        objectId: 778,
+        taskJournalItemId: 778,
+        createdAt: '2026-06-18T10:00:00Z',
+      });
+    });
+
+    const toastOptions = toastMock.showToast.mock.calls[0][0] as {
+      actions: Array<{ label: string; onClick: () => void }>;
+    };
+    const snoozeAction = toastOptions.actions.find((item) => item.label === 'Отложить');
+    act(() => {
+      snoozeAction?.onClick();
+    });
+
+    act(() => {
+      handler?.({
+        id: 79,
+        recipientUserId: 5,
+        type: 'taskChanged',
+        eventKey: 'task:778:changed',
+        title: 'РџРѕРІС‚РѕСЂРЅРѕРµ СѓРІРµРґРѕРјР»РµРЅРёРµ',
+        bodyPreview: 'РџРѕ СЌС‚РѕР№ Р¶Рµ Р·Р°РґР°С‡Рµ.',
+        tone: 'blue',
+        objectType: 'task',
+        objectId: 778,
+        taskJournalItemId: 778,
+        createdAt: '2026-06-18T10:01:00Z',
+      });
+    });
+
+    expect(toastMock.showToast).toHaveBeenCalledTimes(1);
   });
 
   it('shows task change toast and opens the task from action', async () => {

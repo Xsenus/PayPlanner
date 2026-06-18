@@ -13,13 +13,14 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ToastContext, type ToastContextValue, type ToastDomain, type ToastOptions, type ToastVariant } from './toastContextCore';
+import { ToastContext, type ToastAction, type ToastContextValue, type ToastDomain, type ToastOptions, type ToastVariant } from './toastContextCore';
 
 type ToastRecord = Required<Pick<ToastOptions, 'description' | 'durationMs' | 'variant'>> & {
   id: string;
   title: string;
   actionLabel?: string;
   onAction?: () => void;
+  actions?: ToastAction[];
   dedupeKey?: string;
   domain?: ToastDomain;
 };
@@ -171,6 +172,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       durationMs: normalized.durationMs ?? (variant === 'error' ? 5200 : 3400),
       actionLabel: normalized.actionLabel,
       onAction: normalized.onAction,
+      actions: normalized.actions,
       dedupeKey: normalized.dedupeKey,
       domain: normalized.domain,
     };
@@ -268,7 +270,27 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                           <div className="min-w-0 text-sm font-semibold text-slate-900">{toast.title}</div>
                         </div>
                         <div className="mt-1 break-words text-sm text-slate-700">{toast.description}</div>
-                        {toast.actionLabel && toast.onAction ? (
+                        {toast.actions?.length ? (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {toast.actions.map((action) => (
+                              <button
+                                key={action.label}
+                                type="button"
+                                onClick={() => {
+                                  void action.onClick();
+                                  dismissToast(toast.id);
+                                }}
+                                className={
+                                  action.variant === 'secondary'
+                                    ? 'rounded-lg border border-slate-200 bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-white hover:text-slate-900'
+                                    : 'rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800'
+                                }
+                              >
+                                {action.label}
+                              </button>
+                            ))}
+                          </div>
+                        ) : toast.actionLabel && toast.onAction ? (
                           <button
                             type="button"
                             onClick={() => {
