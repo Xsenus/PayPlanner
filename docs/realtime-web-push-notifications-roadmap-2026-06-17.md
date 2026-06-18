@@ -470,12 +470,16 @@
   - Проверено 18.06.2026: `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --filter "FullyQualifiedName~NotificationServiceTests"` и `npm test -- userNotificationDoNotDisturb.test.ts NotificationCenter.test.tsx --runInBand`.
   - Проверено 18.06.2026: полный `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj`, `npm run lint`, `npm run build`, `git diff --check`, JSON/UTF-8 для release/roadmap, локальный запуск backend на временной SQLite-БД с `GET /api/health`.
 
-- [ ] Добавить диагностику каналов.
+- [x] Добавить диагностику каналов.
   - SignalR connected/disconnected.
   - Web Push разрешен/запрещен браузером.
   - Количество активных подписок.
   - Последняя ошибка доставки.
   - DoD: администратор может понять, почему сотрудник не получает уведомления.
+  - Проверено 18.06.2026: панель Push-устройств показывает состояние моментального канала в текущей вкладке, включая подключение, fallback-опрос и последнюю ошибку.
+  - Проверено 18.06.2026: Web Push-диагностика выводит готовность серверных ключей, активные/общие подписки, последнюю успешную доставку и последнюю ошибку; при отсутствии прав глобальная диагностика скрывается без поломки личного статуса устройства.
+  - Проверено 18.06.2026: `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --filter "FullyQualifiedName~PushSubscriptionsControllerTests"` и `npm test -- WebPushDevicePanel.test.tsx RealtimeNotificationToasts.test.tsx --runInBand`.
+  - Проверено 18.06.2026: полный `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj`, `npm run lint`, `npm run build`, `git diff --check`, JSON/UTF-8 для release/roadmap, локальный запуск backend на временной SQLite-БД с `GET /api/health`.
 
 ## Milestone 10. Backend-архитектура единой доставки
 

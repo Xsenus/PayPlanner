@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { RefreshCw, Smartphone } from 'lucide-react';
-import { apiService } from '../../services/api';
+import { Activity, AlertCircle, CheckCircle2, RefreshCw, Smartphone } from 'lucide-react';
+import { apiService, type WebPushDiagnosticsDto } from '../../services/api';
 import {
   getWebPushStatus,
   subscribeCurrentDeviceToWebPush,
@@ -8,6 +8,12 @@ import {
   type WebPushStatus,
 } from '../../services/webPushNotifications';
 import { useToast } from '../../hooks/useToast';
+import {
+  REALTIME_NOTIFICATION_DIAGNOSTICS_EVENT,
+  getRealtimeNotificationDiagnostics,
+  type RealtimeNotificationDiagnostics,
+  type RealtimeNotificationConnectionStatus,
+} from '../../utils/realtimeNotificationDiagnostics';
 
 type WebPushDevicePanelProps = {
   autoLoad?: boolean;
@@ -35,6 +41,25 @@ function formatDateTime(value?: string | null) {
   }
 }
 
+function formatRealtimeStatus(status: RealtimeNotificationConnectionStatus) {
+  switch (status) {
+    case 'connected':
+      return 'подключено';
+    case 'connecting':
+      return 'подключаемся';
+    case 'fallback':
+      return 'fallback-опрос';
+    case 'reconnecting':
+      return 'переподключение';
+    case 'disconnected':
+      return 'отключено';
+    case 'unavailable':
+      return 'недоступно';
+    default:
+      return 'ещё не проверено';
+  }
+}
+
 export function WebPushDevicePanel({
   autoLoad = true,
   showDevices = true,
@@ -44,6 +69,8 @@ export function WebPushDevicePanel({
 }: WebPushDevicePanelProps) {
   const toast = useToast();
   const [webPushStatus, setWebPushStatus] = useState<WebPushStatus | null>(null);
+  const [webPushDiagnostics, setWebPushDiagnostics] = useState<WebPushDiagnosticsDto | null>(null);
+  const [realtimeDiagnostics, setRealtimeDiagnostics] = useState<RealtimeNotificationDiagnostics>(() => getRealtimeNotificationDiagnostics());
   const [webPushLoading, setWebPushLoading] = useState(false);
   const [webPushBusy, setWebPushBusy] = useState(false);
   const [webPushRevokingId, setWebPushRevokingId] = useState<number | null>(null);
@@ -64,14 +91,35 @@ export function WebPushDevicePanel({
   const refreshWebPushStatus = useCallback(async () => {
     try {
       setWebPushLoading(true);
-      setWebPushStatus(await getWebPushStatus());
+      const [nextStatus, diagnosticsResult] = await Promise.allSettled([
+        getWebPushStatus(),
+        apiService.getWebPushDiagnostics(),
+      ]);
+      if (nextStatus.status === 'fulfilled') {
+        setWebPushStatus(nextStatus.value);
+      } else {
+        throw nextStatus.reason;
+      }
+
+      setWebPushDiagnostics(diagnosticsResult.status === 'fulfilled' ? diagnosticsResult.value : null);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Не удалось загрузить статус push-уведомлений.');
       setWebPushStatus(null);
+      setWebPushDiagnostics(null);
     } finally {
       setWebPushLoading(false);
     }
   }, [toast]);
+
+  useEffect(() => {
+    const handleDiagnosticsChanged = (event: Event) => {
+      const detail = (event as CustomEvent<RealtimeNotificationDiagnostics>).detail;
+      setRealtimeDiagnostics(detail ?? getRealtimeNotificationDiagnostics());
+    };
+
+    window.addEventListener(REALTIME_NOTIFICATION_DIAGNOSTICS_EVENT, handleDiagnosticsChanged);
+    return () => window.removeEventListener(REALTIME_NOTIFICATION_DIAGNOSTICS_EVENT, handleDiagnosticsChanged);
+  }, []);
 
   useEffect(() => {
     if (autoLoad) {
@@ -144,6 +192,59 @@ export function WebPushDevicePanel({
               </span>
             ) : null}
           </div>
+          <div className="mt-3 grid gap-2 text-xs md:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-lg border border-white bg-white p-2">
+              <div className="flex items-center gap-1.5 font-medium text-slate-700">
+                {realtimeDiagnostics.status === 'connected' ? (
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                ) : (
+                  <Activity className="h-3.5 w-3.5 text-amber-600" />
+                )}
+                Моментальные
+              </div>
+              <div className="mt-1 text-slate-500">
+                {formatRealtimeStatus(realtimeDiagnostics.status)}
+                {realtimeDiagnostics.fallbackPollingActive ? ' · опрос 30 сек.' : ''}
+              </div>
+            </div>
+            <div className="rounded-lg border border-white bg-white p-2">
+              <div className="flex items-center gap-1.5 font-medium text-slate-700">
+                {webPushDiagnostics?.ready || webPushStatus?.publicKeyReady ? (
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                ) : (
+                  <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
+                )}
+                Web Push сервер
+              </div>
+              <div className="mt-1 text-slate-500">
+                {webPushDiagnostics
+                  ? (webPushDiagnostics.ready ? 'готов' : 'требует настройки')
+                  : (webPushStatus?.publicKeyReady ? 'ключ доступен' : 'диагностика недоступна')}
+              </div>
+            </div>
+            <div className="rounded-lg border border-white bg-white p-2">
+              <div className="font-medium text-slate-700">Подписки</div>
+              <div className="mt-1 text-slate-500">
+                {webPushDiagnostics
+                  ? `${webPushDiagnostics.activeSubscriptionsCount} активных из ${webPushDiagnostics.totalSubscriptionsCount}`
+                  : `${activePushSubscriptionsCount} активных`}
+              </div>
+            </div>
+            <div className="rounded-lg border border-white bg-white p-2">
+              <div className="font-medium text-slate-700">Последняя доставка</div>
+              <div className="mt-1 text-slate-500">
+                {webPushDiagnostics?.lastFailedDeliveryAt
+                  ? `ошибка: ${formatDateTime(webPushDiagnostics.lastFailedDeliveryAt)}`
+                  : formatDateTime(webPushDiagnostics?.lastSuccessfulDeliveryAt)}
+              </div>
+            </div>
+          </div>
+          {realtimeDiagnostics.lastError ? (
+            <p className="mt-2 text-xs text-amber-700">Realtime: {realtimeDiagnostics.lastError}</p>
+          ) : null}
+          {webPushDiagnostics?.lastDeliveryError ? (
+            <p className="mt-1 text-xs text-red-600">Web Push: {webPushDiagnostics.lastDeliveryError}</p>
+          ) : null}
         </div>
         <div className="flex flex-wrap gap-2">
           <button

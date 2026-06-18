@@ -3,6 +3,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { RealtimeNotificationToasts } from './RealtimeNotificationToasts';
 import { REALTIME_USER_NOTIFICATION_CREATED_EVENT, type RealtimeUserNotification } from '../../services/realtimeNotifications';
 import { USER_NOTIFICATIONS_EVENT, type UserNotificationsChangedDetail } from '../../utils/userNotifications';
+import {
+  getRealtimeNotificationDiagnostics,
+  resetRealtimeNotificationDiagnostics,
+} from '../../utils/realtimeNotificationDiagnostics';
 
 const toastMock = vi.hoisted(() => ({
   showToast: vi.fn(),
@@ -80,6 +84,7 @@ describe('RealtimeNotificationToasts', () => {
     connectionState.off.mockReset();
     connectionState.onreconnected.mockReset();
     connectionState.onclose.mockReset();
+    resetRealtimeNotificationDiagnostics();
   });
 
   it('shows task assignment toast and opens the task from action', async () => {
@@ -87,6 +92,10 @@ describe('RealtimeNotificationToasts', () => {
     render(<RealtimeNotificationToasts userId={5} onOpenTask={openTask} />);
 
     await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+    expect(getRealtimeNotificationDiagnostics()).toMatchObject({
+      status: 'connected',
+      fallbackPollingActive: false,
+    });
 
     const handler = connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT);
     expect(handler).toBeTruthy();
@@ -483,6 +492,10 @@ describe('RealtimeNotificationToasts', () => {
     const { unmount } = render(<RealtimeNotificationToasts userId={5} onOpenTask={vi.fn()} />);
 
     await flushRealtimeStart();
+    expect(getRealtimeNotificationDiagnostics()).toMatchObject({
+      status: 'fallback',
+      fallbackPollingActive: true,
+    });
     await waitFor(() =>
       expect(apiMock.getUserNotifications).toHaveBeenCalledWith({
         status: 'unread',

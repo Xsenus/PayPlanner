@@ -12,6 +12,7 @@ import {
 } from '../../services/realtimeNotifications';
 import type { ToastDomain } from '../../contexts/toastContextCore';
 import { emitUserNotificationsChanged } from '../../utils/userNotifications';
+import { updateRealtimeNotificationDiagnostics } from '../../utils/realtimeNotificationDiagnostics';
 
 const FALLBACK_POLL_INTERVAL_MS = 30_000;
 const FALLBACK_PAGE_SIZE = 15;
@@ -322,6 +323,13 @@ export function RealtimeNotificationToasts({
 
   useEffect(() => {
     if (!userId || !canStartNotificationsHubConnection()) {
+      updateRealtimeNotificationDiagnostics({
+        status: 'unavailable',
+        fallbackPollingActive: false,
+        connectionId: null,
+        lastDisconnectedAt: new Date().toISOString(),
+        lastError: 'Пользователь не авторизован для подключения к моментальным уведомлениям.',
+      });
       return undefined;
     }
 
@@ -337,6 +345,12 @@ export function RealtimeNotificationToasts({
     fallbackNoticeShownRef.current = false;
     const connection = createNotificationsHubConnection();
     connectionRef.current = connection;
+    updateRealtimeNotificationDiagnostics({
+      status: 'connecting',
+      fallbackPollingActive: false,
+      connectionId: null,
+      lastError: null,
+    });
 
     const showIncomingNotification = (
       notification: RealtimeUserNotification,
@@ -448,6 +462,12 @@ export function RealtimeNotificationToasts({
       fallbackPollingActive = true;
       fallbackBaselineReadyRef.current = false;
       fallbackKnownNotificationIdsRef.current.clear();
+      updateRealtimeNotificationDiagnostics({
+        status: 'fallback',
+        fallbackPollingActive: true,
+        connectionId: null,
+        lastDisconnectedAt: new Date().toISOString(),
+      });
       showFallbackNotice();
       void pollFallbackNotifications();
       fallbackTimer = window.setInterval(() => {
@@ -462,6 +482,9 @@ export function RealtimeNotificationToasts({
         fallbackTimer = null;
       }
       fallbackPollInFlight = false;
+      updateRealtimeNotificationDiagnostics({
+        fallbackPollingActive: false,
+      });
     };
 
     connection.on(REALTIME_USER_NOTIFICATION_CREATED_EVENT, (notification: RealtimeUserNotification) => {
@@ -475,14 +498,35 @@ export function RealtimeNotificationToasts({
 
       try {
         await connection.start();
+        updateRealtimeNotificationDiagnostics({
+          status: 'connected',
+          fallbackPollingActive: false,
+          connectionId: (connection as { connectionId?: string | null }).connectionId ?? null,
+          lastConnectedAt: new Date().toISOString(),
+          lastError: null,
+        });
         stopFallbackPolling();
       } catch (error) {
         if (!disposed) {
           if (isExpectedRealtimeStartupError(error)) {
             console.debug('Realtime notifications are unavailable; retrying in background.', error);
+            updateRealtimeNotificationDiagnostics({
+              status: 'fallback',
+              fallbackPollingActive: true,
+              connectionId: null,
+              error,
+              lastDisconnectedAt: new Date().toISOString(),
+            });
             startFallbackPolling();
           } else {
             console.error('Realtime notifications failed to start.', error);
+            updateRealtimeNotificationDiagnostics({
+              status: 'disconnected',
+              fallbackPollingActive: false,
+              connectionId: null,
+              error,
+              lastDisconnectedAt: new Date().toISOString(),
+            });
           }
           retryTimer = window.setTimeout(start, 5000);
         }
@@ -490,6 +534,13 @@ export function RealtimeNotificationToasts({
     };
 
     connection.onreconnected(() => {
+      updateRealtimeNotificationDiagnostics({
+        status: 'connected',
+        fallbackPollingActive: false,
+        connectionId: (connection as { connectionId?: string | null }).connectionId ?? null,
+        lastConnectedAt: new Date().toISOString(),
+        lastError: null,
+      });
       stopFallbackPolling();
       emitUserNotificationsChanged({ source: 'realtime', reason: 'reconnected' });
     });
@@ -503,6 +554,13 @@ export function RealtimeNotificationToasts({
         console.error('Realtime notifications connection closed.', error);
       }
 
+      updateRealtimeNotificationDiagnostics({
+        status: 'reconnecting',
+        fallbackPollingActive: true,
+        connectionId: null,
+        error,
+        lastDisconnectedAt: new Date().toISOString(),
+      });
       startFallbackPolling();
       retryTimer = window.setTimeout(start, 5000);
     });
@@ -522,6 +580,12 @@ export function RealtimeNotificationToasts({
       if (connectionRef.current === connection) {
         connectionRef.current = null;
       }
+      updateRealtimeNotificationDiagnostics({
+        status: 'disconnected',
+        fallbackPollingActive: false,
+        connectionId: null,
+        lastDisconnectedAt: new Date().toISOString(),
+      });
     };
   }, [toast, userId]);
 

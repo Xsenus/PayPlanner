@@ -10,6 +10,7 @@ const webPushMock = vi.hoisted(() => ({
 }));
 
 const apiMock = vi.hoisted(() => ({
+  getWebPushDiagnostics: vi.fn(),
   revokeUserPushSubscription: vi.fn(),
 }));
 
@@ -52,6 +53,22 @@ describe('WebPushDevicePanel', () => {
     webPushMock.getWebPushStatus.mockResolvedValue(createStatus());
     webPushMock.subscribeCurrentDeviceToWebPush.mockResolvedValue({});
     webPushMock.unsubscribeCurrentDeviceFromWebPush.mockResolvedValue(undefined);
+    apiMock.getWebPushDiagnostics.mockReset();
+    apiMock.getWebPushDiagnostics.mockResolvedValue({
+      enabled: true,
+      ready: true,
+      publicKeyConfigured: true,
+      privateKeyConfigured: true,
+      subjectConfigured: true,
+      totalSubscriptionsCount: 2,
+      activeSubscriptionsCount: 1,
+      revokedSubscriptionsCount: 1,
+      failedSubscriptionsCount: 1,
+      usersWithActiveSubscriptionsCount: 1,
+      lastSuccessfulDeliveryAt: '2026-06-18T08:00:00Z',
+      lastFailedDeliveryAt: '2026-06-18T08:10:00Z',
+      lastDeliveryError: 'Network error',
+    });
     apiMock.revokeUserPushSubscription.mockResolvedValue(undefined);
   });
 
@@ -72,6 +89,23 @@ describe('WebPushDevicePanel', () => {
     await waitFor(() => expect(webPushMock.subscribeCurrentDeviceToWebPush).toHaveBeenCalledTimes(1));
     expect(webPushMock.getWebPushStatus).toHaveBeenCalledTimes(2);
     expect(toastMock.success).toHaveBeenCalledWith('Push-уведомления включены на этом устройстве.');
+  });
+
+  it('shows realtime and web push diagnostics without blocking device status', async () => {
+    render(<WebPushDevicePanel />);
+
+    expect(await screen.findByText('Web Push: Network error')).toBeTruthy();
+    expect(screen.getByText('1 активных из 2')).toBeTruthy();
+    expect(screen.getByText(/ещё не проверено/)).toBeTruthy();
+  });
+
+  it('keeps device status visible when admin diagnostics are forbidden', async () => {
+    apiMock.getWebPushDiagnostics.mockRejectedValueOnce(new Error('HTTP 403 Forbidden'));
+
+    render(<WebPushDevicePanel />);
+
+    expect(await screen.findByText('Это устройство пока не получает push-уведомления.')).toBeTruthy();
+    expect(screen.getByText('ключ доступен')).toBeTruthy();
   });
 
   it('disables current device when it is already subscribed', async () => {
