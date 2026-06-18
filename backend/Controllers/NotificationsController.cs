@@ -134,15 +134,21 @@ public class NotificationsController : ControllerBase
         return Ok(new NotificationRolePreferencesDto
         {
             Roles = roles
-                .Select(role => new NotificationRolePreferenceDto
+                .Select(role =>
                 {
-                    RoleId = role.Id,
-                    RoleName = role.Name,
-                    IsSystemRole = role.IsSystemRole,
-                    Preferences = MapPreferences(
-                        preferencesByRole.TryGetValue(role.Id, out var preferences)
-                            ? preferences
-                            : UserNotificationPreferenceSettings.Empty)
+                    var defaultProfile = RoleNotificationPreferenceDefaults.Resolve(role.Name, role.IsSystemRole);
+                    var hasCustomPreferences = preferencesByRole.TryGetValue(role.Id, out var preferences);
+                    return new NotificationRolePreferenceDto
+                    {
+                        RoleId = role.Id,
+                        RoleName = role.Name,
+                        IsSystemRole = role.IsSystemRole,
+                        HasCustomPreferences = hasCustomPreferences,
+                        DefaultProfileKey = defaultProfile.Key,
+                        DefaultProfileLabel = defaultProfile.Label,
+                        DefaultProfileDescription = defaultProfile.Description,
+                        Preferences = MapPreferences(hasCustomPreferences ? preferences! : defaultProfile.Preferences)
+                    };
                 })
                 .ToList()
         });
@@ -175,8 +181,12 @@ public class NotificationsController : ControllerBase
             .FirstOrDefaultAsync(item => item.Key == RoleNotificationPreferenceSettings.SettingKey, ct);
         var preferencesByRole = RoleNotificationPreferenceSettings.Parse(setting?.Value)
             .ToDictionary(item => item.Key, item => item.Value);
-        var nextPreferences = NormalizePreferences(request);
-        if (nextPreferences.DisabledTypes.Count == 0 && nextPreferences.DisabledChannels.Count == 0)
+        var defaultProfile = RoleNotificationPreferenceDefaults.Resolve(role.Name, role.IsSystemRole);
+        var hasCustomPreferences = !request.UseDefault;
+        var nextPreferences = request.UseDefault
+            ? defaultProfile.Preferences
+            : NormalizePreferences(request);
+        if (request.UseDefault)
         {
             preferencesByRole.Remove(role.Id);
         }
@@ -210,6 +220,10 @@ public class NotificationsController : ControllerBase
             RoleId = role.Id,
             RoleName = role.Name,
             IsSystemRole = role.IsSystemRole,
+            HasCustomPreferences = hasCustomPreferences,
+            DefaultProfileKey = defaultProfile.Key,
+            DefaultProfileLabel = defaultProfile.Label,
+            DefaultProfileDescription = defaultProfile.Description,
             Preferences = MapPreferences(nextPreferences)
         });
     }

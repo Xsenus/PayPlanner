@@ -151,6 +151,10 @@ public class NotificationRolePreferenceDto
     public int RoleId { get; set; }
     public string RoleName { get; set; } = string.Empty;
     public bool IsSystemRole { get; set; }
+    public bool HasCustomPreferences { get; set; }
+    public string DefaultProfileKey { get; set; } = string.Empty;
+    public string DefaultProfileLabel { get; set; } = string.Empty;
+    public string DefaultProfileDescription { get; set; } = string.Empty;
     public UserNotificationPreferenceDto Preferences { get; set; } = new();
 }
 

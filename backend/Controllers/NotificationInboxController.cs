@@ -358,12 +358,16 @@ public class NotificationInboxController : ControllerBase
             return UserNotificationPreferenceSettings.Parse(userValue);
         }
 
-        var roleId = await _context.Users
+        var role = await _context.Users
             .AsNoTracking()
             .Where(user => user.Id == userId)
-            .Select(user => user.RoleId)
+            .Select(user => new
+            {
+                user.RoleId,
+                RoleName = user.Role != null ? user.Role.Name : string.Empty
+            })
             .FirstOrDefaultAsync(ct);
-        if (roleId <= 0)
+        if (role is null || role.RoleId <= 0)
         {
             return UserNotificationPreferenceSettings.Empty;
         }
@@ -374,8 +378,8 @@ public class NotificationInboxController : ControllerBase
             .Select(item => item.Value)
             .FirstOrDefaultAsync(ct);
 
-        return RoleNotificationPreferenceSettings.ParseForRole(roleValue, roleId)
-               ?? UserNotificationPreferenceSettings.Empty;
+        return RoleNotificationPreferenceSettings.ParseForRole(roleValue, role.RoleId)
+               ?? RoleNotificationPreferenceDefaults.Resolve(role.RoleName).Preferences;
     }
 
     private static IQueryable<UserNotification> ApplyStatusFilter(

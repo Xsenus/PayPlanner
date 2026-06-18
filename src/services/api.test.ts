@@ -1036,6 +1036,10 @@ describe('apiService auth handling', () => {
           roleId: 2,
           roleName: 'lawyer',
           isSystemRole: false,
+          hasCustomPreferences: true,
+          defaultProfileKey: 'lawyer',
+          defaultProfileLabel: 'Юрист',
+          defaultProfileDescription: 'Стандартный профиль юриста',
           preferences: { disabledTypes: ['taskComment'], disabledChannels: { taskAssigned: ['email'] } },
         }
         : {
@@ -1044,6 +1048,10 @@ describe('apiService auth handling', () => {
               roleId: 2,
               roleName: 'lawyer',
               isSystemRole: false,
+              hasCustomPreferences: false,
+              defaultProfileKey: 'lawyer',
+              defaultProfileLabel: 'Юрист',
+              defaultProfileDescription: 'Стандартный профиль юриста',
               preferences: { disabledTypes: [], disabledChannels: {} },
             },
           ],
@@ -1060,6 +1068,8 @@ describe('apiService auth handling', () => {
     });
 
     expect(loaded.roles[0].roleName).toBe('lawyer');
+    expect(loaded.roles[0].hasCustomPreferences).toBe(false);
+    expect(loaded.roles[0].defaultProfileLabel).toBe('Юрист');
     expect(updated.preferences.disabledTypes).toEqual(['taskComment']);
     const [getUrl] = fetchMock.mock.calls[0];
     const [putUrl, putInit] = fetchMock.mock.calls[1];
@@ -1069,6 +1079,35 @@ describe('apiService auth handling', () => {
     expect(putInit?.body).toBe(JSON.stringify({
       disabledTypes: ['taskComment'],
       disabledChannels: { taskAssigned: ['email'] },
+    }));
+  });
+
+  it('sends default role preference reset flag', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      roleId: 2,
+      roleName: 'lawyer',
+      isSystemRole: false,
+      hasCustomPreferences: false,
+      defaultProfileKey: 'lawyer',
+      defaultProfileLabel: 'Юрист',
+      defaultProfileDescription: 'Стандартный профиль юриста',
+      preferences: { disabledTypes: [], disabledChannels: {} },
+    }), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiService.updateNotificationRolePreferences(2, {
+      disabledTypes: [],
+      disabledChannels: {},
+      useDefault: true,
+    });
+
+    const [, putInit] = fetchMock.mock.calls[0];
+    expect(putInit?.body).toBe(JSON.stringify({
+      disabledTypes: [],
+      disabledChannels: {},
+      useDefault: true,
     }));
   });
 

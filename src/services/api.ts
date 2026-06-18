@@ -1087,12 +1087,17 @@ export interface UserNotificationBulkActionResultDto {
 export interface UserNotificationPreferenceDto {
   disabledTypes: string[];
   disabledChannels: Record<string, string[]>;
+  useDefault?: boolean;
 }
 
 export interface NotificationRolePreferenceDto {
   roleId: number;
   roleName: string;
   isSystemRole: boolean;
+  hasCustomPreferences: boolean;
+  defaultProfileKey: string;
+  defaultProfileLabel: string;
+  defaultProfileDescription: string;
   preferences: UserNotificationPreferenceDto;
 }
 

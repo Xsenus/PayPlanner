@@ -685,6 +685,83 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyTaskAssignedAsync_UsesBuiltInLawyerRoleDefaultsWhenNoRoleOverrideExists()
+    {
+        await using var db = await CreateContextAsync();
+        await SeedEmailSettingsAsync(db);
+        var author = await CreateUserAsync(db, "task-author-lawyer-defaults@example.com");
+        var lawyerRole = new Role
+        {
+            Name = "Юрист",
+            Description = "Юрист",
+            CreatedAt = DateTime.UtcNow
+        };
+        db.Roles.Add(lawyerRole);
+        await db.SaveChangesAsync();
+        var assignee = new User
+        {
+            Email = "task-assignee-lawyer-defaults@example.com",
+            FullName = "Lawyer Defaults Assignee",
+            PasswordHash = "hash",
+            RoleId = lawyerRole.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(assignee);
+        await db.SaveChangesAsync();
+
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Client case",
+            Title = "Prepare lawyer defaults test",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\",\"email\"]",
+            Status = "new"
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var emailService = new RecordingEmailService();
+        var service = CreateService(db, emailService, new RecordingTelegramService());
+
+        var deliveries = await service.NotifyTaskAssignedAsync(task, author.FullName, author.Id);
+
+        Assert.Empty(deliveries);
+        Assert.Empty(emailService.Messages);
+        Assert.Equal(UserNotificationTypes.TaskAssigned, (await db.UserNotifications.SingleAsync()).Type);
+    }
+
+    [Fact]
+    public void RoleNotificationPreferenceDefaults_ReturnExpectedProfiles()
+    {
+        var secretary = RoleNotificationPreferenceDefaults.Resolve("Секретарь");
+        var finance = RoleNotificationPreferenceDefaults.Resolve("Бухгалтерия");
+        var manager = RoleNotificationPreferenceDefaults.Resolve("Руководитель практики");
+
+        Assert.Equal("secretary", secretary.Key);
+        Assert.Equal("finance", finance.Key);
+        Assert.Equal("manager", manager.Key);
+        Assert.False(UserNotificationPreferenceSettings.IsChannelEnabled(
+            secretary.Preferences,
+            UserNotificationTypes.PaymentAssigned,
+            NotificationChannels.Email));
+        Assert.True(UserNotificationPreferenceSettings.IsChannelEnabled(
+            finance.Preferences,
+            UserNotificationTypes.PaymentAssigned,
+            NotificationChannels.Email));
+        Assert.True(UserNotificationPreferenceSettings.IsChannelEnabled(
+            manager.Preferences,
+            UserNotificationTypes.CourtHearing,
+            NotificationChannels.Telegram));
+    }
+
+    [Fact]
     public async Task NotifyTaskAssignedAsync_CreatesInAppNotificationForAssignee()
     {
         await using var db = await CreateContextAsync();

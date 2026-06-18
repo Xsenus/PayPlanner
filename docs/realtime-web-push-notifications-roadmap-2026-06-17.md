@@ -448,13 +448,17 @@
   - Проверено 18.06.2026: `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --filter "FullyQualifiedName~NotificationServiceTests|FullyQualifiedName~NotificationInboxControllerTests"` и `npm test -- --run src/utils/userNotificationPreferences.test.ts src/components/Notifications/RealtimeNotificationToasts.test.tsx src/components/Notifications/NotificationCenter.test.tsx`.
   - Проверено 18.06.2026: полный `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj`, `npm run lint`, `npm run build`, `git diff --check`, JSON/UTF-8 для `backend/AppReleases/releases.json`, локальный запуск backend на временной SQLite-БД с `GET /api/health`.
 
-- [ ] Добавить ролевые defaults.
+- [x] Добавить ролевые defaults.
   - Секретарь.
   - Юрист.
   - Руководитель.
   - Бухгалтерия/финансы.
   - Администратор.
   - DoD: новым пользователям не нужно настраивать все вручную.
+  - Проверено 18.06.2026: добавлены встроенные профили уведомлений для администратора, секретаря, юриста, руководителя, бухгалтерии/финансов и обычного сотрудника; профиль применяется, если у пользователя нет личных настроек и у роли нет ручного правила.
+  - Проверено 18.06.2026: администратор видит в настройках, используется стандартный профиль или ручное правило, может сохранить ручное переопределение или вернуть роль к стандартному профилю.
+  - Проверено 18.06.2026: `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --filter "FullyQualifiedName~NotificationServiceTests"` и `npm test -- --run src/services/api.test.ts`.
+  - Проверено 18.06.2026: полный `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj`, `npm run lint`, `npm run build`, `git diff --check`, JSON/UTF-8 для release/roadmap, локальный запуск backend на временной SQLite-БД с `GET /api/health`.
 
 - [ ] Добавить режим "не беспокоить".
   - Рабочие часы.

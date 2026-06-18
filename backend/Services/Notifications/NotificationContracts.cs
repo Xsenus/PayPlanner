@@ -405,6 +405,114 @@ public sealed record UserNotificationPreferenceSnapshot(
     IReadOnlyList<string> DisabledTypes,
     IReadOnlyDictionary<string, IReadOnlyList<string>> DisabledChannels);
 
+public sealed record RoleNotificationPreferenceDefaultProfile(
+    string Key,
+    string Label,
+    string Description,
+    UserNotificationPreferenceSnapshot Preferences);
+
+public static class RoleNotificationPreferenceDefaults
+{
+    private static readonly IReadOnlyList<string> ExternalChannels = [NotificationChannels.Email, NotificationChannels.Telegram];
+
+    public static RoleNotificationPreferenceDefaultProfile Resolve(string? roleName, bool isSystemRole = false)
+    {
+        var normalized = NormalizeRoleName(roleName);
+        if (isSystemRole || normalized == "admin" || normalized.Contains("админист", StringComparison.Ordinal))
+        {
+            return BuildProfile("admin", "Администратор", "Все уведомления включены, внешние каналы остаются доступны для контроля системы.", [UserNotificationDomains.System]);
+        }
+
+        if (ContainsAny(normalized, "секрет"))
+        {
+            return BuildProfile("secretary", "Секретарь", "Сразу видны задачи, календарь, заметки, дела и судебные изменения; внешние каналы оставлены для срочных рабочих событий.", [
+                UserNotificationDomains.Task,
+                UserNotificationDomains.Calendar,
+                UserNotificationDomains.Note,
+                UserNotificationDomains.Case,
+                UserNotificationDomains.Court
+            ]);
+        }
+
+        if (ContainsAny(normalized, "юрист", "адвокат"))
+        {
+            return BuildProfile("lawyer", "Юрист", "Приоритет у задач, календаря, дел, судов и заметок; финансовые события остаются в CRM без лишних внешних сообщений.", [
+                UserNotificationDomains.Task,
+                UserNotificationDomains.Calendar,
+                UserNotificationDomains.Note,
+                UserNotificationDomains.Case,
+                UserNotificationDomains.Court
+            ]);
+        }
+
+        if (ContainsAny(normalized, "руковод", "директор", "управ"))
+        {
+            return BuildProfile("manager", "Руководитель", "Срочные задачи, согласования, финансы, дела, суды и системные предупреждения доступны во всех рабочих каналах.", [
+                UserNotificationDomains.Task,
+                UserNotificationDomains.Payment,
+                UserNotificationDomains.Invoice,
+                UserNotificationDomains.Act,
+                UserNotificationDomains.Contract,
+                UserNotificationDomains.Case,
+                UserNotificationDomains.Court,
+                UserNotificationDomains.System
+            ]);
+        }
+
+        if (ContainsAny(normalized, "бухгалтер", "финанс", "касс", "банк"))
+        {
+            return BuildProfile("finance", "Бухгалтерия/финансы", "Финансовые уведомления остаются срочными, а непрофильные события не шумят во внешних каналах.", [
+                UserNotificationDomains.Payment,
+                UserNotificationDomains.Invoice,
+                UserNotificationDomains.Act,
+                UserNotificationDomains.Contract,
+                UserNotificationDomains.Task
+            ]);
+        }
+
+        return BuildProfile("employee", "Сотрудник", "Срочные задачи, календарь и заметки видны сразу; обычные изменения не перегружают email и Telegram.", [
+            UserNotificationDomains.Task,
+            UserNotificationDomains.Calendar,
+            UserNotificationDomains.Note
+        ]);
+    }
+
+    private static RoleNotificationPreferenceDefaultProfile BuildProfile(
+        string key,
+        string label,
+        string description,
+        IReadOnlyCollection<string> externalDomains)
+    {
+        var disabledChannels = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var type in UserNotificationTypes.All)
+        {
+            if (ShouldDisableExternalChannels(type, externalDomains))
+            {
+                disabledChannels[type.Key] = ExternalChannels;
+            }
+        }
+
+        return new RoleNotificationPreferenceDefaultProfile(
+            key,
+            label,
+            description,
+            new UserNotificationPreferenceSnapshot([], disabledChannels));
+    }
+
+    private static bool ShouldDisableExternalChannels(
+        UserNotificationTypeDefinition type,
+        IReadOnlyCollection<string> externalDomains)
+        => type.Priority != "high"
+           || type.Digestible
+           || !externalDomains.Contains(type.Domain, StringComparer.OrdinalIgnoreCase);
+
+    private static string NormalizeRoleName(string? roleName)
+        => (roleName ?? string.Empty).Trim().ToLowerInvariant();
+
+    private static bool ContainsAny(string value, params string[] fragments)
+        => fragments.Any(fragment => value.Contains(fragment, StringComparison.Ordinal));
+}
+
 public static class RoleNotificationPreferenceSettings
 {
     public const string SettingKey = "notifications.roleTypePreferences.v1";

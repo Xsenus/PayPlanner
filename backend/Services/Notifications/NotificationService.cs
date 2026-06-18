@@ -3019,12 +3019,16 @@ public sealed class NotificationService : INotificationService
             return UserNotificationPreferenceSettings.Parse(userSetting);
         }
 
-        var roleId = await _context.Users
+        var role = await _context.Users
             .AsNoTracking()
             .Where(user => user.Id == recipientUserId)
-            .Select(user => user.RoleId)
+            .Select(user => new
+            {
+                user.RoleId,
+                RoleName = user.Role != null ? user.Role.Name : string.Empty
+            })
             .FirstOrDefaultAsync(cancellationToken);
-        if (roleId <= 0)
+        if (role is null || role.RoleId <= 0)
         {
             return UserNotificationPreferenceSettings.Empty;
         }
@@ -3035,8 +3039,8 @@ public sealed class NotificationService : INotificationService
             .Select(item => item.Value)
             .FirstOrDefaultAsync(cancellationToken);
 
-        return RoleNotificationPreferenceSettings.ParseForRole(roleSetting, roleId)
-               ?? UserNotificationPreferenceSettings.Empty;
+        return RoleNotificationPreferenceSettings.ParseForRole(roleSetting, role.RoleId)
+               ?? RoleNotificationPreferenceDefaults.Resolve(role.RoleName).Preferences;
     }
 
     private async Task<IReadOnlyList<NotificationSenderTarget>> ResolveSenderTargetsAsync(

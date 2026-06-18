@@ -49,6 +49,7 @@ public class UpdateNotificationRolePreferencesRequest
 {
     public List<string>? DisabledTypes { get; set; }
     public Dictionary<string, List<string>>? DisabledChannels { get; set; }
+    public bool UseDefault { get; set; }
 }
 
 public class UpsertNotificationSenderRequest

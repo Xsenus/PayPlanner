@@ -761,8 +761,34 @@ public class CasesV2Controller : ControllerBase
                 && item.Key == UserNotificationPreferenceSettings.SettingKey)
             .Select(item => item.Value)
             .FirstOrDefaultAsync(ct);
+        if (setting is not null)
+        {
+            return UserNotificationPreferenceSettings.IsTypeEnabled(setting, type);
+        }
 
-        return UserNotificationPreferenceSettings.IsTypeEnabled(setting, type);
+        var role = await _db.Users
+            .AsNoTracking()
+            .Where(user => user.Id == recipientUserId)
+            .Select(user => new
+            {
+                user.RoleId,
+                RoleName = user.Role != null ? user.Role.Name : string.Empty
+            })
+            .FirstOrDefaultAsync(ct);
+        if (role is null || role.RoleId <= 0)
+        {
+            return true;
+        }
+
+        var roleSetting = await _db.SystemSettings
+            .AsNoTracking()
+            .Where(item => item.Key == RoleNotificationPreferenceSettings.SettingKey)
+            .Select(item => item.Value)
+            .FirstOrDefaultAsync(ct);
+        var preferences = RoleNotificationPreferenceSettings.ParseForRole(roleSetting, role.RoleId)
+                          ?? RoleNotificationPreferenceDefaults.Resolve(role.RoleName).Preferences;
+
+        return UserNotificationPreferenceSettings.IsTypeEnabled(preferences, type);
     }
 
     private static void AddIfPositive(ISet<int> values, int? value)

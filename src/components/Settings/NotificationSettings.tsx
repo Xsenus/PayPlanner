@@ -429,6 +429,7 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
       item.roleId === selectedRolePreference.roleId
         ? {
           ...item,
+          hasCustomPreferences: true,
           preferences: toApiNotificationPreference(nextPreferences),
         }
         : item
@@ -448,6 +449,31 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
       toast.success('Ролевые настройки уведомлений сохранены.', 'Уведомления');
     } catch (error) {
       const text = extractDisplayErrorMessage(error, 'Не удалось сохранить ролевые настройки уведомлений');
+      toast.error(text, 'Уведомления');
+    } finally {
+      setRolePreferencesSaving(false);
+    }
+  };
+
+  const resetRolePreferencesToDefault = async () => {
+    if (!selectedRolePreference || !canEdit) return;
+
+    setRolePreferencesSaving(true);
+    try {
+      const updated = await apiService.updateNotificationRolePreferences(
+        selectedRolePreference.roleId,
+        {
+          disabledTypes: [],
+          disabledChannels: {},
+          useDefault: true,
+        },
+      );
+      setRolePreferences((current) => current.map((item) => (
+        item.roleId === updated.roleId ? updated : item
+      )));
+      toast.success('Для роли включён стандартный профиль уведомлений.', 'Уведомления');
+    } catch (error) {
+      const text = extractDisplayErrorMessage(error, 'Не удалось вернуть стандартный профиль уведомлений');
       toast.error(text, 'Уведомления');
     } finally {
       setRolePreferencesSaving(false);
@@ -1025,16 +1051,39 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
                 <p className="mt-1 max-w-3xl text-sm text-gray-500">
                   Базовые настройки типов и каналов для пользователей выбранной роли. Личные настройки пользователя в центре уведомлений имеют приоритет над правилом роли.
                 </p>
+                {selectedRolePreference ? (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                    <span className={`rounded-full border px-2 py-1 font-semibold ${
+                      selectedRolePreference.hasCustomPreferences
+                        ? 'border-blue-200 bg-blue-50 text-blue-700'
+                        : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                    }`}>
+                      {selectedRolePreference.hasCustomPreferences ? 'Ручное правило' : `Стандартный профиль: ${selectedRolePreference.defaultProfileLabel}`}
+                    </span>
+                    <span className="text-gray-500">{selectedRolePreference.defaultProfileDescription}</span>
+                  </div>
+                ) : null}
               </div>
-              <button
-                type="button"
-                onClick={() => void saveRolePreferences()}
-                disabled={!canEdit || rolePreferencesLoading || rolePreferencesSaving || !selectedRolePreference}
-                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
-              >
-                <Save className={`h-4 w-4 ${rolePreferencesSaving ? 'animate-pulse' : ''}`} />
-                Сохранить правила
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void resetRolePreferencesToDefault()}
+                  disabled={!canEdit || rolePreferencesLoading || rolePreferencesSaving || !selectedRolePreference || !selectedRolePreference.hasCustomPreferences}
+                  className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                >
+                  <RefreshCw className={`h-4 w-4 ${rolePreferencesSaving ? 'animate-spin' : ''}`} />
+                  Стандартный профиль
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void saveRolePreferences()}
+                  disabled={!canEdit || rolePreferencesLoading || rolePreferencesSaving || !selectedRolePreference}
+                  className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+                >
+                  <Save className={`h-4 w-4 ${rolePreferencesSaving ? 'animate-pulse' : ''}`} />
+                  Сохранить правила
+                </button>
+              </div>
             </div>
 
             {rolePreferencesLoading ? (
@@ -1063,6 +1112,9 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
                       <span className="block text-sm font-semibold">{role.roleName}</span>
                       <span className="mt-1 block text-xs text-gray-500">
                         {role.isSystemRole ? 'Системная роль' : 'Настраиваемая роль'}
+                      </span>
+                      <span className="mt-2 block text-xs font-medium text-gray-500">
+                        {role.hasCustomPreferences ? 'Ручное правило' : role.defaultProfileLabel}
                       </span>
                     </button>
                   ))}
