@@ -566,6 +566,39 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public void UserNotificationDoNotDisturbSettings_MutesOnlyNoisyChannelsAndKeepsCritical()
+    {
+        var settings = UserNotificationDoNotDisturbSettings.Parse(JsonSerializer.Serialize(new
+        {
+            enabled = true,
+            workStart = "09:00",
+            workEnd = "18:00",
+            muteWeekends = true,
+            allowCritical = true
+        }));
+        var saturdayNoon = new DateTime(2026, 6, 20, 12, 0, 0, DateTimeKind.Utc);
+
+        Assert.False(UserNotificationDoNotDisturbSettings.IsChannelMuted(
+            settings,
+            UserNotificationTypes.Find(UserNotificationTypes.TaskAssigned),
+            NotificationChannels.InApp,
+            saturdayNoon,
+            TimeZoneInfo.Utc));
+        Assert.True(UserNotificationDoNotDisturbSettings.IsChannelMuted(
+            settings,
+            UserNotificationTypes.Find(UserNotificationTypes.TaskAssigned),
+            NotificationChannels.Toast,
+            saturdayNoon,
+            TimeZoneInfo.Utc));
+        Assert.False(UserNotificationDoNotDisturbSettings.IsChannelMuted(
+            settings,
+            UserNotificationTypes.Find(UserNotificationTypes.TaskReminder),
+            NotificationChannels.WebPush,
+            saturdayNoon,
+            TimeZoneInfo.Utc));
+    }
+
+    [Fact]
     public async Task NotifyTaskAssignedAsync_RespectsPerTypeChannelPreferences()
     {
         await using var db = await CreateContextAsync();
@@ -1033,6 +1066,71 @@ public class NotificationServiceTests
         Assert.Equal(notification.Id, pushed.Id);
         Assert.Equal(assignee.Id, pushed.RecipientUserId);
         Assert.Equal(UserNotificationTypes.TaskAssigned, pushed.Type);
+    }
+
+    [Fact]
+    public async Task NotifyTaskAssignedAsync_SuppressesNoisyChannelsDuringDoNotDisturb()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db, "task-author-dnd@example.com");
+        var assignee = new User
+        {
+            Email = "new-assignee-dnd@example.com",
+            FullName = "DND Assignee",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(assignee);
+        await db.SaveChangesAsync();
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = assignee.Id,
+            Key = UserNotificationDoNotDisturbSettings.SettingKey,
+            Value = JsonSerializer.Serialize(new
+            {
+                enabled = true,
+                vacationUntil = "2099-01-01",
+                allowCritical = true
+            }),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Client case",
+            Title = "Prepare quiet response",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "new"
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            realtime,
+            webPush);
+
+        await service.NotifyTaskAssignedAsync(task, author.FullName, author.Id);
+
+        Assert.Equal(UserNotificationTypes.TaskAssigned, (await db.UserNotifications.SingleAsync()).Type);
+        Assert.Single(realtime.Notifications);
+        Assert.False(Assert.Single(realtime.ToastEnabledValues));
+        Assert.Empty(webPush.Notifications);
     }
 
     [Fact]

@@ -460,11 +460,15 @@
   - Проверено 18.06.2026: `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --filter "FullyQualifiedName~NotificationServiceTests"` и `npm test -- --run src/services/api.test.ts`.
   - Проверено 18.06.2026: полный `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj`, `npm run lint`, `npm run build`, `git diff --check`, JSON/UTF-8 для release/roadmap, локальный запуск backend на временной SQLite-БД с `GET /api/health`.
 
-- [ ] Добавить режим "не беспокоить".
+- [x] Добавить режим "не беспокоить".
   - Рабочие часы.
   - Отпуск/выходной.
   - Исключения для критичных событий.
   - DoD: система не мешает, но критичное не теряется.
+  - Проверено 18.06.2026: добавлен личный режим "Не беспокоить" в центре уведомлений с рабочими часами, выходными, отпуском и исключением для срочных событий.
+  - Проверено 18.06.2026: центр уведомлений продолжает создавать события, а toast, Web Push, Email и Telegram подавляются вне рабочего времени/в отпуске для обычных событий.
+  - Проверено 18.06.2026: `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --filter "FullyQualifiedName~NotificationServiceTests"` и `npm test -- userNotificationDoNotDisturb.test.ts NotificationCenter.test.tsx --runInBand`.
+  - Проверено 18.06.2026: полный `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj`, `npm run lint`, `npm run build`, `git diff --check`, JSON/UTF-8 для release/roadmap, локальный запуск backend на временной SQLite-БД с `GET /api/health`.
 
 - [ ] Добавить диагностику каналов.
   - SignalR connected/disconnected.

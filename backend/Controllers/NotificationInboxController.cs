@@ -82,6 +82,10 @@ public class NotificationInboxController : ControllerBase
             .Where(item => item.RecipientUserId == userId.Value && item.DeletedAt == null);
         var visibility = await ResolveNotificationTargetVisibilityAsync(ct);
         var preferences = await LoadNotificationPreferencesAsync(userId.Value, ct);
+        var quietHours = await LoadNotificationDoNotDisturbAsync(userId.Value, ct);
+        var timeZone = quietHours.Enabled
+            ? await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_context, userId.Value, ct)
+            : TimeZoneInfo.Utc;
 
         query = ApplyStatusFilter(query, status);
         query = ApplyDisabledTypeFilter(query, preferences.DisabledTypes);
@@ -103,7 +107,7 @@ public class NotificationInboxController : ControllerBase
 
         return Ok(new PagedResponse<UserNotificationDto>
         {
-            Items = items.Select(item => Map(item, preferences)).ToList(),
+            Items = items.Select(item => Map(item, preferences, quietHours, timeZone)).ToList(),
             Total = total,
             Page = page,
             PageSize = pageSize
@@ -380,6 +384,19 @@ public class NotificationInboxController : ControllerBase
 
         return RoleNotificationPreferenceSettings.ParseForRole(roleValue, role.RoleId)
                ?? RoleNotificationPreferenceDefaults.Resolve(role.RoleName).Preferences;
+    }
+
+    private async Task<UserNotificationDoNotDisturbSnapshot> LoadNotificationDoNotDisturbAsync(int userId, CancellationToken ct)
+    {
+        var userValue = await _context.UserSettings
+            .AsNoTracking()
+            .Where(item =>
+                item.UserId == userId
+                && item.Key == UserNotificationDoNotDisturbSettings.SettingKey)
+            .Select(item => item.Value)
+            .FirstOrDefaultAsync(ct);
+
+        return UserNotificationDoNotDisturbSettings.Parse(userValue);
     }
 
     private static IQueryable<UserNotification> ApplyStatusFilter(
@@ -767,10 +784,16 @@ public class NotificationInboxController : ControllerBase
         item.ReadAt = DateTime.UtcNow;
     }
 
-    private static UserNotificationDto Map(UserNotification item, UserNotificationPreferenceSnapshot? preferences = null)
+    private static UserNotificationDto Map(
+        UserNotification item,
+        UserNotificationPreferenceSnapshot? preferences = null,
+        UserNotificationDoNotDisturbSnapshot? quietHours = null,
+        TimeZoneInfo? timeZone = null)
     {
         var type = UserNotificationTypes.Find(item.Type);
         var effectivePreferences = preferences ?? UserNotificationPreferenceSettings.Empty;
+        var effectiveQuietHours = quietHours ?? UserNotificationDoNotDisturbSettings.Disabled;
+        var effectiveTimeZone = timeZone ?? TimeZoneInfo.Utc;
         return new UserNotificationDto
         {
             Id = item.Id,
@@ -783,7 +806,13 @@ public class NotificationInboxController : ControllerBase
             ToastEnabled = UserNotificationPreferenceSettings.IsChannelEnabled(
                 effectivePreferences,
                 item.Type,
-                NotificationChannels.Toast),
+                NotificationChannels.Toast)
+                && !UserNotificationDoNotDisturbSettings.IsChannelMuted(
+                    effectiveQuietHours,
+                    type,
+                    NotificationChannels.Toast,
+                    DateTime.UtcNow,
+                    effectiveTimeZone),
             ObjectType = item.ObjectType,
             ObjectId = item.ObjectId,
             TaskId = item.TaskJournalItemId,

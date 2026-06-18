@@ -405,6 +405,185 @@ public sealed record UserNotificationPreferenceSnapshot(
     IReadOnlyList<string> DisabledTypes,
     IReadOnlyDictionary<string, IReadOnlyList<string>> DisabledChannels);
 
+public static class UserNotificationDoNotDisturbSettings
+{
+    public const string SettingKey = "notifications.doNotDisturb.v1";
+
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly IReadOnlyList<int> DefaultWorkDays = [1, 2, 3, 4, 5];
+    private static readonly IReadOnlySet<string> MutedChannels = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        NotificationChannels.Toast,
+        NotificationChannels.WebPush,
+        NotificationChannels.Email,
+        NotificationChannels.Telegram
+    };
+
+    public static readonly UserNotificationDoNotDisturbSnapshot Disabled = new(
+        Enabled: false,
+        WorkStart: "09:00",
+        WorkEnd: "18:00",
+        MuteWeekends: true,
+        VacationUntil: null,
+        AllowCritical: true,
+        WorkDays: DefaultWorkDays);
+
+    public static UserNotificationDoNotDisturbSnapshot Parse(string? rawValue)
+    {
+        if (string.IsNullOrWhiteSpace(rawValue))
+        {
+            return Disabled;
+        }
+
+        try
+        {
+            var storage = JsonSerializer.Deserialize<UserNotificationDoNotDisturbStorage>(rawValue, JsonOptions);
+            return Normalize(storage);
+        }
+        catch (JsonException)
+        {
+            return Disabled;
+        }
+    }
+
+    public static string Serialize(UserNotificationDoNotDisturbSnapshot settings)
+        => JsonSerializer.Serialize(new UserNotificationDoNotDisturbStorage
+        {
+            Enabled = settings.Enabled,
+            WorkStart = NormalizeTime(settings.WorkStart, Disabled.WorkStart),
+            WorkEnd = NormalizeTime(settings.WorkEnd, Disabled.WorkEnd),
+            MuteWeekends = settings.MuteWeekends,
+            VacationUntil = NormalizeDate(settings.VacationUntil),
+            AllowCritical = settings.AllowCritical,
+            WorkDays = NormalizeWorkDays(settings.WorkDays).ToList()
+        }, JsonOptions);
+
+    public static bool IsChannelMuted(
+        UserNotificationDoNotDisturbSnapshot settings,
+        UserNotificationTypeDefinition? type,
+        string? channel,
+        DateTime nowUtc,
+        TimeZoneInfo timeZone)
+    {
+        if (!settings.Enabled || !IsMutedChannel(channel))
+        {
+            return false;
+        }
+
+        if (settings.AllowCritical && IsCritical(type))
+        {
+            return false;
+        }
+
+        var localNow = CalendarTimeZoneHelper.ToUserLocal(nowUtc, timeZone);
+        if (IsVacationDay(settings, localNow.Date))
+        {
+            return true;
+        }
+
+        if (!IsWorkDay(settings, localNow.DayOfWeek))
+        {
+            return settings.MuteWeekends;
+        }
+
+        return !IsWithinWorkWindow(settings, localNow.TimeOfDay);
+    }
+
+    public static bool IsCritical(UserNotificationTypeDefinition? type)
+        => string.Equals(type?.Priority, "high", StringComparison.OrdinalIgnoreCase);
+
+    private static UserNotificationDoNotDisturbSnapshot Normalize(UserNotificationDoNotDisturbStorage? storage)
+        => new(
+            Enabled: storage?.Enabled ?? Disabled.Enabled,
+            WorkStart: NormalizeTime(storage?.WorkStart, Disabled.WorkStart),
+            WorkEnd: NormalizeTime(storage?.WorkEnd, Disabled.WorkEnd),
+            MuteWeekends: storage?.MuteWeekends ?? Disabled.MuteWeekends,
+            VacationUntil: NormalizeDate(storage?.VacationUntil),
+            AllowCritical: storage?.AllowCritical ?? Disabled.AllowCritical,
+            WorkDays: NormalizeWorkDays(storage?.WorkDays));
+
+    private static bool IsMutedChannel(string? channel)
+        => MutedChannels.Contains((channel ?? string.Empty).Trim());
+
+    private static bool IsVacationDay(UserNotificationDoNotDisturbSnapshot settings, DateTime localDate)
+        => TryParseDate(settings.VacationUntil, out var vacationUntil)
+           && localDate.Date <= vacationUntil.Date;
+
+    private static bool IsWorkDay(UserNotificationDoNotDisturbSnapshot settings, DayOfWeek dayOfWeek)
+    {
+        var normalizedDay = dayOfWeek == DayOfWeek.Sunday ? 7 : (int)dayOfWeek;
+        return settings.WorkDays.Contains(normalizedDay);
+    }
+
+    private static bool IsWithinWorkWindow(UserNotificationDoNotDisturbSnapshot settings, TimeSpan localTime)
+    {
+        var start = ParseTime(settings.WorkStart, Disabled.WorkStart);
+        var end = ParseTime(settings.WorkEnd, Disabled.WorkEnd);
+        if (start == end)
+        {
+            return true;
+        }
+
+        return start < end
+            ? localTime >= start && localTime < end
+            : localTime >= start || localTime < end;
+    }
+
+    private static IReadOnlyList<int> NormalizeWorkDays(IEnumerable<int>? values)
+    {
+        var days = (values ?? DefaultWorkDays)
+            .Where(value => value is >= 1 and <= 7)
+            .Distinct()
+            .OrderBy(value => value)
+            .ToList();
+
+        return days.Count > 0 ? days : DefaultWorkDays;
+    }
+
+    private static string NormalizeTime(string? value, string fallback)
+        => TimeSpan.TryParseExact((value ?? string.Empty).Trim(), @"hh\:mm", CultureInfo.InvariantCulture, out var time)
+            ? time.ToString(@"hh\:mm", CultureInfo.InvariantCulture)
+            : fallback;
+
+    private static TimeSpan ParseTime(string? value, string fallback)
+        => TimeSpan.TryParseExact(NormalizeTime(value, fallback), @"hh\:mm", CultureInfo.InvariantCulture, out var time)
+            ? time
+            : TimeSpan.Zero;
+
+    private static string? NormalizeDate(string? value)
+        => TryParseDate(value, out var date)
+            ? date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+            : null;
+
+    private static bool TryParseDate(string? value, out DateTime date)
+        => DateTime.TryParseExact(
+            (value ?? string.Empty).Trim(),
+            "yyyy-MM-dd",
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.None,
+            out date);
+
+    private sealed class UserNotificationDoNotDisturbStorage
+    {
+        public bool Enabled { get; set; }
+        public string? WorkStart { get; set; }
+        public string? WorkEnd { get; set; }
+        public bool? MuteWeekends { get; set; }
+        public string? VacationUntil { get; set; }
+        public bool? AllowCritical { get; set; }
+        public List<int>? WorkDays { get; set; }
+    }
+}
+
+public sealed record UserNotificationDoNotDisturbSnapshot(
+    bool Enabled,
+    string WorkStart,
+    string WorkEnd,
+    bool MuteWeekends,
+    string? VacationUntil,
+    bool AllowCritical,
+    IReadOnlyList<int> WorkDays);
+
 public sealed record RoleNotificationPreferenceDefaultProfile(
     string Key,
     string Label,

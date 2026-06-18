@@ -6,6 +6,7 @@ import {
   CheckCheck,
   CheckCircle2,
   CircleDollarSign,
+  Clock,
   ExternalLink,
   Filter,
   Gavel,
@@ -13,6 +14,7 @@ import {
   ListTodo,
   Mail,
   Monitor,
+  Moon,
   RefreshCw,
   RotateCcw,
   Search,
@@ -47,6 +49,13 @@ import {
   type UserNotificationPreferenceChannel,
   type UserNotificationTypePreferences,
 } from '../../utils/userNotificationPreferences';
+import {
+  DEFAULT_USER_NOTIFICATION_DO_NOT_DISTURB,
+  USER_NOTIFICATION_DO_NOT_DISTURB_SETTING_KEY,
+  parseUserNotificationDoNotDisturb,
+  serializeUserNotificationDoNotDisturb,
+  type UserNotificationDoNotDisturbSettings,
+} from '../../utils/userNotificationDoNotDisturb';
 import { WebPushDevicePanel } from './WebPushDevicePanel';
 
 type NotificationStatusFilter = NonNullable<UserNotificationsQuery['status']>;
@@ -188,6 +197,7 @@ export function NotificationCenter({
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [preferences, setPreferences] = useState<UserNotificationTypePreferences>(DEFAULT_USER_NOTIFICATION_TYPE_PREFERENCES);
+  const [doNotDisturb, setDoNotDisturb] = useState<UserNotificationDoNotDisturbSettings>(DEFAULT_USER_NOTIFICATION_DO_NOT_DISTURB);
   const [preferencesLoading, setPreferencesLoading] = useState(false);
   const [preferencesSaving, setPreferencesSaving] = useState(false);
   const pageSelectionRef = useRef<HTMLInputElement | null>(null);
@@ -280,15 +290,20 @@ export function NotificationCenter({
 
     let alive = true;
     setPreferencesLoading(true);
-    apiService.getUserSetting(USER_NOTIFICATION_TYPE_PREFERENCES_SETTING_KEY)
-      .then((setting) => {
+    Promise.all([
+      apiService.getUserSetting(USER_NOTIFICATION_TYPE_PREFERENCES_SETTING_KEY),
+      apiService.getUserSetting(USER_NOTIFICATION_DO_NOT_DISTURB_SETTING_KEY),
+    ])
+      .then(([typeSetting, quietSetting]) => {
         if (alive) {
-          setPreferences(parseUserNotificationTypePreferences(setting?.value, knownTypeKeys));
+          setPreferences(parseUserNotificationTypePreferences(typeSetting?.value, knownTypeKeys));
+          setDoNotDisturb(parseUserNotificationDoNotDisturb(quietSetting?.value));
         }
       })
       .catch(() => {
         if (alive) {
           setPreferences(DEFAULT_USER_NOTIFICATION_TYPE_PREFERENCES);
+          setDoNotDisturb(DEFAULT_USER_NOTIFICATION_DO_NOT_DISTURB);
         }
       })
       .finally(() => {
@@ -648,10 +663,14 @@ export function NotificationCenter({
         USER_NOTIFICATION_TYPE_PREFERENCES_SETTING_KEY,
         serializeUserNotificationTypePreferences(preferences, knownTypeKeys),
       );
+      await apiService.upsertUserSetting(
+        USER_NOTIFICATION_DO_NOT_DISTURB_SETTING_KEY,
+        serializeUserNotificationDoNotDisturb(doNotDisturb),
+      );
       emitUserNotificationsChanged({ source: 'inbox', reason: 'preferences-saved' });
       setPage(1);
       refresh();
-      toast.success('Настройки типов уведомлений сохранены.');
+      toast.success('Настройки уведомлений сохранены.');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Не удалось сохранить настройки уведомлений.');
     } finally {
@@ -970,6 +989,97 @@ export function NotificationCenter({
           </div>
 
           <WebPushDevicePanel className="mt-3" autoLoad={preferencesOpen} />
+
+          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50/70 p-3">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <label className="flex cursor-pointer gap-3">
+                <input
+                  type="checkbox"
+                  checked={doNotDisturb.enabled}
+                  onChange={(event) => {
+                    setDoNotDisturb((previous) => ({ ...previous, enabled: event.target.checked }));
+                  }}
+                  className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                />
+                <span>
+                  <span className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                    <Moon className="h-4 w-4 text-slate-500" />
+                    Не беспокоить
+                  </span>
+                  <span className="mt-1 block max-w-2xl text-xs leading-5 text-slate-500">
+                    Вне рабочего времени CRM оставит события в центре уведомлений, но не будет показывать всплывающие сообщения, Push, Email и Telegram.
+                  </span>
+                </span>
+              </label>
+
+              <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={doNotDisturb.allowCritical}
+                  onChange={(event) => {
+                    setDoNotDisturb((previous) => ({ ...previous, allowCritical: event.target.checked }));
+                  }}
+                  disabled={!doNotDisturb.enabled}
+                  className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                />
+                Срочные уведомления показывать сразу
+              </label>
+            </div>
+
+            <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <label className="text-xs font-medium text-slate-600">
+                <span className="mb-1 flex items-center gap-1.5">
+                  <Clock className="h-3.5 w-3.5" />
+                  Рабочий день с
+                </span>
+                <input
+                  type="time"
+                  value={doNotDisturb.workStart}
+                  onChange={(event) => {
+                    setDoNotDisturb((previous) => ({ ...previous, workStart: event.target.value }));
+                  }}
+                  disabled={!doNotDisturb.enabled}
+                  className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                />
+              </label>
+              <label className="text-xs font-medium text-slate-600">
+                <span className="mb-1 block">Рабочий день до</span>
+                <input
+                  type="time"
+                  value={doNotDisturb.workEnd}
+                  onChange={(event) => {
+                    setDoNotDisturb((previous) => ({ ...previous, workEnd: event.target.value }));
+                  }}
+                  disabled={!doNotDisturb.enabled}
+                  className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                />
+              </label>
+              <label className="text-xs font-medium text-slate-600">
+                <span className="mb-1 block">Отпуск или выходной до</span>
+                <input
+                  type="date"
+                  value={doNotDisturb.vacationUntil ?? ''}
+                  onChange={(event) => {
+                    setDoNotDisturb((previous) => ({ ...previous, vacationUntil: event.target.value || null }));
+                  }}
+                  disabled={!doNotDisturb.enabled}
+                  className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                />
+              </label>
+              <label className="flex items-center gap-2 rounded-lg border border-white bg-white px-3 py-2 text-xs font-medium text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={doNotDisturb.muteWeekends}
+                  onChange={(event) => {
+                    setDoNotDisturb((previous) => ({ ...previous, muteWeekends: event.target.checked }));
+                  }}
+                  disabled={!doNotDisturb.enabled}
+                  className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                />
+                Не беспокоить в выходные
+              </label>
+            </div>
+          </div>
 
           {preferencesLoading ? (
             <div className="mt-4 flex items-center gap-2 text-sm text-slate-500">

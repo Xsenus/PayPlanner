@@ -2982,7 +2982,8 @@ public sealed class NotificationService : INotificationService
         CancellationToken cancellationToken)
     {
         var preferences = await GetUserNotificationPreferencesAsync(recipientUserId, cancellationToken);
-        return UserNotificationPreferenceSettings.IsChannelEnabled(preferences, type, channel);
+        return UserNotificationPreferenceSettings.IsChannelEnabled(preferences, type, channel)
+               && !await IsUserNotificationChannelMutedAsync(recipientUserId, type, channel, cancellationToken);
     }
 
     private async Task<IReadOnlyList<string>> ResolveUserNotificationChannelsAsync(
@@ -2998,9 +2999,58 @@ public sealed class NotificationService : INotificationService
         }
 
         var preferences = await GetUserNotificationPreferencesAsync(recipientUserId, cancellationToken);
+        var quietHours = await GetUserNotificationDoNotDisturbAsync(recipientUserId, cancellationToken);
+        var timeZone = quietHours.Enabled
+            ? await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_context, recipientUserId, cancellationToken)
+            : TimeZoneInfo.Utc;
+        var typeDefinition = UserNotificationTypes.Find(type);
+        var nowUtc = DateTime.UtcNow;
+
         return normalizedChannels
             .Where(channel => UserNotificationPreferenceSettings.IsChannelEnabled(preferences, type, channel))
+            .Where(channel => !UserNotificationDoNotDisturbSettings.IsChannelMuted(
+                quietHours,
+                typeDefinition,
+                channel,
+                nowUtc,
+                timeZone))
             .ToList();
+    }
+
+    private async Task<bool> IsUserNotificationChannelMutedAsync(
+        int recipientUserId,
+        string type,
+        string channel,
+        CancellationToken cancellationToken)
+    {
+        var quietHours = await GetUserNotificationDoNotDisturbAsync(recipientUserId, cancellationToken);
+        if (!quietHours.Enabled)
+        {
+            return false;
+        }
+
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_context, recipientUserId, cancellationToken);
+        return UserNotificationDoNotDisturbSettings.IsChannelMuted(
+            quietHours,
+            UserNotificationTypes.Find(type),
+            channel,
+            DateTime.UtcNow,
+            timeZone);
+    }
+
+    private async Task<UserNotificationDoNotDisturbSnapshot> GetUserNotificationDoNotDisturbAsync(
+        int recipientUserId,
+        CancellationToken cancellationToken)
+    {
+        var userSetting = await _context.UserSettings
+            .AsNoTracking()
+            .Where(item =>
+                item.UserId == recipientUserId
+                && item.Key == UserNotificationDoNotDisturbSettings.SettingKey)
+            .Select(item => item.Value)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return UserNotificationDoNotDisturbSettings.Parse(userSetting);
     }
 
     private async Task<UserNotificationPreferenceSnapshot> GetUserNotificationPreferencesAsync(
