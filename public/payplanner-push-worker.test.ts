@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it, vi } from 'vitest';
 
-type WorkerEventListener = (event: any) => void;
+type WorkerEventListener = (event: unknown) => void;
 
 function loadWorker() {
   const listeners = new Map<string, WorkerEventListener>();

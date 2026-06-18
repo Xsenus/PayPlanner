@@ -85,6 +85,7 @@ export function WebPushDevicePanel({
     [webPushStatus],
   );
   const canEnable = webPushStatus?.status !== 'unsupported'
+    && webPushStatus?.status !== 'insecure-context'
     && webPushStatus?.status !== 'server-disabled'
     && webPushStatus?.status !== 'server-not-ready'
     && webPushStatus?.status !== 'permission-denied';

@@ -659,10 +659,12 @@
   - DoD: SignalR WebSocket работает через публичный домен.
   - Проверено 18.06.2026: репозиторная часть закрыта через deploy-runbook и тесты `ProductionTlsResponsibilityTests`; production-приемка должна подтвердить nginx reload и WebSocket `101 Switching Protocols` на `/hubs/notifications` и `/hubs/notes`.
 
-- [ ] Проверить HTTPS и service worker scope.
+- [x] Проверить HTTPS и service worker scope.
   - `crm.elitpravo.com` должен обслуживать service worker по HTTPS.
   - Push subscription должна быть с правильного origin.
   - DoD: браузер разрешает push на production.
+  - Проверено 18.06.2026: frontend-сервис Web Push отдельно определяет небезопасный origin и не обращается к серверу/браузерному разрешению, пока CRM не открыта в secure context; регистрация `payplanner-push-worker.js` закреплена за root scope `/`. `webPushNotifications.test.ts`, `WebPushDevicePanel.test.tsx` и `payplanner-push-worker.test.ts` пройдены, 14 тестов без ошибок.
+  - Проверено 18.06.2026: production build frontend прошел после изменения Web Push secure-origin проверки; service worker остается доступен из `public/payplanner-push-worker.js` и регистрируется на scope `/`. `npm run lint` завершился без ошибок, остались только существующие предупреждения в не связанных с задачей компонентах.
 
 - [ ] Добавить env-переменные на VPS.
   - VAPID public/private key.
@@ -710,6 +712,7 @@
   - Проверено 18.06.2026: после добавления проверки прав доступа к связанным объектам уведомлений полный backend-набор `PayPlanner.Api.Tests` пройден, 1602 теста без ошибок.
   - Проверено 18.06.2026: после проверки service worker click routing и новой записи "Что нового" пройдены `AppVersionControllerTests` (17 тестов) и полный backend-набор `PayPlanner.Api.Tests`, 1602 теста без ошибок.
   - Проверено 18.06.2026: после усиления frontend-проверок центра уведомлений повторно пройден `NotificationServiceTests`, 102 теста без ошибок.
+  - Проверено 18.06.2026: после добавления release note `1.13.427` про HTTPS/service worker scope пройден `AppVersionControllerTests`, 17 тестов без ошибок.
 
 - [x] Тесты прав доступа.
   - Задачи с ограниченной видимостью.
@@ -752,6 +755,7 @@
   - Проверено 18.06.2026: после добавления проверки прав доступа к объектам уведомлений локальная БД `PaymentContext` проверена через `dotnet ef database update`, новых миграций нет, ошибок нет.
   - Проверено 18.06.2026: после проверки переходов из Push-уведомлений локальная БД `PaymentContext` проверена через `dotnet ef database update`, новых миграций нет, ошибок нет.
   - Проверено 18.06.2026: после усиления тестов центра уведомлений локальная БД `PaymentContext` проверена через `dotnet ef database update`, новых миграций нет, ошибок нет.
+  - Проверено 18.06.2026: после проверки HTTPS/service worker scope локальная БД `PaymentContext` проверена через `dotnet ef database update`, новых миграций нет, ошибок нет.
 
 - [ ] Browser manual smoke.
   - Chrome/Edge desktop.
@@ -782,6 +786,7 @@
   - Проверено 17.06.2026: добавлена версия `1.13.382` про моментальные уведомления в открытой CRM.
   - Проверено 18.06.2026: добавлена версия `1.13.420` про быстрые действия во всплывающих уведомлениях.
   - Проверено 18.06.2026: добавлена версия `1.13.422` про понятные признаки доставки и действий у типов уведомлений.
+  - Проверено 18.06.2026: добавлена версия `1.13.427` про понятную проверку HTTPS и root scope service worker для Web Push.
   - Объяснить: появились моментальные уведомления в CRM и браузерные push.
   - Где включить: профиль/центр уведомлений.
   - Что покрыто: задачи, календарь, заметки, финансы и другие важные события.

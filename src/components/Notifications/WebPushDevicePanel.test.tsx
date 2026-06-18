@@ -108,6 +108,24 @@ describe('WebPushDevicePanel', () => {
     expect(screen.getByText('ключ доступен')).toBeTruthy();
   });
 
+  it('keeps enable action disabled when the CRM origin is not secure', async () => {
+    webPushMock.getWebPushStatus.mockResolvedValueOnce(createStatus({
+      status: 'insecure-context',
+      permission: 'default',
+      publicKeyReady: false,
+      message: 'Push-уведомления работают только на защищённом HTTPS-адресе CRM.',
+    }));
+
+    render(<WebPushDevicePanel />);
+
+    expect(await screen.findByText('Push-уведомления работают только на защищённом HTTPS-адресе CRM.')).toBeTruthy();
+
+    const enableButton = screen.getByRole('button', { name: 'Включить на этом устройстве' });
+    expect((enableButton as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(enableButton);
+    expect(webPushMock.subscribeCurrentDeviceToWebPush).not.toHaveBeenCalled();
+  });
+
   it('disables current device when it is already subscribed', async () => {
     webPushMock.getWebPushStatus
       .mockResolvedValueOnce(createStatus({

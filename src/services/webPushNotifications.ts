@@ -1,9 +1,11 @@
 import { apiService, type UpsertPushSubscriptionRequest, type UserPushSubscriptionDto } from './api';
 
-const WORKER_PATH = '/payplanner-push-worker.js';
+export const PAYPLANNER_PUSH_WORKER_PATH = '/payplanner-push-worker.js';
+export const PAYPLANNER_PUSH_WORKER_SCOPE = '/';
 
 export type WebPushDeviceStatus =
   | 'unsupported'
+  | 'insecure-context'
   | 'server-disabled'
   | 'server-not-ready'
   | 'permission-denied'
@@ -26,6 +28,21 @@ export function isWebPushSupported() {
     && Boolean(window.PushManager);
 }
 
+export function isWebPushSecureContext() {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  if (typeof window.isSecureContext === 'boolean') {
+    return window.isSecureContext;
+  }
+
+  const hostname = window.location.hostname;
+  return hostname === 'localhost'
+    || hostname === '127.0.0.1'
+    || hostname === '::1';
+}
+
 export async function getWebPushStatus(): Promise<WebPushStatus> {
   if (!isWebPushSupported()) {
     return {
@@ -34,6 +51,16 @@ export async function getWebPushStatus(): Promise<WebPushStatus> {
       subscriptions: [],
       publicKeyReady: false,
       message: 'Этот браузер не поддерживает push-уведомления.',
+    };
+  }
+
+  if (!isWebPushSecureContext()) {
+    return {
+      status: 'insecure-context',
+      permission: Notification.permission,
+      subscriptions: [],
+      publicKeyReady: false,
+      message: 'Push-уведомления работают только на защищённом HTTPS-адресе CRM.',
     };
   }
 
@@ -100,6 +127,10 @@ export async function subscribeCurrentDeviceToWebPush() {
     throw new Error('Этот браузер не поддерживает push-уведомления.');
   }
 
+  if (!isWebPushSecureContext()) {
+    throw new Error('Push-уведомления работают только на защищённом HTTPS-адресе CRM.');
+  }
+
   const publicKey = await apiService.getWebPushPublicKey();
   if (!publicKey.enabled) {
     throw new Error('Push-уведомления отключены на сервере.');
@@ -131,6 +162,10 @@ export async function unsubscribeCurrentDeviceFromWebPush() {
     return;
   }
 
+  if (!isWebPushSecureContext()) {
+    return;
+  }
+
   const registration = await registerPayPlannerPushWorker();
   const subscription = await registration.pushManager.getSubscription();
   if (!subscription) {
@@ -142,7 +177,11 @@ export async function unsubscribeCurrentDeviceFromWebPush() {
 }
 
 export async function registerPayPlannerPushWorker() {
-  return navigator.serviceWorker.register(WORKER_PATH, { scope: '/' });
+  if (!isWebPushSecureContext()) {
+    throw new Error('Push-уведомления работают только на защищённом HTTPS-адресе CRM.');
+  }
+
+  return navigator.serviceWorker.register(PAYPLANNER_PUSH_WORKER_PATH, { scope: PAYPLANNER_PUSH_WORKER_SCOPE });
 }
 
 export function urlBase64ToUint8Array(value: string) {
