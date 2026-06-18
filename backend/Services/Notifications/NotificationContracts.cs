@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Linq.Expressions;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using PayPlanner.Api.Models;
@@ -366,6 +367,27 @@ public sealed record NotificationEventEnvelope(
         => NotificationPriorities.IsSilent(priority)
             ? channels.Where(channel => string.Equals(channel, NotificationChannels.InApp, StringComparison.OrdinalIgnoreCase)).ToList()
             : channels;
+}
+
+public static class UserNotificationAntiSpamPolicy
+{
+    public static bool ShouldSuppressSelfNotification(int recipientUserId, int? actorUserId)
+        => recipientUserId > 0
+           && actorUserId.HasValue
+           && actorUserId.Value > 0
+           && recipientUserId == actorUserId.Value;
+
+    public static bool IsExactDuplicate(UserNotification notification, NotificationEventEnvelope envelope)
+        => notification.RecipientUserId == envelope.RecipientUserId
+           && string.Equals(notification.EventKey, envelope.EventKey, StringComparison.Ordinal);
+
+    public static Expression<Func<UserNotification, bool>> ExactDuplicatePredicate(NotificationEventEnvelope envelope)
+        => notification =>
+            notification.RecipientUserId == envelope.RecipientUserId
+            && notification.EventKey == envelope.EventKey;
+
+    public static int ResolveGroupingWindowSeconds(string? type)
+        => UserNotificationTypes.Find(type)?.GroupingWindowSeconds ?? 0;
 }
 
 public static class UserNotificationPreferenceSettings

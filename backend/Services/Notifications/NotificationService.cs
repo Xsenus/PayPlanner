@@ -1041,7 +1041,7 @@ public sealed class NotificationService : INotificationService
             cancellationToken: cancellationToken);
 
         foreach (var recipientUserId in recipientUserIds
-            .Where(userId => userId > 0 && userId != actorUserId)
+            .Where(userId => userId > 0 && !UserNotificationAntiSpamPolicy.ShouldSuppressSelfNotification(userId, actorUserId))
             .Distinct())
         {
             await CreateUserNotificationAsync(
@@ -1078,7 +1078,10 @@ public sealed class NotificationService : INotificationService
         DateTime? reminderAt,
         CancellationToken cancellationToken = default)
     {
-        if (noteId <= 0 || boardId <= 0 || assignedUserId <= 0 || assignedUserId == actorUserId)
+        if (noteId <= 0
+            || boardId <= 0
+            || assignedUserId <= 0
+            || UserNotificationAntiSpamPolicy.ShouldSuppressSelfNotification(assignedUserId, actorUserId))
         {
             return;
         }
@@ -1213,7 +1216,7 @@ public sealed class NotificationService : INotificationService
             cancellationToken: cancellationToken);
 
         foreach (var recipientUserId in recipientUserIds
-            .Where(userId => userId > 0 && userId != actorUserId)
+            .Where(userId => userId > 0 && !UserNotificationAntiSpamPolicy.ShouldSuppressSelfNotification(userId, actorUserId))
             .Distinct())
         {
             await CreateUserNotificationAsync(
@@ -1812,7 +1815,7 @@ public sealed class NotificationService : INotificationService
 
         var version = (courtEvent.UpdatedAt ?? courtEvent.CreatedAt).Ticks.ToString(CultureInfo.InvariantCulture);
         foreach (var recipientUserId in recipientUserIds
-            .Where(userId => userId > 0 && userId != actorUserId)
+            .Where(userId => userId > 0 && !UserNotificationAntiSpamPolicy.ShouldSuppressSelfNotification(userId, actorUserId))
             .Distinct())
         {
             await CreateUserNotificationAsync(
@@ -1874,7 +1877,7 @@ public sealed class NotificationService : INotificationService
             : (deadline.UpdatedAt ?? deadline.ClosedAt ?? deadline.CreatedAt).Ticks.ToString(CultureInfo.InvariantCulture);
 
         foreach (var recipientUserId in recipientUserIds
-            .Where(userId => userId > 0 && userId != actorUserId)
+            .Where(userId => userId > 0 && !UserNotificationAntiSpamPolicy.ShouldSuppressSelfNotification(userId, actorUserId))
             .Distinct())
         {
             await CreateUserNotificationAsync(
@@ -1944,7 +1947,7 @@ public sealed class NotificationService : INotificationService
             normalizedAction));
 
         foreach (var recipientUserId in recipientUserIds
-            .Where(userId => userId > 0 && userId != actorUserId)
+            .Where(userId => userId > 0 && !UserNotificationAntiSpamPolicy.ShouldSuppressSelfNotification(userId, actorUserId))
             .Distinct())
         {
             await CreateUserNotificationAsync(
@@ -2042,7 +2045,9 @@ public sealed class NotificationService : INotificationService
         DateTime resolvedAt,
         CancellationToken cancellationToken = default)
     {
-        if (clientCase.Id <= 0 || requestedByUserId <= 0 || requestedByUserId == actorUserId)
+        if (clientCase.Id <= 0
+            || requestedByUserId <= 0
+            || UserNotificationAntiSpamPolicy.ShouldSuppressSelfNotification(requestedByUserId, actorUserId))
         {
             return;
         }
@@ -2116,7 +2121,7 @@ public sealed class NotificationService : INotificationService
         var stateHash = BuildStableTextHash($"{provider}|{normalizedSummary}");
 
         foreach (var recipientUserId in recipientUserIds
-            .Where(userId => userId > 0 && userId != actorUserId)
+            .Where(userId => userId > 0 && !UserNotificationAntiSpamPolicy.ShouldSuppressSelfNotification(userId, actorUserId))
             .Distinct())
         {
             await CreateUserNotificationAsync(
@@ -2952,10 +2957,7 @@ public sealed class NotificationService : INotificationService
 
         var alreadyExists = await _context.UserNotifications
             .AsNoTracking()
-            .AnyAsync(item =>
-                item.RecipientUserId == notificationEvent.RecipientUserId
-                && item.EventKey == notificationEvent.EventKey,
-                cancellationToken);
+            .AnyAsync(UserNotificationAntiSpamPolicy.ExactDuplicatePredicate(notificationEvent), cancellationToken);
         if (alreadyExists)
         {
             return false;
@@ -4338,7 +4340,7 @@ public sealed class NotificationService : INotificationService
         CancellationToken cancellationToken)
     {
         var candidateUserIds = recipientUserIds
-            .Where(userId => userId > 0 && (!actorUserId.HasValue || userId != actorUserId.Value))
+            .Where(userId => userId > 0 && !UserNotificationAntiSpamPolicy.ShouldSuppressSelfNotification(userId, actorUserId))
             .Distinct()
             .ToArray();
         if (candidateUserIds.Length == 0)
@@ -5260,7 +5262,7 @@ public sealed class NotificationService : INotificationService
             .Select(participant => participant.UserId!.Value));
 
         return userIds
-            .Where(userId => userId > 0 && userId != actorUserId)
+            .Where(userId => userId > 0 && !UserNotificationAntiSpamPolicy.ShouldSuppressSelfNotification(userId, actorUserId))
             .Distinct()
             .ToList();
     }
@@ -5268,7 +5270,9 @@ public sealed class NotificationService : INotificationService
     private static IReadOnlyList<int> ResolveCurrentApproverUserIds(TaskJournalItem task, int actorUserId)
     {
         var currentApprover = GetCurrentApprover(task);
-        if (currentApprover?.UserId is not { } userId || userId <= 0 || userId == actorUserId)
+        if (currentApprover?.UserId is not { } userId
+            || userId <= 0
+            || UserNotificationAntiSpamPolicy.ShouldSuppressSelfNotification(userId, actorUserId))
         {
             return Array.Empty<int>();
         }
@@ -5300,7 +5304,7 @@ public sealed class NotificationService : INotificationService
         }
 
         return userIds
-            .Where(userId => userId > 0 && userId != actorUserId)
+            .Where(userId => userId > 0 && !UserNotificationAntiSpamPolicy.ShouldSuppressSelfNotification(userId, actorUserId))
             .Distinct()
             .ToList();
     }
@@ -5324,7 +5328,7 @@ public sealed class NotificationService : INotificationService
             .Select(participant => participant.UserId!.Value));
 
         return userIds
-            .Where(userId => userId > 0 && userId != actorUserId)
+            .Where(userId => userId > 0 && !UserNotificationAntiSpamPolicy.ShouldSuppressSelfNotification(userId, actorUserId))
             .Distinct()
             .ToList();
     }

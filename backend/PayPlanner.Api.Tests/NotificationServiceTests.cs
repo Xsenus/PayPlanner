@@ -64,6 +64,38 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public void UserNotificationAntiSpamPolicy_ResolvesSelfDuplicateAndGroupingRules()
+    {
+        var envelope = new NotificationEventEnvelope(
+            RecipientUserId: 15,
+            Type: UserNotificationTypes.TaskChanged,
+            EventKey: "task:77:changed",
+            Title: "Задача изменена",
+            BodyPreview: "Проверить изменения.",
+            ObjectType: "task",
+            ObjectId: 77,
+            TaskJournalItemId: 77);
+        var duplicate = new UserNotification
+        {
+            RecipientUserId = 15,
+            EventKey = "task:77:changed",
+        };
+        var otherRecipient = new UserNotification
+        {
+            RecipientUserId = 16,
+            EventKey = "task:77:changed",
+        };
+
+        Assert.True(UserNotificationAntiSpamPolicy.ShouldSuppressSelfNotification(15, 15));
+        Assert.False(UserNotificationAntiSpamPolicy.ShouldSuppressSelfNotification(15, null));
+        Assert.True(UserNotificationAntiSpamPolicy.IsExactDuplicate(duplicate, envelope));
+        Assert.False(UserNotificationAntiSpamPolicy.IsExactDuplicate(otherRecipient, envelope));
+        Assert.True(UserNotificationAntiSpamPolicy.ExactDuplicatePredicate(envelope).Compile().Invoke(duplicate));
+        Assert.Equal(300, UserNotificationAntiSpamPolicy.ResolveGroupingWindowSeconds(UserNotificationTypes.TaskChanged));
+        Assert.Equal(0, UserNotificationAntiSpamPolicy.ResolveGroupingWindowSeconds("unknown-type"));
+    }
+
+    [Fact]
     public async Task NotifyAsync_CreatesUserNotificationAndPublishesRealtimeAndWebPush()
     {
         await using var db = await CreateContextAsync();
