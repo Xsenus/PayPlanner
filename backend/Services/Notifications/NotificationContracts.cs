@@ -50,6 +50,7 @@ public static class NotificationPriorities
     public const string High = "high";
     public const string Normal = "normal";
     public const string Silent = "silent";
+    public static readonly IReadOnlyList<string> All = [Critical, High, Normal, Silent];
 
     public static bool IsCritical(string? value)
         => string.Equals(value, Critical, StringComparison.OrdinalIgnoreCase);

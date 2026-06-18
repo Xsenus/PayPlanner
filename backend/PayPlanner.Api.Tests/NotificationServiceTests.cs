@@ -96,6 +96,27 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public void UserNotificationTypes_AllHaveInventoryMetadata()
+    {
+        Assert.Equal(UserNotificationTypes.All.Count, UserNotificationTypes.All.Select(item => item.Key).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+
+        foreach (var type in UserNotificationTypes.All)
+        {
+            Assert.False(string.IsNullOrWhiteSpace(type.Key));
+            Assert.False(string.IsNullOrWhiteSpace(type.Label));
+            Assert.False(string.IsNullOrWhiteSpace(type.Description));
+            Assert.False(string.IsNullOrWhiteSpace(type.Domain));
+            Assert.Contains(type.Priority, NotificationPriorities.All);
+            Assert.NotEmpty(type.EffectiveChannels);
+            Assert.All(type.EffectiveChannels, channel => Assert.Contains(channel, NotificationChannels.All));
+            Assert.Contains(NotificationChannels.InApp, type.EffectiveChannels);
+            Assert.True(type.GroupingWindowSeconds >= 0);
+            Assert.Same(type, UserNotificationTypes.Find(type.Key));
+            Assert.True(UserNotificationTypes.IsKnown(type.Key));
+        }
+    }
+
+    [Fact]
     public async Task NotifyAsync_CreatesUserNotificationAndPublishesRealtimeAndWebPush()
     {
         await using var db = await CreateContextAsync();
