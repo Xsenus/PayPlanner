@@ -199,6 +199,141 @@ public class NotificationServiceTests
         Assert.Single(webPush.Notifications);
     }
 
+    [Fact]
+    public async Task ProductionAcceptanceCriticalEvents_CreateRealtimeAndWebPushNotifications()
+    {
+        await using var db = await CreateContextAsync();
+        var actor = await CreateUserAsync(db, "acceptance-actor@example.com");
+        var recipient = new User
+        {
+            Email = "acceptance-recipient@example.com",
+            FullName = "Получатель приемочных уведомлений",
+            PasswordHash = "hash",
+            RoleId = actor.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(recipient);
+        await db.SaveChangesAsync();
+
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            realtime,
+            webPush);
+
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Приемочное дело",
+            Title = "Проверить новую задачу",
+            Description = "Проверка моментальной связи по задачам",
+            AuthorUserId = actor.Id,
+            AuthorName = actor.FullName,
+            AssigneeUserId = recipient.Id,
+            AssigneeName = recipient.FullName,
+            DueAt = new DateTime(2026, 6, 18, 10, 0, 0, DateTimeKind.Utc),
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "new"
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        await service.NotifyTaskAssignedAsync(task, actor.FullName, actor.Id);
+
+        var changedDueAt = new DateTime(2026, 6, 18, 12, 0, 0, DateTimeKind.Utc);
+        task.DueAt = changedDueAt;
+        await db.SaveChangesAsync();
+        await service.NotifyTaskChangedAsync(
+            task,
+            ["Срок: 18.06.2026 10:00 -> 18.06.2026 12:00"],
+            actor.FullName,
+            actor.Id);
+
+        var note = await CreateStickyNoteAsync(db, actor, StickyNoteBoardVisibility.Shared);
+        await service.NotifyStickyNoteMentionAsync(
+            note.Id,
+            note.BoardId,
+            "Общее",
+            "@acceptance-recipient проверь заметку",
+            actor.FullName,
+            actor.Id,
+            [recipient.Id]);
+        await service.NotifyStickyNoteAssignedAsync(
+            note.Id,
+            note.BoardId,
+            "Общее",
+            "Заметка назначена ответственному",
+            recipient.Id,
+            actor.FullName,
+            actor.Id,
+            new DateTime(2026, 6, 18, 13, 0, 0, DateTimeKind.Utc));
+
+        var payment = new Payment
+        {
+            Description = "Платеж на контроле",
+            Date = new DateTime(2026, 6, 18),
+            Amount = 35000m,
+            Status = PaymentStatus.Pending,
+            Type = PaymentType.Income,
+            Responsibles = { new PaymentResponsible { UserId = recipient.Id } }
+        };
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+
+        var paymentNotified = await service.NotifyAsync(new NotificationEventEnvelope(
+            RecipientUserId: recipient.Id,
+            Type: UserNotificationTypes.PaymentAdvanceReviewRequired,
+            EventKey: $"payment:acceptance:advance-review:{payment.Id}",
+            Title: "Платеж требует контроля",
+            BodyPreview: "Проверьте платеж на контроле.",
+            ObjectType: "payment",
+            ObjectId: payment.Id,
+            TaskJournalItemId: null,
+            Metadata: new { paymentId = payment.Id },
+            ActionUrl: $"/payments/{payment.Id}"));
+
+        Assert.True(paymentNotified);
+
+        var notifications = await db.UserNotifications
+            .OrderBy(item => item.Id)
+            .ToListAsync();
+        var expectedTypes = new[]
+        {
+            UserNotificationTypes.TaskAssigned,
+            UserNotificationTypes.TaskChanged,
+            UserNotificationTypes.NoteMention,
+            UserNotificationTypes.NoteAssigned,
+            UserNotificationTypes.PaymentAdvanceReviewRequired
+        };
+
+        Assert.Equal(expectedTypes, notifications.Select(item => item.Type).ToArray());
+        Assert.All(notifications, notification =>
+        {
+            Assert.Equal(recipient.Id, notification.RecipientUserId);
+            Assert.False(notification.IsRead);
+            Assert.False(notification.IsArchived);
+        });
+        Assert.Equal(expectedTypes, realtime.Notifications.Select(item => item.Type).ToArray());
+        Assert.Equal(expectedTypes, webPush.Notifications.Select(item => item.Type).ToArray());
+        Assert.All(realtime.ToastEnabledValues, Assert.True);
+        Assert.Contains(notifications, item =>
+            item.Type == UserNotificationTypes.TaskChanged
+            && item.TaskJournalItemId == task.Id
+            && item.Title.Contains("срок", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(notifications, item =>
+            item.Type == UserNotificationTypes.PaymentAdvanceReviewRequired
+            && item.ObjectType == "payment"
+            && item.ObjectId == payment.Id
+            && item.MetadataJson.Contains($"\"paymentId\":{payment.Id}", StringComparison.Ordinal));
+        Assert.DoesNotContain(notifications, item => item.RecipientUserId == actor.Id);
+    }
+
     [Theory]
     [InlineData("payment", RolePermissionCatalog.Payments, UserNotificationTypes.PaymentAssigned)]
     [InlineData("invoice", RolePermissionCatalog.Accounts, UserNotificationTypes.InvoiceCreated)]
