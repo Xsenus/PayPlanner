@@ -82,6 +82,12 @@ describe('NotificationCenter', () => {
         channels: ['inApp'],
         deduplicate: true,
         digestible: false,
+        showToastByDefault: false,
+        toastPriority: 'normal',
+        pushEligible: false,
+        pushPriority: 'normal',
+        groupingWindowSeconds: 60,
+        requiresAction: true,
       },
     ]);
     apiMock.getTaskJournalAssignees.mockResolvedValue([]);

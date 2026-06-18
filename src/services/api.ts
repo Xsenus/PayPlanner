@@ -1078,6 +1078,12 @@ export interface UserNotificationTypeDto {
   channels: UserNotificationDeliveryChannel[];
   deduplicate: boolean;
   digestible: boolean;
+  showToastByDefault: boolean;
+  toastPriority: string;
+  pushEligible: boolean;
+  pushPriority: string;
+  groupingWindowSeconds: number;
+  requiresAction: boolean;
 }
 
 export interface UserNotificationBulkActionResultDto {

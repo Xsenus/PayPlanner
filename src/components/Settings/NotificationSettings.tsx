@@ -1155,6 +1155,22 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
                                 <span>
                                   <span className="block text-sm font-semibold text-gray-900">{item.label}</span>
                                   <span className="mt-1 block text-xs leading-5 text-gray-500">{item.description}</span>
+                                  <span className="mt-2 flex flex-wrap gap-1.5">
+                                    {item.requiresAction ? (
+                                      <span className="inline-flex rounded-full bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">Требует действия</span>
+                                    ) : null}
+                                    {item.showToastByDefault ? (
+                                      <span className="inline-flex rounded-full bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700">Toast: {item.toastPriority}</span>
+                                    ) : null}
+                                    {item.pushEligible ? (
+                                      <span className="inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">Push: {item.pushPriority}</span>
+                                    ) : null}
+                                    {item.groupingWindowSeconds > 0 ? (
+                                      <span className="inline-flex rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-500">
+                                        Группировка {item.groupingWindowSeconds} сек.
+                                      </span>
+                                    ) : null}
+                                  </span>
                                 </span>
                               </label>
                               <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">

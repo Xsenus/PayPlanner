@@ -245,11 +245,51 @@ public static class UserNotificationTypes
         new(SystemAdminWarning, "Системное предупреждение", "Администраторам требуется обратить внимание на фоновый процесс, интеграцию или настройку.", "rose", "high", NotificationChannels.All, true, false)
     ];
 
+    public static readonly IReadOnlyList<string> RequiresActionTypes =
+    [
+        TaskAssigned,
+        TaskReminder,
+        TaskCancelled,
+        TaskScheduleConflict,
+        TaskApprovalRequested,
+        TaskRevisionRequested,
+        TaskApprovalOverdue,
+        CalendarAccessChanged,
+        CaseInactivityControl,
+        CaseAccessRequested,
+        CaseCourtEvent,
+        CourtHearing,
+        CourtStatusChanged,
+        CourtDecisionPublished,
+        CourtSyncFailed,
+        CaseProceduralDeadline,
+        CaseInactivityReminder,
+        NoteMention,
+        NoteAssigned,
+        NoteReminder,
+        NoteImportantChanged,
+        PaymentAssigned,
+        PaymentChanged,
+        InvoiceCreated,
+        InvoiceChanged,
+        ActCreated,
+        ActChanged,
+        ContractCreated,
+        ContractChanged,
+        ContractExpiring,
+        PaymentAdvanceReviewRequired,
+        PaymentAdvanceReviewEscalation,
+        SystemAdminWarning
+    ];
+
     public static bool IsKnown(string? value)
         => All.Any(item => string.Equals(item.Key, value, StringComparison.OrdinalIgnoreCase));
 
     public static UserNotificationTypeDefinition? Find(string? value)
         => All.FirstOrDefault(item => string.Equals(item.Key, value, StringComparison.OrdinalIgnoreCase));
+
+    public static bool RequiresAction(string? value)
+        => RequiresActionTypes.Contains(value ?? string.Empty, StringComparer.OrdinalIgnoreCase);
 }
 
 public sealed record UserNotificationTypeDefinition(
@@ -264,6 +304,12 @@ public sealed record UserNotificationTypeDefinition(
 {
     public string Domain => UserNotificationDomains.Resolve(Key);
     public string DomainLabel => UserNotificationDomains.Label(Domain);
+    public bool ShowToastByDefault => Channels.Contains(NotificationChannels.Toast, StringComparer.OrdinalIgnoreCase);
+    public string ToastPriority => Priority;
+    public bool PushEligible => Channels.Contains(NotificationChannels.WebPush, StringComparer.OrdinalIgnoreCase);
+    public string PushPriority => Priority;
+    public int GroupingWindowSeconds => Digestible ? 300 : Deduplicate ? 60 : 0;
+    public bool RequiresAction => UserNotificationTypes.RequiresAction(Key);
 }
 
 public sealed record NotificationEventEnvelope(

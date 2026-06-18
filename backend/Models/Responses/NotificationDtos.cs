@@ -134,6 +134,12 @@ public class UserNotificationTypeDto
     public IReadOnlyList<string> Channels { get; set; } = Array.Empty<string>();
     public bool Deduplicate { get; set; }
     public bool Digestible { get; set; }
+    public bool ShowToastByDefault { get; set; }
+    public string ToastPriority { get; set; } = "normal";
+    public bool PushEligible { get; set; }
+    public string PushPriority { get; set; } = "normal";
+    public int GroupingWindowSeconds { get; set; }
+    public bool RequiresAction { get; set; }
 }
 
 public class UserNotificationBulkActionResultDto

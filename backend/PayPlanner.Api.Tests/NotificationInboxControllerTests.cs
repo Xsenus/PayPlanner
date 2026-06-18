@@ -33,6 +33,20 @@ public class NotificationInboxControllerTests
         Assert.Equal("Задачи", approval.DomainLabel);
         Assert.True(approval.Deduplicate);
         Assert.False(approval.Digestible);
+        Assert.True(approval.ShowToastByDefault);
+        Assert.True(approval.PushEligible);
+        Assert.Equal("high", approval.ToastPriority);
+        Assert.Equal("high", approval.PushPriority);
+        Assert.Equal(60, approval.GroupingWindowSeconds);
+        Assert.True(approval.RequiresAction);
+
+        var taskChanged = Assert.Single(types, item => item.Key == UserNotificationTypes.TaskChanged);
+        Assert.True(taskChanged.ShowToastByDefault);
+        Assert.True(taskChanged.PushEligible);
+        Assert.Equal("normal", taskChanged.ToastPriority);
+        Assert.Equal("normal", taskChanged.PushPriority);
+        Assert.Equal(300, taskChanged.GroupingWindowSeconds);
+        Assert.False(taskChanged.RequiresAction);
 
         Assert.Contains(types, item => item.Key == UserNotificationTypes.PaymentAssigned && item.Domain == UserNotificationDomains.Payment && item.DomainLabel == "Платежи");
         Assert.Contains(types, item => item.Key == UserNotificationTypes.InvoiceChanged && item.Domain == UserNotificationDomains.Invoice && item.DomainLabel == "Счета");

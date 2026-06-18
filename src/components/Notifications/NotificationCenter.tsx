@@ -1121,6 +1121,22 @@ export function NotificationCenter({
                             <span>
                               <span className="block text-sm font-semibold text-slate-900">{item.label}</span>
                               <span className="mt-1 block text-xs leading-5 text-slate-500">{item.description}</span>
+                              <span className="mt-2 flex flex-wrap gap-1.5">
+                                {item.requiresAction ? (
+                                  <span className="inline-flex rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">Требует действия</span>
+                                ) : null}
+                                {item.showToastByDefault ? (
+                                  <span className="inline-flex rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">Toast: {item.toastPriority}</span>
+                                ) : null}
+                                {item.pushEligible ? (
+                                  <span className="inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">Push: {item.pushPriority}</span>
+                                ) : null}
+                                {item.groupingWindowSeconds > 0 ? (
+                                  <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
+                                    Группировка {item.groupingWindowSeconds} сек.
+                                  </span>
+                                ) : null}
+                              </span>
                               <span className="mt-2 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
                                 {item.priority === 'high' ? 'Высокий приоритет' : 'Обычный приоритет'}
                               </span>

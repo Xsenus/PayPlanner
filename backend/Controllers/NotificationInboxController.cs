@@ -537,40 +537,8 @@ public class NotificationInboxController : ControllerBase
             return query;
         }
 
-        return query.Where(item =>
-            item.Type == UserNotificationTypes.TaskAssigned
-            || item.Type == UserNotificationTypes.TaskReminder
-            || item.Type == UserNotificationTypes.TaskCancelled
-            || item.Type == UserNotificationTypes.TaskScheduleConflict
-            || item.Type == UserNotificationTypes.TaskApprovalRequested
-            || item.Type == UserNotificationTypes.TaskRevisionRequested
-            || item.Type == UserNotificationTypes.TaskApprovalOverdue
-            || item.Type == UserNotificationTypes.CalendarAccessChanged
-            || item.Type == UserNotificationTypes.CaseInactivityControl
-            || item.Type == UserNotificationTypes.CaseAccessRequested
-            || item.Type == UserNotificationTypes.CaseCourtEvent
-            || item.Type == UserNotificationTypes.CourtHearing
-            || item.Type == UserNotificationTypes.CourtStatusChanged
-            || item.Type == UserNotificationTypes.CourtDecisionPublished
-            || item.Type == UserNotificationTypes.CourtSyncFailed
-            || item.Type == UserNotificationTypes.CaseProceduralDeadline
-            || item.Type == UserNotificationTypes.CaseInactivityReminder
-            || item.Type == UserNotificationTypes.NoteMention
-            || item.Type == UserNotificationTypes.NoteAssigned
-            || item.Type == UserNotificationTypes.NoteReminder
-            || item.Type == UserNotificationTypes.NoteImportantChanged
-            || item.Type == UserNotificationTypes.PaymentAssigned
-            || item.Type == UserNotificationTypes.PaymentChanged
-            || item.Type == UserNotificationTypes.InvoiceCreated
-            || item.Type == UserNotificationTypes.InvoiceChanged
-            || item.Type == UserNotificationTypes.ActCreated
-            || item.Type == UserNotificationTypes.ActChanged
-            || item.Type == UserNotificationTypes.ContractCreated
-            || item.Type == UserNotificationTypes.ContractChanged
-            || item.Type == UserNotificationTypes.ContractExpiring
-            || item.Type == UserNotificationTypes.PaymentAdvanceReviewRequired
-            || item.Type == UserNotificationTypes.PaymentAdvanceReviewEscalation
-            || item.Type == UserNotificationTypes.SystemAdminWarning);
+        var requiresActionTypes = UserNotificationTypes.RequiresActionTypes;
+        return query.Where(item => requiresActionTypes.Contains(item.Type));
     }
 
     private static string? NormalizeNotificationDomain(string? domain)
@@ -836,7 +804,13 @@ public class NotificationInboxController : ControllerBase
             DomainLabel = item.DomainLabel,
             Channels = item.Channels,
             Deduplicate = item.Deduplicate,
-            Digestible = item.Digestible
+            Digestible = item.Digestible,
+            ShowToastByDefault = item.ShowToastByDefault,
+            ToastPriority = item.ToastPriority,
+            PushEligible = item.PushEligible,
+            PushPriority = item.PushPriority,
+            GroupingWindowSeconds = item.GroupingWindowSeconds,
+            RequiresAction = item.RequiresAction
         };
 
     private sealed record NotificationTargetVisibility(
