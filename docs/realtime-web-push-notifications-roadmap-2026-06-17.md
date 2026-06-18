@@ -35,6 +35,12 @@
 - `[decision]` требуется решение пользователя или бизнеса.
 - `[acceptance]` требуется ручная приемка на реальных данных или окружении заказчика.
 
+## Текущая граница готовности
+
+- [x] Репозиторная и локально проверяемая часть закрыта: backend/frontend логика, Web Push, realtime-toast, настройки каналов, права доступа, диагностика, CI-gates, release notes, документация, локальная БД и browser smoke покрыты проверками в соответствующих milestone.
+- [x] Перед push подготовлен обязательный post-deploy gate: GitHub Actions после деплоя должен проверить публичный API, service worker и WebSocket `101 Switching Protocols` на `/hubs/notifications` и `/hubs/notes`; без `PAYPLANNER_PRODUCTION_SMOKE_TOKEN` деплой должен падать, а не пропускать realtime-проверку.
+- [acceptance] До разрешения на push нельзя закрыть production acceptance: нужно дождаться GitHub Actions, проверить VPS/nginx, health/revision/journal и подтвердить сценарии с реальными пользователями.
+
 ## Основные решения
 
 - [x] Определить название пользовательского канала.
@@ -785,7 +791,7 @@
   - Проверено 18.06.2026: authenticated visual smoke прошел в Edge/Chromium для desktop, tablet и mobile по маршрутам календаря, задач, согласований, календаря задач, платежей и счетов; все 18 проверок завершились `ok`, screenshots сохранены в `.codex-build/browser-smoke/screenshots`.
   - Проверено 18.06.2026: встроенный браузер Codex открыл локальную CRM, публичная страница логина содержит Email, пароль и кнопку входа; service worker `payplanner-push-worker.js` проверен через HTTP, статус 200 и push listener на месте.
 
-- [~] Production acceptance.
+- [acceptance] Production acceptance.
   - Пользователь Аня ставит задачу пользователю Б.
   - Б получает realtime-toast при открытой CRM.
   - Б получает Web Push при закрытой вкладке.
