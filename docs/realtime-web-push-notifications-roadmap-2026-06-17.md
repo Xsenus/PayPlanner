@@ -499,10 +499,12 @@
   - Проверено 18.06.2026: в production-коде прямое создание `UserNotification` осталось только внутри `NotificationService`; события дел и контроля авансов проходят через общий pipeline realtime/Web Push.
   - Проверено 18.06.2026: `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --filter "FullyQualifiedName~NotificationServiceTests|FullyQualifiedName~PaymentsControllerTests"`, `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --filter "FullyQualifiedName~SystemJobsControllerTests|FullyQualifiedName~CasesV2ControllerTests"`, полный `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj`, `npm run lint`, `npm run build`, `git diff --check`, UTF-8 для измененных файлов, локальный запуск backend на временной SQLite-БД с `GET /api/health`.
 
-- [ ] Добавить outbox для доставки.
+- [x] Добавить outbox для доставки.
   - Не терять push/email/telegram, если внешний канал временно недоступен.
   - Разделить сохранение уведомления и доставку.
   - DoD: сбой push-провайдера не ломает сохранение бизнес-операции.
+  - Проверено 18.06.2026: Web Push delivery теперь сохраняется в `NotificationDeliveries` со статусом `pending` до вызова внешнего push-провайдера. Email/Telegram уже сохраняли pending-запись до отправки через общий `SendAsync`.
+  - Проверено 18.06.2026: `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --filter "FullyQualifiedName~WebPushNotificationServiceTests"`, полный `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj`, `npm run lint`, `npm run build`, `git diff --check`, JSON/UTF-8 для release/roadmap/WebPush-файлов, локальный запуск backend на временной SQLite-БД с `GET /api/health`.
 
 - [ ] Добавить retry worker для Web Push.
   - Использовать существующий `NotificationRetrySchedulerService` или расширить его.

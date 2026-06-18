@@ -107,6 +107,34 @@ public class WebPushNotificationServiceTests
         Assert.Equal(NotificationDeliveryStatus.Skipped, delivery.Status);
     }
 
+    [Fact]
+    public async Task SendUserNotificationAsync_PersistsPendingOutboxBeforeCallingPushProvider()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserWithSubscriptionAsync(db, "outbox-push@example.com");
+        var notification = CreateNotification(user.Id, new UserNotification
+        {
+            Type = UserNotificationTypes.TaskAssigned,
+            EventKey = "task:88:assigned",
+            Title = "Новая задача",
+            BodyPreview = "Проверьте задачу.",
+            Tone = "blue",
+            ObjectType = "task",
+            ObjectId = 88,
+        });
+        db.UserNotifications.Add(notification);
+        await db.SaveChangesAsync();
+
+        var service = new FailingWebPushNotificationService(db, notification.EventKey);
+
+        await service.SendUserNotificationAsync(notification);
+
+        Assert.True(service.PendingDeliveryWasPersistedBeforeSend);
+        var delivery = await db.NotificationDeliveries.SingleAsync();
+        Assert.Equal(NotificationDeliveryStatus.Failed, delivery.Status);
+        Assert.Contains("Simulated push provider failure", delivery.Error, StringComparison.Ordinal);
+    }
+
     private static WebPushNotificationService CreateService(PaymentContext db)
     {
         var configuration = new ConfigurationBuilder()
@@ -186,5 +214,50 @@ public class WebPushNotificationServiceTests
         var db = new PaymentContext(options);
         await db.Database.EnsureCreatedAsync();
         return db;
+    }
+
+    private sealed class FailingWebPushNotificationService : WebPushNotificationService
+    {
+        private readonly PaymentContext _db;
+        private readonly string _eventKey;
+
+        public FailingWebPushNotificationService(PaymentContext db, string eventKey)
+            : base(
+                db,
+                new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["WebPush:Enabled"] = "true",
+                        ["WebPush:PublicKey"] = "public-key",
+                        ["WebPush:PrivateKey"] = "private-key",
+                        ["WebPush:Subject"] = "mailto:test@example.com",
+                    })
+                    .Build(),
+                NullLogger<WebPushNotificationService>.Instance)
+        {
+            _db = db;
+            _eventKey = eventKey;
+        }
+
+        public bool PendingDeliveryWasPersistedBeforeSend { get; private set; }
+
+        protected override async Task SendSubscriptionAsync(
+            UserPushSubscription subscription,
+            string payload,
+            string subject,
+            string publicKey,
+            string privateKey,
+            CancellationToken cancellationToken)
+        {
+            PendingDeliveryWasPersistedBeforeSend = await _db.NotificationDeliveries
+                .AsNoTracking()
+                .AnyAsync(item =>
+                    item.EventKey == _eventKey
+                    && item.Channel == NotificationChannels.WebPush
+                    && item.Status == NotificationDeliveryStatus.Pending,
+                    cancellationToken);
+
+            throw new InvalidOperationException("Simulated push provider failure");
+        }
     }
 }

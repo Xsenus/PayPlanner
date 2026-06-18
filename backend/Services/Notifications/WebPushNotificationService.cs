@@ -21,7 +21,7 @@ public interface IWebPushNotificationService
     Task SendUserNotificationAsync(UserNotification notification, CancellationToken cancellationToken = default);
 }
 
-public sealed class WebPushNotificationService : IWebPushNotificationService
+public class WebPushNotificationService : IWebPushNotificationService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private const string FinancialPushTitle = "Финансовое уведомление PayPlanner";
@@ -81,6 +81,7 @@ public sealed class WebPushNotificationService : IWebPushNotificationService
         var pushTitle = ResolvePushTitle(notification);
         var pushBodyPreview = ResolvePushBodyPreview(notification);
         var payload = BuildPayload(notification, pushTitle, pushBodyPreview);
+        var pendingDeliveries = new List<(NotificationDelivery Delivery, UserPushSubscription Subscription)>();
         foreach (var subscription in subscriptions)
         {
             if (await HasCompletedWebPushDeliveryAsync(notification.EventKey, subscription.Endpoint, cancellationToken))
@@ -101,7 +102,18 @@ public sealed class WebPushNotificationService : IWebPushNotificationService
                 CreatedAt = DateTime.UtcNow,
             };
             _context.NotificationDeliveries.Add(delivery);
+            pendingDeliveries.Add((delivery, subscription));
+        }
 
+        if (pendingDeliveries.Count == 0)
+        {
+            return;
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+
+        foreach (var (delivery, subscription) in pendingDeliveries)
+        {
             if (!config.Ready)
             {
                 delivery.Status = NotificationDeliveryStatus.Skipped;
@@ -111,7 +123,7 @@ public sealed class WebPushNotificationService : IWebPushNotificationService
 
             try
             {
-                await SendSubscriptionAsync(subscription, payload, config, cancellationToken);
+                await SendSubscriptionAsync(subscription, payload, config.Subject, config.PublicKey, config.PrivateKey, cancellationToken);
                 delivery.Status = NotificationDeliveryStatus.Sent;
                 delivery.SentAt = DateTime.UtcNow;
                 subscription.LastSeenAt = DateTime.UtcNow;
@@ -145,14 +157,16 @@ public sealed class WebPushNotificationService : IWebPushNotificationService
         await _context.SaveChangesAsync(cancellationToken);
     }
 
-    private async Task SendSubscriptionAsync(
+    protected virtual async Task SendSubscriptionAsync(
         UserPushSubscription subscription,
         string payload,
-        VapidConfig config,
+        string subject,
+        string publicKey,
+        string privateKey,
         CancellationToken cancellationToken)
     {
         var pushSubscription = new PushSubscription(subscription.Endpoint, subscription.P256dh, subscription.Auth);
-        var vapidDetails = new VapidDetails(config.Subject, config.PublicKey, config.PrivateKey);
+        var vapidDetails = new VapidDetails(subject, publicKey, privateKey);
         using var client = new WebPushClient();
         await client.SendNotificationAsync(pushSubscription, payload, vapidDetails, cancellationToken);
     }
