@@ -611,6 +611,55 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyTaskReminderAsync_DoesNotAttachDetachedTaskGraphWhenCreatingInAppNotification()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "detached-reminder-assignee@example.com");
+        var dueAt = DateTime.UtcNow.AddMinutes(-5);
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Дело клиента",
+            Title = "Напомнить по отсоединенной задаче",
+            AssigneeUserId = user.Id,
+            AssigneeName = user.FullName,
+            DueAt = dueAt,
+            RemindersJson = "[\"atDue\"]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "new",
+            Participants =
+            [
+                new TaskJournalParticipant
+                {
+                    UserId = user.Id,
+                    User = user,
+                    Role = "assignee",
+                    DisplayName = user.FullName,
+                    Email = user.Email
+                }
+            ]
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var detachedTask = await db.TaskJournalItems
+            .AsNoTracking()
+            .Include(item => item.Participants)
+                .ThenInclude(participant => participant.User)
+            .SingleAsync(item => item.Id == task.Id);
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+
+        var deliveries = await service.NotifyTaskReminderAsync(detachedTask, "atDue", DateTime.UtcNow);
+
+        Assert.Empty(deliveries);
+        Assert.Equal(1, await db.Users.CountAsync(item => item.Id == user.Id));
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(user.Id, notification.RecipientUserId);
+        Assert.Equal(task.Id, notification.TaskJournalItemId);
+        Assert.Equal(UserNotificationTypes.TaskReminder, notification.Type);
+    }
+
+    [Fact]
     public async Task NotifyTaskReminderAsync_DeduplicatesDailyOverdueWebPushByRecipientLocalDate()
     {
         await using var db = await CreateContextAsync();

@@ -2993,7 +2993,6 @@ public sealed class NotificationService : INotificationService
             ObjectType = notificationEvent.ObjectType,
             ObjectId = notificationEvent.ObjectId,
             TaskJournalItemId = notificationEvent.TaskJournalItemId,
-            TaskJournalItem = notificationEvent.Task,
             MetadataJson = notificationEvent.Metadata is null ? "{}" : JsonSerializer.Serialize(notificationEvent.Metadata, JsonOptions),
             CreatedAt = DateTime.UtcNow
         };

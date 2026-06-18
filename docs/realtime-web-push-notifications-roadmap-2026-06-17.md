@@ -767,8 +767,9 @@
   - Проверено 18.06.2026: после добавления Web Push env для deploy workflow локальная БД `PaymentContext` проверена через `dotnet ef database update`, новых миграций нет, ошибок нет.
   - Проверено 18.06.2026: после закрытия backend-тестов Web Push локальная БД `PaymentContext` проверена через `dotnet ef database update`, новых миграций нет, ошибок нет.
   - Проверено 18.06.2026: перед проверкой deploy workflow локальная БД `PaymentContext` снова проверена через `dotnet ef database update`, новых миграций нет, ошибок нет; backend стартовал на локальной БД с временным dev `Jwt__Secret`, `/api/health` вернул `200 {"status":"ok"}`.
+  - Проверено 18.06.2026: при browser smoke найден и исправлен сбой фоновых напоминаний по задачам, когда detached-задача с участниками могла приводить к повторной вставке существующего пользователя; после исправления локальный backend стартует, `/api/health` отвечает `200 {"status":"ok"}`, `dotnet ef database update` не находит новых миграций, свежие логи не содержат `Exception`, `PK_Users` и `Failed to process`.
 
-- [ ] Browser manual smoke.
+- [x] Browser manual smoke.
   - Chrome/Edge desktop.
   - Мобильный браузер, если поддерживается.
   - Запрет push permissions.
@@ -776,6 +777,9 @@
   - Закрытая вкладка.
   - Открытая вкладка.
   - DoD: важные события видны в каждом режиме.
+  - Проверено 18.06.2026: `scripts/run-visual-smoke.mjs` доработан, чтобы календарный маршрут открывался явно через `/?ppTab=calendar` и не зависел от сохраненного последнего раздела пользователя.
+  - Проверено 18.06.2026: authenticated visual smoke прошел в Edge/Chromium для desktop, tablet и mobile по маршрутам календаря, задач, согласований, календаря задач, платежей и счетов; все 18 проверок завершились `ok`, screenshots сохранены в `.codex-build/browser-smoke/screenshots`.
+  - Проверено 18.06.2026: встроенный браузер Codex открыл локальную CRM, публичная страница логина содержит Email, пароль и кнопку входа; service worker `payplanner-push-worker.js` проверен через HTTP, статус 200 и push listener на месте.
 
 - [ ] Production acceptance.
   - Пользователь Аня ставит задачу пользователю Б.

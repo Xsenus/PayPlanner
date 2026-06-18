@@ -21,7 +21,7 @@ export const PUBLIC_ROUTES = [
 ];
 
 export const AUTHENTICATED_ROUTES = [
-  { name: 'calendar', path: '/' },
+  { name: 'calendar', path: '/?ppTab=calendar' },
   { name: 'tasks', path: '/tasks' },
   { name: 'tasks-approvals', path: '/tasks/approvals' },
   { name: 'tasks-calendar', path: '/tasks/calendar' },
@@ -216,6 +216,14 @@ async function checkPage({ page, frontendUrl, route, viewportName, timeoutMs, ar
   page.on('pageerror', (error) => {
     pageErrors.push(error.message);
   });
+
+  await page.evaluate(() => {
+    try {
+      window.localStorage.removeItem('pp.last_active_tab');
+    } catch {
+      // The first smoke page can still be about:blank with an opaque origin.
+    }
+  }).catch(() => undefined);
 
   await page.goto(buildUrl(frontendUrl, route.path), { waitUntil: 'domcontentloaded', timeout: timeoutMs });
   await page.waitForLoadState('networkidle', { timeout: timeoutMs }).catch(() => undefined);

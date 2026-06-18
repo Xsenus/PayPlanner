@@ -24,6 +24,7 @@ describe('run-visual-smoke configuration', () => {
   it('resolves public and authenticated default routes', () => {
     expect(resolveRoutes('', false)).toEqual(PUBLIC_ROUTES);
     expect(resolveRoutes('', true)).toEqual(AUTHENTICATED_ROUTES);
+    expect(AUTHENTICATED_ROUTES[0]).toEqual({ name: 'calendar', path: '/?ppTab=calendar' });
   });
 
   it('normalizes custom routes', () => {
