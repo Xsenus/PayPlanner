@@ -691,6 +691,7 @@
   - Проверено 18.06.2026: добавлены backend-проверки deploy workflow, которые фиксируют порядок CI/CD-gates до сборки артефактов и деплоя на VPS: `dotnet restore`, `dotnet format`, `dotnet list`, backend-тесты, `npm ci`, lint, typecheck, date audit, `npm audit`, `test:ci`, `test:integration`, `test:legal-flags:strict`, backend publish, frontend build, архив, scp и ssh deploy.
   - Проверено 18.06.2026: deploy workflow дополнительно контролируется на передачу `VITE_API_URL`, публикацию `dist` в frontend-каталог VPS, наличие `public/payplanner-push-worker.js` для service worker и публичные health-check URL после деплоя.
   - Проверено 18.06.2026 локально: `LegalFeatureFlagCiGateTests` прошел 6 тестов; `dotnet build backend/PayPlanner.Api.csproj --no-restore` прошел без предупреждений; `npm run lint` прошел без ошибок; `npx tsc -p tsconfig.app.json --noEmit` прошел; `npm run audit:dates:test` прошел; `npm audit --audit-level=moderate` нашел 0 vulnerabilities; `npm run test:guard` прошел 43 теста; `npx vitest run src/components/Notes/StickyNotes.test.tsx --no-file-parallelism` прошел 59 тестов; `npm run test:unit` прошел 687 тестов; `npm run test:integration` прошел 248 тестов; `npm run build` прошел; локальный API на `http://localhost:5080/api/health` ответил `200 {"status":"ok"}`; `npm run test:legal-flags:strict` прошел при поднятом API.
+  - Проверено 18.06.2026: добавлен `scripts/run-notification-production-readiness.mjs` для post-deploy проверки публичного API health, service worker `payplanner-push-worker.js` и WebSocket `101 Switching Protocols` на `/hubs/notifications` и `/hubs/notes` с короткоживущим JWT; команда описана в `docs/deploy-runbook.md`.
   - Acceptance остается до push: дождаться реального GitHub Actions run, проверить, что workflow зеленый, VPS revision обновлен, backend health и frontend URL отвечают после деплоя.
 
 ## Milestone 13. Тестирование
@@ -793,6 +794,7 @@
   - Создается платеж на контроль.
   - Ответственный/руководитель получает уведомление.
   - Проверено 18.06.2026 локально: добавлен backend acceptance-тест `ProductionAcceptanceCriticalEvents_CreateRealtimeAndWebPushNotifications`, который проверяет создание in-app, realtime-toast и Web Push уведомлений для ключевых событий: новая задача, изменение срока задачи, упоминание в заметке, назначение заметки и платеж на контроле.
+  - Проверено 18.06.2026: для production acceptance подготовлен автоматический readiness-check `scripts/run-notification-production-readiness.mjs`, который после деплоя проверяет публичный API, service worker и оба SignalR WebSocket hub; пользовательский сценарий с реальными сотрудниками остается ручной приемкой.
   - [acceptance] Остается после пуша и деплоя подтвердить на production с реальными пользователями: открытая CRM получает realtime-toast, закрытая вкладка получает Web Push, заказчик видит восстановленную моментальную связь.
   - DoD: заказчик подтверждает, что моментная связь восстановлена.
 

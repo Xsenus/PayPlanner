@@ -102,6 +102,17 @@ Production acceptance checks:
 3. Open the Notes section and confirm that `/hubs/notes` also connects with WebSocket transport.
 4. Create a test notification or note change from another session and confirm that it appears without manual refresh.
 
+Automated readiness check after deploy:
+
+```bash
+PAYPLANNER_PRODUCTION_SMOKE_TOKEN="<short-lived jwt>" node scripts/run-notification-production-readiness.mjs \
+  --api-url=https://api.elitpravo.com \
+  --frontend-url=https://crm.elitpravo.com \
+  --require-websocket=true
+```
+
+The smoke command checks public API health, `payplanner-push-worker.js`, and WebSocket `101 Switching Protocols` for `/hubs/notifications` and `/hubs/notes`. Use a short-lived JWT for a real CRM user and revoke or let it expire after the check.
+
 ## Required backend configuration
 
 Runtime secrets must come from environment variables, systemd environment files, user secrets, or a secret store. Do not commit real secret values to `appsettings*.json`.
