@@ -90,10 +90,28 @@ const DOMAIN_FILTERS: Array<{ value: NotificationDomainFilter; label: string; Ic
 
 const CHANNEL_OPTIONS: Array<{ value: UserNotificationPreferenceChannel; label: string; Icon: LucideIcon }> = [
   { value: 'inApp', label: 'Центр', Icon: Monitor },
+  { value: 'toast', label: 'Всплывающие', Icon: Bell },
+  { value: 'webPush', label: 'Push', Icon: Smartphone },
   { value: 'email', label: 'Email', Icon: Mail },
   { value: 'telegram', label: 'Telegram', Icon: Send },
-  { value: 'webPush', label: 'Push', Icon: Smartphone },
 ];
+
+const TYPE_DOMAIN_ORDER = ['task', 'calendar', 'note', 'payment', 'invoice', 'act', 'contract', 'case', 'court', 'system'];
+
+function groupNotificationTypesByDomain(types: UserNotificationTypeDto[]) {
+  const order = new Map(TYPE_DOMAIN_ORDER.map((key, index) => [key, index]));
+  const groups = new Map<string, { key: string; label: string; items: UserNotificationTypeDto[] }>();
+
+  for (const item of types) {
+    const key = item.domain || 'system';
+    const group = groups.get(key) ?? { key, label: item.domainLabel || 'Система', items: [] };
+    group.items.push(item);
+    groups.set(key, group);
+  }
+
+  return Array.from(groups.values())
+    .sort((left, right) => (order.get(left.key) ?? 999) - (order.get(right.key) ?? 999));
+}
 
 const EMPTY_PAGE: PagedResult<UserNotificationDto> = {
   items: [],
@@ -180,6 +198,7 @@ export function NotificationCenter({
     [itemsPage.items],
   );
   const knownTypeKeys = useMemo(() => types.map((item) => item.key), [types]);
+  const typeGroups = useMemo(() => groupNotificationTypesByDomain(types), [types]);
   const enabledTypesCount = useMemo(
     () => types.filter((item) => isUserNotificationTypeEnabled(preferences, item.key)).length,
     [preferences, types],
@@ -958,69 +977,81 @@ export function NotificationCenter({
               Загружаем настройки типов...
             </div>
           ) : (
-            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {types.map((item) => {
-                const isEnabled = isUserNotificationTypeEnabled(preferences, item.key);
-                const availableChannels = CHANNEL_OPTIONS.filter((channel) => item.channels.includes(channel.value));
-                return (
-                  <div
-                    key={item.key}
-                    className={`min-h-32 rounded-lg border p-3 transition ${
-                      isEnabled
-                        ? 'border-blue-200 bg-blue-50/60 hover:bg-blue-50'
-                        : 'border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100'
-                    }`}
-                  >
-                    <label className="flex cursor-pointer gap-3">
-                      <input
-                        type="checkbox"
-                        checked={isEnabled}
-                        onChange={(event) => {
-                          setPreferences((previous) => toggleUserNotificationTypePreference(previous, item.key, event.target.checked));
-                        }}
-                        className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      <span>
-                        <span className="block text-sm font-semibold text-slate-900">{item.label}</span>
-                        <span className="mt-1 block text-xs leading-5 text-slate-500">{item.description}</span>
-                        <span className="mt-2 inline-flex rounded-full bg-white px-2 py-0.5 text-xs font-medium text-slate-500">
-                          {item.priority === 'high' ? 'Высокий приоритет' : 'Обычный приоритет'}
-                        </span>
-                      </span>
-                    </label>
-                    {availableChannels.length > 0 ? (
-                      <div className="mt-3 grid grid-cols-3 gap-2">
-                        {availableChannels.map(({ value, label, Icon }) => {
-                          const channelEnabled = isUserNotificationChannelEnabled(preferences, item.key, value);
-                          return (
-                            <label
-                              key={value}
-                              className={`flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-lg border px-2 text-xs font-medium transition ${
-                                channelEnabled
-                                  ? 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
-                                  : 'border-slate-200 bg-slate-100 text-slate-400'
-                              } ${isEnabled ? '' : 'cursor-not-allowed opacity-60'}`}
-                              title={`Канал: ${label}`}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={channelEnabled}
-                                disabled={!isEnabled}
-                                onChange={(event) => {
-                                  setPreferences((previous) => toggleUserNotificationChannelPreference(previous, item.key, value, event.target.checked));
-                                }}
-                                className="sr-only"
-                              />
-                              <Icon className="h-3.5 w-3.5" />
-                              <span className="truncate">{label}</span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    ) : null}
+            <div className="mt-4 space-y-3">
+              {typeGroups.map((group) => (
+                <div key={group.key} className="rounded-lg border border-slate-200 bg-slate-50/70 p-3">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <h3 className="text-sm font-semibold text-slate-900">{group.label}</h3>
+                    <span className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-slate-500">
+                      {group.items.length}
+                    </span>
                   </div>
-                );
-              })}
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    {group.items.map((item) => {
+                      const isEnabled = isUserNotificationTypeEnabled(preferences, item.key);
+                      const availableChannels = CHANNEL_OPTIONS.filter((channel) => item.channels.includes(channel.value));
+                      return (
+                        <div
+                          key={item.key}
+                          className={`min-h-32 rounded-lg border p-3 transition ${
+                            isEnabled
+                              ? 'border-blue-200 bg-white hover:bg-blue-50/60'
+                              : 'border-slate-200 bg-white/70 text-slate-500 hover:bg-slate-100'
+                          }`}
+                        >
+                          <label className="flex cursor-pointer gap-3">
+                            <input
+                              type="checkbox"
+                              checked={isEnabled}
+                              onChange={(event) => {
+                                setPreferences((previous) => toggleUserNotificationTypePreference(previous, item.key, event.target.checked));
+                              }}
+                              className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            <span>
+                              <span className="block text-sm font-semibold text-slate-900">{item.label}</span>
+                              <span className="mt-1 block text-xs leading-5 text-slate-500">{item.description}</span>
+                              <span className="mt-2 inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
+                                {item.priority === 'high' ? 'Высокий приоритет' : 'Обычный приоритет'}
+                              </span>
+                            </span>
+                          </label>
+                          {availableChannels.length > 0 ? (
+                            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                              {availableChannels.map(({ value, label, Icon }) => {
+                                const channelEnabled = isUserNotificationChannelEnabled(preferences, item.key, value);
+                                return (
+                                  <label
+                                    key={value}
+                                    className={`flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-lg border px-2 text-xs font-medium transition ${
+                                      channelEnabled
+                                        ? 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                                        : 'border-slate-200 bg-slate-100 text-slate-400'
+                                    } ${isEnabled ? '' : 'cursor-not-allowed opacity-60'}`}
+                                    title={`Канал: ${label}`}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={channelEnabled}
+                                      disabled={!isEnabled}
+                                      onChange={(event) => {
+                                        setPreferences((previous) => toggleUserNotificationChannelPreference(previous, item.key, value, event.target.checked));
+                                      }}
+                                      className="sr-only"
+                                    />
+                                    <Icon className="h-3.5 w-3.5" />
+                                    <span className="truncate">{label}</span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </section>

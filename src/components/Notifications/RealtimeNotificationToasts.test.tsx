@@ -120,6 +120,41 @@ describe('RealtimeNotificationToasts', () => {
     expect(openTask).toHaveBeenCalledWith(123);
   });
 
+  it('updates realtime state without toast when toast channel is disabled', async () => {
+    const changedEvents: UserNotificationsChangedDetail[] = [];
+    const listener = (event: Event) => {
+      changedEvents.push((event as CustomEvent<UserNotificationsChangedDetail>).detail);
+    };
+    window.addEventListener(USER_NOTIFICATIONS_EVENT, listener);
+    render(<RealtimeNotificationToasts userId={5} onOpenTask={vi.fn()} />);
+
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.({
+        id: 45,
+        recipientUserId: 5,
+        type: 'taskAssigned',
+        eventKey: 'task:126:assigned',
+        title: 'Новая задача без всплывашки',
+        bodyPreview: 'Центр должен обновиться, toast нет.',
+        tone: 'blue',
+        toastEnabled: false,
+        objectType: 'task',
+        objectId: 126,
+        taskJournalItemId: 126,
+        createdAt: '2026-05-25T10:00:00Z',
+      });
+    });
+
+    expect(toastMock.showToast).not.toHaveBeenCalled();
+    expect(changedEvents).toContainEqual(expect.objectContaining({
+      notificationId: 45,
+      unreadDelta: 1,
+    }));
+    window.removeEventListener(USER_NOTIFICATIONS_EVENT, listener);
+  });
+
   it('shows task change toast and opens the task from action', async () => {
     const openTask = vi.fn();
     render(<RealtimeNotificationToasts userId={5} onOpenTask={openTask} />);

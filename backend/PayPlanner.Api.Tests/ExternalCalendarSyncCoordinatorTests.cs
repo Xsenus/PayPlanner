@@ -357,7 +357,7 @@ public sealed class ExternalCalendarSyncCoordinatorTests
     {
         public List<UserNotification> Notifications { get; } = [];
 
-        public Task PublishUserNotificationAsync(UserNotification notification, CancellationToken cancellationToken = default)
+        public Task PublishUserNotificationAsync(UserNotification notification, bool toastEnabled = true, CancellationToken cancellationToken = default)
         {
             Notifications.Add(notification);
             return Task.CompletedTask;

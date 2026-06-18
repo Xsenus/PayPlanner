@@ -21,24 +21,99 @@ public sealed record NotificationChannelDefinition(
 public static class NotificationChannels
 {
     public const string InApp = "inApp";
+    public const string Toast = "toast";
     public const string Email = "email";
     public const string Telegram = "telegram";
     public const string WebPush = "webPush";
     public const string Sms = "sms";
     public const string Max = "max";
-    public static readonly IReadOnlyList<string> All = [InApp, Email, Telegram, WebPush];
+    public static readonly IReadOnlyList<string> All = [InApp, Toast, WebPush, Email, Telegram];
     public static readonly IReadOnlyList<string> External = [Email, Telegram, WebPush];
     public static readonly IReadOnlyList<string> Future = [Sms, Max];
-    public static readonly IReadOnlyList<string> Known = [InApp, Email, Telegram, WebPush, Sms, Max];
+    public static readonly IReadOnlyList<string> Known = [InApp, Toast, WebPush, Email, Telegram, Sms, Max];
     public static readonly IReadOnlyList<NotificationChannelDefinition> Definitions =
     [
         new(InApp, "Центр уведомлений", "Внутренние уведомления в CRM, счетчик и центр уведомлений.", "active", true, true, true, false, false, false),
+        new(Toast, "Всплывающие уведомления", "Моментальные уведомления поверх интерфейса CRM при открытой вкладке.", "active", true, false, true, false, false, false),
+        new(WebPush, "Web push", "Браузерные push-уведомления для важных событий, когда вкладка CRM закрыта или не на экране.", "active", true, true, true, true, false, false),
         new(Email, "Email", "Письма через настроенных SMTP-отправителей.", "active", true, true, true, true, true, false),
         new(Telegram, "Telegram", "Сообщения через подключенных Telegram-ботов и привязанные чаты пользователей.", "active", true, true, true, true, true, false),
-        new(WebPush, "Web push", "Браузерные push-уведомления для важных событий, когда вкладка CRM закрыта или не на экране.", "active", true, true, true, true, false, false),
         new(Sms, "SMS", "SMS-уведомления. Адаптер подготовлен в модели каналов, провайдер будет выбран отдельно.", "planned", false, false, false, true, true, true),
         new(Max, "MAX", "Уведомления в мессенджер MAX. Канал зарезервирован как будущая интеграция без привязки к конкретному API.", "planned", false, false, false, true, true, true)
     ];
+}
+
+public static class UserNotificationDomains
+{
+    public const string Task = "task";
+    public const string Calendar = "calendar";
+    public const string Note = "note";
+    public const string Payment = "payment";
+    public const string Invoice = "invoice";
+    public const string Act = "act";
+    public const string Contract = "contract";
+    public const string Case = "case";
+    public const string Court = "court";
+    public const string System = "system";
+
+    public static string Resolve(string? type)
+        => type switch
+        {
+            UserNotificationTypes.TaskAssigned
+                or UserNotificationTypes.TaskReminder
+                or UserNotificationTypes.TaskChanged
+                or UserNotificationTypes.TaskComment
+                or UserNotificationTypes.TaskCompleted
+                or UserNotificationTypes.TaskCancelled
+                or UserNotificationTypes.TaskScheduleConflict
+                or UserNotificationTypes.TaskApprovalRequested
+                or UserNotificationTypes.TaskApproved
+                or UserNotificationTypes.TaskRevisionRequested
+                or UserNotificationTypes.TaskApprovalOverdue => Task,
+            UserNotificationTypes.CalendarAccessChanged => Calendar,
+            UserNotificationTypes.NoteMention
+                or UserNotificationTypes.NoteAssigned
+                or UserNotificationTypes.NoteReminder
+                or UserNotificationTypes.NoteImportantChanged => Note,
+            UserNotificationTypes.PaymentAssigned
+                or UserNotificationTypes.PaymentChanged
+                or UserNotificationTypes.PaymentAdvanceReviewRequired
+                or UserNotificationTypes.PaymentAdvanceReviewEscalation => Payment,
+            UserNotificationTypes.InvoiceCreated
+                or UserNotificationTypes.InvoiceChanged => Invoice,
+            UserNotificationTypes.ActCreated
+                or UserNotificationTypes.ActChanged => Act,
+            UserNotificationTypes.ContractCreated
+                or UserNotificationTypes.ContractChanged
+                or UserNotificationTypes.ContractExpiring => Contract,
+            UserNotificationTypes.CaseInactivityControl
+                or UserNotificationTypes.CaseAccessRequested
+                or UserNotificationTypes.CaseAccessResolved
+                or UserNotificationTypes.CaseProceduralDeadline
+                or UserNotificationTypes.CaseDocument
+                or UserNotificationTypes.CaseInactivityReminder => Case,
+            UserNotificationTypes.CaseCourtEvent
+                or UserNotificationTypes.CourtHearing
+                or UserNotificationTypes.CourtStatusChanged
+                or UserNotificationTypes.CourtDecisionPublished
+                or UserNotificationTypes.CourtSyncFailed => Court,
+            _ => System
+        };
+
+    public static string Label(string? domain)
+        => domain switch
+        {
+            Task => "Задачи",
+            Calendar => "Календарь",
+            Note => "Заметки",
+            Payment => "Платежи",
+            Invoice => "Счета",
+            Act => "Акты",
+            Contract => "Договоры",
+            Case => "Дела",
+            Court => "Суды",
+            _ => "Система"
+        };
 }
 
 public static class NotificationDeliveryStatus
@@ -185,7 +260,11 @@ public sealed record UserNotificationTypeDefinition(
     string Priority,
     IReadOnlyList<string> Channels,
     bool Deduplicate,
-    bool Digestible);
+    bool Digestible)
+{
+    public string Domain => UserNotificationDomains.Resolve(Key);
+    public string DomainLabel => UserNotificationDomains.Label(Domain);
+}
 
 public static class UserNotificationPreferenceSettings
 {

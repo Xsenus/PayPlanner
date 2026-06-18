@@ -2956,7 +2956,8 @@ public sealed class NotificationService : INotificationService
         };
         _context.UserNotifications.Add(notification);
         await _context.SaveChangesAsync(cancellationToken);
-        await _realtimePublisher.PublishUserNotificationAsync(notification, cancellationToken);
+        var toastEnabled = await IsUserNotificationChannelEnabledAsync(recipientUserId, type, NotificationChannels.Toast, cancellationToken);
+        await _realtimePublisher.PublishUserNotificationAsync(notification, toastEnabled, cancellationToken);
 
         if (_webPushNotificationService is not null
             && await IsUserNotificationChannelEnabledAsync(recipientUserId, type, NotificationChannels.WebPush, cancellationToken))

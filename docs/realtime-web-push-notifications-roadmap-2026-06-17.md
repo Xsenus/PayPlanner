@@ -439,10 +439,14 @@
 
 Цель: пользователь сам управляет шумом, а администратор видит состояние каналов.
 
-- [ ] Расширить настройки типов уведомлений.
+- [x] Расширить настройки типов уведомлений.
   - Каналы: центр, realtime toast, Web Push, email, telegram.
   - Отдельные типы: задачи, календарь, заметки, платежи, счета, акты, договоры, дела, суды, система.
   - DoD: пользователь может выключить лишнее, не выключая важное.
+  - Проверено 18.06.2026: добавлен отдельный канал "Всплывающие" для realtime-toast без отключения центра уведомлений; типы сгруппированы по задачам, календарю, заметкам, платежам, счетам, актам, договорам, делам, судам и системе в личных и ролевых настройках.
+  - Проверено 18.06.2026: backend учитывает личные и ролевые настройки для признака показа toast, а SignalR-событие продолжает обновлять счетчики.
+  - Проверено 18.06.2026: `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --filter "FullyQualifiedName~NotificationServiceTests|FullyQualifiedName~NotificationInboxControllerTests"` и `npm test -- --run src/utils/userNotificationPreferences.test.ts src/components/Notifications/RealtimeNotificationToasts.test.tsx src/components/Notifications/NotificationCenter.test.tsx`.
+  - Проверено 18.06.2026: полный `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj`, `npm run lint`, `npm run build`, `git diff --check`, JSON/UTF-8 для `backend/AppReleases/releases.json`, локальный запуск backend на временной SQLite-БД с `GET /api/health`.
 
 - [ ] Добавить ролевые defaults.
   - Секретарь.

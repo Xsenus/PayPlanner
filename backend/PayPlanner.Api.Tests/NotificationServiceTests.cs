@@ -28,12 +28,13 @@ public class NotificationServiceTests
         var channels = await service.GetChannelsAsync();
 
         Assert.Contains(channels, item => item.Key == NotificationChannels.InApp && item.IsEnabled && item.IsSendable && !item.IsFuture);
+        Assert.Contains(channels, item => item.Key == NotificationChannels.Toast && item.IsEnabled && !item.IsSendable && item.SupportsUserPreferences && !item.IsFuture);
+        Assert.Contains(channels, item => item.Key == NotificationChannels.WebPush && item.IsEnabled && item.IsSendable && !item.RequiresProvider && !item.IsFuture);
         Assert.Contains(channels, item => item.Key == NotificationChannels.Email && item.IsEnabled && item.IsSendable && item.RequiresProvider);
         Assert.Contains(channels, item => item.Key == NotificationChannels.Telegram && item.IsEnabled && item.IsSendable && item.RequiresProvider);
-        Assert.Contains(channels, item => item.Key == NotificationChannels.WebPush && item.IsEnabled && item.IsSendable && !item.RequiresProvider && !item.IsFuture);
         Assert.Contains(channels, item => item.Key == NotificationChannels.Sms && !item.IsEnabled && !item.IsSendable && item.IsFuture);
         Assert.Contains(channels, item => item.Key == NotificationChannels.Max && !item.IsEnabled && !item.IsSendable && item.IsFuture);
-        Assert.Equal(new[] { NotificationChannels.InApp, NotificationChannels.Email, NotificationChannels.Telegram, NotificationChannels.WebPush }, NotificationChannels.All);
+        Assert.Equal(new[] { NotificationChannels.InApp, NotificationChannels.Toast, NotificationChannels.WebPush, NotificationChannels.Email, NotificationChannels.Telegram }, NotificationChannels.All);
         Assert.Equal(new[] { NotificationChannels.Sms, NotificationChannels.Max }, NotificationChannels.Future);
     }
 
@@ -1017,6 +1018,65 @@ public class NotificationServiceTests
 
         Assert.Empty(webPush.Notifications);
         Assert.Equal(UserNotificationTypes.TaskAssigned, (await db.UserNotifications.SingleAsync()).Type);
+    }
+
+    [Fact]
+    public async Task NotifyTaskAssignedAsync_PublishesRealtimeWithToastDisabledFlagWhenToastChannelDisabled()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db, "task-author-toast-disabled@example.com");
+        var assignee = new User
+        {
+            Email = "new-assignee-toast-disabled@example.com",
+            FullName = "Toast Disabled Assignee",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.Add(assignee);
+        await db.SaveChangesAsync();
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = assignee.Id,
+            Key = UserNotificationPreferenceSettings.SettingKey,
+            Value = JsonSerializer.Serialize(new
+            {
+                disabledChannels = new Dictionary<string, string[]>
+                {
+                    [UserNotificationTypes.TaskAssigned] = [NotificationChannels.Toast]
+                }
+            }),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Client case",
+            Title = "Prepare disabled toast response",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "new"
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService(), realtime);
+
+        await service.NotifyTaskAssignedAsync(task, author.FullName, author.Id);
+
+        Assert.Equal(UserNotificationTypes.TaskAssigned, (await db.UserNotifications.SingleAsync()).Type);
+        Assert.Single(realtime.Notifications);
+        Assert.False(Assert.Single(realtime.ToastEnabledValues));
     }
 
     [Fact]
@@ -4097,12 +4157,15 @@ public class NotificationServiceTests
     private sealed class RecordingRealtimeNotificationPublisher : IRealtimeNotificationPublisher
     {
         public List<UserNotification> Notifications { get; } = [];
+        public List<bool> ToastEnabledValues { get; } = [];
 
         public Task PublishUserNotificationAsync(
             UserNotification notification,
+            bool toastEnabled = true,
             CancellationToken cancellationToken = default)
         {
             Notifications.Add(notification);
+            ToastEnabledValues.Add(toastEnabled);
             return Task.CompletedTask;
         }
     }

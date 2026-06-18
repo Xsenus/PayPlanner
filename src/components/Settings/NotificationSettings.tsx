@@ -63,10 +63,28 @@ type SenderForm = {
 const DEFAULT_PURPOSES = ['manualTest'];
 const ROLE_CHANNEL_OPTIONS: Array<{ value: UserNotificationPreferenceChannel; label: string; Icon: typeof Monitor }> = [
   { value: 'inApp', label: 'Центр', Icon: Monitor },
+  { value: 'toast', label: 'Всплывающие', Icon: Bell },
+  { value: 'webPush', label: 'Push', Icon: Smartphone },
   { value: 'email', label: 'Email', Icon: Mail },
   { value: 'telegram', label: 'Telegram', Icon: Send },
-  { value: 'webPush', label: 'Push', Icon: Smartphone },
 ];
+
+const TYPE_DOMAIN_ORDER = ['task', 'calendar', 'note', 'payment', 'invoice', 'act', 'contract', 'case', 'court', 'system'];
+
+function groupNotificationTypesByDomain(types: UserNotificationTypeDto[]) {
+  const order = new Map(TYPE_DOMAIN_ORDER.map((key, index) => [key, index]));
+  const groups = new Map<string, { key: string; label: string; items: UserNotificationTypeDto[] }>();
+
+  for (const item of types) {
+    const key = item.domain || 'system';
+    const group = groups.get(key) ?? { key, label: item.domainLabel || 'Система', items: [] };
+    group.items.push(item);
+    groups.set(key, group);
+  }
+
+  return Array.from(groups.values())
+    .sort((left, right) => (order.get(left.key) ?? 999) - (order.get(right.key) ?? 999));
+}
 
 type SenderRoute =
   | { mode: 'list' }
@@ -369,6 +387,7 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
     [selectedTemplateKey, templates],
   );
   const knownNotificationTypeKeys = useMemo(() => notificationTypes.map((item) => item.key), [notificationTypes]);
+  const notificationTypeGroups = useMemo(() => groupNotificationTypesByDomain(notificationTypes), [notificationTypes]);
   const selectedRolePreference = useMemo(
     () => rolePreferences.find((item) => item.roleId === selectedRoleId) ?? rolePreferences[0] ?? null,
     [rolePreferences, selectedRoleId],
@@ -1049,63 +1068,75 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
                   ))}
                 </div>
 
-                <div className="grid gap-3 md:grid-cols-2">
-                  {notificationTypes.map((item) => {
-                    const isEnabled = isUserNotificationTypeEnabled(selectedRolePreferences, item.key);
-                    const availableChannels = ROLE_CHANNEL_OPTIONS.filter((channel) => item.channels.includes(channel.value));
-                    return (
-                      <div
-                        key={item.key}
-                        className={`rounded-xl border p-3 transition ${
-                          isEnabled ? 'border-blue-200 bg-blue-50/60' : 'border-gray-200 bg-gray-50 text-gray-500'
-                        }`}
-                      >
-                        <label className="flex cursor-pointer gap-3">
-                          <input
-                            type="checkbox"
-                            checked={isEnabled}
-                            disabled={!canEdit || !selectedRolePreference}
-                            onChange={(event) => {
-                              updateSelectedRolePreferences((current) => toggleUserNotificationTypePreference(current, item.key, event.target.checked));
-                            }}
-                            className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                          />
-                          <span>
-                            <span className="block text-sm font-semibold text-gray-900">{item.label}</span>
-                            <span className="mt-1 block text-xs leading-5 text-gray-500">{item.description}</span>
-                          </span>
-                        </label>
-                        <div className="mt-3 grid grid-cols-3 gap-2">
-                          {availableChannels.map(({ value, label, Icon }) => {
-                            const channelEnabled = isUserNotificationChannelEnabled(selectedRolePreferences, item.key, value);
-                            return (
-                              <label
-                                key={value}
-                                className={`flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-lg border px-2 text-xs font-semibold transition ${
-                                  channelEnabled
-                                    ? 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
-                                    : 'border-gray-200 bg-gray-100 text-gray-400'
-                                } ${isEnabled && canEdit ? '' : 'cursor-not-allowed opacity-60'}`}
-                                title={`Канал: ${label}`}
-                              >
+                <div className="space-y-3">
+                  {notificationTypeGroups.map((group) => (
+                    <div key={group.key} className="rounded-xl border border-gray-200 bg-gray-50/70 p-3">
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <h5 className="text-sm font-semibold text-gray-900">{group.label}</h5>
+                        <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-gray-500">
+                          {group.items.length}
+                        </span>
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        {group.items.map((item) => {
+                          const isEnabled = isUserNotificationTypeEnabled(selectedRolePreferences, item.key);
+                          const availableChannels = ROLE_CHANNEL_OPTIONS.filter((channel) => item.channels.includes(channel.value));
+                          return (
+                            <div
+                              key={item.key}
+                              className={`rounded-xl border p-3 transition ${
+                                isEnabled ? 'border-blue-200 bg-white' : 'border-gray-200 bg-white/70 text-gray-500'
+                              }`}
+                            >
+                              <label className="flex cursor-pointer gap-3">
                                 <input
                                   type="checkbox"
-                                  checked={channelEnabled}
-                                  disabled={!canEdit || !isEnabled || !selectedRolePreference}
+                                  checked={isEnabled}
+                                  disabled={!canEdit || !selectedRolePreference}
                                   onChange={(event) => {
-                                    updateSelectedRolePreferences((current) => toggleUserNotificationChannelPreference(current, item.key, value, event.target.checked));
+                                    updateSelectedRolePreferences((current) => toggleUserNotificationTypePreference(current, item.key, event.target.checked));
                                   }}
-                                  className="sr-only"
+                                  className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                                 />
-                                <Icon className="h-3.5 w-3.5" />
-                                <span className="truncate">{label}</span>
+                                <span>
+                                  <span className="block text-sm font-semibold text-gray-900">{item.label}</span>
+                                  <span className="mt-1 block text-xs leading-5 text-gray-500">{item.description}</span>
+                                </span>
                               </label>
-                            );
-                          })}
-                        </div>
+                              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                                {availableChannels.map(({ value, label, Icon }) => {
+                                  const channelEnabled = isUserNotificationChannelEnabled(selectedRolePreferences, item.key, value);
+                                  return (
+                                    <label
+                                      key={value}
+                                      className={`flex h-9 cursor-pointer items-center justify-center gap-1.5 rounded-lg border px-2 text-xs font-semibold transition ${
+                                        channelEnabled
+                                          ? 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50'
+                                          : 'border-gray-200 bg-gray-100 text-gray-400'
+                                      } ${isEnabled && canEdit ? '' : 'cursor-not-allowed opacity-60'}`}
+                                      title={`Канал: ${label}`}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={channelEnabled}
+                                        disabled={!canEdit || !isEnabled || !selectedRolePreference}
+                                        onChange={(event) => {
+                                          updateSelectedRolePreferences((current) => toggleUserNotificationChannelPreference(current, item.key, value, event.target.checked));
+                                        }}
+                                        className="sr-only"
+                                      />
+                                      <Icon className="h-3.5 w-3.5" />
+                                      <span className="truncate">{label}</span>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
-                    );
-                  })}
+                    </div>
+                  ))}
                 </div>
               </div>
             )}

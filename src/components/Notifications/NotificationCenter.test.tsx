@@ -44,6 +44,7 @@ function createNotification(overrides: Partial<UserNotificationDto> = {}): UserN
     title: 'Первое уведомление',
     bodyPreview: 'Описание события',
     tone: 'blue',
+    toastEnabled: true,
     objectType: 'task',
     objectId: 1,
     taskId: 1,

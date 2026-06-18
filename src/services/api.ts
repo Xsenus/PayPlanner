@@ -859,7 +859,7 @@ export interface UpdateStickyNoteLayoutPayload {
 }
 
 export type NotificationChannel = 'email' | 'telegram';
-export type UserNotificationDeliveryChannel = 'inApp' | 'email' | 'telegram' | 'webPush';
+export type UserNotificationDeliveryChannel = 'inApp' | 'toast' | 'webPush' | 'email' | 'telegram';
 
 export interface NotificationChannelDto {
   key: string;
@@ -1056,6 +1056,7 @@ export interface UserNotificationDto {
   title: string;
   bodyPreview: string;
   tone: 'rose' | 'amber' | 'blue' | 'emerald' | string;
+  toastEnabled: boolean;
   objectType: string;
   objectId?: number | null;
   taskId?: number | null;
@@ -1072,6 +1073,8 @@ export interface UserNotificationTypeDto {
   description: string;
   tone: string;
   priority: string;
+  domain: string;
+  domainLabel: string;
   channels: UserNotificationDeliveryChannel[];
   deduplicate: boolean;
   digestible: boolean;

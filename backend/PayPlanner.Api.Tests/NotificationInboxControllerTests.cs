@@ -28,14 +28,21 @@ public class NotificationInboxControllerTests
         var approval = Assert.Single(types, item => item.Key == UserNotificationTypes.TaskApprovalRequested);
         Assert.Equal("high", approval.Priority);
         Assert.Contains(NotificationChannels.InApp, approval.Channels);
+        Assert.Contains(NotificationChannels.Toast, approval.Channels);
+        Assert.Equal(UserNotificationDomains.Task, approval.Domain);
+        Assert.Equal("Задачи", approval.DomainLabel);
         Assert.True(approval.Deduplicate);
         Assert.False(approval.Digestible);
 
-        Assert.Contains(types, item => item.Key == UserNotificationTypes.CourtHearing && item.Priority == "high");
+        Assert.Contains(types, item => item.Key == UserNotificationTypes.PaymentAssigned && item.Domain == UserNotificationDomains.Payment && item.DomainLabel == "Платежи");
+        Assert.Contains(types, item => item.Key == UserNotificationTypes.InvoiceChanged && item.Domain == UserNotificationDomains.Invoice && item.DomainLabel == "Счета");
+        Assert.Contains(types, item => item.Key == UserNotificationTypes.ActChanged && item.Domain == UserNotificationDomains.Act && item.DomainLabel == "Акты");
+        Assert.Contains(types, item => item.Key == UserNotificationTypes.ContractExpiring && item.Domain == UserNotificationDomains.Contract && item.DomainLabel == "Договоры");
+        Assert.Contains(types, item => item.Key == UserNotificationTypes.CourtHearing && item.Priority == "high" && item.Domain == UserNotificationDomains.Court);
         Assert.Contains(types, item => item.Key == UserNotificationTypes.CourtStatusChanged && item.Priority == "high");
         Assert.Contains(types, item => item.Key == UserNotificationTypes.CourtDecisionPublished && item.Priority == "high");
         Assert.Contains(types, item => item.Key == UserNotificationTypes.CourtSyncFailed && item.Tone == "rose");
-        Assert.Contains(types, item => item.Key == UserNotificationTypes.CaseInactivityReminder && item.Priority == "high");
+        Assert.Contains(types, item => item.Key == UserNotificationTypes.CaseInactivityReminder && item.Priority == "high" && item.Domain == UserNotificationDomains.Case);
         Assert.Contains(types, item => item.Key == UserNotificationTypes.SystemAdminWarning && item.Tone == "rose");
     }
 

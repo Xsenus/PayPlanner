@@ -111,6 +111,7 @@ public class UserNotificationDto
     public string Title { get; set; } = string.Empty;
     public string BodyPreview { get; set; } = string.Empty;
     public string Tone { get; set; } = "blue";
+    public bool ToastEnabled { get; set; } = true;
     public string ObjectType { get; set; } = string.Empty;
     public int? ObjectId { get; set; }
     public int? TaskId { get; set; }
@@ -128,6 +129,8 @@ public class UserNotificationTypeDto
     public string Description { get; set; } = string.Empty;
     public string Tone { get; set; } = "blue";
     public string Priority { get; set; } = "normal";
+    public string Domain { get; set; } = "system";
+    public string DomainLabel { get; set; } = "Система";
     public IReadOnlyList<string> Channels { get; set; } = Array.Empty<string>();
     public bool Deduplicate { get; set; }
     public bool Digestible { get; set; }

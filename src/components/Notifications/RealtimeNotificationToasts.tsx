@@ -43,6 +43,7 @@ function toRealtimeNotification(item: UserNotificationDto, recipientUserId: numb
     title: item.title,
     bodyPreview: item.bodyPreview,
     tone: item.tone,
+    toastEnabled: item.toastEnabled,
     objectType: item.objectType,
     objectId: item.objectId,
     taskJournalItemId: item.taskId,
@@ -357,7 +358,7 @@ export function RealtimeNotificationToasts({
       }
       shownNotificationIdsRef.current.add(notification.id);
 
-      if (!shouldShowRealtimeToast(notification)) {
+      if (notification.toastEnabled === false || !shouldShowRealtimeToast(notification)) {
         return;
       }
 

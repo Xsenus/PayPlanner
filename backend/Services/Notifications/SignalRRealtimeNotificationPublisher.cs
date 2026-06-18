@@ -19,6 +19,7 @@ public sealed class SignalRRealtimeNotificationPublisher : IRealtimeNotification
 
     public async Task PublishUserNotificationAsync(
         UserNotification notification,
+        bool toastEnabled = true,
         CancellationToken cancellationToken = default)
     {
         if (notification.RecipientUserId <= 0)
@@ -34,6 +35,7 @@ public sealed class SignalRRealtimeNotificationPublisher : IRealtimeNotification
             notification.Title,
             notification.BodyPreview,
             notification.Tone,
+            toastEnabled,
             notification.ObjectType,
             notification.ObjectId,
             notification.TaskJournalItemId,

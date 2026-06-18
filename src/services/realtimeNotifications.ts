@@ -17,6 +17,7 @@ export interface RealtimeUserNotification {
   title: string;
   bodyPreview: string;
   tone: string;
+  toastEnabled?: boolean;
   objectType: string;
   objectId?: number | null;
   taskJournalItemId?: number | null;

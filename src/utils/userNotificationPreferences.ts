@@ -5,9 +5,9 @@ export type UserNotificationTypePreferences = {
   disabledChannels: Record<string, UserNotificationPreferenceChannel[]>;
 };
 
-export type UserNotificationPreferenceChannel = 'inApp' | 'email' | 'telegram' | 'webPush';
+export type UserNotificationPreferenceChannel = 'inApp' | 'toast' | 'webPush' | 'email' | 'telegram';
 
-const KNOWN_CHANNELS: UserNotificationPreferenceChannel[] = ['inApp', 'email', 'telegram', 'webPush'];
+const KNOWN_CHANNELS: UserNotificationPreferenceChannel[] = ['inApp', 'toast', 'webPush', 'email', 'telegram'];
 
 export const DEFAULT_USER_NOTIFICATION_TYPE_PREFERENCES: UserNotificationTypePreferences = {
   disabledTypes: [],

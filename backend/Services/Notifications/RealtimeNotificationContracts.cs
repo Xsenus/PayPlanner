@@ -10,6 +10,7 @@ public sealed record RealtimeUserNotificationDto(
     string Title,
     string BodyPreview,
     string Tone,
+    bool ToastEnabled,
     string ObjectType,
     int? ObjectId,
     int? TaskJournalItemId,
@@ -17,7 +18,7 @@ public sealed record RealtimeUserNotificationDto(
 
 public interface IRealtimeNotificationPublisher
 {
-    Task PublishUserNotificationAsync(UserNotification notification, CancellationToken cancellationToken = default);
+    Task PublishUserNotificationAsync(UserNotification notification, bool toastEnabled = true, CancellationToken cancellationToken = default);
 }
 
 public sealed class NoOpRealtimeNotificationPublisher : IRealtimeNotificationPublisher
@@ -28,6 +29,6 @@ public sealed class NoOpRealtimeNotificationPublisher : IRealtimeNotificationPub
     {
     }
 
-    public Task PublishUserNotificationAsync(UserNotification notification, CancellationToken cancellationToken = default)
+    public Task PublishUserNotificationAsync(UserNotification notification, bool toastEnabled = true, CancellationToken cancellationToken = default)
         => Task.CompletedTask;
 }
