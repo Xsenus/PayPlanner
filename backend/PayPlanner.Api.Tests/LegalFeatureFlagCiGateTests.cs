@@ -50,6 +50,25 @@ public sealed class LegalFeatureFlagCiGateTests
         Assert.Contains("PAYPLANNER_READINESS_API_URL", workflow, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void DeployWorkflow_ConfiguresWebPushRuntimeEnvironmentSafely()
+    {
+        var root = FindRepositoryRoot();
+        var workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "deploy.yml"));
+
+        Assert.Contains("PAYPLANNER_WEBPUSH_ENABLED", workflow, StringComparison.Ordinal);
+        Assert.Contains("PAYPLANNER_WEBPUSH_PUBLIC_KEY", workflow, StringComparison.Ordinal);
+        Assert.Contains("PAYPLANNER_WEBPUSH_PRIVATE_KEY", workflow, StringComparison.Ordinal);
+        Assert.Contains("PAYPLANNER_WEBPUSH_SUBJECT", workflow, StringComparison.Ordinal);
+        Assert.Contains("WebPush__Enabled", workflow, StringComparison.Ordinal);
+        Assert.Contains("WebPush__PublicKey", workflow, StringComparison.Ordinal);
+        Assert.Contains("WebPush__PrivateKey", workflow, StringComparison.Ordinal);
+        Assert.Contains("WebPush__Subject", workflow, StringComparison.Ordinal);
+        Assert.Contains("/opt/payplanner/shared/payplanner.env", workflow, StringComparison.Ordinal);
+        Assert.Contains("EnvironmentFile=-%s", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("-p Environment", workflow, StringComparison.Ordinal);
+    }
+
     private static string FindRepositoryRoot()
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);

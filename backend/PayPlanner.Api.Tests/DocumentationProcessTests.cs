@@ -15,6 +15,9 @@ public sealed class DocumentationProcessTests
         Assert.Contains("dotnet run --project backend\\PayPlanner.Api.csproj", readme, StringComparison.Ordinal);
         Assert.Contains("ConnectionStrings__Default", readme, StringComparison.Ordinal);
         Assert.Contains("Jwt__Secret", readme, StringComparison.Ordinal);
+        Assert.Contains("WebPush__PublicKey", readme, StringComparison.Ordinal);
+        Assert.Contains("WebPush__PrivateKey", readme, StringComparison.Ordinal);
+        Assert.Contains("WebPush__Subject", readme, StringComparison.Ordinal);
         Assert.Contains("docs/quality-gates.md", readme, StringComparison.Ordinal);
         Assert.Contains("docs/release-note-policy.md", readme, StringComparison.Ordinal);
         Assert.Contains("docs/deploy-runbook.md", readme, StringComparison.Ordinal);
@@ -63,6 +66,10 @@ public sealed class DocumentationProcessTests
         Assert.Contains("Secrets", runbook, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("ConnectionStrings__Default", runbook, StringComparison.Ordinal);
         Assert.Contains("Jwt__Secret", runbook, StringComparison.Ordinal);
+        Assert.Contains("PAYPLANNER_WEBPUSH_PUBLIC_KEY", runbook, StringComparison.Ordinal);
+        Assert.Contains("PAYPLANNER_WEBPUSH_PRIVATE_KEY", runbook, StringComparison.Ordinal);
+        Assert.Contains("PAYPLANNER_WEBPUSH_SUBJECT", runbook, StringComparison.Ordinal);
+        Assert.Contains("/opt/payplanner/shared/payplanner.env", runbook, StringComparison.Ordinal);
         Assert.Contains("CORS", runbook, StringComparison.Ordinal);
         Assert.Contains("Cors__AllowedOrigins__0", runbook, StringComparison.Ordinal);
         Assert.Contains("TLS", runbook, StringComparison.Ordinal);

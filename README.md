@@ -131,10 +131,14 @@ Jwt__Secret=<at-least-32-random-characters>
 DaData__ApiKey=<optional-dadata-api-key>
 DaData__Secret=<optional-dadata-secret>
 Email__SmtpPassword=<optional-smtp-password>
+WebPush__Enabled=true
+WebPush__PublicKey=<optional-vapid-public-key>
+WebPush__PrivateKey=<optional-vapid-private-key>
+WebPush__Subject=mailto:admin@example.com
 Cors__AllowedOrigins__0=https://crm.example.com
 ```
 
-Обязательные параметры для запуска backend: `ConnectionStrings:Default` и `Jwt:Secret`. `Jwt:Secret` должен быть не короче 32 символов; приложение завершит старт с ошибкой, если секрет не задан. `DaData:*` и `Email:*` нужны только для соответствующих интеграций.
+Обязательные параметры для запуска backend: `ConnectionStrings:Default` и `Jwt:Secret`. `Jwt:Secret` должен быть не короче 32 символов; приложение завершит старт с ошибкой, если секрет не задан. `DaData:*`, `Email:*` и `WebPush:*` нужны только для соответствующих интеграций.
 В Development backend оставляет CORS открытым для локальной разработки. В Production внешние origins берутся только из `Cors:AllowedOrigins`; если список пустой, cross-origin запросы не разрешаются, а работа через тот же домен продолжает идти без CORS.
 
 Production TLS/HSTS закреплены в [deploy runbook](docs/deploy-runbook.md): публичный HTTPS, редирект HTTP->HTTPS и заголовок `Strict-Transport-Security` должны обеспечиваться nginx, а backend слушает внутренний HTTP endpoint `127.0.0.1:5080`.

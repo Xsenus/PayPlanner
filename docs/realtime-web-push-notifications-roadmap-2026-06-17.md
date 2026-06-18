@@ -666,11 +666,13 @@
   - Проверено 18.06.2026: frontend-сервис Web Push отдельно определяет небезопасный origin и не обращается к серверу/браузерному разрешению, пока CRM не открыта в secure context; регистрация `payplanner-push-worker.js` закреплена за root scope `/`. `webPushNotifications.test.ts`, `WebPushDevicePanel.test.tsx` и `payplanner-push-worker.test.ts` пройдены, 14 тестов без ошибок.
   - Проверено 18.06.2026: production build frontend прошел после изменения Web Push secure-origin проверки; service worker остается доступен из `public/payplanner-push-worker.js` и регистрируется на scope `/`. `npm run lint` завершился без ошибок, остались только существующие предупреждения в не связанных с задачей компонентах.
 
-- [ ] Добавить env-переменные на VPS.
+- [x] Добавить env-переменные на VPS.
   - VAPID public/private key.
   - Push subject/contact.
   - Feature flag для Web Push.
   - DoD: деплой не требует ручного редактирования кода.
+  - Проверено 18.06.2026: deploy workflow принимает `PAYPLANNER_WEBPUSH_ENABLED`, `PAYPLANNER_WEBPUSH_PUBLIC_KEY`, `PAYPLANNER_WEBPUSH_PRIVATE_KEY`, `PAYPLANNER_WEBPUSH_SUBJECT`, пишет runtime `WebPush__*` в `/opt/payplanner/shared/payplanner.env` и подключает файл через systemd drop-in. Если Push включен, но ключи или subject отсутствуют, деплой останавливается до restart backend. Логи health-check больше не выводят `Environment` сервиса.
+  - Проверено 18.06.2026: `docs/deploy-runbook.md` и `README.md` описывают Web Push env/secrets, GitHub repository secrets/variable и VPS env-файл; targeted backend-тесты документации, deploy workflow и release notes прошли, 25 тестов без ошибок.
 
 - [x] Добавить health/diagnostics.
   - Backend знает, что VAPID настроен.
@@ -713,6 +715,7 @@
   - Проверено 18.06.2026: после проверки service worker click routing и новой записи "Что нового" пройдены `AppVersionControllerTests` (17 тестов) и полный backend-набор `PayPlanner.Api.Tests`, 1602 теста без ошибок.
   - Проверено 18.06.2026: после усиления frontend-проверок центра уведомлений повторно пройден `NotificationServiceTests`, 102 теста без ошибок.
   - Проверено 18.06.2026: после добавления release note `1.13.427` про HTTPS/service worker scope пройден `AppVersionControllerTests`, 17 тестов без ошибок.
+  - Проверено 18.06.2026: после добавления deploy env для Web Push пройдены `DocumentationProcessTests`, `LegalFeatureFlagCiGateTests` и `AppVersionControllerTests`, 25 тестов без ошибок.
 
 - [x] Тесты прав доступа.
   - Задачи с ограниченной видимостью.
@@ -756,6 +759,7 @@
   - Проверено 18.06.2026: после проверки переходов из Push-уведомлений локальная БД `PaymentContext` проверена через `dotnet ef database update`, новых миграций нет, ошибок нет.
   - Проверено 18.06.2026: после усиления тестов центра уведомлений локальная БД `PaymentContext` проверена через `dotnet ef database update`, новых миграций нет, ошибок нет.
   - Проверено 18.06.2026: после проверки HTTPS/service worker scope локальная БД `PaymentContext` проверена через `dotnet ef database update`, новых миграций нет, ошибок нет.
+  - Проверено 18.06.2026: после добавления Web Push env для deploy workflow локальная БД `PaymentContext` проверена через `dotnet ef database update`, новых миграций нет, ошибок нет.
 
 - [ ] Browser manual smoke.
   - Chrome/Edge desktop.
@@ -787,6 +791,7 @@
   - Проверено 18.06.2026: добавлена версия `1.13.420` про быстрые действия во всплывающих уведомлениях.
   - Проверено 18.06.2026: добавлена версия `1.13.422` про понятные признаки доставки и действий у типов уведомлений.
   - Проверено 18.06.2026: добавлена версия `1.13.427` про понятную проверку HTTPS и root scope service worker для Web Push.
+  - Проверено 18.06.2026: добавлена версия `1.13.428` про настройку Web Push через env-переменные деплоя и безопасные логи.
   - Объяснить: появились моментальные уведомления в CRM и браузерные push.
   - Где включить: профиль/центр уведомлений.
   - Что покрыто: задачи, календарь, заметки, финансы и другие важные события.

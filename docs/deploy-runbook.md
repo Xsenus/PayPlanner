@@ -112,6 +112,15 @@ Required production values:
 - `Jwt__Secret` with at least 32 characters;
 - `Cors__AllowedOrigins__0` and additional numbered origins when browser clients call the API cross-origin.
 
+Web Push production values:
+
+- `WebPush__Enabled` controls the browser push channel;
+- `WebPush__PublicKey` is the public VAPID key returned to browsers;
+- `WebPush__PrivateKey` is the private VAPID key used only by the backend;
+- `WebPush__Subject` is the VAPID contact value, for example `mailto:admin@example.com`.
+
+The deploy workflow reads the GitHub repository variable `PAYPLANNER_WEBPUSH_ENABLED` and secrets `PAYPLANNER_WEBPUSH_PUBLIC_KEY`, `PAYPLANNER_WEBPUSH_PRIVATE_KEY`, `PAYPLANNER_WEBPUSH_SUBJECT`. On VPS it writes only the runtime `WebPush__*` values to `/opt/payplanner/shared/payplanner.env` with restricted permissions and connects that file through the systemd drop-in `/etc/systemd/system/payplanner.service.d/20-payplanner-runtime-env.conf`. If Web Push is enabled and any key or subject is missing, deployment must stop before the backend restart.
+
 Optional integration values such as DaData and SMTP credentials are required only when the corresponding integrations are enabled.
 
 ## Secrets
@@ -122,6 +131,7 @@ Minimum runtime secrets and sensitive settings:
 
 - `ConnectionStrings__Default`;
 - `Jwt__Secret`;
+- `WebPush__PrivateKey` when browser push notifications are enabled;
 - optional `DaData__ApiKey` and `DaData__Secret`;
 - optional SMTP password values;
 - optional S3/Yandex Disk credentials when backup uploads are enabled.

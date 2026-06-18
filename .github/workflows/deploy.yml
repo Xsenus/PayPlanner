@@ -107,11 +107,17 @@ jobs:
 
       - name: Deploy on VPS
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          PAYPLANNER_WEBPUSH_ENABLED: ${{ vars.PAYPLANNER_WEBPUSH_ENABLED || 'true' }}
+          PAYPLANNER_WEBPUSH_PUBLIC_KEY: ${{ secrets.PAYPLANNER_WEBPUSH_PUBLIC_KEY }}
+          PAYPLANNER_WEBPUSH_PRIVATE_KEY: ${{ secrets.PAYPLANNER_WEBPUSH_PRIVATE_KEY }}
+          PAYPLANNER_WEBPUSH_SUBJECT: ${{ secrets.PAYPLANNER_WEBPUSH_SUBJECT }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
+          envs: PAYPLANNER_WEBPUSH_ENABLED,PAYPLANNER_WEBPUSH_PUBLIC_KEY,PAYPLANNER_WEBPUSH_PRIVATE_KEY,PAYPLANNER_WEBPUSH_SUBJECT
           script: |
             set -euo pipefail
             set -x
@@ -125,6 +131,8 @@ jobs:
             PRIMARY_HEALTH_URL="http://127.0.0.1:5080/api/health"
             PUBLIC_API_HEALTH_URL="${{ env.PUBLIC_API_HEALTH_URL }}"
             PUBLIC_FRONTEND_URL="${{ env.PUBLIC_FRONTEND_URL }}"
+            RUNTIME_ENV_FILE="/opt/payplanner/shared/payplanner.env"
+            SYSTEMD_ENV_DROPIN="/etc/systemd/system/payplanner.service.d/20-payplanner-runtime-env.conf"
             MIN_FREE_KB=262144
             BACKUP_ROOT="/opt/payplanner/deploy-backups"
             BACKUP_DIR="$BACKUP_ROOT/pre-${{ github.sha }}-$(date +%Y%m%d-%H%M%S)"
@@ -145,53 +153,98 @@ jobs:
               fi
             }
 
+            configure_runtime_env() {
+              set +x
+              local webpush_enabled="${PAYPLANNER_WEBPUSH_ENABLED:-true}"
+              local webpush_public_key="${PAYPLANNER_WEBPUSH_PUBLIC_KEY:-}"
+              local webpush_private_key="${PAYPLANNER_WEBPUSH_PRIVATE_KEY:-}"
+              local webpush_subject="${PAYPLANNER_WEBPUSH_SUBJECT:-}"
+
+              case "$(printf '%s' "$webpush_enabled" | tr '[:upper:]' '[:lower:]')" in
+                true|1|yes|on) webpush_enabled="true" ;;
+                false|0|no|off) webpush_enabled="false" ;;
+                *)
+                  echo "PAYPLANNER_WEBPUSH_ENABLED must be true or false."
+                  set -x
+                  return 1
+                  ;;
+              esac
+
+              if [ "$webpush_enabled" = "true" ]; then
+                if [ -z "$webpush_public_key" ] || [ -z "$webpush_private_key" ] || [ -z "$webpush_subject" ]; then
+                  echo "Web Push is enabled, but PAYPLANNER_WEBPUSH_PUBLIC_KEY, PAYPLANNER_WEBPUSH_PRIVATE_KEY or PAYPLANNER_WEBPUSH_SUBJECT is missing."
+                  echo "Add GitHub repository secrets or set repository variable PAYPLANNER_WEBPUSH_ENABLED=false."
+                  set -x
+                  return 1
+                fi
+              fi
+
+              local tmp_env
+              tmp_env="$(mktemp)"
+              {
+                printf 'WebPush__Enabled=%s\n' "$webpush_enabled"
+                if [ -n "$webpush_public_key" ]; then printf 'WebPush__PublicKey=%s\n' "$webpush_public_key"; fi
+                if [ -n "$webpush_private_key" ]; then printf 'WebPush__PrivateKey=%s\n' "$webpush_private_key"; fi
+                if [ -n "$webpush_subject" ]; then printf 'WebPush__Subject=%s\n' "$webpush_subject"; fi
+              } > "$tmp_env"
+
+              sudo install -o root -g payplanner -m 0640 "$tmp_env" "$RUNTIME_ENV_FILE"
+              rm -f "$tmp_env"
+              sudo mkdir -p "$(dirname "$SYSTEMD_ENV_DROPIN")"
+              printf '[Service]\nEnvironmentFile=-%s\n' "$RUNTIME_ENV_FILE" | sudo tee "$SYSTEMD_ENV_DROPIN" >/dev/null
+              set -x
+            }
+
             trap cleanup EXIT
 
-            echo "[1/12] Preflight disk check"
+            echo "[1/13] Preflight disk check"
             check_space "/" "$MIN_FREE_KB"
 
-            echo "[2/12] Prepare staging"
+            echo "[2/13] Prepare staging"
             rm -rf "$STAGE"
             mkdir -p "$STAGE"
             tar -xzf "$TAR" -C "$STAGE"
 
-            echo "[3/12] Ensure target dirs"
+            echo "[3/13] Ensure target dirs"
             sudo mkdir -p "$BE_DIR" "$FE_APP_DIR" "$FE_PUBLIC_DIR" "$BACKUP_ROOT" /opt/payplanner/shared/backups
 
-            echo "[4/12] Backup current release"
+            echo "[4/13] Configure runtime environment"
+            configure_runtime_env
+
+            echo "[5/13] Backup current release"
             sudo mkdir -p "$BACKUP_DIR"
             if [ -d "$BE_DIR" ]; then sudo cp -a "$BE_DIR" "$BACKUP_DIR/backend.previous"; fi
             if [ -d "$FE_APP_DIR" ]; then sudo cp -a "$FE_APP_DIR" "$BACKUP_DIR/frontend.previous"; fi
             if [ -f "$APP_DIR/REVISION" ]; then sudo cp -a "$APP_DIR/REVISION" "$BACKUP_DIR/REVISION.previous"; fi
 
-            echo "[5/12] Stop service"
+            echo "[6/13] Stop service"
             sudo systemctl stop payplanner.service || true
 
-            echo "[6/12] Rsync backend"
+            echo "[7/13] Rsync backend"
             sudo rsync -a --delete "$STAGE/be/" "$BE_DIR/"
 
-            echo "[7/12] Rsync frontend"
+            echo "[8/13] Rsync frontend"
             # Keep previous hashed chunks so already-open browser tabs can switch lazy-loaded sections after a deploy.
             sudo rsync -a "$STAGE/fe/" "$FE_APP_DIR/"
             sudo rsync -a "$STAGE/fe/" "$FE_PUBLIC_DIR/"
 
-            echo "[8/12] Write revision marker"
+            echo "[9/13] Write revision marker"
             printf '%s\n' "${{ github.sha }}" | sudo tee "$APP_DIR/REVISION" >/dev/null
 
-            echo "[9/12] Cleanup temp artifacts"
+            echo "[10/13] Cleanup temp artifacts"
             cleanup
 
-            echo "[10/12] Permissions"
+            echo "[11/13] Permissions"
             sudo chown -R payplanner:payplanner /opt/payplanner
             sudo chown -R www-data:www-data "$FE_PUBLIC_DIR"
 
-            echo "[11/12] Restart service"
+            echo "[12/13] Restart service"
             check_space "/" "$MIN_FREE_KB"
             sudo systemctl daemon-reload || true
             sudo systemctl enable --now payplanner.service
             sudo systemctl restart payplanner.service
 
-            echo "[12/12] Wait for health"
+            echo "[13/13] Wait for health"
             ok=0
             for i in $(seq 1 30); do
               if curl -fsS "$PRIMARY_HEALTH_URL" >/dev/null; then
@@ -204,7 +257,7 @@ jobs:
             if [ "$ok" -ne 1 ]; then
               echo "Health check failed after retries: $PRIMARY_HEALTH_URL"
               sudo systemctl status payplanner.service --no-pager || true
-              sudo systemctl show payplanner.service -p Environment -p ExecStart || true
+              sudo systemctl show payplanner.service -p ExecStart -p FragmentPath -p DropInPaths || true
               sudo df -h "$BE_DIR" || true
               sudo du -sh /opt/payplanner/shared/backups /tmp 2>/dev/null || true
               sudo ss -ltnp | grep dotnet || true
