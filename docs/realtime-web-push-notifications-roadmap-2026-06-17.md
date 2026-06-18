@@ -681,13 +681,17 @@
   - DoD: после деплоя можно быстро проверить состояние.
   - Проверено 17.06.2026: в настройках уведомлений добавлена диагностика Web Push: готовность ключей, активные/отключенные подписки, пользователи с активными устройствами и последние успешные/ошибочные доставки.
 
-- [ ] Проверить GitHub Actions.
+- [acceptance] Проверить GitHub Actions.
   - Build backend.
   - Test backend.
   - Lint/typecheck frontend.
   - Build frontend с service worker.
   - Deploy на VPS.
   - DoD: pipeline зеленый, VPS revision обновлен, health ok.
+  - Проверено 18.06.2026: добавлены backend-проверки deploy workflow, которые фиксируют порядок CI/CD-gates до сборки артефактов и деплоя на VPS: `dotnet restore`, `dotnet format`, `dotnet list`, backend-тесты, `npm ci`, lint, typecheck, date audit, `npm audit`, `test:ci`, `test:integration`, `test:legal-flags:strict`, backend publish, frontend build, архив, scp и ssh deploy.
+  - Проверено 18.06.2026: deploy workflow дополнительно контролируется на передачу `VITE_API_URL`, публикацию `dist` в frontend-каталог VPS, наличие `public/payplanner-push-worker.js` для service worker и публичные health-check URL после деплоя.
+  - Проверено 18.06.2026 локально: `LegalFeatureFlagCiGateTests` прошел 6 тестов; `dotnet build backend/PayPlanner.Api.csproj --no-restore` прошел без предупреждений; `npm run lint` прошел без ошибок; `npx tsc -p tsconfig.app.json --noEmit` прошел; `npm run audit:dates:test` прошел; `npm audit --audit-level=moderate` нашел 0 vulnerabilities; `npm run test:guard` прошел 43 теста; `npx vitest run src/components/Notes/StickyNotes.test.tsx --no-file-parallelism` прошел 59 тестов; `npm run test:unit` прошел 687 тестов; `npm run test:integration` прошел 248 тестов; `npm run build` прошел; локальный API на `http://localhost:5080/api/health` ответил `200 {"status":"ok"}`; `npm run test:legal-flags:strict` прошел при поднятом API.
+  - Acceptance остается до push: дождаться реального GitHub Actions run, проверить, что workflow зеленый, VPS revision обновлен, backend health и frontend URL отвечают после деплоя.
 
 ## Milestone 13. Тестирование
 
@@ -762,6 +766,7 @@
   - Проверено 18.06.2026: после проверки HTTPS/service worker scope локальная БД `PaymentContext` проверена через `dotnet ef database update`, новых миграций нет, ошибок нет.
   - Проверено 18.06.2026: после добавления Web Push env для deploy workflow локальная БД `PaymentContext` проверена через `dotnet ef database update`, новых миграций нет, ошибок нет.
   - Проверено 18.06.2026: после закрытия backend-тестов Web Push локальная БД `PaymentContext` проверена через `dotnet ef database update`, новых миграций нет, ошибок нет.
+  - Проверено 18.06.2026: перед проверкой deploy workflow локальная БД `PaymentContext` снова проверена через `dotnet ef database update`, новых миграций нет, ошибок нет; backend стартовал на локальной БД с временным dev `Jwt__Secret`, `/api/health` вернул `200 {"status":"ok"}`.
 
 - [ ] Browser manual smoke.
   - Chrome/Edge desktop.

@@ -69,6 +69,53 @@ public sealed class LegalFeatureFlagCiGateTests
         Assert.DoesNotContain("-p Environment", workflow, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void DeployWorkflow_KeepsVerificationGatesBeforeArtifactsAndVpsDeploy()
+    {
+        var root = FindRepositoryRoot();
+        var workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "deploy.yml"));
+
+        AssertInOrder(
+            workflow,
+            [
+                "dotnet restore",
+                "dotnet format",
+                "dotnet list",
+                "dotnet test backend/PayPlanner.Api.Tests/PayPlanner.Api.Tests.csproj --no-restore",
+                "npm ci",
+                "npm run lint",
+                "npx tsc -p tsconfig.app.json --noEmit",
+                "npm run audit:dates:test",
+                "npm audit --audit-level=moderate",
+                "npm run test:ci",
+                "npm run test:integration",
+                "npm run test:legal-flags:strict",
+                "dotnet publish",
+                "npm run build",
+                "tar -czf",
+                "appleboy/scp-action",
+                "appleboy/ssh-action",
+            ]);
+    }
+
+    [Fact]
+    public void DeployWorkflow_BuildsFrontendWithApiUrlAndPublishesServiceWorkerArtifact()
+    {
+        var root = FindRepositoryRoot();
+        var workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "deploy.yml"));
+
+        Assert.Contains("VITE_API_URL: ${{ env.FE_API_URL }}", workflow, StringComparison.Ordinal);
+        Assert.Contains("cp -r dist/* \"${{ env.OUT_DIR }}/fe/\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("sudo rsync -a \"$STAGE/fe/\" \"$FE_PUBLIC_DIR/\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("PUBLIC_API_HEALTH_URL", workflow, StringComparison.Ordinal);
+        Assert.Contains("PUBLIC_FRONTEND_URL", workflow, StringComparison.Ordinal);
+        Assert.Contains("curl -fsS \"$PUBLIC_API_HEALTH_URL\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("curl -fsS -o /dev/null \"$PUBLIC_FRONTEND_URL\"", workflow, StringComparison.Ordinal);
+
+        var pushWorker = Path.Combine(root, "public", "payplanner-push-worker.js");
+        Assert.True(File.Exists(pushWorker), "public/payplanner-push-worker.js must exist so Vite copies it to dist during npm run build.");
+    }
+
     private static string FindRepositoryRoot()
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);
@@ -86,5 +133,17 @@ public sealed class LegalFeatureFlagCiGateTests
         }
 
         throw new DirectoryNotFoundException("Repository root was not found.");
+    }
+
+    private static void AssertInOrder(string text, IReadOnlyList<string> markers)
+    {
+        var previousIndex = -1;
+        foreach (var marker in markers)
+        {
+            var index = text.IndexOf(marker, StringComparison.Ordinal);
+            Assert.True(index >= 0, $"deploy.yml must contain '{marker}'.");
+            Assert.True(index > previousIndex, $"deploy.yml must keep '{marker}' after previous verification/deploy step.");
+            previousIndex = index;
+        }
     }
 }

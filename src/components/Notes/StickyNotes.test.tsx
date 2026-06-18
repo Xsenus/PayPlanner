@@ -111,6 +111,7 @@ const createdNote: StickyNoteItem = {
   zIndex: 1,
   version: 1,
   isPinned: false,
+  assignedUserName: '',
   authorUserId: 1,
   authorUserName: 'Пользователь',
   lastUpdatedByUserId: 1,
