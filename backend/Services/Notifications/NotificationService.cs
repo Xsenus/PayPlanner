@@ -2746,6 +2746,11 @@ public sealed class NotificationService : INotificationService
             original.NotificationSenderId);
     }
 
+    public Task<bool> NotifyAsync(
+        NotificationEventEnvelope notificationEvent,
+        CancellationToken cancellationToken = default)
+        => CreateUserNotificationAsync(notificationEvent, cancellationToken);
+
     private async Task SendDeliveryAsync(
         NotificationDelivery delivery,
         NotificationSenderTarget target,
@@ -2872,7 +2877,7 @@ public sealed class NotificationService : INotificationService
                 cancellationToken);
     }
 
-    private async Task CreateUserNotificationAsync(
+    private Task<bool> CreateUserNotificationAsync(
         int recipientUserId,
         string type,
         string eventKey,
@@ -2882,7 +2887,7 @@ public sealed class NotificationService : INotificationService
         TaskJournalItem task,
         object? metadata,
         CancellationToken cancellationToken)
-        => await CreateUserNotificationAsync(
+        => CreateUserNotificationAsync(
             new NotificationEventEnvelope(
                 recipientUserId,
                 type,
@@ -2897,7 +2902,7 @@ public sealed class NotificationService : INotificationService
                 task),
             cancellationToken);
 
-    private async Task CreateUserNotificationAsync(
+    private Task<bool> CreateUserNotificationAsync(
         int recipientUserId,
         string type,
         string eventKey,
@@ -2910,7 +2915,7 @@ public sealed class NotificationService : INotificationService
         TaskJournalItem? task,
         object? metadata,
         CancellationToken cancellationToken)
-        => await CreateUserNotificationAsync(
+        => CreateUserNotificationAsync(
             new NotificationEventEnvelope(
                 recipientUserId,
                 type,
@@ -2925,24 +2930,24 @@ public sealed class NotificationService : INotificationService
                 task),
             cancellationToken);
 
-    private async Task CreateUserNotificationAsync(
+    private async Task<bool> CreateUserNotificationAsync(
         NotificationEventEnvelope notificationEvent,
         CancellationToken cancellationToken)
     {
         if (notificationEvent.RecipientUserId <= 0 || string.IsNullOrWhiteSpace(notificationEvent.EventKey))
         {
-            return;
+            return false;
         }
 
         var type = notificationEvent.EffectiveType;
         if (string.IsNullOrWhiteSpace(type))
         {
-            return;
+            return false;
         }
 
         if (!await IsUserNotificationChannelEnabledAsync(notificationEvent.RecipientUserId, type, NotificationChannels.InApp, cancellationToken))
         {
-            return;
+            return false;
         }
 
         var alreadyExists = await _context.UserNotifications
@@ -2953,7 +2958,7 @@ public sealed class NotificationService : INotificationService
                 cancellationToken);
         if (alreadyExists)
         {
-            return;
+            return false;
         }
 
         var recipientExists = await _context.Users
@@ -2961,7 +2966,7 @@ public sealed class NotificationService : INotificationService
             .AnyAsync(user => user.Id == notificationEvent.RecipientUserId, cancellationToken);
         if (!recipientExists)
         {
-            return;
+            return false;
         }
 
         var notification = new UserNotification
@@ -2989,6 +2994,8 @@ public sealed class NotificationService : INotificationService
         {
             await _webPushNotificationService.SendUserNotificationAsync(notification, cancellationToken);
         }
+
+        return true;
     }
 
     private async Task<bool> IsUserNotificationTypeEnabledAsync(

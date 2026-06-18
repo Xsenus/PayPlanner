@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using System.Security.Cryptography;
 using System.Security.Claims;
@@ -39,7 +40,6 @@ public class CasesV2Controller : ControllerBase
     private const string CaseDocumentTemplatesSettingKey = "cases.documentTemplates";
     private const string CaseProductionCalendarSettingKey = "cases.productionCalendar";
     private static readonly JsonSerializerOptions CaseDocumentTemplateJsonOptions = new(JsonSerializerDefaults.Web);
-    private static readonly JsonSerializerOptions UserNotificationJsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HashSet<string> AllowedCasePriorities = new(StringComparer.OrdinalIgnoreCase)
     {
         "low",
@@ -711,84 +711,65 @@ public class CasesV2Controller : ControllerBase
         object? metadata,
         CancellationToken ct)
     {
-        if (recipientUserId <= 0 || string.IsNullOrWhiteSpace(eventKey))
-        {
-            return;
-        }
-
-        if (!await IsCaseUserNotificationTypeEnabledAsync(recipientUserId, type, ct))
-        {
-            return;
-        }
-
-        var alreadyExists = await _db.UserNotifications
-            .AsNoTracking()
-            .AnyAsync(item => item.RecipientUserId == recipientUserId && item.EventKey == eventKey, ct);
-        if (alreadyExists)
-        {
-            return;
-        }
-
-        var recipientExists = await _db.Users
-            .AsNoTracking()
-            .AnyAsync(item => item.Id == recipientUserId && item.IsActive, ct);
-        if (!recipientExists)
-        {
-            return;
-        }
-
-        _db.UserNotifications.Add(new UserNotification
-        {
-            RecipientUserId = recipientUserId,
-            Type = type,
-            EventKey = eventKey,
-            Title = Truncate(title.Trim(), 300),
-            BodyPreview = Truncate(body.Trim(), 1000),
-            Tone = string.IsNullOrWhiteSpace(tone) ? "blue" : tone.Trim(),
-            ObjectType = "case",
-            ObjectId = clientCase.Id,
-            MetadataJson = metadata is null ? "{}" : JsonSerializer.Serialize(metadata, UserNotificationJsonOptions),
-            CreatedAt = DateTime.UtcNow,
-        });
+        var notificationService = _notificationService ?? CreateFallbackNotificationService();
+        await notificationService.NotifyAsync(
+            new NotificationEventEnvelope(
+                recipientUserId,
+                type,
+                eventKey,
+                title,
+                body,
+                "case",
+                clientCase.Id,
+                null,
+                tone,
+                metadata),
+            ct);
     }
 
-    private async Task<bool> IsCaseUserNotificationTypeEnabledAsync(int recipientUserId, string type, CancellationToken ct)
+    private NotificationService CreateFallbackNotificationService()
+        => new(
+            _db,
+            _configuration,
+            new NoopEmailService(),
+            new NoopTelegramNotificationService(),
+            NullLogger<NotificationService>.Instance);
+
+    private sealed class NoopEmailService : IEmailService
     {
-        var setting = await _db.UserSettings
-            .AsNoTracking()
-            .Where(item =>
-                item.UserId == recipientUserId
-                && item.Key == UserNotificationPreferenceSettings.SettingKey)
-            .Select(item => item.Value)
-            .FirstOrDefaultAsync(ct);
-        if (setting is not null)
-        {
-            return UserNotificationPreferenceSettings.IsTypeEnabled(setting, type);
-        }
+        public Task SendRegistrationPendingEmailAsync(string toEmail, string fullName) => Task.CompletedTask;
+        public Task SendRegistrationApprovedEmailAsync(string toEmail, string fullName) => Task.CompletedTask;
+        public Task SendRegistrationRejectedEmailAsync(string toEmail, string fullName, string? reason) => Task.CompletedTask;
+        public Task SendAdminNewRegistrationNotificationAsync(string adminEmail, string newUserFullName, string newUserEmail) => Task.CompletedTask;
 
-        var role = await _db.Users
-            .AsNoTracking()
-            .Where(user => user.Id == recipientUserId)
-            .Select(user => new
-            {
-                user.RoleId,
-                RoleName = user.Role != null ? user.Role.Name : string.Empty
-            })
-            .FirstOrDefaultAsync(ct);
-        if (role is null || role.RoleId <= 0)
-        {
-            return true;
-        }
+        public Task SendEmailAsync(
+            string toEmail,
+            string subject,
+            string body,
+            bool isHtml = false,
+            CancellationToken cancellationToken = default,
+            EmailSendSettings? settings = null)
+            => Task.CompletedTask;
 
-        var roleSetting = await _db.SystemSettings
-            .AsNoTracking()
-            .Where(item => item.Key == RoleNotificationPreferenceSettings.SettingKey)
-            .Select(item => item.Value)
-            .FirstOrDefaultAsync(ct);
-        var preferences = RoleNotificationPreferenceSettings.ParseForRole(roleSetting, role.RoleId)
-                          ?? RoleNotificationPreferenceDefaults.Resolve(role.RoleName).Preferences;
+        public Task SendEmailWithAttachmentAsync(string toEmail, string subject, string body, string attachmentFileName, byte[] attachmentBytes, string attachmentContentType)
+            => Task.CompletedTask;
+    }
 
-        return UserNotificationPreferenceSettings.IsTypeEnabled(preferences, type);
+    private sealed class NoopTelegramNotificationService : ITelegramNotificationService
+    {
+        public Task<TelegramSendResult> SendMessageAsync(long chatId, string text, CancellationToken cancellationToken = default)
+            => Task.FromResult(new TelegramSendResult(true, NotificationDeliveryStatus.Sent));
+
+        public Task<TelegramSendResult> SendMessageWithTokenAsync(
+            long chatId,
+            string text,
+            string botToken,
+            CancellationToken cancellationToken = default,
+            TelegramBotConnectionSettings? connection = null)
+            => Task.FromResult(new TelegramSendResult(true, NotificationDeliveryStatus.Sent));
+
+        public Task<TelegramNotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new TelegramNotificationSettingsDto());
     }
 
     private static void AddIfPositive(ISet<int> values, int? value)

@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Linq.Expressions;
-using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
@@ -15,7 +14,6 @@ public static class PaymentAdvanceReviewService
     private const decimal AmountEpsilon = 0.009m;
     private const string AdvanceReviewRequiredEventKeyPrefix = "payment-advance-review-required:";
     private const string AdvanceReviewEscalationEventKeyPrefix = "payment-advance-review-escalation:";
-    private static readonly JsonSerializerOptions NotificationJsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly Func<Payment, bool> UnallocatedAdvanceCandidateEvaluator =
         UnallocatedAdvanceCandidatePredicate().Compile();
 
@@ -180,6 +178,7 @@ public static class PaymentAdvanceReviewService
         PaymentContext db,
         Payment payment,
         DateTime utcNow,
+        INotificationService? notificationService = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(db);
@@ -188,6 +187,11 @@ public static class PaymentAdvanceReviewService
         if (payment.Id <= 0
             || payment.AdvanceReviewStatus != PaymentAdvanceReviewStatus.RequiresDecision
             || !IsUnallocatedAdvanceCandidate(payment))
+        {
+            return false;
+        }
+
+        if (notificationService is null)
         {
             return false;
         }
@@ -233,31 +237,30 @@ public static class PaymentAdvanceReviewService
         var title = $"Платеж требует решения по авансу: {counterpartyName}";
         var body = $"Поступил платеж на {formattedAmount} ₽ без счета и акта. Проверьте его в разделе «Платежи» → «Контроль аванса».";
 
-        db.UserNotifications.Add(new UserNotification
-        {
-            RecipientUserId = recipientUserId.Value,
-            Type = UserNotificationTypes.PaymentAdvanceReviewRequired,
-            EventKey = eventKey,
-            Title = Truncate(title, 300),
-            BodyPreview = Truncate(body, 1000),
-            Tone = "rose",
-            ObjectType = "payment",
-            ObjectId = payment.Id,
-            MetadataJson = JsonSerializer.Serialize(new
-            {
-                paymentId = payment.Id,
-                paymentDate = payment.Date,
-                paymentType = payment.Type.ToString(),
-                clientId = payment.ClientId,
-                legalEntityId = payment.LegalEntityId,
-                clientCaseId = payment.ClientCaseId,
-                contractId = payment.ContractId,
-                advanceAmount,
-                advanceReviewStatus = payment.AdvanceReviewStatus.ToString(),
-            }, NotificationJsonOptions),
-            CreatedAt = utcNow,
-        });
-        return true;
+        return await notificationService.NotifyAsync(
+            new NotificationEventEnvelope(
+                recipientUserId.Value,
+                UserNotificationTypes.PaymentAdvanceReviewRequired,
+                eventKey,
+                title,
+                body,
+                "payment",
+                payment.Id,
+                null,
+                "rose",
+                new
+                {
+                    paymentId = payment.Id,
+                    paymentDate = payment.Date,
+                    paymentType = payment.Type.ToString(),
+                    clientId = payment.ClientId,
+                    legalEntityId = payment.LegalEntityId,
+                    clientCaseId = payment.ClientCaseId,
+                    contractId = payment.ContractId,
+                    advanceAmount,
+                    advanceReviewStatus = payment.AdvanceReviewStatus.ToString(),
+                }),
+            ct);
     }
 
     public static async Task<int> EnsureReviewEscalationNotificationsAsync(
@@ -265,6 +268,7 @@ public static class PaymentAdvanceReviewService
         Payment payment,
         DateTime utcNow,
         int criticalAgeDays,
+        INotificationService? notificationService = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(db);
@@ -273,6 +277,11 @@ public static class PaymentAdvanceReviewService
         if (payment.Id <= 0
             || payment.AdvanceReviewStatus != PaymentAdvanceReviewStatus.RequiresDecision
             || !IsUnallocatedAdvanceCandidate(payment))
+        {
+            return 0;
+        }
+
+        if (notificationService is null)
         {
             return 0;
         }
@@ -297,14 +306,6 @@ public static class PaymentAdvanceReviewService
             return 0;
         }
 
-        var disabledSettings = await db.UserSettings
-            .AsNoTracking()
-            .Where(item => adminUserIds.Contains(item.UserId)
-                && item.Key == UserNotificationPreferenceSettings.SettingKey)
-            .Select(item => new { item.UserId, item.Value })
-            .ToListAsync(ct);
-        var disabledByUserId = disabledSettings.ToDictionary(item => item.UserId, item => item.Value);
-
         var eventKey = BuildAdvanceReviewEscalationEventKey(payment.Id, normalizedCriticalAgeDays);
         var existingRecipientIds = await db.UserNotifications
             .AsNoTracking()
@@ -318,21 +319,6 @@ public static class PaymentAdvanceReviewService
         var formattedAmount = advanceAmount.ToString("N2", CultureInfo.GetCultureInfo("ru-RU"));
         var title = $"Просроченный аванс без решения: {counterpartyName}";
         var body = $"Платеж на {formattedAmount} ₽ ожидает решения по авансу уже {ageDays} дн. Проверьте его в разделе «Платежи» → «Контроль аванса».";
-        var metadataJson = JsonSerializer.Serialize(new
-        {
-            paymentId = payment.Id,
-            paymentDate = payment.Date,
-            paidDate = payment.PaidDate,
-            lastPaymentDate = payment.LastPaymentDate,
-            clientId = payment.ClientId,
-            legalEntityId = payment.LegalEntityId,
-            clientCaseId = payment.ClientCaseId,
-            contractId = payment.ContractId,
-            advanceAmount,
-            ageDays,
-            criticalAgeDays = normalizedCriticalAgeDays,
-            advanceReviewStatus = payment.AdvanceReviewStatus.ToString(),
-        }, NotificationJsonOptions);
 
         var createdCount = 0;
         foreach (var adminUserId in adminUserIds)
@@ -342,27 +328,38 @@ public static class PaymentAdvanceReviewService
                 continue;
             }
 
-            if (disabledByUserId.TryGetValue(adminUserId, out var disabledTypes)
-                && UserNotificationPreferenceSettings.ParseDisabledTypes(disabledTypes)
-                    .Contains(UserNotificationTypes.PaymentAdvanceReviewEscalation, StringComparer.OrdinalIgnoreCase))
-            {
-                continue;
-            }
+            var created = await notificationService.NotifyAsync(
+                new NotificationEventEnvelope(
+                    adminUserId,
+                    UserNotificationTypes.PaymentAdvanceReviewEscalation,
+                    eventKey,
+                    title,
+                    body,
+                    "payment",
+                    payment.Id,
+                    null,
+                    "rose",
+                    new
+                    {
+                        paymentId = payment.Id,
+                        paymentDate = payment.Date,
+                        paidDate = payment.PaidDate,
+                        lastPaymentDate = payment.LastPaymentDate,
+                        clientId = payment.ClientId,
+                        legalEntityId = payment.LegalEntityId,
+                        clientCaseId = payment.ClientCaseId,
+                        contractId = payment.ContractId,
+                        advanceAmount,
+                        ageDays,
+                        criticalAgeDays = normalizedCriticalAgeDays,
+                        advanceReviewStatus = payment.AdvanceReviewStatus.ToString(),
+                    }),
+                ct);
 
-            db.UserNotifications.Add(new UserNotification
+            if (created)
             {
-                RecipientUserId = adminUserId,
-                Type = UserNotificationTypes.PaymentAdvanceReviewEscalation,
-                EventKey = eventKey,
-                Title = Truncate(title, 300),
-                BodyPreview = Truncate(body, 1000),
-                Tone = "rose",
-                ObjectType = "payment",
-                ObjectId = payment.Id,
-                MetadataJson = metadataJson,
-                CreatedAt = utcNow,
-            });
-            createdCount++;
+                createdCount++;
+            }
         }
 
         return createdCount;
@@ -501,15 +498,5 @@ public static class PaymentAdvanceReviewService
         }
 
         return string.IsNullOrWhiteSpace(name) ? "контрагент не указан" : name.Trim();
-    }
-
-    private static string Truncate(string value, int maxLength)
-    {
-        if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
-        {
-            return value;
-        }
-
-        return value[..maxLength];
     }
 }

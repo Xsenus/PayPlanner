@@ -512,11 +512,11 @@ public class PaymentsController : ControllerBase
         await _db.SaveChangesAsync(ct);
         var invoiceBefore = await CaptureInvoiceNotificationSnapshotAsync(model, ct);
         await PaymentAdvanceReviewService.SyncBalanceAsync(_db, model, now, HttpContext, ct);
-        await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, model, now, ct);
         await ApplyPaymentOverpaymentHandlingAsync(model, rawPaidAmount, now, paymentTimeZone, ct);
         await SyncPaymentCashOrderAsync(model, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, model, now, ct);
         await _db.SaveChangesAsync(ct);
+        await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, model, now, _notificationService, ct);
         PopulateAuditMetadata(_db, model);
         await NotifyPaymentAssignedAsync(model, ct);
         await NotifyInvoiceStateChangedAsync(model, invoiceBefore, ct);
@@ -704,7 +704,6 @@ public class PaymentsController : ControllerBase
         var invoiceBefore = await CaptureInvoiceNotificationSnapshotAsync(e, ct);
         await ApplyPaymentOverpaymentHandlingAsync(e, rawPaidAmount, now, paymentTimeZone, ct);
         await PaymentAdvanceReviewService.SyncBalanceAsync(_db, e, now, HttpContext, ct);
-        await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, e, now, ct);
         await SyncPaymentCashOrderAsync(e, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, e, now, ct);
         if (originalInvoiceId.HasValue
@@ -715,6 +714,7 @@ public class PaymentsController : ControllerBase
         }
 
         await _db.SaveChangesAsync(ct);
+        await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, e, now, _notificationService, ct);
         PopulateAuditMetadata(_db, e);
         await NotifyPaymentChangedAsync(
             e,
@@ -820,10 +820,10 @@ public class PaymentsController : ControllerBase
         var invoiceBefore = await CaptureInvoiceNotificationSnapshotAsync(payment, ct);
         await ClientBalanceService.UpsertPaymentOverpaymentAsync(_db, payment, payment.PaidAmount, now, HttpContext, ct);
         await PaymentAdvanceReviewService.SyncBalanceAsync(_db, payment, now, HttpContext, ct);
-        await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, payment, now, ct);
         await SyncPaymentCashOrderAsync(payment, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, payment, now, ct);
         await _db.SaveChangesAsync(ct);
+        await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, payment, now, _notificationService, ct);
         PopulateAuditMetadata(_db, payment);
         if (originalStatus != payment.Status)
         {
@@ -1222,7 +1222,7 @@ public class PaymentsController : ControllerBase
             payment.AdvanceReviewedAt = null;
             payment.AdvanceReviewedByUserId = null;
             payment.AdvanceReviewedByUserName = null;
-            await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, payment, DateTime.UtcNow, ct);
+            await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, payment, DateTime.UtcNow, _notificationService, ct);
         }
 
         if (payments.Count > 0)

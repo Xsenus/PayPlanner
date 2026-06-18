@@ -4158,7 +4158,7 @@ public class PaymentsControllerTests
         db.Clients.Add(client);
         await db.SaveChangesAsync();
 
-        var controller = CreatePaymentsController(db, user.Id);
+        var controller = CreatePaymentsController(db, user.Id, CreateNotificationService(db));
         var payment = CreatePayment(new DateTime(2026, 3, 2), 7_100m, "Платеж без документов");
         payment.ClientId = client.Id;
         payment.PaidAmount = 7_100m;
@@ -4199,7 +4199,7 @@ public class PaymentsControllerTests
         db.Clients.Add(client);
         await db.SaveChangesAsync();
 
-        var controller = CreatePaymentsController(db, user.Id);
+        var controller = CreatePaymentsController(db, user.Id, CreateNotificationService(db));
         var payment = CreatePayment(new DateTime(2026, 3, 3), 5_000m, "Первичная оплата без документов");
         payment.ClientId = client.Id;
         payment.PaidAmount = 5_000m;
@@ -4250,7 +4250,7 @@ public class PaymentsControllerTests
         db.Clients.Add(client);
         await db.SaveChangesAsync();
 
-        var controller = CreatePaymentsController(db, user.Id);
+        var controller = CreatePaymentsController(db, user.Id, CreateNotificationService(db));
         var payment = CreatePayment(new DateTime(2026, 3, 4), 3_000m, "Оплата без уведомления");
         payment.ClientId = client.Id;
         payment.PaidAmount = 3_000m;

@@ -64,6 +64,40 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyAsync_CreatesUserNotificationAndPublishesRealtimeAndWebPush()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "generic-notification@example.com");
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            realtime,
+            webPush);
+
+        var created = await service.NotifyAsync(new NotificationEventEnvelope(
+            RecipientUserId: user.Id,
+            Type: UserNotificationTypes.PaymentAdvanceReviewRequired,
+            EventKey: "payment:advance:generic:42",
+            Title: "Платеж требует решения",
+            BodyPreview: "Проверьте аванс.",
+            ObjectType: "payment",
+            ObjectId: 42,
+            TaskJournalItemId: null,
+            Metadata: new { paymentId = 42 }));
+
+        Assert.True(created);
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(UserNotificationTypes.PaymentAdvanceReviewRequired, notification.Type);
+        Assert.Equal("payment", notification.ObjectType);
+        Assert.Equal(42, notification.ObjectId);
+        Assert.Single(realtime.Notifications);
+        Assert.Single(webPush.Notifications);
+    }
+
+    [Fact]
     public async Task NotifyPasswordIssuedAsync_SendsEmailAndTelegram_AndHidesPasswordInDeliveryLog()
     {
         await using var db = await CreateContextAsync();

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services.Notifications;
 
 namespace PayPlanner.Api.Services;
 
@@ -101,6 +102,7 @@ public sealed class PaymentAdvanceReviewMonitoringService : BackgroundService
         {
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
+            var notificationService = scope.ServiceProvider.GetService<INotificationService>();
             var candidatePredicate = PaymentAdvanceReviewService.UnallocatedAdvanceCandidatePredicate();
             var payments = await db.Payments
                 .Include(payment => payment.Client)
@@ -130,7 +132,7 @@ public sealed class PaymentAdvanceReviewMonitoringService : BackgroundService
                     markedCount++;
                 }
 
-                if (await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(db, payment, now, cancellationToken))
+                if (await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(db, payment, now, notificationService, cancellationToken))
                 {
                     notifiedCount++;
                 }
@@ -140,6 +142,7 @@ public sealed class PaymentAdvanceReviewMonitoringService : BackgroundService
                     payment,
                     now,
                     settings.CriticalAgeDays,
+                    notificationService,
                     cancellationToken);
             }
 

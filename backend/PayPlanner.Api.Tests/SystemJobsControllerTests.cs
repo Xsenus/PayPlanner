@@ -490,6 +490,12 @@ public class SystemJobsControllerTests
 
         var services = new ServiceCollection();
         services.AddScoped(_ => new PaymentContext(scope.Options, useObjectAuditModel: false));
+        services.AddScoped<INotificationService>(provider => new NotificationService(
+            provider.GetRequiredService<PaymentContext>(),
+            new ConfigurationBuilder().Build(),
+            new NoopEmailService(),
+            new NoopTelegramNotificationService(),
+            NullLogger<NotificationService>.Instance));
         await using var provider = services.BuildServiceProvider();
         var service = new PaymentAdvanceReviewMonitoringService(
             provider.GetRequiredService<IServiceScopeFactory>(),
@@ -567,6 +573,12 @@ public class SystemJobsControllerTests
 
         var services = new ServiceCollection();
         services.AddScoped(_ => new PaymentContext(scope.Options, useObjectAuditModel: false));
+        services.AddScoped<INotificationService>(provider => new NotificationService(
+            provider.GetRequiredService<PaymentContext>(),
+            new ConfigurationBuilder().Build(),
+            new NoopEmailService(),
+            new NoopTelegramNotificationService(),
+            NullLogger<NotificationService>.Instance));
         await using var provider = services.BuildServiceProvider();
         var service = new PaymentAdvanceReviewMonitoringService(
             provider.GetRequiredService<IServiceScopeFactory>(),
@@ -639,6 +651,12 @@ public class SystemJobsControllerTests
 
         var services = new ServiceCollection();
         services.AddScoped(_ => new PaymentContext(scope.Options, useObjectAuditModel: false));
+        services.AddScoped<INotificationService>(provider => new NotificationService(
+            provider.GetRequiredService<PaymentContext>(),
+            new ConfigurationBuilder().Build(),
+            new NoopEmailService(),
+            new NoopTelegramNotificationService(),
+            NullLogger<NotificationService>.Instance));
         await using var provider = services.BuildServiceProvider();
         var runner = new PaymentAdvanceReviewMonitoringService(
             provider.GetRequiredService<IServiceScopeFactory>(),
@@ -1232,6 +1250,43 @@ public class SystemJobsControllerTests
         }
     }
 
+    private sealed class NoopEmailService : IEmailService
+    {
+        public Task SendRegistrationPendingEmailAsync(string toEmail, string fullName) => Task.CompletedTask;
+        public Task SendRegistrationApprovedEmailAsync(string toEmail, string fullName) => Task.CompletedTask;
+        public Task SendRegistrationRejectedEmailAsync(string toEmail, string fullName, string? reason) => Task.CompletedTask;
+        public Task SendAdminNewRegistrationNotificationAsync(string adminEmail, string newUserFullName, string newUserEmail) => Task.CompletedTask;
+
+        public Task SendEmailAsync(
+            string toEmail,
+            string subject,
+            string body,
+            bool isHtml = false,
+            CancellationToken cancellationToken = default,
+            EmailSendSettings? settings = null)
+            => Task.CompletedTask;
+
+        public Task SendEmailWithAttachmentAsync(string toEmail, string subject, string body, string attachmentFileName, byte[] attachmentBytes, string attachmentContentType)
+            => Task.CompletedTask;
+    }
+
+    private sealed class NoopTelegramNotificationService : ITelegramNotificationService
+    {
+        public Task<TelegramSendResult> SendMessageAsync(long chatId, string text, CancellationToken cancellationToken = default)
+            => Task.FromResult(new TelegramSendResult(true, NotificationDeliveryStatus.Sent));
+
+        public Task<TelegramSendResult> SendMessageWithTokenAsync(
+            long chatId,
+            string text,
+            string botToken,
+            CancellationToken cancellationToken = default,
+            TelegramBotConnectionSettings? connection = null)
+            => Task.FromResult(new TelegramSendResult(true, NotificationDeliveryStatus.Sent));
+
+        public Task<TelegramNotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new TelegramNotificationSettingsDto());
+    }
+
     private sealed class RecordingTaskReminderNotificationService : INotificationService
     {
         public List<(int TaskId, string ReminderKey)> Reminders { get; } = [];
@@ -1269,6 +1324,9 @@ public class SystemJobsControllerTests
 
         public Task<IReadOnlyList<NotificationDelivery>> RetryDeliveryAsync(int deliveryId, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+
+        public Task<bool> NotifyAsync(NotificationEventEnvelope notificationEvent, CancellationToken cancellationToken = default)
+            => Task.FromResult(false);
 
         public Task<NotificationSettingsDto> UpsertSenderAsync(UpsertNotificationSenderRequest request, int? senderId = null, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();

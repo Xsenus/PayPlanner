@@ -912,6 +912,10 @@ public interface INotificationService
         int deliveryId,
         CancellationToken cancellationToken = default);
 
+    Task<bool> NotifyAsync(
+        NotificationEventEnvelope notificationEvent,
+        CancellationToken cancellationToken = default);
+
     Task<NotificationSettingsDto> UpsertSenderAsync(
         PayPlanner.Api.Models.Requests.UpsertNotificationSenderRequest request,
         int? senderId = null,

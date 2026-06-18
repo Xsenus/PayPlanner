@@ -3748,6 +3748,9 @@ public class TasksControllerTests
         public Task<IReadOnlyList<NotificationDelivery>> RetryDeliveryAsync(int deliveryId, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
 
+        public Task<bool> NotifyAsync(NotificationEventEnvelope notificationEvent, CancellationToken cancellationToken = default)
+            => Task.FromResult(false);
+
         public Task<NotificationSettingsDto> UpsertSenderAsync(UpsertNotificationSenderRequest request, int? senderId = null, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
 

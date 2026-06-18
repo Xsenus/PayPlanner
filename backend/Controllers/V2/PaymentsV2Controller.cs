@@ -9,6 +9,7 @@ using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using PayPlanner.Api.Services.Notifications;
 
 namespace PayPlanner.Api.Controllers.V2;
 
@@ -20,8 +21,13 @@ public class PaymentsV2Controller : ControllerBase
     private const int MaxPaymentsExportRows = 5000;
 
     private readonly PaymentContext _db;
+    private readonly INotificationService? _notificationService;
 
-    public PaymentsV2Controller(PaymentContext db) => _db = db;
+    public PaymentsV2Controller(PaymentContext db, INotificationService? notificationService = null)
+    {
+        _db = db;
+        _notificationService = notificationService;
+    }
 
     private Task<DataVisibilityAccess?> ResolvePaymentsVisibilityAsync(CancellationToken ct)
         => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
@@ -317,9 +323,9 @@ public class PaymentsV2Controller : ControllerBase
         _db.Payments.Add(model);
         await _db.SaveChangesAsync(ct);
         await PaymentAdvanceReviewService.SyncBalanceAsync(_db, model, now, HttpContext, ct);
-        await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, model, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, model, now, ct);
         await _db.SaveChangesAsync(ct);
+        await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, model, now, _notificationService, ct);
         return Created($"/api/v2/payments/{model.Id}", model);
     }
 
@@ -478,7 +484,6 @@ public class PaymentsV2Controller : ControllerBase
         entity.RescheduleCount = rescheduleCount;
 
         await PaymentAdvanceReviewService.SyncBalanceAsync(_db, entity, now, HttpContext, ct);
-        await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, entity, now, ct);
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, entity, now, ct);
         if (originalInvoiceId.HasValue
             && originalInvoiceId.Value > 0
@@ -488,6 +493,7 @@ public class PaymentsV2Controller : ControllerBase
         }
 
         await _db.SaveChangesAsync(ct);
+        await PaymentAdvanceReviewService.EnsureReviewRequiredNotificationAsync(_db, entity, now, _notificationService, ct);
         return Ok(entity);
     }
 

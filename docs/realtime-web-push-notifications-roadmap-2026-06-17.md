@@ -491,10 +491,13 @@
   - Проверено 18.06.2026: добавлен `NotificationEventEnvelope`; внутренняя точка создания `UserNotification` принимает единый конверт события, старые вызовы оставлены совместимыми обертками.
   - Проверено 18.06.2026: `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --filter "FullyQualifiedName~NotificationServiceTests"`, полный `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj`, `npm run lint`, `npm run build`, `git diff --check`, UTF-8 для измененных файлов, локальный запуск backend на временной SQLite-БД с `GET /api/health`.
 
-- [ ] Унифицировать создание `UserNotification`.
+- [x] Унифицировать создание `UserNotification`.
   - Задачи уже идут через `NotificationService`.
   - Дела/платежи/суды нужно привести к единому методу, где возможно.
   - DoD: realtime и Web Push вызываются одинаково для всех объектов.
+  - Проверено 18.06.2026: прямые создания уведомлений в делах и контроле авансов переведены на `NotificationService.NotifyAsync(NotificationEventEnvelope)`.
+  - Проверено 18.06.2026: в production-коде прямое создание `UserNotification` осталось только внутри `NotificationService`; события дел и контроля авансов проходят через общий pipeline realtime/Web Push.
+  - Проверено 18.06.2026: `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --filter "FullyQualifiedName~NotificationServiceTests|FullyQualifiedName~PaymentsControllerTests"`, `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --filter "FullyQualifiedName~SystemJobsControllerTests|FullyQualifiedName~CasesV2ControllerTests"`, полный `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj`, `npm run lint`, `npm run build`, `git diff --check`, UTF-8 для измененных файлов, локальный запуск backend на временной SQLite-БД с `GET /api/health`.
 
 - [ ] Добавить outbox для доставки.
   - Не терять push/email/telegram, если внешний канал временно недоступен.
