@@ -22,6 +22,7 @@ jobs:
       OUT_DIR: out
       TAR_NAME: payplanner_${{ github.sha }}.tar.gz
       FE_API_URL: https://api.elitpravo.com/api
+      PUBLIC_API_URL: https://api.elitpravo.com
       PUBLIC_API_HEALTH_URL: https://api.elitpravo.com/api/health
       PUBLIC_FRONTEND_URL: https://crm.elitpravo.com/
 
@@ -268,3 +269,12 @@ jobs:
             echo "Check public endpoints"
             curl -fsS "$PUBLIC_API_HEALTH_URL" >/dev/null
             curl -fsS -o /dev/null "$PUBLIC_FRONTEND_URL"
+
+      - name: Check notification readiness
+        env:
+          PAYPLANNER_PRODUCTION_SMOKE_TOKEN: ${{ secrets.PAYPLANNER_PRODUCTION_SMOKE_TOKEN }}
+        run: |
+          node scripts/run-notification-production-readiness.mjs \
+            --api-url="${{ env.PUBLIC_API_URL }}" \
+            --frontend-url="${{ env.PUBLIC_FRONTEND_URL }}" \
+            --timeout-ms=20000

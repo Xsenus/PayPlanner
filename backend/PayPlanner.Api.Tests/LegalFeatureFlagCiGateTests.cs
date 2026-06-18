@@ -116,6 +116,27 @@ public sealed class LegalFeatureFlagCiGateTests
         Assert.True(File.Exists(pushWorker), "public/payplanner-push-worker.js must exist so Vite copies it to dist during npm run build.");
     }
 
+    [Fact]
+    public void DeployWorkflow_RunsNotificationReadinessAfterVpsDeploy()
+    {
+        var root = FindRepositoryRoot();
+        var workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "deploy.yml"));
+
+        Assert.Contains("PUBLIC_API_URL: https://api.elitpravo.com", workflow, StringComparison.Ordinal);
+        Assert.Contains("Check notification readiness", workflow, StringComparison.Ordinal);
+        Assert.Contains("PAYPLANNER_PRODUCTION_SMOKE_TOKEN", workflow, StringComparison.Ordinal);
+        Assert.Contains("scripts/run-notification-production-readiness.mjs", workflow, StringComparison.Ordinal);
+        Assert.Contains("--api-url=\"${{ env.PUBLIC_API_URL }}\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("--frontend-url=\"${{ env.PUBLIC_FRONTEND_URL }}\"", workflow, StringComparison.Ordinal);
+        AssertInOrder(
+            workflow,
+            [
+                "appleboy/ssh-action",
+                "Check notification readiness",
+                "scripts/run-notification-production-readiness.mjs",
+            ]);
+    }
+
     private static string FindRepositoryRoot()
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);

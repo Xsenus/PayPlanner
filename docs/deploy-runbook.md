@@ -113,6 +113,8 @@ PAYPLANNER_PRODUCTION_SMOKE_TOKEN="<short-lived jwt>" node scripts/run-notificat
 
 The smoke command checks public API health, `payplanner-push-worker.js`, and WebSocket `101 Switching Protocols` for `/hubs/notifications` and `/hubs/notes`. Use a short-lived JWT for a real CRM user and revoke or let it expire after the check.
 
+The GitHub Actions deploy workflow runs the same readiness script after the VPS deploy. API health and the service worker are always checked. WebSocket checks are also performed when the repository secret `PAYPLANNER_PRODUCTION_SMOKE_TOKEN` contains a short-lived CRM JWT; if the secret is absent, the script records the WebSocket checks as skipped and production acceptance must confirm them manually.
+
 ## Required backend configuration
 
 Runtime secrets must come from environment variables, systemd environment files, user secrets, or a secret store. Do not commit real secret values to `appsettings*.json`.
