@@ -117,6 +117,54 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public void TaskNotificationTypes_HaveExpectedRoutingMetadata()
+    {
+        var expected = new Dictionary<string, (string Priority, bool RequiresAction, bool ShowsToast, bool PushEligible)>(StringComparer.OrdinalIgnoreCase)
+        {
+            [UserNotificationTypes.TaskAssigned] = (NotificationPriorities.High, true, true, true),
+            [UserNotificationTypes.TaskReminder] = (NotificationPriorities.Critical, true, true, true),
+            [UserNotificationTypes.TaskChanged] = (NotificationPriorities.Normal, false, true, true),
+            [UserNotificationTypes.TaskComment] = (NotificationPriorities.Normal, false, true, true),
+            [UserNotificationTypes.TaskCompleted] = (NotificationPriorities.Silent, false, false, false),
+            [UserNotificationTypes.TaskCancelled] = (NotificationPriorities.High, true, true, true),
+            [UserNotificationTypes.TaskScheduleConflict] = (NotificationPriorities.High, true, true, true),
+            [UserNotificationTypes.TaskApprovalRequested] = (NotificationPriorities.High, true, true, true),
+            [UserNotificationTypes.TaskApproved] = (NotificationPriorities.Normal, false, true, true),
+            [UserNotificationTypes.TaskRevisionRequested] = (NotificationPriorities.High, true, true, true),
+            [UserNotificationTypes.TaskApprovalOverdue] = (NotificationPriorities.Critical, true, true, true),
+        };
+        var actual = UserNotificationTypes.All
+            .Where(item => string.Equals(item.Domain, UserNotificationDomains.Task, StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(item => item.Key, StringComparer.OrdinalIgnoreCase);
+
+        Assert.Equal(
+            expected.Keys.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToArray(),
+            actual.Keys.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToArray());
+
+        foreach (var (key, metadata) in expected)
+        {
+            var type = actual[key];
+
+            Assert.Equal(UserNotificationDomains.Task, type.Domain);
+            Assert.Equal(metadata.Priority, type.Priority);
+            Assert.Equal(metadata.RequiresAction, type.RequiresAction);
+            Assert.Equal(metadata.ShowsToast, type.ShowToastByDefault);
+            Assert.Equal(metadata.PushEligible, type.PushEligible);
+            Assert.Contains(NotificationChannels.InApp, type.EffectiveChannels);
+
+            if (NotificationPriorities.IsSilent(metadata.Priority))
+            {
+                Assert.Equal(new[] { NotificationChannels.InApp }, type.EffectiveChannels);
+            }
+            else
+            {
+                Assert.Contains(NotificationChannels.Toast, type.EffectiveChannels);
+                Assert.Contains(NotificationChannels.WebPush, type.EffectiveChannels);
+            }
+        }
+    }
+
+    [Fact]
     public async Task NotifyAsync_CreatesUserNotificationAndPublishesRealtimeAndWebPush()
     {
         await using var db = await CreateContextAsync();
