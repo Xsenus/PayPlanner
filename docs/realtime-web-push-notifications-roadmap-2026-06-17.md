@@ -115,10 +115,12 @@
 | `noteImportantChanged` | заметка | пользователи общей доски, кроме автора действия | all | high |
 | `systemAdminWarning` | система | администраторы | all | critical |
 
-- [ ] Проверить все места создания `UserNotifications`.
+- [x] Проверить все места создания `UserNotifications`.
   - Уже видимые зоны: `NotificationService`, `CasesV2Controller`, `PaymentAdvanceReviewService`.
   - Найти зоны, где уведомление создается напрямую без realtime-публикации.
   - DoD: все прямые вставки либо переведены на единый сервис, либо отмечены как технический долг.
+  - Проверено 18.06.2026: production-код создает `UserNotification` только в `NotificationService.CreateUserNotificationAsync`; прямые вставки `UserNotifications.Add/AddRange` найдены только в тестовых фикстурах.
+  - Проверено 18.06.2026: добавлен backend-тест `ProductionUserNotifications_AreCreatedOnlyThroughNotificationService`, который сканирует production-файлы и не дает добавить новый обход единого сервиса без явного изменения теста.
 
 - [ ] Проверить все места отправки task-уведомлений.
   - Новая задача.
