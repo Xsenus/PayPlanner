@@ -139,7 +139,26 @@ jobs:
             BACKUP_DIR="$BACKUP_ROOT/pre-${{ github.sha }}-$(date +%Y%m%d-%H%M%S)"
 
             cleanup() {
-              rm -rf "$STAGE" "$TAR"
+              rm -rf "$STAGE" "$TAR" "/tmp/${{ env.TAR_NAME }}"
+            }
+
+            resolve_package() {
+              if [ -f "$TAR" ]; then
+                return 0
+              fi
+
+              local nested_tar="/tmp/${{ env.TAR_NAME }}/${{ env.TAR_NAME }}"
+              if [ -f "$nested_tar" ]; then
+                TAR="$nested_tar"
+                return 0
+              fi
+
+              echo "Deploy package was not found at expected paths:"
+              echo "  /tmp/${{ env.TAR_NAME }}"
+              echo "  $nested_tar"
+              echo "Recent /tmp PayPlanner artifacts:"
+              ls -la /tmp/payplanner* 2>/dev/null || true
+              return 1
             }
 
             check_space() {
@@ -202,6 +221,7 @@ jobs:
             check_space "/" "$MIN_FREE_KB"
 
             echo "[2/13] Prepare staging"
+            resolve_package
             rm -rf "$STAGE"
             mkdir -p "$STAGE"
             tar -xzf "$TAR" -C "$STAGE"
