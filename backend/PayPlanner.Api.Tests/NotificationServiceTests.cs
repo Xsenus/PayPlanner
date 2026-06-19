@@ -4767,78 +4767,78 @@ public class NotificationServiceTests
         {
             case "payment":
             case "invoice":
-            {
-                var payment = new Payment
                 {
-                    Amount = 12000m,
-                    Date = now.Date,
-                    PlannedDate = now.Date,
-                    Type = PaymentType.Income,
-                    Status = PaymentStatus.Pending,
-                    Description = $"{objectType} notification access fixture",
-                    DocumentKind = objectType == "invoice" ? DocumentKind.Invoice : DocumentKind.Payment,
-                    Responsibles =
+                    var payment = new Payment
+                    {
+                        Amount = 12000m,
+                        Date = now.Date,
+                        PlannedDate = now.Date,
+                        Type = PaymentType.Income,
+                        Status = PaymentStatus.Pending,
+                        Description = $"{objectType} notification access fixture",
+                        DocumentKind = objectType == "invoice" ? DocumentKind.Invoice : DocumentKind.Payment,
+                        Responsibles =
                     {
                         new PaymentResponsible { UserId = owner.Id }
                     }
-                };
-                db.Payments.Add(payment);
-                await db.SaveChangesAsync();
-                return payment.Id;
-            }
+                    };
+                    db.Payments.Add(payment);
+                    await db.SaveChangesAsync();
+                    return payment.Id;
+                }
 
             case "act":
-            {
-                var act = new Act
                 {
-                    Number = $"ACT-{Guid.NewGuid():N}",
-                    Date = now.Date,
-                    Amount = 12000m,
-                    ResponsibleId = owner.Id
-                };
-                db.Acts.Add(act);
-                await db.SaveChangesAsync();
-                return act.Id;
-            }
+                    var act = new Act
+                    {
+                        Number = $"ACT-{Guid.NewGuid():N}",
+                        Date = now.Date,
+                        Amount = 12000m,
+                        ResponsibleId = owner.Id
+                    };
+                    db.Acts.Add(act);
+                    await db.SaveChangesAsync();
+                    return act.Id;
+                }
 
             case "case":
-            {
-                var client = new Client
                 {
-                    Name = "Клиент закрытого дела",
-                    Phone = "+70000000000",
-                    ResponsibleUserId = owner.Id
-                };
-                var clientCase = new ClientCase
-                {
-                    Client = client,
-                    CaseNumber = $"CASE-{Guid.NewGuid():N}",
-                    CaseType = "Тестовое дело",
-                    Stage = "В работе",
-                    ResponsibleUserId = owner.Id
-                };
-                db.ClientCases.Add(clientCase);
-                await db.SaveChangesAsync();
-                return clientCase.Id;
-            }
+                    var client = new Client
+                    {
+                        Name = "Клиент закрытого дела",
+                        Phone = "+70000000000",
+                        ResponsibleUserId = owner.Id
+                    };
+                    var clientCase = new ClientCase
+                    {
+                        Client = client,
+                        CaseNumber = $"CASE-{Guid.NewGuid():N}",
+                        CaseType = "Тестовое дело",
+                        Stage = "В работе",
+                        ResponsibleUserId = owner.Id
+                    };
+                    db.ClientCases.Add(clientCase);
+                    await db.SaveChangesAsync();
+                    return clientCase.Id;
+                }
 
             case "task":
-            {
-                var task = new TaskJournalItem
                 {
-                    ObjectName = "Тестовый объект",
-                    Title = "Закрытая тестовая задача",
-                    AssigneeUserId = owner.Id,
-                    AssigneeName = owner.FullName,
-                    AuthorUserId = owner.Id,
-                    AuthorName = owner.FullName,
-                    DueAt = now.AddHours(2),
-                    Status = "new"
-                };
-                db.TaskJournalItems.Add(task);
-                await db.SaveChangesAsync();
-                return task.Id;
-            }
+                    var task = new TaskJournalItem
+                    {
+                        ObjectName = "Тестовый объект",
+                        Title = "Закрытая тестовая задача",
+                        AssigneeUserId = owner.Id,
+                        AssigneeName = owner.FullName,
+                        AuthorUserId = owner.Id,
+                        AuthorName = owner.FullName,
+                        DueAt = now.AddHours(2),
+                        Status = "new"
+                    };
+                    db.TaskJournalItems.Add(task);
+                    await db.SaveChangesAsync();
+                    return task.Id;
+                }
 
             default:
                 throw new ArgumentOutOfRangeException(nameof(objectType), objectType, "Unsupported notification object type.");
