@@ -239,7 +239,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       {typeof document !== 'undefined'
         ? createPortal(
-            <div className="pointer-events-none fixed right-4 top-4 z-[2000] flex w-[min(100vw-2rem,24rem)] flex-col gap-3" aria-live="polite" aria-atomic="true">
+            <div className="pointer-events-none fixed left-3 right-3 top-3 z-[2000] flex flex-col gap-3 sm:left-auto sm:right-4 sm:top-4 sm:w-[min(100vw-2rem,26rem)]" aria-live="polite" aria-atomic="true">
               {toasts.map((toast) => {
                 const styles = toastStyles(toast.variant);
                 const domainStyles = toastDomainStyles(toast.domain);
@@ -254,25 +254,28 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                   <div
                     key={toast.id}
                     role={toast.variant === 'error' ? 'alert' : 'status'}
-                    className={`pointer-events-auto overflow-hidden rounded-2xl border border-l-4 shadow-xl backdrop-blur ${styles.wrapper} ${domainStyles.borderColor ?? 'border-l-sky-400'}`}
+                    data-testid="toast-card"
+                    className={`pointer-events-auto overflow-hidden rounded-xl border border-l-4 shadow-xl backdrop-blur ${styles.wrapper} ${domainStyles.borderColor ?? 'border-l-sky-400'}`}
                   >
-                    <div className="flex items-start gap-3 px-4 py-3">
-                      <div className={`mt-0.5 shrink-0 ${iconColor}`}>
-                        <Icon className="h-5 w-5" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 px-3 py-3 sm:px-4">
+                      <div className="min-w-0">
+                        <div data-testid="toast-header" className="flex min-w-0 flex-wrap items-center gap-2">
                           {domainStyles.label ? (
-                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ${domainStyles.badge}`}>
+                            <span data-testid="toast-domain-pill" className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-semibold leading-none ring-1 ${domainStyles.badge}`}>
+                              <Icon className="h-3.5 w-3.5" />
                               {domainStyles.label}
                             </span>
-                          ) : null}
-                          <div className="min-w-0 text-sm font-semibold text-slate-900">{toast.title}</div>
+                          ) : (
+                            <span className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/70 ring-1 ring-black/5 ${iconColor}`}>
+                              <Icon className="h-4 w-4" />
+                            </span>
+                          )}
+                          <div className="min-w-0 flex-1 break-words text-sm font-semibold leading-5 text-slate-900 sm:truncate">{toast.title}</div>
                         </div>
-                        <div className="mt-1 break-words text-sm text-slate-700">{toast.description}</div>
+                        <div className="mt-1 break-words text-sm leading-5 text-slate-700">{toast.description}</div>
                         {toast.actions?.length ? (
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {toast.actions.map((action) => (
+                          <div data-testid="toast-actions" className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+                            {toast.actions.map((action, actionIndex) => (
                               <button
                                 key={action.label}
                                 type="button"
@@ -282,8 +285,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                                 }}
                                 className={
                                   action.variant === 'secondary'
-                                    ? 'rounded-lg border border-slate-200 bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-white hover:text-slate-900'
-                                    : 'rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800'
+                                    ? `${actionIndex === 0 || toast.actions?.length === 2 ? 'col-span-2' : 'col-span-1'} inline-flex min-h-8 w-full items-center justify-center rounded-lg border border-slate-200 bg-white/80 px-3 py-1.5 text-center text-xs font-semibold leading-4 text-slate-700 transition hover:bg-white hover:text-slate-900 sm:col-span-1 sm:w-auto`
+                                    : `${actionIndex === 0 ? 'col-span-2' : 'col-span-1'} inline-flex min-h-8 w-full items-center justify-center rounded-lg bg-slate-900 px-3 py-1.5 text-center text-xs font-semibold leading-4 text-white transition hover:bg-slate-800 sm:col-span-1`
                                 }
                               >
                                 {action.label}
@@ -297,7 +300,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                               toast.onAction?.();
                               dismissToast(toast.id);
                             }}
-                            className="mt-3 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-slate-800"
+                            className="mt-3 inline-flex min-h-8 w-full items-center justify-center rounded-lg bg-slate-900 px-3 py-1.5 text-center text-xs font-semibold leading-4 text-white transition hover:bg-slate-800 sm:w-auto"
                           >
                             {toast.actionLabel}
                           </button>

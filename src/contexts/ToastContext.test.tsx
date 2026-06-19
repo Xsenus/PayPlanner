@@ -129,6 +129,13 @@ describe('ToastProvider', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Domain' }));
 
+    const pill = screen.getByTestId('toast-domain-pill');
+    expect(pill.className).toContain('items-center');
+    expect(pill.querySelector('svg')).toBeTruthy();
+    const title = pill.parentElement?.querySelector('div');
+    expect(title?.className).toContain('break-words');
+    expect(title?.className).toContain('sm:truncate');
+
     expect(screen.getByText('Деньги')).toBeTruthy();
     expect(screen.getByText('Проверка платежа')).toBeTruthy();
   });
@@ -149,6 +156,10 @@ describe('ToastProvider', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'MultiAction' }));
+
+    const actions = screen.getByTestId('toast-actions');
+    expect(actions.className).toContain('grid-cols-2');
+    expect(actions.className).toContain('sm:grid-cols-[minmax(0,1fr)_auto_auto]');
     fireEvent.click(screen.getByRole('button', { name: 'РџСЂРѕС‡РёС‚Р°РЅРѕ' }));
 
     expect(firstAction).not.toHaveBeenCalled();
