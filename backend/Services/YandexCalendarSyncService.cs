@@ -1426,7 +1426,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             connection = new YandexCalendarConnection
             {
                 UserId = userId,
-                CalendarMode = await IsAdminConnectionAsync(userId, cancellationToken) ? "adminByAssignee" : "personal",
+                CalendarMode = await ShouldUseAssigneeCalendarModeByDefaultAsync(userId, cancellationToken) ? "adminByAssignee" : "personal",
                 ConflictResolutionMode = "latestWins",
                 CreatedAt = now,
             };
@@ -2182,12 +2182,11 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         }
     }
 
-    private async Task<bool> IsAdminConnectionAsync(int userId, CancellationToken cancellationToken)
-        => await _db.Users
-            .AsNoTracking()
-            .Where(item => item.Id == userId)
-            .Select(item => item.Role != null && item.Role.Name == "admin")
-            .FirstOrDefaultAsync(cancellationToken);
+    private async Task<bool> ShouldUseAssigneeCalendarModeByDefaultAsync(int userId, CancellationToken cancellationToken)
+    {
+        var visibility = await ResolveConnectionCalendarVisibilityAsync(userId, cancellationToken);
+        return visibility is not null && (visibility.SeesAll || visibility.VisibleUserIds.Count > 1);
+    }
 
     private async Task<DataVisibilityAccess?> ResolveConnectionCalendarVisibilityAsync(
         int userId,
