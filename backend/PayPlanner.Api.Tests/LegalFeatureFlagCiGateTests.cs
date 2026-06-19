@@ -57,6 +57,8 @@ public sealed class LegalFeatureFlagCiGateTests
         var workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "deploy.yml"));
 
         Assert.Contains("PAYPLANNER_WEBPUSH_ENABLED", workflow, StringComparison.Ordinal);
+        Assert.Contains("PAYPLANNER_WEBPUSH_ENABLED: ${{ vars.PAYPLANNER_WEBPUSH_ENABLED || 'false' }}", workflow, StringComparison.Ordinal);
+        Assert.Contains("local webpush_enabled=\"${PAYPLANNER_WEBPUSH_ENABLED:-false}\"", workflow, StringComparison.Ordinal);
         Assert.Contains("PAYPLANNER_WEBPUSH_PUBLIC_KEY", workflow, StringComparison.Ordinal);
         Assert.Contains("PAYPLANNER_WEBPUSH_PRIVATE_KEY", workflow, StringComparison.Ordinal);
         Assert.Contains("PAYPLANNER_WEBPUSH_SUBJECT", workflow, StringComparison.Ordinal);

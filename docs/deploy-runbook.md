@@ -132,7 +132,7 @@ Web Push production values:
 - `WebPush__PrivateKey` is the private VAPID key used only by the backend;
 - `WebPush__Subject` is the VAPID contact value, for example `mailto:admin@example.com`.
 
-The deploy workflow reads the GitHub repository variable `PAYPLANNER_WEBPUSH_ENABLED` and secrets `PAYPLANNER_WEBPUSH_PUBLIC_KEY`, `PAYPLANNER_WEBPUSH_PRIVATE_KEY`, `PAYPLANNER_WEBPUSH_SUBJECT`. On VPS it writes only the runtime `WebPush__*` values to `/opt/payplanner/shared/payplanner.env` with restricted permissions and connects that file through the systemd drop-in `/etc/systemd/system/payplanner.service.d/20-payplanner-runtime-env.conf`. If Web Push is enabled and any key or subject is missing, deployment must stop before the backend restart.
+The deploy workflow reads the GitHub repository variable `PAYPLANNER_WEBPUSH_ENABLED` and secrets `PAYPLANNER_WEBPUSH_PUBLIC_KEY`, `PAYPLANNER_WEBPUSH_PRIVATE_KEY`, `PAYPLANNER_WEBPUSH_SUBJECT`. Web Push is disabled by default in CI/CD until `PAYPLANNER_WEBPUSH_ENABLED=true` is set explicitly. On VPS the workflow writes only the runtime `WebPush__*` values to `/opt/payplanner/shared/payplanner.env` with restricted permissions and connects that file through the systemd drop-in `/etc/systemd/system/payplanner.service.d/20-payplanner-runtime-env.conf`. If Web Push is explicitly enabled and any key or subject is missing, deployment must stop before the backend restart.
 
 Optional integration values such as DaData and SMTP credentials are required only when the corresponding integrations are enabled.
 

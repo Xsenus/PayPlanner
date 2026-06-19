@@ -109,7 +109,7 @@ jobs:
       - name: Deploy on VPS
         uses: appleboy/ssh-action@v1.2.0
         env:
-          PAYPLANNER_WEBPUSH_ENABLED: ${{ vars.PAYPLANNER_WEBPUSH_ENABLED || 'true' }}
+          PAYPLANNER_WEBPUSH_ENABLED: ${{ vars.PAYPLANNER_WEBPUSH_ENABLED || 'false' }}
           PAYPLANNER_WEBPUSH_PUBLIC_KEY: ${{ secrets.PAYPLANNER_WEBPUSH_PUBLIC_KEY }}
           PAYPLANNER_WEBPUSH_PRIVATE_KEY: ${{ secrets.PAYPLANNER_WEBPUSH_PRIVATE_KEY }}
           PAYPLANNER_WEBPUSH_SUBJECT: ${{ secrets.PAYPLANNER_WEBPUSH_SUBJECT }}
@@ -156,7 +156,7 @@ jobs:
 
             configure_runtime_env() {
               set +x
-              local webpush_enabled="${PAYPLANNER_WEBPUSH_ENABLED:-true}"
+              local webpush_enabled="${PAYPLANNER_WEBPUSH_ENABLED:-false}"
               local webpush_public_key="${PAYPLANNER_WEBPUSH_PUBLIC_KEY:-}"
               local webpush_private_key="${PAYPLANNER_WEBPUSH_PRIVATE_KEY:-}"
               local webpush_subject="${PAYPLANNER_WEBPUSH_SUBJECT:-}"

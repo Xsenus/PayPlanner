@@ -676,7 +676,7 @@
   - Push subject/contact.
   - Feature flag для Web Push.
   - DoD: деплой не требует ручного редактирования кода.
-  - Проверено 18.06.2026: deploy workflow принимает `PAYPLANNER_WEBPUSH_ENABLED`, `PAYPLANNER_WEBPUSH_PUBLIC_KEY`, `PAYPLANNER_WEBPUSH_PRIVATE_KEY`, `PAYPLANNER_WEBPUSH_SUBJECT`, пишет runtime `WebPush__*` в `/opt/payplanner/shared/payplanner.env` и подключает файл через systemd drop-in. Если Push включен, но ключи или subject отсутствуют, деплой останавливается до restart backend. Логи health-check больше не выводят `Environment` сервиса.
+  - Проверено 19.06.2026: deploy workflow принимает `PAYPLANNER_WEBPUSH_ENABLED`, `PAYPLANNER_WEBPUSH_PUBLIC_KEY`, `PAYPLANNER_WEBPUSH_PRIVATE_KEY`, `PAYPLANNER_WEBPUSH_SUBJECT`, пишет runtime `WebPush__*` в `/opt/payplanner/shared/payplanner.env` и подключает файл через systemd drop-in. Web Push по умолчанию выключен для стабильного CI/CD; если Push явно включен, но ключи или subject отсутствуют, деплой останавливается до restart backend. Логи health-check больше не выводят `Environment` сервиса.
   - Проверено 18.06.2026: `docs/deploy-runbook.md` и `README.md` описывают Web Push env/secrets, GitHub repository secrets/variable и VPS env-файл; targeted backend-тесты документации, deploy workflow и release notes прошли, 25 тестов без ошибок.
 
 - [x] Добавить health/diagnostics.
