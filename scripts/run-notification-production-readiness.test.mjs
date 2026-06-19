@@ -7,6 +7,7 @@ import {
   buildHubUrl,
   buildUrl,
   checkWebSocketUpgrade,
+  isExpectedWebSocketAuthChallengeStatus,
   parseArgs,
   parseHttpStatusLine,
   readBoolean,
@@ -16,9 +17,27 @@ import {
 
 describe('run-notification-production-readiness configuration', () => {
   it('parses dashed and equals cli arguments', () => {
-    expect(parseArgs(['--api-url=https://api.example', '--timeout-ms', '30000'])).toEqual({
+    expect(parseArgs([
+      '--api-url=https://api.example',
+      '--timeout-ms',
+      '30000',
+      '--require-websocket=true',
+      '--allow-websocket-auth-challenge=true',
+    ])).toEqual({
       apiUrl: 'https://api.example',
       timeoutMs: '30000',
+      requireWebsocket: 'true',
+      allowWebsocketAuthChallenge: 'true',
+    });
+  });
+
+  it('maps dashed WebSocket flags into readiness config', () => {
+    expect(buildConfig(parseArgs([
+      '--require-websocket=true',
+      '--allow-websocket-auth-challenge=true',
+    ]))).toMatchObject({
+      requireWebSocket: true,
+      allowWebSocketAuthChallenge: true,
     });
   });
 
@@ -28,6 +47,7 @@ describe('run-notification-production-readiness configuration', () => {
       frontendUrl: DEFAULT_FRONTEND_URL,
       timeoutMs: 15_000,
       requireWebSocket: false,
+      allowWebSocketAuthChallenge: false,
       allowHttp: false,
     });
   });
@@ -75,6 +95,16 @@ describe('run-notification-production-readiness configuration', () => {
     expect(() => parseHttpStatusLine('not http')).toThrow(/Invalid HTTP status/);
   });
 
+  it('recognizes protected WebSocket auth challenge statuses', () => {
+    expect(isExpectedWebSocketAuthChallengeStatus(401)).toBe(true);
+    expect(isExpectedWebSocketAuthChallengeStatus(403)).toBe(true);
+    expect(isExpectedWebSocketAuthChallengeStatus(101)).toBe(false);
+    expect(isExpectedWebSocketAuthChallengeStatus(404)).toBe(false);
+    expect(buildConfig({ allowWebSocketAuthChallenge: 'true' })).toMatchObject({
+      allowWebSocketAuthChallenge: true,
+    });
+  });
+
   it('fails required WebSocket checks before production deploy when token is missing', async () => {
     await expect(checkWebSocketUpgrade({
       apiUrl: DEFAULT_API_URL,
@@ -82,6 +112,7 @@ describe('run-notification-production-readiness configuration', () => {
       timeoutMs: 100,
       token: '',
       requireWebSocket: true,
+      allowWebSocketAuthChallenge: false,
       allowHttp: false,
     }, '/hubs/notifications')).rejects.toThrow(/requires --token/);
   });

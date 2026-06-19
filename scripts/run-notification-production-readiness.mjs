@@ -82,13 +82,17 @@ export function buildConfig(rawArgs = {}) {
   const allowHttp = readBoolean(rawArgs.allowHttp);
   const apiUrl = normalizeBaseUrl(rawArgs.apiUrl ?? DEFAULT_API_URL, 'api-url', allowHttp);
   const frontendUrl = normalizeBaseUrl(rawArgs.frontendUrl ?? DEFAULT_FRONTEND_URL, 'frontend-url', allowHttp);
+  const requireWebSocket = rawArgs.requireWebSocket ?? rawArgs.requireWebsocket;
+  const allowWebSocketAuthChallenge =
+    rawArgs.allowWebSocketAuthChallenge ?? rawArgs.allowWebsocketAuthChallenge;
 
   return {
     apiUrl,
     frontendUrl,
     timeoutMs: readPositiveInt(rawArgs.timeoutMs, DEFAULT_TIMEOUT_MS),
     token: String(rawArgs.token ?? process.env.PAYPLANNER_PRODUCTION_SMOKE_TOKEN ?? '').trim(),
-    requireWebSocket: readBoolean(rawArgs.requireWebSocket),
+    requireWebSocket: readBoolean(requireWebSocket),
+    allowWebSocketAuthChallenge: readBoolean(allowWebSocketAuthChallenge),
     allowHttp,
   };
 }
@@ -116,6 +120,10 @@ export function parseHttpStatusLine(value) {
     statusCode: Number(match[1]),
     statusText: match[2].trim(),
   };
+}
+
+export function isExpectedWebSocketAuthChallengeStatus(statusCode) {
+  return statusCode === 401 || statusCode === 403;
 }
 
 export function buildWebSocketUpgradeRequest(url, frontendUrl) {
@@ -189,7 +197,7 @@ async function checkPushWorker(config) {
 }
 
 export async function checkWebSocketUpgrade(config, hubPath) {
-  if (!config.token) {
+  if (!config.token && !config.allowWebSocketAuthChallenge) {
     if (config.requireWebSocket) {
       throw new Error(`WebSocket check for ${hubPath} requires --token or PAYPLANNER_PRODUCTION_SMOKE_TOKEN.`);
     }
@@ -251,6 +259,14 @@ export async function checkWebSocketUpgrade(config, hubPath) {
   });
 
   const status = parseHttpStatusLine(statusLine);
+  if (!config.token && config.allowWebSocketAuthChallenge) {
+    if (isExpectedWebSocketAuthChallengeStatus(status.statusCode)) {
+      return `WebSocket ${hubPath} auth challenge ok (${status.statusCode} ${status.statusText})`;
+    }
+
+    throw new Error(`WebSocket ${hubPath} expected 401/403 auth challenge without a token, got ${status.statusCode} ${status.statusText}.`);
+  }
+
   if (status.statusCode !== 101) {
     throw new Error(`WebSocket ${hubPath} expected 101 Switching Protocols, got ${status.statusCode} ${status.statusText}.`);
   }
@@ -278,6 +294,8 @@ Options:
   --frontend-url <url>        Public CRM URL. Default: ${DEFAULT_FRONTEND_URL}
   --token <jwt>               JWT for WebSocket checks. Can also use PAYPLANNER_PRODUCTION_SMOKE_TOKEN.
   --require-websocket <bool>  Fail when token is missing. Default: false
+  --allow-websocket-auth-challenge <bool>
+                              Without a token, accept 401/403 from protected hubs instead of skipping.
   --timeout-ms <number>       Per-check timeout. Default: ${DEFAULT_TIMEOUT_MS}
   --allow-http <bool>         Allow http:// URLs for local dry runs. Default: false
   --help                      Show this help.

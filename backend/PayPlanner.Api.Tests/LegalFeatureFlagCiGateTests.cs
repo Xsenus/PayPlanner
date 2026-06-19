@@ -124,11 +124,12 @@ public sealed class LegalFeatureFlagCiGateTests
 
         Assert.Contains("PUBLIC_API_URL: https://api.elitpravo.com", workflow, StringComparison.Ordinal);
         Assert.Contains("Check notification readiness", workflow, StringComparison.Ordinal);
-        Assert.Contains("PAYPLANNER_PRODUCTION_SMOKE_TOKEN", workflow, StringComparison.Ordinal);
         Assert.Contains("scripts/run-notification-production-readiness.mjs", workflow, StringComparison.Ordinal);
         Assert.Contains("--api-url=\"${{ env.PUBLIC_API_URL }}\"", workflow, StringComparison.Ordinal);
         Assert.Contains("--frontend-url=\"${{ env.PUBLIC_FRONTEND_URL }}\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("--token=\"\"", workflow, StringComparison.Ordinal);
         Assert.Contains("--require-websocket=true", workflow, StringComparison.Ordinal);
+        Assert.Contains("--allow-websocket-auth-challenge=true", workflow, StringComparison.Ordinal);
         AssertInOrder(
             workflow,
             [
