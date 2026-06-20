@@ -87,6 +87,10 @@ public static class PaymentDomainService
         {
             payment.IsPaid = false;
             payment.PaidDate = null;
+            if (payment.PaidAmount <= AmountEpsilon)
+            {
+                payment.LastPaymentDate = null;
+            }
 
             if (payment.Status is PaymentStatus.Cancelled or PaymentStatus.Processing)
             {

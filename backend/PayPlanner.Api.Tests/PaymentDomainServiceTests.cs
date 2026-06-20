@@ -128,6 +128,57 @@ public class PaymentDomainServiceTests
         Assert.Equal(PaymentStatus.Pending, payment.Status);
         Assert.False(payment.IsPaid);
         Assert.Null(payment.PaidDate);
+        Assert.Null(payment.LastPaymentDate);
+    }
+
+    [Fact]
+    public void ApplyStatusRules_ClearsStaleLastPaymentDateWhenPaymentHasNoPaidAmount()
+    {
+        var payment = new Payment
+        {
+            Date = new DateTime(2026, 6, 25),
+            PlannedDate = new DateTime(2026, 6, 25),
+            Amount = 28_000m,
+            PaidAmount = 0m,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            IsPaid = false,
+            PaidDate = new DateTime(2026, 6, 19),
+            LastPaymentDate = new DateTime(2026, 6, 19),
+            Description = "Payment received flag was cleared after early posting"
+        };
+
+        PaymentDomainService.ApplyStatusRules(payment, new DateTime(2026, 6, 20, 8, 0, 0, DateTimeKind.Utc));
+
+        Assert.Equal(PaymentStatus.Pending, payment.Status);
+        Assert.False(payment.IsPaid);
+        Assert.Null(payment.PaidDate);
+        Assert.Null(payment.LastPaymentDate);
+    }
+
+    [Fact]
+    public void ApplyStatusRules_KeepsLastPaymentDateForPartialProcessingPayment()
+    {
+        var payment = new Payment
+        {
+            Date = new DateTime(2026, 6, 25),
+            PlannedDate = new DateTime(2026, 6, 25),
+            Amount = 28_000m,
+            PaidAmount = 7_000m,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Processing,
+            IsPaid = false,
+            PaidDate = new DateTime(2026, 6, 19),
+            LastPaymentDate = new DateTime(2026, 6, 19),
+            Description = "Partial payment keeps actual payment date"
+        };
+
+        PaymentDomainService.ApplyStatusRules(payment, new DateTime(2026, 6, 20, 8, 0, 0, DateTimeKind.Utc));
+
+        Assert.Equal(PaymentStatus.Processing, payment.Status);
+        Assert.False(payment.IsPaid);
+        Assert.Null(payment.PaidDate);
+        AssertLocalDate(payment.LastPaymentDate, 2026, 6, 19);
     }
 
     [Fact]
