@@ -1637,7 +1637,7 @@ export function TaskJournal({
 }: TaskJournalProps) {
   const { user, isAdmin } = useAuth();
   const toast = useToast();
-  const { confirm } = useDialog();
+  const { confirm, prompt } = useDialog();
   const { clients } = useClients();
   const { legalEntities } = useLegalEntities();
   const currentUserName = user?.fullName || user?.email || 'Текущий пользователь';
@@ -1860,9 +1860,15 @@ export function TaskJournal({
     applySavedViewFilters(view.filters);
   };
 
-  const handleSaveCurrentView = () => {
+  const handleSaveCurrentView = async () => {
     const currentView = savedViews.find((item) => item.id === selectedSavedViewId);
-    const name = window.prompt('Название представления', currentView?.name ?? '')?.trim();
+    const name = (await prompt({
+      title: 'Сохранить представление',
+      label: 'Название представления',
+      defaultValue: currentView?.name ?? '',
+      confirmLabel: 'Сохранить',
+      cancelLabel: 'Отмена',
+    }))?.trim();
     if (!name) {
       return;
     }

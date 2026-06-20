@@ -994,7 +994,7 @@ export function CaseDetailPage({
   canDelete = true,
   canViewFinance = true,
 }: CaseDetailPageProps) {
-  const { confirm } = useDialog();
+  const { confirm, prompt } = useDialog();
   const initialViewState = readCaseDetailViewState(caseId);
   const [caseItem, setCaseItem] = useState<ClientCase | null>(null);
   const [caseTimeZoneId, setCaseTimeZoneId] = useState(() => normalizeUserTimeZoneId());
@@ -1833,9 +1833,15 @@ export function CaseDetailPage({
     setError(null);
     setNotice(null);
     try {
-      const reason = typeof window !== 'undefined'
-        ? window.prompt('Причина запроса доступа к делу', 'Нужно посмотреть или продолжить работу по делу.') ?? ''
-        : '';
+      const reason = await prompt({
+        title: 'Запрос доступа к делу',
+        label: 'Причина запроса',
+        defaultValue: 'Нужно посмотреть или продолжить работу по делу.',
+        multiline: true,
+        confirmLabel: 'Отправить',
+        cancelLabel: 'Отмена',
+      });
+      if (reason === null) return;
       await apiService.requestCaseAccess(caseId, { reason: reason.trim() });
       setNotice('Запрос доступа отправлен. Руководитель увидит его в истории дела.');
     } catch (err) {
@@ -2110,7 +2116,13 @@ export function CaseDetailPage({
   };
 
   const recordManualCourtCheck = async () => {
-    const comment = window.prompt('Комментарий к ручной проверке суда', '');
+    const comment = await prompt({
+      title: 'Ручная проверка суда',
+      label: 'Комментарий',
+      multiline: true,
+      confirmLabel: 'Сохранить',
+      cancelLabel: 'Отмена',
+    });
     if (comment === null) return;
 
     await runCourtSync({ manualOnly: true, comment: comment.trim() });
@@ -2379,7 +2391,14 @@ export function CaseDetailPage({
 
   const closeProceduralDeadline = async (deadline: ClientCaseProceduralDeadline) => {
     if (!caseItem) return;
-    const reason = window.prompt('Причина закрытия срока', deadline.closeReason || '');
+    const reason = await prompt({
+      title: 'Закрыть процессуальный срок',
+      label: 'Причина закрытия',
+      defaultValue: deadline.closeReason || '',
+      multiline: true,
+      confirmLabel: 'Закрыть',
+      cancelLabel: 'Отмена',
+    });
     if (reason === null) return;
 
     setClosingProceduralDeadlineId(deadline.id);

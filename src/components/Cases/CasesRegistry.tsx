@@ -4,6 +4,7 @@ import { Archive, ArrowUpDown, Bookmark, Briefcase, ClipboardPlus, Download, Loa
 import { useAuth } from '../../contexts/AuthContext';
 import { apiService } from '../../services/api';
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
+import { useDialog } from '../../hooks/useDialog';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
 import type { ActResponsible, ClientCase, ClientCaseAccessRequest } from '../../types';
@@ -374,6 +375,7 @@ function buildCaseUpdatePayload(base: ClientCase, patch: Partial<ClientCase>): O
 
 export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onOpenCaseFinance, allowCreate = true }: CasesRegistryProps) {
   const { user, isAdmin } = useAuth();
+  const { prompt } = useDialog();
   const permissions = useRolePermissions(user?.role?.id);
   const canEditCases = isAdmin() || permissions.cases.canEdit;
   const canExportCases = isAdmin() || permissions.cases.canExport;
@@ -623,9 +625,15 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
     setPage(1);
   };
 
-  const saveCurrentView = () => {
+  const saveCurrentView = async () => {
     const currentView = savedViews.find((view) => view.id === selectedSavedViewId);
-    const name = window.prompt('Название представления', currentView?.name ?? '')?.trim();
+    const name = (await prompt({
+      title: 'Сохранить представление',
+      label: 'Название представления',
+      defaultValue: currentView?.name ?? '',
+      confirmLabel: 'Сохранить',
+      cancelLabel: 'Отмена',
+    }))?.trim();
     if (!name) {
       return;
     }

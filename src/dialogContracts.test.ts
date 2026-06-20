@@ -16,6 +16,15 @@ describe('dialog source contracts', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('uses the CRM dialog instead of native browser prompts', () => {
+    const offenders = Object.entries(sourceModules)
+      .filter(([filePath]) => !/\.test\.(tsx|ts)$/.test(filePath))
+      .filter(([, source]) => /\bwindow\.prompt\s*\(/.test(source))
+      .map(([filePath]) => filePath);
+
+    expect(offenders).toEqual([]);
+  });
+
   it('does not use native browser prompts in contract details', () => {
     const contractDetailSource = sourceModules['./components/Contracts/ContractDetailPage.tsx'];
 
