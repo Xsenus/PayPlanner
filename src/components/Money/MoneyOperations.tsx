@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
+import { useDialog } from '../../hooks/useDialog';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useMoneyOperations } from '../../hooks/useMoneyOperations';
@@ -2283,6 +2284,7 @@ export function MoneyOperations({
   const canDeleteMoneyOperations = permissions.payments.canDelete;
   const { setActiveTab } = useTabNavigation();
   const toast = useToast();
+  const { confirm } = useDialog();
   const [showFilters, setShowFilters] = useState(false);
   const [showAdvancedSearch, setShowAdvancedSearch] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -3690,9 +3692,14 @@ export function MoneyOperations({
       return;
     }
 
-    if (!window.confirm('Откатить импорт выписки? Будут удалены только несверенные операции без связанных кассовых ордеров.')) {
-      return;
-    }
+    const approved = await confirm({
+      title: 'Откатить импорт выписки?',
+      description: 'Будут удалены только несверенные операции без связанных кассовых ордеров.',
+      confirmLabel: 'Откатить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+    if (!approved) return;
 
     setBankImportRollbackLoading(true);
     try {

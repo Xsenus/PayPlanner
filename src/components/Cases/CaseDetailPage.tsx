@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 
 import { apiService, type ContactDirectoryItemDto } from '../../services/api';
+import { useDialog } from '../../hooks/useDialog';
 import { ObjectAuditHistoryCard } from '../ui/ObjectAuditHistoryCard';
 import type {
   ActResponsible,
@@ -993,6 +994,7 @@ export function CaseDetailPage({
   canDelete = true,
   canViewFinance = true,
 }: CaseDetailPageProps) {
+  const { confirm } = useDialog();
   const initialViewState = readCaseDetailViewState(caseId);
   const [caseItem, setCaseItem] = useState<ClientCase | null>(null);
   const [caseTimeZoneId, setCaseTimeZoneId] = useState(() => normalizeUserTimeZoneId());
@@ -2018,7 +2020,14 @@ export function CaseDetailPage({
   const deleteDocument = async (caseDocument: ClientCaseDocument) => {
     if (!caseItem) return;
     if (!canDeleteDocuments) return;
-    if (!window.confirm(`Удалить документ «${caseDocument.originalFileName}»?`)) return;
+    const approved = await confirm({
+      title: 'Удалить документ?',
+      description: `Документ «${caseDocument.originalFileName}» будет удален из дела.`,
+      confirmLabel: 'Удалить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+    if (!approved) return;
 
     setDeletingDocumentId(caseDocument.id);
     setError(null);
@@ -2420,7 +2429,14 @@ export function CaseDetailPage({
 
   const deleteParticipant = async (party: ClientCaseRelatedParty) => {
     if (!caseItem) return;
-    if (!window.confirm(`Удалить связь с участником «${party.displayName}»?`)) return;
+    const approved = await confirm({
+      title: 'Удалить участника из дела?',
+      description: `Связь с участником «${party.displayName}» будет удалена из карточки дела.`,
+      confirmLabel: 'Удалить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+    if (!approved) return;
 
     setDeletingParticipantId(party.id);
     setError(null);
@@ -2499,7 +2515,14 @@ export function CaseDetailPage({
 
   const deleteWorkOrder = async () => {
     if (!caseItem || !workOrder?.id) return;
-    if (!window.confirm('Удалить заказ-наряд по делу?')) return;
+    const approved = await confirm({
+      title: 'Удалить заказ-наряд?',
+      description: 'Заказ-наряд по делу будет удален.',
+      confirmLabel: 'Удалить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+    if (!approved) return;
 
     setDeletingWorkOrder(true);
     setError(null);
@@ -2564,7 +2587,14 @@ export function CaseDetailPage({
 
   const deleteWorkOrderItem = async (item: ClientCaseWorkOrderItem) => {
     if (!caseItem || !workOrder?.id) return;
-    if (!window.confirm(`Удалить услугу «${item.serviceName}» из заказ-наряда?`)) return;
+    const approved = await confirm({
+      title: 'Удалить услугу?',
+      description: `Услуга «${item.serviceName}» будет удалена из заказ-наряда.`,
+      confirmLabel: 'Удалить',
+      cancelLabel: 'Отмена',
+      variant: 'danger',
+    });
+    if (!approved) return;
 
     setDeletingWorkOrderItemId(item.id);
     setError(null);

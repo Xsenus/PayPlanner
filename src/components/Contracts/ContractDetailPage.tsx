@@ -1,6 +1,7 @@
 import { AlertTriangle, ArrowLeft, Ban, Check, Download, FileText, FileX, GripVertical, Loader2, Mail, Pencil, Plus, Printer, Save, Send, Settings2, UploadCloud, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useDialog } from '../../hooks/useDialog';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
 import { apiService, type ContractRulesSettingsDto } from '../../services/api';
 import type { Act, Contract, ContractInput, ContractLegalEntity, Invoice, Payment } from '../../types';
@@ -165,6 +166,7 @@ export function ContractDetailPage({
 }: Props) {
   const { user } = useAuth();
   const toast = useToast();
+  const { confirm } = useDialog();
   const requiresFinancialActionReason = Boolean(user?.requiresFinancialActionReason);
   const [contract, setContract] = useState<Contract | null>(null);
   const [contractRules, setContractRules] = useState<ContractRulesSettingsDto>({
@@ -710,9 +712,13 @@ export function ContractDetailPage({
       try {
         const terminationCheck = await apiService.getContractTerminationCheck(contract.id);
         if (terminationCheck.hasUnpaidInvoices) {
-          const proceed = window.confirm(
-            `По договору есть неоплаченные счета: ${terminationCheck.unpaidInvoiceCount} шт. на сумму ${formatAmount(terminationCheck.unpaidInvoiceAmount)} ₽. Продолжить расторжение?`,
-          );
+          const proceed = await confirm({
+            title: 'Продолжить расторжение?',
+            description: `По договору есть неоплаченные счета: ${terminationCheck.unpaidInvoiceCount} шт. на сумму ${formatAmount(terminationCheck.unpaidInvoiceAmount)} ₽.`,
+            confirmLabel: 'Продолжить',
+            cancelLabel: 'Отмена',
+            variant: 'danger',
+          });
           if (!proceed) return;
 
           financialTerms = window.prompt('Финансовые условия по неоплаченным счетам')?.trim() || null;
