@@ -27,6 +27,48 @@ function PromptLauncher({ onResolved }: { onResolved: (value: string | null) => 
   );
 }
 
+function ConfirmLauncher({ onResolved }: { onResolved: (value: boolean) => void }) {
+  const { confirm } = useDialog();
+
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        const value = await confirm({
+          title: 'Удалить заметку',
+          description: 'Заметка будет удалена с доски.',
+          cancelLabel: 'Оставить',
+          confirmLabel: 'Удалить',
+          variant: 'danger',
+        });
+        onResolved(value);
+      }}
+    >
+      Открыть подтверждение
+    </button>
+  );
+}
+
+function AlertLauncher({ onResolved }: { onResolved: () => void }) {
+  const { alert } = useDialog();
+
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        await alert({
+          title: 'Готово',
+          description: 'Действие выполнено.',
+          confirmLabel: 'Понятно',
+        });
+        onResolved();
+      }}
+    >
+      Открыть уведомление
+    </button>
+  );
+}
+
 describe('modal accessibility contracts', () => {
   it('keeps keyboard focus inside text prompt modals and closes on Escape', async () => {
     const user = userEvent.setup();
@@ -121,5 +163,53 @@ describe('modal accessibility contracts', () => {
 
     expect(onResolved).toHaveBeenCalledWith(null);
     expect(screen.queryByRole('dialog', { name: 'Название представления' })).toBeNull();
+  });
+
+  it('closes shared confirm dialogs as cancellation on Escape', async () => {
+    const user = userEvent.setup();
+    const onResolved = vi.fn();
+
+    render(
+      <DialogProvider>
+        <ConfirmLauncher onResolved={onResolved} />
+      </DialogProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Открыть подтверждение' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'Удалить заметку' });
+    const cancelButton = screen.getByRole('button', { name: 'Оставить' });
+
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+    expect(document.activeElement).toBe(cancelButton);
+
+    await user.keyboard('{Escape}');
+
+    expect(onResolved).toHaveBeenCalledWith(false);
+    expect(screen.queryByRole('dialog', { name: 'Удалить заметку' })).toBeNull();
+  });
+
+  it('closes shared alert dialogs on Escape', async () => {
+    const user = userEvent.setup();
+    const onResolved = vi.fn();
+
+    render(
+      <DialogProvider>
+        <AlertLauncher onResolved={onResolved} />
+      </DialogProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Открыть уведомление' }));
+
+    const dialog = screen.getByRole('dialog', { name: 'Готово' });
+    const okButton = screen.getByRole('button', { name: 'Понятно' });
+
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+    expect(document.activeElement).toBe(okButton);
+
+    await user.keyboard('{Escape}');
+
+    expect(onResolved).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('dialog', { name: 'Готово' })).toBeNull();
   });
 });

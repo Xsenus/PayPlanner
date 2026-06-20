@@ -78,6 +78,41 @@ export function DialogProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<DialogContextValue>(() => ({ confirm, alert, prompt }), [alert, confirm, prompt]);
 
+  const cancelConfirmRequest = () => {
+    setConfirmRequest((current) => {
+      current?.resolve(false);
+      return null;
+    });
+  };
+
+  const acceptConfirmRequest = () => {
+    setConfirmRequest((current) => {
+      current?.resolve(true);
+      return null;
+    });
+  };
+
+  const closeAlertRequest = () => {
+    setAlertRequest((current) => {
+      current?.resolve();
+      return null;
+    });
+  };
+
+  const handleConfirmKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Escape') return;
+
+    event.preventDefault();
+    cancelConfirmRequest();
+  };
+
+  const handleAlertKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Escape') return;
+
+    event.preventDefault();
+    closeAlertRequest();
+  };
+
   const handlePromptSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!promptRequest) return;
@@ -104,7 +139,12 @@ export function DialogProvider({ children }: { children: ReactNode }) {
       {confirmRequest
         ? createPortal(
             <div className="fixed inset-0 z-[2400] flex items-center justify-center bg-slate-900/40 p-4">
-              <div className="w-full max-w-md rounded-2xl bg-white shadow-xl">
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-label={confirmRequest.title}
+                onKeyDown={handleConfirmKeyDown}
+                className="w-full max-w-md rounded-2xl bg-white shadow-xl">
                 <div className="border-b border-slate-200 px-6 py-4">
                   <h2 className="text-lg font-semibold text-slate-900">{confirmRequest.title}</h2>
                 </div>
@@ -113,18 +153,15 @@ export function DialogProvider({ children }: { children: ReactNode }) {
                 </div>
                 <div className="flex items-center justify-end gap-3 border-t border-slate-200 px-6 py-4">
                   <button
-                    onClick={() => {
-                      confirmRequest.resolve(false);
-                      setConfirmRequest(null);
-                    }}
+                    type="button"
+                    autoFocus
+                    onClick={cancelConfirmRequest}
                     className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
                     {confirmRequest.cancelLabel ?? 'Отмена'}
                   </button>
                   <button
-                    onClick={() => {
-                      confirmRequest.resolve(true);
-                      setConfirmRequest(null);
-                    }}
+                    type="button"
+                    onClick={acceptConfirmRequest}
                     className={`rounded-lg px-4 py-2 text-sm font-semibold text-white ${variantButtonClass(confirmRequest.variant ?? 'primary')}`}>
                     {confirmRequest.confirmLabel ?? 'Подтвердить'}
                   </button>
@@ -137,7 +174,12 @@ export function DialogProvider({ children }: { children: ReactNode }) {
       {alertRequest
         ? createPortal(
             <div className="fixed inset-0 z-[2400] flex items-center justify-center bg-slate-900/40 p-4">
-              <div className="w-full max-w-md rounded-2xl bg-white shadow-xl">
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-label={alertRequest.title ?? 'Уведомление'}
+                onKeyDown={handleAlertKeyDown}
+                className="w-full max-w-md rounded-2xl bg-white shadow-xl">
                 <div className="border-b border-slate-200 px-6 py-4">
                   <h2 className="text-lg font-semibold text-slate-900">{alertRequest.title ?? 'Уведомление'}</h2>
                 </div>
@@ -146,10 +188,9 @@ export function DialogProvider({ children }: { children: ReactNode }) {
                 </div>
                 <div className="flex items-center justify-end border-t border-slate-200 px-6 py-4">
                   <button
-                    onClick={() => {
-                      alertRequest.resolve();
-                      setAlertRequest(null);
-                    }}
+                    type="button"
+                    autoFocus
+                    onClick={closeAlertRequest}
                     className={`rounded-lg px-4 py-2 text-sm font-semibold text-white ${variantButtonClass(alertRequest.variant ?? 'primary')}`}>
                     {alertRequest.confirmLabel ?? 'ОК'}
                   </button>
