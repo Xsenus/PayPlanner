@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ClientReconciliationAct } from "./ClientReconciliationAct";
 import { buildReconciliationRows } from "./clientReconciliationActUtils";
@@ -277,6 +277,7 @@ describe("buildReconciliationRows", () => {
 
 describe("ClientReconciliationAct", () => {
   beforeEach(() => {
+    vi.resetAllMocks();
     window.localStorage.clear();
     apiMock.getCasesV1.mockResolvedValue([
       {
@@ -342,6 +343,10 @@ describe("ClientReconciliationAct", () => {
       createdAt: "2026-04-01T00:00:00Z",
       clients: [],
     });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("renders the reconciliation table with CRM operations", async () => {
