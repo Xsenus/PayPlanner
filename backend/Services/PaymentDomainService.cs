@@ -68,7 +68,8 @@ public static class PaymentDomainService
         payment.PaymentDocumentDate = NormalizeLocalDate(payment.PaymentDocumentDate);
 
         var today = ResolveLocalToday(utcNow, timeZone);
-        var fullyPaid = payment.PaidAmount >= payment.Amount - AmountEpsilon;
+        var fullyPaid = payment.Amount > AmountEpsilon
+            && payment.PaidAmount >= payment.Amount - AmountEpsilon;
 
         if (fullyPaid)
         {

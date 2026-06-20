@@ -107,6 +107,30 @@ public class PaymentDomainServiceTests
     }
 
     [Fact]
+    public void ApplyStatusRules_DoesNotAutoCompleteZeroAmountPayment()
+    {
+        var payment = new Payment
+        {
+            Date = new DateTime(2026, 6, 19),
+            PlannedDate = new DateTime(2026, 6, 25),
+            Amount = 0m,
+            PaidAmount = 0m,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            IsPaid = false,
+            PaidDate = new DateTime(2026, 6, 19),
+            LastPaymentDate = new DateTime(2026, 6, 19),
+            Description = "Zero amount payment after payment received was cleared"
+        };
+
+        PaymentDomainService.ApplyStatusRules(payment, new DateTime(2026, 6, 19, 8, 0, 0, DateTimeKind.Utc));
+
+        Assert.Equal(PaymentStatus.Pending, payment.Status);
+        Assert.False(payment.IsPaid);
+        Assert.Null(payment.PaidDate);
+    }
+
+    [Fact]
     public void ApplyStatusRules_UsesProfileTimeZoneForOverdueLocalDay()
     {
         var payment = new Payment

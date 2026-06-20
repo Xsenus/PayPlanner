@@ -1264,12 +1264,23 @@ export function PaymentModal({
     });
 
   const markPending = () =>
-    setFormData((s) => ({
-      ...s,
-      isPaid: false,
-      status: 'Pending',
-      paidDate: '',
-    }));
+    setFormData((s) => {
+      const amount = parseDecimal(s.amount);
+      const paidAmount = parseDecimal(s.paidAmount);
+      const shouldClearPaidAmount =
+        !Number.isFinite(paidAmount) ||
+        amount <= 0.005 ||
+        paidAmount >= amount - 0.005;
+
+      return {
+        ...s,
+        isPaid: false,
+        status: 'Pending',
+        paidAmount: shouldClearPaidAmount ? '' : s.paidAmount,
+        paidDate: '',
+        lastPaymentDate: shouldClearPaidAmount ? '' : s.lastPaymentDate,
+      };
+    });
 
   const amountRef = useRef<HTMLInputElement>(null);
   const handleMoneyFieldFocus = (field: 'amount' | 'paidAmount') => {

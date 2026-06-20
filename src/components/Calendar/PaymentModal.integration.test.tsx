@@ -600,6 +600,59 @@ describe('PaymentModal integration', () => {
     );
   });
 
+  it('clears received state when a zero amount payment is marked as not paid', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        payment={{
+          id: 782,
+          date: '2026-06-19',
+          plannedDate: '2026-06-25',
+          amount: 0,
+          paidAmount: 0,
+          outstandingAmount: 0,
+          hasPartialPayment: false,
+          status: 'Completed',
+          description: 'Zero installment payment',
+          isPaid: true,
+          paidDate: '2026-06-19',
+          lastPaymentDate: '2026-06-19',
+          notes: '',
+          clientId: 69,
+          type: 'Income',
+          documentKind: 'Payment',
+          createdAt: '2026-06-19T00:00:00Z',
+          systemNotes: '',
+          rescheduleCount: 0,
+          advanceReviewStatus: 'None',
+        }}
+      />,
+    );
+
+    const isPaidInput = document.querySelector<HTMLInputElement>('input[name="isPaid"]');
+    expect(isPaidInput).toBeTruthy();
+    expect(isPaidInput!.checked).toBe(true);
+
+    fireEvent.click(isPaidInput!);
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 782,
+        status: 'Pending',
+        isPaid: false,
+        paidAmount: 0,
+        paidDate: undefined,
+        lastPaymentDate: undefined,
+      }),
+    );
+  });
+
   it('uses the profile timezone day when marking a payment as paid', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-06-04T20:30:00.000Z'));
