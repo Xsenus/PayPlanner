@@ -96,6 +96,34 @@ location /hubs/notes {
 
 Do not write regular access logs for the SignalR hub locations. Browser WebSocket connections can carry short-lived authentication data in the query string, and nginx access or upstream error logs would otherwise preserve the full URL during reconnects or backend restarts. Keep a separate hub error log at `crit` level so critical nginx failures are still visible without recording routine connection resets.
 
+If old nginx logs were written before this rule was applied, sanitize them in place and keep the rest of each log line for diagnostics:
+
+```bash
+sudo find /var/log/nginx -maxdepth 1 -type f \( -name 'access.log*' -o -name 'error.log*' -o -name 'payplanner-hubs-error.log*' \) \
+  -exec sh -c '
+    for file do
+      case "$file" in
+        *.gz)
+          tmp="$(mktemp)"
+          gzip -dc "$file" | sed -E "s/access_token=([^&\" ]+)/signalr_token_redacted/g" > "$tmp"
+          gzip -c "$tmp" > "$file.tmp" && cat "$file.tmp" > "$file"
+          rm -f "$tmp" "$file.tmp"
+          ;;
+        *)
+          sed -E -i "s/access_token=([^&\" ]+)/signalr_token_redacted/g" "$file"
+          ;;
+      esac
+    done
+  ' sh {} +
+```
+
+After sanitizing, confirm that no raw hub access-token parameter remains:
+
+```bash
+sudo grep -R "access_token=" /var/log/nginx/access.log /var/log/nginx/error.log /var/log/nginx/payplanner-hubs-error.log 2>/dev/null || true
+sudo zgrep "access_token=" /var/log/nginx/access.log.*.gz /var/log/nginx/error.log.*.gz 2>/dev/null || true
+```
+
 After editing nginx on VPS:
 
 ```bash

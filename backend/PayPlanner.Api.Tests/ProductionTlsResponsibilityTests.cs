@@ -57,6 +57,8 @@ public class ProductionTlsResponsibilityTests
         Assert.Contains("access_log off", runbook, StringComparison.Ordinal);
         Assert.Contains("payplanner-hubs-error.log crit", runbook, StringComparison.Ordinal);
         Assert.Contains("Do not write regular access logs for the SignalR hub locations", runbook, StringComparison.Ordinal);
+        Assert.Contains("signalr_token_redacted", runbook, StringComparison.Ordinal);
+        Assert.Contains("After sanitizing, confirm that no raw hub access-token parameter remains", runbook, StringComparison.Ordinal);
         Assert.Contains("101 Switching Protocols", runbook, StringComparison.Ordinal);
     }
 
