@@ -162,7 +162,7 @@ function resolveCounterpartyLabel(type?: PaymentKind | null): string {
 export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: ActDetailPageProps) {
   const { t } = useTranslation();
   const { user } = useAuth();
-  const { confirm } = useDialog();
+  const { confirm, prompt } = useDialog();
   const toast = useToast();
   const permissions = useRolePermissions(user?.role?.id);
   const canEdit = permissions.acts.canEdit;
@@ -510,7 +510,13 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
             ? 'Signed'
             : 'NotSigned';
       const reason = requiresFinancialActionReason
-        ? window.prompt('Укажите причину смены статуса акта')?.trim()
+        ? (await prompt({
+            title: 'Причина смены статуса акта',
+            label: 'Причина',
+            multiline: true,
+            confirmLabel: 'Продолжить',
+            cancelLabel: 'Отмена',
+          }))?.trim()
         : null;
       if (requiresFinancialActionReason && !reason) {
         toast.error('Причина обязательна и будет сохранена в журнале.');
@@ -532,7 +538,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
     } finally {
       setPageActionLoading(null);
     }
-  }, [act, confirm, requiresFinancialActionReason, toast]);
+  }, [act, confirm, prompt, requiresFinancialActionReason, toast]);
 
   const openStatusChange = useCallback(() => {
     if (!canEdit || !act) return;
@@ -603,7 +609,13 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
   const handleCancelAct = useCallback(async () => {
     if (!act) return;
 
-    const reason = window.prompt('Укажите причину аннулирования акта');
+    const reason = await prompt({
+      title: 'Аннулирование акта',
+      label: 'Причина аннулирования',
+      multiline: true,
+      confirmLabel: 'Аннулировать',
+      cancelLabel: 'Отмена',
+    });
     if (!reason?.trim()) {
       toast.error('Для аннулирования акта нужна причина.');
       return;
@@ -624,7 +636,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
     } finally {
       setPageActionLoading(null);
     }
-  }, [act, toast]);
+  }, [act, prompt, toast]);
 
   const handleCreateCorrection = useCallback(async () => {
     if (!act) return;
@@ -638,7 +650,13 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
     });
     if (!accepted) return;
 
-    const reason = window.prompt('Укажите причину корректировки акта')?.trim() || null;
+    const reason = (await prompt({
+      title: 'Корректировка акта',
+      label: 'Причина корректировки',
+      multiline: true,
+      confirmLabel: 'Создать',
+      cancelLabel: 'Отмена',
+    }))?.trim() || null;
 
     setPageActionLoading('correction');
     try {
@@ -655,7 +673,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
     } finally {
       setPageActionLoading(null);
     }
-  }, [act, confirm, loadActBundle, toast]);
+  }, [act, confirm, loadActBundle, prompt, toast]);
 
   const handleSend = useCallback(async () => {
     if (!act) return;

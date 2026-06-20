@@ -22,4 +22,11 @@ describe('dialog source contracts', () => {
     expect(contractDetailSource).toBeDefined();
     expect(contractDetailSource).not.toMatch(/\bwindow\.prompt\s*\(/);
   });
+
+  it('does not use native browser prompts in act details', () => {
+    const actDetailSource = sourceModules['./components/Acts/ActDetailPage.tsx'];
+
+    expect(actDetailSource).toBeDefined();
+    expect(actDetailSource).not.toMatch(/\bwindow\.prompt\s*\(/);
+  });
 });
