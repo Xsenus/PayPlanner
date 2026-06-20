@@ -29,4 +29,11 @@ describe('dialog source contracts', () => {
     expect(actDetailSource).toBeDefined();
     expect(actDetailSource).not.toMatch(/\bwindow\.prompt\s*\(/);
   });
+
+  it('does not use native browser prompts in invoice editing', () => {
+    const invoiceModalSource = sourceModules['./components/Accounts/InvoiceModal.tsx'];
+
+    expect(invoiceModalSource).toBeDefined();
+    expect(invoiceModalSource).not.toMatch(/\bwindow\.prompt\s*\(/);
+  });
 });

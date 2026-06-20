@@ -917,7 +917,7 @@ export function InvoiceModal({
 }: InvoiceModalProps) {
   const { user: currentUser } = useAuth();
   const { t } = useTranslation();
-  const { confirm } = useDialog();
+  const { confirm, prompt } = useDialog();
   const toast = useToast();
   const profileTimeZoneId = useUserTimeZone();
   const defaultDate = todayYMDInTimeZone(profileTimeZoneId);
@@ -2608,12 +2608,19 @@ export function InvoiceModal({
   }, [form.amount, installmentPlan]);
   const requiresFinancialActionReason = Boolean(currentUser?.requiresFinancialActionReason);
 
-  const requestFinancialActionReason = useCallback((actionName: string): string | null | undefined => {
+  const requestFinancialActionReason = useCallback(async (actionName: string): Promise<string | null | undefined> => {
     if (!requiresFinancialActionReason) {
       return null;
     }
 
-    const reason = window.prompt(`Укажите причину ${actionName}. Она будет сохранена в журнале.`);
+    const reason = await prompt({
+      title: 'Причина изменения',
+      description: 'Причина будет сохранена в журнале.',
+      label: `Укажите причину ${actionName}`,
+      multiline: true,
+      confirmLabel: 'Продолжить',
+      cancelLabel: 'Отмена',
+    });
     if (reason === null) {
       return undefined;
     }
@@ -2625,7 +2632,7 @@ export function InvoiceModal({
     }
 
     return normalizedReason;
-  }, [requiresFinancialActionReason]);
+  }, [prompt, requiresFinancialActionReason]);
 
   const requestAmountReconciliationDecision = useCallback((
     details: InvoiceAmountReconciliation,
@@ -2962,7 +2969,7 @@ export function InvoiceModal({
         || payload.workflowStatus !== (invoice.workflowStatus ?? form.workflowStatus)
       )
     ) {
-      const reason = requestFinancialActionReason('изменения статуса счета');
+      const reason = await requestFinancialActionReason('изменения статуса счета');
       if (reason === undefined) {
         return;
       }
@@ -3383,7 +3390,7 @@ export function InvoiceModal({
             : action === 'markSigned'
               ? 'SignedByClient'
               : 'NotSigned';
-        const reason = requestFinancialActionReason('смены статуса документа');
+        const reason = await requestFinancialActionReason('смены статуса документа');
         if (reason === undefined) return;
 
         const updated = await apiService.updateInvoiceWorkflowStatus(
@@ -3422,7 +3429,7 @@ export function InvoiceModal({
       if (action === 'paid' && invoice?.id) {
         const nextStatus: PaymentStatus = 'Completed';
         const payload = buildInvoicePayload({ statusOverride: nextStatus });
-        const reason = requestFinancialActionReason('изменения статуса оплаты');
+        const reason = await requestFinancialActionReason('изменения статуса оплаты');
         if (reason === undefined) {
           return;
         }
