@@ -47,6 +47,8 @@ map $http_upgrade $connection_upgrade {
 Required proxy settings for API locations that include `/hubs/notifications` and `/hubs/notes`:
 
 ```nginx
+access_log off;
+error_log /var/log/nginx/payplanner-hubs-error.log crit;
 proxy_http_version 1.1;
 proxy_set_header Upgrade $http_upgrade;
 proxy_set_header Connection $connection_upgrade;
@@ -62,6 +64,8 @@ Example dedicated locations:
 
 ```nginx
 location /hubs/notifications {
+    access_log off;
+    error_log /var/log/nginx/payplanner-hubs-error.log crit;
     proxy_pass http://127.0.0.1:5080;
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
@@ -75,6 +79,8 @@ location /hubs/notifications {
 }
 
 location /hubs/notes {
+    access_log off;
+    error_log /var/log/nginx/payplanner-hubs-error.log crit;
     proxy_pass http://127.0.0.1:5080;
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
@@ -87,6 +93,8 @@ location /hubs/notes {
     proxy_send_timeout 3600s;
 }
 ```
+
+Do not write regular access logs for the SignalR hub locations. Browser WebSocket connections can carry short-lived authentication data in the query string, and nginx access or upstream error logs would otherwise preserve the full URL during reconnects or backend restarts. Keep a separate hub error log at `crit` level so critical nginx failures are still visible without recording routine connection resets.
 
 After editing nginx on VPS:
 

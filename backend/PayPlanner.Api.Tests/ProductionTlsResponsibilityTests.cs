@@ -54,6 +54,9 @@ public class ProductionTlsResponsibilityTests
         Assert.Contains("proxy_set_header Upgrade $http_upgrade", runbook, StringComparison.Ordinal);
         Assert.Contains("proxy_set_header Connection $connection_upgrade", runbook, StringComparison.Ordinal);
         Assert.Contains("proxy_read_timeout 3600s", runbook, StringComparison.Ordinal);
+        Assert.Contains("access_log off", runbook, StringComparison.Ordinal);
+        Assert.Contains("payplanner-hubs-error.log crit", runbook, StringComparison.Ordinal);
+        Assert.Contains("Do not write regular access logs for the SignalR hub locations", runbook, StringComparison.Ordinal);
         Assert.Contains("101 Switching Protocols", runbook, StringComparison.Ordinal);
     }
 
