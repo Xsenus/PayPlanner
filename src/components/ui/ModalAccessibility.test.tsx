@@ -157,7 +157,21 @@ describe('modal accessibility contracts', () => {
     await user.click(screen.getByRole('button', { name: 'Открыть ввод' }));
 
     expect(screen.getByRole('dialog', { name: 'Название представления' })).toBeTruthy();
-    expect((screen.getByRole('textbox', { name: 'Название' }) as HTMLInputElement).value).toBe('Мой фильтр');
+    const input = screen.getByRole('textbox', { name: 'Название' });
+    const cancelButton = screen.getByRole('button', { name: 'Отмена' });
+    const confirmButton = screen.getByRole('button', { name: 'Подтвердить' });
+
+    expect((input as HTMLInputElement).value).toBe('Мой фильтр');
+    expect(document.activeElement).toBe(input);
+
+    await user.tab();
+    expect(document.activeElement).toBe(cancelButton);
+
+    await user.tab();
+    expect(document.activeElement).toBe(confirmButton);
+
+    await user.tab();
+    expect(document.activeElement).toBe(input);
 
     await user.keyboard('{Escape}');
 
@@ -179,8 +193,15 @@ describe('modal accessibility contracts', () => {
 
     const dialog = screen.getByRole('dialog', { name: 'Удалить заметку' });
     const cancelButton = screen.getByRole('button', { name: 'Оставить' });
+    const confirmButton = screen.getByRole('button', { name: 'Удалить' });
 
     expect(dialog.getAttribute('aria-modal')).toBe('true');
+    expect(document.activeElement).toBe(cancelButton);
+
+    await user.tab();
+    expect(document.activeElement).toBe(confirmButton);
+
+    await user.tab();
     expect(document.activeElement).toBe(cancelButton);
 
     await user.keyboard('{Escape}');
@@ -205,6 +226,9 @@ describe('modal accessibility contracts', () => {
     const okButton = screen.getByRole('button', { name: 'Понятно' });
 
     expect(dialog.getAttribute('aria-modal')).toBe('true');
+    expect(document.activeElement).toBe(okButton);
+
+    await user.tab();
     expect(document.activeElement).toBe(okButton);
 
     await user.keyboard('{Escape}');

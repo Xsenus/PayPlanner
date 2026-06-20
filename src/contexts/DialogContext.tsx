@@ -1,5 +1,6 @@
-import { useCallback, useMemo, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { useModalFocusTrap } from '../hooks/useModalFocusTrap';
 import { DialogContext, type AlertOptions, type ConfirmOptions, type DialogContextValue, type DialogVariant, type PromptOptions } from './dialogContextCore';
 
 interface ConfirmRequest extends ConfirmOptions {
@@ -52,6 +53,12 @@ export function DialogProvider({ children }: { children: ReactNode }) {
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
   const [alertRequest, setAlertRequest] = useState<AlertRequest | null>(null);
   const [promptRequest, setPromptRequest] = useState<PromptRequest | null>(null);
+  const confirmDialogRef = useRef<HTMLDivElement>(null);
+  const confirmCancelButtonRef = useRef<HTMLButtonElement>(null);
+  const alertDialogRef = useRef<HTMLDivElement>(null);
+  const alertButtonRef = useRef<HTMLButtonElement>(null);
+  const promptDialogRef = useRef<HTMLFormElement>(null);
+  const promptInitialFocusRef = useRef<HTMLElement | null>(null);
 
   const confirm = useCallback((options: ConfirmOptions | string) => {
     return new Promise<boolean>((resolve) => {
@@ -99,38 +106,36 @@ export function DialogProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const handleConfirmKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== 'Escape') return;
-
-    event.preventDefault();
-    cancelConfirmRequest();
-  };
-
-  const handleAlertKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== 'Escape') return;
-
-    event.preventDefault();
-    closeAlertRequest();
-  };
-
-  const handlePromptSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!promptRequest) return;
-    promptRequest.resolve(promptRequest.value);
-    setPromptRequest(null);
-  };
-
   const cancelPromptRequest = () => {
     if (!promptRequest) return;
     promptRequest.resolve(null);
     setPromptRequest(null);
   };
 
-  const handlePromptKeyDown = (event: KeyboardEvent<HTMLFormElement>) => {
-    if (event.key !== 'Escape') return;
+  const handleConfirmKeyDown = useModalFocusTrap(
+    confirmDialogRef,
+    confirmRequest !== null,
+    cancelConfirmRequest,
+    confirmCancelButtonRef,
+  );
+  const handleAlertKeyDown = useModalFocusTrap(
+    alertDialogRef,
+    alertRequest !== null,
+    closeAlertRequest,
+    alertButtonRef,
+  );
+  const handlePromptKeyDown = useModalFocusTrap(
+    promptDialogRef,
+    promptRequest !== null,
+    cancelPromptRequest,
+    promptInitialFocusRef,
+  );
 
+  const handlePromptSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    cancelPromptRequest();
+    if (!promptRequest) return;
+    promptRequest.resolve(promptRequest.value);
+    setPromptRequest(null);
   };
 
   return (
@@ -140,6 +145,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
         ? createPortal(
             <div className="fixed inset-0 z-[2400] flex items-center justify-center bg-slate-900/40 p-4">
               <div
+                ref={confirmDialogRef}
                 role="dialog"
                 aria-modal="true"
                 aria-label={confirmRequest.title}
@@ -153,8 +159,8 @@ export function DialogProvider({ children }: { children: ReactNode }) {
                 </div>
                 <div className="flex items-center justify-end gap-3 border-t border-slate-200 px-6 py-4">
                   <button
+                    ref={confirmCancelButtonRef}
                     type="button"
-                    autoFocus
                     onClick={cancelConfirmRequest}
                     className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
                     {confirmRequest.cancelLabel ?? 'Отмена'}
@@ -175,6 +181,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
         ? createPortal(
             <div className="fixed inset-0 z-[2400] flex items-center justify-center bg-slate-900/40 p-4">
               <div
+                ref={alertDialogRef}
                 role="dialog"
                 aria-modal="true"
                 aria-label={alertRequest.title ?? 'Уведомление'}
@@ -188,8 +195,8 @@ export function DialogProvider({ children }: { children: ReactNode }) {
                 </div>
                 <div className="flex items-center justify-end border-t border-slate-200 px-6 py-4">
                   <button
+                    ref={alertButtonRef}
                     type="button"
-                    autoFocus
                     onClick={closeAlertRequest}
                     className={`rounded-lg px-4 py-2 text-sm font-semibold text-white ${variantButtonClass(alertRequest.variant ?? 'primary')}`}>
                     {alertRequest.confirmLabel ?? 'ОК'}
@@ -204,6 +211,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
         ? createPortal(
             <div className="fixed inset-0 z-[2400] flex items-center justify-center bg-slate-900/40 p-4">
               <form
+                ref={promptDialogRef}
                 onSubmit={handlePromptSubmit}
                 onKeyDown={handlePromptKeyDown}
                 role="dialog"
@@ -219,7 +227,9 @@ export function DialogProvider({ children }: { children: ReactNode }) {
                     <span className="mb-2 block text-sm font-medium text-slate-700">{promptRequest.label ?? 'Значение'}</span>
                     {promptRequest.multiline ? (
                       <textarea
-                        autoFocus
+                        ref={(element) => {
+                          promptInitialFocusRef.current = element;
+                        }}
                         value={promptRequest.value}
                         onChange={(event) => {
                           const nextValue = event.target.value;
@@ -231,7 +241,9 @@ export function DialogProvider({ children }: { children: ReactNode }) {
                       />
                     ) : (
                       <input
-                        autoFocus
+                        ref={(element) => {
+                          promptInitialFocusRef.current = element;
+                        }}
                         type={promptRequest.inputType ?? 'text'}
                         value={promptRequest.value}
                         onChange={(event) => {
