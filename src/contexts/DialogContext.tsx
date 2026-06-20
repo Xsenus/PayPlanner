@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useMemo, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { DialogContext, type AlertOptions, type ConfirmOptions, type DialogContextValue, type DialogVariant, type PromptOptions } from './dialogContextCore';
 
@@ -85,6 +85,19 @@ export function DialogProvider({ children }: { children: ReactNode }) {
     setPromptRequest(null);
   };
 
+  const cancelPromptRequest = () => {
+    if (!promptRequest) return;
+    promptRequest.resolve(null);
+    setPromptRequest(null);
+  };
+
+  const handlePromptKeyDown = (event: KeyboardEvent<HTMLFormElement>) => {
+    if (event.key !== 'Escape') return;
+
+    event.preventDefault();
+    cancelPromptRequest();
+  };
+
   return (
     <DialogContext.Provider value={value}>
       {children}
@@ -151,6 +164,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
             <div className="fixed inset-0 z-[2400] flex items-center justify-center bg-slate-900/40 p-4">
               <form
                 onSubmit={handlePromptSubmit}
+                onKeyDown={handlePromptKeyDown}
                 role="dialog"
                 aria-modal="true"
                 aria-label={promptRequest.title}
@@ -192,10 +206,7 @@ export function DialogProvider({ children }: { children: ReactNode }) {
                 <div className="flex items-center justify-end gap-3 border-t border-slate-200 px-6 py-4">
                   <button
                     type="button"
-                    onClick={() => {
-                      promptRequest.resolve(null);
-                      setPromptRequest(null);
-                    }}
+                    onClick={cancelPromptRequest}
                     className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
                     {promptRequest.cancelLabel ?? 'Отмена'}
                   </button>

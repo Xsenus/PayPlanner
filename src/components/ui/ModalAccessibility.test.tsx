@@ -2,8 +2,30 @@ import userEvent from '@testing-library/user-event';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
+import { DialogProvider } from '../../contexts/DialogContext';
+import { useDialog } from '../../hooks/useDialog';
 import { ConfirmDialog } from './ConfirmDialog';
 import { TextPromptModal } from './TextPromptModal';
+
+function PromptLauncher({ onResolved }: { onResolved: (value: string | null) => void }) {
+  const { prompt } = useDialog();
+
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        const value = await prompt({
+          title: 'Название представления',
+          label: 'Название',
+          defaultValue: 'Мой фильтр',
+        });
+        onResolved(value);
+      }}
+    >
+      Открыть ввод
+    </button>
+  );
+}
 
 describe('modal accessibility contracts', () => {
   it('keeps keyboard focus inside text prompt modals and closes on Escape', async () => {
@@ -78,5 +100,26 @@ describe('modal accessibility contracts', () => {
 
     await user.tab();
     expect(document.activeElement).toBe(cancelButton);
+  });
+
+  it('closes shared prompt dialogs on Escape', async () => {
+    const user = userEvent.setup();
+    const onResolved = vi.fn();
+
+    render(
+      <DialogProvider>
+        <PromptLauncher onResolved={onResolved} />
+      </DialogProvider>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Открыть ввод' }));
+
+    expect(screen.getByRole('dialog', { name: 'Название представления' })).toBeTruthy();
+    expect((screen.getByRole('textbox', { name: 'Название' }) as HTMLInputElement).value).toBe('Мой фильтр');
+
+    await user.keyboard('{Escape}');
+
+    expect(onResolved).toHaveBeenCalledWith(null);
+    expect(screen.queryByRole('dialog', { name: 'Название представления' })).toBeNull();
   });
 });
