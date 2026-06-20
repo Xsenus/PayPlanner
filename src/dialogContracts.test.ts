@@ -15,4 +15,11 @@ describe('dialog source contracts', () => {
 
     expect(offenders).toEqual([]);
   });
+
+  it('does not use native browser prompts in contract details', () => {
+    const contractDetailSource = sourceModules['./components/Contracts/ContractDetailPage.tsx'];
+
+    expect(contractDetailSource).toBeDefined();
+    expect(contractDetailSource).not.toMatch(/\bwindow\.prompt\s*\(/);
+  });
 });

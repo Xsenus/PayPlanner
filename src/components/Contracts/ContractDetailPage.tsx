@@ -166,7 +166,7 @@ export function ContractDetailPage({
 }: Props) {
   const { user } = useAuth();
   const toast = useToast();
-  const { confirm } = useDialog();
+  const { confirm, prompt } = useDialog();
   const requiresFinancialActionReason = Boolean(user?.requiresFinancialActionReason);
   const [contract, setContract] = useState<Contract | null>(null);
   const [contractRules, setContractRules] = useState<ContractRulesSettingsDto>({
@@ -689,20 +689,35 @@ export function ContractDetailPage({
     let cancelReason: string | null = null;
 
     if (action === 'terminate') {
-      const terminationDate = window.prompt('Дата расторжения договора (ГГГГ-ММ-ДД)', todayYMD())?.trim();
+      const terminationDate = (await prompt({
+        title: 'Дата расторжения договора',
+        label: 'Дата расторжения',
+        defaultValue: todayYMD(),
+        inputType: 'date',
+        confirmLabel: 'Продолжить',
+        cancelLabel: 'Отмена',
+      }))?.trim();
       if (!terminationDate) return;
 
-      const terms = window.prompt('Укажите условия расторжения договора')?.trim();
+      const terms = (await prompt({
+        title: 'Условия расторжения договора',
+        label: 'Условия расторжения',
+        multiline: true,
+        confirmLabel: 'Продолжить',
+        cancelLabel: 'Отмена',
+      }))?.trim();
       if (!terms) {
         toast.error('Условия расторжения обязательны.', 'Договоры');
         return;
       }
 
-      const reason = window.prompt(
-        requiresFinancialActionReason
-          ? 'Причина расторжения договора'
-          : 'Причина расторжения договора (необязательно)',
-      )?.trim();
+      const reason = (await prompt({
+        title: 'Причина расторжения договора',
+        label: requiresFinancialActionReason ? 'Причина расторжения' : 'Причина расторжения (необязательно)',
+        multiline: true,
+        confirmLabel: 'Продолжить',
+        cancelLabel: 'Отмена',
+      }))?.trim();
       if (requiresFinancialActionReason && !reason) {
         toast.error('Причина расторжения обязательна и будет сохранена в журнале.', 'Договоры');
         return;
@@ -721,13 +736,25 @@ export function ContractDetailPage({
           });
           if (!proceed) return;
 
-          financialTerms = window.prompt('Финансовые условия по неоплаченным счетам')?.trim() || null;
+          financialTerms = (await prompt({
+            title: 'Финансовые условия',
+            label: 'Финансовые условия по неоплаченным счетам',
+            multiline: true,
+            confirmLabel: 'Продолжить',
+            cancelLabel: 'Отмена',
+          }))?.trim() || null;
           if (!financialTerms) {
             toast.error('Заполните финансовые условия, чтобы расторгнуть договор с неоплаченными счетами.', 'Договоры');
             return;
           }
         } else {
-          financialTerms = window.prompt('Финансовые условия (необязательно)')?.trim() || null;
+          financialTerms = (await prompt({
+            title: 'Финансовые условия',
+            label: 'Финансовые условия (необязательно)',
+            multiline: true,
+            confirmLabel: 'Продолжить',
+            cancelLabel: 'Отмена',
+          }))?.trim() || null;
         }
       } catch (error) {
         toast.error(extractDisplayErrorMessage(error, 'Не удалось проверить неоплаченные счета договора'), 'Договоры');
@@ -743,7 +770,13 @@ export function ContractDetailPage({
     }
 
     if (action === 'cancel') {
-      const reason = window.prompt('Укажите причину аннулирования договора')?.trim();
+      const reason = (await prompt({
+        title: 'Аннулирование договора',
+        label: 'Причина аннулирования',
+        multiline: true,
+        confirmLabel: 'Аннулировать',
+        cancelLabel: 'Отмена',
+      }))?.trim();
       if (!reason) {
         toast.error('Причина аннулирования обязательна.', 'Договоры');
         return;
@@ -756,10 +789,16 @@ export function ContractDetailPage({
     try {
       let updatedContract: Contract;
       let successMessage: string;
-      const requestStatusReason = (label: string) => {
+      const requestStatusReason = async (label: string) => {
         if (!requiresFinancialActionReason) return null;
 
-        const reason = window.prompt(`Укажите причину: ${label}`)?.trim();
+        const reason = (await prompt({
+          title: 'Причина изменения',
+          label: `Укажите причину: ${label}`,
+          multiline: true,
+          confirmLabel: 'Продолжить',
+          cancelLabel: 'Отмена',
+        }))?.trim();
         if (!reason) {
           toast.error('Причина обязательна и будет сохранена в журнале.', 'Договоры');
           return undefined;
@@ -769,17 +808,17 @@ export function ContractDetailPage({
       };
 
       if (action === 'sendToSigning') {
-        const reason = requestStatusReason('смена статуса договора');
+        const reason = await requestStatusReason('смена статуса договора');
         if (reason === undefined) return;
         updatedContract = await apiService.updateContractStatus(contract.id, 'OnSigning', reason);
         successMessage = 'Договор отправлен на подписание.';
       } else if (action === 'markNotSigned') {
-        const reason = requestStatusReason('смена статуса договора');
+        const reason = await requestStatusReason('смена статуса договора');
         if (reason === undefined) return;
         updatedContract = await apiService.updateContractStatus(contract.id, 'NotSigned', reason);
         successMessage = 'Договор отмечен неподписанным.';
       } else if (action === 'markConcluded') {
-        const reason = requestStatusReason('смена статуса договора');
+        const reason = await requestStatusReason('смена статуса договора');
         if (reason === undefined) return;
         updatedContract = await apiService.updateContractStatus(contract.id, 'Concluded', reason);
         successMessage = 'Договор отмечен подписанным.';
@@ -873,7 +912,13 @@ export function ContractDetailPage({
   const sendContractByEmail = async () => {
     if (!contract || documentSaving) return;
 
-    const email = window.prompt('Email получателя договора')?.trim();
+    const email = (await prompt({
+      title: 'Отправить договор на email',
+      label: 'Email получателя',
+      inputType: 'email',
+      confirmLabel: 'Отправить',
+      cancelLabel: 'Отмена',
+    }))?.trim();
     if (!email) return;
 
     setDocumentSaving(true);

@@ -17,9 +17,22 @@ export interface AlertOptions {
   variant?: DialogVariant;
 }
 
+export interface PromptOptions {
+  title: string;
+  description?: string;
+  label?: string;
+  defaultValue?: string;
+  placeholder?: string;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  multiline?: boolean;
+  inputType?: 'text' | 'email' | 'date';
+}
+
 export interface DialogContextValue {
   confirm: (options: ConfirmOptions | string) => Promise<boolean>;
   alert: (options: AlertOptions | string) => Promise<void>;
+  prompt: (options: PromptOptions | string) => Promise<string | null>;
 }
 
 export const DialogContext = createContext<DialogContextValue | null>(null);
