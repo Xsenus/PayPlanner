@@ -150,7 +150,7 @@ public class NotificationInboxControllerTests
             user.Id,
             "task:1:completed",
             UserNotificationTypes.TaskCompleted,
-            title: "Р—Р°РґР°С‡Р° Р·Р°РІРµСЂС€РµРЅР°");
+            title: "Задача завершена");
         db.UserNotifications.Add(notification);
         await db.SaveChangesAsync();
 

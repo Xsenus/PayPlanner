@@ -182,8 +182,8 @@ public class WebPushNotificationServiceTests
         {
             Type = UserNotificationTypes.TaskChanged,
             EventKey = "task:99:changed",
-            Title = "Р—Р°РґР°С‡Р° РёР·РјРµРЅРµРЅР°",
-            BodyPreview = "РџСЂРѕРІРµСЂСЊС‚Рµ РёР·РјРµРЅРµРЅРёСЏ РІ Р·Р°РґР°С‡Рµ.",
+            Title = "Задача изменена",
+            BodyPreview = "Проверьте изменения в задаче.",
             Tone = "amber",
             ObjectType = "task",
             ObjectId = 99,
@@ -234,8 +234,8 @@ public class WebPushNotificationServiceTests
         {
             Type = UserNotificationTypes.TaskChanged,
             EventKey = "task:100:changed",
-            Title = "Р—Р°РґР°С‡Р° РёР·РјРµРЅРµРЅР°",
-            BodyPreview = "РџСЂРѕРІРµСЂСЊС‚Рµ РёР·РјРµРЅРµРЅРёСЏ РІ Р·Р°РґР°С‡Рµ.",
+            Title = "Задача изменена",
+            BodyPreview = "Проверьте изменения в задаче.",
             Tone = "amber",
             ObjectType = "task",
             ObjectId = 100,

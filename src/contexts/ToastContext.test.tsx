@@ -66,13 +66,13 @@ function ToastHarness({
         type="button"
         onClick={() => {
           toast.showToast({
-            title: 'РќРµСЃРєРѕР»СЊРєРѕ РґРµР№СЃС‚РІРёР№',
-            description: 'РЈ СЌС‚РѕРіРѕ С‚РѕСЃС‚Р° РµСЃС‚СЊ Р±С‹СЃС‚СЂС‹Рµ РґРµР№СЃС‚РІРёСЏ.',
+            title: 'Несколько действий',
+            description: 'У этого тоста есть быстрые действия.',
             durationMs: 0,
             actions: [
-              { label: 'РћС‚РєСЂС‹С‚СЊ', onClick: onFirstAction ?? (() => undefined) },
-              { label: 'РџСЂРѕС‡РёС‚Р°РЅРѕ', onClick: onSecondAction ?? (() => undefined), variant: 'secondary' },
-              { label: 'РћС‚Р»РѕР¶РёС‚СЊ', onClick: onThirdAction ?? (() => undefined), variant: 'secondary' },
+              { label: 'Открыть', onClick: onFirstAction ?? (() => undefined) },
+              { label: 'Прочитано', onClick: onSecondAction ?? (() => undefined), variant: 'secondary' },
+              { label: 'Отложить', onClick: onThirdAction ?? (() => undefined), variant: 'secondary' },
             ],
           });
         }}
@@ -160,7 +160,7 @@ describe('ToastProvider', () => {
     const actions = screen.getByTestId('toast-actions');
     expect(actions.className).toContain('grid-cols-2');
     expect(actions.className).toContain('sm:grid-cols-[minmax(0,1fr)_auto_auto]');
-    fireEvent.click(screen.getByRole('button', { name: 'РџСЂРѕС‡РёС‚Р°РЅРѕ' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Прочитано' }));
 
     expect(firstAction).not.toHaveBeenCalled();
     expect(secondAction).toHaveBeenCalledTimes(1);

@@ -941,6 +941,9 @@ export function PaymentModal({
       defaultDateRef.current = defaultDate;
       prevOpenRef.current = true;
     }
+  // defaultDate is synchronized by the next effect while the modal stays open;
+  // adding it here would reset user-entered fields on date changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [defaultClientCaseId, defaultClientId, defaultExpenseClientId, defaultExpenseLegalEntityId, defaultLegalEntityId, isOpen, linkedInvoice, type]);
 
   useEffect(() => {

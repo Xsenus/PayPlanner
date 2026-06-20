@@ -3,7 +3,8 @@ import userEvent, { type UserEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DialogProvider } from '../../contexts/DialogContext';
 import { ToastProvider } from '../../contexts/ToastContext';
-import { copyTextToClipboard, getEffectiveBoardNotesCount, StickyNotes } from './StickyNotes';
+import { StickyNotes } from './StickyNotes';
+import { copyTextToClipboard, getEffectiveBoardNotesCount } from './stickyNotesUtils';
 import type { StickyNoteBoard, StickyNoteBoardMember, StickyNoteBoardMemberCandidate, StickyNoteItem } from '../../services/api';
 
 const realtimeMock = vi.hoisted(() => {

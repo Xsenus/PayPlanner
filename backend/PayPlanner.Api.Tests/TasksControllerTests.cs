@@ -2904,8 +2904,8 @@ public class TasksControllerTests
     public async Task UpdateStatus_DoneRequiresResultByDefault()
     {
         await using var db = await CreateContextAsync();
-        var author = await CreateAdminUserAsync(db, "author-result-default@example.com", "РђРІС‚РѕСЂ");
-        var client = await CreateClientAsync(db, "РРІР°РЅРѕРІ РРІР°РЅ РРІР°РЅРѕРІРёС‡");
+        var author = await CreateAdminUserAsync(db, "author-result-default@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
         var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id, result: null);
         var controller = CreateController(db, new RecordingNotificationService(), author);
 
@@ -2922,8 +2922,8 @@ public class TasksControllerTests
     public async Task UpdateStatus_DoneAllowsEmptyResultWhenSettingDisabled()
     {
         await using var db = await CreateContextAsync();
-        var author = await CreateAdminUserAsync(db, "author-result-disabled@example.com", "РђРІС‚РѕСЂ");
-        var client = await CreateClientAsync(db, "РРІР°РЅРѕРІ РРІР°РЅ РРІР°РЅРѕРІРёС‡");
+        var author = await CreateAdminUserAsync(db, "author-result-disabled@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
         var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id, result: null);
         var now = DateTime.UtcNow;
         db.SystemSettings.Add(new SystemSetting

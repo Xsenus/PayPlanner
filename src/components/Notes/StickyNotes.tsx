@@ -37,6 +37,7 @@ import {
 import { useToast } from '../../hooks/useToast';
 import { useDialog } from '../../hooks/useDialog';
 import type { HubConnection } from '@microsoft/signalr';
+import { copyTextToClipboard, getEffectiveBoardNotesCount } from './stickyNotesUtils';
 
 const COLORS: Array<{ value: StickyNoteColor; label: string; className: string; swatchClassName: string; swatchTextClassName: string }> = [
   { value: 'yellow', label: 'Желтая', className: 'bg-amber-100 border-amber-200 text-slate-950', swatchClassName: 'bg-amber-200 border-amber-400', swatchTextClassName: 'text-amber-950' },
@@ -109,10 +110,6 @@ function isInteractiveTarget(target: EventTarget | null) {
   return target instanceof HTMLElement && Boolean(target.closest('textarea,button,select,input'));
 }
 
-export function getEffectiveBoardNotesCount(boardNotesCount: number, loadedNotesCount: number) {
-  return Math.max(boardNotesCount, loadedNotesCount);
-}
-
 function readStoredViewMode(): NotesViewMode {
   if (typeof window === 'undefined') {
     return 'canvas';
@@ -162,15 +159,6 @@ function removeStoredValue(key: string) {
   } catch {
     // Local storage is a convenience; the notes themselves stay server-backed.
   }
-}
-
-export async function copyTextToClipboard(text: string, clipboard?: Pick<Clipboard, 'writeText'>) {
-  const targetClipboard = clipboard ?? globalThis.navigator?.clipboard ?? window.navigator.clipboard;
-  if (!targetClipboard?.writeText) {
-    throw new Error('Clipboard API is unavailable');
-  }
-
-  await targetClipboard.writeText(text);
 }
 
 export function StickyNotes() {

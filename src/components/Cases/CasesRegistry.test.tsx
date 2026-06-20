@@ -25,11 +25,11 @@ const permissionsState = vi.hoisted(() => ({
 function createTaskJournalItem(overrides: Partial<TaskJournalItem> = {}): TaskJournalItem {
   return {
     id: 501,
-    objectName: 'Р”РµР»Рѕ',
-    title: 'РџСЂРѕРІРµСЂРёС‚СЊ РґРµР»Рѕ',
+    objectName: 'Дело',
+    title: 'Проверить дело',
     description: '',
-    assigneeName: 'РђРґРјРёРЅРёСЃС‚СЂР°С‚РѕСЂ',
-    authorName: 'РЎРёСЃС‚РµРјР°',
+    assigneeName: 'Администратор',
+    authorName: 'Система',
     dueAt: '2026-05-20T10:00:00Z',
     plannedDurationMinutes: 60,
     type: 'task',
