@@ -111,7 +111,9 @@ public sealed class LegalFeatureFlagCiGateTests
         Assert.Contains("sudo rsync -a \"$STAGE/fe/\" \"$FE_PUBLIC_DIR/\"", workflow, StringComparison.Ordinal);
         Assert.Contains("PUBLIC_API_HEALTH_URL", workflow, StringComparison.Ordinal);
         Assert.Contains("PUBLIC_FRONTEND_URL", workflow, StringComparison.Ordinal);
-        Assert.Contains("curl -fsS \"$PUBLIC_API_HEALTH_URL\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("sudo tee \"$APP_DIR/.deploy-revision\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("curl -fsS \"$PRIMARY_HEALTH_URL\" | grep -Eq", workflow, StringComparison.Ordinal);
+        Assert.Contains("curl -fsS \"$PUBLIC_API_HEALTH_URL\" | grep -Eq", workflow, StringComparison.Ordinal);
         Assert.Contains("curl -fsS -o /dev/null \"$PUBLIC_FRONTEND_URL\"", workflow, StringComparison.Ordinal);
 
         var pushWorker = Path.Combine(root, "public", "payplanner-push-worker.js");

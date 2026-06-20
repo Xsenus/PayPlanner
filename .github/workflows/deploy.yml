@@ -240,6 +240,7 @@ jobs:
             if [ -d "$BE_DIR" ]; then sudo cp -a "$BE_DIR" "$BACKUP_DIR/backend.previous"; fi
             if [ -d "$FE_APP_DIR" ]; then sudo cp -a "$FE_APP_DIR" "$BACKUP_DIR/frontend.previous"; fi
             if [ -f "$APP_DIR/REVISION" ]; then sudo cp -a "$APP_DIR/REVISION" "$BACKUP_DIR/REVISION.previous"; fi
+            if [ -f "$APP_DIR/.deploy-revision" ]; then sudo cp -a "$APP_DIR/.deploy-revision" "$BACKUP_DIR/.deploy-revision.previous"; fi
 
             echo "[6/13] Stop service"
             sudo systemctl stop payplanner.service || true
@@ -254,6 +255,7 @@ jobs:
 
             echo "[9/13] Write revision marker"
             printf '%s\n' "${{ github.sha }}" | sudo tee "$APP_DIR/REVISION" >/dev/null
+            printf '%s\n' "${{ github.sha }}" | sudo tee "$APP_DIR/.deploy-revision" >/dev/null
 
             echo "[10/13] Cleanup temp artifacts"
             cleanup
@@ -271,7 +273,7 @@ jobs:
             echo "[13/13] Wait for health"
             ok=0
             for i in $(seq 1 30); do
-              if curl -fsS "$PRIMARY_HEALTH_URL" >/dev/null; then
+              if curl -fsS "$PRIMARY_HEALTH_URL" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"'; then
                 ok=1
                 echo "Health OK on attempt $i via $PRIMARY_HEALTH_URL"
                 break
@@ -290,7 +292,7 @@ jobs:
             fi
 
             echo "Check public endpoints"
-            curl -fsS "$PUBLIC_API_HEALTH_URL" >/dev/null
+            curl -fsS "$PUBLIC_API_HEALTH_URL" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"'
             curl -fsS -o /dev/null "$PUBLIC_FRONTEND_URL"
 
       - name: Check notification readiness

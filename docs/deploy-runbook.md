@@ -225,7 +225,7 @@ Rollback checklist:
 2. Restore the previous backend and frontend artifacts from the deploy backup.
 3. Restore the database backup if migrations or startup maintenance changed data in a way that cannot be fixed forward.
 4. Start the backend service.
-5. Check `http://127.0.0.1:5080/api/health` locally and the public HTTPS health URL.
+5. Check `http://127.0.0.1:5080/api/health` locally and the public HTTPS health URL. Both checks must return JSON with `{"status":"ok"}`, not the CRM HTML shell.
 6. Confirm that admins can open the CRM and that the What New module still loads release notes.
 
 Do not manually delete production tables, columns, or backup files during rollback unless the recovery plan explicitly requires it.
@@ -236,6 +236,7 @@ The deploy workflow checks the internal backend endpoint:
 
 ```bash
 curl -fsS http://127.0.0.1:5080/api/health
+curl -fsS http://127.0.0.1:5080/api/health | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"'
 ```
 
 Operators should also check public endpoints after nginx is serving the new frontend and proxying the API:
@@ -243,11 +244,13 @@ Operators should also check public endpoints after nginx is serving the new fron
 ```bash
 curl -I https://crm.elitpravo.com/
 curl -fsS https://api.elitpravo.com/api/health
+curl -fsS https://api.elitpravo.com/api/health | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"'
 ```
 
 Expected result:
 
 - backend health returns HTTP 200;
 - public CRM returns HTTPS;
-- public API health returns HTTP 200;
+- public API health returns HTTP 200 and JSON with `status: ok`;
 - HSTS is present on public HTTPS responses after certificates are valid.
+- `/opt/payplanner/app/REVISION` and `/opt/payplanner/app/.deploy-revision` contain the deployed Git revision.
