@@ -1,10 +1,14 @@
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using PayPlanner.Api.Data;
 
 #nullable disable
 
 namespace PayPlanner.Api.Migrations.PostgreSql
 {
     /// <inheritdoc />
+    [DbContext(typeof(PostgreSqlPaymentContext))]
+    [Migration("20260503100030_AddMoneyOperationVatFieldsPostgres")]
     public partial class AddMoneyOperationVatFieldsPostgres : Migration
     {
         /// <inheritdoc />
