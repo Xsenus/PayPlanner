@@ -13,6 +13,8 @@ const {
   createActCorrectionMock,
   downloadActDocumentMock,
   sendActByEmailMock,
+  dialogConfirmMock,
+  dialogPromptMock,
 } = vi.hoisted(() => ({
   actModalSpy: vi.fn(),
   getActMock: vi.fn(),
@@ -23,6 +25,8 @@ const {
   createActCorrectionMock: vi.fn(),
   downloadActDocumentMock: vi.fn(),
   sendActByEmailMock: vi.fn(),
+  dialogConfirmMock: vi.fn(),
+  dialogPromptMock: vi.fn(),
 }));
 
 vi.mock('../../contexts/AuthContext', () => ({
@@ -46,7 +50,8 @@ vi.mock('../../hooks/useTranslation', () => ({
 
 vi.mock('../../hooks/useDialog', () => ({
   useDialog: () => ({
-    confirm: vi.fn().mockResolvedValue(true),
+    confirm: dialogConfirmMock,
+    prompt: dialogPromptMock,
   }),
 }));
 
@@ -90,6 +95,8 @@ vi.mock('../ui/ObjectAuditModal', () => ({
 describe('ActDetailPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    dialogConfirmMock.mockResolvedValue(true);
+    dialogPromptMock.mockResolvedValue('Уточнение суммы');
     getDocumentStatusesMock.mockResolvedValue([]);
     createActCorrectionMock.mockResolvedValue({
       id: 40,
@@ -303,7 +310,7 @@ describe('ActDetailPage', () => {
       ],
     });
     getActResponsiblesMock.mockResolvedValue({ items: [] });
-    vi.spyOn(window, 'prompt').mockReturnValueOnce('Уточнение суммы');
+    dialogPromptMock.mockResolvedValueOnce('Уточнение суммы');
 
     render(<ActDetailPage actId={34} onBack={vi.fn()} />);
 

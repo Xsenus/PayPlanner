@@ -47,6 +47,11 @@ const toastMock = vi.hoisted(() => ({
   success: vi.fn(),
 }));
 
+const dialogMock = vi.hoisted(() => ({
+  confirm: vi.fn(),
+  prompt: vi.fn(),
+}));
+
 const clientsState = vi.hoisted(() => ({
   clients: [] as Client[],
 }));
@@ -82,9 +87,7 @@ vi.mock('../../hooks/useToast', () => ({
 }));
 
 vi.mock('../../hooks/useDialog', () => ({
-  useDialog: () => ({
-    confirm: vi.fn().mockResolvedValue(true),
-  }),
+  useDialog: () => dialogMock,
 }));
 
 vi.mock('../../hooks/useClients', () => ({
@@ -345,6 +348,8 @@ describe('TaskJournal', () => {
   beforeEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
+    dialogMock.confirm.mockResolvedValue(true);
+    dialogMock.prompt.mockResolvedValue('Срочные задачи');
     window.localStorage.clear();
     authState.user = { id: 7, fullName: 'Администратор', email: 'admin@example.com' };
     authState.isAdmin = true;
@@ -1214,7 +1219,7 @@ describe('TaskJournal', () => {
   });
 
   it('saves, applies and deletes custom task journal views', async () => {
-    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('Срочные задачи');
+    dialogMock.prompt.mockResolvedValueOnce('Срочные задачи');
 
     try {
       await renderJournal([
@@ -1272,7 +1277,7 @@ describe('TaskJournal', () => {
         expect(JSON.parse(window.localStorage.getItem('pp.task_journal.views.v1.user:7') ?? '[]')).toHaveLength(0);
       });
     } finally {
-      promptSpy.mockRestore();
+      dialogMock.prompt.mockResolvedValue('Срочные задачи');
     }
   });
 

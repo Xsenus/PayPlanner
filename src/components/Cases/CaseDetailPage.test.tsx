@@ -6,6 +6,11 @@ import type { ClientCase, ClientCaseWorkOrder } from '../../types';
 import type { TaskJournalItem } from '../../utils/taskJournalStore';
 import { CaseDetailPage } from './CaseDetailPage';
 
+const dialogMock = vi.hoisted(() => ({
+  confirm: vi.fn(),
+  prompt: vi.fn(),
+}));
+
 vi.mock('../../services/api', () => ({
   apiService: {
     getCaseV2: vi.fn(),
@@ -79,6 +84,10 @@ vi.mock('../../services/api', () => ({
     markCaseActivity: vi.fn(),
     getUserSetting: vi.fn(),
   },
+}));
+
+vi.mock('../../hooks/useDialog', () => ({
+  useDialog: () => dialogMock,
 }));
 
 function createCase(overrides: Partial<ClientCase> = {}): ClientCase {
@@ -161,6 +170,10 @@ function createTask(overrides: Partial<TaskJournalItem> = {}): TaskJournalItem {
 
 describe('CaseDetailPage', () => {
   beforeEach(() => {
+    dialogMock.confirm.mockReset();
+    dialogMock.confirm.mockResolvedValue(true);
+    dialogMock.prompt.mockReset();
+    dialogMock.prompt.mockResolvedValue(null);
     window.sessionStorage.clear();
     vi.mocked(apiService.getCaseV2).mockReset();
     vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase());
@@ -1456,7 +1469,7 @@ describe('CaseDetailPage', () => {
 
   it('offers an access request when the case is hidden or unavailable', async () => {
     vi.mocked(apiService.getCaseV2).mockRejectedValueOnce(new Error('HTTP 403 Forbidden - Дело скрыто от исполнителя.'));
-    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('Нужно проверить сроки');
+    dialogMock.prompt.mockResolvedValueOnce('Нужно проверить сроки');
 
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
 
@@ -1467,7 +1480,6 @@ describe('CaseDetailPage', () => {
       expect(apiService.requestCaseAccess).toHaveBeenCalledWith(15, { reason: 'Нужно проверить сроки' });
     });
     expect(await screen.findByText(/Запрос доступа отправлен/u)).toBeTruthy();
-    promptSpy.mockRestore();
   });
 
   it('archives the case through the header action', async () => {
@@ -1704,7 +1716,6 @@ describe('CaseDetailPage', () => {
   });
 
   it('updates and deletes a case document from the documents tab', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
 
     await screen.findByText('ЗЕМЦОВ - банкротство');
@@ -1723,7 +1734,7 @@ describe('CaseDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Удалить документ Заявление.docx' }));
 
     await waitFor(() => {
-      expect(confirmSpy).toHaveBeenCalledWith('Удалить документ «Заявление.docx»?');
+      expect(dialogMock.confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Удалить документ?', variant: 'danger' }));
       expect(apiService.deleteCaseDocument).toHaveBeenCalledWith(15, 7);
       expect(screen.getByText('Документ «Заявление.docx» удален.')).toBeTruthy();
     });
@@ -1756,7 +1767,6 @@ describe('CaseDetailPage', () => {
 
   it('opens a related participant from the participants tab', async () => {
     const onOpenClient = vi.fn();
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     vi.mocked(apiService.getObjectAuditHistory).mockResolvedValue([
       {
         id: 92,
@@ -1791,7 +1801,7 @@ describe('CaseDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Удалить связь с участником Земцов Виктор Александрович' }));
 
     await waitFor(() => {
-      expect(confirmSpy).toHaveBeenCalledWith('Удалить связь с участником «Земцов Виктор Александрович»?');
+      expect(dialogMock.confirm).toHaveBeenCalledWith(expect.objectContaining({ title: 'Удалить участника из дела?', variant: 'danger' }));
       expect(apiService.deleteCaseRelatedParty).toHaveBeenCalledWith(15, 1);
     });
   });
@@ -1932,7 +1942,7 @@ describe('CaseDetailPage', () => {
   });
 
   it('records a manual court check with a comment from the court tab', async () => {
-    const prompt = vi.spyOn(window, 'prompt').mockReturnValue('Проверено по телефону суда');
+    dialogMock.prompt.mockResolvedValueOnce('Проверено по телефону суда');
     vi.mocked(apiService.runCaseCourtSync).mockResolvedValueOnce({
       clientCaseId: 15,
       status: 'manual-check-recorded',
@@ -1959,8 +1969,6 @@ describe('CaseDetailPage', () => {
       });
     });
     expect(screen.getByText(/Комментарий: Проверено по телефону суда/u)).toBeTruthy();
-
-    prompt.mockRestore();
   });
 
   it('copies a direct case link', async () => {

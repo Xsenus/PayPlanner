@@ -22,6 +22,10 @@ const permissionsState = vi.hoisted(() => ({
   paymentsCanView: true,
 }));
 
+const dialogMock = vi.hoisted(() => ({
+  prompt: vi.fn(),
+}));
+
 function createTaskJournalItem(overrides: Partial<TaskJournalItem> = {}): TaskJournalItem {
   return {
     id: 501,
@@ -115,6 +119,10 @@ vi.mock('../../hooks/useRolePermissions', () => ({
   },
 }));
 
+vi.mock('../../hooks/useDialog', () => ({
+  useDialog: () => dialogMock,
+}));
+
 function createCase(overrides: Partial<ClientCase> = {}): ClientCase {
   return {
     id: 1,
@@ -162,6 +170,8 @@ function createCase(overrides: Partial<ClientCase> = {}): ClientCase {
 
 describe('CasesRegistry', () => {
   beforeEach(() => {
+    dialogMock.prompt.mockReset();
+    dialogMock.prompt.mockResolvedValue('\u0410\u043a\u0442\u0438\u0432\u043d\u044b\u0435 \u0417\u0435\u043c\u0446\u043e\u0432');
     authState.isAdmin = true;
     permissionsState.casesCanExport = true;
     permissionsState.paymentsCanView = true;
@@ -677,7 +687,6 @@ describe('CasesRegistry', () => {
   });
 
   it('saves and applies registry filter views', async () => {
-    const prompt = vi.spyOn(window, 'prompt').mockReturnValue('Активные Земцов');
 
     render(<CasesRegistry />);
 
@@ -698,6 +707,9 @@ describe('CasesRegistry', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Сохранить вид' }));
 
+    await waitFor(() => {
+      expect(window.localStorage.getItem('pp.cases_registry_views.v1')).not.toBeNull();
+    });
     const savedRaw = window.localStorage.getItem('pp.cases_registry_views.v1');
     expect(savedRaw).not.toBeNull();
     const savedViews = JSON.parse(savedRaw!);
@@ -723,8 +735,6 @@ describe('CasesRegistry', () => {
         page: 1,
       }));
     });
-
-    prompt.mockRestore();
   });
 
   it('runs row quick actions for task creation and case finance', async () => {
