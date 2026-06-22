@@ -5236,6 +5236,65 @@ services.Id,
     }
 
     [Fact]
+    public async Task BankStatementImports_WithoutPaymentsViewPermission_ReturnsForbid()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateReportsUserWithPaymentsPermissionAsync(
+            db,
+            reportsCanView: true,
+            reportsCanExport: true,
+            paymentsCanView: false,
+            paymentsCanExport: true);
+        var controller = CreateController(db, CreateUserPrincipal(user.Id));
+
+        var action = await controller.BankStatementImports(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(action.Result);
+    }
+
+    [Fact]
+    public async Task BankStatementImportsExport_WithoutPaymentsExportPermission_ReturnsForbid()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateReportsUserWithPaymentsPermissionAsync(
+            db,
+            reportsCanView: true,
+            reportsCanExport: true,
+            paymentsCanView: true,
+            paymentsCanExport: false);
+        var controller = CreateController(db, CreateUserPrincipal(user.Id));
+
+        var action = await controller.ExportManagementReportExcel(
+            "bank-statement-imports",
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(action);
+    }
+
+    [Fact]
     public async Task BankStatementImports_FiltersCreatedAtByProfileLocalDay()
     {
         await using var db = await CreateContextAsync();

@@ -6951,6 +6951,7 @@ function BankStatementImportReportSection({
   onReload,
   filters,
   profileTimeZoneId,
+  canExportPaymentReports,
 }: {
   report: BankStatementImportReport | null;
   loading: boolean;
@@ -6958,6 +6959,7 @@ function BankStatementImportReportSection({
   onReload: () => void;
   filters?: ManagementReportExportFilters;
   profileTimeZoneId?: string | null;
+  canExportPaymentReports: boolean;
 }) {
   const rows = report?.statuses ?? [];
 
@@ -6978,13 +6980,13 @@ function BankStatementImportReportSection({
           <button
             type="button"
             onClick={() => report && exportBankStatementImportReport(report, profileTimeZoneId)}
-            disabled={!report || loading}
+            disabled={!report || loading || !canExportPaymentReports}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
-          <ManagementReportExportButtons reportKind="bank-statement-imports" filters={filters} disabled={!report || loading} />
+          <ManagementReportExportButtons reportKind="bank-statement-imports" filters={filters} disabled={!report || loading || !canExportPaymentReports} />
           <button
             type="button"
             onClick={onReload}
@@ -7743,7 +7745,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     loading: bankStatementImportReportLoading,
     error: bankStatementImportReportError,
     reload: reloadBankStatementImportReport,
-  } = useBankStatementImportReport(cashFlowDates);
+  } = useBankStatementImportReport(cashFlowDates, { enabled: canViewPaymentReports });
   const {
     report: spreadsheetImportReport,
     loading: spreadsheetImportReportLoading,
@@ -8520,14 +8522,17 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               />
             ) : null}
 
-            <BankStatementImportReportSection
-              report={bankStatementImportReport}
-              loading={bankStatementImportReportLoading}
-              error={bankStatementImportReportError}
-              onReload={reloadBankStatementImportReport}
-              filters={cashFlowDates}
-              profileTimeZoneId={profileTimeZoneId}
-            />
+            {canViewPaymentReports ? (
+              <BankStatementImportReportSection
+                report={bankStatementImportReport}
+                loading={bankStatementImportReportLoading}
+                error={bankStatementImportReportError}
+                onReload={reloadBankStatementImportReport}
+                filters={cashFlowDates}
+                profileTimeZoneId={profileTimeZoneId}
+                canExportPaymentReports={canExportPaymentReports}
+              />
+            ) : null}
 
             <SpreadsheetImportReportSection
               report={spreadsheetImportReport}

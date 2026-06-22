@@ -895,6 +895,11 @@ public class ReportsController : ControllerBase
 
             case "bank-statement-imports":
                 {
+                    if (!await HasPaymentsPermissionAsync(static permission => permission.CanExport, ct))
+                    {
+                        return (null, Forbid());
+                    }
+
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
                         cancellationToken => BuildBankStatementImportReportAsync(start, end, timeZone, cancellationToken),
@@ -1727,6 +1732,11 @@ public class ReportsController : ControllerBase
         var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         if (!await CanViewReportsAsync(ct))
+        {
+            return Forbid();
+        }
+
+        if (!await HasPaymentsPermissionAsync(static permission => permission.CanView, ct))
         {
             return Forbid();
         }
