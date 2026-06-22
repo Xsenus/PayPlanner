@@ -34,6 +34,9 @@ public class CashOrdersController : ControllerBase
             ? null
             : Forbid();
 
+    private Task<DataVisibilityAccess?> ResolvePaymentsVisibilityAsync(CancellationToken ct)
+        => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+
     [HttpGet("cashbook")]
     public async Task<ActionResult<CashBookResponseDto>> GetCashBook(
         [FromQuery] DateTime? from,
@@ -46,7 +49,13 @@ public class CashOrdersController : ControllerBase
             return forbidden;
         }
 
-        return Ok(await BuildCashBookAsync(from, to, accountName, ct));
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Forbid();
+        }
+
+        return Ok(await BuildCashBookAsync(from, to, accountName, visibility, ct));
     }
 
     [HttpGet("cashbook/print")]
@@ -61,7 +70,13 @@ public class CashOrdersController : ControllerBase
             return forbidden;
         }
 
-        var cashBook = await BuildCashBookAsync(from, to, accountName, ct);
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Forbid();
+        }
+
+        var cashBook = await BuildCashBookAsync(from, to, accountName, visibility, ct);
         return Content(BuildCashBookPrintHtml(cashBook), "text/html; charset=utf-8", Encoding.UTF8);
     }
 
@@ -107,7 +122,13 @@ public class CashOrdersController : ControllerBase
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 5, 200);
 
-        var query = BuildFilteredQuery(from, to, type, status, search, accountName);
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Forbid();
+        }
+
+        var query = BuildFilteredQuery(from, to, type, status, search, accountName, visibility);
 
         var total = await query.CountAsync(ct);
         var items = await query
@@ -147,7 +168,13 @@ public class CashOrdersController : ControllerBase
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 5, 200);
 
-        var query = BuildFilteredQuery(from, to, type, status, search, accountName);
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Forbid();
+        }
+
+        var query = BuildFilteredQuery(from, to, type, status, search, accountName, visibility);
         var total = await query.CountAsync(ct);
         var summary = await query
             .GroupBy(_ => 1)
@@ -206,7 +233,13 @@ public class CashOrdersController : ControllerBase
             return forbidden;
         }
 
-        var query = BuildFilteredQuery(from, to, type, status, search, accountName);
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Forbid();
+        }
+
+        var query = BuildFilteredQuery(from, to, type, status, search, accountName, visibility);
         var total = await query.CountAsync(ct);
         var summary = await query
             .GroupBy(_ => 1)
@@ -327,7 +360,13 @@ public class CashOrdersController : ControllerBase
 
         var today = await ResolveCashOrderTodayAsync(ct);
         var date = request.Date == default ? today : request.Date.Date;
-        var accountingBalance = await CalculateCashBalanceAsync(date, accountName, ct);
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Forbid();
+        }
+
+        var accountingBalance = await CalculateCashBalanceAsync(date, accountName, visibility, ct);
         var difference = request.ActualBalance - accountingBalance;
 
         CashOrder? correctionOrder = null;
@@ -348,6 +387,8 @@ public class CashOrdersController : ControllerBase
                 Basis = "Корректировка по инвентаризации кассы",
                 Comment = Normalize(request.Comment),
                 CreatedAt = DateTime.UtcNow,
+                CreatedByUserId = User.GetUserId(),
+                CreatedByUserName = User.GetDisplayName(),
             };
             _db.CashOrders.Add(correctionOrder);
         }
@@ -379,11 +420,18 @@ public class CashOrdersController : ControllerBase
             return forbidden;
         }
 
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Forbid();
+        }
+
         var order = await _db.CashOrders
             .Include(item => item.Client)
             .Include(item => item.Payment)
             .Include(item => item.MoneyOperation)
             .AsNoTracking()
+            .ApplyCashOrderVisibility(visibility)
             .FirstOrDefaultAsync(item => item.Id == id, ct);
 
         return order is null ? NotFound() : Ok(Map(order));
@@ -397,9 +445,16 @@ public class CashOrdersController : ControllerBase
             return forbidden;
         }
 
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Forbid();
+        }
+
         var payment = await _db.Payments
             .Include(item => item.Client)
             .Include(item => item.PaymentSource)
+            .ApplyPaymentVisibility(visibility)
             .FirstOrDefaultAsync(item => item.Id == paymentId, ct);
 
         if (payment is null)
@@ -444,6 +499,8 @@ public class CashOrdersController : ControllerBase
             ReceiverName = payment.Type == PaymentType.Expense ? payment.CounterpartyName ?? payment.Client?.Name : null,
             Basis = BuildBasis(payment),
             CreatedAt = DateTime.UtcNow,
+            CreatedByUserId = User.GetUserId(),
+            CreatedByUserName = User.GetDisplayName(),
         };
 
         _db.CashOrders.Add(order);
@@ -460,7 +517,14 @@ public class CashOrdersController : ControllerBase
             return forbidden;
         }
 
-        var operation = await _db.MoneyOperations.FirstOrDefaultAsync(item => item.Id == operationId, ct);
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Forbid();
+        }
+
+        var operation = await ApplyVisibleMoneyOperationForCashOrders(_db.MoneyOperations, visibility)
+            .FirstOrDefaultAsync(item => item.Id == operationId, ct);
         if (operation is null)
         {
             return NotFound();
@@ -496,6 +560,8 @@ public class CashOrdersController : ControllerBase
             Basis = BuildBasis(operation),
             Comment = operation.CategoryName,
             CreatedAt = DateTime.UtcNow,
+            CreatedByUserId = User.GetUserId(),
+            CreatedByUserName = User.GetDisplayName(),
         };
 
         _db.CashOrders.Add(order);
@@ -532,6 +598,8 @@ public class CashOrdersController : ControllerBase
         model.CancelledAt = model.Status == CashOrderStatus.Cancelled ? model.CancelledAt ?? DateTime.UtcNow : null;
         model.CancelledReason = model.Status == CashOrderStatus.Cancelled ? Normalize(model.CancelledReason) : null;
         model.CreatedAt = DateTime.UtcNow;
+        model.CreatedByUserId = User.GetUserId();
+        model.CreatedByUserName = User.GetDisplayName();
 
         _db.CashOrders.Add(model);
         await _db.SaveChangesAsync(ct);
@@ -547,7 +615,15 @@ public class CashOrdersController : ControllerBase
             return forbidden;
         }
 
-        var order = await _db.CashOrders.FirstOrDefaultAsync(item => item.Id == id, ct);
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Forbid();
+        }
+
+        var order = await _db.CashOrders
+            .ApplyCashOrderVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
         if (order is null)
         {
             return NotFound();
@@ -578,6 +654,8 @@ public class CashOrdersController : ControllerBase
         order.Appendix = Normalize(model.Appendix);
         order.Comment = Normalize(model.Comment);
         order.UpdatedAt = DateTime.UtcNow;
+        order.UpdatedByUserId = User.GetUserId();
+        order.UpdatedByUserName = User.GetDisplayName();
 
         await _db.SaveChangesAsync(ct);
 
@@ -592,7 +670,15 @@ public class CashOrdersController : ControllerBase
             return forbidden;
         }
 
-        var order = await _db.CashOrders.FirstOrDefaultAsync(item => item.Id == id, ct);
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Forbid();
+        }
+
+        var order = await _db.CashOrders
+            .ApplyCashOrderVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
         if (order is null)
         {
             return NotFound();
@@ -617,7 +703,15 @@ public class CashOrdersController : ControllerBase
             return forbidden;
         }
 
-        var order = await _db.CashOrders.FirstOrDefaultAsync(item => item.Id == id, ct);
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Forbid();
+        }
+
+        var order = await _db.CashOrders
+            .ApplyCashOrderVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
         if (order is null)
         {
             return NotFound();
@@ -637,6 +731,8 @@ public class CashOrdersController : ControllerBase
         {
             order.Status = CashOrderStatus.Posted;
             order.UpdatedAt = DateTime.UtcNow;
+            order.UpdatedByUserId = User.GetUserId();
+            order.UpdatedByUserName = User.GetDisplayName();
             await _db.SaveChangesAsync(ct);
         }
 
@@ -651,7 +747,15 @@ public class CashOrdersController : ControllerBase
             return forbidden;
         }
 
-        var order = await _db.CashOrders.FirstOrDefaultAsync(item => item.Id == id, ct);
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Forbid();
+        }
+
+        var order = await _db.CashOrders
+            .ApplyCashOrderVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
         if (order is null)
         {
             return NotFound();
@@ -663,6 +767,8 @@ public class CashOrdersController : ControllerBase
             order.CancelledAt = DateTime.UtcNow;
             order.CancelledReason = Normalize(request?.Reason);
             order.UpdatedAt = DateTime.UtcNow;
+            order.UpdatedByUserId = User.GetUserId();
+            order.UpdatedByUserName = User.GetDisplayName();
             await _db.SaveChangesAsync(ct);
         }
 
@@ -677,8 +783,15 @@ public class CashOrdersController : ControllerBase
             return forbidden;
         }
 
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Forbid();
+        }
+
         var source = await _db.CashOrders
             .AsNoTracking()
+            .ApplyCashOrderVisibility(visibility)
             .FirstOrDefaultAsync(item => item.Id == id, ct);
         if (source is null)
         {
@@ -703,6 +816,8 @@ public class CashOrdersController : ControllerBase
             Appendix = source.Appendix,
             Comment = source.Comment,
             CreatedAt = DateTime.UtcNow,
+            CreatedByUserId = User.GetUserId(),
+            CreatedByUserName = User.GetDisplayName(),
         };
 
         _db.CashOrders.Add(order);
@@ -719,11 +834,18 @@ public class CashOrdersController : ControllerBase
             return forbidden;
         }
 
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Forbid();
+        }
+
         var order = await _db.CashOrders
             .Include(item => item.Client)
             .Include(item => item.Payment)
             .Include(item => item.MoneyOperation)
             .AsNoTracking()
+            .ApplyCashOrderVisibility(visibility)
             .FirstOrDefaultAsync(item => item.Id == id, ct);
         if (order is null)
         {
@@ -741,11 +863,18 @@ public class CashOrdersController : ControllerBase
             return forbidden;
         }
 
+        var visibility = await ResolvePaymentsVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Forbid();
+        }
+
         var order = await _db.CashOrders
             .Include(item => item.Client)
             .Include(item => item.Payment)
             .Include(item => item.MoneyOperation)
             .AsNoTracking()
+            .ApplyCashOrderVisibility(visibility)
             .FirstOrDefaultAsync(item => item.Id == id, ct);
         if (order is null)
         {
@@ -774,13 +903,65 @@ public class CashOrdersController : ControllerBase
            (operation.Direction == MoneyOperationDirection.Income ||
             operation.Direction == MoneyOperationDirection.Expense);
 
+    private static IQueryable<MoneyOperation> ApplyVisibleMoneyOperationForCashOrders(
+        IQueryable<MoneyOperation> query,
+        DataVisibilityAccess visibility)
+    {
+        if (visibility.SeesAll)
+        {
+            return query;
+        }
+
+        var visibleUserIds = visibility.VisibleUserIds.ToArray();
+        return query.Where(operation =>
+            (operation.ResponsibleUserId.HasValue && visibleUserIds.Contains(operation.ResponsibleUserId.Value))
+            || (operation.LinkedInvoice != null
+                && operation.LinkedInvoice.Payments.Any(payment =>
+                    payment.DocumentKind == DocumentKind.Invoice
+                    && (payment.Responsibles.Any(link => visibleUserIds.Contains(link.UserId))
+                        || (payment.Client != null
+                            && payment.Client.ResponsibleUserId.HasValue
+                            && visibleUserIds.Contains(payment.Client.ResponsibleUserId.Value))
+                        || (payment.ExpenseClient != null
+                            && payment.ExpenseClient.ResponsibleUserId.HasValue
+                            && visibleUserIds.Contains(payment.ExpenseClient.ResponsibleUserId.Value))
+                        || (payment.LegalEntity != null
+                            && payment.LegalEntity.ResponsibleUserId.HasValue
+                            && visibleUserIds.Contains(payment.LegalEntity.ResponsibleUserId.Value))
+                        || (payment.ExpenseLegalEntity != null
+                            && payment.ExpenseLegalEntity.ResponsibleUserId.HasValue
+                            && visibleUserIds.Contains(payment.ExpenseLegalEntity.ResponsibleUserId.Value))
+                        || (payment.ClientCase != null
+                            && payment.ClientCase.Client != null
+                            && payment.ClientCase.Client.ResponsibleUserId.HasValue
+                            && visibleUserIds.Contains(payment.ClientCase.Client.ResponsibleUserId.Value))
+                        || (payment.ClientCase != null
+                            && payment.ClientCase.LegalEntity != null
+                            && payment.ClientCase.LegalEntity.ResponsibleUserId.HasValue
+                            && visibleUserIds.Contains(payment.ClientCase.LegalEntity.ResponsibleUserId.Value))
+                        || payment.InvoiceClientCases.Any(link =>
+                            (link.ClientCase.Client != null
+                                && link.ClientCase.Client.ResponsibleUserId.HasValue
+                                && visibleUserIds.Contains(link.ClientCase.Client.ResponsibleUserId.Value))
+                            || (link.ClientCase.LegalEntity != null
+                                && link.ClientCase.LegalEntity.ResponsibleUserId.HasValue
+                                && visibleUserIds.Contains(link.ClientCase.LegalEntity.ResponsibleUserId.Value)))
+                        || (payment.Contract != null
+                            && (payment.Contract.ClientContracts.Any(link =>
+                                    link.Client.ResponsibleUserId.HasValue
+                                    && visibleUserIds.Contains(link.Client.ResponsibleUserId.Value))
+                                || payment.Contract.LegalEntityContracts.Any(link =>
+                                    link.LegalEntity.ResponsibleUserId.HasValue
+                                    && visibleUserIds.Contains(link.LegalEntity.ResponsibleUserId.Value))))))));
+    }
+
     private async Task<DateTime> ResolveCashOrderTodayAsync(CancellationToken ct)
     {
         var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
         return CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date;
     }
 
-    private async Task<CashBookResponseDto> BuildCashBookAsync(DateTime? from, DateTime? to, string? accountName, CancellationToken ct)
+    private async Task<CashBookResponseDto> BuildCashBookAsync(DateTime? from, DateTime? to, string? accountName, DataVisibilityAccess visibility, CancellationToken ct)
     {
         var today = await ResolveCashOrderTodayAsync(ct);
         var fromDate = (from ?? today).Date;
@@ -792,6 +973,7 @@ public class CashOrdersController : ControllerBase
 
         var postedOrders = _db.CashOrders
             .AsNoTracking()
+            .ApplyCashOrderVisibility(visibility)
             .Where(order => order.Status == CashOrderStatus.Posted);
         var accountFilter = NormalizeAccountFilter(accountName);
         if (accountFilter is not null)
@@ -857,9 +1039,10 @@ public class CashOrdersController : ControllerBase
         };
     }
 
-    private Task<decimal> CalculateCashBalanceAsync(DateTime date, string accountName, CancellationToken ct)
+    private Task<decimal> CalculateCashBalanceAsync(DateTime date, string accountName, DataVisibilityAccess visibility, CancellationToken ct)
         => _db.CashOrders
             .AsNoTracking()
+            .ApplyCashOrderVisibility(visibility)
             .Where(order => order.Status == CashOrderStatus.Posted)
             .Where(order => order.Account == accountName)
             .Where(order => order.Date <= date.Date)
@@ -871,13 +1054,15 @@ public class CashOrdersController : ControllerBase
         CashOrderType? type,
         CashOrderStatus? status,
         string? search,
-        string? accountName = null)
+        string? accountName,
+        DataVisibilityAccess visibility)
     {
         var query = _db.CashOrders
             .Include(order => order.Client)
             .Include(order => order.Payment)
             .Include(order => order.MoneyOperation)
             .AsNoTracking()
+            .ApplyCashOrderVisibility(visibility)
             .AsQueryable();
 
         if (from.HasValue)

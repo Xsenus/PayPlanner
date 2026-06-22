@@ -158,6 +158,137 @@ public static class DataVisibilityQueryExtensions
                         && visibleUserIds.Contains(link.LegalEntity.ResponsibleUserId.Value)))));
     }
 
+    public static IQueryable<CashOrder> ApplyCashOrderVisibility(
+        this IQueryable<CashOrder> query,
+        DataVisibilityAccess? access)
+    {
+        if (access is null) return query.Where(_ => false);
+        if (access.SeesAll) return query;
+
+        var visibleUserIds = access.VisibleUserIds.ToArray();
+        return query.Where(order =>
+            (order.CreatedByUserId.HasValue && visibleUserIds.Contains(order.CreatedByUserId.Value))
+            || (order.Client != null
+                && order.Client.ResponsibleUserId.HasValue
+                && visibleUserIds.Contains(order.Client.ResponsibleUserId.Value))
+            || (order.Payment != null
+                && (order.Payment.Responsibles.Any(link => visibleUserIds.Contains(link.UserId))
+                    || (order.Payment.Client != null
+                        && order.Payment.Client.ResponsibleUserId.HasValue
+                        && visibleUserIds.Contains(order.Payment.Client.ResponsibleUserId.Value))
+                    || (order.Payment.ExpenseClient != null
+                        && order.Payment.ExpenseClient.ResponsibleUserId.HasValue
+                        && visibleUserIds.Contains(order.Payment.ExpenseClient.ResponsibleUserId.Value))
+                    || (order.Payment.LegalEntity != null
+                        && order.Payment.LegalEntity.ResponsibleUserId.HasValue
+                        && visibleUserIds.Contains(order.Payment.LegalEntity.ResponsibleUserId.Value))
+                    || (order.Payment.ExpenseLegalEntity != null
+                        && order.Payment.ExpenseLegalEntity.ResponsibleUserId.HasValue
+                        && visibleUserIds.Contains(order.Payment.ExpenseLegalEntity.ResponsibleUserId.Value))
+                    || (order.Payment.ClientCase != null
+                        && order.Payment.ClientCase.Client != null
+                        && order.Payment.ClientCase.Client.ResponsibleUserId.HasValue
+                        && visibleUserIds.Contains(order.Payment.ClientCase.Client.ResponsibleUserId.Value))
+                    || (order.Payment.ClientCase != null
+                        && order.Payment.ClientCase.LegalEntity != null
+                        && order.Payment.ClientCase.LegalEntity.ResponsibleUserId.HasValue
+                        && visibleUserIds.Contains(order.Payment.ClientCase.LegalEntity.ResponsibleUserId.Value))
+                    || order.Payment.InvoiceClientCases.Any(link =>
+                        (link.ClientCase.Client != null
+                            && link.ClientCase.Client.ResponsibleUserId.HasValue
+                            && visibleUserIds.Contains(link.ClientCase.Client.ResponsibleUserId.Value))
+                        || (link.ClientCase.LegalEntity != null
+                            && link.ClientCase.LegalEntity.ResponsibleUserId.HasValue
+                            && visibleUserIds.Contains(link.ClientCase.LegalEntity.ResponsibleUserId.Value)))
+                    || (order.Payment.Contract != null
+                        && (order.Payment.Contract.ClientContracts.Any(link =>
+                                link.Client.ResponsibleUserId.HasValue
+                                && visibleUserIds.Contains(link.Client.ResponsibleUserId.Value))
+                            || order.Payment.Contract.LegalEntityContracts.Any(link =>
+                                link.LegalEntity.ResponsibleUserId.HasValue
+                                && visibleUserIds.Contains(link.LegalEntity.ResponsibleUserId.Value))))))
+            || (order.Invoice != null
+                && order.Invoice.Payments.Any(invoicePayment =>
+                    invoicePayment.DocumentKind == DocumentKind.Invoice
+                    && (invoicePayment.Responsibles.Any(link => visibleUserIds.Contains(link.UserId))
+                        || (invoicePayment.Client != null
+                            && invoicePayment.Client.ResponsibleUserId.HasValue
+                            && visibleUserIds.Contains(invoicePayment.Client.ResponsibleUserId.Value))
+                        || (invoicePayment.ExpenseClient != null
+                            && invoicePayment.ExpenseClient.ResponsibleUserId.HasValue
+                            && visibleUserIds.Contains(invoicePayment.ExpenseClient.ResponsibleUserId.Value))
+                        || (invoicePayment.LegalEntity != null
+                            && invoicePayment.LegalEntity.ResponsibleUserId.HasValue
+                            && visibleUserIds.Contains(invoicePayment.LegalEntity.ResponsibleUserId.Value))
+                        || (invoicePayment.ExpenseLegalEntity != null
+                            && invoicePayment.ExpenseLegalEntity.ResponsibleUserId.HasValue
+                            && visibleUserIds.Contains(invoicePayment.ExpenseLegalEntity.ResponsibleUserId.Value))
+                        || (invoicePayment.ClientCase != null
+                            && invoicePayment.ClientCase.Client != null
+                            && invoicePayment.ClientCase.Client.ResponsibleUserId.HasValue
+                            && visibleUserIds.Contains(invoicePayment.ClientCase.Client.ResponsibleUserId.Value))
+                        || (invoicePayment.ClientCase != null
+                            && invoicePayment.ClientCase.LegalEntity != null
+                            && invoicePayment.ClientCase.LegalEntity.ResponsibleUserId.HasValue
+                            && visibleUserIds.Contains(invoicePayment.ClientCase.LegalEntity.ResponsibleUserId.Value))
+                        || invoicePayment.InvoiceClientCases.Any(link =>
+                            (link.ClientCase.Client != null
+                                && link.ClientCase.Client.ResponsibleUserId.HasValue
+                                && visibleUserIds.Contains(link.ClientCase.Client.ResponsibleUserId.Value))
+                            || (link.ClientCase.LegalEntity != null
+                                && link.ClientCase.LegalEntity.ResponsibleUserId.HasValue
+                                && visibleUserIds.Contains(link.ClientCase.LegalEntity.ResponsibleUserId.Value)))
+                        || (invoicePayment.Contract != null
+                            && (invoicePayment.Contract.ClientContracts.Any(link =>
+                                    link.Client.ResponsibleUserId.HasValue
+                                    && visibleUserIds.Contains(link.Client.ResponsibleUserId.Value))
+                                || invoicePayment.Contract.LegalEntityContracts.Any(link =>
+                                    link.LegalEntity.ResponsibleUserId.HasValue
+                                    && visibleUserIds.Contains(link.LegalEntity.ResponsibleUserId.Value)))))))
+            || (order.MoneyOperation != null
+                && order.MoneyOperation.ResponsibleUserId.HasValue
+                && visibleUserIds.Contains(order.MoneyOperation.ResponsibleUserId.Value))
+            || (order.MoneyOperation != null
+                && order.MoneyOperation.LinkedInvoice != null
+                && order.MoneyOperation.LinkedInvoice.Payments.Any(invoicePayment =>
+                    invoicePayment.DocumentKind == DocumentKind.Invoice
+                    && (invoicePayment.Responsibles.Any(link => visibleUserIds.Contains(link.UserId))
+                        || (invoicePayment.Client != null
+                            && invoicePayment.Client.ResponsibleUserId.HasValue
+                            && visibleUserIds.Contains(invoicePayment.Client.ResponsibleUserId.Value))
+                        || (invoicePayment.ExpenseClient != null
+                            && invoicePayment.ExpenseClient.ResponsibleUserId.HasValue
+                            && visibleUserIds.Contains(invoicePayment.ExpenseClient.ResponsibleUserId.Value))
+                        || (invoicePayment.LegalEntity != null
+                            && invoicePayment.LegalEntity.ResponsibleUserId.HasValue
+                            && visibleUserIds.Contains(invoicePayment.LegalEntity.ResponsibleUserId.Value))
+                        || (invoicePayment.ExpenseLegalEntity != null
+                            && invoicePayment.ExpenseLegalEntity.ResponsibleUserId.HasValue
+                            && visibleUserIds.Contains(invoicePayment.ExpenseLegalEntity.ResponsibleUserId.Value))
+                        || (invoicePayment.ClientCase != null
+                            && invoicePayment.ClientCase.Client != null
+                            && invoicePayment.ClientCase.Client.ResponsibleUserId.HasValue
+                            && visibleUserIds.Contains(invoicePayment.ClientCase.Client.ResponsibleUserId.Value))
+                        || (invoicePayment.ClientCase != null
+                            && invoicePayment.ClientCase.LegalEntity != null
+                            && invoicePayment.ClientCase.LegalEntity.ResponsibleUserId.HasValue
+                            && visibleUserIds.Contains(invoicePayment.ClientCase.LegalEntity.ResponsibleUserId.Value))
+                        || invoicePayment.InvoiceClientCases.Any(link =>
+                            (link.ClientCase.Client != null
+                                && link.ClientCase.Client.ResponsibleUserId.HasValue
+                                && visibleUserIds.Contains(link.ClientCase.Client.ResponsibleUserId.Value))
+                            || (link.ClientCase.LegalEntity != null
+                                && link.ClientCase.LegalEntity.ResponsibleUserId.HasValue
+                                && visibleUserIds.Contains(link.ClientCase.LegalEntity.ResponsibleUserId.Value)))
+                        || (invoicePayment.Contract != null
+                            && (invoicePayment.Contract.ClientContracts.Any(link =>
+                                    link.Client.ResponsibleUserId.HasValue
+                                    && visibleUserIds.Contains(link.Client.ResponsibleUserId.Value))
+                                || invoicePayment.Contract.LegalEntityContracts.Any(link =>
+                                    link.LegalEntity.ResponsibleUserId.HasValue
+                                    && visibleUserIds.Contains(link.LegalEntity.ResponsibleUserId.Value))))))));
+    }
+
     public static IQueryable<Act> ApplyActVisibility(
         this IQueryable<Act> query,
         DataVisibilityAccess? access)

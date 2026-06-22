@@ -5066,6 +5066,51 @@ services.Id,
     }
 
     [Fact]
+    public async Task CashOrders_AppliesPaymentsVisibilityScope()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateReportsUserWithPaymentsPermissionAsync(
+            db,
+            reportsCanView: true,
+            reportsCanExport: true,
+            paymentsCanView: true,
+            paymentsCanExport: true,
+            paymentsViewScope: DataVisibilityScope.Own);
+        var hiddenUser = User("cash-orders-hidden-user");
+        db.Users.Add(hiddenUser);
+        await db.SaveChangesAsync();
+
+        var visibleClient = new Client { Name = "Visible cash client", ResponsibleUserId = user.Id };
+        var hiddenClient = new Client { Name = "Hidden cash client", ResponsibleUserId = hiddenUser.Id };
+        db.Clients.AddRange(visibleClient, hiddenClient);
+        await db.SaveChangesAsync();
+
+        var visibleOrder = CashOrder("PKO-VISIBLE", CashOrderType.Incoming, CashOrderStatus.Posted, 1_500m, new DateTime(2026, 5, 10));
+        visibleOrder.ClientId = visibleClient.Id;
+        var hiddenOrder = CashOrder("PKO-HIDDEN", CashOrderType.Incoming, CashOrderStatus.Posted, 9_000m, new DateTime(2026, 5, 11));
+        hiddenOrder.ClientId = hiddenClient.Id;
+        var ownManualOrder = CashOrder("RKO-OWN", CashOrderType.Outgoing, CashOrderStatus.Posted, 400m, new DateTime(2026, 5, 12));
+        ownManualOrder.CreatedByUserId = user.Id;
+        var otherManualOrder = CashOrder("RKO-HIDDEN", CashOrderType.Outgoing, CashOrderStatus.Posted, 700m, new DateTime(2026, 5, 13));
+        otherManualOrder.CreatedByUserId = hiddenUser.Id;
+        db.CashOrders.AddRange(visibleOrder, hiddenOrder, ownManualOrder, otherManualOrder);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateUserPrincipal(user.Id));
+
+        var action = await controller.CashOrders(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            CancellationToken.None);
+
+        var report = Assert.IsType<CashOrderReportDto>(Assert.IsType<OkObjectResult>(action.Result).Value);
+        Assert.Equal(2, report.OrderCount);
+        Assert.Equal(1_500m, report.PostedIncomingTotal);
+        Assert.Equal(400m, report.PostedOutgoingTotal);
+        Assert.Equal(1_100m, report.PostedNetTotal);
+    }
+
+    [Fact]
     public async Task CashOrders_WithoutPaymentsViewPermission_ReturnsForbid()
     {
         await using var db = await CreateContextAsync();
@@ -5510,6 +5555,20 @@ services.Id,
             CreatedAt = DateTime.UtcNow,
         };
 
+    private static User User(string prefix)
+        => new()
+        {
+            Email = $"{prefix}-{Guid.NewGuid():N}@example.test",
+            FullName = $"{prefix} user",
+            IsActive = true,
+            IsApproved = true,
+            Role = new Role
+            {
+                Name = $"{prefix}-role-{Guid.NewGuid():N}",
+                Description = $"{prefix} role",
+            },
+        };
+
     private static ReportsController CreateController(
         PaymentContext db,
         ClaimsPrincipal? user = null,
@@ -5593,7 +5652,8 @@ services.Id,
         bool reportsCanView,
         bool reportsCanExport,
         bool paymentsCanView,
-        bool paymentsCanExport)
+        bool paymentsCanExport,
+        string paymentsViewScope = DataVisibilityScope.All)
     {
         var role = new Role
         {
@@ -5625,7 +5685,7 @@ services.Id,
                 Section = RolePermissionCatalog.Payments,
                 CanView = paymentsCanView,
                 CanExport = paymentsCanExport,
-                ViewScope = DataVisibilityScope.All,
+                ViewScope = paymentsViewScope,
             });
         await db.SaveChangesAsync();
         return user;

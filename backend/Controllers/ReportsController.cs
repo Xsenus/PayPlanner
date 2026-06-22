@@ -538,9 +538,15 @@ public class ReportsController : ControllerBase
                         return (null, Forbid());
                     }
 
+                    var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+                    if (paymentsVisibility is null)
+                    {
+                        return (null, Unauthorized());
+                    }
+
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildCashBookReportAsync(start, end, normalizedAccountName, cancellationToken),
+                        cancellationToken => BuildCashBookReportAsync(start, end, normalizedAccountName, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildCashBookExportDocument(reportDto), null);
@@ -873,9 +879,15 @@ public class ReportsController : ControllerBase
                         return (null, Forbid());
                     }
 
+                    var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+                    if (paymentsVisibility is null)
+                    {
+                        return (null, Unauthorized());
+                    }
+
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildCashOrderReportAsync(start, end, source, normalizedAccountName, normalizedCounterpartyName, effectiveClientId, effectiveCaseId, effectiveContractId, effectiveIncomeTypeId, cancellationToken),
+                        cancellationToken => BuildCashOrderReportAsync(start, end, source, normalizedAccountName, normalizedCounterpartyName, effectiveClientId, effectiveCaseId, effectiveContractId, effectiveIncomeTypeId, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildCashOrderExportDocument(reportDto), null);
@@ -1692,13 +1704,14 @@ public class ReportsController : ControllerBase
             return Forbid();
         }
 
-        if (!await HasPaymentsPermissionAsync(static permission => permission.CanView, ct))
+        var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+        if (paymentsVisibility is null)
         {
             return Forbid();
         }
 
         var report = await SqliteRetryHelper.ExecuteAsync(
-            cancellationToken => BuildCashOrderReportAsync(start, end, source, NormalizeOptional(accountName), NormalizeOptional(counterpartyName), clientId, caseId, contractId, incomeTypeId, cancellationToken),
+            cancellationToken => BuildCashOrderReportAsync(start, end, source, NormalizeOptional(accountName), NormalizeOptional(counterpartyName), clientId, caseId, contractId, incomeTypeId, paymentsVisibility, cancellationToken),
             _logger,
             ct);
 
@@ -7804,10 +7817,12 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         string? accountName,
+        DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
         var postedOrders = _db.CashOrders
             .AsNoTracking()
+            .ApplyCashOrderVisibility(paymentsVisibility)
             .Where(order => order.Status == CashOrderStatus.Posted);
         if (!string.IsNullOrWhiteSpace(accountName))
         {
@@ -7883,10 +7898,12 @@ public class ReportsController : ControllerBase
         int? caseId,
         int? contractId,
         int? incomeTypeId,
+        DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
         var query = _db.CashOrders
             .AsNoTracking()
+            .ApplyCashOrderVisibility(paymentsVisibility)
             .Where(item => item.Date >= from && item.Date <= to);
 
         if (source.HasValue)

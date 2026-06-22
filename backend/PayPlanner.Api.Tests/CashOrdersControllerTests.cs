@@ -305,6 +305,107 @@ public class CashOrdersControllerTests
     }
 
     [Fact]
+    public async Task RegisterAndCashBook_ApplyPaymentsVisibilityScope()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, viewScope: DataVisibilityScope.Own);
+        var hiddenUserId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, viewScope: DataVisibilityScope.Own);
+        var visibleClient = new Client { Name = "Visible cash register client", ResponsibleUserId = userId };
+        var hiddenClient = new Client { Name = "Hidden cash register client", ResponsibleUserId = hiddenUserId };
+        db.Clients.AddRange(visibleClient, hiddenClient);
+        await db.SaveChangesAsync();
+
+        db.CashOrders.AddRange(
+            new CashOrder
+            {
+                Number = "PKO-VISIBLE",
+                Type = CashOrderType.Incoming,
+                Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 5, 1),
+                Amount = 1_000m,
+                ClientId = visibleClient.Id,
+                Account = "Основная касса",
+            },
+            new CashOrder
+            {
+                Number = "PKO-HIDDEN",
+                Type = CashOrderType.Incoming,
+                Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 5, 1),
+                Amount = 7_000m,
+                ClientId = hiddenClient.Id,
+                Account = "Основная касса",
+            },
+            new CashOrder
+            {
+                Number = "RKO-OWN",
+                Type = CashOrderType.Outgoing,
+                Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 5, 2),
+                Amount = 300m,
+                CreatedByUserId = userId,
+                Account = "Основная касса",
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, userId, isAdminClaim: false);
+
+        var registerAction = await controller.GetRegister(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            null,
+            null,
+            null,
+            1,
+            25,
+            "Основная касса",
+            CancellationToken.None);
+        var register = Assert.IsType<CashOrderRegisterResponseDto>(Assert.IsType<OkObjectResult>(registerAction.Result).Value);
+        Assert.Equal(2, register.Total);
+        Assert.Equal(1_000m, register.IncomingAmount);
+        Assert.Equal(300m, register.OutgoingAmount);
+        Assert.DoesNotContain(register.Items, item => item.Number == "PKO-HIDDEN");
+
+        var cashBookAction = await controller.GetCashBook(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 2),
+            "Основная касса",
+            CancellationToken.None);
+        var cashBook = Assert.IsType<CashBookResponseDto>(Assert.IsType<OkObjectResult>(cashBookAction.Result).Value);
+        Assert.Equal(1_000m, cashBook.Income);
+        Assert.Equal(300m, cashBook.Expense);
+        Assert.Equal(700m, cashBook.ClosingBalance);
+    }
+
+    [Fact]
+    public async Task GetById_HiddenCashOrder_ReturnsNotFoundForLimitedRole()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, viewScope: DataVisibilityScope.Own);
+        var hiddenUserId = await CreateUserWithPaymentsPermissionAsync(db, canView: true, viewScope: DataVisibilityScope.Own);
+        var hiddenClient = new Client { Name = "Hidden cash order client", ResponsibleUserId = hiddenUserId };
+        db.Clients.Add(hiddenClient);
+        await db.SaveChangesAsync();
+        var hiddenOrder = new CashOrder
+        {
+            Number = "PKO-HIDDEN-ID",
+            Type = CashOrderType.Incoming,
+            Status = CashOrderStatus.Posted,
+            Date = new DateTime(2026, 5, 1),
+            Amount = 7_000m,
+            ClientId = hiddenClient.Id,
+        };
+        db.CashOrders.Add(hiddenOrder);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, userId, isAdminClaim: false);
+
+        var action = await controller.GetById(hiddenOrder.Id, CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(action);
+    }
+
+    [Fact]
     public async Task Update_WithoutPaymentsEditPermission_ReturnsForbid()
     {
         await using var db = await CreateContextAsync();
@@ -463,7 +564,8 @@ public class CashOrdersControllerTests
         bool canCreate = false,
         bool canEdit = false,
         bool canDelete = false,
-        bool canExport = false)
+        bool canExport = false,
+        string viewScope = DataVisibilityScope.All)
     {
         var role = new Role
         {
@@ -494,7 +596,7 @@ public class CashOrdersControllerTests
             CanEdit = canEdit,
             CanDelete = canDelete,
             CanExport = canExport,
-            ViewScope = DataVisibilityScope.All,
+            ViewScope = viewScope,
         });
         await db.SaveChangesAsync();
         return user.Id;
