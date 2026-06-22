@@ -5395,10 +5395,69 @@ services.Id,
     }
 
     [Fact]
+    public async Task SpreadsheetImports_WithoutAdminAccess_ReturnsForbid()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateReportsUserWithPaymentsPermissionAsync(
+            db,
+            reportsCanView: true,
+            reportsCanExport: true,
+            paymentsCanView: true,
+            paymentsCanExport: true);
+        var controller = CreateController(db, CreateUserPrincipal(user.Id));
+
+        var action = await controller.SpreadsheetImports(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(action.Result);
+    }
+
+    [Fact]
+    public async Task SpreadsheetImportsExport_WithoutAdminAccess_ReturnsForbid()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateReportsUserWithPaymentsPermissionAsync(
+            db,
+            reportsCanView: true,
+            reportsCanExport: true,
+            paymentsCanView: true,
+            paymentsCanExport: true);
+        var controller = CreateController(db, CreateUserPrincipal(user.Id));
+
+        var action = await controller.ExportManagementReportExcel(
+            "spreadsheet-imports",
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(action);
+    }
+
+    [Fact]
     public async Task SpreadsheetImports_FiltersCreatedAtByProfileLocalDay()
     {
         await using var db = await CreateContextAsync();
-        var user = await CreateReportsUserWithTimeZoneAsync(db, "Europe/Samara");
+        var user = await CreateAdminUserWithTimeZoneAsync(db, "Europe/Samara");
         db.SpreadsheetImportBatches.AddRange(
             SpreadsheetImportBatch("Local May First", SpreadsheetImportBatchStatus.Applied, 1, 10, 8, 1, 1, 0, 0, new DateTime(2026, 4, 30, 21, 30, 0, DateTimeKind.Utc)),
             SpreadsheetImportBatch("Local May Second", SpreadsheetImportBatchStatus.AppliedWithErrors, 1, 20, 10, 2, 3, 5, 0, new DateTime(2026, 5, 1, 20, 30, 0, DateTimeKind.Utc)));
@@ -5699,6 +5758,33 @@ services.Id,
         db.UserSettings.Add(new UserSetting
         {
             UserId = user.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = timeZoneId,
+        });
+        await db.SaveChangesAsync();
+        return user;
+    }
+
+    private static async Task<User> CreateAdminUserWithTimeZoneAsync(PaymentContext db, string timeZoneId)
+    {
+        var role = new Role
+        {
+            Name = "admin",
+            Description = "Admin test role",
+        };
+        var user = new User
+        {
+            Email = $"admin-timezone-{Guid.NewGuid():N}@example.test",
+            FullName = "Admin Timezone User",
+            IsActive = true,
+            Role = role,
+        };
+
+        db.Roles.Add(role);
+        db.Users.Add(user);
+        db.UserSettings.Add(new UserSetting
+        {
+            User = user,
             Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
             Value = timeZoneId,
         });

@@ -107,6 +107,17 @@ public class ReportsController : ControllerBase
         CancellationToken ct)
         => _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Payments, isAllowed, ct);
 
+    private async Task<bool> CanAccessAdminReportsAsync(CancellationToken ct)
+    {
+        if (User.IsInRole("admin"))
+        {
+            return true;
+        }
+
+        var userId = User.GetUserId();
+        return userId.HasValue && await _db.IsUserAdminAsync(userId.Value, ct);
+    }
+
     private async Task<DateTime> ResolveReportTodayAsync(CancellationToken ct)
     {
         var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
@@ -910,6 +921,11 @@ public class ReportsController : ControllerBase
 
             case "spreadsheet-imports":
                 {
+                    if (!await CanAccessAdminReportsAsync(ct))
+                    {
+                        return (null, Forbid());
+                    }
+
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
                         cancellationToken => BuildSpreadsheetImportReportAsync(start, end, timeZone, cancellationToken),
@@ -1761,7 +1777,7 @@ public class ReportsController : ControllerBase
     {
         var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
-        if (!await CanViewReportsAsync(ct))
+        if (!await CanViewReportsAsync(ct) || !await CanAccessAdminReportsAsync(ct))
         {
             return Forbid();
         }

@@ -7261,10 +7261,11 @@ function formatContractOptionLabel(item: Contract) {
 }
 
 export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsProps = {}) {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const permissions = useRolePermissions(user?.role?.id);
   const canViewPaymentReports = permissions.payments.canView;
   const canExportPaymentReports = permissions.payments.canExport;
+  const canViewSpreadsheetImportReport = isAdmin();
   const profileTimeZoneId = useUserTimeZone();
   const ymNow = currentReportMonthInTimeZone(profileTimeZoneId);
   const [range, setRange] = useState<MonthRange>({ from: ymNow, to: ymNow });
@@ -7751,7 +7752,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     loading: spreadsheetImportReportLoading,
     error: spreadsheetImportReportError,
     reload: reloadSpreadsheetImportReport,
-  } = useSpreadsheetImportReport(cashFlowDates);
+  } = useSpreadsheetImportReport(cashFlowDates, { enabled: canViewSpreadsheetImportReport });
 
   const titleSuffix = useMemo(
     () => buildTitleSuffix(normalizedRange.fromYM, normalizedRange.toYM),
@@ -8534,14 +8535,16 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               />
             ) : null}
 
-            <SpreadsheetImportReportSection
-              report={spreadsheetImportReport}
-              loading={spreadsheetImportReportLoading}
-              error={spreadsheetImportReportError}
-              onReload={reloadSpreadsheetImportReport}
-              filters={cashFlowDates}
-              profileTimeZoneId={profileTimeZoneId}
-            />
+            {canViewSpreadsheetImportReport ? (
+              <SpreadsheetImportReportSection
+                report={spreadsheetImportReport}
+                loading={spreadsheetImportReportLoading}
+                error={spreadsheetImportReportError}
+                onReload={reloadSpreadsheetImportReport}
+                filters={cashFlowDates}
+                profileTimeZoneId={profileTimeZoneId}
+              />
+            ) : null}
               </>
             ) : null}
           </>

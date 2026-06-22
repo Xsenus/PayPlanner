@@ -7,7 +7,12 @@ export interface SpreadsheetImportReportFilters {
   to?: string;
 }
 
-export function useSpreadsheetImportReport(filters: SpreadsheetImportReportFilters) {
+export interface SpreadsheetImportReportOptions {
+  enabled?: boolean;
+}
+
+export function useSpreadsheetImportReport(filters: SpreadsheetImportReportFilters, options: SpreadsheetImportReportOptions = {}) {
+  const enabled = options.enabled ?? true;
   const [report, setReport] = useState<SpreadsheetImportReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -22,6 +27,14 @@ export function useSpreadsheetImportReport(filters: SpreadsheetImportReportFilte
   );
 
   const load = useCallback(async () => {
+    if (!enabled) {
+      requestIdRef.current += 1;
+      setReport(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     setLoading(true);
@@ -46,7 +59,7 @@ export function useSpreadsheetImportReport(filters: SpreadsheetImportReportFilte
         setLoading(false);
       }
     }
-  }, [stableFilters]);
+  }, [enabled, stableFilters]);
 
   useEffect(() => {
     void load();
