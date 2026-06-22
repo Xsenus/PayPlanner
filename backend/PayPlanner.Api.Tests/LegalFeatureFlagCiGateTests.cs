@@ -127,8 +127,8 @@ public sealed class LegalFeatureFlagCiGateTests
         var workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "deploy.yml"));
 
         Assert.Contains("PUBLIC_API_URL: https://api.elitpravo.com", workflow, StringComparison.Ordinal);
-        Assert.Contains("Check notification readiness", workflow, StringComparison.Ordinal);
-        Assert.Contains("scripts/run-notification-production-readiness.mjs", workflow, StringComparison.Ordinal);
+        Assert.Contains("Check production deploy readiness", workflow, StringComparison.Ordinal);
+        Assert.Contains("scripts/run-production-deploy-readiness.mjs", workflow, StringComparison.Ordinal);
         Assert.Contains("--api-url=\"${{ env.PUBLIC_API_URL }}\"", workflow, StringComparison.Ordinal);
         Assert.Contains("--frontend-url=\"${{ env.PUBLIC_FRONTEND_URL }}\"", workflow, StringComparison.Ordinal);
         Assert.Contains("--token=\"\"", workflow, StringComparison.Ordinal);
@@ -138,8 +138,8 @@ public sealed class LegalFeatureFlagCiGateTests
             workflow,
             [
                 "appleboy/ssh-action",
-                "Check notification readiness",
-                "scripts/run-notification-production-readiness.mjs",
+                "Check production deploy readiness",
+                "scripts/run-production-deploy-readiness.mjs",
             ]);
     }
 
