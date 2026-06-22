@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   canAccessTab,
   getInitialActReturnTab,
+  getInitialCaseDetailTab,
   getInitialActId,
   getInitialClientId,
   getInitialContractId,
@@ -191,6 +192,21 @@ describe('App client routing helpers', () => {
     window.history.replaceState({}, '', '/cases/15');
 
     expect(getPathCaseId()).toBe(15);
+    expect(getInitialTab()).toBe('caseDetail');
+  });
+
+  it('restores the case detail tab from a case deep-link', () => {
+    window.history.replaceState({}, '', '/cases/15?ppCaseTab=documents');
+
+    expect(getPathCaseId()).toBe(15);
+    expect(getInitialCaseDetailTab()).toBe('documents');
+    expect(getInitialTab()).toBe('caseDetail');
+  });
+
+  it('ignores unsupported case detail tabs', () => {
+    window.history.replaceState({}, '', '/cases/15?ppCaseTab=unknown');
+
+    expect(getInitialCaseDetailTab()).toBe(null);
     expect(getInitialTab()).toBe('caseDetail');
   });
 

@@ -26,6 +26,7 @@ import {
   canAccessTab,
   getInitialActId,
   getInitialActReturnTab,
+  getInitialCaseDetailTab,
   getPathCaseId,
   getInitialClientId,
   getInitialContractId,
@@ -246,7 +247,18 @@ function AppContent() {
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(getInitialTaskId);
   const [taskReturnTab, setTaskReturnTab] = useState<Tab | null>(null);
   const [selectedLegalEntityId, setSelectedLegalEntityId] = useState<number | null>(null);
-  const [selectedCaseId, setSelectedCaseId] = useState<number | null>(getPathCaseId);
+  const [selectedCaseId, setSelectedCaseId] = useState<number | null>(() => {
+    const caseId = getPathCaseId();
+    const caseTab = getInitialCaseDetailTab();
+    if (caseId && caseTab) {
+      try {
+        window.sessionStorage.setItem(`pp.case-detail.${caseId}.view.v1`, JSON.stringify({ activeTab: caseTab }));
+      } catch {
+        /** */
+      }
+    }
+    return caseId;
+  });
   const [caseReturnTab, setCaseReturnTab] = useState<Tab>('cases');
   const [initialCaseId, setInitialCaseId] = useState<number | 'all'>('all');
   const [initialClientSection, setInitialClientSection] = useState<'payments' | 'accounts' | 'acts' | undefined>(undefined);
@@ -799,6 +811,7 @@ function AppContent() {
     } else {
       url.searchParams.delete('userId');
     }
+    url.searchParams.delete('ppCaseTab');
 
     window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
   }, [

@@ -139,6 +139,48 @@ public class WebPushNotificationServiceTests
         Assert.Contains("Simulated push provider failure", delivery.Error, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(UserNotificationTypes.TaskAssigned, "task", 88, null, "{}", "/tasks/88")]
+    [InlineData(UserNotificationTypes.PaymentAssigned, "payment", 42, null, "{}", "/payments/42")]
+    [InlineData(UserNotificationTypes.InvoiceChanged, "invoice", 43, null, "{}", "/invoices/43")]
+    [InlineData(UserNotificationTypes.ActChanged, "act", 44, null, "{}", "/acts/44")]
+    [InlineData(UserNotificationTypes.ContractChanged, "contract", 45, null, "{}", "/contracts/45")]
+    [InlineData(UserNotificationTypes.CaseInactivityReminder, "case", 46, null, "{}", "/cases/46")]
+    [InlineData(UserNotificationTypes.CaseDocument, "case", 47, null, "{\"clientCaseDocumentId\":901}", "/cases/47?ppCaseTab=documents")]
+    [InlineData(UserNotificationTypes.CourtHearing, "case", 48, null, "{\"courtEventId\":902}", "/cases/48?ppCaseTab=court")]
+    public async Task SendUserNotificationAsync_PayloadContainsDirectCrmUrl(
+        string notificationType,
+        string objectType,
+        int objectId,
+        int? taskJournalItemId,
+        string metadataJson,
+        string expectedUrl)
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserWithSubscriptionAsync(db, $"push-url-{objectId}@example.com");
+        var notification = CreateNotification(user.Id, new UserNotification
+        {
+            Type = notificationType,
+            EventKey = $"{objectType}:{objectId}:url",
+            Title = "Новое уведомление",
+            BodyPreview = "Откройте связанный объект.",
+            Tone = "blue",
+            ObjectType = objectType,
+            ObjectId = objectId,
+            TaskJournalItemId = taskJournalItemId,
+            MetadataJson = metadataJson,
+        });
+        db.UserNotifications.Add(notification);
+        await db.SaveChangesAsync();
+
+        var service = new FailingWebPushNotificationService(db, notification.EventKey);
+
+        await service.SendUserNotificationAsync(notification);
+
+        using var payload = JsonDocument.Parse(service.CapturedPayload);
+        Assert.Equal(expectedUrl, payload.RootElement.GetProperty("url").GetString());
+    }
+
     [Fact]
     public async Task SendUserNotificationAsync_DeactivatesDeadSubscriptionWhenPushProviderReturnsGone()
     {

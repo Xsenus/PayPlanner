@@ -2,6 +2,21 @@ import { ALL_TABS, type Tab } from './types/tabs';
 import type { RolePermissions } from './types/permissions';
 
 export const LAST_TAB_STORAGE_KEY = 'pp.last_active_tab';
+export const CASE_DETAIL_TAB_QUERY_PARAM = 'ppCaseTab';
+
+const CASE_DETAIL_TABS = [
+  'overview',
+  'participants',
+  'tasks',
+  'court',
+  'finance',
+  'workOrder',
+  'documents',
+  'conversation',
+  'history',
+] as const;
+
+export type CaseDetailRouteTab = typeof CASE_DETAIL_TABS[number];
 
 function isValidTab(value: string | null): value is Tab {
   return value !== null && (ALL_TABS as readonly string[]).includes(value);
@@ -317,6 +332,20 @@ function isContractReturnTab(tab: string | null): tab is 'contracts' | 'accounts
 
 function isActReturnTab(tab: string | null): tab is 'acts' | 'actsIncome' | 'actsExpense' {
   return tab === 'acts' || tab === 'actsIncome' || tab === 'actsExpense';
+}
+
+function isCaseDetailRouteTab(tab: string | null): tab is CaseDetailRouteTab {
+  return tab !== null && (CASE_DETAIL_TABS as readonly string[]).includes(tab);
+}
+
+export function getInitialCaseDetailTab(): CaseDetailRouteTab | null {
+  if (typeof window === 'undefined' || !getPathCaseId()) {
+    return null;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const tab = params.get(CASE_DETAIL_TAB_QUERY_PARAM);
+  return isCaseDetailRouteTab(tab) ? tab : null;
 }
 
 export function getInitialTab(): Tab {

@@ -339,9 +339,88 @@ public class WebPushNotificationService : IWebPushNotificationService
             objectType = notification.ObjectType,
             objectId = notification.ObjectId,
             taskJournalItemId = notification.TaskJournalItemId,
-            url = "/notifications",
+            url = ResolveNotificationUrl(notification),
             createdAt = notification.CreatedAt,
         }, JsonOptions);
+
+    private static string ResolveNotificationUrl(UserNotification notification)
+    {
+        var objectType = notification.ObjectType.Trim().ToLowerInvariant();
+        if (notification.TaskJournalItemId is int taskId && taskId > 0)
+        {
+            return $"/tasks/{taskId}";
+        }
+
+        if (notification.ObjectId is not { } objectId || objectId <= 0)
+        {
+            return "/notifications";
+        }
+
+        return objectType switch
+        {
+            "task" => $"/tasks/{objectId}",
+            "payment" => $"/payments/{objectId}",
+            "invoice" or "account" => $"/invoices/{objectId}",
+            "act" => $"/acts/{objectId}",
+            "contract" => $"/contracts/{objectId}",
+            "case" or "client-case" => ResolveCaseNotificationUrl(notification, objectId),
+            "calendar" => "/tasks/calendar",
+            "note" or "sticky-note" => "/notes",
+            _ => "/notifications",
+        };
+    }
+
+    private static string ResolveCaseNotificationUrl(UserNotification notification, int caseId)
+    {
+        if (notification.Type == UserNotificationTypes.CaseDocument
+            || TryReadPositiveMetadataInt(notification.MetadataJson, "clientCaseDocumentId").HasValue)
+        {
+            return $"/cases/{caseId}?ppCaseTab=documents";
+        }
+
+        if (notification.Type is UserNotificationTypes.CaseCourtEvent
+            or UserNotificationTypes.CaseProceduralDeadline
+            or UserNotificationTypes.CourtHearing
+            or UserNotificationTypes.CourtStatusChanged
+            or UserNotificationTypes.CourtDecisionPublished
+            or UserNotificationTypes.CourtSyncFailed
+            || TryReadPositiveMetadataInt(notification.MetadataJson, "courtEventId").HasValue
+            || TryReadPositiveMetadataInt(notification.MetadataJson, "proceduralDeadlineId").HasValue)
+        {
+            return $"/cases/{caseId}?ppCaseTab=court";
+        }
+
+        return $"/cases/{caseId}";
+    }
+
+    private static int? TryReadPositiveMetadataInt(string? metadataJson, string propertyName)
+    {
+        if (string.IsNullOrWhiteSpace(metadataJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(metadataJson);
+            if (!document.RootElement.TryGetProperty(propertyName, out var value))
+            {
+                return null;
+            }
+
+            var parsed = value.ValueKind switch
+            {
+                JsonValueKind.Number when value.TryGetInt32(out var number) => number,
+                JsonValueKind.String when int.TryParse(value.GetString(), out var number) => number,
+                _ => 0,
+            };
+            return parsed > 0 ? parsed : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
     private static string ResolvePushTitle(UserNotification notification)
         => IsSensitiveFinancialNotification(notification)
