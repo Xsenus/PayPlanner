@@ -27,6 +27,12 @@ Before adding a new mechanism, look for existing modules for notifications, moda
 
 Keep changes scoped to the requested behavior. Do not rewrite unrelated release notes, permissions, migrations, or configuration unless the task explicitly requires it.
 
+## Deployment Verification
+
+After pushing changes to a branch that triggers deployment, verify that GitHub Actions started, completed successfully, and deployed the expected revision without errors. If a workflow fails, a deployment does not start, or the deployed revision does not match the pushed commit, inspect the workflow logs and fix the problem before considering the deployment complete.
+
+After a successful deployment, verify the live environment directly: check the public API health endpoint, the frontend entry point, the service worker when relevant, and the VPS service status/revision when VPS access is available. Do not rely only on a successful `git push` as proof that production is updated.
+
 ## Roadmaps
 
 When the user asks to create or continue a roadmap, store it under `docs/` as a human-readable Markdown document with statuses, milestones, rationale, checks, and clear definition of done.
