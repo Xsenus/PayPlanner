@@ -36,6 +36,7 @@
 
 - `[x]` Закрыт полный аудит проекта от 10.06.2026: TypeScript, форматирование backend, проверки deploy workflow, security/config, CORS/TLS, upload limits, API error contract, hosted services, seed/backfill, feature flags, frontend accessibility/smoke и документация release/deploy.
 - `[x]` В `AGENTS.md` закреплено правило: после push обязательно проверять GitHub Actions и корректность deploy; при ошибках исправлять, а не оставлять без внимания.
+- `[x]` Добавлен production deploy readiness smoke: GitHub Actions публикует `deploy-revision.txt`, а проверка после deploy сверяет ожидаемый SHA, frontend, API health, service worker и WebSocket auth challenge.
 - `[x]` Устранены production EF warnings по soft-delete/query loading, добавлен диагностический режим `Diagnostics:ThrowEfRuntimeWarnings`; после deploy на VPS свежий старт приложения прошел без целевых EF warning и ошибок.
 - `[x]` Исправлена выгрузка акта сверки клиента: Excel/PDF недоступны до окончания загрузки операций и профиля организации, чтобы документ не формировался с временным названием компании.
 
@@ -80,7 +81,7 @@
 
 - `[acceptance]` На production включить Push на реальном устройстве, уйти на другой сайт или закрыть вкладку CRM, создать несколько событий и подтвердить, что браузерные уведомления приходят отдельно.
 - `[acceptance]` Проверить replay внутри CRM: после возврата во вкладку свежие непрочитанные события должны показаться снизу справа очередью с паузой.
-- `[acceptance]` Проверить автоматический deploy через GitHub Actions: run должен стартовать после push, пройти тесты, обновить `REVISION` на VPS и оставить health/logs без ошибок.
+- `[acceptance]` Проверить автоматический deploy через GitHub Actions: run должен стартовать после push, пройти тесты, обновить `REVISION` на VPS, отдать публичный `deploy-revision.txt` с ожидаемым SHA и оставить health/logs без ошибок.
 
 ### Точечный доступ к календарям
 

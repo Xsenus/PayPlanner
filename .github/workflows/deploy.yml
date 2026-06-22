@@ -95,6 +95,7 @@ jobs:
         run: |
           mkdir -p "${{ env.OUT_DIR }}/fe"
           cp -r dist/* "${{ env.OUT_DIR }}/fe/"
+          printf '%s\n' "${{ github.sha }}" > "${{ env.OUT_DIR }}/fe/deploy-revision.txt"
 
       - name: Create tarball
         run: tar -czf "${{ env.TAR_NAME }}" -C "${{ env.OUT_DIR }}" .
@@ -295,11 +296,12 @@ jobs:
             curl -fsS "$PUBLIC_API_HEALTH_URL" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"'
             curl -fsS -o /dev/null "$PUBLIC_FRONTEND_URL"
 
-      - name: Check notification readiness
+      - name: Check production deploy readiness
         run: |
-          node scripts/run-notification-production-readiness.mjs \
+          node scripts/run-production-deploy-readiness.mjs \
             --api-url="${{ env.PUBLIC_API_URL }}" \
             --frontend-url="${{ env.PUBLIC_FRONTEND_URL }}" \
+            --expected-sha="${{ github.sha }}" \
             --token="" \
             --require-websocket=true \
             --allow-websocket-auth-challenge=true \
