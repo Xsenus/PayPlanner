@@ -3377,6 +3377,53 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task Documents_ForbidListWithoutCaseViewPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var viewer = await CreateUserAsync(db, "documents-no-view@example.com", "Без просмотра дел");
+        viewer.Role!.Permissions.Single(permission => permission.Section == RolePermissionCatalog.Cases).CanView = false;
+        var client = new Client
+        {
+            Name = "Клиент закрытого дела",
+            IsActive = true,
+            ResponsibleUserId = viewer.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело без права просмотра",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = viewer.Id,
+        };
+        var document = new ClientCaseDocument
+        {
+            ClientCase = clientCase,
+            DocumentKey = "closed",
+            Version = 1,
+            DocumentType = "Иск",
+            Status = "Подготовлен",
+            OriginalFileName = "closed.txt",
+            StoredFileName = "closed-v1.txt",
+            StoragePath = "cases/closed-v1.txt",
+            ContentType = "text/plain",
+            SizeBytes = 5,
+            UploadedByUserId = viewer.Id,
+            UploadedByName = viewer.FullName,
+            UploadedAt = DateTime.UtcNow,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.ClientCaseDocuments.Add(document);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, viewer);
+
+        var listResult = await controller.GetDocuments(clientCase.Id, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(listResult.Result);
+    }
+
+    [Fact]
     public async Task Documents_ForbidMutationsWithoutCaseEditPermission()
     {
         await using var db = await CreateContextAsync();

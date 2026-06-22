@@ -3565,6 +3565,11 @@ public class CasesV2Controller : ControllerBase
     [HttpGet("{id:int}/documents")]
     public async Task<ActionResult<IReadOnlyList<ClientCaseDocumentDto>>> GetDocuments(int id, CancellationToken ct)
     {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var visibility = await ResolveCasesVisibilityAsync(ct);
         if (visibility is null)
         {
