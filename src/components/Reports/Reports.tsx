@@ -7405,6 +7405,19 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     }),
     [cashFlowDates, selectedCaseId, selectedClientId, selectedContractId, selectedCounterpartyName, selectedIncomeTypeId, selectedMoneyAccountName],
   );
+  const bankStatementImportReportFilters = useMemo(
+    () => ({
+      ...cashFlowDates,
+      ...(selectedMoneyAccountName ? { accountName: selectedMoneyAccountName } : {}),
+      ...(selectedCounterpartyName ? { counterpartyName: selectedCounterpartyName } : {}),
+      ...(selectedClientId ? { clientId: selectedClientId } : {}),
+      ...(selectedCaseId ? { caseId: selectedCaseId } : {}),
+      ...(selectedContractId ? { contractId: selectedContractId } : {}),
+      ...(selectedIncomeTypeId ? { incomeTypeId: selectedIncomeTypeId } : {}),
+      exportDisabled: !canExportPaymentReports,
+    }),
+    [canExportPaymentReports, cashFlowDates, selectedCaseId, selectedClientId, selectedContractId, selectedCounterpartyName, selectedIncomeTypeId, selectedMoneyAccountName],
+  );
   const casePeriodReportFilters = useMemo(
     () => ({ ...cashFlowDates, limit: 100 }),
     [cashFlowDates],
@@ -7779,7 +7792,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     loading: bankStatementImportReportLoading,
     error: bankStatementImportReportError,
     reload: reloadBankStatementImportReport,
-  } = useBankStatementImportReport(cashFlowDates, { enabled: canViewPaymentReports });
+  } = useBankStatementImportReport(bankStatementImportReportFilters, { enabled: canViewPaymentReports });
   const {
     report: spreadsheetImportReport,
     loading: spreadsheetImportReportLoading,
@@ -8572,7 +8585,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
                 loading={bankStatementImportReportLoading}
                 error={bankStatementImportReportError}
                 onReload={reloadBankStatementImportReport}
-                filters={cashFlowDates}
+                filters={bankStatementImportReportFilters}
                 profileTimeZoneId={profileTimeZoneId}
                 canExportPaymentReports={canExportPaymentReports}
               />

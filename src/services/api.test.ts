@@ -2591,6 +2591,12 @@ describe('apiService reports', () => {
     const result = await apiService.getBankStatementImportReport({
       from: '2026-05-01',
       to: '2026-05-31',
+      accountName: 'Main account',
+      counterpartyName: 'Target',
+      clientId: 10,
+      caseId: 20,
+      contractId: 30,
+      incomeTypeId: 40,
     });
 
     expect(result).toEqual(payload);
@@ -2599,6 +2605,12 @@ describe('apiService reports', () => {
     expect(String(url)).toContain('/reports/bank-statement-imports?');
     expect(String(url)).toContain('from=2026-05-01');
     expect(String(url)).toContain('to=2026-05-31');
+    expect(String(url)).toContain('accountName=Main+account');
+    expect(String(url)).toContain('counterpartyName=Target');
+    expect(String(url)).toContain('clientId=10');
+    expect(String(url)).toContain('caseId=20');
+    expect(String(url)).toContain('contractId=30');
+    expect(String(url)).toContain('incomeTypeId=40');
   });
 
   it('loads spreadsheet import report with filters', async () => {

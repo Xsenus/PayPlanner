@@ -6235,6 +6235,12 @@ export class ApiService {
   async getBankStatementImportReport(params?: {
     from?: string;
     to?: string;
+    accountName?: string;
+    counterpartyName?: string;
+    clientId?: number;
+    caseId?: number;
+    contractId?: number;
+    incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<BankStatementImportReport>(`/reports/bank-statement-imports${q}`);

@@ -5279,6 +5279,121 @@ services.Id,
     }
 
     [Fact]
+    public async Task BankStatementImports_AppliesRowFinancialFilters()
+    {
+        await using var db = await CreateContextAsync();
+        var targetClient = new Client { Name = "Target Client" };
+        var otherClient = new Client { Name = "Other Client" };
+        var targetCase = new ClientCase { CaseNumber = "CASE-BANK-1", Client = targetClient };
+        var otherCase = new ClientCase { CaseNumber = "CASE-BANK-2", Client = otherClient };
+        var targetContract = Contract("BANK-CONTRACT-1", ContractStatus.Concluded, 1_500m, new DateTime(2026, 5, 1), false, new DateTime(2026, 12, 31));
+        var otherContract = Contract("BANK-CONTRACT-2", ContractStatus.Concluded, 9_000m, new DateTime(2026, 5, 1), false, new DateTime(2026, 12, 31));
+        var targetIncomeType = new IncomeType { Name = "Target bank income", PaymentType = PaymentType.Income };
+        var otherIncomeType = new IncomeType { Name = "Other bank income", PaymentType = PaymentType.Income };
+        var targetInvoice = new Invoice { Number = "INV-BANK-1", Date = new DateTime(2026, 5, 1) };
+        var otherInvoice = new Invoice { Number = "INV-BANK-2", Date = new DateTime(2026, 5, 1) };
+        db.AddRange(targetClient, otherClient, targetCase, otherCase, targetContract, otherContract, targetIncomeType, otherIncomeType, targetInvoice, otherInvoice);
+        await db.SaveChangesAsync();
+
+        var targetPayment = InvoicePayment("Main account", PaymentType.Income, PaymentStatus.Completed, InvoiceWorkflowStatus.Paid, 1_500m, 1_500m, new DateTime(2026, 5, 10));
+        targetPayment.InvoiceId = targetInvoice.Id;
+        targetPayment.ClientId = targetClient.Id;
+        targetPayment.ClientCaseId = targetCase.Id;
+        targetPayment.ContractId = targetContract.Id;
+        targetPayment.IncomeTypeId = targetIncomeType.Id;
+        targetPayment.CounterpartyName = "Target Client";
+        var otherPayment = InvoicePayment("Other account", PaymentType.Income, PaymentStatus.Completed, InvoiceWorkflowStatus.Paid, 9_000m, 9_000m, new DateTime(2026, 5, 10));
+        otherPayment.InvoiceId = otherInvoice.Id;
+        otherPayment.ClientId = otherClient.Id;
+        otherPayment.ClientCaseId = otherCase.Id;
+        otherPayment.ContractId = otherContract.Id;
+        otherPayment.IncomeTypeId = otherIncomeType.Id;
+        otherPayment.CounterpartyName = "Other Client";
+        db.Payments.AddRange(targetPayment, otherPayment);
+        var targetOperation = Operation(
+            MoneyOperationSource.Bank,
+            MoneyOperationDirection.Income,
+            MoneyOperationAccountingType.Fact,
+            1_500m,
+            new DateTime(2026, 5, 10),
+            "Main account",
+            targetIncomeType.Id,
+            "Income",
+            "Target Client",
+            linkedInvoiceId: targetInvoice.Id);
+        var otherOperation = Operation(
+            MoneyOperationSource.Bank,
+            MoneyOperationDirection.Income,
+            MoneyOperationAccountingType.Fact,
+            9_000m,
+            new DateTime(2026, 5, 10),
+            "Other account",
+            otherIncomeType.Id,
+            "Income",
+            "Other Client",
+            linkedInvoiceId: otherInvoice.Id);
+        db.MoneyOperations.AddRange(targetOperation, otherOperation);
+        await db.SaveChangesAsync();
+
+        var batch = BankStatementImportBatch("filtered-bank.txt", BankStatementImportBatchStatus.AppliedWithErrors, 2, 1, 0, 1, 0, new DateTime(2026, 5, 10, 10, 0, 0, DateTimeKind.Utc));
+        batch.Rows.Add(new BankStatementImportRow
+        {
+            RowNumber = 1,
+            ImportKey = "target-row",
+            Status = BankStatementImportRowStatus.Created,
+            MoneyOperationId = targetOperation.Id,
+            Date = new DateTime(2026, 5, 10),
+            Direction = MoneyOperationDirection.Income,
+            Amount = 1_500m,
+            AccountName = "Main account",
+            CounterpartyName = "Target Client",
+            CreatedAt = new DateTime(2026, 5, 10, 10, 5, 0, DateTimeKind.Utc),
+        });
+        batch.Rows.Add(new BankStatementImportRow
+        {
+            RowNumber = 2,
+            ImportKey = "other-row",
+            Status = BankStatementImportRowStatus.Error,
+            MoneyOperationId = otherOperation.Id,
+            Date = new DateTime(2026, 5, 10),
+            Direction = MoneyOperationDirection.Income,
+            Amount = 9_000m,
+            AccountName = "Other account",
+            CounterpartyName = "Other Client",
+            CreatedAt = new DateTime(2026, 5, 10, 10, 6, 0, DateTimeKind.Utc),
+        });
+        db.BankStatementImportBatches.Add(batch);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db);
+
+        var action = await controller.BankStatementImports(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            CancellationToken.None,
+            accountName: "Main account",
+            counterpartyName: "Target",
+            clientId: targetClient.Id,
+            caseId: targetCase.Id,
+            contractId: targetContract.Id,
+            incomeTypeId: targetIncomeType.Id);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<BankStatementImportReportDto>(ok.Value);
+        Assert.Equal(1, report.BatchCount);
+        Assert.Equal(1, report.RowsReadTotal);
+        Assert.Equal(1, report.CreatedRowsTotal);
+        Assert.Equal(0, report.ErrorRowsTotal);
+        Assert.Equal(1, report.AppliedWithErrorsCount);
+        var status = Assert.Single(report.Statuses);
+        Assert.Equal(BankStatementImportBatchStatus.AppliedWithErrors, status.Status);
+        Assert.Equal(1, status.BatchCount);
+        Assert.Equal(1, status.RowsRead);
+        Assert.Equal(1, status.CreatedRows);
+        Assert.Equal(0, status.ErrorRows);
+        Assert.Equal(100m, status.Share);
+    }
+
+    [Fact]
     public async Task BankStatementImports_WithoutPaymentsViewPermission_ReturnsForbid()
     {
         await using var db = await CreateContextAsync();

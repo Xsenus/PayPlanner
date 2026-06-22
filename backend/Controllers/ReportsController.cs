@@ -944,7 +944,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildBankStatementImportReportAsync(start, end, timeZone, cancellationToken),
+                        cancellationToken => BuildBankStatementImportReportAsync(start, end, timeZone, normalizedAccountName, normalizedCounterpartyName, effectiveClientId, effectiveCaseId, effectiveContractId, effectiveIncomeTypeId, cancellationToken),
                         _logger,
                         ct);
                     return (BuildBankStatementImportExportDocument(reportDto), null);
@@ -1774,7 +1774,13 @@ public class ReportsController : ControllerBase
     public async Task<ActionResult<BankStatementImportReportDto>> BankStatementImports(
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
-        CancellationToken ct)
+        CancellationToken ct,
+        [FromQuery] string? accountName = null,
+        [FromQuery] string? counterpartyName = null,
+        [FromQuery] int? clientId = null,
+        [FromQuery] int? caseId = null,
+        [FromQuery] int? contractId = null,
+        [FromQuery] int? incomeTypeId = null)
     {
         var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
@@ -1792,7 +1798,17 @@ public class ReportsController : ControllerBase
             async cancellationToken =>
             {
                 var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), cancellationToken);
-                return await BuildBankStatementImportReportAsync(start, end, timeZone, cancellationToken);
+                return await BuildBankStatementImportReportAsync(
+                    start,
+                    end,
+                    timeZone,
+                    NormalizeOptional(accountName),
+                    NormalizeOptional(counterpartyName),
+                    clientId,
+                    caseId,
+                    contractId,
+                    incomeTypeId,
+                    cancellationToken);
             },
             _logger,
             ct);
@@ -8246,12 +8262,168 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         TimeZoneInfo timeZone,
+        string? accountName,
+        string? counterpartyName,
+        int? clientId,
+        int? caseId,
+        int? contractId,
+        int? incomeTypeId,
         CancellationToken ct)
     {
         var localStart = from.Date;
         var localEnd = to.Date;
         var startUtc = CalendarTimeZoneHelper.FromUserLocalToUtc(localStart, timeZone);
         var endUtc = CalendarTimeZoneHelper.FromUserLocalToUtc(localEnd.AddDays(1), timeZone);
+        var hasRowFilters =
+            !string.IsNullOrWhiteSpace(accountName) ||
+            !string.IsNullOrWhiteSpace(counterpartyName) ||
+            (clientId.HasValue && clientId.Value > 0) ||
+            (caseId.HasValue && caseId.Value > 0) ||
+            (contractId.HasValue && contractId.Value > 0) ||
+            (incomeTypeId.HasValue && incomeTypeId.Value > 0);
+
+        if (hasRowFilters)
+        {
+            var filteredRowsQuery = _db.BankStatementImportRows
+                .AsNoTracking()
+                .Where(row => row.Batch != null && row.Batch.CreatedAt >= startUtc && row.Batch.CreatedAt < endUtc);
+
+            if (!string.IsNullOrWhiteSpace(accountName))
+            {
+                var targetAccountName = accountName.Trim();
+                filteredRowsQuery = filteredRowsQuery.Where(row =>
+                    row.AccountName == targetAccountName ||
+                    (row.MoneyOperationId.HasValue && _db.MoneyOperations.Any(operation =>
+                        operation.Id == row.MoneyOperationId.Value &&
+                        operation.AccountName == targetAccountName)));
+            }
+
+            if (!string.IsNullOrWhiteSpace(counterpartyName))
+            {
+                var counterpartyFilter = counterpartyName.Trim();
+                filteredRowsQuery = filteredRowsQuery.Where(row =>
+                    (row.CounterpartyName != null && row.CounterpartyName.Contains(counterpartyFilter)) ||
+                    (row.MoneyOperationId.HasValue && _db.MoneyOperations.Any(operation =>
+                        operation.Id == row.MoneyOperationId.Value &&
+                        operation.CounterpartyName != null &&
+                        operation.CounterpartyName.Contains(counterpartyFilter))));
+            }
+
+            if (clientId.HasValue && clientId.Value > 0)
+            {
+                var targetClientId = clientId.Value;
+                filteredRowsQuery = filteredRowsQuery.Where(row =>
+                    row.MoneyOperationId.HasValue &&
+                    _db.MoneyOperations.Any(operation =>
+                        operation.Id == row.MoneyOperationId.Value &&
+                        operation.CounterpartyName != null &&
+                        _db.Clients.Any(client =>
+                            client.Id == targetClientId &&
+                            ((!string.IsNullOrEmpty(client.Name) && operation.CounterpartyName.Contains(client.Name)) ||
+                                (!string.IsNullOrEmpty(client.Company) && operation.CounterpartyName.Contains(client.Company))))));
+            }
+
+            if (caseId.HasValue && caseId.Value > 0)
+            {
+                var targetCaseId = caseId.Value;
+                filteredRowsQuery = filteredRowsQuery.Where(row =>
+                    row.MoneyOperationId.HasValue &&
+                    _db.MoneyOperations.Any(operation =>
+                        operation.Id == row.MoneyOperationId.Value &&
+                        operation.LinkedInvoiceId.HasValue &&
+                        _db.Payments.Any(payment =>
+                            payment.InvoiceId == operation.LinkedInvoiceId.Value &&
+                            (payment.ClientCaseId == targetCaseId ||
+                                payment.InvoiceClientCases.Any(link => link.ClientCaseId == targetCaseId)))));
+            }
+
+            if (contractId.HasValue && contractId.Value > 0)
+            {
+                var targetContractId = contractId.Value;
+                filteredRowsQuery = filteredRowsQuery.Where(row =>
+                    row.MoneyOperationId.HasValue &&
+                    _db.MoneyOperations.Any(operation =>
+                        operation.Id == row.MoneyOperationId.Value &&
+                        operation.LinkedInvoiceId.HasValue &&
+                        _db.Payments.Any(payment =>
+                            payment.InvoiceId == operation.LinkedInvoiceId.Value &&
+                            (payment.ContractId == targetContractId ||
+                                _db.ContractPayments.Any(link => link.ContractId == targetContractId && link.PaymentId == payment.Id) ||
+                                _db.ContractInvoices.Any(link => link.ContractId == targetContractId && link.InvoiceId == payment.Id)))));
+            }
+
+            if (incomeTypeId.HasValue && incomeTypeId.Value > 0)
+            {
+                var targetIncomeTypeId = incomeTypeId.Value;
+                filteredRowsQuery = filteredRowsQuery.Where(row =>
+                    row.MoneyOperationId.HasValue &&
+                    _db.MoneyOperations.Any(operation =>
+                        operation.Id == row.MoneyOperationId.Value &&
+                        operation.IncomeTypeId == targetIncomeTypeId));
+            }
+
+            var rowItems = await filteredRowsQuery
+                .Select(row => new
+                {
+                    BatchId = row.BatchId,
+                    BatchStatus = row.Batch!.Status,
+                    row.Status,
+                    row.CreatedAt,
+                })
+                .ToListAsync(ct);
+
+            rowItems = rowItems
+                .Where(item =>
+                {
+                    var localDate = CalendarTimeZoneHelper.ToUserLocal(item.CreatedAt, timeZone).Date;
+                    return localDate >= localStart && localDate <= localEnd;
+                })
+                .ToList();
+
+            var batchCount = rowItems.Select(item => item.BatchId).Distinct().Count();
+            var statusRows = rowItems
+                .GroupBy(item => item.BatchStatus)
+                .Select(group =>
+                {
+                    var distinctBatchCount = group.Select(item => item.BatchId).Distinct().Count();
+                    return new BankStatementImportReportItemDto
+                    {
+                        Status = group.Key,
+                        StatusLabel = FormatBankStatementImportStatusLabel(group.Key),
+                        BatchCount = distinctBatchCount,
+                        RowsRead = group.Count(),
+                        CreatedRows = group.Count(item => item.Status == BankStatementImportRowStatus.Created),
+                        SkippedRows = group.Count(item => item.Status == BankStatementImportRowStatus.Skipped),
+                        ErrorRows = group.Count(item => item.Status == BankStatementImportRowStatus.Error),
+                        RollbackRows = group.Count(item => item.Status is BankStatementImportRowStatus.RolledBack or BankStatementImportRowStatus.RollbackSkipped),
+                        Share = batchCount > 0
+                            ? Math.Round((decimal)distinctBatchCount / batchCount * 100m, 1, MidpointRounding.AwayFromZero)
+                            : 0m,
+                    };
+                })
+                .OrderBy(item => BankStatementImportStatusSortOrder(item.Status))
+                .ThenByDescending(item => item.ErrorRows)
+                .ThenByDescending(item => item.RowsRead)
+                .ToList();
+
+            return new BankStatementImportReportDto
+            {
+                From = from,
+                To = to,
+                BatchCount = batchCount,
+                RowsReadTotal = rowItems.Count,
+                CreatedRowsTotal = rowItems.Count(item => item.Status == BankStatementImportRowStatus.Created),
+                SkippedRowsTotal = rowItems.Count(item => item.Status == BankStatementImportRowStatus.Skipped),
+                ErrorRowsTotal = rowItems.Count(item => item.Status == BankStatementImportRowStatus.Error),
+                RollbackRowsTotal = rowItems.Count(item => item.Status is BankStatementImportRowStatus.RolledBack or BankStatementImportRowStatus.RollbackSkipped),
+                AppliedCount = rowItems.Where(item => item.BatchStatus == BankStatementImportBatchStatus.Applied).Select(item => item.BatchId).Distinct().Count(),
+                AppliedWithErrorsCount = rowItems.Where(item => item.BatchStatus == BankStatementImportBatchStatus.AppliedWithErrors).Select(item => item.BatchId).Distinct().Count(),
+                RolledBackCount = rowItems.Where(item => item.BatchStatus == BankStatementImportBatchStatus.RolledBack).Select(item => item.BatchId).Distinct().Count(),
+                RollbackBlockedCount = rowItems.Where(item => item.BatchStatus == BankStatementImportBatchStatus.RollbackBlocked).Select(item => item.BatchId).Distinct().Count(),
+                Statuses = statusRows,
+            };
+        }
+
         var rows = await _db.BankStatementImportBatches
             .AsNoTracking()
             .Where(item => item.CreatedAt >= startUtc && item.CreatedAt < endUtc)

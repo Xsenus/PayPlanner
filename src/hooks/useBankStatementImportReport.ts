@@ -5,6 +5,12 @@ import type { BankStatementImportReport } from '../types';
 export interface BankStatementImportReportFilters {
   from?: string;
   to?: string;
+  accountName?: string;
+  counterpartyName?: string;
+  clientId?: number;
+  caseId?: number;
+  contractId?: number;
+  incomeTypeId?: number;
 }
 
 export function useBankStatementImportReport(filters: BankStatementImportReportFilters, options: { enabled?: boolean } = {}) {
@@ -18,8 +24,23 @@ export function useBankStatementImportReport(filters: BankStatementImportReportF
     () => ({
       from: filters.from,
       to: filters.to,
+      accountName: filters.accountName,
+      counterpartyName: filters.counterpartyName,
+      clientId: filters.clientId,
+      caseId: filters.caseId,
+      contractId: filters.contractId,
+      incomeTypeId: filters.incomeTypeId,
     }),
-    [filters.from, filters.to],
+    [
+      filters.accountName,
+      filters.caseId,
+      filters.clientId,
+      filters.contractId,
+      filters.counterpartyName,
+      filters.from,
+      filters.incomeTypeId,
+      filters.to,
+    ],
   );
 
   const load = useCallback(async () => {
