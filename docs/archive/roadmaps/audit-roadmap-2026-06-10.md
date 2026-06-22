@@ -61,7 +61,7 @@ npm audit --audit-level=moderate
   - Выполнено: создана ветка `audit-roadmap-fixes-2026-06-10`; `git status --short` показывает только изменения, существовавшие до начала исправлений, и новые audit docs.
 
 - [x] Сохранить ссылку на полный отчет и этот roadmap в задаче/PR.
-  - Файлы: `docs/full-project-audit-2026-06-10.md`, `docs/audit-roadmap-2026-06-10.md`.
+  - Файлы: `docs/full-project-audit-2026-06-10.md`, `docs/archive/roadmaps/audit-roadmap-2026-06-10.md`.
   - DoD: следующий агент видит, откуда взяты решения.
   - Выполнено: полный отчет и roadmap сохранены в `docs/`; P0-исправления зафиксированы коммитом `9b61a7c8`.
 

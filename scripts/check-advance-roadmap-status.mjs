@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const DEFAULT_ROADMAP = 'docs/unallocated-advance-monitoring-roadmap-2026-06-12.md';
+const DEFAULT_ROADMAP = 'docs/archive/roadmaps/unallocated-advance-monitoring-roadmap-2026-06-12.md';
 
 if (isCliEntryPoint()) {
   runCli();

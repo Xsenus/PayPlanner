@@ -2,7 +2,8 @@
 
 Дата проверки: 2026-06-16  
 Среда: локальная PostgreSQL БД `payplanner` на `127.0.0.1:5433`  
-Связанный roadmap: `docs/financial-access-hardening-roadmap-2026-06-16.md`  
+Исторический roadmap: `docs/archive/roadmaps/financial-access-hardening-roadmap-2026-06-16.md`
+Актуальный единый roadmap: `docs/remaining-roadmap.md`
 Связанный коммит реализации: `28f23aa8 Усилить доступ к кассе и операциям денег`
 Read-only SQL для повторной проверки: `docs/financial-cash-access-acceptance-checks.sql`
 Ручной чеклист приемки: `docs/financial-cash-access-manual-acceptance-checklist-2026-06-16.md`

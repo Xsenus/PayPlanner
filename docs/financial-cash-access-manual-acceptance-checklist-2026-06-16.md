@@ -5,7 +5,8 @@
 
 Связанные материалы:
 
-- Roadmap: `docs/financial-access-hardening-roadmap-2026-06-16.md`
+- Исторический roadmap: `docs/archive/roadmaps/financial-access-hardening-roadmap-2026-06-16.md`
+- Актуальный единый roadmap: `docs/remaining-roadmap.md`
 - Приемочный отчет по локальной БД: `docs/financial-cash-access-acceptance-report-2026-06-16.md`
 - Read-only SQL для актуальной БД: `docs/financial-cash-access-acceptance-checks.sql`
 - Коммит реализации: `28f23aa8 Усилить доступ к кассе и операциям денег`

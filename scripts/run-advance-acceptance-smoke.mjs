@@ -15,9 +15,13 @@ const tempDir = mkdtempSync(path.join(tmpdir(), 'payplanner-advance-smoke-'));
 const tempDb = path.join(tempDir, 'payplanner.db');
 const port = 5300 + Math.floor(Math.random() * 300);
 const baseUrl = `http://127.0.0.1:${port}`;
+const apiReadyTimeoutMs = Number.parseInt(
+  process.env.PAYPLANNER_ADVANCE_SMOKE_READY_TIMEOUT_MS ?? '180000',
+  10,
+);
 const backendLog = path.join(tempDir, 'backend.out.log');
 const backendErr = path.join(tempDir, 'backend.err.log');
-const roadmapPath = path.join(root, 'docs', 'unallocated-advance-monitoring-roadmap-2026-06-12.md');
+const roadmapPath = path.join(root, 'docs', 'archive', 'roadmaps', 'unallocated-advance-monitoring-roadmap-2026-06-12.md');
 
 function readArgValue(name) {
   const prefix = `${name}=`;
@@ -116,9 +120,23 @@ function hasBalanceTransaction(transactions, predicate) {
   });
 }
 
-async function waitForApi() {
-  const deadline = Date.now() + 60_000;
+async function waitForApi(child) {
+  const timeoutMs = Number.isFinite(apiReadyTimeoutMs) && apiReadyTimeoutMs > 0
+    ? apiReadyTimeoutMs
+    : 180_000;
+  const deadline = Date.now() + timeoutMs;
+  let backendExit = null;
+  child.once('exit', (code, signal) => {
+    backendExit = { code, signal };
+  });
+
   while (Date.now() < deadline) {
+    if (backendExit) {
+      throw new Error(
+        `Backend exited before readiness with code ${backendExit.code ?? 'null'} and signal ${backendExit.signal ?? 'null'}`,
+      );
+    }
+
     try {
       const response = await fetch(`${baseUrl}/api/health`);
       if (response.ok) {
@@ -129,7 +147,7 @@ async function waitForApi() {
     }
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
-  throw new Error('Backend did not become ready in 60 seconds');
+  throw new Error(`Backend did not become ready in ${Math.round(timeoutMs / 1000)} seconds`);
 }
 
 async function stopProcessTree(child) {
@@ -235,7 +253,7 @@ async function runApiSmoke() {
   );
 
   try {
-    await waitForApi();
+    await waitForApi(backend);
     const login = await fetchJson(`${baseUrl}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
