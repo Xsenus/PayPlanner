@@ -143,6 +143,41 @@ public class LegalEntitiesControllerTests
     }
 
     [Fact]
+    public async Task WriteEndpoints_RequireLegalEntityActionPermissions()
+    {
+        await using var db = await CreateContextAsync();
+        var noCreateUserId = await CreateUserAsync(db);
+        var noEditUserId = await CreateUserAsync(db);
+        var noDeleteUserId = await CreateUserAsync(db);
+        await SetLegalEntityPermissionAsync(db, noCreateUserId, canCreate: false, canEdit: true, canDelete: true);
+        await SetLegalEntityPermissionAsync(db, noEditUserId, canCreate: true, canEdit: false, canDelete: true);
+        await SetLegalEntityPermissionAsync(db, noDeleteUserId, canCreate: true, canEdit: true, canDelete: false);
+
+        var editEntityId = await CreateLegalEntityAsync(db, "Юрлицо без права редактирования", responsibleUserId: noEditUserId);
+        var deleteEntityId = await CreateLegalEntityAsync(db, "Юрлицо без права удаления", responsibleUserId: noDeleteUserId);
+
+        var createResult = await CreateController(db, noCreateUserId, isAdmin: false).Create(
+            BuildRequest(),
+            CancellationToken.None);
+        var updateResult = await CreateController(db, noEditUserId, isAdmin: false).Update(
+            editEntityId,
+            BuildRequest(),
+            CancellationToken.None);
+        var deleteResult = await CreateController(db, noDeleteUserId, isAdmin: false).Delete(
+            deleteEntityId,
+            CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(createResult.Result);
+        Assert.IsType<ForbidResult>(updateResult.Result);
+        Assert.IsType<ForbidResult>(deleteResult);
+        Assert.False(await db.LegalEntities.AnyAsync(item => item.ShortName == BuildRequest().ShortName));
+
+        var editEntity = await db.LegalEntities.AsNoTracking().SingleAsync(item => item.Id == editEntityId);
+        Assert.Equal("Юрлицо без права редактирования", editEntity.ShortName);
+        Assert.True(await db.LegalEntities.AnyAsync(item => item.Id == deleteEntityId));
+    }
+
+    [Fact]
     public async Task Delete_RemovesDeletedCompanyFromMainCompanySettings()
     {
         await using var db = await CreateContextAsync();
@@ -1012,6 +1047,42 @@ public class LegalEntitiesControllerTests
         db.Users.Add(user);
         await db.SaveChangesAsync();
         return user.Id;
+    }
+
+    private static async Task SetLegalEntityPermissionAsync(
+        PaymentContext db,
+        int userId,
+        bool canCreate,
+        bool canEdit,
+        bool canDelete,
+        bool canView = true)
+    {
+        var roleId = await db.Users
+            .Where(item => item.Id == userId)
+            .Select(item => item.RoleId)
+            .SingleAsync();
+
+        var permission = await db.RolePermissions
+            .SingleOrDefaultAsync(item => item.RoleId == roleId && item.Section == RolePermissionCatalog.LegalEntities);
+        if (permission is null)
+        {
+            permission = new RolePermission
+            {
+                RoleId = roleId,
+                Section = RolePermissionCatalog.LegalEntities,
+                ViewScope = DataVisibilityScope.All,
+            };
+            db.RolePermissions.Add(permission);
+        }
+
+        permission.CanView = canView;
+        permission.CanCreate = canCreate;
+        permission.CanEdit = canEdit;
+        permission.CanDelete = canDelete;
+        permission.CanExport = true;
+        permission.CanViewAnalytics = false;
+        permission.ViewScope = DataVisibilityScope.All;
+        await db.SaveChangesAsync();
     }
 
     private static async Task<PaymentContext> CreateContextAsync()

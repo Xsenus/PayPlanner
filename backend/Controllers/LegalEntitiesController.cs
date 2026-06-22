@@ -77,6 +77,11 @@ public class LegalEntitiesController : ControllerBase
     private Task<DataVisibilityAccess?> GetCurrentAccessAsync(CancellationToken ct)
         => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.LegalEntities, ct);
 
+    private Task<bool> HasLegalEntitiesPermissionAsync(
+        Func<RolePermissionValues, bool> isAllowed,
+        CancellationToken ct)
+        => _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.LegalEntities, isAllowed, ct);
+
     private async Task<MainCompanySettingsState> LoadMainCompanySettingsStateAsync(CancellationToken ct)
     {
         var values = await _db.SystemSettings
@@ -929,6 +934,11 @@ public class LegalEntitiesController : ControllerBase
             return Unauthorized();
         }
 
+        if (!await HasLegalEntitiesPermissionAsync(static permission => permission.CanCreate, ct))
+        {
+            return Forbid();
+        }
+
         var requirementsSection = string.Equals(request.FormRequirementsSection, "clients-modal-legal", StringComparison.OrdinalIgnoreCase)
             ? "clients-modal-legal"
             : "legal-entities";
@@ -1065,6 +1075,11 @@ public class LegalEntitiesController : ControllerBase
         if (access is null)
         {
             return Unauthorized();
+        }
+
+        if (!await HasLegalEntitiesPermissionAsync(static permission => permission.CanDelete, ct))
+        {
+            return Forbid();
         }
 
         var query = await ApplyResponsibleVisibilityAsync(_db.LegalEntities
@@ -1843,6 +1858,11 @@ public class LegalEntitiesController : ControllerBase
         if (access is null)
         {
             return Unauthorized();
+        }
+
+        if (!await HasLegalEntitiesPermissionAsync(static permission => permission.CanEdit, ct))
+        {
+            return Forbid();
         }
 
         var query = await ApplyResponsibleVisibilityAsync(_db.LegalEntities

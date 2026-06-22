@@ -2366,31 +2366,22 @@ public class TasksController : ControllerBase
 
         var start = entity.DueAt;
         var end = GetTaskEndAt(entity);
-        var dayStart = start.Date;
-        var dayEnd = dayStart.AddDays(1);
+        var windowStart = start.Date.AddDays(-1);
+        var windowEnd = end.Date.AddDays(1);
 
         var candidates = await _db.TaskJournalItems
             .Include(task => task.Participants)
             .Where(task =>
                 task.Id != entity.Id &&
                 ActiveTaskStatuses.Contains(task.Status) &&
-                task.DueAt >= dayStart &&
-                task.DueAt < dayEnd &&
-                (
-                    (task.AssigneeUserId.HasValue && assigneeUserIds.Contains(task.AssigneeUserId.Value)) ||
-                    task.Participants.Any(participant =>
-                        participant.Role == "assignee" &&
-                        participant.UserId.HasValue &&
-                        assigneeUserIds.Contains(participant.UserId.Value)) ||
-                    (assigneeNames.Count > 0 && assigneeNames.Contains(task.AssigneeName.ToLower())) ||
-                    task.Participants.Any(participant =>
-                        participant.Role == "assignee" &&
-                        assigneeNames.Contains(participant.DisplayName.ToLower()))
-                ))
+                task.DueAt >= windowStart &&
+                task.DueAt < windowEnd)
             .ToListAsync(ct);
 
         return candidates
-            .Where(candidate => IntervalsOverlap(start, end, candidate.DueAt, GetTaskEndAt(candidate)))
+            .Where(candidate =>
+                SharesTaskAssignee(candidate, assigneeUserIds, assigneeNames) &&
+                IntervalsOverlap(start, end, candidate.DueAt, GetTaskEndAt(candidate)))
             .OrderBy(candidate => candidate.DueAt)
             .ThenBy(candidate => candidate.Id)
             .ToList();
@@ -2432,6 +2423,33 @@ public class TasksController : ControllerBase
         }
 
         return names.ToList();
+    }
+
+    private static bool SharesTaskAssignee(
+        TaskJournalItem candidate,
+        IReadOnlyCollection<int> assigneeUserIds,
+        IReadOnlyCollection<string> assigneeNames)
+    {
+        if (candidate.AssigneeUserId is { } assigneeUserId &&
+            assigneeUserId > 0 &&
+            assigneeUserIds.Contains(assigneeUserId))
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(candidate.AssigneeName) &&
+            assigneeNames.Contains(candidate.AssigneeName.Trim().ToLowerInvariant()))
+        {
+            return true;
+        }
+
+        return candidate.Participants.Any(participant =>
+            participant.Role == "assignee" &&
+            ((participant.UserId is { } participantUserId &&
+              participantUserId > 0 &&
+              assigneeUserIds.Contains(participantUserId)) ||
+             (!string.IsNullOrWhiteSpace(participant.DisplayName) &&
+              assigneeNames.Contains(participant.DisplayName.Trim().ToLowerInvariant()))));
     }
 
     private static DateTime GetTaskEndAt(TaskJournalItem entity)

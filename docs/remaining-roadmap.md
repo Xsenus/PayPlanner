@@ -70,6 +70,7 @@
 - `[x]` Добавлен replay свежих непрочитанных уведомлений после возврата во вкладку CRM или открытия браузера на том же устройстве: уведомления показываются по очереди с паузой, а отдельные browser push не заменяют друг друга.
 - `[x]` Browser Push теперь несет прямую ссылку на связанный объект CRM: задачу, платеж, счет, акт, договор, дело, судебную вкладку или документы дела.
 - `[x]` 2026-06-23: панель Push-уведомлений снова показывает отключение для уже подключенного текущего устройства, даже если серверная диагностика Web Push выводит предупреждение по настройкам. Проверено тестами `webPushNotifications` и `WebPushDevicePanel`.
+- `[x]` 2026-06-23: уведомления о конфликте расписания задач больше не пропускают пересечения, которые переходят через полночь UTC. Проверено backend-тестом `TasksControllerTests.CreateTask_NotifiesWhenScheduleConflictsWithActiveTask`.
 
 ### Юридический и документный контур
 
@@ -226,6 +227,7 @@
   - `[x]` 2026-06-23: старый неверсированный API дел `/api/cases` закрыт секционными правами `Cases.CanView/Create/Edit/Delete` и object-level видимостью; карточка legacy API больше не подтягивает платежи в обход финансовых прав. Проверено backend-тестами `CasesControllerTests`.
   - `[x]` 2026-06-23: актуальный V2 API клиентов закрыт явными правами `Clients.CanCreate/CanEdit/CanDelete` для записи, а не только областью видимости. Проверено backend-тестом `ClientsControllerTests.V2WriteEndpoints_RequireClientActionPermissions`.
   - `[x]` 2026-06-23: старые API клиентов `/api/clients` и `/api/v1/clients` закрыты секционными правами `Clients.CanView/Create/Edit/Delete`, включая массовое удаление и смену ответственного. Проверено backend-тестами `ClientsControllerTests.LegacyWriteEndpoints_RequireClientActionPermissions` и `ClientsControllerTests.V1Endpoints_RequireClientSectionPermissions`.
+  - `[x]` 2026-06-23: актуальный API юридических лиц закрыт явными правами `LegalEntities.CanCreate/CanEdit/CanDelete` для создания, редактирования и удаления, а не только областью видимости. Проверено backend-тестом `LegalEntitiesControllerTests.WriteEndpoints_RequireLegalEntityActionPermissions`.
 - `[partial]` Довести backend- и frontend-тесты прав по реальным ролям заказчика. Тесты прав есть, но финальный набор зависит от утвержденной матрицы.
 - `[acceptance]` Финально проверить маскирование и раскрытие чувствительных данных на реальных ролях и данных.
 
