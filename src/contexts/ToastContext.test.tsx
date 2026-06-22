@@ -120,6 +120,22 @@ describe('ToastProvider', () => {
     expect(screen.getAllByText('Четвертое').length).toBeGreaterThan(0);
   });
 
+  it('positions notification stack in the bottom-right corner and grows upward', () => {
+    render(
+      <ToastProvider>
+        <ToastHarness />
+      </ToastProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Domain' }));
+
+    const stack = screen.getByTestId('toast-card').parentElement;
+    expect(stack?.className).toContain('bottom-3');
+    expect(stack?.className).toContain('sm:bottom-4');
+    expect(stack?.className).toContain('sm:right-4');
+    expect(stack?.className).toContain('flex-col-reverse');
+  });
+
   it('shows a compact domain marker for domain-specific toasts', () => {
     render(
       <ToastProvider>

@@ -239,7 +239,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       {typeof document !== 'undefined'
         ? createPortal(
-            <div className="pointer-events-none fixed left-3 right-3 top-3 z-[2000] flex flex-col gap-3 sm:left-auto sm:right-4 sm:top-4 sm:w-[min(100vw-2rem,26rem)]" aria-live="polite" aria-atomic="true">
+            <div className="pointer-events-none fixed bottom-3 left-3 right-3 z-[2000] flex flex-col-reverse gap-3 sm:left-auto sm:right-4 sm:bottom-4 sm:w-[min(100vw-2rem,26rem)]" aria-live="polite" aria-atomic="true">
               {toasts.map((toast) => {
                 const styles = toastStyles(toast.variant);
                 const domainStyles = toastDomainStyles(toast.domain);

@@ -52,7 +52,48 @@ async function dispatchNotificationClick(
   return event;
 }
 
+async function dispatchPush(listener: WorkerEventListener, payload: Record<string, unknown>) {
+  const waitUntilPromises: Promise<unknown>[] = [];
+  const event = {
+    data: {
+      json: () => payload,
+    },
+    waitUntil: vi.fn((promise: Promise<unknown>) => {
+      waitUntilPromises.push(promise);
+    }),
+  };
+
+  listener(event);
+  await Promise.all(waitUntilPromises);
+
+  return event;
+}
+
 describe('payplanner-push-worker', () => {
+  it('uses notification id as the browser notification tag so accumulated events do not replace each other', async () => {
+    const { listeners, registration } = loadWorker();
+
+    await dispatchPush(
+      listeners.get('push')!,
+      {
+        title: 'Task changed',
+        body: 'Deadline moved',
+        notificationId: 801,
+        eventKey: 'task:15:changed',
+        createdAt: '2026-06-22T08:00:00Z',
+      },
+    );
+
+    expect(registration.showNotification).toHaveBeenCalledWith(
+      'Task changed',
+      expect.objectContaining({
+        tag: 'payplanner-notification-801',
+        renotify: true,
+        timestamp: Date.parse('2026-06-22T08:00:00Z'),
+      }),
+    );
+  });
+
   it('navigates and focuses an existing CRM tab for relative notification urls', async () => {
     const { listeners, clients } = loadWorker();
     const foreignClient = {

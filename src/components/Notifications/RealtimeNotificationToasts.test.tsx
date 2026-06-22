@@ -558,6 +558,152 @@ describe('RealtimeNotificationToasts', () => {
     errorSpy.mockRestore();
   });
 
+  it('replays unread notifications that arrived while this device was away', async () => {
+    const changedEvents: UserNotificationsChangedDetail[] = [];
+    const listener = (event: Event) => {
+      changedEvents.push((event as CustomEvent<UserNotificationsChangedDetail>).detail);
+    };
+    window.addEventListener(USER_NOTIFICATIONS_EVENT, listener);
+    window.localStorage.setItem(
+      'payplanner.realtimeToastLastSeenAt.v1.5',
+      String(Date.now() - 120_000),
+    );
+    const createdAt = new Date(Date.now() - 60_000).toISOString();
+    apiMock.getUserNotifications.mockResolvedValue({
+      items: [
+        {
+          id: 710,
+          type: 'taskAssigned',
+          typeLabel: 'Task',
+          eventKey: 'task:710:assigned',
+          title: 'Missed task from closed browser',
+          bodyPreview: 'This notification should be replayed after return.',
+          tone: 'blue',
+          objectType: 'task',
+          objectId: 710,
+          taskId: 710,
+          isRead: false,
+          readAt: null,
+          isArchived: false,
+          archivedAt: null,
+          createdAt,
+        },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 50,
+    });
+
+    render(<RealtimeNotificationToasts userId={5} onOpenTask={vi.fn()} />);
+
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(apiMock.getUserNotifications).toHaveBeenCalledWith({
+        status: 'unread',
+        page: 1,
+        pageSize: 50,
+      }),
+    );
+    await waitFor(() =>
+      expect(toastMock.showToast).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: 'Missed task from closed browser',
+          dedupeKey: 'task:710',
+          domain: 'task',
+        }),
+      ),
+    );
+    expect(changedEvents).toContainEqual(expect.objectContaining({
+      notificationId: 710,
+      reason: 'missed-replay',
+    }));
+    expect(changedEvents.find((item) => item.notificationId === 710)?.unreadDelta).toBeUndefined();
+    window.removeEventListener(USER_NOTIFICATIONS_EVENT, listener);
+  });
+
+  it('spaces accumulated replay notifications so they can be read one by one', async () => {
+    vi.useFakeTimers();
+    window.localStorage.setItem(
+      'payplanner.realtimeToastLastSeenAt.v1.5',
+      String(Date.now() - 120_000),
+    );
+    const firstCreatedAt = new Date(Date.now() - 90_000).toISOString();
+    const secondCreatedAt = new Date(Date.now() - 60_000).toISOString();
+    apiMock.getUserNotifications.mockResolvedValue({
+      items: [
+        {
+          id: 712,
+          type: 'taskAssigned',
+          typeLabel: 'Task',
+          eventKey: 'task:712:assigned',
+          title: 'Second missed task',
+          bodyPreview: 'Second replay item.',
+          tone: 'blue',
+          objectType: 'task',
+          objectId: 712,
+          taskId: 712,
+          isRead: false,
+          readAt: null,
+          isArchived: false,
+          archivedAt: null,
+          createdAt: secondCreatedAt,
+        },
+        {
+          id: 711,
+          type: 'taskAssigned',
+          typeLabel: 'Task',
+          eventKey: 'task:711:assigned',
+          title: 'First missed task',
+          bodyPreview: 'First replay item.',
+          tone: 'blue',
+          objectType: 'task',
+          objectId: 711,
+          taskId: 711,
+          isRead: false,
+          readAt: null,
+          isArchived: false,
+          archivedAt: null,
+          createdAt: firstCreatedAt,
+        },
+      ],
+      total: 2,
+      page: 1,
+      pageSize: 50,
+    });
+
+    try {
+      render(<RealtimeNotificationToasts userId={5} onOpenTask={vi.fn()} />);
+
+      await act(async () => {
+        await Promise.resolve();
+        await connectionState.start.mock.results[0]?.value;
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(toastMock.showToast).toHaveBeenCalledTimes(1);
+      expect(toastMock.showToast).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        title: 'First missed task',
+      }));
+
+      act(() => {
+        vi.advanceTimersByTime(2499);
+      });
+      expect(toastMock.showToast).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+        await Promise.resolve();
+      });
+      expect(toastMock.showToast).toHaveBeenCalledTimes(2);
+      expect(toastMock.showToast).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        title: 'Second missed task',
+      }));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('polls unread notifications and shows fallback toasts when realtime startup is unavailable', async () => {
     const createdAt = new Date(Date.now() + 1000).toISOString();
     apiMock.getUserNotifications.mockResolvedValue({

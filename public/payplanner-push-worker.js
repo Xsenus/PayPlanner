@@ -11,11 +11,17 @@ self.addEventListener('push', (event) => {
   }
 
   const title = payload.title || 'PayPlanner CRM';
+  const notificationTag = payload.notificationId
+    ? `payplanner-notification-${payload.notificationId}`
+    : payload.eventKey || undefined;
+  const notificationTimestamp = Date.parse(payload.createdAt || '');
   const options = {
     body: payload.body || 'Новое уведомление в CRM',
     icon: '/logo.png',
     badge: '/logo.png',
-    tag: payload.eventKey || payload.notificationId || undefined,
+    tag: notificationTag,
+    renotify: Boolean(notificationTag),
+    timestamp: Number.isFinite(notificationTimestamp) ? notificationTimestamp : Date.now(),
     data: {
       url: payload.url || '/notifications',
       notificationId: payload.notificationId,

@@ -16,8 +16,13 @@ import { updateRealtimeNotificationDiagnostics } from '../../utils/realtimeNotif
 
 const FALLBACK_POLL_INTERVAL_MS = 30_000;
 const FALLBACK_PAGE_SIZE = 15;
+const MISSED_REPLAY_PAGE_SIZE = 50;
+const MISSED_REPLAY_MAX_ITEMS = 25;
+const MISSED_REPLAY_SPACING_MS = 2500;
+const MISSED_REPLAY_LOOKBACK_MS = 48 * 60 * 60 * 1000;
 const TOAST_SNOOZE_MS = 30 * 60 * 1000;
 const TOAST_SNOOZE_STORAGE_KEY = 'payplanner.realtimeToastSnoozes.v1';
+const LAST_SEEN_STORAGE_KEY_PREFIX = 'payplanner.realtimeToastLastSeenAt.v1';
 
 type RealtimeNotificationToastsProps = {
   userId: number;
@@ -313,6 +318,39 @@ function snoozeToast(dedupeKey: string, now = Date.now()) {
   window.localStorage.setItem(TOAST_SNOOZE_STORAGE_KEY, JSON.stringify(next));
 }
 
+function buildLastSeenStorageKey(userId: number): string {
+  return `${LAST_SEEN_STORAGE_KEY_PREFIX}.${userId}`;
+}
+
+function readLastSeenMs(userId: number, now = Date.now()): number | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const raw = window.localStorage.getItem(buildLastSeenStorageKey(userId));
+  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+
+  const lowerBound = now - MISSED_REPLAY_LOOKBACK_MS;
+  const upperBound = now + 5 * 60 * 1000;
+  return parsed >= lowerBound && parsed <= upperBound ? parsed : null;
+}
+
+function writeLastSeenMs(userId: number, now = Date.now()) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.localStorage.setItem(buildLastSeenStorageKey(userId), String(now));
+}
+
+function parseCreatedAtMs(value: string): number | null {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 export function RealtimeNotificationToasts({
   userId,
   onOpenTask,
@@ -331,6 +369,8 @@ export function RealtimeNotificationToasts({
   const fallbackKnownNotificationIdsRef = useRef<Set<number>>(new Set());
   const fallbackBaselineReadyRef = useRef(false);
   const fallbackNoticeShownRef = useRef(false);
+  const queuedToastNotificationsRef = useRef<RealtimeUserNotification[]>([]);
+  const queuedToastTimerRef = useRef<number | null>(null);
   const handlersRef = useRef({
     onOpenTask,
     onOpenCase,
@@ -375,10 +415,15 @@ export function RealtimeNotificationToasts({
     let fallbackPollingActive = false;
     let fallbackPollInFlight = false;
     let fallbackActivatedAtMs = 0;
+    let missedReplayInFlight = false;
+    const mountedAtMs = Date.now();
+    const initialMissedSinceMs = readLastSeenMs(userId, mountedAtMs);
+    writeLastSeenMs(userId, mountedAtMs);
     shownNotificationIdsRef.current.clear();
     fallbackKnownNotificationIdsRef.current.clear();
     fallbackBaselineReadyRef.current = false;
     fallbackNoticeShownRef.current = false;
+    queuedToastNotificationsRef.current = [];
     const connection = createNotificationsHubConnection();
     connectionRef.current = connection;
     updateRealtimeNotificationDiagnostics({
@@ -388,26 +433,7 @@ export function RealtimeNotificationToasts({
       lastError: null,
     });
 
-    const showIncomingNotification = (
-      notification: RealtimeUserNotification,
-      reason: 'created' | 'fallback-poll',
-    ) => {
-      if (!notification || notification.recipientUserId !== userId) {
-        return;
-      }
-
-      emitUserNotificationsChanged({
-        source: 'realtime',
-        reason,
-        unreadDelta: 1,
-        notificationId: notification.id,
-      });
-
-      if (shownNotificationIdsRef.current.has(notification.id)) {
-        return;
-      }
-      shownNotificationIdsRef.current.add(notification.id);
-
+    const renderToastNotification = (notification: RealtimeUserNotification) => {
       if (notification.toastEnabled === false || !shouldShowRealtimeToast(notification)) {
         return;
       }
@@ -469,6 +495,104 @@ export function RealtimeNotificationToasts({
       });
     };
 
+    const flushQueuedToastNotifications = () => {
+      if (disposed || queuedToastTimerRef.current !== null) {
+        return;
+      }
+
+      const next = queuedToastNotificationsRef.current.shift();
+      if (!next) {
+        return;
+      }
+
+      renderToastNotification(next);
+      queuedToastTimerRef.current = window.setTimeout(() => {
+        queuedToastTimerRef.current = null;
+        flushQueuedToastNotifications();
+      }, MISSED_REPLAY_SPACING_MS);
+    };
+
+    const enqueueToastNotification = (notification: RealtimeUserNotification) => {
+      queuedToastNotificationsRef.current.push(notification);
+      flushQueuedToastNotifications();
+    };
+
+    const showIncomingNotification = (
+      notification: RealtimeUserNotification,
+      reason: 'created' | 'fallback-poll' | 'missed-replay' | 'visibility-resume',
+      delivery: 'immediate' | 'queued' = 'immediate',
+    ) => {
+      if (!notification || notification.recipientUserId !== userId) {
+        return;
+      }
+
+      emitUserNotificationsChanged({
+        source: 'realtime',
+        reason,
+        unreadDelta: reason === 'created' || reason === 'fallback-poll' ? 1 : undefined,
+        notificationId: notification.id,
+      });
+
+      if (shownNotificationIdsRef.current.has(notification.id)) {
+        return;
+      }
+      shownNotificationIdsRef.current.add(notification.id);
+
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+        writeLastSeenMs(userId);
+      }
+
+      if (delivery === 'queued') {
+        enqueueToastNotification(notification);
+        return;
+      }
+
+      renderToastNotification(notification);
+    };
+
+    const replayMissedNotifications = async (
+      sinceMs: number | null,
+      reason: 'missed-replay' | 'visibility-resume',
+    ) => {
+      if (disposed || missedReplayInFlight || sinceMs === null) {
+        return;
+      }
+
+      missedReplayInFlight = true;
+      try {
+        const page = await apiService.getUserNotifications({
+          status: 'unread',
+          page: 1,
+          pageSize: MISSED_REPLAY_PAGE_SIZE,
+        });
+        if (disposed) {
+          return;
+        }
+
+        const replayItems = page.items
+          .filter((item) => {
+            const createdAtMs = parseCreatedAtMs(item.createdAt);
+            return createdAtMs !== null && createdAtMs >= sinceMs - 1000;
+          })
+          .sort((left, right) => {
+            const leftCreatedAtMs = parseCreatedAtMs(left.createdAt) ?? 0;
+            const rightCreatedAtMs = parseCreatedAtMs(right.createdAt) ?? 0;
+            return leftCreatedAtMs - rightCreatedAtMs || left.id - right.id;
+          })
+          .slice(-MISSED_REPLAY_MAX_ITEMS);
+
+        for (const item of replayItems) {
+          showIncomingNotification(toRealtimeNotification(item, userId), reason, 'queued');
+        }
+      } catch (error) {
+        if (!disposed) {
+          console.error('Missed notifications replay failed.', error);
+        }
+      } finally {
+        missedReplayInFlight = false;
+      }
+    };
+
     const showFallbackNotice = () => {
       if (fallbackNoticeShownRef.current) {
         return;
@@ -502,13 +626,14 @@ export function RealtimeNotificationToasts({
         }
 
         const firstPoll = !fallbackBaselineReadyRef.current;
-        const activationThresholdMs = fallbackActivatedAtMs - 1000;
+        const replaySinceMs = initialMissedSinceMs ?? fallbackActivatedAtMs;
+        const activationThresholdMs = replaySinceMs - 1000;
 
         for (const item of page.items) {
-          const notificationCreatedAtMs = Date.parse(item.createdAt);
+          const notificationCreatedAtMs = parseCreatedAtMs(item.createdAt);
           const isKnown = fallbackKnownNotificationIdsRef.current.has(item.id);
           const isFreshForFallback =
-            Number.isFinite(notificationCreatedAtMs) && notificationCreatedAtMs >= activationThresholdMs;
+            notificationCreatedAtMs !== null && notificationCreatedAtMs >= activationThresholdMs;
 
           fallbackKnownNotificationIdsRef.current.add(item.id);
 
@@ -520,7 +645,7 @@ export function RealtimeNotificationToasts({
             continue;
           }
 
-          showIncomingNotification(toRealtimeNotification(item, userId), 'fallback-poll');
+          showIncomingNotification(toRealtimeNotification(item, userId), 'fallback-poll', firstPoll ? 'queued' : 'immediate');
         }
 
         fallbackBaselineReadyRef.current = true;
@@ -571,6 +696,28 @@ export function RealtimeNotificationToasts({
       showIncomingNotification(notification, 'created');
     });
 
+    const handleVisibilityChange = () => {
+      if (typeof document === 'undefined') {
+        return;
+      }
+
+      if (document.visibilityState === 'hidden') {
+        writeLastSeenMs(userId);
+        return;
+      }
+
+      const missedSinceMs = readLastSeenMs(userId);
+      writeLastSeenMs(userId);
+      void replayMissedNotifications(missedSinceMs, 'visibility-resume');
+    };
+
+    const handlePageHide = () => {
+      writeLastSeenMs(userId);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pagehide', handlePageHide);
+
     const start = async () => {
       if (disposed) {
         return;
@@ -586,6 +733,7 @@ export function RealtimeNotificationToasts({
           lastError: null,
         });
         stopFallbackPolling();
+        void replayMissedNotifications(initialMissedSinceMs, 'missed-replay');
       } catch (error) {
         if (!disposed) {
           if (isExpectedRealtimeStartupError(error)) {
@@ -623,6 +771,9 @@ export function RealtimeNotificationToasts({
       });
       stopFallbackPolling();
       emitUserNotificationsChanged({ source: 'realtime', reason: 'reconnected' });
+      const missedSinceMs = readLastSeenMs(userId);
+      writeLastSeenMs(userId);
+      void replayMissedNotifications(missedSinceMs, 'visibility-resume');
     });
 
     connection.onclose((error) => {
@@ -652,6 +803,14 @@ export function RealtimeNotificationToasts({
       if (retryTimer !== null) {
         window.clearTimeout(retryTimer);
       }
+      if (queuedToastTimerRef.current !== null) {
+        window.clearTimeout(queuedToastTimerRef.current);
+        queuedToastTimerRef.current = null;
+      }
+      queuedToastNotificationsRef.current = [];
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pagehide', handlePageHide);
+      writeLastSeenMs(userId);
       stopFallbackPolling();
       connection.off(REALTIME_USER_NOTIFICATION_CREATED_EVENT);
       if (connection.state !== HubConnectionState.Disconnected) {
