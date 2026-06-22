@@ -540,7 +540,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildCashBookReportAsync(start, end, cancellationToken),
+                        cancellationToken => BuildCashBookReportAsync(start, end, normalizedAccountName, cancellationToken),
                         _logger,
                         ct);
                     return (BuildCashBookExportDocument(reportDto), null);
@@ -7803,11 +7803,16 @@ public class ReportsController : ControllerBase
     private async Task<CashBookResponseDto> BuildCashBookReportAsync(
         DateTime from,
         DateTime to,
+        string? accountName,
         CancellationToken ct)
     {
         var postedOrders = _db.CashOrders
             .AsNoTracking()
             .Where(order => order.Status == CashOrderStatus.Posted);
+        if (!string.IsNullOrWhiteSpace(accountName))
+        {
+            postedOrders = postedOrders.Where(order => order.Account == accountName);
+        }
 
         var openingBalance = await postedOrders
             .Where(order => order.Date < from)
@@ -7857,6 +7862,7 @@ public class ReportsController : ControllerBase
         {
             From = from,
             To = to,
+            AccountName = accountName,
             OpeningBalance = openingBalance,
             Income = income,
             Expense = expense,

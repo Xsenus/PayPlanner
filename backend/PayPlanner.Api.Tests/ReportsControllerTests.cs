@@ -431,6 +431,53 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task ManagementCashExport_UsesSelectedCashAccountFilter()
+    {
+        await using var db = await CreateContextAsync();
+        var incomingA = CashOrder("PKO-CASH-A", CashOrderType.Incoming, CashOrderStatus.Posted, 5_000m, new DateTime(2026, 5, 1));
+        incomingA.Account = "Cashbox A";
+        var outgoingA = CashOrder("RKO-CASH-A", CashOrderType.Outgoing, CashOrderStatus.Posted, 2_000m, new DateTime(2026, 5, 2));
+        outgoingA.Account = "Cashbox A";
+        var incomingB = CashOrder("PKO-CASH-B", CashOrderType.Incoming, CashOrderStatus.Posted, 99_000m, new DateTime(2026, 5, 3));
+        incomingB.Account = "Cashbox B";
+        db.CashOrders.AddRange(incomingA, outgoingA, incomingB);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateAdminPrincipal());
+
+        var excelAction = await controller.ExportManagementReportExcel(
+            "cash",
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            null,
+            "Cashbox A",
+            null,
+            null,
+            null,
+            null,
+            null,
+            new DateTime(2026, 5, 31),
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            50,
+            CancellationToken.None);
+
+        var excel = Assert.IsType<FileContentResult>(excelAction);
+        var text = System.Text.Encoding.UTF8.GetString(excel.FileContents);
+        Assert.Contains("Касса: Cashbox A", text, StringComparison.Ordinal);
+        Assert.Contains("5000.00", text, StringComparison.Ordinal);
+        Assert.Contains("2000.00", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("99000.00", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ManagementReportExcel_UsesProfileTimeZoneForGeneratedAt()
     {
         await using var db = await CreateContextAsync();

@@ -7369,6 +7369,13 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     }),
     [cashFlowDates, selectedCaseId, selectedClientId, selectedContractId, selectedCounterpartyName, selectedIncomeTypeId, selectedMoneyAccountName],
   );
+  const cashBookReportFilters = useMemo(
+    () => ({
+      ...cashFlowDates,
+      ...(selectedMoneyAccountName ? { accountName: selectedMoneyAccountName } : {}),
+    }),
+    [cashFlowDates, selectedMoneyAccountName],
+  );
   const casePeriodReportFilters = useMemo(
     () => ({ ...cashFlowDates, limit: 100 }),
     [cashFlowDates],
@@ -7538,7 +7545,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     loading: cashReportLoading,
     error: cashReportError,
     reload: reloadCashReport,
-  } = useCashReport(cashFlowDates, { enabled: canViewPaymentReports });
+  } = useCashReport(cashBookReportFilters, { enabled: canViewPaymentReports });
   const bankReportFilters = useMemo(
     () => buildBankReportFilters(moneyOperationReportFilters),
     [moneyOperationReportFilters],
@@ -8218,7 +8225,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
                 loading={cashReportLoading}
                 error={cashReportError}
                 onReload={reloadCashReport}
-                filters={cashFlowDates}
+                filters={cashBookReportFilters}
                 profileTimeZoneId={profileTimeZoneId}
                 canExportPaymentReports={canExportPaymentReports}
               />
