@@ -70,6 +70,26 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task GetAssignees_WithTaskCreatePermission_ReturnsAllActiveUsersDespiteOwnVisibility()
+    {
+        await using var db = await CreateContextAsync();
+        var current = await CreateTaskUserAsync(db, "task-create-own@example.com", "Постановщик", canEdit: false, canCreate: true);
+        var visibleAssignee = await CreateTaskUserAsync(db, "visible-assignee@example.com", "Доступный исполнитель", canEdit: false);
+        var inactiveAssignee = await CreateTaskUserAsync(db, "inactive-assignee@example.com", "Неактивный исполнитель", canEdit: false);
+        inactiveAssignee.IsActive = false;
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), current);
+
+        var result = await controller.GetAssignees(ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var items = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalAssigneeDto>>(ok.Value);
+        Assert.Contains(items, item => item.Id == current.Id);
+        Assert.Contains(items, item => item.Id == visibleAssignee.Id);
+        Assert.DoesNotContain(items, item => item.Id == inactiveAssignee.Id);
+    }
+
+    [Fact]
     public async Task GetAssignees_UsesSpecificCalendarVisibilityForCalendarView()
     {
         await using var db = await CreateContextAsync();

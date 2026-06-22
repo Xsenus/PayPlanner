@@ -245,11 +245,15 @@ public class TasksController : ControllerBase
             return Forbid();
         }
 
+        var canManageTaskAssignments = !calendarView
+            && (access.IsAdmin
+                || access.Permission?.CanCreate == true
+                || access.Permission?.CanEdit == true);
         var visibleUserIds = access.Visibility.VisibleUserIds.ToArray();
         var users = await _db.Users
             .AsNoTracking()
             .Where(user => user.IsActive && user.IsApproved)
-            .Where(user => access.Visibility.SeesAll || visibleUserIds.Contains(user.Id))
+            .Where(user => canManageTaskAssignments || access.Visibility.SeesAll || visibleUserIds.Contains(user.Id))
             .OrderBy(user => user.FullName)
             .ThenBy(user => user.Email)
             .Select(user => new TaskJournalAssigneeDto
