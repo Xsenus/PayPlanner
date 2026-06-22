@@ -4896,6 +4896,11 @@ public class CasesV2Controller : ControllerBase
         [FromBody] MarkClientCaseActivityRequest? request,
         CancellationToken ct)
     {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var visibility = await ResolveCasesVisibilityAsync(ct);
         if (visibility is null)
         {
@@ -4957,6 +4962,11 @@ public class CasesV2Controller : ControllerBase
         [FromBody] AddClientCaseHistoryEntryRequest request,
         CancellationToken ct)
     {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var visibility = await ResolveCasesVisibilityAsync(ct);
         if (visibility is null)
         {

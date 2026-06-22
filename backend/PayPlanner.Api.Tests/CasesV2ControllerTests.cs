@@ -4615,6 +4615,52 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task CaseActivityAndHistory_RequireCaseViewAndEditPermissions()
+    {
+        await using var db = await CreateContextAsync();
+        var noViewUser = await CreateUserAsync(db, "case-activity-no-view@example.com", "Без просмотра");
+        noViewUser.Role!.Permissions.Single(permission => permission.Section == RolePermissionCatalog.Cases).CanView = false;
+        var noEditUser = await CreateUserAsync(db, "case-history-no-edit@example.com", "Без редактирования");
+        noEditUser.Role!.Permissions.Single(permission => permission.Section == RolePermissionCatalog.Cases).CanEdit = false;
+        var client = new Client
+        {
+            Name = "Клиент активности и истории",
+            IsActive = true,
+            ResponsibleUserId = noEditUser.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело активности и истории",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = noEditUser.Id,
+            EventHistory = "Дело создано",
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var activityController = CreateController(db, noViewUser);
+        var activityResult = await activityController.MarkActivity(
+            clientCase.Id,
+            new CasesV2Controller.MarkClientCaseActivityRequest { Confirmed = true },
+            CancellationToken.None);
+
+        var historyController = CreateController(db, noEditUser);
+        var historyResult = await historyController.AddHistoryEntry(
+            clientCase.Id,
+            new CasesV2Controller.AddClientCaseHistoryEntryRequest { Text = "Скрытый комментарий" },
+            CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(activityResult.Result);
+        Assert.IsType<ForbidResult>(historyResult.Result);
+
+        await db.Entry(clientCase).ReloadAsync();
+        Assert.Null(clientCase.ActivityConfirmedAt);
+        Assert.Equal("Дело создано", clientCase.EventHistory);
+    }
+
+    [Fact]
     public async Task Timeline_ReturnsParsedCaseHistoryEntries()
     {
         await using var db = await CreateContextAsync();
