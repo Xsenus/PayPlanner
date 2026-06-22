@@ -64,6 +64,7 @@ import { useSpreadsheetImportReport } from '../../hooks/useSpreadsheetImportRepo
 import { MonthRangePicker, type MonthRange } from '../MonthRange/MonthRangePicker';
 import { apiService } from '../../services/api';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { toManagementReportApiFilters } from '../../utils/managementReportExportFilters';
 import { buildReportMonthPresetRange, currentReportMonthInTimeZone, type ReportMonthPreset } from '../../utils/reportPeriod';
 import {
   buildTitleSuffix,
@@ -1472,13 +1473,13 @@ function CashFlowReportSection({
           <button
             type="button"
             onClick={() => report && exportCashFlowReport(report, profileTimeZoneId)}
-            disabled={!report || loading}
+            disabled={!report || loading || filters?.exportDisabled}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
-          <ManagementReportExportButtons reportKind="cash-flow" filters={filters} disabled={!report || loading} />
+          <ManagementReportExportButtons reportKind="cash-flow" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
             onClick={onReload}
@@ -1651,13 +1652,13 @@ function CashFlowForecastReportSection({
           <button
             type="button"
             onClick={() => report && exportCashFlowForecastReport(report, profileTimeZoneId)}
-            disabled={!report || loading}
+            disabled={!report || loading || filters?.exportDisabled}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
-          <ManagementReportExportButtons reportKind="cash-flow-forecast" filters={filters} disabled={!report || loading} />
+          <ManagementReportExportButtons reportKind="cash-flow-forecast" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
             onClick={onReload}
@@ -1945,13 +1946,13 @@ function BankReportSection({
           <button
             type="button"
             onClick={() => report && exportBankReport(report, profileTimeZoneId)}
-            disabled={!report || loading}
+            disabled={!report || loading || filters?.exportDisabled}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
-          <ManagementReportExportButtons reportKind="bank" filters={filters} disabled={!report || loading} />
+          <ManagementReportExportButtons reportKind="bank" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
             onClick={onReload}
@@ -2135,13 +2136,13 @@ function CategoryReportSection({
           <button
             type="button"
             onClick={() => report && exportCategoryReport(report, profileTimeZoneId)}
-            disabled={!report || loading}
+            disabled={!report || loading || filters?.exportDisabled}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
-          <ManagementReportExportButtons reportKind="categories" filters={filters} disabled={!report || loading} />
+          <ManagementReportExportButtons reportKind="categories" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
             onClick={onReload}
@@ -2238,13 +2239,13 @@ function CounterpartyReportSection({
           <button
             type="button"
             onClick={() => report && exportCounterpartyReport(report, profileTimeZoneId)}
-            disabled={!report || loading}
+            disabled={!report || loading || filters?.exportDisabled}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
-          <ManagementReportExportButtons reportKind="counterparties" filters={filters} disabled={!report || loading} />
+          <ManagementReportExportButtons reportKind="counterparties" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
             onClick={onReload}
@@ -2392,13 +2393,13 @@ function ProjectReportSection({
           <button
             type="button"
             onClick={() => report && exportProjectReport(report, profileTimeZoneId)}
-            disabled={!report || loading}
+            disabled={!report || loading || filters?.exportDisabled}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
-          <ManagementReportExportButtons reportKind="projects" filters={filters} disabled={!report || loading} />
+          <ManagementReportExportButtons reportKind="projects" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
             onClick={onReload}
@@ -2530,6 +2531,7 @@ type ManagementReportExportFilters = {
   inactiveDays?: number;
   escalationDays?: number;
   limit?: number;
+  exportDisabled?: boolean;
 };
 
 function ManagementReportExportButtons({
@@ -2543,6 +2545,9 @@ function ManagementReportExportButtons({
 }) {
   const [exporting, setExporting] = useState<ManagementReportExportFormat | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const exportDisabled = filters?.exportDisabled ?? false;
+  const apiFilters = toManagementReportApiFilters(filters);
+  const isDisabled = disabled || exportDisabled;
 
   async function handleExport(format: ManagementReportExportFormat) {
     setExporting(format);
@@ -2552,7 +2557,7 @@ function ManagementReportExportButtons({
       const result = await apiService.downloadManagementReport({
         report: reportKind,
         format,
-        ...(filters ?? {}),
+        ...apiFilters,
       });
       downloadBlob(result.fileName, result.blob);
     } catch (err) {
@@ -2567,7 +2572,7 @@ function ManagementReportExportButtons({
       <button
         type="button"
         onClick={() => void handleExport('excel')}
-        disabled={disabled || exporting !== null}
+        disabled={isDisabled || exporting !== null}
         className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
       >
         <FileSpreadsheet className="h-4 w-4" />
@@ -2576,7 +2581,7 @@ function ManagementReportExportButtons({
       <button
         type="button"
         onClick={() => void handleExport('pdf')}
-        disabled={disabled || exporting !== null}
+        disabled={isDisabled || exporting !== null}
         className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
       >
         <FileText className="h-4 w-4" />
@@ -4545,13 +4550,13 @@ function DirectionReportSection({
           <button
             type="button"
             onClick={() => report && exportDirectionReport(report, profileTimeZoneId)}
-            disabled={!report || loading}
+            disabled={!report || loading || filters?.exportDisabled}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
-          <ManagementReportExportButtons reportKind="directions" filters={filters} disabled={!report || loading} />
+          <ManagementReportExportButtons reportKind="directions" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
             onClick={onReload}
@@ -4691,13 +4696,13 @@ function SalesPointReportSection({
           <button
             type="button"
             onClick={() => report && exportSalesPointReport(report, profileTimeZoneId)}
-            disabled={!report || loading}
+            disabled={!report || loading || filters?.exportDisabled}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
-          <ManagementReportExportButtons reportKind="sales-points" filters={filters} disabled={!report || loading} />
+          <ManagementReportExportButtons reportKind="sales-points" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
             onClick={onReload}
@@ -4834,13 +4839,13 @@ function VatReportSection({
           <button
             type="button"
             onClick={() => report && exportVatReport(report, profileTimeZoneId)}
-            disabled={!report || loading}
+            disabled={!report || loading || filters?.exportDisabled}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
-          <ManagementReportExportButtons reportKind="vat" filters={filters} disabled={!report || loading} />
+          <ManagementReportExportButtons reportKind="vat" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
             onClick={onReload}
@@ -4997,13 +5002,13 @@ function PlanFactReportSection({
           <button
             type="button"
             onClick={() => report && exportPlanFactReport(report, profileTimeZoneId)}
-            disabled={!report || loading}
+            disabled={!report || loading || filters?.exportDisabled}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
-          <ManagementReportExportButtons reportKind="plan-fact" filters={filters} disabled={!report || loading} />
+          <ManagementReportExportButtons reportKind="plan-fact" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
             onClick={onReload}
@@ -5146,13 +5151,13 @@ function AdvanceReportSection({
           <button
             type="button"
             onClick={() => report && exportAdvanceReport(report, profileTimeZoneId)}
-            disabled={!report || loading}
+            disabled={!report || loading || filters?.exportDisabled}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
-          <ManagementReportExportButtons reportKind="advances" filters={filters} disabled={!report || loading} />
+          <ManagementReportExportButtons reportKind="advances" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
             onClick={onReload}
@@ -5308,13 +5313,13 @@ function PaymentPriorityReportSection({
           <button
             type="button"
             onClick={() => report && exportPaymentPriorityReport(report, profileTimeZoneId)}
-            disabled={!report || loading}
+            disabled={!report || loading || filters?.exportDisabled}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
-          <ManagementReportExportButtons reportKind="payment-priorities" filters={filters} disabled={!report || loading} />
+          <ManagementReportExportButtons reportKind="payment-priorities" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
             onClick={onReload}
@@ -5452,13 +5457,13 @@ function PaidAccountReportSection({
           <button
             type="button"
             onClick={() => report && exportPaidAccountReport(report, profileTimeZoneId)}
-            disabled={!report || loading}
+            disabled={!report || loading || filters?.exportDisabled}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
-          <ManagementReportExportButtons reportKind="paid-accounts" filters={filters} disabled={!report || loading} />
+          <ManagementReportExportButtons reportKind="paid-accounts" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
             onClick={onReload}
@@ -5592,13 +5597,13 @@ function PaidInvoiceReportSection({
           <button
             type="button"
             onClick={() => report && exportPaidInvoiceReport(report, profileTimeZoneId)}
-            disabled={!report || loading}
+            disabled={!report || loading || filters?.exportDisabled}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
-          <ManagementReportExportButtons reportKind="paid-invoices" filters={filters} disabled={!report || loading} />
+          <ManagementReportExportButtons reportKind="paid-invoices" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
             onClick={onReload}
@@ -5729,13 +5734,13 @@ function InvoiceStatusReportSection({
           <button
             type="button"
             onClick={() => report && exportInvoiceStatusReport(report, profileTimeZoneId)}
-            disabled={!report || loading}
+            disabled={!report || loading || filters?.exportDisabled}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
-          <ManagementReportExportButtons reportKind="invoice-statuses" filters={filters} disabled={!report || loading} />
+          <ManagementReportExportButtons reportKind="invoice-statuses" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
             onClick={onReload}
@@ -5876,13 +5881,13 @@ function ActStatusReportSection({
           <button
             type="button"
             onClick={() => report && exportActStatusReport(report, profileTimeZoneId)}
-            disabled={!report || loading}
+            disabled={!report || loading || filters?.exportDisabled}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
-          <ManagementReportExportButtons reportKind="act-statuses" filters={filters} disabled={!report || loading} />
+          <ManagementReportExportButtons reportKind="act-statuses" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
             onClick={onReload}
@@ -6023,13 +6028,13 @@ function ContractStatusReportSection({
           <button
             type="button"
             onClick={() => report && exportContractStatusReport(report, profileTimeZoneId)}
-            disabled={!report || loading}
+            disabled={!report || loading || filters?.exportDisabled}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
-          <ManagementReportExportButtons reportKind="contract-statuses" filters={filters} disabled={!report || loading} />
+          <ManagementReportExportButtons reportKind="contract-statuses" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
             onClick={onReload}
@@ -6164,13 +6169,13 @@ function PaymentOrderReportSection({
           <button
             type="button"
             onClick={() => report && exportPaymentOrderReport(report, profileTimeZoneId)}
-            disabled={!report || loading}
+            disabled={!report || loading || filters?.exportDisabled}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
-          <ManagementReportExportButtons reportKind="payment-orders" filters={filters} disabled={!report || loading} />
+          <ManagementReportExportButtons reportKind="payment-orders" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
             onClick={onReload}
@@ -6301,13 +6306,13 @@ function PaymentPurposeReportSection({
           <button
             type="button"
             onClick={() => report && exportPaymentPurposeReport(report, profileTimeZoneId)}
-            disabled={!report || loading}
+            disabled={!report || loading || filters?.exportDisabled}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
-          <ManagementReportExportButtons reportKind="payment-purposes" filters={filters} disabled={!report || loading} />
+          <ManagementReportExportButtons reportKind="payment-purposes" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
             onClick={onReload}
@@ -6439,13 +6444,13 @@ function MatchStatusReportSection({
           <button
             type="button"
             onClick={() => report && exportMatchStatusReport(report, profileTimeZoneId)}
-            disabled={!report || loading}
+            disabled={!report || loading || filters?.exportDisabled}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
-          <ManagementReportExportButtons reportKind="match-statuses" filters={filters} disabled={!report || loading} />
+          <ManagementReportExportButtons reportKind="match-statuses" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
             onClick={onReload}
@@ -6576,13 +6581,13 @@ function JournalStatusReportSection({
           <button
             type="button"
             onClick={() => report && exportJournalStatusReport(report, profileTimeZoneId)}
-            disabled={!report || loading}
+            disabled={!report || loading || filters?.exportDisabled}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
-          <ManagementReportExportButtons reportKind="journal-statuses" filters={filters} disabled={!report || loading} />
+          <ManagementReportExportButtons reportKind="journal-statuses" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
             onClick={onReload}
@@ -6708,13 +6713,13 @@ function CurrencyReportSection({
           <button
             type="button"
             onClick={() => report && exportCurrencyReport(report, profileTimeZoneId)}
-            disabled={!report || loading}
+            disabled={!report || loading || filters?.exportDisabled}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
-          <ManagementReportExportButtons reportKind="currencies" filters={filters} disabled={!report || loading} />
+          <ManagementReportExportButtons reportKind="currencies" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
             onClick={onReload}
@@ -7127,13 +7132,13 @@ function SpreadsheetImportReportSection({
           <button
             type="button"
             onClick={() => report && exportSpreadsheetImportReport(report, profileTimeZoneId)}
-            disabled={!report || loading}
+            disabled={!report || loading || filters?.exportDisabled}
             className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <FileSpreadsheet className="h-4 w-4" />
             CSV
           </button>
-          <ManagementReportExportButtons reportKind="spreadsheet-imports" filters={filters} disabled={!report || loading} />
+          <ManagementReportExportButtons reportKind="spreadsheet-imports" filters={filters} disabled={!report || loading || filters?.exportDisabled} />
           <button
             type="button"
             onClick={onReload}
@@ -7360,6 +7365,13 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     }),
     [cashFlowDates, selectedCaseId, selectedClientId, selectedContractId, selectedCounterpartyName, selectedIncomeTypeId, selectedMoneyAccountName, selectedMoneySource],
   );
+  const paymentOperationReportFilters = useMemo(
+    () => ({
+      ...moneyOperationReportFilters,
+      exportDisabled: !canExportPaymentReports,
+    }),
+    [canExportPaymentReports, moneyOperationReportFilters],
+  );
   const moneyAccountReportFilters = useMemo(
     () => ({
       ...cashFlowDates,
@@ -7371,6 +7383,13 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
       ...(selectedIncomeTypeId ? { incomeTypeId: selectedIncomeTypeId } : {}),
     }),
     [cashFlowDates, selectedCaseId, selectedClientId, selectedContractId, selectedCounterpartyName, selectedIncomeTypeId, selectedMoneyAccountName],
+  );
+  const paymentAccountReportFilters = useMemo(
+    () => ({
+      ...moneyAccountReportFilters,
+      exportDisabled: !canExportPaymentReports,
+    }),
+    [canExportPaymentReports, moneyAccountReportFilters],
   );
   const cashBookReportFilters = useMemo(
     () => ({
@@ -7552,6 +7571,13 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
   const bankReportFilters = useMemo(
     () => buildBankReportFilters(moneyOperationReportFilters),
     [moneyOperationReportFilters],
+  );
+  const bankManagementReportFilters = useMemo(
+    () => ({
+      ...bankReportFilters,
+      exportDisabled: !canExportPaymentReports,
+    }),
+    [bankReportFilters, canExportPaymentReports],
   );
   const {
     report: bankReport,
@@ -8209,7 +8235,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={cashFlowLoading}
               error={cashFlowError}
               onReload={reloadCashFlow}
-              filters={moneyOperationReportFilters}
+              filters={paymentOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -8218,7 +8244,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={cashFlowForecastLoading}
               error={cashFlowForecastError}
               onReload={reloadCashFlowForecast}
-              filters={moneyAccountReportFilters}
+              filters={paymentAccountReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -8239,7 +8265,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={bankReportLoading}
               error={bankReportError}
               onReload={reloadBankReport}
-              filters={bankReportFilters}
+              filters={bankManagementReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -8248,7 +8274,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={categoryReportLoading}
               error={categoryReportError}
               onReload={reloadCategoryReport}
-              filters={moneyOperationReportFilters}
+              filters={paymentOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -8257,7 +8283,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={counterpartyReportLoading}
               error={counterpartyReportError}
               onReload={reloadCounterpartyReport}
-              filters={moneyOperationReportFilters}
+              filters={paymentOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -8266,7 +8292,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={projectReportLoading}
               error={projectReportError}
               onReload={reloadProjectReport}
-              filters={moneyOperationReportFilters}
+              filters={paymentOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
               </>
@@ -8372,7 +8398,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={directionReportLoading}
               error={directionReportError}
               onReload={reloadDirectionReport}
-              filters={moneyOperationReportFilters}
+              filters={paymentOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -8381,7 +8407,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={salesPointReportLoading}
               error={salesPointReportError}
               onReload={reloadSalesPointReport}
-              filters={moneyOperationReportFilters}
+              filters={paymentOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -8390,7 +8416,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={vatReportLoading}
               error={vatReportError}
               onReload={reloadVatReport}
-              filters={moneyOperationReportFilters}
+              filters={paymentOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -8399,7 +8425,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={planFactReportLoading}
               error={planFactReportError}
               onReload={reloadPlanFactReport}
-              filters={moneyOperationReportFilters}
+              filters={paymentOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -8408,7 +8434,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={advanceReportLoading}
               error={advanceReportError}
               onReload={reloadAdvanceReport}
-              filters={moneyOperationReportFilters}
+              filters={paymentOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -8417,7 +8443,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={paymentPriorityReportLoading}
               error={paymentPriorityReportError}
               onReload={reloadPaymentPriorityReport}
-              filters={moneyOperationReportFilters}
+              filters={paymentOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -8426,7 +8452,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={paidAccountReportLoading}
               error={paidAccountReportError}
               onReload={reloadPaidAccountReport}
-              filters={moneyOperationReportFilters}
+              filters={paymentOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -8435,7 +8461,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={paidInvoiceReportLoading}
               error={paidInvoiceReportError}
               onReload={reloadPaidInvoiceReport}
-              filters={moneyOperationReportFilters}
+              filters={paymentOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -8471,7 +8497,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={paymentOrderReportLoading}
               error={paymentOrderReportError}
               onReload={reloadPaymentOrderReport}
-              filters={moneyOperationReportFilters}
+              filters={paymentOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -8480,7 +8506,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={paymentPurposeReportLoading}
               error={paymentPurposeReportError}
               onReload={reloadPaymentPurposeReport}
-              filters={moneyOperationReportFilters}
+              filters={paymentOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -8489,7 +8515,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={matchStatusReportLoading}
               error={matchStatusReportError}
               onReload={reloadMatchStatusReport}
-              filters={moneyOperationReportFilters}
+              filters={paymentOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -8498,7 +8524,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={journalStatusReportLoading}
               error={journalStatusReportError}
               onReload={reloadJournalStatusReport}
-              filters={moneyOperationReportFilters}
+              filters={paymentOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -8507,7 +8533,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={currencyReportLoading}
               error={currencyReportError}
               onReload={reloadCurrencyReport}
-              filters={moneyOperationReportFilters}
+              filters={paymentOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 

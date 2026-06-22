@@ -107,6 +107,31 @@ public class ReportsController : ControllerBase
         CancellationToken ct)
         => _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Payments, isAllowed, ct);
 
+    private static bool IsPaymentBackedManagementReport(string normalizedReport)
+        => normalizedReport is
+            "cash-flow" or
+            "cash-flow-forecast" or
+            "cash" or
+            "bank" or
+            "plan-fact" or
+            "advances" or
+            "payment-priorities" or
+            "paid-accounts" or
+            "paid-invoices" or
+            "categories" or
+            "counterparties" or
+            "projects" or
+            "directions" or
+            "sales-points" or
+            "vat" or
+            "payment-orders" or
+            "payment-purposes" or
+            "match-statuses" or
+            "journal-statuses" or
+            "currencies" or
+            "cash-orders" or
+            "bank-statement-imports";
+
     private async Task<bool> CanAccessAdminReportsAsync(CancellationToken ct)
     {
         if (User.IsInRole("admin"))
@@ -495,6 +520,12 @@ public class ReportsController : ControllerBase
         }
 
         var normalizedReport = (NormalizeOptional(report) ?? string.Empty).ToLowerInvariant();
+        if (IsPaymentBackedManagementReport(normalizedReport)
+            && !await HasPaymentsPermissionAsync(static permission => permission.CanExport, ct))
+        {
+            return (null, Forbid());
+        }
+
         var normalizedAccountName = NormalizeOptional(accountName);
         var normalizedCounterpartyName = NormalizeOptional(counterpartyName);
         var effectiveClientId = clientId.HasValue && clientId.Value > 0 ? clientId.Value : (int?)null;

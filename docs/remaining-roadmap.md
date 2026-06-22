@@ -198,6 +198,7 @@
 - `[x]` Фильтр по статье дохода/расхода добавлен и проверен для финансовых отчетов по денежным операциям и их Excel/PDF-выгрузок: UI передает `incomeTypeId`, backend применяет его к фактическим операциям, план-факт отчету и прогнозу платежей, добавлены регрессионные тесты `CashFlow_FiltersByIncomeTypeId` и `CashFlowForecast_FiltersByIncomeTypeId`.
 - `[x]` Фильтр по договору добавлен и проверен для финансовых отчетов по денежным операциям и их Excel/PDF-выгрузок: UI передает `contractId`, backend применяет его к фактическим операциям через связанные счета/платежи и к прогнозу платежей через прямые и табличные связи договора, добавлены регрессионные тесты `CashFlow_FiltersByContractIdUsingLinkedInvoicePayments` и `CashFlowForecast_FiltersByContractId`.
 - `[x]` Проверить права доступа к отчетам и экспортам на backend, а не только скрытием кнопок в UI: просмотр отчетов закрывается серверным `Reports.CanView`, экспорт закрывается серверным `Reports.CanExport`, добавлен регрессионный тест `ReportViewEndpoints_ReturnForbidWhenReportsAreHiddenForRole`, существующий тест `LegalWorkExports_RequireExportPermission` подтверждает запрет выгрузок без права экспорта.
+- `[x]` 2026-06-22: платежные отчеты и их CSV/Excel/PDF-выгрузки учитывают `Payments.CanExport`: пользователь с правом просмотра, но без права выгрузки видит отчет, но не может скачать финансовые данные через кнопки или прямой management export API. Проверено backend-тестом `ReportsControllerTests.PaymentBackedManagementExports_RequirePaymentsExportPermission`.
 
 ## 8. Юридический CRM-модуль
 

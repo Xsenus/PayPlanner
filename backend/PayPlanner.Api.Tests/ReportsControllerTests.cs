@@ -872,6 +872,49 @@ public class ReportsControllerTests
             CancellationToken.None));
     }
 
+    [Theory]
+    [InlineData("cash-flow")]
+    [InlineData("cash-flow-forecast")]
+    [InlineData("categories")]
+    [InlineData("paid-invoices")]
+    public async Task PaymentBackedManagementExports_RequirePaymentsExportPermission(string reportKind)
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateReportsUserWithPaymentsPermissionAsync(
+            db,
+            reportsCanView: true,
+            reportsCanExport: true,
+            paymentsCanView: true,
+            paymentsCanExport: false);
+        var controller = CreateController(db, CreateUserPrincipal(user.Id));
+
+        var action = await controller.ExportManagementReportExcel(
+            reportKind,
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(action);
+    }
+
     [Fact]
     public async Task CaseActivity_BuildsInactivityDiagnostics()
     {
