@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../services/api';
-import type { InvoiceStatusReport } from '../types';
+import type { InvoiceStatusReport, MoneyOperationSource } from '../types';
 
 export interface InvoiceStatusReportFilters {
   from?: string;
   to?: string;
+  source?: MoneyOperationSource;
+  accountName?: string;
+  counterpartyName?: string;
   clientId?: number;
   caseId?: number;
   contractId?: number;
@@ -21,12 +24,15 @@ export function useInvoiceStatusReport(filters: InvoiceStatusReportFilters) {
     () => ({
       from: filters.from,
       to: filters.to,
+      source: filters.source,
+      accountName: filters.accountName,
+      counterpartyName: filters.counterpartyName,
       clientId: filters.clientId,
       caseId: filters.caseId,
       contractId: filters.contractId,
       incomeTypeId: filters.incomeTypeId,
     }),
-    [filters.caseId, filters.clientId, filters.contractId, filters.from, filters.incomeTypeId, filters.to],
+    [filters.accountName, filters.caseId, filters.clientId, filters.contractId, filters.counterpartyName, filters.from, filters.incomeTypeId, filters.source, filters.to],
   );
 
   const load = useCallback(async () => {

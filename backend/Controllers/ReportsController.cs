@@ -700,7 +700,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildInvoiceStatusReportAsync(start, end, effectiveClientId, effectiveCaseId, effectiveContractId, effectiveIncomeTypeId, accountsVisibility, cancellationToken),
+                        cancellationToken => BuildInvoiceStatusReportAsync(start, end, source, normalizedAccountName, normalizedCounterpartyName, effectiveClientId, effectiveCaseId, effectiveContractId, effectiveIncomeTypeId, accountsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildInvoiceStatusExportDocument(reportDto), null);
@@ -716,7 +716,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildActStatusReportAsync(start, end, effectiveClientId, effectiveCaseId, effectiveContractId, actsVisibility, cancellationToken),
+                        cancellationToken => BuildActStatusReportAsync(start, end, source, normalizedAccountName, normalizedCounterpartyName, effectiveClientId, effectiveCaseId, effectiveContractId, actsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildActStatusExportDocument(reportDto), null);
@@ -732,7 +732,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildContractStatusReportAsync(start, end, effectiveClientId, effectiveCaseId, effectiveContractId, contractsVisibility, cancellationToken),
+                        cancellationToken => BuildContractStatusReportAsync(start, end, source, normalizedAccountName, normalizedCounterpartyName, effectiveClientId, effectiveCaseId, effectiveContractId, contractsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildContractStatusExportDocument(reportDto), null);
@@ -1584,6 +1584,9 @@ public class ReportsController : ControllerBase
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         CancellationToken ct,
+        [FromQuery] MoneyOperationSource? source = null,
+        [FromQuery] string? accountName = null,
+        [FromQuery] string? counterpartyName = null,
         [FromQuery] int? clientId = null,
         [FromQuery] int? caseId = null,
         [FromQuery] int? contractId = null,
@@ -1593,7 +1596,7 @@ public class ReportsController : ControllerBase
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Accounts,
-            (visibility, cancellationToken) => BuildInvoiceStatusReportAsync(start, end, clientId, caseId, contractId, incomeTypeId, visibility, cancellationToken),
+            (visibility, cancellationToken) => BuildInvoiceStatusReportAsync(start, end, source, NormalizeOptional(accountName), NormalizeOptional(counterpartyName), clientId, caseId, contractId, incomeTypeId, visibility, cancellationToken),
             ct);
     }
 
@@ -1602,6 +1605,9 @@ public class ReportsController : ControllerBase
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         CancellationToken ct,
+        [FromQuery] MoneyOperationSource? source = null,
+        [FromQuery] string? accountName = null,
+        [FromQuery] string? counterpartyName = null,
         [FromQuery] int? clientId = null,
         [FromQuery] int? caseId = null,
         [FromQuery] int? contractId = null)
@@ -1610,7 +1616,7 @@ public class ReportsController : ControllerBase
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Acts,
-            (visibility, cancellationToken) => BuildActStatusReportAsync(start, end, clientId, caseId, contractId, visibility, cancellationToken),
+            (visibility, cancellationToken) => BuildActStatusReportAsync(start, end, source, NormalizeOptional(accountName), NormalizeOptional(counterpartyName), clientId, caseId, contractId, visibility, cancellationToken),
             ct);
     }
 
@@ -1619,6 +1625,9 @@ public class ReportsController : ControllerBase
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         CancellationToken ct,
+        [FromQuery] MoneyOperationSource? source = null,
+        [FromQuery] string? accountName = null,
+        [FromQuery] string? counterpartyName = null,
         [FromQuery] int? clientId = null,
         [FromQuery] int? caseId = null,
         [FromQuery] int? contractId = null)
@@ -1627,7 +1636,7 @@ public class ReportsController : ControllerBase
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Contracts,
-            (visibility, cancellationToken) => BuildContractStatusReportAsync(start, end, clientId, caseId, contractId, visibility, cancellationToken),
+            (visibility, cancellationToken) => BuildContractStatusReportAsync(start, end, source, NormalizeOptional(accountName), NormalizeOptional(counterpartyName), clientId, caseId, contractId, visibility, cancellationToken),
             ct);
     }
 
@@ -6929,6 +6938,9 @@ public class ReportsController : ControllerBase
     private async Task<InvoiceStatusReportDto> BuildInvoiceStatusReportAsync(
         DateTime from,
         DateTime to,
+        MoneyOperationSource? source,
+        string? accountName,
+        string? counterpartyName,
         int? clientId,
         int? caseId,
         int? contractId,
@@ -6940,6 +6952,22 @@ public class ReportsController : ControllerBase
             .AsNoTracking()
             .ApplyPaymentVisibility(accountsVisibility)
             .Where(item => item.DocumentKind == DocumentKind.Invoice && item.Date >= from && item.Date <= to);
+
+        if (source.HasValue || !string.IsNullOrWhiteSpace(accountName) || !string.IsNullOrWhiteSpace(counterpartyName))
+        {
+            var targetAccountName = NormalizeOptional(accountName);
+            var targetCounterpartyName = NormalizeOptional(counterpartyName);
+            query = query.Where(item =>
+                item.InvoiceId.HasValue &&
+                _db.MoneyOperations.Any(operation =>
+                    operation.LinkedInvoiceId == item.InvoiceId.Value &&
+                    operation.AccountingType == MoneyOperationAccountingType.Fact &&
+                    (operation.Direction == MoneyOperationDirection.Income || operation.Direction == MoneyOperationDirection.Expense) &&
+                    (!source.HasValue || operation.Source == source.Value) &&
+                    (targetAccountName == null || operation.AccountName == targetAccountName) &&
+                    (targetCounterpartyName == null ||
+                        (operation.CounterpartyName != null && operation.CounterpartyName.Contains(targetCounterpartyName)))));
+        }
 
         if (clientId.HasValue && clientId.Value > 0)
         {
@@ -7089,6 +7117,9 @@ public class ReportsController : ControllerBase
     private async Task<ActStatusReportDto> BuildActStatusReportAsync(
         DateTime from,
         DateTime to,
+        MoneyOperationSource? source,
+        string? accountName,
+        string? counterpartyName,
         int? clientId,
         int? caseId,
         int? contractId,
@@ -7103,6 +7134,25 @@ public class ReportsController : ControllerBase
             .AsNoTracking()
             .ApplyActVisibility(actsVisibility)
             .Where(item => item.Date >= periodStart && item.Date < periodEndExclusive);
+
+        if (source.HasValue || !string.IsNullOrWhiteSpace(accountName) || !string.IsNullOrWhiteSpace(counterpartyName))
+        {
+            var targetAccountName = NormalizeOptional(accountName);
+            var targetCounterpartyName = NormalizeOptional(counterpartyName);
+            query = query.Where(item =>
+                item.InvoiceId.HasValue &&
+                _db.Payments.Any(payment =>
+                    payment.Id == item.InvoiceId.Value &&
+                    payment.InvoiceId.HasValue &&
+                    _db.MoneyOperations.Any(operation =>
+                        operation.LinkedInvoiceId == payment.InvoiceId.Value &&
+                        operation.AccountingType == MoneyOperationAccountingType.Fact &&
+                        (operation.Direction == MoneyOperationDirection.Income || operation.Direction == MoneyOperationDirection.Expense) &&
+                        (!source.HasValue || operation.Source == source.Value) &&
+                        (targetAccountName == null || operation.AccountName == targetAccountName) &&
+                        (targetCounterpartyName == null ||
+                            (operation.CounterpartyName != null && operation.CounterpartyName.Contains(targetCounterpartyName))))));
+        }
 
         if (clientId.HasValue && clientId.Value > 0)
         {
@@ -7243,6 +7293,9 @@ public class ReportsController : ControllerBase
     private async Task<ContractStatusReportDto> BuildContractStatusReportAsync(
         DateTime from,
         DateTime to,
+        MoneyOperationSource? source,
+        string? accountName,
+        string? counterpartyName,
         int? clientId,
         int? caseId,
         int? contractId,
@@ -7257,6 +7310,35 @@ public class ReportsController : ControllerBase
             .AsNoTracking()
             .ApplyContractVisibility(contractsVisibility)
             .Where(item => item.Date >= periodStart && item.Date < periodEndExclusive);
+
+        if (source.HasValue || !string.IsNullOrWhiteSpace(accountName) || !string.IsNullOrWhiteSpace(counterpartyName))
+        {
+            var targetAccountName = NormalizeOptional(accountName);
+            var targetCounterpartyName = NormalizeOptional(counterpartyName);
+            query = query.Where(item =>
+                _db.ContractInvoices.Any(link =>
+                    link.ContractId == item.Id &&
+                    link.Invoice.InvoiceId.HasValue &&
+                    _db.MoneyOperations.Any(operation =>
+                        operation.LinkedInvoiceId == link.Invoice.InvoiceId.Value &&
+                        operation.AccountingType == MoneyOperationAccountingType.Fact &&
+                        (operation.Direction == MoneyOperationDirection.Income || operation.Direction == MoneyOperationDirection.Expense) &&
+                        (!source.HasValue || operation.Source == source.Value) &&
+                        (targetAccountName == null || operation.AccountName == targetAccountName) &&
+                        (targetCounterpartyName == null ||
+                            (operation.CounterpartyName != null && operation.CounterpartyName.Contains(targetCounterpartyName))))) ||
+                _db.ContractPayments.Any(link =>
+                    link.ContractId == item.Id &&
+                    link.Payment.InvoiceId.HasValue &&
+                    _db.MoneyOperations.Any(operation =>
+                        operation.LinkedInvoiceId == link.Payment.InvoiceId.Value &&
+                        operation.AccountingType == MoneyOperationAccountingType.Fact &&
+                        (operation.Direction == MoneyOperationDirection.Income || operation.Direction == MoneyOperationDirection.Expense) &&
+                        (!source.HasValue || operation.Source == source.Value) &&
+                        (targetAccountName == null || operation.AccountName == targetAccountName) &&
+                        (targetCounterpartyName == null ||
+                            (operation.CounterpartyName != null && operation.CounterpartyName.Contains(targetCounterpartyName))))));
+        }
 
         if (clientId.HasValue && clientId.Value > 0)
         {

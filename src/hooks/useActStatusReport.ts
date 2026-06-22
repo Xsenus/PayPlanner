@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../services/api';
-import type { ActStatusReport } from '../types';
+import type { ActStatusReport, MoneyOperationSource } from '../types';
 
 export interface ActStatusReportFilters {
   from?: string;
   to?: string;
+  source?: MoneyOperationSource;
+  accountName?: string;
+  counterpartyName?: string;
   clientId?: number;
   caseId?: number;
   contractId?: number;
@@ -20,11 +23,14 @@ export function useActStatusReport(filters: ActStatusReportFilters) {
     () => ({
       from: filters.from,
       to: filters.to,
+      source: filters.source,
+      accountName: filters.accountName,
+      counterpartyName: filters.counterpartyName,
       clientId: filters.clientId,
       caseId: filters.caseId,
       contractId: filters.contractId,
     }),
-    [filters.caseId, filters.clientId, filters.contractId, filters.from, filters.to],
+    [filters.accountName, filters.caseId, filters.clientId, filters.contractId, filters.counterpartyName, filters.from, filters.source, filters.to],
   );
 
   const load = useCallback(async () => {

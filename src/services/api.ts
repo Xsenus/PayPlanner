@@ -6111,6 +6111,9 @@ export class ApiService {
   async getInvoiceStatusReport(params?: {
     from?: string;
     to?: string;
+    source?: MoneyOperationSource;
+    accountName?: string;
+    counterpartyName?: string;
     clientId?: number;
     caseId?: number;
     contractId?: number;
@@ -6123,6 +6126,9 @@ export class ApiService {
   async getActStatusReport(params?: {
     from?: string;
     to?: string;
+    source?: MoneyOperationSource;
+    accountName?: string;
+    counterpartyName?: string;
     clientId?: number;
     caseId?: number;
     contractId?: number;
@@ -6134,6 +6140,9 @@ export class ApiService {
   async getContractStatusReport(params?: {
     from?: string;
     to?: string;
+    source?: MoneyOperationSource;
+    accountName?: string;
+    counterpartyName?: string;
     clientId?: number;
     caseId?: number;
     contractId?: number;
