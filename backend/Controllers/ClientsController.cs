@@ -43,6 +43,13 @@ public class ClientsController : ControllerBase
     private Task<DataVisibilityAccess?> GetCurrentAccessAsync(CancellationToken ct)
         => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Clients, ct);
 
+    private async Task<IActionResult?> RequireClientsPermissionAsync(
+        Func<RolePermissionValues, bool> isAllowed,
+        CancellationToken ct)
+        => await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Clients, isAllowed, ct)
+            ? null
+            : Forbid();
+
     private async Task<DateTime> ResolveClientStatsTodayAsync(CancellationToken ct)
     {
         var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
@@ -778,6 +785,11 @@ public class ClientsController : ControllerBase
             return Unauthorized();
         }
 
+        if (await RequireClientsPermissionAsync(permission => permission.CanCreate, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         if (model.LegalEntityId.HasValue)
         {
             var exists = await _db.LegalEntities.AsNoTracking().AnyAsync(le => le.Id == model.LegalEntityId.Value);
@@ -843,6 +855,11 @@ public class ClientsController : ControllerBase
         if (access is null)
         {
             return Unauthorized();
+        }
+
+        if (await RequireClientsPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
         }
 
         var e = await BuildVisibleClientsQuery(access)
@@ -1142,6 +1159,11 @@ public class ClientsController : ControllerBase
             return Unauthorized();
         }
 
+        if (await RequireClientsPermissionAsync(permission => permission.CanDelete, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var e = await BuildVisibleClientsQuery(access)
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (e is null) return NotFound();
@@ -1169,6 +1191,11 @@ public class ClientsController : ControllerBase
         if (access is null)
         {
             return Unauthorized();
+        }
+
+        if (await RequireClientsPermissionAsync(permission => permission.CanDelete, ct) is { } forbidden)
+        {
+            return forbidden;
         }
 
         var ids = NormalizeIds(request.Ids);
@@ -1230,6 +1257,11 @@ public class ClientsController : ControllerBase
         if (access is null)
         {
             return Unauthorized();
+        }
+
+        if (await RequireClientsPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
         }
 
         var ids = NormalizeIds(request.Ids);

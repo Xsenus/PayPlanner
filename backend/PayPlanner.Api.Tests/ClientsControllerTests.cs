@@ -8,10 +8,12 @@ using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Controllers.V2;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.LegalEntities;
 using Xunit;
+using ClientsV1Controller = PayPlanner.Api.Controllers.V1.ClientsV1Controller;
 
 namespace PayPlanner.Api.Tests;
 
@@ -308,6 +310,132 @@ public class ClientsControllerTests
 
         await db.Entry(editClient).ReloadAsync();
         Assert.Equal("Клиент без редактирования", editClient.Name);
+        Assert.True(editClient.IsActive);
+        Assert.True(await db.Clients.AnyAsync(item => item.Id == deleteClient.Id));
+    }
+
+    [Fact]
+    public async Task LegacyWriteEndpoints_RequireClientActionPermissions()
+    {
+        await using var db = await CreateContextAsync();
+        var noCreateUserId = await CreateUserAsync(db, "legacy-client-no-create");
+        var noEditUserId = await CreateUserAsync(db, "legacy-client-no-edit");
+        var noDeleteUserId = await CreateUserAsync(db, "legacy-client-no-delete");
+        await SetClientPermissionAsync(db, noCreateUserId, canCreate: false, canEdit: true, canDelete: true);
+        await SetClientPermissionAsync(db, noEditUserId, canCreate: true, canEdit: false, canDelete: true);
+        await SetClientPermissionAsync(db, noDeleteUserId, canCreate: true, canEdit: true, canDelete: false);
+        var editClient = new Client
+        {
+            Name = "Legacy клиент без редактирования",
+            IsActive = true,
+            ResponsibleUserId = noEditUserId,
+        };
+        var deleteClient = new Client
+        {
+            Name = "Legacy клиент без удаления",
+            IsActive = true,
+            ResponsibleUserId = noDeleteUserId,
+        };
+        db.Clients.AddRange(editClient, deleteClient);
+        await db.SaveChangesAsync();
+
+        var createResult = await CreateController(db, noCreateUserId).Create(new Client
+        {
+            Name = "Запрещенное legacy создание клиента",
+            IsActive = true,
+        }, CancellationToken.None);
+        var updateResult = await CreateController(db, noEditUserId).Update(editClient.Id, new Client
+        {
+            Name = "Запрещенное legacy изменение клиента",
+            IsActive = false,
+        }, CancellationToken.None);
+        var changeResponsibleResult = await CreateController(db, noEditUserId).ChangeResponsible(new BulkAssignResponsibleRequest
+        {
+            Ids = [editClient.Id],
+            ResponsibleUserId = noCreateUserId,
+        }, CancellationToken.None);
+        var deleteResult = await CreateController(db, noDeleteUserId).Delete(deleteClient.Id, CancellationToken.None);
+        var bulkDeleteResult = await CreateController(db, noDeleteUserId).BulkDelete(new BulkIdsRequest
+        {
+            Ids = [deleteClient.Id],
+        }, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(createResult);
+        Assert.IsType<ForbidResult>(updateResult);
+        Assert.IsType<ForbidResult>(changeResponsibleResult);
+        Assert.IsType<ForbidResult>(deleteResult);
+        Assert.IsType<ForbidResult>(bulkDeleteResult);
+        Assert.False(await db.Clients.AnyAsync(item => item.Name == "Запрещенное legacy создание клиента"));
+
+        await db.Entry(editClient).ReloadAsync();
+        Assert.Equal("Legacy клиент без редактирования", editClient.Name);
+        Assert.Equal(noEditUserId, editClient.ResponsibleUserId);
+        Assert.True(editClient.IsActive);
+        Assert.True(await db.Clients.AnyAsync(item => item.Id == deleteClient.Id));
+    }
+
+    [Fact]
+    public async Task V1Endpoints_RequireClientSectionPermissions()
+    {
+        await using var db = await CreateContextAsync();
+        var noViewUserId = await CreateUserAsync(db, "v1-client-no-view");
+        var noCreateUserId = await CreateUserAsync(db, "v1-client-no-create");
+        var noEditUserId = await CreateUserAsync(db, "v1-client-no-edit");
+        var noDeleteUserId = await CreateUserAsync(db, "v1-client-no-delete");
+        await SetClientPermissionAsync(db, noViewUserId, canCreate: true, canEdit: true, canDelete: true, canView: false);
+        await SetClientPermissionAsync(db, noCreateUserId, canCreate: false, canEdit: true, canDelete: true);
+        await SetClientPermissionAsync(db, noEditUserId, canCreate: true, canEdit: false, canDelete: true);
+        await SetClientPermissionAsync(db, noDeleteUserId, canCreate: true, canEdit: true, canDelete: false);
+        var viewClient = new Client
+        {
+            Name = "V1 клиент без просмотра",
+            IsActive = true,
+            ResponsibleUserId = noViewUserId,
+        };
+        var editClient = new Client
+        {
+            Name = "V1 клиент без редактирования",
+            IsActive = true,
+            ResponsibleUserId = noEditUserId,
+        };
+        var deleteClient = new Client
+        {
+            Name = "V1 клиент без удаления",
+            IsActive = true,
+            ResponsibleUserId = noDeleteUserId,
+        };
+        db.Clients.AddRange(viewClient, editClient, deleteClient);
+        await db.SaveChangesAsync();
+
+        var listResult = await CreateV1Controller(db, noViewUserId).Get(
+            search: null,
+            isActive: null,
+            sortBy: null,
+            sortDir: null,
+            limit: null,
+            ct: CancellationToken.None);
+        var detailsResult = await CreateV1Controller(db, noViewUserId).GetById(viewClient.Id, CancellationToken.None);
+        var createResult = await CreateV1Controller(db, noCreateUserId).Create(new Client
+        {
+            Name = "Запрещенное V1 создание клиента",
+            IsActive = true,
+        }, CancellationToken.None);
+        var updateResult = await CreateV1Controller(db, noEditUserId).Update(editClient.Id, new Client
+        {
+            Name = "Запрещенное V1 изменение клиента",
+            IsActive = false,
+        }, CancellationToken.None);
+        var deleteResult = await CreateV1Controller(db, noDeleteUserId).Delete(deleteClient.Id, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(listResult);
+        Assert.IsType<ForbidResult>(detailsResult);
+        Assert.IsType<ForbidResult>(createResult);
+        Assert.IsType<ForbidResult>(updateResult);
+        Assert.IsType<ForbidResult>(deleteResult);
+        Assert.False(await db.Clients.AnyAsync(item => item.Name == "Запрещенное V1 создание клиента"));
+
+        await db.Entry(editClient).ReloadAsync();
+        Assert.Equal("V1 клиент без редактирования", editClient.Name);
         Assert.True(editClient.IsActive);
         Assert.True(await db.Clients.AnyAsync(item => item.Id == deleteClient.Id));
     }
@@ -1707,6 +1835,26 @@ public class ClientsControllerTests
         };
 
         return new ClientsV2Controller(db)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(claims, authenticationType: "Test")),
+                },
+            },
+        };
+    }
+
+    private static ClientsV1Controller CreateV1Controller(PaymentContext db, int userId)
+    {
+        var claims = new[]
+        {
+            new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
+            new Claim(ClaimTypes.Name, "Тестовый пользователь"),
+        };
+
+        return new ClientsV1Controller(db)
         {
             ControllerContext = new ControllerContext
             {

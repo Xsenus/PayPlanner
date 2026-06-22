@@ -225,6 +225,7 @@
   - `[x]` 2026-06-23: старый V1 API дел закрыт секционными правами `Cases.CanView/Create/Edit/Delete` и object-level видимостью; карточка V1 больше не подтягивает платежи в обход финансовых прав. Проверено backend-тестами `CasesV1ControllerTests`.
   - `[x]` 2026-06-23: старый неверсированный API дел `/api/cases` закрыт секционными правами `Cases.CanView/Create/Edit/Delete` и object-level видимостью; карточка legacy API больше не подтягивает платежи в обход финансовых прав. Проверено backend-тестами `CasesControllerTests`.
   - `[x]` 2026-06-23: актуальный V2 API клиентов закрыт явными правами `Clients.CanCreate/CanEdit/CanDelete` для записи, а не только областью видимости. Проверено backend-тестом `ClientsControllerTests.V2WriteEndpoints_RequireClientActionPermissions`.
+  - `[x]` 2026-06-23: старые API клиентов `/api/clients` и `/api/v1/clients` закрыты секционными правами `Clients.CanView/Create/Edit/Delete`, включая массовое удаление и смену ответственного. Проверено backend-тестами `ClientsControllerTests.LegacyWriteEndpoints_RequireClientActionPermissions` и `ClientsControllerTests.V1Endpoints_RequireClientSectionPermissions`.
 - `[partial]` Довести backend- и frontend-тесты прав по реальным ролям заказчика. Тесты прав есть, но финальный набор зависит от утвержденной матрицы.
 - `[acceptance]` Финально проверить маскирование и раскрытие чувствительных данных на реальных ролях и данных.
 

@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Controllers.V1;
 
@@ -16,20 +17,18 @@ public class ClientsV1Controller : ControllerBase
     private readonly PaymentContext _db;
     public ClientsV1Controller(PaymentContext db) => _db = db;
 
-    private IQueryable<Client> BuildVisibleClientsQuery(int? currentUserId, bool isAdmin)
-        => _db.Clients.ApplyClientVisibility(isAdmin, currentUserId);
+    private IQueryable<Client> BuildVisibleClientsQuery(DataVisibilityAccess? access)
+        => _db.Clients.ApplyClientVisibility(access);
 
-    private async Task<(int? UserId, bool IsAdmin)> GetCurrentAccessAsync(CancellationToken ct)
-    {
-        var currentUserId = User.GetUserId();
-        if (!currentUserId.HasValue)
-        {
-            return (null, false);
-        }
+    private Task<DataVisibilityAccess?> GetCurrentAccessAsync(CancellationToken ct)
+        => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Clients, ct);
 
-        var isAdmin = await _db.IsUserAdminAsync(currentUserId.Value, ct);
-        return (currentUserId, isAdmin);
-    }
+    private async Task<IActionResult?> RequireClientsPermissionAsync(
+        Func<RolePermissionValues, bool> isAllowed,
+        CancellationToken ct)
+        => await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Clients, isAllowed, ct)
+            ? null
+            : Forbid();
 
     private static string? FormatResponsibleUserName(User? user)
     {
@@ -60,13 +59,18 @@ public class ClientsV1Controller : ControllerBase
         [FromQuery] int? limit,
         CancellationToken ct)
     {
+        if (await RequireClientsPermissionAsync(permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var access = await GetCurrentAccessAsync(ct);
-        if (!access.IsAdmin && !access.UserId.HasValue)
+        if (access is null)
         {
             return Unauthorized();
         }
 
-        var q = BuildVisibleClientsQuery(access.UserId, access.IsAdmin)
+        var q = BuildVisibleClientsQuery(access)
             .Include(c => c.ResponsibleUser)
             .AsQueryable()
             .ApplyClientFilters(search, isActive)
@@ -86,13 +90,18 @@ public class ClientsV1Controller : ControllerBase
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
     {
+        if (await RequireClientsPermissionAsync(permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var access = await GetCurrentAccessAsync(ct);
-        if (!access.IsAdmin && !access.UserId.HasValue)
+        if (access is null)
         {
             return Unauthorized();
         }
 
-        var client = await BuildVisibleClientsQuery(access.UserId, access.IsAdmin)
+        var client = await BuildVisibleClientsQuery(access)
             .Include(c => c.Cases)
             .Include(c => c.LegalEntity)
             .Include(c => c.ClientStatus)
@@ -109,15 +118,20 @@ public class ClientsV1Controller : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Client model, CancellationToken ct)
     {
+        if (await RequireClientsPermissionAsync(permission => permission.CanCreate, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var access = await GetCurrentAccessAsync(ct);
-        if (!access.UserId.HasValue)
+        if (access is null)
         {
             return Unauthorized();
         }
 
         var responsibleUserId = access.IsAdmin
-            ? (model.ResponsibleUserId ?? access.UserId.Value)
-            : access.UserId.Value;
+            ? (model.ResponsibleUserId ?? access.UserId)
+            : access.UserId;
         if (!await ResponsibleUserExistsAsync(responsibleUserId, ct))
         {
             return BadRequest($"Ответственный #{responsibleUserId} не найден");
@@ -134,13 +148,18 @@ public class ClientsV1Controller : ControllerBase
     [HttpPut("{id:int}")]
     public async Task<IActionResult> Update(int id, [FromBody] Client model, CancellationToken ct)
     {
+        if (await RequireClientsPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var access = await GetCurrentAccessAsync(ct);
-        if (!access.IsAdmin && !access.UserId.HasValue)
+        if (access is null)
         {
             return Unauthorized();
         }
 
-        var e = await BuildVisibleClientsQuery(access.UserId, access.IsAdmin)
+        var e = await BuildVisibleClientsQuery(access)
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (e is null) return NotFound();
 
@@ -173,13 +192,18 @@ public class ClientsV1Controller : ControllerBase
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
+        if (await RequireClientsPermissionAsync(permission => permission.CanDelete, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var access = await GetCurrentAccessAsync(ct);
-        if (!access.IsAdmin && !access.UserId.HasValue)
+        if (access is null)
         {
             return Unauthorized();
         }
 
-        var e = await BuildVisibleClientsQuery(access.UserId, access.IsAdmin)
+        var e = await BuildVisibleClientsQuery(access)
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (e is null) return NotFound();
 
