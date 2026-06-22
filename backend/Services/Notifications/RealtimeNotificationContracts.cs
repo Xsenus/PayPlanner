@@ -14,6 +14,7 @@ public sealed record RealtimeUserNotificationDto(
     string ObjectType,
     int? ObjectId,
     int? TaskJournalItemId,
+    string MetadataJson,
     DateTime CreatedAt);
 
 public interface IRealtimeNotificationPublisher

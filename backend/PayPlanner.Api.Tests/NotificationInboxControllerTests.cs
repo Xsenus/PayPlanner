@@ -85,6 +85,7 @@ public class NotificationInboxControllerTests
         var currentUser = await CreateUserAsync(db, "current@example.com");
         var otherUser = await CreateUserAsync(db, "other@example.com");
         var currentNotification = CreateNotification(currentUser.Id, "task:1:changed");
+        currentNotification.MetadataJson = "{\"clientCaseDocumentId\":991,\"action\":\"uploaded\"}";
         var otherNotification = CreateNotification(otherUser.Id, "task:2:changed");
         db.UserNotifications.AddRange(currentNotification, otherNotification);
         await db.SaveChangesAsync();
@@ -95,10 +96,12 @@ public class NotificationInboxControllerTests
         var page = Assert.IsType<PagedResponse<UserNotificationDto>>(Assert.IsType<OkObjectResult>(listResult.Result).Value);
         Assert.Single(page.Items);
         Assert.Equal(currentNotification.Id, page.Items[0].Id);
+        Assert.Equal(currentNotification.MetadataJson, page.Items[0].MetadataJson);
 
         var readResult = await controller.MarkRead(currentNotification.Id, CancellationToken.None);
         var readDto = Assert.IsType<UserNotificationDto>(Assert.IsType<OkObjectResult>(readResult.Result).Value);
         Assert.True(readDto.IsRead);
+        Assert.Equal(currentNotification.MetadataJson, readDto.MetadataJson);
 
         var archiveResult = await controller.Archive(currentNotification.Id, CancellationToken.None);
         var archivedDto = Assert.IsType<UserNotificationDto>(Assert.IsType<OkObjectResult>(archiveResult.Result).Value);

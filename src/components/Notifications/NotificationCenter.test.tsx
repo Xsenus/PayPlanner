@@ -304,4 +304,55 @@ describe('NotificationCenter', () => {
     await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(30));
     expect(handlers[handlerName]).toHaveBeenCalledWith(777);
   });
+
+  it('opens case document notifications on the documents tab', async () => {
+    const onOpenCase = vi.fn();
+    const onOpenCaseDocument = vi.fn();
+    const item = createNotification({
+      id: 31,
+      type: 'caseDocument',
+      typeLabel: 'Документы дела',
+      title: 'Загружен документ дела',
+      objectType: 'case',
+      objectId: 88,
+      taskId: null,
+      metadataJson: '{"clientCaseDocumentId":991,"action":"uploaded"}',
+    });
+    apiMock.getUserNotifications.mockResolvedValue(createPage([item]));
+
+    render(<NotificationCenter onOpenCase={onOpenCase} onOpenCaseDocument={onOpenCaseDocument} />);
+
+    expect(await screen.findByText('Загружен документ дела')).toBeTruthy();
+    expect(screen.getByText('Документ #991')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'К документам' }));
+
+    await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(31));
+    expect(onOpenCaseDocument).toHaveBeenCalledWith(88, 991);
+    expect(onOpenCase).not.toHaveBeenCalled();
+  });
+
+  it('falls back to opening the case when document metadata is absent', async () => {
+    const onOpenCase = vi.fn();
+    const onOpenCaseDocument = vi.fn();
+    const item = createNotification({
+      id: 32,
+      type: 'caseDocument',
+      typeLabel: 'Документы дела',
+      title: 'Документ без metadata',
+      objectType: 'case',
+      objectId: 89,
+      taskId: null,
+      metadataJson: '{}',
+    });
+    apiMock.getUserNotifications.mockResolvedValue(createPage([item]));
+
+    render(<NotificationCenter onOpenCase={onOpenCase} onOpenCaseDocument={onOpenCaseDocument} />);
+
+    expect(await screen.findByText('Документ без metadata')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'К делу' }));
+
+    await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(32));
+    expect(onOpenCase).toHaveBeenCalledWith(89);
+    expect(onOpenCaseDocument).not.toHaveBeenCalled();
+  });
 });

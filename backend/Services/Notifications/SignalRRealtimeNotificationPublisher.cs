@@ -39,6 +39,7 @@ public sealed class SignalRRealtimeNotificationPublisher : IRealtimeNotification
             notification.ObjectType,
             notification.ObjectId,
             notification.TaskJournalItemId,
+            notification.MetadataJson,
             notification.CreatedAt);
 
         try

@@ -983,6 +983,7 @@ function AppContent() {
           <NotificationCenter
             onOpenTask={(taskId) => openTaskDetail(taskId, { returnTo: 'notifications' })}
             onOpenCase={openRelatedCase}
+            onOpenCaseDocument={(caseId) => openCaseDetailSection(caseId, 'documents')}
             onOpenPayment={(paymentId) => openPaymentPage(paymentId)}
             onOpenInvoice={(invoiceId) => openInvoicePage(invoiceId, { returnTo: { tab: 'notifications' } })}
             onOpenAct={(actId) => openActDetail(actId, { tab: 'notifications' })}
@@ -1761,6 +1762,7 @@ function AppContent() {
           userId={user.id}
           onOpenTask={(taskId) => openTaskDetail(taskId, { returnTo: activeTab })}
           onOpenCase={openRelatedCase}
+          onOpenCaseDocument={(caseId) => openCaseDetailSection(caseId, 'documents')}
           onOpenPayment={(paymentId) => openPaymentPage(paymentId)}
           onOpenInvoice={(invoiceId) => openInvoicePage(invoiceId)}
           onOpenAct={(actId) => openActDetail(actId, { tab: 'notifications' })}

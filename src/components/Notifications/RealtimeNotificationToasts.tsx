@@ -13,6 +13,7 @@ import {
 import type { ToastDomain } from '../../contexts/toastContextCore';
 import { emitUserNotificationsChanged } from '../../utils/userNotifications';
 import { updateRealtimeNotificationDiagnostics } from '../../utils/realtimeNotificationDiagnostics';
+import { getClientCaseDocumentIdFromNotification } from '../../utils/userNotificationMetadata';
 
 const FALLBACK_POLL_INTERVAL_MS = 30_000;
 const FALLBACK_PAGE_SIZE = 15;
@@ -28,6 +29,7 @@ type RealtimeNotificationToastsProps = {
   userId: number;
   onOpenTask?: (taskId: number) => void;
   onOpenCase?: (caseId: number) => void;
+  onOpenCaseDocument?: (caseId: number, documentId?: number) => void;
   onOpenPayment?: (paymentId: number) => void;
   onOpenInvoice?: (invoiceId: number) => void;
   onOpenAct?: (actId: number) => void;
@@ -55,6 +57,7 @@ function toRealtimeNotification(item: UserNotificationDto, recipientUserId: numb
     objectType: item.objectType,
     objectId: item.objectId,
     taskJournalItemId: item.taskId,
+    metadataJson: item.metadataJson,
     createdAt: item.createdAt,
   };
 }
@@ -234,6 +237,16 @@ function resolveToastAction(
     switch (notification.objectType) {
       case 'case':
       case 'client-case':
+        if (handlers.onOpenCaseDocument) {
+          const documentId = getClientCaseDocumentIdFromNotification(notification);
+          if (documentId) {
+            return {
+              label: 'Открыть документы',
+              run: () => handlers.onOpenCaseDocument?.(notification.objectId!, documentId),
+            };
+          }
+        }
+
         if (handlers.onOpenCase) {
           return {
             label: 'Открыть дело',
@@ -355,6 +368,7 @@ export function RealtimeNotificationToasts({
   userId,
   onOpenTask,
   onOpenCase,
+  onOpenCaseDocument,
   onOpenPayment,
   onOpenInvoice,
   onOpenAct,
@@ -374,6 +388,7 @@ export function RealtimeNotificationToasts({
   const handlersRef = useRef({
     onOpenTask,
     onOpenCase,
+    onOpenCaseDocument,
     onOpenPayment,
     onOpenInvoice,
     onOpenAct,
@@ -387,6 +402,7 @@ export function RealtimeNotificationToasts({
     handlersRef.current = {
       onOpenTask,
       onOpenCase,
+      onOpenCaseDocument,
       onOpenPayment,
       onOpenInvoice,
       onOpenAct,
@@ -395,7 +411,7 @@ export function RealtimeNotificationToasts({
       onOpenNotes,
       onOpenNotifications: onOpenNotifications ?? (() => undefined),
     };
-  }, [onOpenAct, onOpenCalendar, onOpenCase, onOpenContract, onOpenInvoice, onOpenNotes, onOpenNotifications, onOpenPayment, onOpenTask]);
+  }, [onOpenAct, onOpenCalendar, onOpenCase, onOpenCaseDocument, onOpenContract, onOpenInvoice, onOpenNotes, onOpenNotifications, onOpenPayment, onOpenTask]);
 
   useEffect(() => {
     if (!userId || !canStartNotificationsHubConnection()) {

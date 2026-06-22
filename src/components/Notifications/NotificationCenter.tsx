@@ -57,6 +57,7 @@ import {
   type UserNotificationDoNotDisturbSettings,
 } from '../../utils/userNotificationDoNotDisturb';
 import { WebPushDevicePanel } from './WebPushDevicePanel';
+import { getClientCaseDocumentIdFromNotification } from '../../utils/userNotificationMetadata';
 
 type NotificationStatusFilter = NonNullable<UserNotificationsQuery['status']>;
 type NotificationTaskRoleFilter = 'all' | 'assignee' | 'author' | 'observer' | 'approver';
@@ -65,6 +66,7 @@ type NotificationDomainFilter = 'all' | 'task' | 'calendar' | 'note' | 'finance'
 type NotificationCenterProps = {
   onOpenTask?: (taskId: number) => void;
   onOpenCase?: (caseId: number) => void;
+  onOpenCaseDocument?: (caseId: number, documentId?: number) => void;
   onOpenPayment?: (paymentId: number) => void;
   onOpenInvoice?: (invoiceId: number) => void;
   onOpenAct?: (actId: number) => void;
@@ -194,6 +196,7 @@ function formatDateTime(value?: string | null) {
 export function NotificationCenter({
   onOpenTask,
   onOpenCase,
+  onOpenCaseDocument,
   onOpenPayment,
   onOpenInvoice,
   onOpenAct,
@@ -519,14 +522,19 @@ export function NotificationCenter({
   };
 
   const handleOpenCase = async (item: UserNotificationDto) => {
-    if (item.objectType !== 'case' || !item.objectId || !onOpenCase) {
+    if (item.objectType !== 'case' || !item.objectId || (!onOpenCase && !onOpenCaseDocument)) {
       return;
     }
 
     try {
       setBusyId(item.id);
       await markRead(item);
-      onOpenCase(item.objectId);
+      const documentId = getClientCaseDocumentIdFromNotification(item);
+      if (documentId && onOpenCaseDocument) {
+        onOpenCaseDocument(item.objectId, documentId);
+      } else {
+        onOpenCase?.(item.objectId);
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Не удалось открыть дело.');
     } finally {
@@ -1253,6 +1261,8 @@ export function NotificationCenter({
               const itemBusy = busyId === item.id;
               const linkedObjectLabel = item.objectId ? openLinkedObjectLabels[item.objectType] : undefined;
               const canOpenLinkedObject = Boolean(linkedObjectLabel && openLinkedObjectHandlers[item.objectType]);
+              const caseDocumentId = getClientCaseDocumentIdFromNotification(item);
+              const caseButtonLabel = caseDocumentId && onOpenCaseDocument ? 'К документам' : 'К делу';
               return (
                 <article
                   key={item.id}
@@ -1301,6 +1311,7 @@ export function NotificationCenter({
                           <span>{formatDateTime(item.createdAt)}</span>
                           {item.taskId ? <span>Задача #{item.taskId}</span> : null}
                           {item.objectType === 'case' && item.objectId ? <span>Дело #{item.objectId}</span> : null}
+                          {caseDocumentId ? <span>Документ #{caseDocumentId}</span> : null}
                           {linkedObjectLabel && item.objectId ? <span>{linkedObjectLabel.replace('К ', '')} #{item.objectId}</span> : null}
                           <span>{item.eventKey}</span>
                         </div>
@@ -1340,7 +1351,7 @@ export function NotificationCenter({
                         className="inline-flex h-9 items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 text-sm font-medium text-violet-700 transition hover:bg-violet-100 disabled:cursor-wait disabled:opacity-60"
                       >
                         <ExternalLink className="h-4 w-4" />
-                        К делу
+                        {caseButtonLabel}
                       </button>
                     ) : null}
                     {canOpenLinkedObject ? (

@@ -785,6 +785,7 @@ public class NotificationInboxController : ControllerBase
             ObjectType = item.ObjectType,
             ObjectId = item.ObjectId,
             TaskId = item.TaskJournalItemId,
+            MetadataJson = item.MetadataJson,
             IsRead = item.IsRead,
             ReadAt = item.ReadAt,
             IsArchived = item.IsArchived,

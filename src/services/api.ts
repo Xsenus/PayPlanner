@@ -1060,6 +1060,7 @@ export interface UserNotificationDto {
   objectType: string;
   objectId?: number | null;
   taskId?: number | null;
+  metadataJson?: string | null;
   isRead: boolean;
   readAt?: string | null;
   isArchived: boolean;

@@ -115,6 +115,7 @@ public class UserNotificationDto
     public string ObjectType { get; set; } = string.Empty;
     public int? ObjectId { get; set; }
     public int? TaskId { get; set; }
+    public string MetadataJson { get; set; } = "{}";
     public bool IsRead { get; set; }
     public DateTime? ReadAt { get; set; }
     public bool IsArchived { get; set; }

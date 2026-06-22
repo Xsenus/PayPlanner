@@ -21,6 +21,7 @@ export interface RealtimeUserNotification {
   objectType: string;
   objectId?: number | null;
   taskJournalItemId?: number | null;
+  metadataJson?: string | null;
   createdAt: string;
 }
 

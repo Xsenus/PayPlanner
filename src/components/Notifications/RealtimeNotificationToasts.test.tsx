@@ -133,6 +133,50 @@ describe('RealtimeNotificationToasts', () => {
     expect(openTask).toHaveBeenCalledWith(123);
   });
 
+  it('opens case document toast actions on the documents tab', async () => {
+    const openCase = vi.fn();
+    const openCaseDocument = vi.fn();
+    render(
+      <RealtimeNotificationToasts
+        userId={5}
+        onOpenCase={openCase}
+        onOpenCaseDocument={openCaseDocument}
+      />,
+    );
+
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+    const handler = connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT);
+
+    act(() => {
+      handler?.({
+        id: 43,
+        recipientUserId: 5,
+        type: 'caseDocument',
+        eventKey: 'case:77:document:901',
+        title: 'Новый документ дела',
+        bodyPreview: 'Загружено заявление.',
+        tone: 'emerald',
+        objectType: 'case',
+        objectId: 77,
+        taskJournalItemId: null,
+        metadataJson: '{"clientCaseDocumentId":901,"action":"uploaded"}',
+        createdAt: '2026-05-25T10:05:00Z',
+      });
+    });
+
+    expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Новый документ дела',
+      actionLabel: 'Открыть документы',
+      domain: 'case',
+    }));
+
+    const toastOptions = toastMock.showToast.mock.calls[0][0] as { onAction: () => void };
+    act(() => toastOptions.onAction());
+
+    expect(openCaseDocument).toHaveBeenCalledWith(77, 901);
+    expect(openCase).not.toHaveBeenCalled();
+  });
+
   it('updates realtime state without toast when toast channel is disabled', async () => {
     const changedEvents: UserNotificationsChangedDetail[] = [];
     const listener = (event: Event) => {
