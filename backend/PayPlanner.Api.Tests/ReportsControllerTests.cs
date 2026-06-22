@@ -4477,15 +4477,20 @@ services.Id,
     public async Task ActStatuses_AppliesMoneyOperationFilters()
     {
         await using var db = await CreateContextAsync();
+        var targetIncomeType = new IncomeType { Name = "Act status target income", PaymentType = PaymentType.Income };
+        var otherIncomeType = new IncomeType { Name = "Act status other income", PaymentType = PaymentType.Income };
         var targetInvoiceDocument = new Invoice { Number = "ACT-MONEY-1", Date = new DateTime(2026, 5, 10) };
         var otherInvoiceDocument = new Invoice { Number = "ACT-MONEY-2", Date = new DateTime(2026, 5, 11) };
+        db.IncomeTypes.AddRange(targetIncomeType, otherIncomeType);
         db.Invoices.AddRange(targetInvoiceDocument, otherInvoiceDocument);
         await db.SaveChangesAsync();
 
         var matchingInvoice = InvoicePayment("ACT-MONEY-1", PaymentType.Income, PaymentStatus.Completed, InvoiceWorkflowStatus.Paid, 1_200m, 1_200m, new DateTime(2026, 5, 10));
         matchingInvoice.InvoiceId = targetInvoiceDocument.Id;
+        matchingInvoice.IncomeTypeId = targetIncomeType.Id;
         var otherInvoice = InvoicePayment("ACT-MONEY-2", PaymentType.Income, PaymentStatus.Completed, InvoiceWorkflowStatus.Paid, 2_200m, 2_200m, new DateTime(2026, 5, 11));
         otherInvoice.InvoiceId = otherInvoiceDocument.Id;
+        otherInvoice.IncomeTypeId = otherIncomeType.Id;
         db.Payments.AddRange(matchingInvoice, otherInvoice);
         await db.SaveChangesAsync();
 
@@ -4496,7 +4501,7 @@ services.Id,
         db.Acts.AddRange(matching, other);
         db.MoneyOperations.AddRange(
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 1_200m, new DateTime(2026, 5, 10), "Main account", counterpartyName: "Target payer", linkedInvoiceId: targetInvoiceDocument.Id),
-            Operation(MoneyOperationSource.Cash, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 2_200m, new DateTime(2026, 5, 11), "Main account", counterpartyName: "Target payer", linkedInvoiceId: otherInvoiceDocument.Id));
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 2_200m, new DateTime(2026, 5, 11), "Main account", counterpartyName: "Target payer", linkedInvoiceId: otherInvoiceDocument.Id));
         await db.SaveChangesAsync();
 
         var controller = CreateController(db);
@@ -4507,7 +4512,8 @@ services.Id,
             CancellationToken.None,
             source: MoneyOperationSource.Bank,
             accountName: "Main account",
-            counterpartyName: "Target");
+            counterpartyName: "Target",
+            incomeTypeId: targetIncomeType.Id);
 
         var report = Assert.IsType<ActStatusReportDto>(Assert.IsType<OkObjectResult>(action.Result).Value);
         Assert.Equal(1, report.ActCount);
@@ -4697,8 +4703,11 @@ services.Id,
     public async Task ContractStatuses_AppliesMoneyOperationFilters()
     {
         await using var db = await CreateContextAsync();
+        var targetIncomeType = new IncomeType { Name = "Contract status target income", PaymentType = PaymentType.Income };
+        var otherIncomeType = new IncomeType { Name = "Contract status other income", PaymentType = PaymentType.Income };
         var targetInvoiceDocument = new Invoice { Number = "CON-MONEY-1", Date = new DateTime(2026, 5, 10) };
         var otherInvoiceDocument = new Invoice { Number = "CON-MONEY-2", Date = new DateTime(2026, 5, 11) };
+        db.IncomeTypes.AddRange(targetIncomeType, otherIncomeType);
         db.Invoices.AddRange(targetInvoiceDocument, otherInvoiceDocument);
         await db.SaveChangesAsync();
 
@@ -4709,8 +4718,10 @@ services.Id,
 
         var matchingInvoice = InvoicePayment("CON-MONEY-1", PaymentType.Income, PaymentStatus.Completed, InvoiceWorkflowStatus.Paid, 1_500m, 1_500m, new DateTime(2026, 5, 10));
         matchingInvoice.InvoiceId = targetInvoiceDocument.Id;
+        matchingInvoice.IncomeTypeId = targetIncomeType.Id;
         var otherInvoice = InvoicePayment("CON-MONEY-2", PaymentType.Income, PaymentStatus.Completed, InvoiceWorkflowStatus.Paid, 2_500m, 2_500m, new DateTime(2026, 5, 11));
         otherInvoice.InvoiceId = otherInvoiceDocument.Id;
+        otherInvoice.IncomeTypeId = otherIncomeType.Id;
         db.Payments.AddRange(matchingInvoice, otherInvoice);
         await db.SaveChangesAsync();
 
@@ -4720,7 +4731,7 @@ services.Id,
         db.MoneyOperations.AddRange(
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 1_500m, new DateTime(2026, 5, 10), "Main account", counterpartyName: "Target payer", linkedInvoiceId: targetInvoiceDocument.Id),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Plan, 2_500m, new DateTime(2026, 5, 11), "Main account", counterpartyName: "Target payer", linkedInvoiceId: otherInvoiceDocument.Id),
-            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 2_500m, new DateTime(2026, 5, 11), "Other account", counterpartyName: "Target payer", linkedInvoiceId: otherInvoiceDocument.Id));
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 2_500m, new DateTime(2026, 5, 11), "Main account", counterpartyName: "Target payer", linkedInvoiceId: otherInvoiceDocument.Id));
         await db.SaveChangesAsync();
 
         var controller = CreateController(db);
@@ -4731,7 +4742,8 @@ services.Id,
             CancellationToken.None,
             source: MoneyOperationSource.Bank,
             accountName: "Main account",
-            counterpartyName: "Target");
+            counterpartyName: "Target",
+            incomeTypeId: targetIncomeType.Id);
 
         var report = Assert.IsType<ContractStatusReportDto>(Assert.IsType<OkObjectResult>(action.Result).Value);
         Assert.Equal(1, report.ContractCount);

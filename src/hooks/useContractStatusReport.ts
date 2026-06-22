@@ -11,6 +11,7 @@ export interface ContractStatusReportFilters {
   clientId?: number;
   caseId?: number;
   contractId?: number;
+  incomeTypeId?: number;
 }
 
 export function useContractStatusReport(filters: ContractStatusReportFilters) {
@@ -29,8 +30,9 @@ export function useContractStatusReport(filters: ContractStatusReportFilters) {
       clientId: filters.clientId,
       caseId: filters.caseId,
       contractId: filters.contractId,
+      incomeTypeId: filters.incomeTypeId,
     }),
-    [filters.accountName, filters.caseId, filters.clientId, filters.contractId, filters.counterpartyName, filters.from, filters.source, filters.to],
+    [filters.accountName, filters.caseId, filters.clientId, filters.contractId, filters.counterpartyName, filters.from, filters.incomeTypeId, filters.source, filters.to],
   );
 
   const load = useCallback(async () => {

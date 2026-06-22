@@ -2305,6 +2305,7 @@ describe('apiService reports', () => {
       clientId: 10,
       caseId: 20,
       contractId: 30,
+      incomeTypeId: 40,
     });
 
     expect(result).toEqual(payload);
@@ -2319,6 +2320,7 @@ describe('apiService reports', () => {
     expect(String(url)).toContain('clientId=10');
     expect(String(url)).toContain('caseId=20');
     expect(String(url)).toContain('contractId=30');
+    expect(String(url)).toContain('incomeTypeId=40');
   });
 
   it('loads contract status report with filters', async () => {
@@ -2360,6 +2362,7 @@ describe('apiService reports', () => {
       clientId: 10,
       caseId: 20,
       contractId: 30,
+      incomeTypeId: 40,
     });
 
     expect(result).toEqual(payload);
@@ -2374,6 +2377,7 @@ describe('apiService reports', () => {
     expect(String(url)).toContain('clientId=10');
     expect(String(url)).toContain('caseId=20');
     expect(String(url)).toContain('contractId=30');
+    expect(String(url)).toContain('incomeTypeId=40');
   });
 
   it('loads payment order report with filters', async () => {

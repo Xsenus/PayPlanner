@@ -6132,6 +6132,7 @@ export class ApiService {
     clientId?: number;
     caseId?: number;
     contractId?: number;
+    incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<ActStatusReport>(`/reports/act-statuses${q}`);
@@ -6146,6 +6147,7 @@ export class ApiService {
     clientId?: number;
     caseId?: number;
     contractId?: number;
+    incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<ContractStatusReport>(`/reports/contract-statuses${q}`);
