@@ -652,7 +652,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildInvoiceStatusReportAsync(start, end, accountsVisibility, cancellationToken),
+                        cancellationToken => BuildInvoiceStatusReportAsync(start, end, effectiveClientId, effectiveCaseId, effectiveContractId, effectiveIncomeTypeId, accountsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildInvoiceStatusExportDocument(reportDto), null);
@@ -668,7 +668,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildActStatusReportAsync(start, end, actsVisibility, cancellationToken),
+                        cancellationToken => BuildActStatusReportAsync(start, end, effectiveClientId, effectiveCaseId, effectiveContractId, actsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildActStatusExportDocument(reportDto), null);
@@ -684,7 +684,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildContractStatusReportAsync(start, end, contractsVisibility, cancellationToken),
+                        cancellationToken => BuildContractStatusReportAsync(start, end, effectiveClientId, effectiveCaseId, effectiveContractId, contractsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildContractStatusExportDocument(reportDto), null);
@@ -1519,13 +1519,17 @@ public class ReportsController : ControllerBase
     public async Task<ActionResult<InvoiceStatusReportDto>> InvoiceStatuses(
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
-        CancellationToken ct)
+        CancellationToken ct,
+        [FromQuery] int? clientId = null,
+        [FromQuery] int? caseId = null,
+        [FromQuery] int? contractId = null,
+        [FromQuery] int? incomeTypeId = null)
     {
         var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Accounts,
-            (visibility, cancellationToken) => BuildInvoiceStatusReportAsync(start, end, visibility, cancellationToken),
+            (visibility, cancellationToken) => BuildInvoiceStatusReportAsync(start, end, clientId, caseId, contractId, incomeTypeId, visibility, cancellationToken),
             ct);
     }
 
@@ -1533,13 +1537,16 @@ public class ReportsController : ControllerBase
     public async Task<ActionResult<ActStatusReportDto>> ActStatuses(
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
-        CancellationToken ct)
+        CancellationToken ct,
+        [FromQuery] int? clientId = null,
+        [FromQuery] int? caseId = null,
+        [FromQuery] int? contractId = null)
     {
         var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Acts,
-            (visibility, cancellationToken) => BuildActStatusReportAsync(start, end, visibility, cancellationToken),
+            (visibility, cancellationToken) => BuildActStatusReportAsync(start, end, clientId, caseId, contractId, visibility, cancellationToken),
             ct);
     }
 
@@ -1547,13 +1554,16 @@ public class ReportsController : ControllerBase
     public async Task<ActionResult<ContractStatusReportDto>> ContractStatuses(
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
-        CancellationToken ct)
+        CancellationToken ct,
+        [FromQuery] int? clientId = null,
+        [FromQuery] int? caseId = null,
+        [FromQuery] int? contractId = null)
     {
         var (start, end) = await ResolveReportPeriodAsync(from, to, ct);
 
         return await ExecuteVisibleReportAsync(
             RolePermissionCatalog.Contracts,
-            (visibility, cancellationToken) => BuildContractStatusReportAsync(start, end, visibility, cancellationToken),
+            (visibility, cancellationToken) => BuildContractStatusReportAsync(start, end, clientId, caseId, contractId, visibility, cancellationToken),
             ct);
     }
 
@@ -6826,13 +6836,48 @@ public class ReportsController : ControllerBase
     private async Task<InvoiceStatusReportDto> BuildInvoiceStatusReportAsync(
         DateTime from,
         DateTime to,
+        int? clientId,
+        int? caseId,
+        int? contractId,
+        int? incomeTypeId,
         DataVisibilityAccess accountsVisibility,
         CancellationToken ct)
     {
-        var rows = await _db.Payments
+        var query = _db.Payments
             .AsNoTracking()
             .ApplyPaymentVisibility(accountsVisibility)
-            .Where(item => item.DocumentKind == DocumentKind.Invoice && item.Date >= from && item.Date <= to)
+            .Where(item => item.DocumentKind == DocumentKind.Invoice && item.Date >= from && item.Date <= to);
+
+        if (clientId.HasValue && clientId.Value > 0)
+        {
+            var targetClientId = clientId.Value;
+            query = query.Where(item => item.ClientId == targetClientId || item.ExpenseClientId == targetClientId);
+        }
+
+        if (caseId.HasValue && caseId.Value > 0)
+        {
+            var targetCaseId = caseId.Value;
+            query = query.Where(item =>
+                item.ClientCaseId == targetCaseId ||
+                item.InvoiceClientCases.Any(link => link.ClientCaseId == targetCaseId));
+        }
+
+        if (contractId.HasValue && contractId.Value > 0)
+        {
+            var targetContractId = contractId.Value;
+            query = query.Where(item =>
+                item.ContractId == targetContractId ||
+                _db.ContractInvoices.Any(link => link.ContractId == targetContractId && link.InvoiceId == item.Id) ||
+                _db.ContractPayments.Any(link => link.ContractId == targetContractId && link.PaymentId == item.Id));
+        }
+
+        if (incomeTypeId.HasValue && incomeTypeId.Value > 0)
+        {
+            var targetIncomeTypeId = incomeTypeId.Value;
+            query = query.Where(item => item.IncomeTypeId == targetIncomeTypeId);
+        }
+
+        var rows = await query
             .Select(item => new
             {
                 item.Type,
@@ -6951,6 +6996,9 @@ public class ReportsController : ControllerBase
     private async Task<ActStatusReportDto> BuildActStatusReportAsync(
         DateTime from,
         DateTime to,
+        int? clientId,
+        int? caseId,
+        int? contractId,
         DataVisibilityAccess actsVisibility,
         CancellationToken ct)
     {
@@ -6958,10 +7006,41 @@ public class ReportsController : ControllerBase
         var periodEnd = NormalizeReportDate(to);
         var periodEndExclusive = periodEnd.AddDays(1);
 
-        var rows = await _db.Acts
+        var query = _db.Acts
             .AsNoTracking()
             .ApplyActVisibility(actsVisibility)
-            .Where(item => item.Date >= periodStart && item.Date < periodEndExclusive)
+            .Where(item => item.Date >= periodStart && item.Date < periodEndExclusive);
+
+        if (clientId.HasValue && clientId.Value > 0)
+        {
+            var targetClientId = clientId.Value;
+            query = query.Where(item =>
+                item.ClientId == targetClientId ||
+                (item.InvoiceId.HasValue && _db.Payments.Any(payment =>
+                    payment.Id == item.InvoiceId.Value &&
+                    (payment.ClientId == targetClientId || payment.ExpenseClientId == targetClientId))));
+        }
+
+        if (caseId.HasValue && caseId.Value > 0)
+        {
+            var targetCaseId = caseId.Value;
+            query = query.Where(item =>
+                (item.InvoiceId.HasValue && _db.Payments.Any(payment =>
+                    payment.Id == item.InvoiceId.Value &&
+                    (payment.ClientCaseId == targetCaseId ||
+                        payment.InvoiceClientCases.Any(link => link.ClientCaseId == targetCaseId)))));
+        }
+
+        if (contractId.HasValue && contractId.Value > 0)
+        {
+            var targetContractId = contractId.Value;
+            query = query.Where(item =>
+                _db.ContractActs.Any(link => link.ContractId == targetContractId && link.ActId == item.Id) ||
+                (item.InvoiceId.HasValue && _db.ContractInvoices.Any(link =>
+                    link.ContractId == targetContractId && link.InvoiceId == item.InvoiceId.Value)));
+        }
+
+        var rows = await query
             .Select(item => new
             {
                 item.Status,
@@ -7071,6 +7150,9 @@ public class ReportsController : ControllerBase
     private async Task<ContractStatusReportDto> BuildContractStatusReportAsync(
         DateTime from,
         DateTime to,
+        int? clientId,
+        int? caseId,
+        int? contractId,
         DataVisibilityAccess contractsVisibility,
         CancellationToken ct)
     {
@@ -7078,10 +7160,39 @@ public class ReportsController : ControllerBase
         var periodEnd = NormalizeReportDate(to);
         var periodEndExclusive = periodEnd.AddDays(1);
 
-        var rows = await _db.Contracts
+        var query = _db.Contracts
             .AsNoTracking()
             .ApplyContractVisibility(contractsVisibility)
-            .Where(item => item.Date >= periodStart && item.Date < periodEndExclusive)
+            .Where(item => item.Date >= periodStart && item.Date < periodEndExclusive);
+
+        if (clientId.HasValue && clientId.Value > 0)
+        {
+            var targetClientId = clientId.Value;
+            query = query.Where(item =>
+                item.ClientContracts.Any(link => link.ClientId == targetClientId));
+        }
+
+        if (caseId.HasValue && caseId.Value > 0)
+        {
+            var targetCaseId = caseId.Value;
+            query = query.Where(item =>
+                _db.ContractInvoices.Any(link =>
+                    link.ContractId == item.Id &&
+                    (link.Invoice.ClientCaseId == targetCaseId ||
+                        link.Invoice.InvoiceClientCases.Any(caseLink => caseLink.ClientCaseId == targetCaseId))) ||
+                _db.ContractPayments.Any(link =>
+                    link.ContractId == item.Id &&
+                    (link.Payment.ClientCaseId == targetCaseId ||
+                        link.Payment.InvoiceClientCases.Any(caseLink => caseLink.ClientCaseId == targetCaseId))));
+        }
+
+        if (contractId.HasValue && contractId.Value > 0)
+        {
+            var targetContractId = contractId.Value;
+            query = query.Where(item => item.Id == targetContractId);
+        }
+
+        var rows = await query
             .Select(item => new
             {
                 item.Status,

@@ -4179,6 +4179,64 @@ services.Id,
     }
 
     [Fact]
+    public async Task InvoiceStatuses_AppliesClientCaseContractAndIncomeTypeFilters()
+    {
+        await using var db = await CreateContextAsync();
+        var targetClient = new Client { Name = "Invoice status target" };
+        var otherClient = new Client { Name = "Invoice status other" };
+        var targetCase = new ClientCase { Client = targetClient, CaseNumber = "INV-FILTER", Title = "Invoice filter case" };
+        var otherCase = new ClientCase { Client = otherClient, CaseNumber = "INV-OTHER", Title = "Invoice other case" };
+        var targetContract = Contract("INV-CONTRACT", ContractStatus.Concluded, 5_000m, new DateTime(2026, 5, 1), false, null);
+        var targetIncomeType = new IncomeType { Name = "Invoice status services", PaymentType = PaymentType.Income };
+        db.AddRange(targetClient, otherClient, targetCase, otherCase, targetContract, targetIncomeType);
+        await db.SaveChangesAsync();
+
+        var matching = InvoicePayment("INV-FILTER-1", PaymentType.Income, PaymentStatus.Completed, InvoiceWorkflowStatus.Paid, 1_000m, 1_000m, new DateTime(2026, 5, 10));
+        matching.ClientId = targetClient.Id;
+        matching.ClientCaseId = targetCase.Id;
+        matching.ContractId = targetContract.Id;
+        matching.IncomeTypeId = targetIncomeType.Id;
+
+        var otherClientInvoice = InvoicePayment("INV-FILTER-2", PaymentType.Income, PaymentStatus.Completed, InvoiceWorkflowStatus.Paid, 2_000m, 2_000m, new DateTime(2026, 5, 11));
+        otherClientInvoice.ClientId = otherClient.Id;
+        otherClientInvoice.ClientCaseId = targetCase.Id;
+        otherClientInvoice.ContractId = targetContract.Id;
+        otherClientInvoice.IncomeTypeId = targetIncomeType.Id;
+
+        var otherCaseInvoice = InvoicePayment("INV-FILTER-3", PaymentType.Income, PaymentStatus.Completed, InvoiceWorkflowStatus.Paid, 3_000m, 3_000m, new DateTime(2026, 5, 12));
+        otherCaseInvoice.ClientId = targetClient.Id;
+        otherCaseInvoice.ClientCaseId = otherCase.Id;
+        otherCaseInvoice.ContractId = targetContract.Id;
+        otherCaseInvoice.IncomeTypeId = targetIncomeType.Id;
+
+        var otherContractInvoice = InvoicePayment("INV-FILTER-4", PaymentType.Income, PaymentStatus.Completed, InvoiceWorkflowStatus.Paid, 4_000m, 4_000m, new DateTime(2026, 5, 13));
+        otherContractInvoice.ClientId = targetClient.Id;
+        otherContractInvoice.ClientCaseId = targetCase.Id;
+        otherContractInvoice.IncomeTypeId = targetIncomeType.Id;
+
+        db.Payments.AddRange(matching, otherClientInvoice, otherCaseInvoice, otherContractInvoice);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+
+        var action = await controller.InvoiceStatuses(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            CancellationToken.None,
+            clientId: targetClient.Id,
+            caseId: targetCase.Id,
+            contractId: targetContract.Id,
+            incomeTypeId: targetIncomeType.Id);
+
+        var report = Assert.IsType<InvoiceStatusReportDto>(Assert.IsType<OkObjectResult>(action.Result).Value);
+        Assert.Equal(1, report.InvoiceCount);
+        Assert.Equal(1_000m, report.TotalAmount);
+        var status = Assert.Single(report.Statuses);
+        Assert.Equal(InvoiceWorkflowStatus.Paid, status.Status);
+        Assert.Equal(1_000m, status.TotalAmount);
+    }
+
+    [Fact]
     public async Task ActStatuses_GroupsActsByWorkflowStatus()
     {
         await using var db = await CreateContextAsync();
@@ -4246,6 +4304,45 @@ services.Id,
                 Assert.Equal(4_000m, item.PendingAmount);
                 Assert.Equal(26.7m, item.Share);
             });
+    }
+
+    [Fact]
+    public async Task ActStatuses_AppliesClientAndContractFilters()
+    {
+        await using var db = await CreateContextAsync();
+        var targetClient = new Client { Name = "Act status target" };
+        var otherClient = new Client { Name = "Act status other" };
+        var targetContract = Contract("ACT-CONTRACT", ContractStatus.Concluded, 9_000m, new DateTime(2026, 5, 1), false, null);
+        db.AddRange(targetClient, otherClient, targetContract);
+        await db.SaveChangesAsync();
+
+        var matching = Act("ACT-FILTER-1", ActStatus.Signed, ActWorkflowStatus.Signed, 1_200m, new DateTime(2026, 5, 10));
+        matching.ClientId = targetClient.Id;
+        var otherClientAct = Act("ACT-FILTER-2", ActStatus.Signed, ActWorkflowStatus.Signed, 2_200m, new DateTime(2026, 5, 11));
+        otherClientAct.ClientId = otherClient.Id;
+        var unlinkedAct = Act("ACT-FILTER-3", ActStatus.Signed, ActWorkflowStatus.Signed, 3_200m, new DateTime(2026, 5, 12));
+        unlinkedAct.ClientId = targetClient.Id;
+        db.Acts.AddRange(matching, otherClientAct, unlinkedAct);
+        await db.SaveChangesAsync();
+
+        db.ContractActs.Add(new ContractAct { ContractId = targetContract.Id, ActId = matching.Id });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+
+        var action = await controller.ActStatuses(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            CancellationToken.None,
+            clientId: targetClient.Id,
+            contractId: targetContract.Id);
+
+        var report = Assert.IsType<ActStatusReportDto>(Assert.IsType<OkObjectResult>(action.Result).Value);
+        Assert.Equal(1, report.ActCount);
+        Assert.Equal(1_200m, report.TotalAmount);
+        var status = Assert.Single(report.Statuses);
+        Assert.Equal(ActWorkflowStatus.Signed, status.WorkflowStatus);
+        Assert.Equal(1_200m, status.TotalAmount);
     }
 
     [Fact]
@@ -4380,6 +4477,48 @@ services.Id,
                 Assert.Equal(5_000m, item.TotalAmount);
                 Assert.Equal(23.8m, item.Share);
             });
+    }
+
+    [Fact]
+    public async Task ContractStatuses_AppliesClientCaseAndContractFilters()
+    {
+        await using var db = await CreateContextAsync();
+        var targetClient = new Client { Name = "Contract status target" };
+        var otherClient = new Client { Name = "Contract status other" };
+        var targetCase = new ClientCase { Client = targetClient, CaseNumber = "CON-FILTER", Title = "Contract filter case" };
+        var matching = Contract("CON-FILTER-1", ContractStatus.Concluded, 1_500m, new DateTime(2026, 5, 10), false, null);
+        var otherClientContract = Contract("CON-FILTER-2", ContractStatus.Concluded, 2_500m, new DateTime(2026, 5, 11), false, null);
+        db.AddRange(targetClient, otherClient, targetCase, matching, otherClientContract);
+        await db.SaveChangesAsync();
+
+        db.ClientContracts.AddRange(
+            new ClientContract { ClientId = targetClient.Id, ContractId = matching.Id },
+            new ClientContract { ClientId = otherClient.Id, ContractId = otherClientContract.Id });
+        var linkedInvoice = InvoicePayment("CON-FILTER-INV", PaymentType.Income, PaymentStatus.Completed, InvoiceWorkflowStatus.Paid, 1_500m, 1_500m, new DateTime(2026, 5, 12));
+        linkedInvoice.ClientId = targetClient.Id;
+        linkedInvoice.ClientCaseId = targetCase.Id;
+        db.Payments.Add(linkedInvoice);
+        await db.SaveChangesAsync();
+
+        db.ContractInvoices.Add(new ContractInvoice { ContractId = matching.Id, InvoiceId = linkedInvoice.Id });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+
+        var action = await controller.ContractStatuses(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            CancellationToken.None,
+            clientId: targetClient.Id,
+            caseId: targetCase.Id,
+            contractId: matching.Id);
+
+        var report = Assert.IsType<ContractStatusReportDto>(Assert.IsType<OkObjectResult>(action.Result).Value);
+        Assert.Equal(1, report.ContractCount);
+        Assert.Equal(1_500m, report.TotalAmount);
+        var status = Assert.Single(report.Statuses);
+        Assert.Equal(ContractStatus.Concluded, status.Status);
+        Assert.Equal(1_500m, status.TotalAmount);
     }
 
     [Fact]

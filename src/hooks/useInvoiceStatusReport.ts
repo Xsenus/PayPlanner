@@ -5,6 +5,10 @@ import type { InvoiceStatusReport } from '../types';
 export interface InvoiceStatusReportFilters {
   from?: string;
   to?: string;
+  clientId?: number;
+  caseId?: number;
+  contractId?: number;
+  incomeTypeId?: number;
 }
 
 export function useInvoiceStatusReport(filters: InvoiceStatusReportFilters) {
@@ -17,8 +21,12 @@ export function useInvoiceStatusReport(filters: InvoiceStatusReportFilters) {
     () => ({
       from: filters.from,
       to: filters.to,
+      clientId: filters.clientId,
+      caseId: filters.caseId,
+      contractId: filters.contractId,
+      incomeTypeId: filters.incomeTypeId,
     }),
-    [filters.from, filters.to],
+    [filters.caseId, filters.clientId, filters.contractId, filters.from, filters.incomeTypeId, filters.to],
   );
 
   const load = useCallback(async () => {

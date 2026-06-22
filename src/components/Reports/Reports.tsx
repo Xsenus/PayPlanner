@@ -7682,19 +7682,19 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     loading: invoiceStatusReportLoading,
     error: invoiceStatusReportError,
     reload: reloadInvoiceStatusReport,
-  } = useInvoiceStatusReport(cashFlowDates);
+  } = useInvoiceStatusReport(moneyOperationReportFilters);
   const {
     report: actStatusReport,
     loading: actStatusReportLoading,
     error: actStatusReportError,
     reload: reloadActStatusReport,
-  } = useActStatusReport(cashFlowDates);
+  } = useActStatusReport(moneyOperationReportFilters);
   const {
     report: contractStatusReport,
     loading: contractStatusReportLoading,
     error: contractStatusReportError,
     reload: reloadContractStatusReport,
-  } = useContractStatusReport(cashFlowDates);
+  } = useContractStatusReport(moneyOperationReportFilters);
   const {
     report: paymentOrderReport,
     loading: paymentOrderReportLoading,
@@ -8434,7 +8434,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={invoiceStatusReportLoading}
               error={invoiceStatusReportError}
               onReload={reloadInvoiceStatusReport}
-              filters={cashFlowDates}
+              filters={moneyOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -8443,7 +8443,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={actStatusReportLoading}
               error={actStatusReportError}
               onReload={reloadActStatusReport}
-              filters={cashFlowDates}
+              filters={moneyOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
@@ -8452,7 +8452,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={contractStatusReportLoading}
               error={contractStatusReportError}
               onReload={reloadContractStatusReport}
-              filters={cashFlowDates}
+              filters={moneyOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 

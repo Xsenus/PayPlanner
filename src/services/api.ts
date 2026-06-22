@@ -6111,6 +6111,10 @@ export class ApiService {
   async getInvoiceStatusReport(params?: {
     from?: string;
     to?: string;
+    clientId?: number;
+    caseId?: number;
+    contractId?: number;
+    incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<InvoiceStatusReport>(`/reports/invoice-statuses${q}`);
@@ -6119,6 +6123,9 @@ export class ApiService {
   async getActStatusReport(params?: {
     from?: string;
     to?: string;
+    clientId?: number;
+    caseId?: number;
+    contractId?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<ActStatusReport>(`/reports/act-statuses${q}`);
@@ -6127,6 +6134,9 @@ export class ApiService {
   async getContractStatusReport(params?: {
     from?: string;
     to?: string;
+    clientId?: number;
+    caseId?: number;
+    contractId?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<ContractStatusReport>(`/reports/contract-statuses${q}`);

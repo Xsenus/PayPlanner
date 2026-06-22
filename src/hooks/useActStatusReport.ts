@@ -5,6 +5,9 @@ import type { ActStatusReport } from '../types';
 export interface ActStatusReportFilters {
   from?: string;
   to?: string;
+  clientId?: number;
+  caseId?: number;
+  contractId?: number;
 }
 
 export function useActStatusReport(filters: ActStatusReportFilters) {
@@ -17,8 +20,11 @@ export function useActStatusReport(filters: ActStatusReportFilters) {
     () => ({
       from: filters.from,
       to: filters.to,
+      clientId: filters.clientId,
+      caseId: filters.caseId,
+      contractId: filters.contractId,
     }),
-    [filters.from, filters.to],
+    [filters.caseId, filters.clientId, filters.contractId, filters.from, filters.to],
   );
 
   const load = useCallback(async () => {
