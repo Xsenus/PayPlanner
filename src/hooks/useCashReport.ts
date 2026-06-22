@@ -6,6 +6,11 @@ export interface CashReportFilters {
   from?: string;
   to?: string;
   accountName?: string;
+  counterpartyName?: string;
+  clientId?: number;
+  caseId?: number;
+  contractId?: number;
+  incomeTypeId?: number;
 }
 
 export function useCashReport(filters: CashReportFilters, options: { enabled?: boolean } = {}) {
@@ -20,8 +25,22 @@ export function useCashReport(filters: CashReportFilters, options: { enabled?: b
       from: filters.from,
       to: filters.to,
       accountName: filters.accountName,
+      counterpartyName: filters.counterpartyName,
+      clientId: filters.clientId,
+      caseId: filters.caseId,
+      contractId: filters.contractId,
+      incomeTypeId: filters.incomeTypeId,
     }),
-    [filters.accountName, filters.from, filters.to],
+    [
+      filters.accountName,
+      filters.caseId,
+      filters.clientId,
+      filters.contractId,
+      filters.counterpartyName,
+      filters.from,
+      filters.incomeTypeId,
+      filters.to,
+    ],
   );
 
   const load = useCallback(async () => {

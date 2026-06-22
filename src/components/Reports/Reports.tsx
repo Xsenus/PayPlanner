@@ -2520,6 +2520,8 @@ type ManagementReportExportFilters = {
   counterpartyName?: string;
   clientId?: number;
   caseId?: number;
+  contractId?: number;
+  incomeTypeId?: number;
   asOf?: string;
   status?: string;
   responsibleUserId?: number;
@@ -7395,8 +7397,13 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     () => ({
       ...cashFlowDates,
       ...(selectedMoneyAccountName ? { accountName: selectedMoneyAccountName } : {}),
+      ...(selectedCounterpartyName ? { counterpartyName: selectedCounterpartyName } : {}),
+      ...(selectedClientId ? { clientId: selectedClientId } : {}),
+      ...(selectedCaseId ? { caseId: selectedCaseId } : {}),
+      ...(selectedContractId ? { contractId: selectedContractId } : {}),
+      ...(selectedIncomeTypeId ? { incomeTypeId: selectedIncomeTypeId } : {}),
     }),
-    [cashFlowDates, selectedMoneyAccountName],
+    [cashFlowDates, selectedCaseId, selectedClientId, selectedContractId, selectedCounterpartyName, selectedIncomeTypeId, selectedMoneyAccountName],
   );
   const casePeriodReportFilters = useMemo(
     () => ({ ...cashFlowDates, limit: 100 }),

@@ -588,7 +588,7 @@ public class ReportsController : ControllerBase
 
                     var (start, end) = ResolveReportPeriod(from, to, reportToday);
                     var reportDto = await SqliteRetryHelper.ExecuteAsync(
-                        cancellationToken => BuildCashBookReportAsync(start, end, normalizedAccountName, paymentsVisibility, cancellationToken),
+                        cancellationToken => BuildCashBookReportAsync(start, end, normalizedAccountName, normalizedCounterpartyName, effectiveClientId, effectiveCaseId, effectiveContractId, effectiveIncomeTypeId, paymentsVisibility, cancellationToken),
                         _logger,
                         ct);
                     return (BuildCashBookExportDocument(reportDto), null);
@@ -7874,6 +7874,11 @@ public class ReportsController : ControllerBase
         DateTime from,
         DateTime to,
         string? accountName,
+        string? counterpartyName,
+        int? clientId,
+        int? caseId,
+        int? contractId,
+        int? incomeTypeId,
         DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
@@ -7884,6 +7889,87 @@ public class ReportsController : ControllerBase
         if (!string.IsNullOrWhiteSpace(accountName))
         {
             postedOrders = postedOrders.Where(order => order.Account == accountName);
+        }
+
+        if (!string.IsNullOrWhiteSpace(counterpartyName))
+        {
+            var counterpartyFilter = counterpartyName.Trim();
+            postedOrders = postedOrders.Where(item =>
+                (item.PayerName != null && item.PayerName.Contains(counterpartyFilter)) ||
+                (item.ReceiverName != null && item.ReceiverName.Contains(counterpartyFilter)) ||
+                (item.PaymentId.HasValue && _db.Payments.Any(payment =>
+                    payment.Id == item.PaymentId.Value &&
+                    payment.CounterpartyName != null &&
+                    payment.CounterpartyName.Contains(counterpartyFilter))) ||
+                (item.MoneyOperationId.HasValue && _db.MoneyOperations.Any(operation =>
+                    operation.Id == item.MoneyOperationId.Value &&
+                    operation.CounterpartyName != null &&
+                    operation.CounterpartyName.Contains(counterpartyFilter))));
+        }
+
+        if (clientId.HasValue && clientId.Value > 0)
+        {
+            var targetClientId = clientId.Value;
+            postedOrders = postedOrders.Where(item =>
+                item.ClientId == targetClientId ||
+                (item.PaymentId.HasValue && _db.Payments.Any(payment =>
+                    payment.Id == item.PaymentId.Value &&
+                    (payment.ClientId == targetClientId || payment.ExpenseClientId == targetClientId))) ||
+                (item.MoneyOperationId.HasValue && _db.MoneyOperations.Any(operation =>
+                    operation.Id == item.MoneyOperationId.Value &&
+                    operation.CounterpartyName != null &&
+                    _db.Clients.Any(client =>
+                        client.Id == targetClientId &&
+                        ((!string.IsNullOrEmpty(client.Name) && operation.CounterpartyName.Contains(client.Name)) ||
+                            (!string.IsNullOrEmpty(client.Company) && operation.CounterpartyName.Contains(client.Company)))))));
+        }
+
+        if (caseId.HasValue && caseId.Value > 0)
+        {
+            var targetCaseId = caseId.Value;
+            postedOrders = postedOrders.Where(item =>
+                (item.PaymentId.HasValue && _db.Payments.Any(payment =>
+                    payment.Id == item.PaymentId.Value &&
+                    (payment.ClientCaseId == targetCaseId ||
+                        payment.InvoiceClientCases.Any(link => link.ClientCaseId == targetCaseId)))) ||
+                (item.MoneyOperationId.HasValue && _db.MoneyOperations.Any(operation =>
+                    operation.Id == item.MoneyOperationId.Value &&
+                    operation.LinkedInvoiceId.HasValue &&
+                    _db.Payments.Any(payment =>
+                        payment.InvoiceId == operation.LinkedInvoiceId.Value &&
+                        (payment.ClientCaseId == targetCaseId ||
+                            payment.InvoiceClientCases.Any(link => link.ClientCaseId == targetCaseId))))));
+        }
+
+        if (contractId.HasValue && contractId.Value > 0)
+        {
+            var targetContractId = contractId.Value;
+            postedOrders = postedOrders.Where(item =>
+                (item.PaymentId.HasValue && _db.Payments.Any(payment =>
+                    payment.Id == item.PaymentId.Value &&
+                    (payment.ContractId == targetContractId ||
+                        _db.ContractPayments.Any(link => link.ContractId == targetContractId && link.PaymentId == payment.Id) ||
+                        _db.ContractInvoices.Any(link => link.ContractId == targetContractId && link.InvoiceId == payment.Id)))) ||
+                (item.MoneyOperationId.HasValue && _db.MoneyOperations.Any(operation =>
+                    operation.Id == item.MoneyOperationId.Value &&
+                    operation.LinkedInvoiceId.HasValue &&
+                    _db.Payments.Any(payment =>
+                        payment.InvoiceId == operation.LinkedInvoiceId.Value &&
+                        (payment.ContractId == targetContractId ||
+                            _db.ContractPayments.Any(link => link.ContractId == targetContractId && link.PaymentId == payment.Id) ||
+                            _db.ContractInvoices.Any(link => link.ContractId == targetContractId && link.InvoiceId == payment.Id))))));
+        }
+
+        if (incomeTypeId.HasValue && incomeTypeId.Value > 0)
+        {
+            var targetIncomeTypeId = incomeTypeId.Value;
+            postedOrders = postedOrders.Where(item =>
+                (item.PaymentId.HasValue && _db.Payments.Any(payment =>
+                    payment.Id == item.PaymentId.Value &&
+                    payment.IncomeTypeId == targetIncomeTypeId)) ||
+                (item.MoneyOperationId.HasValue && _db.MoneyOperations.Any(operation =>
+                    operation.Id == item.MoneyOperationId.Value &&
+                    operation.IncomeTypeId == targetIncomeTypeId)));
         }
 
         var openingBalance = await postedOrders

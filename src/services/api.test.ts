@@ -1354,6 +1354,11 @@ describe('apiService reports', () => {
       to: '2026-05-31',
       source: 'Bank',
       accountName: 'Основной банк',
+      counterpartyName: 'Merkulov',
+      clientId: 10,
+      caseId: 20,
+      contractId: 30,
+      incomeTypeId: 40,
     });
 
     expect(result).toEqual(payload);
@@ -1389,6 +1394,11 @@ describe('apiService reports', () => {
       from: '2026-05-01',
       to: '2026-05-31',
       accountName: 'Основной банк',
+      counterpartyName: 'Merkulov',
+      clientId: 10,
+      caseId: 20,
+      contractId: 30,
+      incomeTypeId: 40,
     });
 
     expect(result).toEqual(payload);
@@ -1398,6 +1408,11 @@ describe('apiService reports', () => {
     expect(String(url)).toContain('from=2026-05-01');
     expect(String(url)).toContain('to=2026-05-31');
     expect(String(url)).toContain('accountName=');
+    expect(String(url)).toContain('counterpartyName=Merkulov');
+    expect(String(url)).toContain('clientId=10');
+    expect(String(url)).toContain('caseId=20');
+    expect(String(url)).toContain('contractId=30');
+    expect(String(url)).toContain('incomeTypeId=40');
   });
 
   it('loads cash book report with filters', async () => {
@@ -1422,6 +1437,11 @@ describe('apiService reports', () => {
       from: '2026-05-01',
       to: '2026-05-31',
       accountName: 'Основная касса',
+      counterpartyName: 'Merkulov',
+      clientId: 10,
+      caseId: 20,
+      contractId: 30,
+      incomeTypeId: 40,
     });
 
     expect(result).toEqual(payload);

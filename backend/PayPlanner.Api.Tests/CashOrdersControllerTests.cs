@@ -246,7 +246,7 @@ public class CashOrdersControllerTests
         var userId = await CreateUserWithPaymentsPermissionAsync(db);
         var controller = CreateController(db, userId, isAdminClaim: false);
 
-        var action = await controller.GetCashBook(null, null, null, CancellationToken.None);
+        var action = await controller.GetCashBook(null, null, null, ct: CancellationToken.None);
 
         Assert.IsType<ForbidResult>(action.Result);
     }
@@ -370,11 +370,108 @@ public class CashOrdersControllerTests
             new DateTime(2026, 5, 1),
             new DateTime(2026, 5, 2),
             "Основная касса",
-            CancellationToken.None);
+            ct: CancellationToken.None);
         var cashBook = Assert.IsType<CashBookResponseDto>(Assert.IsType<OkObjectResult>(cashBookAction.Result).Value);
         Assert.Equal(1_000m, cashBook.Income);
         Assert.Equal(300m, cashBook.Expense);
         Assert.Equal(700m, cashBook.ClosingBalance);
+    }
+
+    [Fact]
+    public async Task CashBook_AppliesLinkedPaymentFilters()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true);
+
+        var targetClient = new Client { Name = "Target Client" };
+        var otherClient = new Client { Name = "Other Client" };
+        var targetCase = new ClientCase { CaseNumber = "CASE-1", Client = targetClient };
+        var otherCase = new ClientCase { CaseNumber = "CASE-2", Client = otherClient };
+        var targetContract = new Contract { Number = "CONTRACT-1", Date = new DateTime(2026, 5, 1) };
+        var otherContract = new Contract { Number = "CONTRACT-2", Date = new DateTime(2026, 5, 1) };
+        var targetIncomeType = new IncomeType { Name = "Target income", PaymentType = PaymentType.Income };
+        var otherIncomeType = new IncomeType { Name = "Other income", PaymentType = PaymentType.Income };
+        db.AddRange(targetClient, otherClient, targetCase, otherCase, targetContract, otherContract, targetIncomeType, otherIncomeType);
+        await db.SaveChangesAsync();
+
+        var targetPayment = new Payment
+        {
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Completed,
+            Date = new DateTime(2026, 5, 10),
+            PlannedDate = new DateTime(2026, 5, 10),
+            Amount = 1_500m,
+            PaidAmount = 1_500m,
+            Description = "Target cash payment",
+            CounterpartyName = "Target payer",
+            ClientId = targetClient.Id,
+            ClientCaseId = targetCase.Id,
+            ContractId = targetContract.Id,
+            IncomeTypeId = targetIncomeType.Id,
+        };
+        var otherPayment = new Payment
+        {
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Completed,
+            Date = new DateTime(2026, 5, 10),
+            PlannedDate = new DateTime(2026, 5, 10),
+            Amount = 9_000m,
+            PaidAmount = 9_000m,
+            Description = "Other cash payment",
+            CounterpartyName = "Other payer",
+            ClientId = otherClient.Id,
+            ClientCaseId = otherCase.Id,
+            ContractId = otherContract.Id,
+            IncomeTypeId = otherIncomeType.Id,
+        };
+        db.Payments.AddRange(targetPayment, otherPayment);
+        await db.SaveChangesAsync();
+
+        db.CashOrders.AddRange(
+            new CashOrder
+            {
+                Number = "PKO-FILTER-TARGET",
+                Type = CashOrderType.Incoming,
+                Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 5, 10),
+                Amount = 1_500m,
+                Account = "Main cashbox",
+                PayerName = "Target payer",
+                ClientId = targetClient.Id,
+                PaymentId = targetPayment.Id,
+            },
+            new CashOrder
+            {
+                Number = "PKO-FILTER-OTHER",
+                Type = CashOrderType.Incoming,
+                Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 5, 10),
+                Amount = 9_000m,
+                Account = "Main cashbox",
+                PayerName = "Other payer",
+                ClientId = otherClient.Id,
+                PaymentId = otherPayment.Id,
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, userId, isAdminClaim: false);
+
+        var action = await controller.GetCashBook(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            "Main cashbox",
+            counterpartyName: "Target",
+            clientId: targetClient.Id,
+            caseId: targetCase.Id,
+            contractId: targetContract.Id,
+            incomeTypeId: targetIncomeType.Id,
+            ct: CancellationToken.None);
+
+        var cashBook = Assert.IsType<CashBookResponseDto>(Assert.IsType<OkObjectResult>(action.Result).Value);
+        Assert.Equal(1_500m, cashBook.Income);
+        Assert.Equal(0m, cashBook.Expense);
+        Assert.Equal(1_500m, cashBook.ClosingBalance);
+        Assert.Equal(1, cashBook.IncomingCount);
     }
 
     [Fact]

@@ -42,6 +42,11 @@ public class CashOrdersController : ControllerBase
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         [FromQuery] string? accountName = null,
+        [FromQuery] string? counterpartyName = null,
+        [FromQuery] int? clientId = null,
+        [FromQuery] int? caseId = null,
+        [FromQuery] int? contractId = null,
+        [FromQuery] int? incomeTypeId = null,
         CancellationToken ct = default)
     {
         if (await RequirePaymentsPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
@@ -55,7 +60,17 @@ public class CashOrdersController : ControllerBase
             return Forbid();
         }
 
-        return Ok(await BuildCashBookAsync(from, to, accountName, visibility, ct));
+        return Ok(await BuildCashBookAsync(
+            from,
+            to,
+            accountName,
+            counterpartyName,
+            clientId,
+            caseId,
+            contractId,
+            incomeTypeId,
+            visibility,
+            ct));
     }
 
     [HttpGet("cashbook/print")]
@@ -63,6 +78,11 @@ public class CashOrdersController : ControllerBase
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
         [FromQuery] string? accountName = null,
+        [FromQuery] string? counterpartyName = null,
+        [FromQuery] int? clientId = null,
+        [FromQuery] int? caseId = null,
+        [FromQuery] int? contractId = null,
+        [FromQuery] int? incomeTypeId = null,
         CancellationToken ct = default)
     {
         if (await RequirePaymentsPermissionAsync(static permission => permission.CanExport, ct) is { } forbidden)
@@ -76,7 +96,17 @@ public class CashOrdersController : ControllerBase
             return Forbid();
         }
 
-        var cashBook = await BuildCashBookAsync(from, to, accountName, visibility, ct);
+        var cashBook = await BuildCashBookAsync(
+            from,
+            to,
+            accountName,
+            counterpartyName,
+            clientId,
+            caseId,
+            contractId,
+            incomeTypeId,
+            visibility,
+            ct);
         return Content(BuildCashBookPrintHtml(cashBook), "text/html; charset=utf-8", Encoding.UTF8);
     }
 
@@ -961,7 +991,17 @@ public class CashOrdersController : ControllerBase
         return CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date;
     }
 
-    private async Task<CashBookResponseDto> BuildCashBookAsync(DateTime? from, DateTime? to, string? accountName, DataVisibilityAccess visibility, CancellationToken ct)
+    private async Task<CashBookResponseDto> BuildCashBookAsync(
+        DateTime? from,
+        DateTime? to,
+        string? accountName,
+        string? counterpartyName,
+        int? clientId,
+        int? caseId,
+        int? contractId,
+        int? incomeTypeId,
+        DataVisibilityAccess visibility,
+        CancellationToken ct)
     {
         var today = await ResolveCashOrderTodayAsync(ct);
         var fromDate = (from ?? today).Date;
@@ -980,6 +1020,7 @@ public class CashOrdersController : ControllerBase
         {
             postedOrders = postedOrders.Where(order => order.Account == accountFilter);
         }
+        postedOrders = ApplyCashBookFilters(postedOrders, counterpartyName, clientId, caseId, contractId, incomeTypeId);
 
         var openingBalance = await postedOrders
             .Where(order => order.Date < fromDate)
@@ -1037,6 +1078,98 @@ public class CashOrdersController : ControllerBase
             OutgoingCount = periodGroups.Sum(group => group.OutgoingCount),
             Days = days,
         };
+    }
+
+    private IQueryable<CashOrder> ApplyCashBookFilters(
+        IQueryable<CashOrder> query,
+        string? counterpartyName,
+        int? clientId,
+        int? caseId,
+        int? contractId,
+        int? incomeTypeId)
+    {
+        if (!string.IsNullOrWhiteSpace(counterpartyName))
+        {
+            var counterpartyFilter = counterpartyName.Trim();
+            query = query.Where(item =>
+                (item.PayerName != null && item.PayerName.Contains(counterpartyFilter)) ||
+                (item.ReceiverName != null && item.ReceiverName.Contains(counterpartyFilter)) ||
+                (item.PaymentId.HasValue && _db.Payments.Any(payment =>
+                    payment.Id == item.PaymentId.Value &&
+                    payment.CounterpartyName != null &&
+                    payment.CounterpartyName.Contains(counterpartyFilter))) ||
+                (item.MoneyOperationId.HasValue && _db.MoneyOperations.Any(operation =>
+                    operation.Id == item.MoneyOperationId.Value &&
+                    operation.CounterpartyName != null &&
+                    operation.CounterpartyName.Contains(counterpartyFilter))));
+        }
+
+        if (clientId.HasValue && clientId.Value > 0)
+        {
+            var targetClientId = clientId.Value;
+            query = query.Where(item =>
+                item.ClientId == targetClientId ||
+                (item.PaymentId.HasValue && _db.Payments.Any(payment =>
+                    payment.Id == item.PaymentId.Value &&
+                    (payment.ClientId == targetClientId || payment.ExpenseClientId == targetClientId))) ||
+                (item.MoneyOperationId.HasValue && _db.MoneyOperations.Any(operation =>
+                    operation.Id == item.MoneyOperationId.Value &&
+                    operation.CounterpartyName != null &&
+                    _db.Clients.Any(client =>
+                        client.Id == targetClientId &&
+                        ((!string.IsNullOrEmpty(client.Name) && operation.CounterpartyName.Contains(client.Name)) ||
+                            (!string.IsNullOrEmpty(client.Company) && operation.CounterpartyName.Contains(client.Company)))))));
+        }
+
+        if (caseId.HasValue && caseId.Value > 0)
+        {
+            var targetCaseId = caseId.Value;
+            query = query.Where(item =>
+                (item.PaymentId.HasValue && _db.Payments.Any(payment =>
+                    payment.Id == item.PaymentId.Value &&
+                    (payment.ClientCaseId == targetCaseId ||
+                        payment.InvoiceClientCases.Any(link => link.ClientCaseId == targetCaseId)))) ||
+                (item.MoneyOperationId.HasValue && _db.MoneyOperations.Any(operation =>
+                    operation.Id == item.MoneyOperationId.Value &&
+                    operation.LinkedInvoiceId.HasValue &&
+                    _db.Payments.Any(payment =>
+                        payment.InvoiceId == operation.LinkedInvoiceId.Value &&
+                        (payment.ClientCaseId == targetCaseId ||
+                            payment.InvoiceClientCases.Any(link => link.ClientCaseId == targetCaseId))))));
+        }
+
+        if (contractId.HasValue && contractId.Value > 0)
+        {
+            var targetContractId = contractId.Value;
+            query = query.Where(item =>
+                (item.PaymentId.HasValue && _db.Payments.Any(payment =>
+                    payment.Id == item.PaymentId.Value &&
+                    (payment.ContractId == targetContractId ||
+                        _db.ContractPayments.Any(link => link.ContractId == targetContractId && link.PaymentId == payment.Id) ||
+                        _db.ContractInvoices.Any(link => link.ContractId == targetContractId && link.InvoiceId == payment.Id)))) ||
+                (item.MoneyOperationId.HasValue && _db.MoneyOperations.Any(operation =>
+                    operation.Id == item.MoneyOperationId.Value &&
+                    operation.LinkedInvoiceId.HasValue &&
+                    _db.Payments.Any(payment =>
+                        payment.InvoiceId == operation.LinkedInvoiceId.Value &&
+                        (payment.ContractId == targetContractId ||
+                            _db.ContractPayments.Any(link => link.ContractId == targetContractId && link.PaymentId == payment.Id) ||
+                            _db.ContractInvoices.Any(link => link.ContractId == targetContractId && link.InvoiceId == payment.Id))))));
+        }
+
+        if (incomeTypeId.HasValue && incomeTypeId.Value > 0)
+        {
+            var targetIncomeTypeId = incomeTypeId.Value;
+            query = query.Where(item =>
+                (item.PaymentId.HasValue && _db.Payments.Any(payment =>
+                    payment.Id == item.PaymentId.Value &&
+                    payment.IncomeTypeId == targetIncomeTypeId)) ||
+                (item.MoneyOperationId.HasValue && _db.MoneyOperations.Any(operation =>
+                    operation.Id == item.MoneyOperationId.Value &&
+                    operation.IncomeTypeId == targetIncomeTypeId)));
+        }
+
+        return query;
     }
 
     private Task<decimal> CalculateCashBalanceAsync(DateTime date, string accountName, DataVisibilityAccess visibility, CancellationToken ct)
