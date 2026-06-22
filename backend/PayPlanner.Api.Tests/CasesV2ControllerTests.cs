@@ -3377,7 +3377,7 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
-    public async Task Documents_ForbidListWithoutCaseViewPermission()
+    public async Task Documents_ForbidReadAndDownloadWithoutCaseViewPermission()
     {
         await using var db = await CreateContextAsync();
         var viewer = await CreateUserAsync(db, "documents-no-view@example.com", "Без просмотра дел");
@@ -3419,8 +3419,14 @@ public class CasesV2ControllerTests
         var controller = CreateController(db, viewer);
 
         var listResult = await controller.GetDocuments(clientCase.Id, CancellationToken.None);
+        var documentResult = await controller.GetDocumentById(document.Id, CancellationToken.None);
+        var downloadByIdResult = await controller.DownloadDocumentById(document.Id, CancellationToken.None);
+        var scopedDownloadResult = await controller.DownloadDocument(clientCase.Id, document.Id, CancellationToken.None);
 
         Assert.IsType<ForbidResult>(listResult.Result);
+        Assert.IsType<ForbidResult>(documentResult.Result);
+        Assert.IsType<ForbidResult>(downloadByIdResult);
+        Assert.IsType<ForbidResult>(scopedDownloadResult);
     }
 
     [Fact]

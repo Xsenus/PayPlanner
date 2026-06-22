@@ -3934,6 +3934,11 @@ public class CasesV2Controller : ControllerBase
     [HttpGet("{id:int}/documents/{documentId:int}/download")]
     public async Task<IActionResult> DownloadDocument(int id, int documentId, CancellationToken ct)
     {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var visibility = await ResolveCasesVisibilityAsync(ct);
         if (visibility is null)
         {
