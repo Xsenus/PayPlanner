@@ -2412,7 +2412,7 @@ public class TasksControllerTests
             .SingleAsync();
         Assert.Equal(PaymentStatus.Pending, payment.Status);
         Assert.Equal(7_000m, payment.Amount);
-        Assert.Equal(DateTime.UtcNow.Date.AddDays(5), payment.Date);
+        Assert.Equal(GetDefaultProfileToday().AddDays(5), payment.Date);
         Assert.Contains(payment.Responsibles, responsible => responsible.UserId == assignee.Id);
     }
 
@@ -2544,7 +2544,7 @@ public class TasksControllerTests
         var payment = await db.Payments.SingleAsync();
         Assert.Equal(PaymentStatus.Pending, payment.Status);
         Assert.Equal(6_500m, payment.Amount);
-        Assert.Equal(DateTime.UtcNow.Date.AddDays(5), payment.Date);
+        Assert.Equal(GetDefaultProfileToday().AddDays(5), payment.Date);
     }
 
     [Fact]
@@ -2616,7 +2616,7 @@ public class TasksControllerTests
 
         var updatedPayment = await db.Payments.SingleAsync(item => item.Id == payment.Id);
         Assert.Equal(PaymentStatus.Pending, updatedPayment.Status);
-        Assert.Equal(DateTime.UtcNow.Date.AddDays(5), updatedPayment.Date);
+        Assert.Equal(GetDefaultProfileToday().AddDays(5), updatedPayment.Date);
     }
 
     [Fact]
@@ -3481,6 +3481,12 @@ public class TasksControllerTests
         }
 
         throw new InvalidOperationException("No test timezone with a local date different from UTC was found.");
+    }
+
+    private static DateTime GetDefaultProfileToday()
+    {
+        var timeZone = CalendarTimeZoneHelper.ResolveTimeZone(null);
+        return CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date;
     }
 
     private static (TaskJournalAutomationSchedulerService Scheduler, ServiceProvider Provider) CreateAutomationScheduler(
