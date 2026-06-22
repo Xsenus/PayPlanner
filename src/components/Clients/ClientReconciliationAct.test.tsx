@@ -413,7 +413,9 @@ describe("ClientReconciliationAct", () => {
       />,
     );
 
-    await waitFor(() => expect(apiMock.getInvoices).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(screen.getAllByText("По данным ООО ЭлитПраво").length).toBeGreaterThan(0);
+    });
 
     fireEvent.click(screen.getByRole("button", { name: /Excel/i }));
 
@@ -566,7 +568,9 @@ describe("ClientReconciliationAct", () => {
       />,
     );
 
-    await waitFor(() => expect(apiMock.getInvoices).toHaveBeenCalled());
+    await waitFor(() => {
+      expect(screen.getAllByText("По данным ООО ЭлитПраво").length).toBeGreaterThan(0);
+    });
 
     fireEvent.click(screen.getByRole("button", { name: /PDF/i }));
 
