@@ -6220,6 +6220,13 @@ export class ApiService {
   async getCashOrderReport(params?: {
     from?: string;
     to?: string;
+    source?: MoneyOperationSource;
+    accountName?: string;
+    counterpartyName?: string;
+    clientId?: number;
+    caseId?: number;
+    contractId?: number;
+    incomeTypeId?: number;
   }) {
     const q = buildQuery(params ?? {});
     return this.request<CashOrderReport>(`/reports/cash-orders${q}`);

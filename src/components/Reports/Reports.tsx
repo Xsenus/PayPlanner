@@ -7730,7 +7730,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     loading: cashOrderReportLoading,
     error: cashOrderReportError,
     reload: reloadCashOrderReport,
-  } = useCashOrderReport(cashFlowDates, { enabled: canViewPaymentReports });
+  } = useCashOrderReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
   const {
     report: bankStatementImportReport,
     loading: bankStatementImportReportLoading,
@@ -8507,7 +8507,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
                 loading={cashOrderReportLoading}
                 error={cashOrderReportError}
                 onReload={reloadCashOrderReport}
-                filters={cashFlowDates}
+                filters={moneyOperationReportFilters}
                 profileTimeZoneId={profileTimeZoneId}
                 canExportPaymentReports={canExportPaymentReports}
               />

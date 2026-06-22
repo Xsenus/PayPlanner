@@ -2513,6 +2513,13 @@ describe('apiService reports', () => {
     const result = await apiService.getCashOrderReport({
       from: '2026-05-01',
       to: '2026-05-31',
+      source: 'Cash',
+      accountName: 'Касса',
+      counterpartyName: 'ООО Ромашка',
+      clientId: 10,
+      caseId: 20,
+      contractId: 30,
+      incomeTypeId: 40,
     });
 
     expect(result).toEqual(payload);
@@ -2521,6 +2528,13 @@ describe('apiService reports', () => {
     expect(String(url)).toContain('/reports/cash-orders?');
     expect(String(url)).toContain('from=2026-05-01');
     expect(String(url)).toContain('to=2026-05-31');
+    expect(String(url)).toContain('source=Cash');
+    expect(String(url)).toContain('accountName=%D0%9A%D0%B0%D1%81%D1%81%D0%B0');
+    expect(String(url)).toContain('counterpartyName=%D0%9E%D0%9E%D0%9E+%D0%A0%D0%BE%D0%BC%D0%B0%D1%88%D0%BA%D0%B0');
+    expect(String(url)).toContain('clientId=10');
+    expect(String(url)).toContain('caseId=20');
+    expect(String(url)).toContain('contractId=30');
+    expect(String(url)).toContain('incomeTypeId=40');
   });
 
   it('loads bank statement import report with filters', async () => {

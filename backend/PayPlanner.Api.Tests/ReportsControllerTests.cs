@@ -4938,6 +4938,87 @@ services.Id,
     }
 
     [Fact]
+    public async Task CashOrders_AppliesMoneyOperationFilters()
+    {
+        await using var db = await CreateContextAsync();
+        var targetClient = new Client { Name = "Cash order target client", Company = "ООО Целевой клиент" };
+        var otherClient = new Client { Name = "Cash order other client" };
+        var targetCase = new ClientCase { Client = targetClient, CaseNumber = "CASH-FILTER", Title = "Cash order case" };
+        var targetContract = Contract("CASH-CONTRACT", ContractStatus.Concluded, 5_000m, new DateTime(2026, 5, 1), false, null);
+        var services = new IncomeType { Name = "Cash order services", PaymentType = PaymentType.Income };
+        db.AddRange(targetClient, otherClient, targetCase, targetContract, services);
+        await db.SaveChangesAsync();
+
+        var matchingPayment = InvoicePayment("Касса", PaymentType.Income, PaymentStatus.Completed, InvoiceWorkflowStatus.Paid, 1_500m, 1_500m, new DateTime(2026, 5, 10), DocumentKind.Payment);
+        matchingPayment.ClientId = targetClient.Id;
+        matchingPayment.ClientCaseId = targetCase.Id;
+        matchingPayment.ContractId = targetContract.Id;
+        matchingPayment.IncomeTypeId = services.Id;
+        matchingPayment.CounterpartyName = "ООО Целевой клиент";
+
+        var otherClientPayment = InvoicePayment("Касса", PaymentType.Income, PaymentStatus.Completed, InvoiceWorkflowStatus.Paid, 2_500m, 2_500m, new DateTime(2026, 5, 11), DocumentKind.Payment);
+        otherClientPayment.ClientId = otherClient.Id;
+        otherClientPayment.ClientCaseId = targetCase.Id;
+        otherClientPayment.ContractId = targetContract.Id;
+        otherClientPayment.IncomeTypeId = services.Id;
+        otherClientPayment.CounterpartyName = "ООО Целевой клиент";
+
+        var otherAccountPayment = InvoicePayment("Другая касса", PaymentType.Income, PaymentStatus.Completed, InvoiceWorkflowStatus.Paid, 3_500m, 3_500m, new DateTime(2026, 5, 12), DocumentKind.Payment);
+        otherAccountPayment.ClientId = targetClient.Id;
+        otherAccountPayment.ClientCaseId = targetCase.Id;
+        otherAccountPayment.ContractId = targetContract.Id;
+        otherAccountPayment.IncomeTypeId = services.Id;
+        otherAccountPayment.CounterpartyName = "ООО Целевой клиент";
+
+        db.Payments.AddRange(matchingPayment, otherClientPayment, otherAccountPayment);
+        await db.SaveChangesAsync();
+
+        var matchingOrder = CashOrder("PKO-FILTER-1", CashOrderType.Incoming, CashOrderStatus.Posted, 1_500m, new DateTime(2026, 5, 10));
+        matchingOrder.ClientId = targetClient.Id;
+        matchingOrder.PaymentId = matchingPayment.Id;
+        matchingOrder.Account = "Касса";
+        matchingOrder.PayerName = "ООО Целевой клиент";
+
+        var otherClientOrder = CashOrder("PKO-FILTER-2", CashOrderType.Incoming, CashOrderStatus.Posted, 2_500m, new DateTime(2026, 5, 11));
+        otherClientOrder.ClientId = otherClient.Id;
+        otherClientOrder.PaymentId = otherClientPayment.Id;
+        otherClientOrder.Account = "Касса";
+        otherClientOrder.PayerName = "ООО Целевой клиент";
+
+        var otherAccountOrder = CashOrder("PKO-FILTER-3", CashOrderType.Incoming, CashOrderStatus.Posted, 3_500m, new DateTime(2026, 5, 12));
+        otherAccountOrder.ClientId = targetClient.Id;
+        otherAccountOrder.PaymentId = otherAccountPayment.Id;
+        otherAccountOrder.Account = "Другая касса";
+        otherAccountOrder.PayerName = "ООО Целевой клиент";
+
+        db.CashOrders.AddRange(matchingOrder, otherClientOrder, otherAccountOrder);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+
+        var action = await controller.CashOrders(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            CancellationToken.None,
+            source: MoneyOperationSource.Cash,
+            accountName: "Касса",
+            counterpartyName: "Целевой",
+            clientId: targetClient.Id,
+            caseId: targetCase.Id,
+            contractId: targetContract.Id,
+            incomeTypeId: services.Id);
+
+        var report = Assert.IsType<CashOrderReportDto>(Assert.IsType<OkObjectResult>(action.Result).Value);
+        Assert.Equal(1, report.OrderCount);
+        Assert.Equal(1_500m, report.PostedIncomingTotal);
+        Assert.Equal(0m, report.PostedOutgoingTotal);
+        var status = Assert.Single(report.Statuses);
+        Assert.Equal(CashOrderStatus.Posted, status.Status);
+        Assert.Equal(1_500m, status.IncomingTotal);
+        Assert.Equal(1, status.IncomingCount);
+    }
+
+    [Fact]
     public async Task CashOrders_WithoutPaymentsViewPermission_ReturnsForbid()
     {
         await using var db = await CreateContextAsync();

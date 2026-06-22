@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../services/api';
-import type { CashOrderReport } from '../types';
+import type { CashOrderReport, MoneyOperationSource } from '../types';
 
 export interface CashOrderReportFilters {
   from?: string;
   to?: string;
+  source?: MoneyOperationSource;
+  accountName?: string;
+  counterpartyName?: string;
+  clientId?: number;
+  caseId?: number;
+  contractId?: number;
+  incomeTypeId?: number;
 }
 
 export function useCashOrderReport(filters: CashOrderReportFilters, options: { enabled?: boolean } = {}) {
@@ -18,8 +25,25 @@ export function useCashOrderReport(filters: CashOrderReportFilters, options: { e
     () => ({
       from: filters.from,
       to: filters.to,
+      source: filters.source,
+      accountName: filters.accountName,
+      counterpartyName: filters.counterpartyName,
+      clientId: filters.clientId,
+      caseId: filters.caseId,
+      contractId: filters.contractId,
+      incomeTypeId: filters.incomeTypeId,
     }),
-    [filters.from, filters.to],
+    [
+      filters.accountName,
+      filters.caseId,
+      filters.clientId,
+      filters.contractId,
+      filters.counterpartyName,
+      filters.from,
+      filters.incomeTypeId,
+      filters.source,
+      filters.to,
+    ],
   );
 
   const load = useCallback(async () => {
