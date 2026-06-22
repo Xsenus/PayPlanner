@@ -71,6 +71,21 @@ export async function getWebPushStatus(): Promise<WebPushStatus> {
   const registration = await registerPayPlannerPushWorker();
   const browserSubscription = await registration.pushManager.getSubscription();
   const permission = Notification.permission;
+  const hasCurrentActiveSubscription = Boolean(
+    browserSubscription
+      && subscriptions.some((item) => item.isActive && item.endpoint === browserSubscription.endpoint),
+  );
+
+  if (hasCurrentActiveSubscription && permission !== 'denied') {
+    return {
+      status: 'subscribed',
+      permission,
+      subscriptions,
+      currentEndpoint: browserSubscription?.endpoint,
+      publicKeyReady: Boolean(publicKey.enabled && publicKey.ready && publicKey.publicKey),
+      message: 'Push-уведомления включены на этом устройстве.',
+    };
+  }
 
   if (!publicKey.enabled) {
     return {
@@ -104,11 +119,6 @@ export async function getWebPushStatus(): Promise<WebPushStatus> {
       message: 'Браузер запретил push-уведомления для CRM.',
     };
   }
-
-  const hasCurrentActiveSubscription = Boolean(
-    browserSubscription
-      && subscriptions.some((item) => item.isActive && item.endpoint === browserSubscription.endpoint),
-  );
 
   return {
     status: hasCurrentActiveSubscription ? 'subscribed' : 'not-subscribed',

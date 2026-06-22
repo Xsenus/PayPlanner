@@ -168,6 +168,79 @@ describe('webPushNotifications', () => {
     });
   });
 
+  it('keeps current active subscription enabled when server keys are temporarily not ready', async () => {
+    const originalServiceWorker = navigator.serviceWorker;
+    const originalPushManager = window.PushManager;
+    const originalNotification = window.Notification;
+    const originalIsSecureContext = window.isSecureContext;
+    const browserSubscription = { endpoint: 'https://push.example/current' };
+    const register = vi.fn().mockResolvedValue({
+      pushManager: {
+        getSubscription: vi.fn().mockResolvedValue(browserSubscription),
+      },
+    });
+
+    Object.defineProperty(navigator, 'serviceWorker', {
+      configurable: true,
+      value: { register },
+    });
+    Object.defineProperty(window, 'PushManager', {
+      configurable: true,
+      value: vi.fn(),
+    });
+    Object.defineProperty(window, 'Notification', {
+      configurable: true,
+      value: { permission: 'granted' },
+    });
+    Object.defineProperty(window, 'isSecureContext', {
+      configurable: true,
+      value: true,
+    });
+    apiMock.getWebPushPublicKey.mockResolvedValue({
+      enabled: true,
+      ready: false,
+      publicKey: '',
+    });
+    apiMock.getUserPushSubscriptions.mockResolvedValue([
+      {
+        id: 7,
+        endpoint: browserSubscription.endpoint,
+        browser: 'Google Chrome',
+        platform: 'Windows',
+        deviceName: 'Google Chrome / Windows',
+        isActive: true,
+        createdAt: '2026-06-22T09:00:00Z',
+        updatedAt: '2026-06-22T09:00:00Z',
+        lastSeenAt: '2026-06-22T09:00:00Z',
+      },
+    ]);
+
+    await expect(getWebPushStatus()).resolves.toMatchObject({
+      status: 'subscribed',
+      permission: 'granted',
+      currentEndpoint: browserSubscription.endpoint,
+      publicKeyReady: false,
+      message: 'Push-уведомления включены на этом устройстве.',
+    });
+
+    Object.defineProperty(navigator, 'serviceWorker', {
+      configurable: true,
+      value: originalServiceWorker,
+    });
+    Object.defineProperty(window, 'PushManager', {
+      configurable: true,
+      value: originalPushManager,
+    });
+    Object.defineProperty(window, 'Notification', {
+      configurable: true,
+      value: originalNotification,
+    });
+    Object.defineProperty(window, 'isSecureContext', {
+      configurable: true,
+      value: originalIsSecureContext,
+    });
+  });
+
   it('registers PayPlanner push worker at the root scope', async () => {
     const originalServiceWorker = navigator.serviceWorker;
     const originalIsSecureContext = window.isSecureContext;

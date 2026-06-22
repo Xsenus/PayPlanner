@@ -99,6 +99,51 @@ describe('WebPushDevicePanel', () => {
     expect(screen.getByText(/ещё не проверено/)).toBeTruthy();
   });
 
+  it('keeps disable action available for the current device when server diagnostics require setup', async () => {
+    webPushMock.getWebPushStatus.mockResolvedValueOnce(createStatus({
+      status: 'subscribed',
+      permission: 'granted',
+      publicKeyReady: false,
+      currentEndpoint: 'https://push.example/current',
+      message: 'Push-уведомления включены на этом устройстве.',
+      subscriptions: [
+        {
+          id: 10,
+          endpoint: 'https://push.example/current',
+          browser: 'Chrome',
+          platform: 'Windows',
+          deviceName: 'Chrome Windows',
+          isActive: true,
+          createdAt: '2026-06-22T09:00:00Z',
+          updatedAt: '2026-06-22T09:00:00Z',
+          lastSeenAt: '2026-06-22T09:00:00Z',
+        },
+      ],
+    }));
+    apiMock.getWebPushDiagnostics.mockResolvedValueOnce({
+      enabled: true,
+      ready: false,
+      publicKeyConfigured: true,
+      privateKeyConfigured: false,
+      subjectConfigured: true,
+      totalSubscriptionsCount: 1,
+      activeSubscriptionsCount: 1,
+      revokedSubscriptionsCount: 0,
+      failedSubscriptionsCount: 0,
+      usersWithActiveSubscriptionsCount: 1,
+      lastSuccessfulDeliveryAt: '2026-06-22T09:00:00Z',
+      lastFailedDeliveryAt: null,
+      lastDeliveryError: null,
+    });
+
+    render(<WebPushDevicePanel />);
+
+    expect(await screen.findByText('Push-уведомления включены на этом устройстве.')).toBeTruthy();
+    expect(screen.getByText('требует настройки')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Отключить это устройство' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Включить на этом устройстве' })).toBeNull();
+  });
+
   it('keeps device status visible when admin diagnostics are forbidden', async () => {
     apiMock.getWebPushDiagnostics.mockRejectedValueOnce(new Error('HTTP 403 Forbidden'));
 
