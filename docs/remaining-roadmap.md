@@ -221,6 +221,7 @@
   - `[x]` 2026-06-23: заказ-наряд дела и его печатная форма по прямым endpoint'ам явно требуют право просмотра дел `Cases.CanView`. Проверено backend-тестом `CasesV2ControllerTests.WorkOrder_ForbidsReadAndPrintWithoutCaseViewPermission`.
   - `[x]` 2026-06-23: связанные лица дела по прямому endpoint'у явно требуют право просмотра дел `Cases.CanView`. Проверено backend-тестом `CasesV2ControllerTests.RelatedParties_ForbidListWithoutCaseViewPermission`.
   - `[x]` 2026-06-23: действия активности и истории дела закрыты явными правами `Cases.CanView`/`Cases.CanEdit`. Проверено backend-тестом `CasesV2ControllerTests.CaseActivityAndHistory_RequireCaseViewAndEditPermissions`.
+  - `[x]` 2026-06-23: предварительный расчет процессуального срока закрыт явным правом просмотра дел `Cases.CanView`, как остальные endpoints блока сроков. Проверено backend-тестом `CasesV2ControllerTests.ProceduralDeadlineCalculationPreview_ReturnsForbidWithoutCaseViewPermission`.
 - `[partial]` Довести backend- и frontend-тесты прав по реальным ролям заказчика. Тесты прав есть, но финальный набор зависит от утвержденной матрицы.
 - `[acceptance]` Финально проверить маскирование и раскрытие чувствительных данных на реальных ролях и данных.
 

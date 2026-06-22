@@ -2882,7 +2882,8 @@ public class CasesV2ControllerTests
     public async Task ProceduralDeadlineCalculationPreview_ReturnsCalculatedDate()
     {
         await using var db = await CreateContextAsync();
-        var controller = CreateController(db, new User { Id = 1, Email = "owner@example.com", FullName = "Владелец" });
+        var owner = await CreateUserAsync(db, "deadline-preview@example.com", "Владелец");
+        var controller = CreateController(db, owner);
 
         var result = await controller.CalculateProceduralDeadlinePreview(new ProceduralDeadlineCalculationRequest
         {
@@ -2901,6 +2902,25 @@ public class CasesV2ControllerTests
         Assert.Equal(3, dto.SkippedNonWorkingDays);
         Assert.Equal(0, dto.RollForwardDays);
         Assert.Contains("пропущено нерабочих дней: 3", dto.Explanation, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ProceduralDeadlineCalculationPreview_ReturnsForbidWithoutCaseViewPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var viewer = await CreateUserAsync(db, "deadline-preview-no-view@example.com", "Без просмотра дел");
+        viewer.Role!.Permissions.Single(permission => permission.Section == RolePermissionCatalog.Cases).CanView = false;
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, viewer);
+
+        var result = await controller.CalculateProceduralDeadlinePreview(new ProceduralDeadlineCalculationRequest
+        {
+            StartAt = new DateTime(2026, 4, 30, 0, 0, 0, DateTimeKind.Utc),
+            Rule = "workingDays",
+            DaysToAdd = 2,
+        }, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result.Result);
     }
 
     [Fact]

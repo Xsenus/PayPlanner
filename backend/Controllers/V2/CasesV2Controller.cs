@@ -1967,6 +1967,11 @@ public class CasesV2Controller : ControllerBase
         [FromBody] ProceduralDeadlineCalculationRequest? request,
         CancellationToken ct)
     {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var calculationRequest = request ?? new ProceduralDeadlineCalculationRequest();
         var calendarSettings = await GetProductionCalendarSettingsAsync(ct);
         calculationRequest.WorkingDates = MergeCalculationDates(calculationRequest.WorkingDates, calendarSettings.WorkingDates);
