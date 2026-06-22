@@ -22,6 +22,13 @@ public class ClientsV2Controller : ControllerBase
     private Task<DataVisibilityAccess?> GetCurrentAccessAsync(CancellationToken ct)
         => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Clients, ct);
 
+    private async Task<IActionResult?> RequireClientsPermissionAsync(
+        Func<RolePermissionValues, bool> isAllowed,
+        CancellationToken ct)
+        => await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Clients, isAllowed, ct)
+            ? null
+            : Forbid();
+
     private static string? FormatResponsibleUserName(User? user)
     {
         if (user is null) return null;
@@ -534,6 +541,11 @@ public class ClientsV2Controller : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Client model, CancellationToken ct)
     {
+        if (await RequireClientsPermissionAsync(permission => permission.CanCreate, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var access = await GetCurrentAccessAsync(ct);
         if (access is null)
         {
@@ -559,6 +571,11 @@ public class ClientsV2Controller : ControllerBase
     [HttpPut("{id:int}")]
     public async Task<IActionResult> Update(int id, [FromBody] Client model, CancellationToken ct)
     {
+        if (await RequireClientsPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var access = await GetCurrentAccessAsync(ct);
         if (access is null)
         {
@@ -598,6 +615,11 @@ public class ClientsV2Controller : ControllerBase
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
+        if (await RequireClientsPermissionAsync(permission => permission.CanDelete, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var access = await GetCurrentAccessAsync(ct);
         if (access is null)
         {

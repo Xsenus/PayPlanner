@@ -265,6 +265,54 @@ public class ClientsControllerTests
     }
 
     [Fact]
+    public async Task V2WriteEndpoints_RequireClientActionPermissions()
+    {
+        await using var db = await CreateContextAsync();
+        var noCreateUserId = await CreateUserAsync(db, "client-no-create");
+        var noEditUserId = await CreateUserAsync(db, "client-no-edit");
+        var noDeleteUserId = await CreateUserAsync(db, "client-no-delete");
+        await SetClientPermissionAsync(db, noCreateUserId, canCreate: false, canEdit: true, canDelete: true);
+        await SetClientPermissionAsync(db, noEditUserId, canCreate: true, canEdit: false, canDelete: true);
+        await SetClientPermissionAsync(db, noDeleteUserId, canCreate: true, canEdit: true, canDelete: false);
+        var editClient = new Client
+        {
+            Name = "Клиент без редактирования",
+            IsActive = true,
+            ResponsibleUserId = noEditUserId,
+        };
+        var deleteClient = new Client
+        {
+            Name = "Клиент без удаления",
+            IsActive = true,
+            ResponsibleUserId = noDeleteUserId,
+        };
+        db.Clients.AddRange(editClient, deleteClient);
+        await db.SaveChangesAsync();
+
+        var createResult = await CreateV2Controller(db, noCreateUserId).Create(new Client
+        {
+            Name = "Запрещенное создание клиента",
+            IsActive = true,
+        }, CancellationToken.None);
+        var updateResult = await CreateV2Controller(db, noEditUserId).Update(editClient.Id, new Client
+        {
+            Name = "Запрещенное изменение клиента",
+            IsActive = false,
+        }, CancellationToken.None);
+        var deleteResult = await CreateV2Controller(db, noDeleteUserId).Delete(deleteClient.Id, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(createResult);
+        Assert.IsType<ForbidResult>(updateResult);
+        Assert.IsType<ForbidResult>(deleteResult);
+        Assert.False(await db.Clients.AnyAsync(item => item.Name == "Запрещенное создание клиента"));
+
+        await db.Entry(editClient).ReloadAsync();
+        Assert.Equal("Клиент без редактирования", editClient.Name);
+        Assert.True(editClient.IsActive);
+        Assert.True(await db.Clients.AnyAsync(item => item.Id == deleteClient.Id));
+    }
+
+    [Fact]
     public async Task V2Get_DeduplicatesRelatedInvoices_WithSameVisibleNumber()
     {
         await using var db = await CreateContextAsync();
@@ -1557,6 +1605,41 @@ public class ClientsControllerTests
         db.Users.Add(user);
         await db.SaveChangesAsync();
         return user.Id;
+    }
+
+    private static async Task SetClientPermissionAsync(
+        PaymentContext db,
+        int userId,
+        bool canCreate,
+        bool canEdit,
+        bool canDelete,
+        bool canView = true)
+    {
+        var roleId = await db.Users
+            .Where(user => user.Id == userId)
+            .Select(user => user.RoleId)
+            .SingleAsync();
+        var permission = await db.RolePermissions
+            .SingleOrDefaultAsync(item => item.RoleId == roleId && item.Section == RolePermissionCatalog.Clients);
+
+        if (permission is null)
+        {
+            permission = new RolePermission
+            {
+                RoleId = roleId,
+                Section = RolePermissionCatalog.Clients,
+                ViewScope = DataVisibilityScope.All,
+            };
+            db.RolePermissions.Add(permission);
+        }
+
+        permission.CanView = canView;
+        permission.CanCreate = canCreate;
+        permission.CanEdit = canEdit;
+        permission.CanDelete = canDelete;
+        permission.CanExport = true;
+        permission.ViewScope = DataVisibilityScope.All;
+        await db.SaveChangesAsync();
     }
 
     private static async Task<int> CreateLegalEntityAsync(PaymentContext db, string shortName)
