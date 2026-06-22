@@ -42,10 +42,29 @@ builder.Services.AddSwaggerGen();
 void ConfigureSqlite(DbContextOptionsBuilder options) => options
     .UseSqlite(databaseProvider.ConnectionString)
     .UsePayPlannerSqliteMigrations()
-    .ConfigureWarnings(warnings => warnings.Ignore(RelationalEventId.PendingModelChangesWarning));
+    .ConfigureWarnings(warnings =>
+    {
+        warnings.Ignore(RelationalEventId.PendingModelChangesWarning);
+        ConfigureEfDiagnostics(warnings);
+    });
 void ConfigurePostgreSql(DbContextOptionsBuilder options) => options
     .UseNpgsql(databaseProvider.ConnectionString)
-    .ConfigureWarnings(warnings => warnings.Ignore(RelationalEventId.PendingModelChangesWarning));
+    .ConfigureWarnings(warnings =>
+    {
+        warnings.Ignore(RelationalEventId.PendingModelChangesWarning);
+        ConfigureEfDiagnostics(warnings);
+    });
+
+void ConfigureEfDiagnostics(WarningsConfigurationBuilder warnings)
+{
+    if (!builder.Configuration.GetValue<bool>("Diagnostics:ThrowEfRuntimeWarnings"))
+    {
+        return;
+    }
+
+    warnings.Throw(RelationalEventId.MultipleCollectionIncludeWarning);
+    warnings.Throw(CoreEventId.FirstWithoutOrderByAndFilterWarning);
+}
 
 static void EnsureWalMode(string connectionString)
 {

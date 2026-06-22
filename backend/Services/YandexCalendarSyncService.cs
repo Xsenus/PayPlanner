@@ -264,6 +264,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         var connection = await _db.YandexCalendarConnections
             .Include(item => item.Calendars)
             .Include(item => item.TaskLinks)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(item => item.UserId == userId, cancellationToken);
         if (connection is not null)
         {
@@ -1336,7 +1337,8 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             .ThenInclude(item => item.Role)
             .Include(item => item.TaskLinks)
             .Include(item => item.Calendars)
-            .ThenInclude(item => item.OwnerUser);
+            .ThenInclude(item => item.OwnerUser)
+            .AsSplitQuery();
 
     private async Task<YandexCalendarStatusDto> BuildStatusAsync(
         int userId,

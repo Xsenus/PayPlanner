@@ -70,6 +70,7 @@ public sealed class StickyNoteReminderNotificationService : BackgroundService
             .Include(note => note.AssignedUser)
             .ThenInclude(user => user!.Role)
             .ThenInclude(role => role!.Permissions)
+            .AsSplitQuery()
             .Where(note =>
                 note.AssignedUserId.HasValue
                 && note.ReminderAt.HasValue

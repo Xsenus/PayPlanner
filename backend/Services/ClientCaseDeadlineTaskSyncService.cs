@@ -25,6 +25,7 @@ public static class ClientCaseDeadlineTaskSyncService
             .Include(item => item.Client)
             .Include(item => item.LegalEntity)
             .Include(item => item.ProceduralDeadlines)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(item => item.Id == clientCaseId, ct);
         if (clientCase is null)
         {

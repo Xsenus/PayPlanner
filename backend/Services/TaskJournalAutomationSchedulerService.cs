@@ -513,6 +513,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
             .Include(task => task.ClientCase)
             .Include(task => task.Participants)
             .Include(task => task.Comments)
+            .AsSplitQuery()
             .Where(task =>
                 task.ClientCaseId.HasValue &&
                 task.ClientCase != null &&

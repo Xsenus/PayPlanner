@@ -2924,6 +2924,62 @@ public class PaymentContext : DbContext
             ConfigureAudit<User>(modelBuilder, enableSoftDelete: false);
         }
 
+        modelBuilder.Entity<ActLineItem>()
+            .HasQueryFilter(item => Acts.Any(parent => parent.Id == item.ActId));
+        modelBuilder.Entity<ClientCaseCourtComplaint>()
+            .HasQueryFilter(item => ClientCases.Any(parent => parent.Id == item.ClientCaseId)
+                && ClientCaseCourtInstances.Any(parent => parent.Id == item.CourtInstanceId));
+        modelBuilder.Entity<ClientCaseCourtEventHistory>()
+            .HasQueryFilter(item => ClientCases.Any(parent => parent.Id == item.ClientCaseId)
+                && ClientCaseCourtEvents.Any(parent => parent.Id == item.ClientCaseCourtEventId));
+        modelBuilder.Entity<ClientCaseCourtInstance>()
+            .HasQueryFilter(item => ClientCases.Any(parent => parent.Id == item.ClientCaseId));
+        modelBuilder.Entity<ClientCaseDocument>()
+            .HasQueryFilter(item => ClientCases.Any(parent => parent.Id == item.ClientCaseId));
+        modelBuilder.Entity<ClientCaseRelatedParty>()
+            .HasQueryFilter(item => ClientCases.Any(parent => parent.Id == item.ClientCaseId));
+        modelBuilder.Entity<ClientCaseWorkOrder>()
+            .HasQueryFilter(item => ClientCases.Any(parent => parent.Id == item.ClientCaseId));
+        modelBuilder.Entity<ClientCaseWorkOrderItem>()
+            .HasQueryFilter(item => ClientCaseWorkOrders.Any(parent => parent.Id == item.ClientCaseWorkOrderId));
+        modelBuilder.Entity<ClientContract>()
+            .HasQueryFilter(item => Clients.Any(parent => parent.Id == item.ClientId)
+                && Contracts.Any(parent => parent.Id == item.ContractId));
+        modelBuilder.Entity<ContractAct>()
+            .HasQueryFilter(item => Contracts.Any(parent => parent.Id == item.ContractId)
+                && Acts.Any(parent => parent.Id == item.ActId));
+        modelBuilder.Entity<ContractInvoice>()
+            .HasQueryFilter(item => Contracts.Any(parent => parent.Id == item.ContractId)
+                && Payments.Any(parent => parent.Id == item.InvoiceId));
+        modelBuilder.Entity<ContractPayment>()
+            .HasQueryFilter(item => Contracts.Any(parent => parent.Id == item.ContractId)
+                && Payments.Any(parent => parent.Id == item.PaymentId));
+        modelBuilder.Entity<GoogleCalendarTaskLink>()
+            .HasQueryFilter(item => TaskJournalItems.Any(parent => parent.Id == item.TaskJournalItemId));
+        modelBuilder.Entity<InvoiceClientCase>()
+            .HasQueryFilter(item => Payments.Any(parent => parent.Id == item.PaymentId)
+                && ClientCases.Any(parent => parent.Id == item.ClientCaseId));
+        modelBuilder.Entity<LegalEntityContract>()
+            .HasQueryFilter(item => LegalEntities.Any(parent => parent.Id == item.LegalEntityId)
+                && Contracts.Any(parent => parent.Id == item.ContractId));
+        modelBuilder.Entity<PaymentRemainderTransfer>()
+            .HasQueryFilter(item => Payments.Any(parent => parent.Id == item.SourcePaymentId)
+                && Payments.Any(parent => parent.Id == item.RemainderPaymentId));
+        modelBuilder.Entity<PaymentResponsible>()
+            .HasQueryFilter(item => Payments.Any(parent => parent.Id == item.PaymentId));
+        modelBuilder.Entity<StickyNoteBoardMember>()
+            .HasQueryFilter(item => StickyNoteBoards.Any(parent => parent.Id == item.BoardId));
+        modelBuilder.Entity<TaskJournalComment>()
+            .HasQueryFilter(item => TaskJournalItems.Any(parent => parent.Id == item.TaskJournalItemId));
+        modelBuilder.Entity<TaskJournalFile>()
+            .HasQueryFilter(item => TaskJournalItems.Any(parent => parent.Id == item.TaskJournalItemId));
+        modelBuilder.Entity<TaskJournalParticipant>()
+            .HasQueryFilter(item => TaskJournalItems.Any(parent => parent.Id == item.TaskJournalItemId));
+        modelBuilder.Entity<UserCompanyAccess>()
+            .HasQueryFilter(item => LegalEntities.Any(parent => parent.Id == item.LegalEntityId));
+        modelBuilder.Entity<YandexCalendarTaskLink>()
+            .HasQueryFilter(item => TaskJournalItems.Any(parent => parent.Id == item.TaskJournalItemId));
+
         ConfigureDecimalPrecision(modelBuilder);
 
         if (Database.IsNpgsql())

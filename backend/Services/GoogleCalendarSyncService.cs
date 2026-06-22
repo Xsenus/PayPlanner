@@ -265,6 +265,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
         var connection = await _db.GoogleCalendarConnections
             .Include(item => item.Calendars)
             .Include(item => item.TaskLinks)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(item => item.UserId == userId, cancellationToken);
         if (connection is not null)
         {
@@ -1515,7 +1516,8 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             .ThenInclude(item => item.Role)
             .Include(item => item.TaskLinks)
             .Include(item => item.Calendars)
-            .ThenInclude(item => item.OwnerUser);
+            .ThenInclude(item => item.OwnerUser)
+            .AsSplitQuery();
 
     private async Task<GoogleCalendarStatusDto> BuildStatusAsync(
         int userId,
