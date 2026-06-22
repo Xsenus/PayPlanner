@@ -19,9 +19,21 @@ public class CasesController : ControllerBase
     private Task<DataVisibilityAccess?> ResolveCasesVisibilityAsync(CancellationToken ct)
         => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
 
+    private async Task<IActionResult?> RequireCasesPermissionAsync(
+        Func<RolePermissionValues, bool> isAllowed,
+        CancellationToken ct)
+        => await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Cases, isAllowed, ct)
+            ? null
+            : Forbid();
+
     [HttpGet]
     public async Task<IActionResult> Get([FromQuery] int? clientId, [FromQuery] int? legalEntityId, CancellationToken ct)
     {
+        if (await RequireCasesPermissionAsync(permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var visibility = await ResolveCasesVisibilityAsync(ct);
         if (visibility is null)
         {
@@ -46,6 +58,11 @@ public class CasesController : ControllerBase
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
     {
+        if (await RequireCasesPermissionAsync(permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var visibility = await ResolveCasesVisibilityAsync(ct);
         if (visibility is null)
         {
@@ -55,7 +72,6 @@ public class CasesController : ControllerBase
         var entity = await _db.ClientCases
             .Include(c => c.Client)
             .Include(c => c.LegalEntity)
-            .Include(c => c.Payments)
             .ApplyClientCaseVisibility(visibility)
             .AsNoTracking()
             .FirstOrDefaultAsync(c => c.Id == id, ct);
@@ -66,6 +82,11 @@ public class CasesController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] ClientCase model, CancellationToken ct)
     {
+        if (await RequireCasesPermissionAsync(permission => permission.CanCreate, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var visibility = await ResolveCasesVisibilityAsync(ct);
         if (visibility is null)
         {
@@ -84,6 +105,11 @@ public class CasesController : ControllerBase
     [HttpPut("{id:int}")]
     public async Task<IActionResult> Update(int id, [FromBody] ClientCase model, CancellationToken ct)
     {
+        if (await RequireCasesPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var visibility = await ResolveCasesVisibilityAsync(ct);
         if (visibility is null)
         {
@@ -118,6 +144,11 @@ public class CasesController : ControllerBase
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
+        if (await RequireCasesPermissionAsync(permission => permission.CanDelete, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var visibility = await ResolveCasesVisibilityAsync(ct);
         if (visibility is null)
         {
