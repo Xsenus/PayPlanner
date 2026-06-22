@@ -5982,6 +5982,58 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task WorkOrder_ForbidsReadAndPrintWithoutCaseViewPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "work-order-no-view@example.com", "Без просмотра дел");
+        user.Role!.Permissions.Single(permission => permission.Section == RolePermissionCatalog.Cases).CanView = false;
+        var client = new Client
+        {
+            Name = "Клиент закрытого заказ-наряда",
+            IsActive = true,
+            ResponsibleUserId = user.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело с закрытым заказ-нарядом",
+            CaseNumber = "WO-NO-VIEW",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = user.Id,
+        };
+        var workOrder = new ClientCaseWorkOrder
+        {
+            ClientCase = clientCase,
+            Title = "Закрытый заказ-наряд",
+            Status = "approved",
+            Currency = "RUB",
+            CreatedAt = DateTime.UtcNow,
+            Items =
+            [
+                new ClientCaseWorkOrderItem
+                {
+                    ServiceName = "Подготовка документов",
+                    Quantity = 1,
+                    UnitPrice = 15000,
+                    TotalAmount = 15000,
+                    SortOrder = 1,
+                },
+            ],
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.ClientCaseWorkOrders.Add(workOrder);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, user);
+
+        var getResult = await controller.GetWorkOrder(clientCase.Id, CancellationToken.None);
+        var printResult = await controller.PrintWorkOrder(clientCase.Id, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(getResult.Result);
+        Assert.IsType<ForbidResult>(printResult);
+    }
+
+    [Fact]
     public async Task WorkOrder_ForbidsUserWithoutEditPermission()
     {
         await using var db = await CreateContextAsync();

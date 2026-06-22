@@ -5382,6 +5382,11 @@ public class CasesV2Controller : ControllerBase
     [HttpGet("{id:int}/work-order")]
     public async Task<ActionResult<ClientCaseWorkOrderDto>> GetWorkOrder(int id, CancellationToken ct)
     {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var visibility = await ResolveCasesVisibilityAsync(ct);
         if (visibility is null)
         {
@@ -5410,6 +5415,11 @@ public class CasesV2Controller : ControllerBase
     [HttpGet("{id:int}/work-order/print")]
     public async Task<IActionResult> PrintWorkOrder(int id, CancellationToken ct)
     {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var visibility = await ResolveCasesVisibilityAsync(ct);
         if (visibility is null)
         {
