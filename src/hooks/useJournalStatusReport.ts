@@ -14,7 +14,12 @@ export interface JournalStatusReportFilters {
   incomeTypeId?: number;
 }
 
-export function useJournalStatusReport(filters: JournalStatusReportFilters) {
+export interface JournalStatusReportOptions {
+  enabled?: boolean;
+}
+
+export function useJournalStatusReport(filters: JournalStatusReportFilters, options: JournalStatusReportOptions = {}) {
+  const enabled = options.enabled ?? true;
   const [report, setReport] = useState<JournalStatusReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +41,14 @@ export function useJournalStatusReport(filters: JournalStatusReportFilters) {
   );
 
   const load = useCallback(async () => {
+    if (!enabled) {
+      requestIdRef.current += 1;
+      setReport(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     setLoading(true);
@@ -60,7 +73,7 @@ export function useJournalStatusReport(filters: JournalStatusReportFilters) {
         setLoading(false);
       }
     }
-  }, [stableFilters]);
+  }, [enabled, stableFilters]);
 
   useEffect(() => {
     void load();

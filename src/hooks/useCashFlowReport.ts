@@ -14,7 +14,12 @@ export interface CashFlowReportFilters {
   incomeTypeId?: number;
 }
 
-export function useCashFlowReport(filters: CashFlowReportFilters) {
+export interface CashFlowReportOptions {
+  enabled?: boolean;
+}
+
+export function useCashFlowReport(filters: CashFlowReportFilters, options: CashFlowReportOptions = {}) {
+  const enabled = options.enabled ?? true;
   const [report, setReport] = useState<CashFlowReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +41,14 @@ export function useCashFlowReport(filters: CashFlowReportFilters) {
   );
 
   const load = useCallback(async () => {
+    if (!enabled) {
+      requestIdRef.current += 1;
+      setReport(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     setLoading(true);
@@ -60,7 +73,7 @@ export function useCashFlowReport(filters: CashFlowReportFilters) {
         setLoading(false);
       }
     }
-  }, [stableFilters]);
+  }, [enabled, stableFilters]);
 
   useEffect(() => {
     void load();

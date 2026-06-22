@@ -14,7 +14,12 @@ export interface MoneyCategoryReportFilters {
   incomeTypeId?: number;
 }
 
-export function useMoneyCategoryReport(filters: MoneyCategoryReportFilters) {
+export interface MoneyCategoryReportOptions {
+  enabled?: boolean;
+}
+
+export function useMoneyCategoryReport(filters: MoneyCategoryReportFilters, options: MoneyCategoryReportOptions = {}) {
+  const enabled = options.enabled ?? true;
   const [report, setReport] = useState<MoneyCategoryReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +41,14 @@ export function useMoneyCategoryReport(filters: MoneyCategoryReportFilters) {
   );
 
   const load = useCallback(async () => {
+    if (!enabled) {
+      requestIdRef.current += 1;
+      setReport(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     setLoading(true);
@@ -60,7 +73,7 @@ export function useMoneyCategoryReport(filters: MoneyCategoryReportFilters) {
         setLoading(false);
       }
     }
-  }, [stableFilters]);
+  }, [enabled, stableFilters]);
 
   useEffect(() => {
     void load();

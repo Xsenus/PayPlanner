@@ -14,7 +14,12 @@ export interface VatReportFilters {
   incomeTypeId?: number;
 }
 
-export function useVatReport(filters: VatReportFilters) {
+export interface VatReportOptions {
+  enabled?: boolean;
+}
+
+export function useVatReport(filters: VatReportFilters, options: VatReportOptions = {}) {
+  const enabled = options.enabled ?? true;
   const [report, setReport] = useState<VatReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +41,14 @@ export function useVatReport(filters: VatReportFilters) {
   );
 
   const load = useCallback(async () => {
+    if (!enabled) {
+      requestIdRef.current += 1;
+      setReport(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     setLoading(true);
@@ -60,7 +73,7 @@ export function useVatReport(filters: VatReportFilters) {
         setLoading(false);
       }
     }
-  }, [stableFilters]);
+  }, [enabled, stableFilters]);
 
   useEffect(() => {
     void load();

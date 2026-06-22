@@ -14,7 +14,12 @@ export interface ProjectReportFilters {
   incomeTypeId?: number;
 }
 
-export function useProjectReport(filters: ProjectReportFilters) {
+export interface ProjectReportOptions {
+  enabled?: boolean;
+}
+
+export function useProjectReport(filters: ProjectReportFilters, options: ProjectReportOptions = {}) {
+  const enabled = options.enabled ?? true;
   const [report, setReport] = useState<ProjectReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +41,14 @@ export function useProjectReport(filters: ProjectReportFilters) {
   );
 
   const load = useCallback(async () => {
+    if (!enabled) {
+      requestIdRef.current += 1;
+      setReport(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     setLoading(true);
@@ -60,7 +73,7 @@ export function useProjectReport(filters: ProjectReportFilters) {
         setLoading(false);
       }
     }
-  }, [stableFilters]);
+  }, [enabled, stableFilters]);
 
   useEffect(() => {
     void load();

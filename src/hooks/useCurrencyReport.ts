@@ -14,7 +14,12 @@ export interface CurrencyReportFilters {
   incomeTypeId?: number;
 }
 
-export function useCurrencyReport(filters: CurrencyReportFilters) {
+export interface CurrencyReportOptions {
+  enabled?: boolean;
+}
+
+export function useCurrencyReport(filters: CurrencyReportFilters, options: CurrencyReportOptions = {}) {
+  const enabled = options.enabled ?? true;
   const [report, setReport] = useState<CurrencyReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +41,14 @@ export function useCurrencyReport(filters: CurrencyReportFilters) {
   );
 
   const load = useCallback(async () => {
+    if (!enabled) {
+      requestIdRef.current += 1;
+      setReport(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     setLoading(true);
@@ -60,7 +73,7 @@ export function useCurrencyReport(filters: CurrencyReportFilters) {
         setLoading(false);
       }
     }
-  }, [stableFilters]);
+  }, [enabled, stableFilters]);
 
   useEffect(() => {
     void load();

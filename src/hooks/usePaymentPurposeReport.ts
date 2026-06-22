@@ -14,7 +14,12 @@ export interface PaymentPurposeReportFilters {
   incomeTypeId?: number;
 }
 
-export function usePaymentPurposeReport(filters: PaymentPurposeReportFilters) {
+export interface PaymentPurposeReportOptions {
+  enabled?: boolean;
+}
+
+export function usePaymentPurposeReport(filters: PaymentPurposeReportFilters, options: PaymentPurposeReportOptions = {}) {
+  const enabled = options.enabled ?? true;
   const [report, setReport] = useState<PaymentPurposeReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +41,14 @@ export function usePaymentPurposeReport(filters: PaymentPurposeReportFilters) {
   );
 
   const load = useCallback(async () => {
+    if (!enabled) {
+      requestIdRef.current += 1;
+      setReport(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     setLoading(true);
@@ -60,7 +73,7 @@ export function usePaymentPurposeReport(filters: PaymentPurposeReportFilters) {
         setLoading(false);
       }
     }
-  }, [stableFilters]);
+  }, [enabled, stableFilters]);
 
   useEffect(() => {
     void load();

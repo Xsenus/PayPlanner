@@ -7555,13 +7555,13 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     loading: cashFlowLoading,
     error: cashFlowError,
     reload: reloadCashFlow,
-  } = useCashFlowReport(moneyOperationReportFilters);
+  } = useCashFlowReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
   const {
     report: cashFlowForecastReport,
     loading: cashFlowForecastLoading,
     error: cashFlowForecastError,
     reload: reloadCashFlowForecast,
-  } = useCashFlowForecastReport(moneyAccountReportFilters);
+  } = useCashFlowForecastReport(moneyAccountReportFilters, { enabled: canViewPaymentReports });
   const {
     report: cashReport,
     loading: cashReportLoading,
@@ -7584,25 +7584,25 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     loading: bankReportLoading,
     error: bankReportError,
     reload: reloadBankReport,
-  } = useCashFlowReport(bankReportFilters);
+  } = useCashFlowReport(bankReportFilters, { enabled: canViewPaymentReports });
   const {
     report: categoryReport,
     loading: categoryReportLoading,
     error: categoryReportError,
     reload: reloadCategoryReport,
-  } = useMoneyCategoryReport(moneyOperationReportFilters);
+  } = useMoneyCategoryReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
   const {
     report: counterpartyReport,
     loading: counterpartyReportLoading,
     error: counterpartyReportError,
     reload: reloadCounterpartyReport,
-  } = useCounterpartyReport(moneyOperationReportFilters);
+  } = useCounterpartyReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
   const {
     report: projectReport,
     loading: projectReportLoading,
     error: projectReportError,
     reload: reloadProjectReport,
-  } = useProjectReport(moneyOperationReportFilters);
+  } = useProjectReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
   const {
     report: legalWorkReport,
     loading: legalWorkReportLoading,
@@ -7670,49 +7670,49 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     loading: directionReportLoading,
     error: directionReportError,
     reload: reloadDirectionReport,
-  } = useDirectionReport(moneyOperationReportFilters);
+  } = useDirectionReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
   const {
     report: salesPointReport,
     loading: salesPointReportLoading,
     error: salesPointReportError,
     reload: reloadSalesPointReport,
-  } = useSalesPointReport(moneyOperationReportFilters);
+  } = useSalesPointReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
   const {
     report: vatReport,
     loading: vatReportLoading,
     error: vatReportError,
     reload: reloadVatReport,
-  } = useVatReport(moneyOperationReportFilters);
+  } = useVatReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
   const {
     report: planFactReport,
     loading: planFactReportLoading,
     error: planFactReportError,
     reload: reloadPlanFactReport,
-  } = usePlanFactReport(moneyOperationReportFilters);
+  } = usePlanFactReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
   const {
     report: advanceReport,
     loading: advanceReportLoading,
     error: advanceReportError,
     reload: reloadAdvanceReport,
-  } = useAdvanceReport(moneyOperationReportFilters);
+  } = useAdvanceReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
   const {
     report: paymentPriorityReport,
     loading: paymentPriorityReportLoading,
     error: paymentPriorityReportError,
     reload: reloadPaymentPriorityReport,
-  } = usePaymentPriorityReport(moneyOperationReportFilters);
+  } = usePaymentPriorityReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
   const {
     report: paidAccountReport,
     loading: paidAccountReportLoading,
     error: paidAccountReportError,
     reload: reloadPaidAccountReport,
-  } = usePaidAccountReport(moneyOperationReportFilters);
+  } = usePaidAccountReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
   const {
     report: paidInvoiceReport,
     loading: paidInvoiceReportLoading,
     error: paidInvoiceReportError,
     reload: reloadPaidInvoiceReport,
-  } = usePaidInvoiceReport(moneyOperationReportFilters);
+  } = usePaidInvoiceReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
   const {
     report: invoiceStatusReport,
     loading: invoiceStatusReportLoading,
@@ -7736,31 +7736,31 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     loading: paymentOrderReportLoading,
     error: paymentOrderReportError,
     reload: reloadPaymentOrderReport,
-  } = usePaymentOrderReport(moneyOperationReportFilters);
+  } = usePaymentOrderReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
   const {
     report: paymentPurposeReport,
     loading: paymentPurposeReportLoading,
     error: paymentPurposeReportError,
     reload: reloadPaymentPurposeReport,
-  } = usePaymentPurposeReport(moneyOperationReportFilters);
+  } = usePaymentPurposeReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
   const {
     report: matchStatusReport,
     loading: matchStatusReportLoading,
     error: matchStatusReportError,
     reload: reloadMatchStatusReport,
-  } = useMatchStatusReport(moneyOperationReportFilters);
+  } = useMatchStatusReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
   const {
     report: journalStatusReport,
     loading: journalStatusReportLoading,
     error: journalStatusReportError,
     reload: reloadJournalStatusReport,
-  } = useJournalStatusReport(moneyOperationReportFilters);
+  } = useJournalStatusReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
   const {
     report: currencyReport,
     loading: currencyReportLoading,
     error: currencyReportError,
     reload: reloadCurrencyReport,
-  } = useCurrencyReport(moneyOperationReportFilters);
+  } = useCurrencyReport(moneyOperationReportFilters, { enabled: canViewPaymentReports });
   const {
     report: cashOrderReport,
     loading: cashOrderReportLoading,
@@ -8230,6 +8230,8 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               />
             </section>
 
+            {canViewPaymentReports ? (
+              <>
             <CashFlowReportSection
               report={cashFlowReport}
               loading={cashFlowLoading}
@@ -8248,17 +8250,15 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               profileTimeZoneId={profileTimeZoneId}
             />
 
-            {canViewPaymentReports ? (
-              <CashReportSection
-                report={cashReport}
-                loading={cashReportLoading}
-                error={cashReportError}
-                onReload={reloadCashReport}
-                filters={cashBookReportFilters}
-                profileTimeZoneId={profileTimeZoneId}
-                canExportPaymentReports={canExportPaymentReports}
-              />
-            ) : null}
+            <CashReportSection
+              report={cashReport}
+              loading={cashReportLoading}
+              error={cashReportError}
+              onReload={reloadCashReport}
+              filters={cashBookReportFilters}
+              profileTimeZoneId={profileTimeZoneId}
+              canExportPaymentReports={canExportPaymentReports}
+            />
 
             <BankReportSection
               report={bankReport}
@@ -8295,6 +8295,8 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               filters={paymentOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
+              </>
+            ) : null}
               </>
             ) : null}
 
@@ -8393,6 +8395,8 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
             {activeGroup === 'analytics' ? (
               <>
 
+            {canViewPaymentReports ? (
+              <>
             <DirectionReportSection
               report={directionReport}
               loading={directionReportLoading}
@@ -8464,6 +8468,8 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               filters={paymentOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
+              </>
+            ) : null}
 
             <InvoiceStatusReportSection
               report={invoiceStatusReport}
@@ -8492,6 +8498,8 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               profileTimeZoneId={profileTimeZoneId}
             />
 
+            {canViewPaymentReports ? (
+              <>
             <PaymentOrderReportSection
               report={paymentOrderReport}
               loading={paymentOrderReportLoading}
@@ -8536,6 +8544,8 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               filters={paymentOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
+              </>
+            ) : null}
 
             {canViewPaymentReports ? (
               <CashOrderReportSection

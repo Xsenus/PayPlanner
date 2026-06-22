@@ -14,7 +14,12 @@ export interface SalesPointReportFilters {
   incomeTypeId?: number;
 }
 
-export function useSalesPointReport(filters: SalesPointReportFilters) {
+export interface SalesPointReportOptions {
+  enabled?: boolean;
+}
+
+export function useSalesPointReport(filters: SalesPointReportFilters, options: SalesPointReportOptions = {}) {
+  const enabled = options.enabled ?? true;
   const [report, setReport] = useState<SalesPointReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +41,14 @@ export function useSalesPointReport(filters: SalesPointReportFilters) {
   );
 
   const load = useCallback(async () => {
+    if (!enabled) {
+      requestIdRef.current += 1;
+      setReport(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     setLoading(true);
@@ -60,7 +73,7 @@ export function useSalesPointReport(filters: SalesPointReportFilters) {
         setLoading(false);
       }
     }
-  }, [stableFilters]);
+  }, [enabled, stableFilters]);
 
   useEffect(() => {
     void load();

@@ -14,7 +14,12 @@ export interface AdvanceReportFilters {
   incomeTypeId?: number;
 }
 
-export function useAdvanceReport(filters: AdvanceReportFilters) {
+export interface AdvanceReportOptions {
+  enabled?: boolean;
+}
+
+export function useAdvanceReport(filters: AdvanceReportFilters, options: AdvanceReportOptions = {}) {
+  const enabled = options.enabled ?? true;
   const [report, setReport] = useState<AdvanceReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +41,14 @@ export function useAdvanceReport(filters: AdvanceReportFilters) {
   );
 
   const load = useCallback(async () => {
+    if (!enabled) {
+      requestIdRef.current += 1;
+      setReport(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     setLoading(true);
@@ -60,7 +73,7 @@ export function useAdvanceReport(filters: AdvanceReportFilters) {
         setLoading(false);
       }
     }
-  }, [stableFilters]);
+  }, [enabled, stableFilters]);
 
   useEffect(() => {
     void load();

@@ -14,7 +14,12 @@ export interface MatchStatusReportFilters {
   incomeTypeId?: number;
 }
 
-export function useMatchStatusReport(filters: MatchStatusReportFilters) {
+export interface MatchStatusReportOptions {
+  enabled?: boolean;
+}
+
+export function useMatchStatusReport(filters: MatchStatusReportFilters, options: MatchStatusReportOptions = {}) {
+  const enabled = options.enabled ?? true;
   const [report, setReport] = useState<MatchStatusReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +41,14 @@ export function useMatchStatusReport(filters: MatchStatusReportFilters) {
   );
 
   const load = useCallback(async () => {
+    if (!enabled) {
+      requestIdRef.current += 1;
+      setReport(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     setLoading(true);
@@ -60,7 +73,7 @@ export function useMatchStatusReport(filters: MatchStatusReportFilters) {
         setLoading(false);
       }
     }
-  }, [stableFilters]);
+  }, [enabled, stableFilters]);
 
   useEffect(() => {
     void load();

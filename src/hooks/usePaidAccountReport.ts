@@ -14,7 +14,12 @@ export interface PaidAccountReportFilters {
   incomeTypeId?: number;
 }
 
-export function usePaidAccountReport(filters: PaidAccountReportFilters) {
+export interface PaidAccountReportOptions {
+  enabled?: boolean;
+}
+
+export function usePaidAccountReport(filters: PaidAccountReportFilters, options: PaidAccountReportOptions = {}) {
+  const enabled = options.enabled ?? true;
   const [report, setReport] = useState<PaidAccountReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +41,14 @@ export function usePaidAccountReport(filters: PaidAccountReportFilters) {
   );
 
   const load = useCallback(async () => {
+    if (!enabled) {
+      requestIdRef.current += 1;
+      setReport(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     setLoading(true);
@@ -60,7 +73,7 @@ export function usePaidAccountReport(filters: PaidAccountReportFilters) {
         setLoading(false);
       }
     }
-  }, [stableFilters]);
+  }, [enabled, stableFilters]);
 
   useEffect(() => {
     void load();
