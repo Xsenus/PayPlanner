@@ -217,6 +217,7 @@
   - `[x]` 2026-06-22: отчет по импортам из таблиц и его выгрузки закрыты административным доступом, как и сам инструмент Excel/XML/ZIP-импорта базы: обычные роли больше не получают этот отчет через UI или прямой API/export-запрос. Проверено backend-тестами `ReportsControllerTests.SpreadsheetImports_WithoutAdminAccess_ReturnsForbid` и `ReportsControllerTests.SpreadsheetImportsExport_WithoutAdminAccess_ReturnsForbid`.
   - `[x]` 2026-06-22: список документов дела по прямому адресу карточки дела явно требует право просмотра дел `Cases.CanView`, а не только объектную видимость дела. Проверено backend-тестом `CasesV2ControllerTests.Documents_ForbidListWithoutCaseViewPermission`.
   - `[x]` 2026-06-23: заказ-наряд дела и его печатная форма по прямым endpoint'ам явно требуют право просмотра дел `Cases.CanView`. Проверено backend-тестом `CasesV2ControllerTests.WorkOrder_ForbidsReadAndPrintWithoutCaseViewPermission`.
+  - `[x]` 2026-06-23: связанные лица дела по прямому endpoint'у явно требуют право просмотра дел `Cases.CanView`. Проверено backend-тестом `CasesV2ControllerTests.RelatedParties_ForbidListWithoutCaseViewPermission`.
 - `[partial]` Довести backend- и frontend-тесты прав по реальным ролям заказчика. Тесты прав есть, но финальный набор зависит от утвержденной матрицы.
 - `[acceptance]` Финально проверить маскирование и раскрытие чувствительных данных на реальных ролях и данных.
 

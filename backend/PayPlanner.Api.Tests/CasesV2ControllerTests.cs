@@ -5646,6 +5646,50 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task RelatedParties_ForbidListWithoutCaseViewPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "related-parties-no-view@example.com", "Без просмотра дел");
+        user.Role!.Permissions.Single(permission => permission.Section == RolePermissionCatalog.Cases).CanView = false;
+        var client = new Client
+        {
+            Name = "Клиент закрытых связей",
+            IsActive = true,
+            ResponsibleUserId = user.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело со связанными лицами",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = user.Id,
+        };
+        var relatedClient = new Client
+        {
+            Name = "Связанное лицо",
+            IsActive = true,
+            ResponsibleUserId = user.Id,
+        };
+        db.Clients.AddRange(client, relatedClient);
+        db.ClientCases.Add(clientCase);
+        db.ClientCaseRelatedParties.Add(new ClientCaseRelatedParty
+        {
+            ClientCase = clientCase,
+            SourceType = "client",
+            Client = relatedClient,
+            DisplayName = relatedClient.Name,
+            Role = "Свидетель",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, user);
+
+        var result = await controller.GetRelatedParties(clientCase.Id, includeArchived: true, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
     public async Task RelatedParties_AddListsAndDeletesDirectoryLink()
     {
         await using var db = await CreateContextAsync();
