@@ -3,6 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Contract } from '../../types';
 import { ContractDetailPage } from './ContractDetailPage';
 
+const { dialogConfirmMock, dialogPromptMock } = vi.hoisted(() => ({
+  dialogConfirmMock: vi.fn(),
+  dialogPromptMock: vi.fn(),
+}));
+
 function createPersistedTableSettings(
   columns: Array<{ key: string; defaultWidth?: number; defaultVisible?: boolean }>,
   defaultPageSize: number,
@@ -49,6 +54,13 @@ vi.mock('../../hooks/useToast', () => ({
   useToast: () => ({
     success: vi.fn(),
     error: vi.fn(),
+  }),
+}));
+
+vi.mock('../../hooks/useDialog', () => ({
+  useDialog: () => ({
+    confirm: dialogConfirmMock,
+    prompt: dialogPromptMock,
   }),
 }));
 
@@ -145,6 +157,10 @@ describe('ContractDetailPage integration', () => {
     vi.mocked(apiService.downloadContractTerminationAgreement).mockReset();
     vi.mocked(apiService.sendContractByEmail).mockReset();
     vi.mocked(apiService.uploadContractDocumentToYandexDisk).mockReset();
+    dialogConfirmMock.mockReset();
+    dialogPromptMock.mockReset();
+    dialogConfirmMock.mockResolvedValue(true);
+    dialogPromptMock.mockResolvedValue(null);
 
     vi.mocked(apiService.getContract).mockResolvedValue(contractFixture);
     vi.mocked(apiService.getContractRulesSettings).mockResolvedValue({
@@ -345,7 +361,7 @@ describe('ContractDetailPage integration', () => {
   });
 
   it('downloads and sends contract documents from the detail header', async () => {
-    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('client@example.com');
+    dialogPromptMock.mockResolvedValueOnce('client@example.com');
 
     render(
       <ContractDetailPage
@@ -384,8 +400,6 @@ describe('ContractDetailPage integration', () => {
     await waitFor(() => {
       expect(apiService.uploadContractDocumentToYandexDisk).toHaveBeenCalledWith(77, 'pdf');
     });
-
-    promptSpy.mockRestore();
   });
 
   it('offers a termination agreement document for terminated contracts', async () => {
@@ -413,13 +427,12 @@ describe('ContractDetailPage integration', () => {
   it('checks unpaid invoices before terminating a contract', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date('2026-06-04T12:00:00.000Z'));
-    const promptSpy = vi
-      .spyOn(window, 'prompt')
-      .mockReturnValueOnce('2026-05-22')
+    dialogPromptMock
+      .mockResolvedValueOnce('2026-05-22')
       .mockReturnValueOnce('Расторжение по соглашению')
       .mockReturnValueOnce('Соглашение сторон')
       .mockReturnValueOnce('Оплатить остаток до конца месяца');
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    dialogConfirmMock.mockResolvedValueOnce(true);
     vi.mocked(apiService.getContractTerminationCheck).mockResolvedValue({
       hasUnpaidInvoices: true,
       unpaidInvoiceCount: 2,
@@ -444,7 +457,11 @@ describe('ContractDetailPage integration', () => {
 
     await waitFor(() => {
       expect(apiService.getContractTerminationCheck).toHaveBeenCalledWith(77);
-      expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('неоплаченные счета'));
+      expect(dialogConfirmMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          description: expect.stringContaining('неоплаченные счета'),
+        }),
+      );
       expect(apiService.terminateContract).toHaveBeenCalledWith(
         77,
         '2026-05-22',
@@ -453,14 +470,14 @@ describe('ContractDetailPage integration', () => {
         'Оплатить остаток до конца месяца',
       );
     });
-    expect(promptSpy).toHaveBeenNthCalledWith(
+    expect(dialogPromptMock).toHaveBeenNthCalledWith(
       1,
-      'Дата расторжения договора (ГГГГ-ММ-ДД)',
-      '2026-06-04',
+      expect.objectContaining({
+        defaultValue: '2026-06-04',
+        inputType: 'date',
+      }),
     );
 
-    promptSpy.mockRestore();
-    confirmSpy.mockRestore();
     vi.useRealTimers();
   });
 });

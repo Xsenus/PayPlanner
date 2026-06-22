@@ -51,6 +51,7 @@ const {
   toastMock,
   toastErrorMock,
   toastSuccessMock,
+  dialogConfirmMock,
   setActiveTabMock,
   updateCashOrderMock,
   updateMoneyOperationMock,
@@ -105,6 +106,7 @@ const {
     toastMock: { error: toastErrorMock, success: toastSuccessMock },
     toastErrorMock,
     toastSuccessMock,
+    dialogConfirmMock: vi.fn(),
     setActiveTabMock: vi.fn(),
     updateCashOrderMock: vi.fn(),
     updateMoneyOperationMock: vi.fn(),
@@ -165,6 +167,12 @@ vi.mock('../../contexts/TabContext', () => ({
 
 vi.mock('../../hooks/useToast', () => ({
   useToast: () => toastMock,
+}));
+
+vi.mock('../../hooks/useDialog', () => ({
+  useDialog: () => ({
+    confirm: dialogConfirmMock,
+  }),
 }));
 
 vi.mock('../../hooks/usePersistedTableSettings', () => ({
@@ -401,6 +409,8 @@ describe('MoneyOperations integration', () => {
     rollbackBankStatementImportMock.mockReset();
     toastErrorMock.mockReset();
     toastSuccessMock.mockReset();
+    dialogConfirmMock.mockReset();
+    dialogConfirmMock.mockResolvedValue(true);
     setActiveTabMock.mockReset();
     updateCashOrderMock.mockReset();
     updateMoneyOperationMock.mockReset();
@@ -2828,8 +2838,6 @@ describe('MoneyOperations integration', () => {
       page: 1,
       pageSize: 5,
     });
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-
     render(<MoneyOperations source="Bank" />);
 
     expect(getBankStatementImportsMock).not.toHaveBeenCalled();
