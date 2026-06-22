@@ -8236,7 +8236,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               loading={bankReportLoading}
               error={bankReportError}
               onReload={reloadBankReport}
-              filters={cashFlowDates}
+              filters={bankReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
 
