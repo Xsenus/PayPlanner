@@ -1210,6 +1210,138 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task TasksManagementExports_ApplyTasksVisibilityScope()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role
+        {
+            Name = $"reports-tasks-scope-{Guid.NewGuid():N}",
+            Description = "Reports tasks visibility export test role",
+        };
+        var user = new User
+        {
+            Email = $"reports-tasks-scope-{Guid.NewGuid():N}@example.test",
+            FullName = "Visible task export user",
+            IsActive = true,
+            Role = role,
+        };
+        var hiddenUser = User("tasks-export-hidden-user");
+        db.Roles.Add(role);
+        db.Users.AddRange(user, hiddenUser);
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                Role = role,
+                Section = RolePermissionCatalog.Reports,
+                CanView = true,
+                CanExport = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                Role = role,
+                Section = RolePermissionCatalog.Tasks,
+                CanView = true,
+                CanExport = true,
+                ViewScope = DataVisibilityScope.Own,
+            });
+        await db.SaveChangesAsync();
+
+        db.TaskJournalItems.AddRange(
+            new TaskJournalItem
+            {
+                Title = "VISIBLE-SCOPE-TASK",
+                ObjectName = "Visible export object",
+                Status = "new",
+                Type = "task",
+                Priority = "normal",
+                AssigneeUserId = user.Id,
+                AssigneeName = user.FullName,
+                AuthorUserId = hiddenUser.Id,
+                AuthorName = hiddenUser.FullName,
+                DueAt = new DateTime(2026, 5, 26, 10, 0, 0, DateTimeKind.Utc),
+                CreatedAt = new DateTime(2026, 5, 20, 10, 0, 0, DateTimeKind.Utc),
+                UpdatedAt = new DateTime(2026, 5, 20, 10, 0, 0, DateTimeKind.Utc),
+                Result = "Visible result",
+            },
+            new TaskJournalItem
+            {
+                Title = "HIDDEN-SCOPE-TASK",
+                ObjectName = "Hidden export object",
+                Status = "new",
+                Type = "task",
+                Priority = "normal",
+                AssigneeUserId = hiddenUser.Id,
+                AssigneeName = hiddenUser.FullName,
+                AuthorUserId = hiddenUser.Id,
+                AuthorName = hiddenUser.FullName,
+                DueAt = new DateTime(2026, 5, 26, 11, 0, 0, DateTimeKind.Utc),
+                CreatedAt = new DateTime(2026, 5, 20, 11, 0, 0, DateTimeKind.Utc),
+                UpdatedAt = new DateTime(2026, 5, 20, 11, 0, 0, DateTimeKind.Utc),
+                Result = "Hidden result",
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateUserPrincipal(user.Id));
+
+        var csvAction = await controller.ExportManagementReportCsv(
+            "tasks",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            new DateTime(2026, 5, 26),
+            "all",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            50,
+            CancellationToken.None);
+        var printAction = await controller.PrintManagementReport(
+            "tasks",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            new DateTime(2026, 5, 26),
+            "all",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            50,
+            CancellationToken.None);
+
+        var csv = Assert.IsType<FileContentResult>(csvAction);
+        var csvText = Encoding.UTF8.GetString(csv.FileContents);
+        Assert.Contains("VISIBLE-SCOPE-TASK", csvText, StringComparison.Ordinal);
+        Assert.DoesNotContain("HIDDEN-SCOPE-TASK", csvText, StringComparison.Ordinal);
+
+        var print = Assert.IsType<ContentResult>(printAction);
+        Assert.Contains("VISIBLE-SCOPE-TASK", print.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("HIDDEN-SCOPE-TASK", print.Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CaseActivity_BuildsInactivityDiagnostics()
     {
         await using var db = await CreateContextAsync();

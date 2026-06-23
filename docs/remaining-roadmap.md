@@ -265,6 +265,7 @@
   - `[x]` 2026-06-23: актуальный API юридических лиц закрыт явными правами `LegalEntities.CanCreate/CanEdit/CanDelete` для создания, редактирования и удаления, а не только областью видимости. Проверено backend-тестом `LegalEntitiesControllerTests.WriteEndpoints_RequireLegalEntityActionPermissions`.
   - `[x]` 2026-06-23: актуальный API договоров закрыт явными правами `Contracts.CanCreate/CanEdit/CanDelete` для создания, смены статуса, расторжения, аннулирования, редактирования и удаления. Проверено backend-тестом `ContractsControllerTests.WriteEndpoints_RequireContractActionPermissions`.
   - `[x]` 2026-06-23: прямые CSV-выгрузки и HTML-печать управленческого cash-flow отчета применяют object-level видимость платежей: роль с доступом "только свои" не получает чужие операции через export API. Проверено backend-тестом `ReportsControllerTests.CashFlowManagementExports_ApplyPaymentsVisibilityScope`.
+  - `[x]` 2026-06-23: прямые CSV-выгрузки и HTML-печать управленческого журнала задач применяют object-level видимость задач: роль с доступом "только свои" не получает чужие задачи через export API. Проверено backend-тестом `ReportsControllerTests.TasksManagementExports_ApplyTasksVisibilityScope`.
 - `[partial]` Довести backend- и frontend-тесты прав по реальным ролям заказчика. Тесты прав есть, но финальный набор зависит от утвержденной матрицы.
 - `[acceptance]` Финально проверить маскирование и раскрытие чувствительных данных на реальных ролях и данных.
 
