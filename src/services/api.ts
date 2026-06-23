@@ -4638,29 +4638,10 @@ export class ApiService {
 
 
   async cleanAddress(address: string) {
-    const endpoints = [
-      '/clients/dadata/clean-address',
-      '/legal-entities/clean/address',
-      '/legalentities/clean/address',
-    ] as const;
-
-    let lastError: Error | null = null;
-    for (const endpoint of endpoints) {
-      try {
-        return await this.request<CleanedAddress>(endpoint, {
-          method: 'POST',
-          body: JSON.stringify({ address }),
-        });
-      } catch (error) {
-        if (!(error instanceof Error)) throw error;
-        lastError = error;
-        if (!error.message.includes('404')) {
-          throw error;
-        }
-      }
-    }
-
-    throw lastError ?? new Error('Не удалось найти endpoint стандартизации адреса');
+    return this.request<CleanedAddress>('/clients/dadata/clean-address', {
+      method: 'POST',
+      body: JSON.stringify({ address }),
+    });
   }
 
 

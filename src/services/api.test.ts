@@ -87,6 +87,36 @@ describe('sticky notes realtime contract', () => {
   });
 });
 
+describe('client DaData API', () => {
+  it('uses the client clean-address endpoint without legacy fallback routes', async () => {
+    const payload = {
+      result: '446200, Самарская обл, г Новокуйбышевск, ул Дзержинского, д 14, кв 9',
+      postalCode: '446200',
+      regionWithType: 'Самарская обл',
+      cityWithType: 'г Новокуйбышевск',
+      streetWithType: 'ул Дзержинского',
+      house: '14',
+      flat: '9',
+    };
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.cleanAddress('г.Новокуйбышевск, ул. Дзержинского д.14.кв.9');
+
+    expect(result).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/clients/dadata/clean-address');
+    expect(String(url)).not.toContain('/legal-entities/clean/address');
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(String(init?.body))).toEqual({
+      address: 'г.Новокуйбышевск, ул. Дзержинского д.14.кв.9',
+    });
+  });
+});
+
 describe('payments advance review API', () => {
   it('requests advance diagnostics with search filters', async () => {
     const payload = {
