@@ -326,6 +326,66 @@ public class ReportsController : ControllerBase
             $"{document!.Slug}-{now.Local:yyyyMMdd-HHmm}.xls");
     }
 
+    [HttpGet("management.csv")]
+    public async Task<IActionResult> ExportManagementReportCsv(
+        [FromQuery] string report,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] MoneyOperationSource? source,
+        [FromQuery] string? accountName,
+        [FromQuery] string? counterpartyName,
+        [FromQuery] int? clientId,
+        [FromQuery] int? caseId,
+        [FromQuery] int? contractId,
+        [FromQuery] int? incomeTypeId,
+        [FromQuery] DateTime? asOf,
+        [FromQuery] string? status,
+        [FromQuery] int? responsibleUserId,
+        [FromQuery] string? caseType,
+        [FromQuery] int? lawyerUserId,
+        [FromQuery] int? horizonDays,
+        [FromQuery] string? deadlineType,
+        [FromQuery] string? activity,
+        [FromQuery] int? inactiveDays,
+        [FromQuery] int? escalationDays,
+        [FromQuery] int? limit,
+        CancellationToken ct)
+    {
+        var (document, error) = await BuildManagementReportExportDocumentAsync(
+            report,
+            from,
+            to,
+            source,
+            accountName,
+            counterpartyName,
+            clientId,
+            caseId,
+            contractId,
+            incomeTypeId,
+            asOf,
+            status,
+            responsibleUserId,
+            caseType,
+            lawyerUserId,
+            horizonDays,
+            deadlineType,
+            activity,
+            inactiveDays,
+            escalationDays,
+            limit,
+            ct);
+        if (error is not null)
+        {
+            return error;
+        }
+
+        var now = await ResolveReportNowAsync(ct);
+        return File(
+            BuildReportExportCsv(document!, now.Utc, now.TimeZone),
+            "text/csv; charset=utf-8",
+            $"{document!.Slug}-{now.Local:yyyyMMdd-HHmm}.csv");
+    }
+
     [HttpGet("management.pdf")]
     public async Task<IActionResult> ExportManagementReportPdf(
         [FromQuery] string report,
@@ -3552,6 +3612,38 @@ public class ReportsController : ControllerBase
 </Workbook>
 """);
         return builder.ToString();
+    }
+
+    private static byte[] BuildReportExportCsv(
+        ReportExportDocument document,
+        DateTime generatedAtUtc,
+        TimeZoneInfo timeZone)
+    {
+        var builder = new StringBuilder();
+        AppendCsvRow(builder, [document.Title]);
+        AppendCsvRow(builder, [document.Subtitle]);
+        AppendCsvRow(builder, ["Сформировано", GeneratedAtCell(generatedAtUtc, timeZone)]);
+        AppendCsvRow(builder, []);
+
+        foreach (var metric in document.Metrics)
+        {
+            AppendCsvRow(builder, [metric.Label, metric.Value]);
+        }
+
+        foreach (var table in document.Tables)
+        {
+            AppendCsvRow(builder, []);
+            AppendCsvRow(builder, [table.Title]);
+            AppendCsvRow(builder, table.Headers);
+            foreach (var row in table.Rows)
+            {
+                AppendCsvRow(builder, row.Cells);
+            }
+        }
+
+        return Encoding.UTF8.GetPreamble()
+            .Concat(Encoding.UTF8.GetBytes(builder.ToString()))
+            .ToArray();
     }
 
     private static string BuildReportExportPrintHtml(

@@ -220,7 +220,7 @@ public class ReportsControllerTests
     }
 
     [Fact]
-    public async Task ManagementReportExports_ReturnExcelAndPdfFiles()
+    public async Task ManagementReportExports_ReturnCsvExcelAndPdfFiles()
     {
         await using var db = await CreateContextAsync();
         var role = new Role { Name = "manager", Description = "Manager" };
@@ -299,6 +299,34 @@ public class ReportsControllerTests
 
         foreach (var reportKind in reportKinds)
         {
+            var csvAction = await controller.ExportManagementReportCsv(
+                reportKind,
+                today.AddDays(-30),
+                today.AddDays(30),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                today,
+                null,
+                null,
+                null,
+                null,
+                7,
+                null,
+                "all",
+                null,
+                null,
+                50,
+                CancellationToken.None);
+            var csv = Assert.IsType<FileContentResult>(csvAction);
+            Assert.Equal("text/csv; charset=utf-8", csv.ContentType);
+            Assert.EndsWith(".csv", csv.FileDownloadName, StringComparison.Ordinal);
+            Assert.Contains(";", System.Text.Encoding.UTF8.GetString(csv.FileContents), StringComparison.Ordinal);
+
             var excelAction = await controller.ExportManagementReportExcel(
                 reportKind,
                 today.AddDays(-30),
@@ -826,6 +854,29 @@ public class ReportsControllerTests
         Assert.IsType<ForbidResult>(await controller.ExportLegalWorkExcel(null, null, null, null, null, CancellationToken.None));
         Assert.IsType<ForbidResult>(await controller.ExportLegalWorkPdf(null, null, null, null, null, CancellationToken.None));
         Assert.IsType<ForbidResult>(await controller.ExportManagementReportExcel(
+            "case-finance",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            CancellationToken.None));
+        Assert.IsType<ForbidResult>(await controller.ExportManagementReportCsv(
             "case-finance",
             null,
             null,

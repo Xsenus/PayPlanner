@@ -1657,6 +1657,43 @@ describe('apiService reports', () => {
     expect(String(url)).toContain('limit=100');
   });
 
+  it('downloads management report CSV exports with filters', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('csv-data', {
+      headers: {
+        'content-disposition': 'attachment; filename="cash-flow-report.csv"',
+      },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.downloadManagementReport({
+      report: 'cash-flow',
+      format: 'csv',
+      from: '2026-05-01',
+      to: '2026-05-31',
+      source: 'Bank',
+      accountName: 'Main account',
+      clientId: 25,
+      caseId: 12,
+      contractId: 7,
+      incomeTypeId: 3,
+    });
+
+    expect(result.fileName).toBe('cash-flow-report.csv');
+    expect(await result.blob.text()).toBe('csv-data');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/reports/management.csv?');
+    expect(String(url)).toContain('report=cash-flow');
+    expect(String(url)).toContain('from=2026-05-01');
+    expect(String(url)).toContain('to=2026-05-31');
+    expect(String(url)).toContain('source=Bank');
+    expect(String(url)).toContain('accountName=Main+account');
+    expect(String(url)).toContain('clientId=25');
+    expect(String(url)).toContain('caseId=12');
+    expect(String(url)).toContain('contractId=7');
+    expect(String(url)).toContain('incomeTypeId=3');
+  });
+
   it('loads overdue procedural deadlines report with filters', async () => {
     const payload = {
       generatedAt: '2026-05-26T10:00:00Z',

@@ -5848,7 +5848,7 @@ export class ApiService {
 
   async downloadManagementReport(params: {
     report: 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast' | 'cash' | 'bank' | 'plan-fact' | 'advances' | 'payment-priorities' | 'paid-accounts' | 'paid-invoices' | 'invoice-statuses' | 'act-statuses' | 'contract-statuses' | 'categories' | 'counterparties' | 'projects' | 'directions' | 'sales-points' | 'vat' | 'payment-orders' | 'payment-purposes' | 'match-statuses' | 'journal-statuses' | 'currencies' | 'cash-orders' | 'bank-statement-imports' | 'spreadsheet-imports';
-    format: 'excel' | 'pdf';
+    format: 'csv' | 'excel' | 'pdf';
     from?: string;
     to?: string;
     source?: MoneyOperationSource;
@@ -5871,7 +5871,7 @@ export class ApiService {
     limit?: number;
   }) {
     const { format, ...filters } = params;
-    const extension = format === 'excel' ? 'xls' : 'pdf';
+    const extension = format === 'excel' ? 'xls' : format;
     const q = buildQuery(filters);
     const token = getAuthToken();
     const response = await fetch(`${API_BASE_URL}/reports/management.${extension}${q}`, {

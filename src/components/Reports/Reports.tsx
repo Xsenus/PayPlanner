@@ -2500,7 +2500,7 @@ function ProjectReportSection({
 }
 
 type LegalWorkExportFormat = 'csv' | 'excel' | 'pdf';
-type ManagementReportExportFormat = 'excel' | 'pdf';
+type ManagementReportExportFormat = 'csv' | 'excel' | 'pdf';
 type ManagementReportKind = 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast' | 'cash' | 'bank' | 'plan-fact' | 'advances' | 'payment-priorities' | 'paid-accounts' | 'paid-invoices' | 'invoice-statuses' | 'act-statuses' | 'contract-statuses' | 'categories' | 'counterparties' | 'projects' | 'directions' | 'sales-points' | 'vat' | 'payment-orders' | 'payment-purposes' | 'match-statuses' | 'journal-statuses' | 'currencies' | 'cash-orders' | 'bank-statement-imports' | 'spreadsheet-imports';
 type ReportCaseSection = 'tasks' | 'documents' | 'court' | 'workOrder';
 
@@ -2571,6 +2571,15 @@ function ManagementReportExportButtons({
 
   return (
     <>
+      <button
+        type="button"
+        onClick={() => void handleExport('csv')}
+        disabled={isDisabled || exporting !== null}
+        className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <FileSpreadsheet className="h-4 w-4" />
+        {exporting === 'csv' ? 'CSV...' : 'CSV'}
+      </button>
       <button
         type="button"
         onClick={() => void handleExport('excel')}
