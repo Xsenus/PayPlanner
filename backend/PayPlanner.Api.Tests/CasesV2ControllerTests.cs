@@ -4981,6 +4981,63 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task CourtSyncEndpoints_RequireCasePermissionsAndVisibility()
+    {
+        await using var db = await CreateContextAsync();
+        var noViewUser = await CreateUserAsync(db, "court-sync-no-view@example.com", "Без просмотра");
+        noViewUser.Role!.Permissions.Single(permission => permission.Section == RolePermissionCatalog.Cases).CanView = false;
+        var noEditUser = await CreateUserAsync(db, "court-sync-no-edit@example.com", "Без редактирования");
+        noEditUser.Role!.Permissions.Single(permission => permission.Section == RolePermissionCatalog.Cases).CanEdit = false;
+        var limitedEditor = await CreateUserAsync(db, "court-sync-limited@example.com", "Ограниченный");
+        var otherResponsible = await CreateUserAsync(db, "court-sync-other@example.com", "Другой");
+        var client = new Client
+        {
+            Name = "Клиент судебной синхронизации",
+            IsActive = true,
+            ResponsibleUserId = noEditUser.Id,
+        };
+        var accessibleCase = new ClientCase
+        {
+            Client = client,
+            Title = "Доступное судебное дело",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = noEditUser.Id,
+            CourtCaseNumber = "А55-111/2026",
+            EventHistory = "23.06.2026 10:00: Ручная проверка судебного источника зафиксирована. Инициатор: Тест.",
+        };
+        var hiddenCase = new ClientCase
+        {
+            Client = client,
+            Title = "Скрытое судебное дело",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = otherResponsible.Id,
+            CourtCaseNumber = "А55-222/2026",
+        };
+        db.Clients.Add(client);
+        db.ClientCases.AddRange(accessibleCase, hiddenCase);
+        await db.SaveChangesAsync();
+
+        var noViewController = CreateController(db, noViewUser);
+        Assert.IsType<ForbidResult>((await noViewController.GetCourtSyncSettings(CancellationToken.None)).Result);
+        Assert.IsType<ForbidResult>((await noViewController.GetCourtSyncProviders(CancellationToken.None)).Result);
+        Assert.IsType<ForbidResult>((await noViewController.GetCourtSyncJournal(take: 50, status: null, search: null, CancellationToken.None)).Result);
+        Assert.IsType<ForbidResult>((await noViewController.GetCourtSyncLogs(accessibleCase.Id, CancellationToken.None)).Result);
+
+        var noEditController = CreateController(db, noEditUser);
+        Assert.IsType<ForbidResult>((await noEditController.UpdateCourtSyncSettings(new CasesV2Controller.UpdateClientCaseCourtSyncSettingsRequest
+        {
+            IsEnabled = true,
+            IntervalMinutes = 60,
+            BatchSize = 10,
+        }, CancellationToken.None)).Result);
+        Assert.IsType<ForbidResult>((await noEditController.RunCourtSync(accessibleCase.Id, null, CancellationToken.None)).Result);
+
+        var limitedController = CreateController(db, limitedEditor);
+        Assert.IsType<NotFoundResult>((await limitedController.RunCourtSync(hiddenCase.Id, null, CancellationToken.None)).Result);
+        Assert.IsType<NotFoundResult>((await limitedController.GetCourtSyncLogs(hiddenCase.Id, CancellationToken.None)).Result);
+    }
+
+    [Fact]
     public async Task RunCourtSync_ManualOnlyRecordsCommentWithoutExternalUpdate()
     {
         await using var db = await CreateContextAsync();
