@@ -830,6 +830,36 @@ public class ContractsControllerTests
     }
 
     [Fact]
+    public async Task SendEmail_RequiresContractExportPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db, email: "client@example.com");
+        var createResult = await CreateAdminController(db).Create(
+            new UpsertContractRequest
+            {
+                Number = "CT-MAIL-FORBID",
+                Date = new DateTime(2026, 5, 21),
+                BillingMode = ContractBillingMode.Fixed,
+                Amount = 45_000m,
+                Clients = [new UpsertContractClientRequest { ClientId = client.Id }],
+            },
+            CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createResult.Result);
+        var createdDto = Assert.IsType<ContractDto>(created.Value);
+        var user = await CreateContractUserAsync(db, "contracts-no-export", canCreate: true, canEdit: true, canDelete: true, canExport: false);
+        var emailService = new CapturingEmailService();
+        var controller = CreateControllerForUser(db, user.Id, emailService);
+
+        var actionResult = await controller.SendEmail(
+            createdDto.Id,
+            new SendInvoiceEmailRequest { Format = "word" },
+            CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(actionResult);
+        Assert.Null(emailService.ToEmail);
+    }
+
+    [Fact]
     public async Task UploadDocumentToYandexDisk_UploadsContractDocumentAndWritesAudit()
     {
         await using var db = await CreateContextAsync();
@@ -1874,7 +1904,8 @@ public class ContractsControllerTests
         bool canCreate,
         bool canEdit,
         bool canDelete,
-        bool canView = true)
+        bool canView = true,
+        bool canExport = true)
     {
         var role = new Role
         {
@@ -1889,7 +1920,7 @@ public class ContractsControllerTests
                     CanCreate = canCreate,
                     CanEdit = canEdit,
                     CanDelete = canDelete,
-                    CanExport = true,
+                    CanExport = canExport,
                     ViewScope = DataVisibilityScope.All,
                 },
             },
@@ -1909,8 +1940,8 @@ public class ContractsControllerTests
         return user;
     }
 
-    private static ContractsController CreateControllerForUser(PaymentContext db, int userId)
-        => new(db, new NoopFormRequirementsService())
+    private static ContractsController CreateControllerForUser(PaymentContext db, int userId, IEmailService? emailService = null)
+        => new(db, new NoopFormRequirementsService(), emailService: emailService)
         {
             ControllerContext = new ControllerContext
             {

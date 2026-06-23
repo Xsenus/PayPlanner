@@ -2203,6 +2203,27 @@ public class ActsControllerTests
     }
 
     [Fact]
+    public async Task SendActEmail_RequiresActsExportPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        client.Email = "client@example.com";
+        await db.SaveChangesAsync();
+        var act = await CreateManualActAsync(db, client.Id, "ACT-313-MAIL-FORBID", 10_000m, ActStatus.Created);
+        var user = await CreateActsUserAsync(db, "acts-no-export", canExport: false);
+        var emailService = new RecordingEmailService();
+        var controller = CreateControllerForUser(db, user.Id, emailService);
+
+        var action = await controller.SendActEmail(
+            act.Id,
+            new SendInvoiceEmailRequest { Format = "word" },
+            CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(action);
+        Assert.Null(emailService.ToEmail);
+    }
+
+    [Fact]
     public async Task SendActEmail_ReturnsProblem_WhenPdfServiceIsMissing()
     {
         await using var db = await CreateContextAsync();
@@ -2968,6 +2989,60 @@ public class ActsControllerTests
         await db.SaveChangesAsync();
         return user;
     }
+
+    private static async Task<User> CreateActsUserAsync(PaymentContext db, string name, bool canExport)
+    {
+        var role = new Role
+        {
+            Name = $"{name}-{Guid.NewGuid():N}",
+            Description = name,
+            Permissions =
+            {
+                new RolePermission
+                {
+                    Section = RolePermissionCatalog.Acts,
+                    CanView = true,
+                    CanCreate = true,
+                    CanEdit = true,
+                    CanDelete = true,
+                    CanExport = canExport,
+                    ViewScope = DataVisibilityScope.All,
+                },
+            },
+        };
+        var user = new User
+        {
+            Email = $"{name}-{Guid.NewGuid():N}@example.test",
+            FullName = name,
+            PasswordHash = "test",
+            Role = role,
+            IsActive = true,
+            IsApproved = true,
+        };
+
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        return user;
+    }
+
+    private static ActsController CreateControllerForUser(PaymentContext db, int userId, IEmailService? emailService = null)
+        => new(
+            db,
+            new NoopFormRequirementsService(),
+            emailService: emailService)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                    [
+                        new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
+                        new Claim(ClaimTypes.Name, "Test user"),
+                    ], "Test")),
+                },
+            },
+        };
 
     private static ActsController CreateAdminController(PaymentContext db, IYandexDiskService? yandexDiskService = null)
     {

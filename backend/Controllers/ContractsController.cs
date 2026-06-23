@@ -573,6 +573,11 @@ public class ContractsController : ControllerBase
     public async Task<IActionResult> SendEmail(int id, [FromBody] SendInvoiceEmailRequest request, CancellationToken ct)
     {
         if (!ModelState.IsValid) return ValidationProblem(ModelState);
+        if (await RequireSectionPermissionAsync(RolePermissionCatalog.Contracts, permission => permission.CanExport, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         if (_emailService is null)
         {
             return BadRequest("Email service is not configured.");

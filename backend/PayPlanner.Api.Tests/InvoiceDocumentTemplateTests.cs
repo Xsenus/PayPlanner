@@ -898,6 +898,24 @@ public class InvoiceDocumentTemplateTests
     }
 
     [Fact]
+    public async Task SendInvoiceEmail_RequiresAccountsExportPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        var user = await CreateAccountsUserAsync(db, "accounts-no-export", canExport: false);
+        var emailService = new RecordingEmailService();
+        var controller = CreateController(db, isAdmin: false, emailService: emailService, userId: user.Id);
+
+        var result = await controller.SendInvoiceEmail(
+            paymentId,
+            new SendInvoiceEmailRequest { Format = "word" },
+            CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result);
+        Assert.Null(emailService.ToEmail);
+    }
+
+    [Fact]
     public async Task UpsertDocumentTemplateSettings_ForbidsNonAdminUsers()
     {
         await using var db = await CreateContextAsync();
@@ -1558,6 +1576,41 @@ public class InvoiceDocumentTemplateTests
         return db;
     }
 
+    private static async Task<User> CreateAccountsUserAsync(PaymentContext db, string name, bool canExport)
+    {
+        var role = new Role
+        {
+            Name = $"{name}-{Guid.NewGuid():N}",
+            Description = name,
+            Permissions =
+            {
+                new RolePermission
+                {
+                    Section = RolePermissionCatalog.Accounts,
+                    CanView = true,
+                    CanCreate = true,
+                    CanEdit = true,
+                    CanDelete = true,
+                    CanExport = canExport,
+                    ViewScope = DataVisibilityScope.All,
+                },
+            },
+        };
+        var user = new User
+        {
+            Email = $"{name}-{Guid.NewGuid():N}@example.test",
+            FullName = name,
+            PasswordHash = "test",
+            Role = role,
+            IsActive = true,
+            IsApproved = true,
+        };
+
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        return user;
+    }
+
     private static string BuildLegacyBrokenManagedDefaultTemplateHtml()
     {
         var currentDefaultHtml = InvoiceDocumentTemplateEngine.CreateDefaultSettings().DefaultTemplateHtml;
@@ -1768,9 +1821,16 @@ public class InvoiceDocumentTemplateTests
         bool isAdmin,
         IEmailService? emailService = null,
         IInvoiceDocumentPdfService? pdfService = null,
-        IYandexDiskService? yandexDiskService = null)
+        IYandexDiskService? yandexDiskService = null,
+        int? userId = null)
     {
         var claims = new List<Claim>();
+        if (userId.HasValue)
+        {
+            claims.Add(new Claim(ClaimTypes.NameIdentifier, userId.Value.ToString()));
+            claims.Add(new Claim(ClaimTypes.Name, "Test user"));
+        }
+
         if (isAdmin)
         {
             claims.Add(new Claim(ClaimTypes.Role, "admin"));

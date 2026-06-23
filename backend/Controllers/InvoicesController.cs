@@ -2857,6 +2857,11 @@ public class InvoicesController : ControllerBase
             return ValidationProblem(ModelState);
         }
 
+        if (await RequireAccountsPermissionAsync(permission => permission.CanExport, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var payment = await LoadInvoiceDocumentPaymentAsync(id, ct);
 
         if (payment is null)

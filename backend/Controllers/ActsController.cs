@@ -1243,6 +1243,11 @@ public class ActsController : ControllerBase
             return ValidationProblem(ModelState);
         }
 
+        if (await RequireActsPermissionAsync(permission => permission.CanExport, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         if (_emailService is null)
         {
             return Problem(statusCode: StatusCodes.Status503ServiceUnavailable, detail: "Email service is not registered on the server.");
