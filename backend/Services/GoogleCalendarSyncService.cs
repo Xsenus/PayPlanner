@@ -2300,16 +2300,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
 
     private async Task EnsureUserCanManageCalendarAsync(HttpRequest request, CancellationToken cancellationToken)
     {
-        var user = request.HttpContext.User;
-        var userId = user.GetUserId();
-        if (!userId.HasValue)
-        {
-            if (user.IsInRole("admin"))
-            {
-                return;
-            }
-        }
-        else if (await _db.IsUserAdminAsync(userId.Value, cancellationToken))
+        if (await _db.IsUserAdminOrLegacyFallbackAsync(request.HttpContext.User, cancellationToken))
         {
             return;
         }

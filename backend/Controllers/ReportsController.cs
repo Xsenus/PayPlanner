@@ -143,20 +143,7 @@ public class ReportsController : ControllerBase
     }
 
     private async Task<bool> IsCurrentUserAdminAsync(CancellationToken ct)
-    {
-        var userId = User.GetUserId();
-        if (!userId.HasValue)
-        {
-            return User.IsInRole("admin");
-        }
-
-        if (!await _db.Users.AsNoTracking().AnyAsync(ct))
-        {
-            return User.IsInRole("admin");
-        }
-
-        return await _db.IsUserAdminAsync(userId.Value, ct);
-    }
+        => await _db.IsUserAdminOrLegacyFallbackAsync(User, ct);
 
     private async Task<DateTime> ResolveReportTodayAsync(CancellationToken ct)
     {

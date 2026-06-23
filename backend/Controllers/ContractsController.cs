@@ -64,20 +64,7 @@ public class ContractsController : ControllerBase
         => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Contracts, ct);
 
     private async Task<bool> IsDatabaseAdminAsync(CancellationToken ct)
-    {
-        var userId = User.GetUserId();
-        if (!userId.HasValue)
-        {
-            return User.IsInRole("admin");
-        }
-
-        if (!await _db.Users.AsNoTracking().AnyAsync(ct))
-        {
-            return User.IsInRole("admin");
-        }
-
-        return await _db.IsUserAdminAsync(userId.Value, ct);
-    }
+        => await _db.IsUserAdminOrLegacyFallbackAsync(User, ct);
 
     private Task<TimeZoneInfo> ResolveContractTimeZoneAsync(CancellationToken ct)
         => CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);

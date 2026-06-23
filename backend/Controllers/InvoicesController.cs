@@ -79,15 +79,7 @@ public class InvoicesController : ControllerBase
             : Forbid();
 
     private async Task<bool> IsCurrentUserAdminAsync(CancellationToken ct)
-    {
-        var userId = User.GetUserId();
-        if (!userId.HasValue)
-        {
-            return User.IsInRole("admin");
-        }
-
-        return await _db.IsUserAdminAsync(userId.Value, ct);
-    }
+        => await _db.IsUserAdminOrLegacyFallbackAsync(User, ct);
 
     private async Task<IReadOnlyCollection<int>> ResolveInvoiceNotificationRecipientsAsync(
         Payment invoicePayment,

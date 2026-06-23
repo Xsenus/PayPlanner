@@ -12,6 +12,74 @@ namespace PayPlanner.Api.Tests;
 public class DataVisibilityServiceTests
 {
     [Fact]
+    public async Task IsUserAdminOrLegacyFallbackAsync_UsesDatabaseRoleForExistingUser()
+    {
+        await using var db = await CreateContextAsync();
+        var adminRole = new Role { Name = "admin", Description = "admin" };
+        db.Roles.Add(adminRole);
+        await db.SaveChangesAsync();
+        var admin = new User
+        {
+            Email = "db-admin@example.com",
+            PasswordHash = "hash",
+            FullName = "Database Admin",
+            RoleId = adminRole.Id,
+            IsActive = true,
+        };
+        db.Users.Add(admin);
+        await db.SaveChangesAsync();
+
+        var isAdmin = await db.IsUserAdminOrLegacyFallbackAsync(CreatePrincipal(admin.Id));
+
+        Assert.True(isAdmin);
+    }
+
+    [Fact]
+    public async Task IsUserAdminOrLegacyFallbackAsync_IgnoresAdminClaimForExistingNonAdminUser()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "manager", Description = "manager" };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+        var user = new User
+        {
+            Email = "db-manager@example.com",
+            PasswordHash = "hash",
+            FullName = "Database Manager",
+            RoleId = role.Id,
+            IsActive = true,
+        };
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        var isAdmin = await db.IsUserAdminOrLegacyFallbackAsync(CreatePrincipal(user.Id, isAdminClaim: true));
+
+        Assert.False(isAdmin);
+    }
+
+    [Fact]
+    public async Task IsUserAdminOrLegacyFallbackAsync_ReturnsFalseForMissingUserWhenDatabaseHasUsers()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "manager", Description = "manager" };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+        db.Users.Add(new User
+        {
+            Email = "existing-admin-helper-user@example.com",
+            PasswordHash = "hash",
+            FullName = "Existing User",
+            RoleId = role.Id,
+            IsActive = true,
+        });
+        await db.SaveChangesAsync();
+
+        var isAdmin = await db.IsUserAdminOrLegacyFallbackAsync(CreatePrincipal(987654, isAdminClaim: true));
+
+        Assert.False(isAdmin);
+    }
+
+    [Fact]
     public async Task ResolveDataVisibilityAsync_IgnoresAdminClaimWhenDatabaseRoleIsNotAdmin()
     {
         await using var db = await CreateContextAsync();

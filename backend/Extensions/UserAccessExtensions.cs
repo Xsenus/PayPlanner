@@ -14,6 +14,39 @@ public static class UserAccessExtensions
             .Select(u => u.Role != null && u.Role.Name == "admin")
             .FirstOrDefaultAsync(ct);
 
+    public static async Task<bool> IsUserAdminOrLegacyFallbackAsync(
+        this PaymentContext db,
+        ClaimsPrincipal? principal,
+        CancellationToken ct = default)
+    {
+        if (principal is null)
+        {
+            return false;
+        }
+
+        var userId = principal.GetUserId();
+        if (!userId.HasValue)
+        {
+            return principal.IsInRole("admin");
+        }
+
+        var user = await db.Users
+            .AsNoTracking()
+            .Where(item => item.Id == userId.Value && item.IsActive)
+            .Select(item => new
+            {
+                RoleName = item.Role != null ? item.Role.Name : string.Empty,
+            })
+            .FirstOrDefaultAsync(ct);
+
+        if (user is not null)
+        {
+            return string.Equals(user.RoleName, "admin", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return !await db.Users.AsNoTracking().AnyAsync(ct) && principal.IsInRole("admin");
+    }
+
     public static async Task<RolePermission?> GetUserSectionPermissionAsync(
         this PaymentContext db,
         int userId,
