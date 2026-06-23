@@ -2102,6 +2102,175 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task LawyerWorkloadManagementExports_ApplyCasesAndTasksVisibilityScope()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role
+        {
+            Name = $"lawyer-workload-export-role-{Guid.NewGuid():N}",
+            Description = "Lawyer workload export role",
+        };
+        var visibleUser = new User
+        {
+            Email = $"visible-workload-export-{Guid.NewGuid():N}@example.test",
+            FullName = "Visible Workload Export User",
+            IsActive = true,
+            Role = role,
+        };
+        var hiddenUser = new User
+        {
+            Email = $"hidden-workload-export-{Guid.NewGuid():N}@example.test",
+            FullName = "Hidden Workload Export User",
+            IsActive = true,
+            Role = role,
+        };
+
+        db.Roles.Add(role);
+        db.Users.AddRange(visibleUser, hiddenUser);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Reports,
+                CanView = true,
+                CanExport = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Cases,
+                CanView = true,
+                ViewScope = DataVisibilityScope.Own,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Tasks,
+                CanView = true,
+                ViewScope = DataVisibilityScope.Own,
+            });
+
+        var visibleClient = new Client { Name = "Visible workload export client", ResponsibleUserId = visibleUser.Id };
+        var hiddenClient = new Client { Name = "Hidden workload export client", ResponsibleUserId = hiddenUser.Id };
+        db.Clients.AddRange(visibleClient, hiddenClient);
+        await db.SaveChangesAsync();
+
+        var asOf = new DateTime(2026, 5, 26);
+        var visibleCase = new ClientCase
+        {
+            ClientId = visibleClient.Id,
+            CaseNumber = "WORKLOAD-EXPORT-VISIBLE",
+            Title = "Visible workload export case",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = visibleUser.Id,
+            CreatedAt = asOf.AddDays(-20),
+        };
+        var hiddenCase = new ClientCase
+        {
+            ClientId = hiddenClient.Id,
+            CaseNumber = "WORKLOAD-EXPORT-HIDDEN",
+            Title = "Hidden workload export case",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = hiddenUser.Id,
+            CreatedAt = asOf.AddDays(-20),
+        };
+        db.ClientCases.AddRange(visibleCase, hiddenCase);
+        await db.SaveChangesAsync();
+
+        db.TaskJournalItems.AddRange(
+            new TaskJournalItem
+            {
+                ClientCaseId = visibleCase.Id,
+                ObjectName = visibleCase.Title,
+                Title = "Visible workload export task",
+                AssigneeUserId = visibleUser.Id,
+                AssigneeName = visibleUser.FullName,
+                DueAt = asOf.AddDays(-1).AddHours(9),
+                Status = "new",
+                Priority = "high",
+                Type = "task",
+                PlannedDurationMinutes = 180,
+                CreatedAt = asOf.AddDays(-3),
+            },
+            new TaskJournalItem
+            {
+                ClientCaseId = hiddenCase.Id,
+                ObjectName = hiddenCase.Title,
+                Title = "Hidden workload export task",
+                AssigneeUserId = hiddenUser.Id,
+                AssigneeName = hiddenUser.FullName,
+                DueAt = asOf.AddDays(-1).AddHours(9),
+                Status = "new",
+                Priority = "high",
+                Type = "task",
+                PlannedDurationMinutes = 600,
+                CreatedAt = asOf.AddDays(-3),
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateUserPrincipal(visibleUser.Id));
+
+        var csvAction = await controller.ExportManagementReportCsv(
+            "lawyer-workload",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            asOf,
+            null,
+            null,
+            null,
+            null,
+            7,
+            null,
+            null,
+            null,
+            null,
+            50,
+            CancellationToken.None);
+        var printAction = await controller.PrintManagementReport(
+            "lawyer-workload",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            asOf,
+            null,
+            null,
+            null,
+            null,
+            7,
+            null,
+            null,
+            null,
+            null,
+            50,
+            CancellationToken.None);
+
+        var csv = Assert.IsType<FileContentResult>(csvAction);
+        var csvText = Encoding.UTF8.GetString(csv.FileContents);
+        Assert.Contains("Visible Workload Export User", csvText, StringComparison.Ordinal);
+        Assert.DoesNotContain("Hidden Workload Export User", csvText, StringComparison.Ordinal);
+
+        var print = Assert.IsType<ContentResult>(printAction);
+        Assert.Contains("Visible Workload Export User", print.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("Hidden Workload Export User", print.Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task OverdueDeadlines_UsesVisibleProceduralDeadlines()
     {
         await using var db = await CreateContextAsync();
