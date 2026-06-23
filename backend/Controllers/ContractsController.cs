@@ -672,6 +672,10 @@ public class ContractsController : ControllerBase
     {
         var contract = await LoadEditableContractAsync(id, ct);
         if (contract is null) return NotFound();
+        if (await RequireSectionPermissionAsync(RolePermissionCatalog.Contracts, permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
 
         var originalStatus = contract.Status;
         var originalValidUntil = contract.ValidUntil;
@@ -704,6 +708,10 @@ public class ContractsController : ControllerBase
     {
         var contract = await LoadEditableContractAsync(id, ct);
         if (contract is null) return NotFound();
+        if (await RequireSectionPermissionAsync(RolePermissionCatalog.Contracts, permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
 
         var originalStatus = contract.Status;
         var originalValidUntil = contract.ValidUntil;
@@ -729,6 +737,10 @@ public class ContractsController : ControllerBase
     {
         var contract = await LoadEditableContractAsync(id, ct);
         if (contract is null) return NotFound();
+        if (await RequireSectionPermissionAsync(RolePermissionCatalog.Contracts, permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
 
         var originalStatus = contract.Status;
         var originalValidUntil = contract.ValidUntil;
@@ -761,6 +773,10 @@ public class ContractsController : ControllerBase
 
         var contract = await LoadEditableContractDetailAsync(id, ct);
         if (contract is null) return NotFound();
+        if (await RequireSectionPermissionAsync(RolePermissionCatalog.Contracts, permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
 
         var originalStatus = contract.Status;
         var originalValidUntil = contract.ValidUntil;
@@ -877,6 +893,10 @@ public class ContractsController : ControllerBase
 
         var contract = await LoadEditableContractDetailAsync(id, ct);
         if (contract is null) return NotFound();
+        if (await RequireSectionPermissionAsync(RolePermissionCatalog.Contracts, permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
         if (string.Equals(contract.Status, ContractStatus.Cancelled, StringComparison.OrdinalIgnoreCase))
         {
             return BadRequest("Аннулированный договор нельзя расторгнуть.");
@@ -921,6 +941,10 @@ public class ContractsController : ControllerBase
 
         var contract = await LoadEditableContractDetailAsync(id, ct);
         if (contract is null) return NotFound();
+        if (await RequireSectionPermissionAsync(RolePermissionCatalog.Contracts, permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
         if (!string.Equals(contract.Status, ContractStatus.Draft, StringComparison.OrdinalIgnoreCase)
             && !string.Equals(contract.Status, ContractStatus.NotSigned, StringComparison.OrdinalIgnoreCase)
             && !string.Equals(contract.Status, ContractStatus.RequiresClientSignature, StringComparison.OrdinalIgnoreCase)
@@ -1011,6 +1035,11 @@ public class ContractsController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<ContractDto>> Create([FromBody] UpsertContractRequest request, CancellationToken ct)
     {
+        if (await RequireSectionPermissionAsync(RolePermissionCatalog.Contracts, permission => permission.CanCreate, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var missingCreate = await _formRequirements.GetMissingFieldsAsync("contracts", request, ct);
         if (missingCreate.Count > 0) return BadRequest(new { message = "Не заполнены обязательные поля", missingFields = missingCreate });
         if (!ModelState.IsValid) return ValidationProblem(ModelState);
@@ -1066,6 +1095,10 @@ public class ContractsController : ControllerBase
         if (visibility is null)
         {
             return Unauthorized();
+        }
+        if (await RequireSectionPermissionAsync(RolePermissionCatalog.Contracts, permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
         }
 
         var contract = await _db.Contracts
@@ -1126,6 +1159,10 @@ public class ContractsController : ControllerBase
     {
         var contract = await LoadEditableContractAsync(id, ct);
         if (contract is null) return NotFound();
+        if (await RequireSectionPermissionAsync(RolePermissionCatalog.Contracts, permission => permission.CanDelete, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
         _db.Contracts.Remove(contract);
         await _db.SaveChangesAsync(ct);
         return NoContent();
@@ -2216,12 +2253,18 @@ public class ContractsController : ControllerBase
         Func<RolePermission, bool> isAllowed,
         CancellationToken ct)
     {
-        if (User.IsInRole("admin"))
+        var principal = User;
+        if (principal?.Identity?.IsAuthenticated != true)
         {
             return null;
         }
 
-        var userId = User.GetUserId();
+        if (principal.IsInRole("admin"))
+        {
+            return null;
+        }
+
+        var userId = principal.GetUserId();
         if (!userId.HasValue)
         {
             return Forbid();

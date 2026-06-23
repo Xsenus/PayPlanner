@@ -228,6 +228,7 @@
   - `[x]` 2026-06-23: актуальный V2 API клиентов закрыт явными правами `Clients.CanCreate/CanEdit/CanDelete` для записи, а не только областью видимости. Проверено backend-тестом `ClientsControllerTests.V2WriteEndpoints_RequireClientActionPermissions`.
   - `[x]` 2026-06-23: старые API клиентов `/api/clients` и `/api/v1/clients` закрыты секционными правами `Clients.CanView/Create/Edit/Delete`, включая массовое удаление и смену ответственного. Проверено backend-тестами `ClientsControllerTests.LegacyWriteEndpoints_RequireClientActionPermissions` и `ClientsControllerTests.V1Endpoints_RequireClientSectionPermissions`.
   - `[x]` 2026-06-23: актуальный API юридических лиц закрыт явными правами `LegalEntities.CanCreate/CanEdit/CanDelete` для создания, редактирования и удаления, а не только областью видимости. Проверено backend-тестом `LegalEntitiesControllerTests.WriteEndpoints_RequireLegalEntityActionPermissions`.
+  - `[x]` 2026-06-23: актуальный API договоров закрыт явными правами `Contracts.CanCreate/CanEdit/CanDelete` для создания, смены статуса, расторжения, аннулирования, редактирования и удаления. Проверено backend-тестом `ContractsControllerTests.WriteEndpoints_RequireContractActionPermissions`.
 - `[partial]` Довести backend- и frontend-тесты прав по реальным ролям заказчика. Тесты прав есть, но финальный набор зависит от утвержденной матрицы.
 - `[acceptance]` Финально проверить маскирование и раскрытие чувствительных данных на реальных ролях и данных.
 

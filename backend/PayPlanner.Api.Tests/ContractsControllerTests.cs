@@ -405,6 +405,64 @@ public class ContractsControllerTests
     }
 
     [Fact]
+    public async Task WriteEndpoints_RequireContractActionPermissions()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var noCreateUser = await CreateContractUserAsync(db, "contracts-no-create", canCreate: false, canEdit: true, canDelete: true);
+        var noEditUser = await CreateContractUserAsync(db, "contracts-no-edit", canCreate: true, canEdit: false, canDelete: true);
+        var noDeleteUser = await CreateContractUserAsync(db, "contracts-no-delete", canCreate: true, canEdit: true, canDelete: false);
+        var editContract = new Contract
+        {
+            Number = "CT-NO-EDIT",
+            Date = new DateTime(2026, 6, 20),
+            BillingMode = ContractBillingMode.Fixed,
+            Amount = 10_000m,
+            Status = ContractStatus.Draft,
+            ClientContracts = { new ClientContract { ClientId = client.Id } },
+        };
+        var deleteContract = new Contract
+        {
+            Number = "CT-NO-DELETE",
+            Date = new DateTime(2026, 6, 21),
+            BillingMode = ContractBillingMode.Fixed,
+            Amount = 20_000m,
+            Status = ContractStatus.Draft,
+            ClientContracts = { new ClientContract { ClientId = client.Id } },
+        };
+        db.Contracts.AddRange(editContract, deleteContract);
+        await db.SaveChangesAsync();
+
+        var createResult = await CreateControllerForUser(db, noCreateUser.Id).Create(
+            BuildContractRequest(client.Id, "CT-FORBID-CREATE"),
+            CancellationToken.None);
+        var updateResult = await CreateControllerForUser(db, noEditUser.Id).Update(
+            editContract.Id,
+            BuildContractRequest(client.Id, "CT-FORBID-UPDATE"),
+            CancellationToken.None);
+        var statusResult = await CreateControllerForUser(db, noEditUser.Id).UpdateStatus(
+            editContract.Id,
+            new UpdateNamedStatusRequest
+            {
+                Status = ContractStatus.Concluded,
+                Reason = "Проверка прав роли",
+            },
+            CancellationToken.None);
+        var deleteResult = await CreateControllerForUser(db, noDeleteUser.Id).Delete(deleteContract.Id, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(createResult.Result);
+        Assert.IsType<ForbidResult>(updateResult.Result);
+        Assert.IsType<ForbidResult>(statusResult.Result);
+        Assert.IsType<ForbidResult>(deleteResult);
+        Assert.False(await db.Contracts.AsNoTracking().AnyAsync(item => item.Number == "CT-FORBID-CREATE"));
+
+        var unchangedEditContract = await db.Contracts.AsNoTracking().SingleAsync(item => item.Id == editContract.Id);
+        Assert.Equal("CT-NO-EDIT", unchangedEditContract.Number);
+        Assert.Equal(ContractStatus.Draft, unchangedEditContract.Status);
+        Assert.True(await db.Contracts.AsNoTracking().AnyAsync(item => item.Id == deleteContract.Id));
+    }
+
+    [Fact]
     public async Task UpdateStatus_AcceptsRequiresClientSignature()
     {
         await using var db = await CreateContextAsync();
@@ -1799,6 +1857,73 @@ public class ContractsControllerTests
         await db.Database.EnsureCreatedAsync();
         return db;
     }
+
+    private static UpsertContractRequest BuildContractRequest(int clientId, string number)
+        => new()
+        {
+            Number = number,
+            Date = new DateTime(2026, 6, 20),
+            BillingMode = ContractBillingMode.Fixed,
+            Amount = 12_000m,
+            Clients = [new UpsertContractClientRequest { ClientId = clientId }],
+        };
+
+    private static async Task<User> CreateContractUserAsync(
+        PaymentContext db,
+        string name,
+        bool canCreate,
+        bool canEdit,
+        bool canDelete,
+        bool canView = true)
+    {
+        var role = new Role
+        {
+            Name = $"{name}-{Guid.NewGuid():N}",
+            Description = name,
+            Permissions =
+            {
+                new RolePermission
+                {
+                    Section = RolePermissionCatalog.Contracts,
+                    CanView = canView,
+                    CanCreate = canCreate,
+                    CanEdit = canEdit,
+                    CanDelete = canDelete,
+                    CanExport = true,
+                    ViewScope = DataVisibilityScope.All,
+                },
+            },
+        };
+        var user = new User
+        {
+            Email = $"{name}-{Guid.NewGuid():N}@example.test",
+            FullName = name,
+            PasswordHash = "test",
+            Role = role,
+            IsActive = true,
+            IsApproved = true,
+        };
+
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        return user;
+    }
+
+    private static ContractsController CreateControllerForUser(PaymentContext db, int userId)
+        => new(db, new NoopFormRequirementsService())
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                    [
+                        new Claim(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture)),
+                        new Claim(ClaimTypes.Name, "Пользователь договоров"),
+                    ], "Test")),
+                },
+            },
+        };
 
     private static async Task<Client> CreateClientAsync(PaymentContext db, string? email = null)
     {
