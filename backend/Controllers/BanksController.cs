@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
@@ -20,11 +21,23 @@ public class BanksController : ControllerBase
         _db = db;
     }
 
+    private async Task<ActionResult?> RequireDictionariesPermissionAsync(
+        Func<RolePermissionValues, bool> isAllowed,
+        CancellationToken ct)
+        => await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Dictionaries, isAllowed, ct)
+            ? null
+            : Forbid();
+
     [HttpGet]
     public async Task<ActionResult<IReadOnlyCollection<BankDto>>> GetBanks(
         [FromQuery] string? search,
         CancellationToken ct)
     {
+        if (await RequireDictionariesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var query = _db.Banks.AsNoTracking();
 
         if (!string.IsNullOrWhiteSpace(search))
@@ -49,6 +62,11 @@ public class BanksController : ControllerBase
     [HttpGet("{id:int}")]
     public async Task<ActionResult<BankDto>> GetBank(int id, CancellationToken ct)
     {
+        if (await RequireDictionariesPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var bank = await _db.Banks.AsNoTracking().FirstOrDefaultAsync(item => item.Id == id, ct);
         if (bank is null)
         {
@@ -59,9 +77,13 @@ public class BanksController : ControllerBase
     }
 
     [HttpPost]
-    [Authorize(Policy = "Admin")]
     public async Task<ActionResult<BankDto>> CreateBank([FromBody] BankUpsertRequest request, CancellationToken ct)
     {
+        if (await RequireDictionariesPermissionAsync(static permission => permission.CanCreate, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var normalized = Normalize(request);
 
         var duplicateExists = await _db.Banks.AnyAsync(
@@ -91,9 +113,13 @@ public class BanksController : ControllerBase
     }
 
     [HttpPut("{id:int}")]
-    [Authorize(Policy = "Admin")]
     public async Task<ActionResult<BankDto>> UpdateBank(int id, [FromBody] BankUpsertRequest request, CancellationToken ct)
     {
+        if (await RequireDictionariesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var entity = await _db.Banks.FirstOrDefaultAsync(item => item.Id == id, ct);
         if (entity is null)
         {
@@ -126,9 +152,13 @@ public class BanksController : ControllerBase
     }
 
     [HttpDelete("{id:int}")]
-    [Authorize(Policy = "Admin")]
     public async Task<IActionResult> DeleteBank(int id, CancellationToken ct)
     {
+        if (await RequireDictionariesPermissionAsync(static permission => permission.CanDelete, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var entity = await _db.Banks.FirstOrDefaultAsync(item => item.Id == id, ct);
         if (entity is null)
         {
