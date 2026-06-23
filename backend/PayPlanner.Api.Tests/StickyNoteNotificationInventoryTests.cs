@@ -45,6 +45,18 @@ public class StickyNoteNotificationInventoryTests
     }
 
     [Fact]
+    public void StickyNotesController_UsesDatabaseAwareAdminFallback()
+    {
+        var controllerSource = ReadSourceFile("backend", "Controllers", "StickyNotesController.cs");
+
+        Assert.DoesNotContain("User.IsInRole(\"admin\")", controllerSource, StringComparison.Ordinal);
+        AssertMethodContains(
+            controllerSource,
+            "ResolvePermissionValuesAsync",
+            "IsUserAdminOrLegacyFallbackAsync");
+    }
+
+    [Fact]
     public void StickyNoteReminderService_KeepsVisibilityCheckAndNotificationPath()
     {
         var serviceSource = ReadSourceFile("backend", "Services", "Notifications", "StickyNoteReminderNotificationService.cs");

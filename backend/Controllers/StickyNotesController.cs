@@ -703,7 +703,8 @@ public sealed class StickyNotesController : ControllerBase
         var permission = await _db.GetUserSectionPermissionAsync(userId, RolePermissionCatalog.Notes, ct);
         if (permission is null)
         {
-            return RolePermissionCatalog.BuildDefaults(User.IsInRole("admin"))[RolePermissionCatalog.Notes];
+            var isAdmin = await _db.IsUserAdminOrLegacyFallbackAsync(User, ct);
+            return RolePermissionCatalog.BuildDefaults(isAdmin)[RolePermissionCatalog.Notes];
         }
 
         return new RolePermissionValues(
