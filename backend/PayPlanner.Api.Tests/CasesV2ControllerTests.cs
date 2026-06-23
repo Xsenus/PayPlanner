@@ -6496,6 +6496,79 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task WorkOrderDerivedActions_ReturnNotFoundForHiddenCase()
+    {
+        await using var db = await CreateContextAsync();
+        var viewer = await CreateUserAsync(db, "work-order-hidden-derived@example.com", "Документный пользователь");
+        await GrantSectionPermissionAsync(db, viewer, RolePermissionCatalog.Accounts);
+        await GrantSectionPermissionAsync(db, viewer, RolePermissionCatalog.Acts);
+        await GrantSectionPermissionAsync(db, viewer, RolePermissionCatalog.Contracts);
+        var otherResponsible = await CreateUserAsync(db, "work-order-hidden-derived-owner@example.com", "Другой ответственный");
+        var client = new Client
+        {
+            Name = "Скрытый клиент документов заказ-наряда",
+            IsActive = true,
+            ResponsibleUserId = otherResponsible.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Скрытое дело с документами заказ-наряда",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = otherResponsible.Id,
+        };
+        var workOrder = new ClientCaseWorkOrder
+        {
+            ClientCase = clientCase,
+            Title = "Скрытый заказ-наряд для документов",
+            Status = "pending_approval",
+            Currency = "RUB",
+            Items =
+            [
+                new ClientCaseWorkOrderItem
+                {
+                    ServiceName = "Скрытая услуга для документов",
+                    Quantity = 1,
+                    UnitPrice = 1000,
+                    TotalAmount = 1000,
+                    SortOrder = 1,
+                },
+            ],
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.ClientCaseWorkOrders.Add(workOrder);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, viewer);
+
+        var generateResult = await controller.GenerateWorkOrderDocument(clientCase.Id, CancellationToken.None);
+        var invoiceResult = await controller.CreateInvoiceFromWorkOrder(clientCase.Id, new CasesV2Controller.CreateClientCaseWorkOrderInvoiceRequest(), CancellationToken.None);
+        var actResult = await controller.CreateActFromWorkOrder(clientCase.Id, new CasesV2Controller.CreateClientCaseWorkOrderActRequest(), CancellationToken.None);
+        var contractResult = await controller.CreateContractFromWorkOrder(clientCase.Id, new CasesV2Controller.CreateClientCaseWorkOrderContractRequest(), CancellationToken.None);
+        var approveResult = await controller.ApproveWorkOrder(clientCase.Id, new CasesV2Controller.ClientCaseWorkOrderApprovalRequest
+        {
+            Comment = "Согласовано",
+        }, CancellationToken.None);
+        var revisionResult = await controller.RequestWorkOrderRevision(clientCase.Id, new CasesV2Controller.ClientCaseWorkOrderApprovalRequest
+        {
+            Comment = "На доработку",
+        }, CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(generateResult.Result);
+        Assert.IsType<NotFoundResult>(invoiceResult.Result);
+        Assert.IsType<NotFoundResult>(actResult.Result);
+        Assert.IsType<NotFoundResult>(contractResult.Result);
+        Assert.IsType<NotFoundResult>(approveResult.Result);
+        Assert.IsType<NotFoundResult>(revisionResult.Result);
+        Assert.False(await db.ClientCaseDocuments.AnyAsync(item => item.ClientCaseId == clientCase.Id));
+        Assert.False(await db.Payments.AnyAsync(item => item.ClientCaseId == clientCase.Id));
+        Assert.False(await db.Acts.AnyAsync(item => item.ClientId == client.Id));
+        Assert.False(await db.Contracts.AnyAsync());
+        var reloaded = await db.ClientCaseWorkOrders.SingleAsync(item => item.Id == workOrder.Id);
+        Assert.Equal("pending_approval", reloaded.Status);
+    }
+
+    [Fact]
     public async Task WorkOrder_ForbidsUserWithoutEditPermission()
     {
         await using var db = await CreateContextAsync();
