@@ -1,4 +1,9 @@
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Controllers;
+using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Controllers;
@@ -12,6 +17,44 @@ namespace PayPlanner.Api.Tests;
 
 public sealed class UserSettingsControllerTests
 {
+    [Fact]
+    public async Task AdminFilter_ReturnsForbid_ForUserWithoutAdminRoleInDatabase()
+    {
+        await using var scope = await CreateScopeAsync();
+        var user = await CreateUserAsync(scope.Db, "settings-filter-user@example.test");
+        var controller = CreateController(scope.Db, user.Id, isAdminClaim: true);
+        var context = CreateAdminActionExecutingContext(controller, user.Id);
+        var nextCalled = false;
+
+        await controller.OnActionExecutionAsync(context, () =>
+        {
+            nextCalled = true;
+            return Task.FromResult(new ActionExecutedContext(context, [], controller));
+        });
+
+        Assert.False(nextCalled);
+        Assert.IsType<ForbidResult>(context.Result);
+    }
+
+    [Fact]
+    public async Task AdminFilter_AllowsUserWithAdminRoleInDatabase()
+    {
+        await using var scope = await CreateScopeAsync();
+        var user = await CreateUserAsync(scope.Db, "settings-filter-admin@example.test", roleName: "admin");
+        var controller = CreateController(scope.Db, user.Id, isAdminClaim: false);
+        var context = CreateAdminActionExecutingContext(controller, user.Id);
+        var nextCalled = false;
+
+        await controller.OnActionExecutionAsync(context, () =>
+        {
+            nextCalled = true;
+            return Task.FromResult(new ActionExecutedContext(context, [], controller));
+        });
+
+        Assert.True(nextCalled);
+        Assert.Null(context.Result);
+    }
+
     [Fact]
     public async Task Get_ReturnsNoContentForMissingCurrentUserSetting()
     {
@@ -60,26 +103,33 @@ public sealed class UserSettingsControllerTests
         Assert.IsType<NotFoundResult>(result.Result);
     }
 
-    private static UserSettingsController CreateController(PaymentContext db, int userId)
+    private static UserSettingsController CreateController(PaymentContext db, int userId, bool isAdminClaim = false)
     {
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, userId.ToString()),
+        };
+        if (isAdminClaim)
+        {
+            claims.Add(new Claim(ClaimTypes.Role, "admin"));
+        }
+
         return new UserSettingsController(db)
         {
             ControllerContext = new ControllerContext
             {
-                HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+                HttpContext = new DefaultHttpContext
                 {
-                    User = new ClaimsPrincipal(new ClaimsIdentity(
-                    [
-                        new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
-                    ], "TestAuth")),
+                    User = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth")),
                 },
             },
         };
     }
 
-    private static async Task<User> CreateUserAsync(PaymentContext db, string email)
+    private static async Task<User> CreateUserAsync(PaymentContext db, string email, string? roleName = null)
     {
-        var role = new Role { Name = $"role-{Guid.NewGuid():N}", Description = "Test role" };
+        roleName ??= $"role-{Guid.NewGuid():N}";
+        var role = new Role { Name = roleName, Description = "Test role" };
         var user = new User
         {
             Email = email,
@@ -93,6 +143,36 @@ public sealed class UserSettingsControllerTests
         db.Users.Add(user);
         await db.SaveChangesAsync();
         return user;
+    }
+
+    private static ActionExecutingContext CreateAdminActionExecutingContext(
+        UserSettingsController controller,
+        int userId)
+    {
+        var httpContext = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+                [
+                    new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
+                    new Claim(ClaimTypes.Name, $"User {userId}"),
+                    new Claim(ClaimTypes.Role, "admin"),
+                ],
+                "TestAuth")),
+        };
+        var actionContext = new ActionContext(
+            httpContext,
+            new RouteData(),
+            new ControllerActionDescriptor
+            {
+                EndpointMetadata = [new AuthorizeAttribute { Policy = "Admin" }],
+            });
+        controller.ControllerContext = new ControllerContext(actionContext);
+
+        return new ActionExecutingContext(
+            actionContext,
+            [],
+            new Dictionary<string, object?>(),
+            controller);
     }
 
     private static async Task<TestDbScope> CreateScopeAsync()

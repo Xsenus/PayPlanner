@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
@@ -12,11 +14,33 @@ namespace PayPlanner.Api.Controllers;
 [ApiController]
 [Route("api/user-settings")]
 [Authorize]
-public class UserSettingsController : ControllerBase
+public class UserSettingsController : ControllerBase, IAsyncActionFilter
 {
     private readonly PaymentContext _db;
 
     public UserSettingsController(PaymentContext db) => _db = db;
+
+    [NonAction]
+    public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
+    {
+        var requiresAdmin = context.ActionDescriptor.EndpointMetadata
+            .OfType<AuthorizeAttribute>()
+            .Any(attribute => string.Equals(attribute.Policy, "Admin", StringComparison.Ordinal));
+        if (!requiresAdmin)
+        {
+            await next();
+            return;
+        }
+
+        var userId = context.HttpContext.User.GetUserId();
+        if (!userId.HasValue || !await _db.IsUserAdminAsync(userId.Value, context.HttpContext.RequestAborted))
+        {
+            context.Result = Forbid();
+            return;
+        }
+
+        await next();
+    }
 
     [HttpGet("{key}")]
     public async Task<ActionResult<UserSettingDto>> Get(string key)
