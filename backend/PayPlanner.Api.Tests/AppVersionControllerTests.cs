@@ -154,7 +154,7 @@ public sealed class AppVersionControllerTests
     public async Task CreateRelease_AddsManualReleaseToDatabase()
     {
         await using var scope = await CreateScopeAsync();
-        var user = await CreateUserAsync(scope.Db, "admin@example.test");
+        var user = await CreateUserAsync(scope.Db, "admin@example.test", isAdmin: true);
         var controller = CreateController(scope.Db, user.Id);
 
         var result = await controller.CreateRelease(new SaveAppReleaseRequest(
@@ -177,7 +177,7 @@ public sealed class AppVersionControllerTests
     public async Task CreateRelease_WhenVersionAlreadyExists_ReturnsConflict()
     {
         await using var scope = await CreateScopeAsync();
-        var user = await CreateUserAsync(scope.Db, "admin-duplicate-version@example.test");
+        var user = await CreateUserAsync(scope.Db, "admin-duplicate-version@example.test", isAdmin: true);
         var controller = CreateController(scope.Db, user.Id, Release("2026-05-21-existing", version: "1.13.10"));
 
         var result = await controller.CreateRelease(new SaveAppReleaseRequest(
@@ -197,7 +197,7 @@ public sealed class AppVersionControllerTests
     public async Task UpdateRelease_WhenVersionAlreadyExists_ReturnsConflict()
     {
         await using var scope = await CreateScopeAsync();
-        var user = await CreateUserAsync(scope.Db, "admin-update-duplicate-version@example.test");
+        var user = await CreateUserAsync(scope.Db, "admin-update-duplicate-version@example.test", isAdmin: true);
         var controller = CreateController(
             scope.Db,
             user.Id,
@@ -225,7 +225,7 @@ public sealed class AppVersionControllerTests
     public async Task DeleteRelease_RemovesReleaseItemsAndSeenMarks()
     {
         await using var scope = await CreateScopeAsync();
-        var user = await CreateUserAsync(scope.Db, "delete-release@example.test");
+        var user = await CreateUserAsync(scope.Db, "delete-release@example.test", isAdmin: true);
         var release = Release("2026-05-22-delete");
         var controller = CreateController(scope.Db, user.Id, release);
         await controller.MarkSeen(new AppVersionMarkSeenRequest(release.ReleaseId), CancellationToken.None);
@@ -240,6 +240,39 @@ public sealed class AppVersionControllerTests
         Assert.False(await scope.Db.AppReleases.AnyAsync(item => item.Id == releaseId));
         Assert.False(await scope.Db.AppReleaseItems.AnyAsync(item => item.AppReleaseId == releaseId));
         Assert.False(await scope.Db.AppReleaseSeen.AnyAsync(item => item.AppReleaseId == releaseId));
+    }
+
+    [Fact]
+    public async Task AdminReleaseEndpoints_ReturnForbid_ForNonAdminUser()
+    {
+        await using var scope = await CreateScopeAsync();
+        var user = await CreateUserAsync(scope.Db, "release-non-admin@example.test");
+        var release = Release("2026-05-22-admin-forbid");
+        var controller = CreateController(scope.Db, user.Id, release);
+        var releaseId = await scope.Db.AppReleases
+            .Where(item => item.ReleaseId == release.ReleaseId)
+            .Select(item => item.Id)
+            .SingleAsync();
+        var request = new SaveAppReleaseRequest(
+            "2026-05-23-admin-forbid",
+            "1.13.99",
+            new DateTime(2026, 5, 23),
+            "Forbidden release",
+            "Should not be saved",
+            true,
+            [new SaveAppReleaseItemRequest("new", "Forbidden item")]);
+
+        var listResult = await controller.GetAdminReleases(CancellationToken.None);
+        var createResult = await controller.CreateRelease(request, CancellationToken.None);
+        var updateResult = await controller.UpdateRelease(releaseId, request, CancellationToken.None);
+        var deleteResult = await controller.DeleteRelease(releaseId, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(listResult.Result);
+        Assert.IsType<ForbidResult>(createResult.Result);
+        Assert.IsType<ForbidResult>(updateResult.Result);
+        Assert.IsType<ForbidResult>(deleteResult);
+        Assert.True(await scope.Db.AppReleases.AnyAsync(item => item.Id == releaseId));
+        Assert.False(await scope.Db.AppReleases.AnyAsync(item => item.ReleaseId == "2026-05-23-admin-forbid"));
     }
 
     [Fact]
@@ -590,9 +623,9 @@ public sealed class AppVersionControllerTests
 
     private sealed record ReleaseFileEntry(string ReleaseId, System.Version Version, DateTime ReleasedAt);
 
-    private static async Task<User> CreateUserAsync(PaymentContext db, string email)
+    private static async Task<User> CreateUserAsync(PaymentContext db, string email, bool isAdmin = false)
     {
-        var role = new Role { Name = $"role-{Guid.NewGuid():N}", Description = "Test role" };
+        var role = new Role { Name = isAdmin ? "admin" : $"role-{Guid.NewGuid():N}", Description = "Test role" };
         var user = new User
         {
             Email = email,

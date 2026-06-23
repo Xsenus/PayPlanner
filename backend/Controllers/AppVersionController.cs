@@ -30,6 +30,22 @@ public sealed class AppVersionController : ControllerBase
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
+    private async Task<ForbidResult?> RequireAdminAccessAsync(CancellationToken ct)
+    {
+        if (User?.Identity?.IsAuthenticated != true)
+        {
+            return null;
+        }
+
+        var userId = User.GetUserId();
+        if (!userId.HasValue || !await _db.IsUserAdminAsync(userId.Value, ct))
+        {
+            return Forbid();
+        }
+
+        return null;
+    }
+
     [HttpGet("latest")]
     public async Task<ActionResult<AppVersionLatestResponse>> GetLatest(CancellationToken ct)
     {
@@ -109,6 +125,11 @@ public sealed class AppVersionController : ControllerBase
     [Authorize(Policy = "Admin")]
     public async Task<ActionResult<IReadOnlyCollection<AppReleaseAdminDto>>> GetAdminReleases(CancellationToken ct)
     {
+        if (await RequireAdminAccessAsync(ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var releases = await _db.AppReleases
             .AsNoTracking()
             .Include(release => release.Items)
@@ -123,6 +144,11 @@ public sealed class AppVersionController : ControllerBase
     [Authorize(Policy = "Admin")]
     public async Task<ActionResult<AppReleaseAdminDto>> CreateRelease([FromBody] SaveAppReleaseRequest request, CancellationToken ct)
     {
+        if (await RequireAdminAccessAsync(ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var validation = ValidateRequest(request);
         if (validation is not null) return BadRequest(validation);
 
@@ -163,6 +189,11 @@ public sealed class AppVersionController : ControllerBase
     [Authorize(Policy = "Admin")]
     public async Task<ActionResult<AppReleaseAdminDto>> UpdateRelease(int id, [FromBody] SaveAppReleaseRequest request, CancellationToken ct)
     {
+        if (await RequireAdminAccessAsync(ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var validation = ValidateRequest(request);
         if (validation is not null) return BadRequest(validation);
 
@@ -200,6 +231,11 @@ public sealed class AppVersionController : ControllerBase
     [Authorize(Policy = "Admin")]
     public async Task<IActionResult> DeleteRelease(int id, CancellationToken ct)
     {
+        if (await RequireAdminAccessAsync(ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var release = await _db.AppReleases
             .FirstOrDefaultAsync(item => item.Id == id, ct);
         if (release is null) return NotFound();
