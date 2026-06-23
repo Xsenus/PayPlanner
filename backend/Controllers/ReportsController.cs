@@ -449,6 +449,63 @@ public class ReportsController : ControllerBase
         return File(pdf, "application/pdf", $"{document!.Slug}-{now.Local:yyyyMMdd-HHmm}.pdf");
     }
 
+    [HttpGet("management.print")]
+    public async Task<IActionResult> PrintManagementReport(
+        [FromQuery] string report,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] MoneyOperationSource? source,
+        [FromQuery] string? accountName,
+        [FromQuery] string? counterpartyName,
+        [FromQuery] int? clientId,
+        [FromQuery] int? caseId,
+        [FromQuery] int? contractId,
+        [FromQuery] int? incomeTypeId,
+        [FromQuery] DateTime? asOf,
+        [FromQuery] string? status,
+        [FromQuery] int? responsibleUserId,
+        [FromQuery] string? caseType,
+        [FromQuery] int? lawyerUserId,
+        [FromQuery] int? horizonDays,
+        [FromQuery] string? deadlineType,
+        [FromQuery] string? activity,
+        [FromQuery] int? inactiveDays,
+        [FromQuery] int? escalationDays,
+        [FromQuery] int? limit,
+        CancellationToken ct)
+    {
+        var (document, error) = await BuildManagementReportExportDocumentAsync(
+            report,
+            from,
+            to,
+            source,
+            accountName,
+            counterpartyName,
+            clientId,
+            caseId,
+            contractId,
+            incomeTypeId,
+            asOf,
+            status,
+            responsibleUserId,
+            caseType,
+            lawyerUserId,
+            horizonDays,
+            deadlineType,
+            activity,
+            inactiveDays,
+            escalationDays,
+            limit,
+            ct);
+        if (error is not null)
+        {
+            return error;
+        }
+
+        var now = await ResolveReportNowAsync(ct);
+        return Content(BuildReportExportPrintHtml(document!, now.Utc, now.TimeZone), "text/html; charset=utf-8", Encoding.UTF8);
+    }
+
     [HttpGet("case-finance")]
     public async Task<ActionResult<CaseFinanceReportDto>> CaseFinance(
         [FromQuery] DateTime? from,

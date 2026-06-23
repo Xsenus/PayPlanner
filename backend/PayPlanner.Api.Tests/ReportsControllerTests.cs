@@ -220,7 +220,7 @@ public class ReportsControllerTests
     }
 
     [Fact]
-    public async Task ManagementReportExports_ReturnCsvExcelAndPdfFiles()
+    public async Task ManagementReportExports_ReturnCsvExcelPdfAndPrintFiles()
     {
         await using var db = await CreateContextAsync();
         var role = new Role { Name = "manager", Description = "Manager" };
@@ -326,6 +326,33 @@ public class ReportsControllerTests
             Assert.Equal("text/csv; charset=utf-8", csv.ContentType);
             Assert.EndsWith(".csv", csv.FileDownloadName, StringComparison.Ordinal);
             Assert.Contains(";", System.Text.Encoding.UTF8.GetString(csv.FileContents), StringComparison.Ordinal);
+
+            var printAction = await controller.PrintManagementReport(
+                reportKind,
+                today.AddDays(-30),
+                today.AddDays(30),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                today,
+                null,
+                null,
+                null,
+                null,
+                7,
+                null,
+                "all",
+                null,
+                null,
+                50,
+                CancellationToken.None);
+            var print = Assert.IsType<ContentResult>(printAction);
+            Assert.Equal("text/html; charset=utf-8", print.ContentType);
+            Assert.Contains("<!doctype html>", print.Content, StringComparison.OrdinalIgnoreCase);
 
             var excelAction = await controller.ExportManagementReportExcel(
                 reportKind,
@@ -877,6 +904,29 @@ public class ReportsControllerTests
             null,
             CancellationToken.None));
         Assert.IsType<ForbidResult>(await controller.ExportManagementReportCsv(
+            "case-finance",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            CancellationToken.None));
+        Assert.IsType<ForbidResult>(await controller.PrintManagementReport(
             "case-finance",
             null,
             null,

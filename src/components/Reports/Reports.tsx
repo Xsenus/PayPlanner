@@ -16,6 +16,7 @@ import {
   FolderKanban,
   Handshake,
   Percent,
+  Printer,
   RefreshCcw,
   Store,
   Target,
@@ -182,6 +183,18 @@ function downloadBlob(filename: string, blob: Blob) {
   link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function openPrintHtml(html: string) {
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const opened = window.open(url, '_blank', 'noopener,noreferrer');
+  if (!opened) {
+    URL.revokeObjectURL(url);
+    return;
+  }
+
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 function exportCaseFinanceReport(report: CaseFinanceReport, timeZoneId?: string | null) {
@@ -2500,7 +2513,7 @@ function ProjectReportSection({
 }
 
 type LegalWorkExportFormat = 'csv' | 'excel' | 'pdf';
-type ManagementReportExportFormat = 'csv' | 'excel' | 'pdf';
+type ManagementReportExportFormat = 'csv' | 'excel' | 'pdf' | 'print';
 type ManagementReportKind = 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast' | 'cash' | 'bank' | 'plan-fact' | 'advances' | 'payment-priorities' | 'paid-accounts' | 'paid-invoices' | 'invoice-statuses' | 'act-statuses' | 'contract-statuses' | 'categories' | 'counterparties' | 'projects' | 'directions' | 'sales-points' | 'vat' | 'payment-orders' | 'payment-purposes' | 'match-statuses' | 'journal-statuses' | 'currencies' | 'cash-orders' | 'bank-statement-imports' | 'spreadsheet-imports';
 type ReportCaseSection = 'tasks' | 'documents' | 'court' | 'workOrder';
 
@@ -2556,6 +2569,15 @@ function ManagementReportExportButtons({
     setError(null);
 
     try {
+      if (format === 'print') {
+        const html = await apiService.getManagementReportPrintHtml({
+          report: reportKind,
+          ...apiFilters,
+        });
+        openPrintHtml(html);
+        return;
+      }
+
       const result = await apiService.downloadManagementReport({
         report: reportKind,
         format,
@@ -2597,6 +2619,15 @@ function ManagementReportExportButtons({
       >
         <FileText className="h-4 w-4" />
         {exporting === 'pdf' ? 'PDF...' : 'PDF'}
+      </button>
+      <button
+        type="button"
+        onClick={() => void handleExport('print')}
+        disabled={isDisabled || exporting !== null}
+        className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <Printer className="h-4 w-4" />
+        {exporting === 'print' ? 'Печать...' : 'Печать'}
       </button>
       {error ? <span className="w-full text-xs text-rose-600">{error}</span> : null}
     </>

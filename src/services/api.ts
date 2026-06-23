@@ -5894,6 +5894,33 @@ export class ApiService {
     };
   }
 
+  async getManagementReportPrintHtml(params: {
+    report: 'case-finance' | 'case-success' | 'current-cases' | 'lawyer-workload' | 'overdue-deadlines' | 'case-activity' | 'cash-flow' | 'cash-flow-forecast' | 'cash' | 'bank' | 'plan-fact' | 'advances' | 'payment-priorities' | 'paid-accounts' | 'paid-invoices' | 'invoice-statuses' | 'act-statuses' | 'contract-statuses' | 'categories' | 'counterparties' | 'projects' | 'directions' | 'sales-points' | 'vat' | 'payment-orders' | 'payment-purposes' | 'match-statuses' | 'journal-statuses' | 'currencies' | 'cash-orders' | 'bank-statement-imports' | 'spreadsheet-imports';
+    from?: string;
+    to?: string;
+    source?: MoneyOperationSource;
+    accountName?: string;
+    counterpartyName?: string;
+    clientId?: number;
+    caseId?: number;
+    contractId?: number;
+    incomeTypeId?: number;
+    asOf?: string;
+    status?: string;
+    responsibleUserId?: number;
+    caseType?: string;
+    lawyerUserId?: number;
+    horizonDays?: number;
+    deadlineType?: string;
+    activity?: 'all' | 'inactive' | 'active' | 'escalated' | 'disabled';
+    inactiveDays?: number;
+    escalationDays?: number;
+    limit?: number;
+  }) {
+    const q = buildQuery(params);
+    return this.request<string>(`/reports/management.print${q}`);
+  }
+
   async getCaseActivityReport(params?: {
     inactiveDays?: number;
     escalationDays?: number;

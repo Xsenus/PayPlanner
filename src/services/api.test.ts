@@ -1694,6 +1694,43 @@ describe('apiService reports', () => {
     expect(String(url)).toContain('incomeTypeId=3');
   });
 
+  it('loads management report print HTML with filters', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('<!doctype html><html><body>print</body></html>', {
+      headers: {
+        'content-type': 'text/html; charset=utf-8',
+      },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.getManagementReportPrintHtml({
+      report: 'cash-flow-forecast',
+      from: '2026-05-01',
+      to: '2026-05-31',
+      source: 'Bank',
+      accountName: 'Main account',
+      clientId: 25,
+      caseId: 12,
+      contractId: 7,
+      incomeTypeId: 3,
+      horizonDays: 45,
+    });
+
+    expect(result).toContain('print');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/reports/management.print?');
+    expect(String(url)).toContain('report=cash-flow-forecast');
+    expect(String(url)).toContain('from=2026-05-01');
+    expect(String(url)).toContain('to=2026-05-31');
+    expect(String(url)).toContain('source=Bank');
+    expect(String(url)).toContain('accountName=Main+account');
+    expect(String(url)).toContain('clientId=25');
+    expect(String(url)).toContain('caseId=12');
+    expect(String(url)).toContain('contractId=7');
+    expect(String(url)).toContain('incomeTypeId=3');
+    expect(String(url)).toContain('horizonDays=45');
+  });
+
   it('loads overdue procedural deadlines report with filters', async () => {
     const payload = {
       generatedAt: '2026-05-26T10:00:00Z',
