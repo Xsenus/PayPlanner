@@ -65,6 +65,17 @@ public class ActsController : ControllerBase
             ? null
             : Forbid();
 
+    private async Task<bool> IsCurrentUserAdminAsync(CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
+        {
+            return User.IsInRole("admin");
+        }
+
+        return await _db.IsUserAdminAsync(userId.Value, ct);
+    }
+
     private async Task<IReadOnlyCollection<int>> ResolveActNotificationRecipientsAsync(
         Act act,
         IEnumerable<int> candidateUserIds,
@@ -1755,7 +1766,7 @@ public class ActsController : ControllerBase
         Func<RolePermission, bool> isAllowed,
         CancellationToken ct)
     {
-        if (User.IsInRole("admin"))
+        if (await IsCurrentUserAdminAsync(ct))
         {
             return null;
         }

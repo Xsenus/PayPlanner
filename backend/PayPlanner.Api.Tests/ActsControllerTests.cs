@@ -2224,6 +2224,27 @@ public class ActsControllerTests
     }
 
     [Fact]
+    public async Task SendActEmail_ForbidsAdminClaimWhenDatabaseRoleIsNotAdmin()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        client.Email = "client@example.com";
+        await db.SaveChangesAsync();
+        var act = await CreateManualActAsync(db, client.Id, "ACT-313-STALE-ADMIN", 10_000m, ActStatus.Created);
+        var user = await CreateActsUserAsync(db, "acts-stale-admin-no-export", canExport: false);
+        var emailService = new RecordingEmailService();
+        var controller = CreateControllerForUser(db, user.Id, emailService, includeAdminRoleClaim: true);
+
+        var action = await controller.SendActEmail(
+            act.Id,
+            new SendInvoiceEmailRequest { Format = "word" },
+            CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(action);
+        Assert.Null(emailService.ToEmail);
+    }
+
+    [Fact]
     public async Task SendActEmail_ReturnsProblem_WhenPdfServiceIsMissing()
     {
         await using var db = await CreateContextAsync();
@@ -3057,7 +3078,11 @@ public class ActsControllerTests
         return user;
     }
 
-    private static ActsController CreateControllerForUser(PaymentContext db, int userId, IEmailService? emailService = null)
+    private static ActsController CreateControllerForUser(
+        PaymentContext db,
+        int userId,
+        IEmailService? emailService = null,
+        bool includeAdminRoleClaim = false)
         => new(
             db,
             new NoopFormRequirementsService(),
@@ -3068,13 +3093,26 @@ public class ActsControllerTests
                 HttpContext = new DefaultHttpContext
                 {
                     User = new ClaimsPrincipal(new ClaimsIdentity(
-                    [
-                        new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
-                        new Claim(ClaimTypes.Name, "Test user"),
-                    ], "Test")),
+                        BuildUserClaims(userId, includeAdminRoleClaim),
+                        "Test")),
                 },
             },
         };
+
+    private static Claim[] BuildUserClaims(int userId, bool includeAdminRoleClaim)
+    {
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, userId.ToString()),
+            new(ClaimTypes.Name, "Test user"),
+        };
+        if (includeAdminRoleClaim)
+        {
+            claims.Add(new Claim(ClaimTypes.Role, "admin"));
+        }
+
+        return claims.ToArray();
+    }
 
     private static ActsController CreateAdminController(PaymentContext db, IYandexDiskService? yandexDiskService = null)
     {
