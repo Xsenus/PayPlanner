@@ -833,6 +833,73 @@ END:VCALENDAR
         Assert.Contains("администратором", error.Message);
     }
 
+    [Fact]
+    public async Task UpdateSettingsAsync_WhenAdminManagedRejectsAdminClaimWithoutDatabaseAdminRole()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "yandex-stale-admin-claim@example.com", "user");
+        await CreateConnectionAsync(db, user.Id);
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "calendarSync.settings",
+            Value = JsonSerializer.Serialize(new CalendarSyncSettingsDto
+            {
+                SyncMode = "hybrid",
+                ConflictResolutionMode = "latestWins",
+                UserControlMode = "adminManaged",
+                InactiveUserAction = "cleanupExternalData",
+            }),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new FakeHttpClientFactory());
+
+        var error = await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            service.UpdateSettingsAsync(
+                user.Id,
+                new UpdateYandexCalendarSettingsRequest { SyncEnabled = false },
+                CreateHttpRequest(user.Id, role: "admin"),
+                CancellationToken.None));
+
+        Assert.Contains("администратором", error.Message);
+    }
+
+    [Fact]
+    public async Task UpdateSettingsAsync_WhenAdminManagedAllowsDatabaseAdminRoleWithoutAdminClaim()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "yandex-db-admin@example.com", "admin");
+        await CreateConnectionAsync(db, user.Id);
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "calendarSync.settings",
+            Value = JsonSerializer.Serialize(new CalendarSyncSettingsDto
+            {
+                SyncMode = "hybrid",
+                ConflictResolutionMode = "latestWins",
+                UserControlMode = "adminManaged",
+                InactiveUserAction = "cleanupExternalData",
+            }),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new FakeHttpClientFactory());
+
+        var result = await service.UpdateSettingsAsync(
+            user.Id,
+            new UpdateYandexCalendarSettingsRequest { SyncEnabled = false },
+            CreateHttpRequest(user.Id, role: "user"),
+            CancellationToken.None);
+
+        Assert.NotNull(result.Connection);
+        Assert.False(await db.YandexCalendarConnections
+            .Where(item => item.UserId == user.Id)
+            .Select(item => item.SyncEnabled)
+            .SingleAsync());
+    }
+
     private static YandexCalendarSyncService CreateService(PaymentContext db, IHttpClientFactory httpClientFactory)
     {
         return new YandexCalendarSyncService(

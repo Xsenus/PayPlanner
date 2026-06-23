@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
@@ -2255,7 +2256,16 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
 
     private async Task EnsureUserCanManageCalendarAsync(HttpRequest request, CancellationToken cancellationToken)
     {
-        if (request.HttpContext.User.IsInRole("admin"))
+        var user = request.HttpContext.User;
+        var userId = user.GetUserId();
+        if (!userId.HasValue)
+        {
+            if (user.IsInRole("admin"))
+            {
+                return;
+            }
+        }
+        else if (await _db.IsUserAdminAsync(userId.Value, cancellationToken))
         {
             return;
         }
