@@ -298,6 +298,43 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task GetById_HidesSensitiveContacts_WhenAdminClaimIsNotAdminInDatabase()
+    {
+        await using var db = await CreateContextAsync();
+        var viewer = await CreateUserAsync(db, "stale-admin-case@example.com", "Наблюдатель");
+        viewer.Role!.Permissions.Single(permission => permission.Section == RolePermissionCatalog.Cases).CanEdit = false;
+
+        var client = new Client
+        {
+            Name = "Клиент со старым админ-токеном",
+            IsActive = true,
+            ResponsibleUserId = viewer.Id,
+            Phone = "+79990001122",
+            Email = "stale-admin-client@example.test",
+            Address = "Новосибирск, Красный проспект, 1",
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело со старым админ-токеном",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = viewer.Id,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, viewer, includeAdminRoleClaim: true);
+
+        var result = await controller.GetById(clientCase.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var dto = Assert.IsType<ClientCase>(ok.Value);
+        Assert.False(dto.CanRevealSensitiveData);
+        Assert.Equal(string.Empty, dto.Client!.Phone);
+        Assert.Equal(string.Empty, dto.Client.Email);
+        Assert.Equal(string.Empty, dto.Client.Address);
+    }
+
+    [Fact]
     public async Task RequestAccess_RecordsRequestForHiddenCase()
     {
         await using var db = await CreateContextAsync();
@@ -7125,7 +7162,8 @@ public class CasesV2ControllerTests
         ICourtSyncProviderRegistry? courtSyncProviderRegistry = null,
         IConfiguration? configuration = null,
         IOptionsMonitor<AppFeatureFlagsOptions>? featureFlags = null,
-        INotificationService? notificationService = null)
+        INotificationService? notificationService = null,
+        bool includeAdminRoleClaim = false)
         => new(db, new TestWebHostEnvironment
         {
             ContentRootPath = contentRootPath ?? Path.Combine(Path.GetTempPath(), "payplanner-case-documents", Guid.NewGuid().ToString("N")),
@@ -7136,14 +7174,27 @@ public class CasesV2ControllerTests
                 HttpContext = new DefaultHttpContext
                 {
                     User = new ClaimsPrincipal(new ClaimsIdentity(
-                    [
-                        new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-                        new Claim(ClaimTypes.Name, user.FullName),
-                        new Claim(ClaimTypes.Email, user.Email),
-                    ], "TestAuth")),
+                        BuildUserClaims(user, includeAdminRoleClaim),
+                        "TestAuth")),
                 },
             },
         };
+
+    private static Claim[] BuildUserClaims(User user, bool includeAdminRoleClaim)
+    {
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, user.Id.ToString()),
+            new(ClaimTypes.Name, user.FullName),
+            new(ClaimTypes.Email, user.Email),
+        };
+        if (includeAdminRoleClaim)
+        {
+            claims.Add(new Claim(ClaimTypes.Role, "admin"));
+        }
+
+        return claims.ToArray();
+    }
 
     private static NotificationService CreateNotificationService(PaymentContext db)
     {

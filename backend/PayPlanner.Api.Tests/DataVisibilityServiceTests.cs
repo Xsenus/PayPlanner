@@ -12,6 +12,83 @@ namespace PayPlanner.Api.Tests;
 public class DataVisibilityServiceTests
 {
     [Fact]
+    public async Task ResolveDataVisibilityAsync_IgnoresAdminClaimWhenDatabaseRoleIsNotAdmin()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "lawyer", Description = "lawyer" };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = role.Id,
+            Section = RolePermissionCatalog.Cases,
+            CanView = true,
+            ViewScope = DataVisibilityScope.Own,
+        });
+
+        var user = new User
+        {
+            Email = "stale-admin-claim@example.com",
+            PasswordHash = "hash",
+            FullName = "Stale Admin Claim",
+            RoleId = role.Id,
+            IsActive = true,
+        };
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        var principal = CreatePrincipal(user.Id, isAdminClaim: true);
+
+        var access = await db.ResolveDataVisibilityAsync(principal, RolePermissionCatalog.Cases);
+
+        Assert.NotNull(access);
+        Assert.False(access!.IsAdmin);
+        Assert.Equal(DataVisibilityScope.Own, access.ViewScope);
+        Assert.False(access.CanSeeUser(user.Id + 1000));
+    }
+
+    [Fact]
+    public async Task HasUserSectionPermissionAsync_IgnoresAdminClaimWhenDatabaseRoleIsNotAdmin()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "viewer", Description = "viewer" };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = role.Id,
+            Section = RolePermissionCatalog.Cases,
+            CanView = true,
+            CanCreate = false,
+            CanEdit = false,
+            CanDelete = false,
+            ViewScope = DataVisibilityScope.Own,
+        });
+
+        var user = new User
+        {
+            Email = "stale-section-admin@example.com",
+            PasswordHash = "hash",
+            FullName = "Stale Section Admin",
+            RoleId = role.Id,
+            IsActive = true,
+        };
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        var principal = CreatePrincipal(user.Id, isAdminClaim: true);
+
+        var canCreate = await db.HasUserSectionPermissionAsync(
+            principal,
+            RolePermissionCatalog.Cases,
+            static permission => permission.CanCreate);
+
+        Assert.False(canCreate);
+    }
+
+    [Fact]
     public async Task ResolveDataVisibilityAsync_UsesDepartmentDictionaryAndLegacyNameFallback()
     {
         await using var db = await CreateContextAsync();
@@ -234,5 +311,16 @@ public class DataVisibilityServiceTests
         var db = new PaymentContext(options);
         await db.Database.EnsureCreatedAsync();
         return db;
+    }
+
+    private static ClaimsPrincipal CreatePrincipal(int userId, bool isAdminClaim = false)
+    {
+        var claims = new List<Claim> { new(ClaimTypes.NameIdentifier, userId.ToString()) };
+        if (isAdminClaim)
+        {
+            claims.Add(new Claim(ClaimTypes.Role, "admin"));
+        }
+
+        return new ClaimsPrincipal(new ClaimsIdentity(claims, "test"));
     }
 }

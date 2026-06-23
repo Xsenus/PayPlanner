@@ -19,11 +19,32 @@ public sealed class RoleManagementAccessService
         ClaimsPrincipal user,
         CancellationToken cancellationToken = default)
     {
-        if (user.IsInRole("admin"))
+        var userId = user.GetUserId();
+        if (!userId.HasValue)
+        {
+            return RoleManagementAccessSnapshot.None;
+        }
+
+        var userRole = await _db.Users
+            .AsNoTracking()
+            .Where(entity => entity.Id == userId.Value && entity.IsActive)
+            .Select(entity => new
+            {
+                entity.RoleId,
+                RoleName = entity.Role != null ? entity.Role.Name : string.Empty,
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (userRole is null)
+        {
+            return new RoleManagementAccessSnapshot(userId, null, false, false, false, false, false);
+        }
+
+        if (string.Equals(userRole.RoleName, "admin", StringComparison.OrdinalIgnoreCase))
         {
             return new RoleManagementAccessSnapshot(
-                user.GetUserId(),
-                null,
+                userId,
+                userRole.RoleId,
                 true,
                 true,
                 true,
@@ -31,26 +52,9 @@ public sealed class RoleManagementAccessService
                 true);
         }
 
-        var userId = user.GetUserId();
-        if (!userId.HasValue)
-        {
-            return RoleManagementAccessSnapshot.None;
-        }
-
-        var userRoleId = await _db.Users
-            .AsNoTracking()
-            .Where(entity => entity.Id == userId.Value)
-            .Select(entity => (int?)entity.RoleId)
-            .FirstOrDefaultAsync(cancellationToken);
-
-        if (!userRoleId.HasValue)
-        {
-            return new RoleManagementAccessSnapshot(userId, null, false, false, false, false, false);
-        }
-
         var permissions = await _db.RolePermissions
             .AsNoTracking()
-            .Where(entity => entity.RoleId == userRoleId.Value && entity.Section == RolePermissionCatalog.Roles)
+            .Where(entity => entity.RoleId == userRole.RoleId && entity.Section == RolePermissionCatalog.Roles)
             .Select(entity => new
             {
                 entity.CanView,
@@ -62,7 +66,7 @@ public sealed class RoleManagementAccessService
 
         return new RoleManagementAccessSnapshot(
             userId,
-            userRoleId,
+            userRole.RoleId,
             false,
             permissions?.CanView ?? false,
             permissions?.CanCreate ?? false,

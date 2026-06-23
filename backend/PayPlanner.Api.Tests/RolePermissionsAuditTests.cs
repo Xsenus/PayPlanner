@@ -35,15 +35,16 @@ public class RolePermissionsAuditTests
         });
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db, CreateAdminPrincipal());
+        var admin = await CreateAdminUserAsync(db);
+        var controller = CreateController(db, CreateAdminPrincipal(admin.Id));
 
         var response = await controller.GetAudit(CancellationToken.None);
 
         var report = AssertOk<RolePermissionAuditReportDto>(response);
-        var roleAudit = Assert.Single(report.Roles);
-        Assert.Equal(1, report.TotalRoles);
+        var roleAudit = Assert.Single(report.Roles, item => item.RoleName == "lawyer");
+        Assert.Equal(2, report.TotalRoles);
         Assert.Equal(1, report.ReadyRoles);
-        Assert.Equal(0, report.RolesWithIssues);
+        Assert.Equal(1, report.RolesWithIssues);
         Assert.Equal(0, report.RolesWithBroadDataScope);
         Assert.False(roleAudit.HasIssues);
         Assert.Equal(RolePermissionCatalog.AllSections.Length, roleAudit.ConfiguredSectionsCount);
@@ -102,14 +103,15 @@ public class RolePermissionsAuditTests
             });
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db, CreateAdminPrincipal());
+        var admin = await CreateAdminUserAsync(db);
+        var controller = CreateController(db, CreateAdminPrincipal(admin.Id));
 
         var response = await controller.GetAudit(CancellationToken.None);
 
         var report = AssertOk<RolePermissionAuditReportDto>(response);
-        var roleAudit = Assert.Single(report.Roles);
+        var roleAudit = Assert.Single(report.Roles, item => item.RoleName == "legacy-lawyer");
         Assert.Equal(0, report.ReadyRoles);
-        Assert.Equal(1, report.RolesWithIssues);
+        Assert.Equal(2, report.RolesWithIssues);
         Assert.Equal(1, report.RolesWithBroadDataScope);
         Assert.True(roleAudit.HasIssues);
         Assert.Contains(RolePermissionCatalog.Calendar, roleAudit.MissingSections);
@@ -131,7 +133,8 @@ public class RolePermissionsAuditTests
         db.RolePermissions.AddRange(RolePermissionCatalog.CreateEntities(role.Id, allowRoleManagement: false));
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db, CreateAdminPrincipal());
+        var admin = await CreateAdminUserAsync(db);
+        var controller = CreateController(db, CreateAdminPrincipal(admin.Id));
 
         var response = await controller.ExportAuditCsv(CancellationToken.None);
 
@@ -171,6 +174,32 @@ public class RolePermissionsAuditTests
     }
 
     [Fact]
+    public async Task GetAudit_ForbidsAdminClaimWhenDatabaseRoleIsNotAdmin()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "viewer-stale-admin", Description = "No role access" };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+
+        var user = new User
+        {
+            Email = "viewer-stale-admin@example.com",
+            PasswordHash = "hash",
+            FullName = "Viewer Stale Admin",
+            RoleId = role.Id,
+            IsActive = true,
+        };
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateUserPrincipal(user.Id, includeAdminRoleClaim: true));
+
+        var response = await controller.GetAudit(CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(response.Result);
+    }
+
+    [Fact]
     public async Task Update_SynchronizesSpecificCalendarVisibleUsers()
     {
         await using var db = await CreateContextAsync();
@@ -200,7 +229,8 @@ public class RolePermissionsAuditTests
         db.Users.AddRange(first, second);
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db, CreateAdminPrincipal());
+        var admin = await CreateAdminUserAsync(db);
+        var controller = CreateController(db, CreateAdminPrincipal(admin.Id));
         var request = new RolePermissionsDto
         {
             Calendar = new CalendarPermissionsDto
@@ -271,7 +301,8 @@ public class RolePermissionsAuditTests
         await db.SaveChangesAsync();
 
         var notificationService = new RecordingNotificationService();
-        var controller = CreateController(db, CreateAdminPrincipal(), notificationService);
+        var admin = await CreateAdminUserAsync(db);
+        var controller = CreateController(db, CreateAdminPrincipal(admin.Id), notificationService);
         var request = new RolePermissionsDto
         {
             Calendar = new CalendarPermissionsDto
@@ -312,7 +343,8 @@ public class RolePermissionsAuditTests
         db.Users.Add(inactive);
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db, CreateAdminPrincipal());
+        var admin = await CreateAdminUserAsync(db);
+        var controller = CreateController(db, CreateAdminPrincipal(admin.Id));
         var request = new RolePermissionsDto
         {
             Calendar = new CalendarPermissionsDto
@@ -341,29 +373,53 @@ public class RolePermissionsAuditTests
             }
         };
 
-    private static ClaimsPrincipal CreateAdminPrincipal()
+    private static ClaimsPrincipal CreateAdminPrincipal(int userId)
         => new(new ClaimsIdentity(
             new[]
             {
-                new Claim(ClaimTypes.NameIdentifier, "1"),
+                new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
                 new Claim(ClaimTypes.Name, "Admin"),
                 new Claim(ClaimTypes.Role, "admin"),
             },
             "test"));
 
-    private static ClaimsPrincipal CreateUserPrincipal(int userId)
-        => new(new ClaimsIdentity(
-            new[]
-            {
-                new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
-                new Claim(ClaimTypes.Name, "Viewer"),
-            },
-            "test"));
+    private static ClaimsPrincipal CreateUserPrincipal(int userId, bool includeAdminRoleClaim = false)
+    {
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, userId.ToString()),
+            new(ClaimTypes.Name, "Viewer"),
+        };
+        if (includeAdminRoleClaim)
+        {
+            claims.Add(new Claim(ClaimTypes.Role, "admin"));
+        }
+
+        return new ClaimsPrincipal(new ClaimsIdentity(claims, "test"));
+    }
 
     private static T AssertOk<T>(ActionResult<T> response)
     {
         var ok = Assert.IsType<OkObjectResult>(response.Result);
         return Assert.IsType<T>(ok.Value);
+    }
+
+    private static async Task<User> CreateAdminUserAsync(PaymentContext db)
+    {
+        var role = new Role { Name = "admin", Description = "Администратор" };
+        var user = new User
+        {
+            Email = $"admin-{Guid.NewGuid():N}@example.com",
+            PasswordHash = "hash",
+            FullName = "Admin",
+            Role = role,
+            IsActive = true,
+            IsApproved = true,
+        };
+
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        return user;
     }
 
     private static async Task<PaymentContext> CreateContextAsync()

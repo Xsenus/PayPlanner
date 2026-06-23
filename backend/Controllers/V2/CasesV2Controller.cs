@@ -149,7 +149,7 @@ public class CasesV2Controller : ControllerBase
             return Forbid();
         }
 
-        var isAdmin = User.IsInRole("admin") || await _db.IsUserAdminAsync(userId.Value, ct);
+        var isAdmin = await _db.IsUserAdminAsync(userId.Value, ct);
         if (isAdmin)
         {
             return null;
@@ -167,7 +167,7 @@ public class CasesV2Controller : ControllerBase
             return Forbid();
         }
 
-        var isAdmin = User.IsInRole("admin") || await _db.IsUserAdminAsync(userId.Value, ct);
+        var isAdmin = await _db.IsUserAdminAsync(userId.Value, ct);
         if (isAdmin)
         {
             return null;
@@ -188,7 +188,7 @@ public class CasesV2Controller : ControllerBase
             return false;
         }
 
-        if (User.IsInRole("admin") || await _db.IsUserAdminAsync(userId.Value, ct))
+        if (await _db.IsUserAdminAsync(userId.Value, ct))
         {
             return true;
         }

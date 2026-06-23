@@ -40,10 +40,10 @@ public class PaymentsV2Controller : ControllerBase
         var userId = User.GetUserId();
         if (!userId.HasValue)
         {
-            return User?.IsInRole("admin") == true || User?.Identity?.IsAuthenticated != true;
+            return User?.Identity?.IsAuthenticated != true;
         }
 
-        if (User.IsInRole("admin") || await _db.IsUserAdminAsync(userId.Value, ct))
+        if (await _db.IsUserAdminAsync(userId.Value, ct))
         {
             return true;
         }

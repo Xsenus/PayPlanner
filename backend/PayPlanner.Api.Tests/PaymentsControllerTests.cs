@@ -821,6 +821,23 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task PaymentsV2_ExportCsv_ForbidsAdminClaimWhenDatabaseRoleIsNotAdmin()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreatePaymentsUserAsync(db, canExport: false);
+        var controller = CreatePaymentsV2Controller(db, user.Id, includeAdminRoleClaim: true);
+
+        var result = await controller.ExportCsv(
+            from: null,
+            to: null,
+            clientId: null,
+            caseId: null,
+            ct: CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result);
+    }
+
+    [Fact]
     public async Task PaymentsV2_FiltersByLegalEntityAndRole()
     {
         await using var db = await CreateContextAsync();
@@ -1084,7 +1101,7 @@ public class PaymentsControllerTests
     public async Task Update_AppendsSystemNoteTimestampInProfileTimeZone()
     {
         await using var db = await CreateContextAsync();
-        var role = new Role { Name = "payment-timezone-admin", Description = "Admin" };
+        var role = new Role { Name = "admin", Description = "Admin" };
         var user = new User
         {
             Email = "payment-timezone@example.test",
@@ -5500,13 +5517,17 @@ public class PaymentsControllerTests
         return contract;
     }
 
-    private static PaymentsV2Controller CreatePaymentsV2Controller(PaymentContext db, int userId)
+    private static PaymentsV2Controller CreatePaymentsV2Controller(PaymentContext db, int userId, bool includeAdminRoleClaim = false)
     {
         var claims = new List<Claim>
         {
             new(ClaimTypes.NameIdentifier, userId.ToString()),
             new(ClaimTypes.Name, "Test user"),
         };
+        if (includeAdminRoleClaim)
+        {
+            claims.Add(new Claim(ClaimTypes.Role, "admin"));
+        }
 
         return new PaymentsV2Controller(db)
         {

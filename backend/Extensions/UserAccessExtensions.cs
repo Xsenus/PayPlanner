@@ -82,8 +82,7 @@ public static class UserAccessExtensions
             return fallbackValues.CanView && isAllowed(fallbackValues);
         }
 
-        var isAdmin = principal.IsInRole("admin")
-            || string.Equals(user.RoleName, "admin", StringComparison.OrdinalIgnoreCase);
+        var isAdmin = string.Equals(user.RoleName, "admin", StringComparison.OrdinalIgnoreCase);
         if (isAdmin)
         {
             return true;

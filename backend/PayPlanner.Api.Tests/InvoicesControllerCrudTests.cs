@@ -2884,6 +2884,29 @@ public class InvoicesControllerCrudTests
 
     private static InvoicesController CreateController(PaymentContext db, bool isAdmin, int? userId)
     {
+        if (isAdmin && userId.HasValue)
+        {
+            var adminRole = db.Roles.SingleOrDefault(role => role.Name == "admin");
+            if (adminRole is null)
+            {
+                adminRole = new Role
+                {
+                    Name = "admin",
+                    Description = "Администратор",
+                    CreatedAt = DateTime.UtcNow,
+                };
+                db.Roles.Add(adminRole);
+                db.SaveChanges();
+            }
+
+            var user = db.Users.SingleOrDefault(item => item.Id == userId.Value);
+            if (user is not null && user.RoleId != adminRole.Id)
+            {
+                user.RoleId = adminRole.Id;
+                db.SaveChanges();
+            }
+        }
+
         var claims = new List<Claim>();
         if (isAdmin)
         {

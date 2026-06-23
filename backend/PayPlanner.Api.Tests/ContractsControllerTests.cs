@@ -920,6 +920,39 @@ public class ContractsControllerTests
     }
 
     [Fact]
+    public async Task NumberingAndRulesSettings_ForbidAdminClaimWhenDatabaseRoleIsNotAdmin()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateContractUserAsync(
+            db,
+            "contracts-stale-admin-settings",
+            canCreate: true,
+            canEdit: true,
+            canDelete: true);
+        var controller = CreateControllerForUser(db, user.Id, includeAdminRoleClaim: true);
+
+        var numberingResult = await controller.UpsertNumberingSettings(
+            new ContractNumberingSettingsRequest
+            {
+                StartNumber = 10,
+                AllocationStrategy = "global",
+                Template = "{NNN}",
+            },
+            CancellationToken.None);
+        var rulesResult = await controller.UpsertRulesSettings(
+            new ContractRulesSettingsRequest
+            {
+                AutoGenerateWhenEmpty = true,
+                AllowManualNumberEdit = true,
+            },
+            CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(numberingResult.Result);
+        Assert.IsType<ForbidResult>(rulesResult.Result);
+        Assert.Empty(await db.SystemSettings.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
     public async Task DocumentTemplateSettings_StoresCustomActiveTemplate()
     {
         await using var db = await CreateContextAsync();
@@ -1940,7 +1973,11 @@ public class ContractsControllerTests
         return user;
     }
 
-    private static ContractsController CreateControllerForUser(PaymentContext db, int userId, IEmailService? emailService = null)
+    private static ContractsController CreateControllerForUser(
+        PaymentContext db,
+        int userId,
+        IEmailService? emailService = null,
+        bool includeAdminRoleClaim = false)
         => new(db, new NoopFormRequirementsService(), emailService: emailService)
         {
             ControllerContext = new ControllerContext
@@ -1948,13 +1985,26 @@ public class ContractsControllerTests
                 HttpContext = new DefaultHttpContext
                 {
                     User = new ClaimsPrincipal(new ClaimsIdentity(
-                    [
-                        new Claim(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture)),
-                        new Claim(ClaimTypes.Name, "Пользователь договоров"),
-                    ], "Test")),
+                        BuildContractUserClaims(userId, includeAdminRoleClaim),
+                        "Test")),
                 },
             },
         };
+
+    private static Claim[] BuildContractUserClaims(int userId, bool includeAdminRoleClaim)
+    {
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture)),
+            new(ClaimTypes.Name, "Пользователь договоров"),
+        };
+        if (includeAdminRoleClaim)
+        {
+            claims.Add(new Claim(ClaimTypes.Role, "admin"));
+        }
+
+        return claims.ToArray();
+    }
 
     private static async Task<Client> CreateClientAsync(PaymentContext db, string? email = null)
     {

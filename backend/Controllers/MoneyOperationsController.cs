@@ -155,10 +155,10 @@ public class MoneyOperationsController : ControllerBase
         var userId = GetCurrentUserId();
         if (!userId.HasValue)
         {
-            return User.HasAdminRole() || User?.Identity?.IsAuthenticated != true;
+            return User?.Identity?.IsAuthenticated != true;
         }
 
-        if (User.HasAdminRole() || await _db.IsUserAdminAsync(userId.Value, ct))
+        if (await _db.IsUserAdminAsync(userId.Value, ct))
         {
             return true;
         }

@@ -282,12 +282,13 @@ public class LegalEntitiesControllerCoverageTests
     public async Task GetAll_GetPaged_AndGetById_HideMainCompanies_ForRegularUsers()
     {
         await using var db = await CreateContextAsync();
+        var admin = await CreateAdminUserAsync(db);
         var regularUser = await CreateUserAsync(db, isActive: true);
         var mainCompanyId = await CreateLegalEntityAsync(db, "Main Company");
         var visibleId = await CreateLegalEntityAsync(db, "Searchable Service", responsibleUserId: regularUser.Id);
         var anotherId = await CreateLegalEntityAsync(db, "Vector");
 
-        var adminController = CreateController(db, new StubLegalEntityEnrichmentService(), currentUserId: 1);
+        var adminController = CreateController(db, new StubLegalEntityEnrichmentService(), currentUserId: admin.Id);
         await adminController.UpdateMainCompanySettings(
             new UpdateMainCompanySettingsRequest
             {
@@ -654,10 +655,11 @@ public class LegalEntitiesControllerCoverageTests
     public async Task Create_ValidatesShortNameResponsibleInnAndClientIds()
     {
         await using var db = await CreateContextAsync();
+        var admin = await CreateAdminUserAsync(db);
         await CreateLegalEntityAsync(db, "Дубликат ИНН", inn: "633009620345");
         var activeResponsible = await CreateUserAsync(db, isActive: true);
         var inactiveResponsible = await CreateUserAsync(db, isActive: false);
-        var controller = CreateController(db, new StubLegalEntityEnrichmentService(), currentUserId: 1);
+        var controller = CreateController(db, new StubLegalEntityEnrichmentService(), currentUserId: admin.Id);
 
         Assert.IsType<BadRequestObjectResult>(
             (await controller.Create(new LegalEntityRequest { ShortName = " " }, CancellationToken.None)).Result);
@@ -734,11 +736,12 @@ public class LegalEntitiesControllerCoverageTests
     public async Task Update_ValidatesExistenceResponsibleInnAndClientIds()
     {
         await using var db = await CreateContextAsync();
+        var admin = await CreateAdminUserAsync(db);
         var activeResponsible = await CreateUserAsync(db, isActive: true);
         var inactiveResponsible = await CreateUserAsync(db, isActive: false);
         var entityId = await CreateLegalEntityAsync(db, "Обновляемая компания", inn: "7700000001");
         await CreateLegalEntityAsync(db, "Компания-дубль", inn: "7700000002");
-        var controller = CreateController(db, new StubLegalEntityEnrichmentService(), currentUserId: 1);
+        var controller = CreateController(db, new StubLegalEntityEnrichmentService(), currentUserId: admin.Id);
 
         Assert.IsType<NotFoundResult>(
             (await controller.Update(404, new LegalEntityRequest { ShortName = "Нет" }, CancellationToken.None)).Result);
@@ -1134,6 +1137,38 @@ public class LegalEntitiesControllerCoverageTests
             RoleId = role.Id,
             IsEmployee = true,
             IsActive = isActive,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        return user;
+    }
+
+    private static async Task<User> CreateAdminUserAsync(PaymentContext db)
+    {
+        var role = await db.Roles.FirstOrDefaultAsync(item => item.Name == "admin");
+        if (role is null)
+        {
+            role = new Role
+            {
+                Name = "admin",
+                Description = "Администратор",
+            };
+            db.Roles.Add(role);
+            await db.SaveChangesAsync();
+        }
+
+        var user = new User
+        {
+            Email = $"legal-admin-{Guid.NewGuid():N}@example.com",
+            PasswordHash = "hash",
+            FullName = "Администратор",
+            RoleId = role.Id,
+            IsEmployee = true,
+            IsActive = true,
             IsApproved = true,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,

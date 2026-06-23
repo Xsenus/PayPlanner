@@ -169,7 +169,7 @@ public class LegalEntitiesControllerTests
     public async Task GetAllAndPaged_WithCounterpartyRole_FilterLegalEntities()
     {
         await using var db = await CreateContextAsync();
-        var userId = await CreateUserAsync(db);
+        var userId = await CreateUserAsync(db, roleName: "admin");
         var clientStatusId = await CreateClientStatusAsync(db, "Клиент", ClientStatusSystemKeys.Client);
         var supplierStatusId = await CreateClientStatusAsync(db, "Поставщик", ClientStatusSystemKeys.Supplier);
         var creditorStatusId = await CreateClientStatusAsync(db, "Кредитор", ClientStatusSystemKeys.Creditor);

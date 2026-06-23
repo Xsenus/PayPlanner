@@ -656,6 +656,54 @@ public class MoneyOperationsControllerTests
     }
 
     [Fact]
+    public async Task ExportCsv_ReturnsForbidWhenAdminClaimIsNotAdminInDatabase()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role
+        {
+            Name = $"money-stale-admin-{Guid.NewGuid():N}",
+            Description = "Деньги без выгрузки со старым claim",
+            Permissions =
+            [
+                new RolePermission
+                {
+                    Section = RolePermissionCatalog.Payments,
+                    CanView = true,
+                    CanExport = false,
+                    ViewScope = DataVisibilityScope.All,
+                },
+            ],
+        };
+        var user = new User
+        {
+            Email = "money-stale-admin@example.com",
+            FullName = "Старый админ claim",
+            PasswordHash = "test",
+            IsActive = true,
+            IsApproved = true,
+            Role = role,
+        };
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, user.Id, isAdminClaim: true);
+
+        var action = await controller.ExportCsv(
+            from: null,
+            to: null,
+            source: null,
+            direction: null,
+            accountingType: null,
+            moneyAccountId: null,
+            accountName: null,
+            categoryName: null,
+            linkedInvoiceId: null,
+            search: null,
+            ct: CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(action);
+    }
+
+    [Fact]
     public async Task Create_ReturnsForbidWhenPaymentCreateIsDenied()
     {
         await using var db = await CreateContextAsync();

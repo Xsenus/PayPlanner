@@ -78,8 +78,7 @@ public static class DataVisibilityService
                 VisibleUserIds: new[] { currentUserId.Value });
         }
 
-        var isAdmin = claimIsAdmin
-            || string.Equals(user.RoleName, "admin", StringComparison.OrdinalIgnoreCase);
+        var isAdmin = string.Equals(user.RoleName, "admin", StringComparison.OrdinalIgnoreCase);
 
         var permission = await db.RolePermissions
             .AsNoTracking()

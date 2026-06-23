@@ -229,7 +229,7 @@ public class ActsControllerTests
     {
         await using var db = await CreateContextAsync();
         var client = await CreateClientAsync(db);
-        var actor = await CreateUserAsync(db, "Администратор", "act-admin@example.com", isActive: true, isApproved: true);
+        var actor = await CreateAdminUserAsync(db, "Администратор", "act-admin@example.com");
         var responsible = await CreateUserAsync(db, "Ответственный по акту", "act-responsible@example.com", isActive: true, isApproved: true);
         db.RolePermissions.Add(new RolePermission
         {
@@ -340,7 +340,7 @@ public class ActsControllerTests
     {
         await using var db = await CreateContextAsync();
         var client = await CreateClientAsync(db);
-        var actor = await CreateUserAsync(db, "Администратор", "admin@example.com", isActive: true, isApproved: true);
+        var actor = await CreateAdminUserAsync(db, "Администратор", "admin@example.com");
         var act = await CreateManualActAsync(db, client.Id, "ACT-CANCEL-1", 7_500m, ActStatus.Signed);
         act.WorkflowStatus = ActWorkflowStatus.Signed;
         act.Comment = "Исходный комментарий";
@@ -2990,6 +2990,38 @@ public class ActsControllerTests
         return user;
     }
 
+    private static async Task<User> CreateAdminUserAsync(PaymentContext db, string fullName, string email)
+    {
+        var role = await db.Roles.FirstOrDefaultAsync(item => item.Name == "admin");
+        if (role is null)
+        {
+            role = new Role
+            {
+                Name = "admin",
+                Description = "Администратор",
+                CreatedAt = DateTime.UtcNow,
+            };
+            db.Roles.Add(role);
+            await db.SaveChangesAsync();
+        }
+
+        var user = new User
+        {
+            Email = email,
+            PasswordHash = "hash",
+            FullName = fullName,
+            RoleId = role.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        return user;
+    }
+
     private static async Task<User> CreateActsUserAsync(PaymentContext db, string name, bool canExport)
     {
         var role = new Role
@@ -3046,6 +3078,44 @@ public class ActsControllerTests
 
     private static ActsController CreateAdminController(PaymentContext db, IYandexDiskService? yandexDiskService = null)
     {
+        var adminRole = db.Roles.SingleOrDefault(role => role.Name == "admin");
+        if (adminRole is null)
+        {
+            adminRole = new Role
+            {
+                Name = "admin",
+                Description = "Администратор",
+                CreatedAt = DateTime.UtcNow,
+            };
+            db.Roles.Add(adminRole);
+            db.SaveChanges();
+        }
+
+        var admin = db.Users.SingleOrDefault(user => user.Id == 1);
+        if (admin is null)
+        {
+            admin = new User
+            {
+                Id = 1,
+                Email = "acts-admin@example.com",
+                PasswordHash = "hash",
+                FullName = "Администратор",
+                RoleId = adminRole.Id,
+                IsActive = true,
+                IsApproved = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            };
+            db.Users.Add(admin);
+        }
+        else
+        {
+            admin.RoleId = adminRole.Id;
+            admin.IsActive = true;
+            admin.IsApproved = true;
+        }
+        db.SaveChanges();
+
         var controller = new ActsController(
             db,
             new NoopFormRequirementsService(),

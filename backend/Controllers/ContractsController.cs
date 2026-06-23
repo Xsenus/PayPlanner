@@ -63,6 +63,12 @@ public class ContractsController : ControllerBase
     private Task<DataVisibilityAccess?> ResolveContractsVisibilityAsync(CancellationToken ct)
         => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Contracts, ct);
 
+    private async Task<bool> IsDatabaseAdminAsync(CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        return userId.HasValue && await _db.IsUserAdminAsync(userId.Value, ct);
+    }
+
     private Task<TimeZoneInfo> ResolveContractTimeZoneAsync(CancellationToken ct)
         => CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
 
@@ -991,7 +997,7 @@ public class ContractsController : ControllerBase
     [HttpPut("numbering-settings")]
     public async Task<ActionResult<ContractNumberingSettingsDto>> UpsertNumberingSettings([FromBody] ContractNumberingSettingsRequest request, CancellationToken ct)
     {
-        if (!User.HasAdminRole()) return Forbid();
+        if (!await IsDatabaseAdminAsync(ct)) return Forbid();
         if (request.StartNumber < 1) return BadRequest("Стартовый номер договора должен быть больше 0.");
         var template = NormalizeContractTemplate(request.Template);
         if (!TryExtractSequenceToken(template, out _)) return BadRequest("Шаблон номера договора должен содержать один маркер номера: {N}, {NN}, {NNN} или {NNNN}.");
@@ -1011,7 +1017,7 @@ public class ContractsController : ControllerBase
     [HttpPut("rules-settings")]
     public async Task<ActionResult<ContractRulesSettingsDto>> UpsertRulesSettings([FromBody] ContractRulesSettingsRequest request, CancellationToken ct)
     {
-        if (!User.HasAdminRole()) return Forbid();
+        if (!await IsDatabaseAdminAsync(ct)) return Forbid();
         if (!request.AutoGenerateWhenEmpty && !request.AllowManualNumberEdit) return BadRequest("Нужно оставить хотя бы один способ заполнения номера договора: автогенерацию или ручной ввод.");
         var now = DateTime.UtcNow;
         await UpsertSystemSettingAsync(ContractAutoGenerateNumberSettingKey, request.AutoGenerateWhenEmpty.ToString().ToLowerInvariant(), now, ct);
