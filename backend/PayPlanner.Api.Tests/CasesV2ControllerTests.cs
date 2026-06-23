@@ -4251,6 +4251,69 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task DirectDocumentMutationEndpoints_ReturnNotFoundForHiddenCase()
+    {
+        await using var db = await CreateContextAsync();
+        var viewer = await CreateUserAsync(db, "hidden-document-editor@example.com", "Редактор");
+        var otherResponsible = await CreateUserAsync(db, "hidden-document-editor-owner@example.com", "Другой ответственный");
+        var client = new Client
+        {
+            Name = "Скрытый клиент для изменения",
+            IsActive = true,
+            ResponsibleUserId = otherResponsible.Id,
+        };
+        var hiddenCase = new ClientCase
+        {
+            Client = client,
+            Title = "Скрытое дело для изменения",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = otherResponsible.Id,
+        };
+        var document = new ClientCaseDocument
+        {
+            ClientCase = hiddenCase,
+            DocumentKey = "hidden-edit",
+            Version = 1,
+            DocumentType = "Иск",
+            Status = "Подготовлен",
+            OriginalFileName = "hidden-edit.txt",
+            StoredFileName = "hidden-edit-v1.txt",
+            StoragePath = "hidden/hidden-edit-v1.txt",
+            ContentType = "text/plain",
+            SizeBytes = 5,
+            UploadedByUserId = otherResponsible.Id,
+            UploadedByName = otherResponsible.FullName,
+            UploadedAt = DateTime.UtcNow,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(hiddenCase);
+        db.ClientCaseDocuments.Add(document);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, viewer);
+
+        var versionResult = await controller.UploadDocumentVersionById(
+            document.Id,
+            CreateFormFile("blocked", "hidden-edit-v2.txt"),
+            documentType: null,
+            status: "Отправлен",
+            ct: CancellationToken.None);
+        var updateResult = await controller.UpdateDocumentById(
+            document.Id,
+            new CasesV2Controller.UpdateCaseDocumentRequest { Status = "Отправлен" },
+            CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(versionResult.Result);
+        Assert.IsType<NotFoundResult>(updateResult.Result);
+        Assert.Equal(1, await db.ClientCaseDocuments.CountAsync(item => item.DocumentKey == document.DocumentKey));
+        var unchanged = await db.ClientCaseDocuments.SingleAsync(item => item.Id == document.Id);
+        Assert.Equal("Подготовлен", unchanged.Status);
+        Assert.False(await db.ObjectAuditEvents.AnyAsync(item =>
+            item.ObjectType == "client-case-document"
+            && item.ObjectId == document.Id
+            && (item.Action == "Updated" || item.Action == "Uploaded")));
+    }
+
+    [Fact]
     public async Task Documents_GeneratesTemplateFromCaseDataAndStoresVersionedFile()
     {
         await using var db = await CreateContextAsync();
