@@ -693,12 +693,23 @@ public class ClientsController : ControllerBase
     [HttpPost("dadata/clean-address")]
     public async Task<IActionResult> CleanAddress([FromBody] ClientCleanAddressRequest request, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(request.Address)) return BadRequest("Укажите Address");
+        var rawAddress = request.Address?.Trim();
+        if (string.IsNullOrWhiteSpace(rawAddress)) return BadRequest("Укажите адрес");
 
-        var result = await _enrichment.CleanAddressAsync(request.Address, ct);
-        if (result is null) return NotFound();
+        var result = await _enrichment.CleanAddressAsync(rawAddress, ct);
+        if (result is not null) return Ok(MapCleanedAddressResponse(result));
 
-        return Ok(new
+        var fallback = (await _enrichment.SuggestAddressesAsync(rawAddress, 1, ct)).FirstOrDefault();
+        if (fallback is null)
+        {
+            return NotFound(new { message = "Адрес не найден в DaData. Проверьте написание или заполните поля вручную." });
+        }
+
+        return Ok(MapAddressSuggestionCleanResponse(rawAddress, fallback));
+    }
+
+    private static object MapCleanedAddressResponse(CleanedAddress result)
+        => new
         {
             source = result.Source,
             result = result.Result,
@@ -729,8 +740,43 @@ public class ClientsController : ControllerBase
             qcGeo = result.QcGeo,
             unparsedParts = result.UnparsedParts,
             timezone = result.Timezone,
-        });
-    }
+        };
+
+    private static object MapAddressSuggestionCleanResponse(
+        string source,
+        ILegalEntityEnrichmentService.DadataAddressSuggestion suggestion)
+        => new
+        {
+            source,
+            result = suggestion.UnrestrictedValue ?? suggestion.Value,
+            postalCode = suggestion.PostalCode,
+            country = (string?)null,
+            countryIsoCode = (string?)null,
+            federalDistrict = (string?)null,
+            regionWithType = suggestion.RegionWithType,
+            areaWithType = suggestion.AreaWithType,
+            cityWithType = suggestion.CityWithType,
+            settlementWithType = suggestion.SettlementWithType,
+            streetWithType = suggestion.StreetWithType,
+            house = suggestion.House,
+            block = (string?)null,
+            flat = suggestion.Flat,
+            fiasId = suggestion.FiasId,
+            fiasLevel = (string?)null,
+            kladrId = suggestion.KladrId,
+            okato = (string?)null,
+            oktmo = (string?)null,
+            taxOffice = (string?)null,
+            taxOfficeLegal = (string?)null,
+            geoLat = suggestion.GeoLat,
+            geoLon = suggestion.GeoLon,
+            qc = (int?)null,
+            qcComplete = (int?)null,
+            qcHouse = (int?)null,
+            qcGeo = (int?)null,
+            unparsedParts = (string?)null,
+            timezone = (string?)null,
+        };
 
     [HttpPost("dadata/suggest-address")]
     public async Task<IActionResult> SuggestAddress([FromBody] ClientSuggestAddressRequest request, CancellationToken ct)

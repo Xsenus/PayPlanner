@@ -183,7 +183,13 @@ public class ClientsControllerCoverageTests
         Assert.IsType<BadRequestObjectResult>(blank);
 
         var missing = await controller.CleanAddress(new ClientCleanAddressRequest("Не найден"), CancellationToken.None);
-        Assert.IsType<NotFoundResult>(missing);
+        var missingResult = Assert.IsType<NotFoundObjectResult>(missing);
+        using (var missingJson = JsonDocument.Parse(JsonSerializer.Serialize(missingResult.Value)))
+        {
+            Assert.Equal(
+                "Адрес не найден в DaData. Проверьте написание или заполните поля вручную.",
+                missingJson.RootElement.GetProperty("message").GetString());
+        }
 
         var ok = Assert.IsType<OkObjectResult>(
             await controller.CleanAddress(new ClientCleanAddressRequest("Самара, Миронова, 9"), CancellationToken.None));
@@ -193,6 +199,53 @@ public class ClientsControllerCoverageTests
         Assert.Equal("Россия", json.RootElement.GetProperty("country").GetString());
         Assert.Equal("г Новокуйбышевск", json.RootElement.GetProperty("cityWithType").GetString());
         Assert.Equal("fias-1", json.RootElement.GetProperty("fiasId").GetString());
+    }
+
+    [Fact]
+    public async Task CleanAddress_FallsBackToAddressSuggestion_WhenCleanerHasNoMatch()
+    {
+        await using var db = await CreateContextAsync();
+        var controller = CreateController(
+            db,
+            currentUserId: null,
+            enrichmentService: new StubEnrichmentService
+            {
+                AddressSuggestions =
+                {
+                    ["г.Новокуйбышевск, ул. Дзержинского д.14.кв.9"] =
+                    [
+                        new ILegalEntityEnrichmentService.DadataAddressSuggestion(
+                            Value: "г Новокуйбышевск, ул Дзержинского, д 14, кв 9",
+                            UnrestrictedValue: "446200, Самарская обл, г Новокуйбышевск, ул Дзержинского, д 14, кв 9",
+                            PostalCode: "446200",
+                            FiasId: "fias-dzerzhinskogo-14",
+                            KladrId: "kladr-dzerzhinskogo-14",
+                            GeoLat: "53.099",
+                            GeoLon: "49.947",
+                            RegionWithType: "Самарская обл",
+                            AreaWithType: null,
+                            CityWithType: "г Новокуйбышевск",
+                            SettlementWithType: null,
+                            StreetWithType: "ул Дзержинского",
+                            House: "14",
+                            Flat: "9"),
+                    ],
+                },
+            });
+
+        var ok = Assert.IsType<OkObjectResult>(
+            await controller.CleanAddress(
+                new ClientCleanAddressRequest("г.Новокуйбышевск, ул. Дзержинского д.14.кв.9"),
+                CancellationToken.None));
+
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(ok.Value));
+        Assert.Equal("446200", json.RootElement.GetProperty("postalCode").GetString());
+        Assert.Equal("Самарская обл", json.RootElement.GetProperty("regionWithType").GetString());
+        Assert.Equal("г Новокуйбышевск", json.RootElement.GetProperty("cityWithType").GetString());
+        Assert.Equal("ул Дзержинского", json.RootElement.GetProperty("streetWithType").GetString());
+        Assert.Equal("14", json.RootElement.GetProperty("house").GetString());
+        Assert.Equal("9", json.RootElement.GetProperty("flat").GetString());
+        Assert.Equal("fias-dzerzhinskogo-14", json.RootElement.GetProperty("fiasId").GetString());
     }
 
     [Fact]

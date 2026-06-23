@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -96,6 +97,66 @@ public sealed class DadataLegalEntityEnrichmentServiceTests
             service.SuggestAddressesAsync("Новосибирск", 5, cts.Token));
     }
 
+    [Fact]
+    public async Task SuggestAddressesAsync_RetriesWithNormalizedAddress_WhenCompactQueryHasNoMatches()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var attempt = 0;
+        var handler = new RecordingDadataHandler(_ =>
+        {
+            attempt++;
+            var json = attempt == 1
+                ? """{"suggestions":[]}"""
+                : """
+                  {
+                    "suggestions": [
+                      {
+                        "value": "г Новокуйбышевск, ул Дзержинского, д 14, кв 9",
+                        "unrestricted_value": "446200, Самарская обл, г Новокуйбышевск, ул Дзержинского, д 14, кв 9",
+                        "data": {
+                          "postal_code": "446200",
+                          "region_with_type": "Самарская обл",
+                          "city_with_type": "г Новокуйбышевск",
+                          "street_with_type": "ул Дзержинского",
+                          "house": "14",
+                          "flat": "9",
+                          "fias_id": "fias-14",
+                          "kladr_id": "kladr-14"
+                        }
+                      }
+                    ]
+                  }
+                  """;
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json"),
+            };
+        });
+        var service = CreateService(scope.Db, handler);
+
+        var suggestions = await service.SuggestAddressesAsync(
+            "г.Новокуйбышевск, ул. Дзержинского д.14.кв.9",
+            5,
+            CancellationToken.None);
+
+        var suggestion = Assert.Single(suggestions);
+        Assert.Equal("446200", suggestion.PostalCode);
+        Assert.Equal("г Новокуйбышевск", suggestion.CityWithType);
+        Assert.Equal("ул Дзержинского", suggestion.StreetWithType);
+        Assert.Equal("14", suggestion.House);
+        Assert.Equal("9", suggestion.Flat);
+        Assert.Equal(2, handler.Requests.Count);
+        using var firstBody = JsonDocument.Parse(handler.Bodies[0]);
+        using var secondBody = JsonDocument.Parse(handler.Bodies[1]);
+        Assert.Equal(
+            "г.Новокуйбышевск, ул. Дзержинского д.14.кв.9",
+            firstBody.RootElement.GetProperty("query").GetString());
+        Assert.Equal(
+            "г. Новокуйбышевск, ул. Дзержинского, д 14, кв 9",
+            secondBody.RootElement.GetProperty("query").GetString());
+    }
+
     private static DadataLegalEntityEnrichmentService CreateService(PaymentContext db, HttpMessageHandler handler)
         => new(
             new HttpClient(handler) { BaseAddress = new Uri("https://dadata.test/") },
@@ -127,10 +188,12 @@ public sealed class DadataLegalEntityEnrichmentServiceTests
     private sealed class RecordingDadataHandler(Func<HttpRequestMessage, HttpResponseMessage> handler) : HttpMessageHandler
     {
         public List<HttpRequestMessage> Requests { get; } = [];
+        public List<string> Bodies { get; } = [];
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Requests.Add(request);
+            Bodies.Add(request.Content?.ReadAsStringAsync(cancellationToken).GetAwaiter().GetResult() ?? string.Empty);
             return Task.FromResult(handler(request));
         }
     }

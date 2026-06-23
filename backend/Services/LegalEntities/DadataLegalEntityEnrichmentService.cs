@@ -4,6 +4,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
@@ -353,45 +354,50 @@ namespace PayPlanner.Api.Services.LegalEntities
             var effectiveLimit = Math.Clamp(limit <= 0 ? 5 : limit, 1, 20);
             var url = Combine(_opt.BaseUrl, "suggest/address");
 
-            using var req = new HttpRequestMessage(HttpMethod.Post, url)
-            {
-                Content = JsonContent(new { query = payloadQuery, count = effectiveLimit })
-            };
-            req.Headers.Authorization = new AuthenticationHeaderValue("Token", token);
-
             try
             {
-                using var resp = await SendWithRetriesAsync(req, ct);
-                if (!resp.IsSuccessStatusCode)
+                foreach (var candidateQuery in BuildAddressSuggestionQueries(payloadQuery))
                 {
-                    _logger.LogWarning("DaData address suggest failed: {Code} {Reason}",
-                        (int)resp.StatusCode, resp.ReasonPhrase);
-                    return Array.Empty<ILegalEntityEnrichmentService.DadataAddressSuggestion>();
+                    using var req = new HttpRequestMessage(HttpMethod.Post, url)
+                    {
+                        Content = JsonContent(new { query = candidateQuery, count = effectiveLimit })
+                    };
+                    req.Headers.Authorization = new AuthenticationHeaderValue("Token", token);
+
+                    using var resp = await SendWithRetriesAsync(req, ct);
+                    if (!resp.IsSuccessStatusCode)
+                    {
+                        _logger.LogWarning("DaData address suggest failed: {Code} {Reason}",
+                            (int)resp.StatusCode, resp.ReasonPhrase);
+                        return Array.Empty<ILegalEntityEnrichmentService.DadataAddressSuggestion>();
+                    }
+
+                    await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+                    var result = await JsonSerializer.DeserializeAsync<AddressSuggestResponse>(stream, JsonOptions, ct);
+                    if (result?.Suggestions == null || result.Suggestions.Count == 0)
+                        continue;
+
+                    return result.Suggestions
+                        .Select(s => new ILegalEntityEnrichmentService.DadataAddressSuggestion(
+                            s.Value ?? string.Empty,
+                            s.UnrestrictedValue,
+                            s.Data?.PostalCode,
+                            s.Data?.FiasId,
+                            s.Data?.KladrId,
+                            s.Data?.GeoLat,
+                            s.Data?.GeoLon,
+                            s.Data?.RegionWithType,
+                            s.Data?.AreaWithType,
+                            s.Data?.CityWithType,
+                            s.Data?.SettlementWithType,
+                            s.Data?.StreetWithType,
+                            s.Data?.House,
+                            s.Data?.Flat))
+                        .Where(x => !string.IsNullOrWhiteSpace(x.Value))
+                        .ToList();
                 }
 
-                await using var stream = await resp.Content.ReadAsStreamAsync(ct);
-                var result = await JsonSerializer.DeserializeAsync<AddressSuggestResponse>(stream, JsonOptions, ct);
-                if (result?.Suggestions == null || result.Suggestions.Count == 0)
-                    return Array.Empty<ILegalEntityEnrichmentService.DadataAddressSuggestion>();
-
-                return result.Suggestions
-                    .Select(s => new ILegalEntityEnrichmentService.DadataAddressSuggestion(
-                        s.Value ?? string.Empty,
-                        s.UnrestrictedValue,
-                        s.Data?.PostalCode,
-                        s.Data?.FiasId,
-                        s.Data?.KladrId,
-                        s.Data?.GeoLat,
-                        s.Data?.GeoLon,
-                        s.Data?.RegionWithType,
-                        s.Data?.AreaWithType,
-                        s.Data?.CityWithType,
-                        s.Data?.SettlementWithType,
-                        s.Data?.StreetWithType,
-                        s.Data?.House,
-                        s.Data?.Flat))
-                    .Where(x => !string.IsNullOrWhiteSpace(x.Value))
-                    .ToList();
+                return Array.Empty<ILegalEntityEnrichmentService.DadataAddressSuggestion>();
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex)
@@ -399,6 +405,28 @@ namespace PayPlanner.Api.Services.LegalEntities
                 _logger.LogError(ex, "DaData address suggest error");
                 return Array.Empty<ILegalEntityEnrichmentService.DadataAddressSuggestion>();
             }
+        }
+
+        private static IReadOnlyList<string> BuildAddressSuggestionQueries(string query)
+        {
+            var trimmed = query.Trim();
+            var normalized = NormalizeAddressSuggestionQuery(trimmed);
+            return string.Equals(trimmed, normalized, StringComparison.Ordinal)
+                ? [trimmed]
+                : [trimmed, normalized];
+        }
+
+        private static string NormalizeAddressSuggestionQuery(string query)
+        {
+            var value = Regex.Replace(query.Trim(), @"([,;])(?=\S)", "$1 ");
+            value = Regex.Replace(value, @"\b(г|ул)\.\s*", "$1. ", RegexOptions.IgnoreCase);
+            value = Regex.Replace(value, @"(?<=\p{L})\.(?=\d)", ". ");
+            value = Regex.Replace(value, @"(?<=\d)\.(?=\p{L})", ", ");
+            value = Regex.Replace(value, @"\bд\.\s*", "д ", RegexOptions.IgnoreCase);
+            value = Regex.Replace(value, @"\bкв\.\s*", "кв ", RegexOptions.IgnoreCase);
+            value = Regex.Replace(value, @"(?<![,])\s+(д\s+\d)", ", $1", RegexOptions.IgnoreCase);
+            value = Regex.Replace(value, @"(?<![,])\s+(кв\s+\d)", ", $1", RegexOptions.IgnoreCase);
+            return Regex.Replace(value, @"\s+", " ").Trim();
         }
 
         public async Task<IReadOnlyList<LegalEntitySuggestion>> SuggestAsync(
