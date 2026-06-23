@@ -78,6 +78,11 @@ public static class UserAccessExtensions
 
         if (user is null)
         {
+            if (await db.Users.AsNoTracking().AnyAsync(ct))
+            {
+                return false;
+            }
+
             var fallbackValues = RolePermissionCatalog.BuildDefaults(allowRoleManagement: principal.IsInRole("admin"))[section];
             return fallbackValues.CanView && isAllowed(fallbackValues);
         }

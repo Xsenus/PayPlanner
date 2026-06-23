@@ -69,6 +69,11 @@ public static class DataVisibilityService
 
         if (user is null)
         {
+            if (await db.Users.AsNoTracking().AnyAsync(ct))
+            {
+                return null;
+            }
+
             var fallbackScope = claimIsAdmin ? DataVisibilityScope.All : DataVisibilityScope.Own;
             return new DataVisibilityAccess(
                 UserId: currentUserId.Value,

@@ -89,6 +89,55 @@ public class DataVisibilityServiceTests
     }
 
     [Fact]
+    public async Task ResolveDataVisibilityAsync_ReturnsNullForMissingUserWhenDatabaseHasUsers()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "lawyer", Description = "lawyer" };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+        db.Users.Add(new User
+        {
+            Email = "existing-user@example.com",
+            PasswordHash = "hash",
+            FullName = "Existing User",
+            RoleId = role.Id,
+            IsActive = true,
+        });
+        await db.SaveChangesAsync();
+
+        var access = await db.ResolveDataVisibilityAsync(
+            CreatePrincipal(987654, isAdminClaim: true),
+            RolePermissionCatalog.Cases);
+
+        Assert.Null(access);
+    }
+
+    [Fact]
+    public async Task HasUserSectionPermissionAsync_ReturnsFalseForMissingUserWhenDatabaseHasUsers()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "viewer", Description = "viewer" };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+        db.Users.Add(new User
+        {
+            Email = "existing-section-user@example.com",
+            PasswordHash = "hash",
+            FullName = "Existing Section User",
+            RoleId = role.Id,
+            IsActive = true,
+        });
+        await db.SaveChangesAsync();
+
+        var canCreate = await db.HasUserSectionPermissionAsync(
+            CreatePrincipal(987654, isAdminClaim: true),
+            RolePermissionCatalog.Cases,
+            static permission => permission.CanCreate);
+
+        Assert.False(canCreate);
+    }
+
+    [Fact]
     public async Task ResolveDataVisibilityAsync_UsesDepartmentDictionaryAndLegacyNameFallback()
     {
         await using var db = await CreateContextAsync();

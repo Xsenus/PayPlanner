@@ -936,6 +936,7 @@ public class LegalEntitiesControllerTests
     public async Task Delete_RemovesUserCompanyAccesses_AndSoftDeletesAddresses()
     {
         await using var db = await CreateContextAsync();
+        var currentUserId = await CreateUserAsync(db, roleName: "admin");
         var employeeUserId = await CreateUserAsync(db);
 
         var entity = new LegalEntity
@@ -963,7 +964,7 @@ public class LegalEntitiesControllerTests
         });
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db, userId: 58);
+        var controller = CreateController(db, currentUserId);
         var deleteAction = await controller.Delete(entity.Id, CancellationToken.None);
 
         Assert.IsType<NoContentResult>(deleteAction);
