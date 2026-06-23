@@ -1580,6 +1580,9 @@ public static class InvoiceDocumentTemplateEngine
       font-size: 16px !important;
       font-weight: 700;
     }
+    .counterparty-table {
+      table-layout: fixed;
+    }
     .counterparty-table td {
       padding: 3px 4px;
       vertical-align: top;
@@ -1610,6 +1613,7 @@ public static class InvoiceDocumentTemplateEngine
     .items-table {
       margin: 8px 0;
       border: 1px solid #000000;
+      table-layout: fixed;
     }
     .items-table th,
     .items-table td {
@@ -1629,6 +1633,7 @@ public static class InvoiceDocumentTemplateEngine
     }
     .items-table .name {
       width: 55%;
+      overflow-wrap: anywhere;
       word-break: break-word;
     }
     .items-table .qty {

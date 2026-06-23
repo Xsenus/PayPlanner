@@ -510,6 +510,97 @@ public class InvoiceDocumentTemplateTests
     }
 
     [Fact]
+    public void RenderHtml_KeepsLongCounterpartyNamesPrintableInDefaultTemplate()
+    {
+        var sellerFullName = "Автономная некоммерческая организация Центр защиты прав потребителей и комплексного сопровождения судебных процедур Приволжского федерального округа Самарской области";
+        var buyerFullName = "Общество с ограниченной ответственностью Международная юридическая группа по сопровождению сложных имущественных и семейных споров";
+        var longServiceName = "Комплексное юридическое сопровождение доверителя по многоэтапному судебному спору с подготовкой процессуальных документов и анализом материалов дела";
+        var mainCompany = new LegalEntity
+        {
+            ShortName = "АНО Центр защиты прав",
+            FullName = sellerFullName,
+            Inn = "6311999999",
+            Kpp = "631101001",
+            TreasuryAccountNumber = "40702810900000000001",
+            TreasuryBankName = "Самарский банк сопровождения расчетов с очень длинным наименованием",
+            TreasuryBankBik = "043601607",
+            TreasuryCorrAccountNumber = "30101810200000000607",
+            Addresses =
+            [
+                new AddressRecord
+                {
+                    Type = AddressType.Legal,
+                    Value = "443000, Самарская область, город Самара, улица Очень Длинная Юридическая, дом 125, офис 804",
+                    IsPrimary = true,
+                },
+            ],
+        };
+        var buyer = new LegalEntity
+        {
+            ShortName = "ООО Международная юридическая группа",
+            FullName = buyerFullName,
+            Inn = "6311000001",
+            Kpp = "631101002",
+            Ogrn = "1236300000001",
+            TreasuryAccountNumber = "40702810000000000002",
+            TreasuryBankName = "Банк клиента с длинным наименованием для проверки печатной формы счета",
+            TreasuryBankBik = "043601608",
+            TreasuryCorrAccountNumber = "30101810200000000608",
+            Addresses =
+            [
+                new AddressRecord
+                {
+                    Type = AddressType.Legal,
+                    Value = "443001, Самарская область, город Самара, проспект Длинных Наименований, дом 17, помещение 240",
+                    IsPrimary = true,
+                },
+            ],
+        };
+        var payment = new Payment
+        {
+            Account = "128",
+            AccountDate = new DateTime(2026, 6, 19),
+            Date = new DateTime(2026, 6, 25),
+            Amount = 95_000m,
+            Type = PaymentType.Income,
+            LegalEntity = buyer,
+            Contract = new Contract
+            {
+                Number = "LONG-1",
+                Date = new DateTime(2026, 6, 1),
+                Title = "Договор на сопровождение",
+            },
+        };
+
+        var html = InvoiceDocumentTemplateEngine.RenderHtml(
+            InvoiceDocumentTemplateEngine.CreateDefaultSettings().DefaultTemplateHtml,
+            payment,
+            [
+                new InvoiceLineItemDto
+                {
+                    Name = longServiceName,
+                    Quantity = 1m,
+                    Unit = "усл. ед.",
+                    Price = 95_000m,
+                },
+            ],
+            mainCompany,
+            includeSignatureAndSeal: false);
+
+        Assert.Contains(sellerFullName, html);
+        Assert.Contains(buyerFullName, html);
+        Assert.Contains(longServiceName, html);
+        Assert.Contains("<span class=\"counterparty-line\">", html);
+        Assert.Matches(@"\.counterparty-table\s*\{\s*table-layout:\s*fixed;", html);
+        Assert.Matches(@"\.counterparty-value\s*\{[^}]*overflow-wrap:\s*anywhere;", html);
+        Assert.Matches(@"\.items-table\s*\{[^}]*table-layout:\s*fixed;", html);
+        Assert.Matches(@"\.items-table \.name\s*\{[^}]*overflow-wrap:\s*anywhere;", html);
+        Assert.DoesNotContain("{{seller.requisites}}", html);
+        Assert.DoesNotContain("{{buyer.requisitesHtml}}", html);
+        Assert.DoesNotContain("{{name}}", html);
+    }
+
+    [Fact]
     public async Task GetDocument_RendersInstallmentSchedule_WhenInstallmentsExist()
     {
         await using var db = await CreateContextAsync();
