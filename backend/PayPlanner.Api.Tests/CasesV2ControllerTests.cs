@@ -6022,6 +6022,64 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task RelatedParties_ReturnNotFoundForHiddenCaseActions()
+    {
+        await using var db = await CreateContextAsync();
+        var viewer = await CreateUserAsync(db, "related-parties-hidden-viewer@example.com", "Наблюдатель связанных лиц");
+        var otherResponsible = await CreateUserAsync(db, "related-parties-hidden-owner@example.com", "Другой ответственный");
+        var hiddenClient = new Client
+        {
+            Name = "Скрытый клиент связанных лиц",
+            IsActive = true,
+            ResponsibleUserId = otherResponsible.Id,
+        };
+        var hiddenCase = new ClientCase
+        {
+            Client = hiddenClient,
+            Title = "Скрытое дело со связанными лицами",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = otherResponsible.Id,
+        };
+        var visibleRelatedClient = new Client
+        {
+            Name = "Видимое связанное лицо",
+            IsActive = true,
+            ResponsibleUserId = viewer.Id,
+        };
+        var hiddenRelatedParty = new ClientCaseRelatedParty
+        {
+            ClientCase = hiddenCase,
+            SourceType = "client",
+            Client = visibleRelatedClient,
+            DisplayName = visibleRelatedClient.Name,
+            Role = "Свидетель",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Clients.AddRange(hiddenClient, visibleRelatedClient);
+        db.ClientCases.Add(hiddenCase);
+        db.ClientCaseRelatedParties.Add(hiddenRelatedParty);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, viewer);
+
+        var listResult = await controller.GetRelatedParties(hiddenCase.Id, includeArchived: true, CancellationToken.None);
+        var addResult = await controller.AddRelatedParty(hiddenCase.Id, new CasesV2Controller.UpsertClientCaseRelatedPartyRequest
+        {
+            SourceType = "client",
+            SourceId = visibleRelatedClient.Id,
+            Role = "Представитель",
+        }, CancellationToken.None);
+        var deleteResult = await controller.DeleteRelatedParty(hiddenCase.Id, hiddenRelatedParty.Id, CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(listResult.Result);
+        Assert.IsType<NotFoundResult>(addResult.Result);
+        Assert.IsType<NotFoundResult>(deleteResult);
+        var reloadedParty = await db.ClientCaseRelatedParties.AsNoTracking().SingleAsync(item => item.Id == hiddenRelatedParty.Id);
+        Assert.False(reloadedParty.IsArchived);
+        Assert.Equal("Свидетель", reloadedParty.Role);
+        Assert.Single(await db.ClientCaseRelatedParties.AsNoTracking().Where(item => item.ClientCaseId == hiddenCase.Id).ToListAsync());
+    }
+
+    [Fact]
     public async Task RelatedParties_AddListsAndDeletesDirectoryLink()
     {
         await using var db = await CreateContextAsync();
