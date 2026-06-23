@@ -1,5 +1,8 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Filters;
+using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Services;
 
@@ -8,13 +11,28 @@ namespace PayPlanner.Api.Controllers;
 [ApiController]
 [Route("api/auth/admin/providers")]
 [Authorize(Policy = "Admin")]
-public class AuthProvidersAdminController : ControllerBase
+public class AuthProvidersAdminController : ControllerBase, IAsyncActionFilter
 {
+    private readonly PaymentContext _db;
     private readonly ExternalAuthService _externalAuthService;
 
-    public AuthProvidersAdminController(ExternalAuthService externalAuthService)
+    public AuthProvidersAdminController(ExternalAuthService externalAuthService, PaymentContext db)
     {
         _externalAuthService = externalAuthService;
+        _db = db;
+    }
+
+    [NonAction]
+    public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
+    {
+        var userId = context.HttpContext.User.GetUserId();
+        if (!userId.HasValue || !await _db.IsUserAdminAsync(userId.Value, context.HttpContext.RequestAborted))
+        {
+            context.Result = Forbid();
+            return;
+        }
+
+        await next();
     }
 
     [HttpGet]
