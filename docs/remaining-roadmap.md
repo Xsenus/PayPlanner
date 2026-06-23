@@ -268,6 +268,7 @@
   - `[x]` 2026-06-23: прямые CSV-выгрузки и HTML-печать управленческого журнала задач применяют object-level видимость задач: роль с доступом "только свои" не получает чужие задачи через export API. Проверено backend-тестом `ReportsControllerTests.TasksManagementExports_ApplyTasksVisibilityScope`.
   - `[x]` 2026-06-23: прямые CSV-выгрузки и HTML-печать отчета по загрузке юристов применяют object-level видимость дел и задач: роль с доступом "только свои" не получает чужого юриста через export API. Проверено backend-тестом `ReportsControllerTests.LawyerWorkloadManagementExports_ApplyCasesAndTasksVisibilityScope`.
   - `[x]` 2026-06-23: прямые CSV-выгрузки и HTML-печать отчета по просроченным процессуальным срокам применяют object-level видимость дел: роль с доступом "только свои" не получает сроки по скрытым делам через export API. Проверено backend-тестом `ReportsControllerTests.OverdueDeadlinesManagementExports_ApplyCasesVisibilityScope`.
+  - `[x]` 2026-06-23: прямые CSV-выгрузки и HTML-печать отчета по активности дел применяют object-level видимость дел: роль с доступом "только свои" не получает скрытые дела через export API. Проверено backend-тестом `ReportsControllerTests.CaseActivityManagementExports_ApplyCasesVisibilityScope`.
 - `[partial]` Довести backend- и frontend-тесты прав по реальным ролям заказчика. Тесты прав есть, но финальный набор зависит от утвержденной матрицы.
 - `[acceptance]` Финально проверить маскирование и раскрытие чувствительных данных на реальных ролях и данных.
 

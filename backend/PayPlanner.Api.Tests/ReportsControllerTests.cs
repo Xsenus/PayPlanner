@@ -1541,6 +1541,134 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task CaseActivityManagementExports_ApplyCasesVisibilityScope()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role
+        {
+            Name = $"case-activity-export-role-{Guid.NewGuid():N}",
+            Description = "Case activity export role",
+        };
+        var visibleUser = new User
+        {
+            Email = $"visible-case-activity-export-{Guid.NewGuid():N}@example.test",
+            FullName = "Visible Case Activity Export User",
+            IsActive = true,
+            Role = role,
+        };
+        var hiddenUser = new User
+        {
+            Email = $"hidden-case-activity-export-{Guid.NewGuid():N}@example.test",
+            FullName = "Hidden Case Activity Export User",
+            IsActive = true,
+            Role = role,
+        };
+
+        db.Roles.Add(role);
+        db.Users.AddRange(visibleUser, hiddenUser);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Reports,
+                CanView = true,
+                CanExport = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Cases,
+                CanView = true,
+                ViewScope = DataVisibilityScope.Own,
+            });
+
+        var visibleClient = new Client { Name = "Visible activity export client", ResponsibleUserId = visibleUser.Id };
+        var hiddenClient = new Client { Name = "Hidden activity export client", ResponsibleUserId = hiddenUser.Id };
+        db.Clients.AddRange(visibleClient, hiddenClient);
+        await db.SaveChangesAsync();
+
+        db.ClientCases.AddRange(
+            new ClientCase
+            {
+                ClientId = visibleClient.Id,
+                CaseNumber = "ACTIVITY-EXPORT-VISIBLE",
+                Title = "Visible activity export case",
+                Status = ClientCaseStatus.Open,
+                CreatedAt = DateTime.UtcNow.AddDays(-40),
+            },
+            new ClientCase
+            {
+                ClientId = hiddenClient.Id,
+                CaseNumber = "ACTIVITY-EXPORT-HIDDEN",
+                Title = "Hidden activity export case",
+                Status = ClientCaseStatus.Open,
+                CreatedAt = DateTime.UtcNow.AddDays(-40),
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateUserPrincipal(visibleUser.Id));
+
+        var csvAction = await controller.ExportManagementReportCsv(
+            "case-activity",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "all",
+            14,
+            30,
+            10,
+            CancellationToken.None);
+        var printAction = await controller.PrintManagementReport(
+            "case-activity",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "all",
+            14,
+            30,
+            10,
+            CancellationToken.None);
+
+        var csv = Assert.IsType<FileContentResult>(csvAction);
+        var csvText = Encoding.UTF8.GetString(csv.FileContents);
+        Assert.Contains("ACTIVITY-EXPORT-VISIBLE", csvText, StringComparison.Ordinal);
+        Assert.DoesNotContain("ACTIVITY-EXPORT-HIDDEN", csvText, StringComparison.Ordinal);
+
+        var print = Assert.IsType<ContentResult>(printAction);
+        Assert.Contains("ACTIVITY-EXPORT-VISIBLE", print.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("ACTIVITY-EXPORT-HIDDEN", print.Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CurrentCases_UsesCaseAndTaskVisibility()
     {
         await using var db = await CreateContextAsync();
