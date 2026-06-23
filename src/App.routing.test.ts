@@ -56,6 +56,57 @@ function createPermissions(overrides: Partial<RolePermissions> = {}): RolePermis
   };
 }
 
+const deniedSection = {
+  canView: false,
+  canCreate: false,
+  canEdit: false,
+  canDelete: false,
+  canExport: false,
+  viewScope: 'own',
+} as const;
+
+const workLimitedSection = {
+  canView: true,
+  canCreate: true,
+  canEdit: true,
+  canDelete: false,
+  canExport: false,
+  viewScope: 'own',
+} as const;
+
+const readOnlySection = {
+  canView: true,
+  canCreate: false,
+  canEdit: false,
+  canDelete: false,
+  canExport: false,
+  viewScope: 'own',
+} as const;
+
+function createOperationalRolePermissions(role: 'secretary' | 'lawyer' | 'accountant'): RolePermissions {
+  const permissions = createPermissions({
+    calendar: { ...workLimitedSection, canViewAnalytics: false },
+    tasks: role === 'accountant' ? deniedSection : workLimitedSection,
+    clients: role === 'accountant' ? readOnlySection : workLimitedSection,
+    cases: role === 'accountant' ? readOnlySection : workLimitedSection,
+    reports: deniedSection,
+    accounts: role === 'accountant' ? workLimitedSection : deniedSection,
+    acts: role === 'accountant' ? workLimitedSection : deniedSection,
+    payments: role === 'accountant' ? workLimitedSection : deniedSection,
+    contracts: role === 'accountant' ? workLimitedSection : deniedSection,
+    notifications: {
+      ...readOnlySection,
+      canEdit: true,
+    },
+    roles: deniedSection,
+    audit: deniedSection,
+    yandexDisk: deniedSection,
+    s3Storage: deniedSection,
+  });
+
+  return permissions;
+}
+
 describe('App payment routing helpers', () => {
   beforeEach(() => {
     window.history.replaceState({}, '', '/');
@@ -326,6 +377,43 @@ describe('App negative deep-link guards', () => {
 
     expect(getInitialTab()).toBe(expectedTab);
     expect(canAccessTab(expectedTab, permissions)).toBe(false);
+  });
+});
+
+describe('App real role route access matrix', () => {
+  it.each([
+    {
+      role: 'secretary' as const,
+      allowedTabs: ['calendar', 'tasks', 'tasksCalendar', 'clients', 'cases', 'notifications', 'settings'] as Tab[],
+      deniedTabs: ['accounts', 'acts', 'payments', 'contracts', 'reports', 'roles', 'audit', 'yandexDisk', 's3Storage'] as Tab[],
+    },
+    {
+      role: 'lawyer' as const,
+      allowedTabs: ['calendar', 'tasks', 'tasksCalendar', 'clients', 'cases', 'notifications', 'settings'] as Tab[],
+      deniedTabs: ['accounts', 'acts', 'payments', 'contracts', 'reports', 'roles', 'audit', 'yandexDisk', 's3Storage'] as Tab[],
+    },
+    {
+      role: 'accountant' as const,
+      allowedTabs: ['calendar', 'clients', 'cases', 'accounts', 'acts', 'payments', 'contracts', 'notifications', 'settings'] as Tab[],
+      deniedTabs: ['tasks', 'tasksControl', 'tasksApprovals', 'tasksCalendar', 'reports', 'roles', 'audit', 'yandexDisk', 's3Storage'] as Tab[],
+    },
+  ])('applies expected menu access for $role', ({ role, allowedTabs, deniedTabs }) => {
+    const permissions = createOperationalRolePermissions(role);
+    const options = {
+      canManageRoles: permissions.roles.canView,
+      canViewAudit: permissions.audit.canView,
+      canViewSettings: permissions.notifications.canView || permissions.yandexDisk.canView || permissions.s3Storage.canView,
+      canViewYandexDisk: permissions.yandexDisk.canView,
+      canViewS3Storage: permissions.s3Storage.canView,
+    };
+
+    for (const tab of allowedTabs) {
+      expect(canAccessTab(tab, permissions, options), `${role} should access ${tab}`).toBe(true);
+    }
+
+    for (const tab of deniedTabs) {
+      expect(canAccessTab(tab, permissions, options), `${role} should not access ${tab}`).toBe(false);
+    }
   });
 });
 
