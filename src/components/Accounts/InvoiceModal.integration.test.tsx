@@ -2517,6 +2517,70 @@ describe('InvoiceModal integration', () => {
     expect(await screen.findByText('Case from invoice')).toBeTruthy();
   });
 
+  it('submits a newly created client case with the invoice payload', async () => {
+    const getCasesMock = vi.mocked(apiService.getCases);
+    const createCaseMock = vi.mocked(apiService.createCase);
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    getCasesMock.mockResolvedValue([]);
+    createCaseMock.mockResolvedValue({
+      id: 442,
+      clientId: 1,
+      title: 'Case from invoice',
+      description: 'Created from invoice',
+      status: 'Open',
+      createdAt: '2026-04-15T10:00:00Z',
+    } as ClientCase);
+
+    render(
+      <InvoiceModal
+        open
+        mode="create"
+        invoice={null}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        submitting={false}
+        clients={[createTestClient(1, 'Client owner')]}
+        responsibles={[]}
+        lookupsLoading={false}
+        defaultClientId={1}
+        relatedPayments={[]}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(getCasesMock).toHaveBeenCalledWith({ clientId: 1 });
+    });
+
+    fireEvent.change(screen.getByLabelText(/Номер сч/i), {
+      target: { value: 'INV-CASE-1' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Создать дело' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'submit-case' }));
+
+    await waitFor(() => {
+      expect(createCaseMock).toHaveBeenCalledWith(expect.objectContaining({
+        clientId: 1,
+        title: 'Case from invoice',
+        status: 'Open',
+      }));
+    });
+
+    expect(await screen.findByText('Case from invoice')).toBeTruthy();
+
+    const form = document.getElementById('invoice-edit-form') as HTMLFormElement | null;
+    expect(form).toBeTruthy();
+    fireEvent.submit(form!);
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+        number: 'INV-CASE-1',
+        clientId: 1,
+        clientCaseId: 442,
+        clientCaseIds: [442],
+      }));
+    });
+  });
+
   it('submits an expense invoice without an expense counterparty', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
 
