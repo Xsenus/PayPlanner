@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 
 namespace PayPlanner.Api.Controllers;
@@ -9,7 +11,7 @@ namespace PayPlanner.Api.Controllers;
 [ApiController]
 [Route("api/dictionaries")]
 [Authorize(Policy = "Admin")]
-public class DictionariesAdminController : ControllerBase
+public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
 {
     private const int ServiceNameMaxLength = 1000;
     private const int ServiceDescriptionMaxLength = 2000;
@@ -18,6 +20,19 @@ public class DictionariesAdminController : ControllerBase
 
     private readonly PaymentContext _db;
     public DictionariesAdminController(PaymentContext db) => _db = db;
+
+    [NonAction]
+    public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
+    {
+        var userId = context.HttpContext.User.GetUserId();
+        if (!userId.HasValue || !await _db.IsUserAdminAsync(userId.Value, context.HttpContext.RequestAborted))
+        {
+            context.Result = Forbid();
+            return;
+        }
+
+        await next();
+    }
 
     private IActionResult InUseError(string title)
         => BadRequest($"Нельзя удалить элемент справочника \"{title}\", так как он используется в данных.");
