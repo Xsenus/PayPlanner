@@ -70,6 +70,21 @@ public sealed class YandexDiskControllerTests
     }
 
     [Fact]
+    public async Task List_ForbidsAdminClaimWhenDatabaseRoleIsNotAdmin()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var user = await SeedUserAsync(scope.Db, permission => permission with { CanView = false });
+        var service = new FakeYandexDiskService();
+        var controller = CreateController(scope.Db, service, CreateUserPrincipal(user.Id, isAdminClaim: true));
+
+        var response = await controller.List("/Docs", limit: 20, offset: 5, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(response.Result);
+        Assert.False(service.ListCalled);
+        Assert.Empty(scope.Db.ObjectAuditEvents);
+    }
+
+    [Fact]
     public async Task Delete_ForbidsUserWithoutDeletePermission()
     {
         await using var scope = await CreateDbScopeAsync();
@@ -320,6 +335,26 @@ public sealed class YandexDiskControllerTests
     }
 
     [Fact]
+    public async Task UploadCaseDocument_ForbidsAdminClaimWhenCasesExportIsNotAllowed()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var user = await SeedUserAsync(
+            scope.Db,
+            permission => permission with { CanView = true, CanCreate = true },
+            (section, permission) => string.Equals(section, RolePermissionCatalog.Cases, StringComparison.OrdinalIgnoreCase)
+                ? permission with { CanView = true, CanExport = false }
+                : permission);
+        var service = new FakeYandexDiskService();
+        var controller = CreateController(scope.Db, service, CreateUserPrincipal(user.Id, isAdminClaim: true));
+
+        var response = await controller.UploadCaseDocument(documentId: 123, overwrite: false, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(response.Result);
+        Assert.False(service.UploadCrmDocumentCalled);
+        Assert.Empty(scope.Db.ObjectAuditEvents);
+    }
+
+    [Fact]
     public async Task SaveText_AllowsEditPermissionAndWritesAudit()
     {
         await using var scope = await CreateDbScopeAsync();
@@ -539,7 +574,10 @@ public sealed class YandexDiskControllerTests
             },
         };
 
-    private static async Task<User> SeedUserAsync(PaymentContext db, Func<RolePermissionValues, RolePermissionValues> configure)
+    private static async Task<User> SeedUserAsync(
+        PaymentContext db,
+        Func<RolePermissionValues, RolePermissionValues> configure,
+        Func<string, RolePermissionValues, RolePermissionValues>? configureSection = null)
     {
         var role = new Role { Name = $"role-{Guid.NewGuid():N}", Description = "Yandex Disk role" };
         db.Roles.Add(role);
@@ -551,6 +589,11 @@ public sealed class YandexDiskControllerTests
             var values = string.Equals(pair.Key, RolePermissionCatalog.YandexDisk, StringComparison.OrdinalIgnoreCase)
                 ? configure(pair.Value)
                 : pair.Value;
+            if (configureSection is not null)
+            {
+                values = configureSection(pair.Key, values);
+            }
+
             db.RolePermissions.Add(new RolePermission
             {
                 RoleId = role.Id,
@@ -578,14 +621,20 @@ public sealed class YandexDiskControllerTests
         return user;
     }
 
-    private static ClaimsPrincipal CreateUserPrincipal(int userId)
-        => new(new ClaimsIdentity(
-            new[]
-            {
-                new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
-                new Claim(ClaimTypes.Name, "Yandex Disk User"),
-            },
-            "test"));
+    private static ClaimsPrincipal CreateUserPrincipal(int userId, bool isAdminClaim = false)
+    {
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, userId.ToString()),
+            new(ClaimTypes.Name, "Yandex Disk User"),
+        };
+        if (isAdminClaim)
+        {
+            claims.Add(new Claim(ClaimTypes.Role, "admin"));
+        }
+
+        return new ClaimsPrincipal(new ClaimsIdentity(claims, "test"));
+    }
 
     private static async Task<TestDbScope> CreateDbScopeAsync()
     {
@@ -613,6 +662,7 @@ public sealed class YandexDiskControllerTests
         public bool GetTextCalled { get; private set; }
         public bool SaveTextCalled { get; private set; }
         public bool TestConnectionCalled { get; private set; }
+        public bool UploadCrmDocumentCalled { get; private set; }
 
         public Task<YandexDiskSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(new YandexDiskSettingsDto { IsConfigured = true, RootPath = "disk:/PayPlanner" });
@@ -751,7 +801,10 @@ public sealed class YandexDiskControllerTests
             });
 
         public Task<YandexDiskOperationResultDto> UploadCrmDocumentAsync(YandexDiskCrmDocumentUpload upload, CancellationToken cancellationToken = default)
-            => Task.FromResult(new YandexDiskOperationResultDto { Success = true, Path = $"/CRM/{upload.OriginalFileName}" });
+        {
+            UploadCrmDocumentCalled = true;
+            return Task.FromResult(new YandexDiskOperationResultDto { Success = true, Path = $"/CRM/{upload.OriginalFileName}" });
+        }
     }
 
     private sealed class TestDbScope(SqliteConnection connection, PaymentContext db) : IAsyncDisposable

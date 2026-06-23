@@ -771,15 +771,15 @@ public sealed class YandexDiskController : ControllerBase
 
     private async Task<ActionResult?> RequirePermissionAsync(Func<RolePermission, bool> isAllowed, CancellationToken ct)
     {
-        if (User.IsInRole("admin"))
-        {
-            return null;
-        }
-
         var userId = User.GetUserId();
         if (!userId.HasValue)
         {
-            return Forbid();
+            return User.IsInRole("admin") ? null : Forbid();
+        }
+
+        if (await _db.IsUserAdminAsync(userId.Value, ct))
+        {
+            return null;
         }
 
         var permission = await _db.GetUserSectionPermissionAsync(userId.Value, RolePermissionCatalog.YandexDisk, ct);
@@ -793,15 +793,15 @@ public sealed class YandexDiskController : ControllerBase
         Func<RolePermission, bool> isAllowed,
         CancellationToken ct)
     {
-        if (User.IsInRole("admin"))
-        {
-            return null;
-        }
-
         var userId = User.GetUserId();
         if (!userId.HasValue)
         {
-            return Forbid();
+            return User.IsInRole("admin") ? null : Forbid();
+        }
+
+        if (await _db.IsUserAdminAsync(userId.Value, ct))
+        {
+            return null;
         }
 
         var permission = await _db.GetUserSectionPermissionAsync(userId.Value, section, ct);
