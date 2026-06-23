@@ -3,8 +3,10 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
@@ -16,7 +18,7 @@ namespace PayPlanner.Api.Controllers;
 [ApiController]
 [Route("api/user-activity")]
 [Authorize]
-public class UserActivityController : ControllerBase
+public class UserActivityController : ControllerBase, IAsyncActionFilter
 {
     private const int OnlineThresholdMinutes = 5;
     private readonly PaymentContext _context;
@@ -34,6 +36,28 @@ public class UserActivityController : ControllerBase
         _activityService = activityService;
         _sqliteMaintenanceService = sqliteMaintenanceService;
         _logger = logger;
+    }
+
+    [NonAction]
+    public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
+    {
+        var requiresAdmin = context.ActionDescriptor.EndpointMetadata
+            .OfType<AuthorizeAttribute>()
+            .Any(attribute => string.Equals(attribute.Policy, "Admin", StringComparison.Ordinal));
+        if (!requiresAdmin)
+        {
+            await next();
+            return;
+        }
+
+        var userId = context.HttpContext.User.GetUserId();
+        if (!userId.HasValue || !await _context.IsUserAdminAsync(userId.Value, context.HttpContext.RequestAborted))
+        {
+            context.Result = Forbid();
+            return;
+        }
+
+        await next();
     }
 
     [HttpGet]

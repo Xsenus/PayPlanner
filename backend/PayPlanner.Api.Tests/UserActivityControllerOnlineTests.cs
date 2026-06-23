@@ -1,6 +1,10 @@
 using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Controllers;
+using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -16,6 +20,44 @@ namespace PayPlanner.Api.Tests;
 
 public class UserActivityControllerOnlineTests
 {
+    [Fact]
+    public async Task AdminFilter_ReturnsForbid_ForUserWithoutAdminRoleInDatabase()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "user");
+        var controller = CreateController(db);
+        var context = CreateAdminActionExecutingContext(controller, user.Id);
+        var nextCalled = false;
+
+        await controller.OnActionExecutionAsync(context, () =>
+        {
+            nextCalled = true;
+            return Task.FromResult(new ActionExecutedContext(context, [], controller));
+        });
+
+        Assert.False(nextCalled);
+        Assert.IsType<ForbidResult>(context.Result);
+    }
+
+    [Fact]
+    public async Task AdminFilter_AllowsUserWithAdminRoleInDatabase()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "admin");
+        var controller = CreateController(db);
+        var context = CreateAdminActionExecutingContext(controller, user.Id);
+        var nextCalled = false;
+
+        await controller.OnActionExecutionAsync(context, () =>
+        {
+            nextCalled = true;
+            return Task.FromResult(new ActionExecutedContext(context, [], controller));
+        });
+
+        Assert.True(nextCalled);
+        Assert.Null(context.Result);
+    }
+
     [Fact]
     public async Task GetOnlineAsync_ReturnsUsersWithOnlineStateAndLastLogin()
     {
@@ -201,6 +243,61 @@ public class UserActivityControllerOnlineTests
         var db = new PaymentContext(options);
         await db.Database.EnsureCreatedAsync();
         return db;
+    }
+
+    private static async Task<User> CreateUserAsync(PaymentContext db, string roleName)
+    {
+        var role = new Role
+        {
+            Name = roleName,
+            Description = roleName,
+            CreatedAt = DateTime.UtcNow,
+        };
+        var user = new User
+        {
+            Email = $"{roleName}-{Guid.NewGuid():N}@example.test",
+            PasswordHash = "hash",
+            FullName = roleName,
+            IsActive = true,
+            IsApproved = true,
+            Role = role,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        return user;
+    }
+
+    private static ActionExecutingContext CreateAdminActionExecutingContext(
+        UserActivityController controller,
+        int userId)
+    {
+        var httpContext = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+                [
+                    new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
+                    new Claim(ClaimTypes.Name, $"User {userId}"),
+                    new Claim(ClaimTypes.Role, "admin"),
+                ],
+                "TestAuth")),
+        };
+        var actionContext = new ActionContext(
+            httpContext,
+            new RouteData(),
+            new ControllerActionDescriptor
+            {
+                EndpointMetadata = [new AuthorizeAttribute { Policy = "Admin" }],
+            });
+        controller.ControllerContext = new ControllerContext(actionContext);
+
+        return new ActionExecutingContext(
+            actionContext,
+            [],
+            new Dictionary<string, object?>(),
+            controller);
     }
 
     private sealed class FakeUserActivityService : IUserActivityService
