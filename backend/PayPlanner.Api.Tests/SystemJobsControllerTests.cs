@@ -1,5 +1,8 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Controllers;
+using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -24,6 +27,44 @@ namespace PayPlanner.Api.Tests;
 
 public class SystemJobsControllerTests
 {
+    [Fact]
+    public async Task AdminFilter_ReturnsForbid_ForUserWithoutAdminRoleInDatabase()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var user = await CreateUserAsync(scope.Db, "user");
+        var controller = CreateController(scope.Db);
+        var context = CreateActionExecutingContext(controller, user.Id);
+        var nextCalled = false;
+
+        await controller.OnActionExecutionAsync(context, () =>
+        {
+            nextCalled = true;
+            return Task.FromResult(new ActionExecutedContext(context, [], controller));
+        });
+
+        Assert.False(nextCalled);
+        Assert.IsType<ForbidResult>(context.Result);
+    }
+
+    [Fact]
+    public async Task AdminFilter_AllowsUserWithAdminRoleInDatabase()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var user = await CreateUserAsync(scope.Db, "admin");
+        var controller = CreateController(scope.Db);
+        var context = CreateActionExecutingContext(controller, user.Id);
+        var nextCalled = false;
+
+        await controller.OnActionExecutionAsync(context, () =>
+        {
+            nextCalled = true;
+            return Task.FromResult(new ActionExecutedContext(context, [], controller));
+        });
+
+        Assert.True(nextCalled);
+        Assert.Null(context.Result);
+    }
+
     [Fact]
     public async Task GetDiagnostics_ReturnsKnownBackgroundJobsWithoutSecrets()
     {
@@ -1291,6 +1332,64 @@ public class SystemJobsControllerTests
         }
 
         throw new InvalidOperationException("No test timezone with a local date different from UTC date was found.");
+    }
+
+    private static SystemJobsController CreateController(PaymentContext db)
+        => new(
+            db,
+            new ConfigurationBuilder().Build(),
+            new TestOptionsMonitor<AppFeatureFlagsOptions>(new AppFeatureFlagsOptions()));
+
+    private static async Task<User> CreateUserAsync(PaymentContext db, string roleName)
+    {
+        var role = new Role
+        {
+            Name = roleName,
+            Description = roleName,
+            CreatedAt = DateTime.UtcNow,
+        };
+        var user = new User
+        {
+            Email = $"{roleName}-{Guid.NewGuid():N}@example.test",
+            PasswordHash = "hash",
+            FullName = roleName,
+            IsActive = true,
+            IsApproved = true,
+            Role = role,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        return user;
+    }
+
+    private static ActionExecutingContext CreateActionExecutingContext(
+        SystemJobsController controller,
+        int userId)
+    {
+        var httpContext = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+                [
+                    new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
+                    new Claim(ClaimTypes.Name, $"User {userId}"),
+                    new Claim(ClaimTypes.Role, "admin"),
+                ],
+                "TestAuth")),
+        };
+        var actionContext = new ActionContext(
+            httpContext,
+            new RouteData(),
+            new ControllerActionDescriptor());
+        controller.ControllerContext = new ControllerContext(actionContext);
+
+        return new ActionExecutingContext(
+            actionContext,
+            [],
+            new Dictionary<string, object?>(),
+            controller);
     }
 
     private sealed class TestOptionsMonitor<T> : IOptionsMonitor<T>

@@ -1,10 +1,12 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using System.Security.Claims;
 using System.Text.Json;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
@@ -17,7 +19,7 @@ namespace PayPlanner.Api.Controllers;
 [ApiController]
 [Route("api/system/jobs")]
 [Authorize(Policy = "Admin")]
-public sealed class SystemJobsController : ControllerBase
+public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
 {
     private const string DatabaseBackupEnabledKey = "database-backup.enabled";
     private const string DatabaseBackupScheduleKey = "database-backup.schedule-local";
@@ -85,6 +87,19 @@ public sealed class SystemJobsController : ControllerBase
         _moneyBalanceRunner = moneyBalanceRunner;
         _userActivityRetentionRunner = userActivityRetentionRunner;
         _yandexDiskCrmSyncRunner = yandexDiskCrmSyncRunner;
+    }
+
+    [NonAction]
+    public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
+    {
+        var userId = context.HttpContext.User.GetUserId();
+        if (!userId.HasValue || !await _db.IsUserAdminAsync(userId.Value, context.HttpContext.RequestAborted))
+        {
+            context.Result = Forbid();
+            return;
+        }
+
+        await next();
     }
 
     [HttpGet("diagnostics")]
