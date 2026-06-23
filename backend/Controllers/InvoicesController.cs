@@ -78,6 +78,17 @@ public class InvoicesController : ControllerBase
             ? null
             : Forbid();
 
+    private async Task<bool> IsCurrentUserAdminAsync(CancellationToken ct)
+    {
+        if (User.IsInRole("admin"))
+        {
+            return true;
+        }
+
+        var userId = User.GetUserId();
+        return userId.HasValue && await _db.IsUserAdminAsync(userId.Value, ct);
+    }
+
     private async Task<IReadOnlyCollection<int>> ResolveInvoiceNotificationRecipientsAsync(
         Payment invoicePayment,
         IEnumerable<int> candidateUserIds,
@@ -648,6 +659,33 @@ public class InvoicesController : ControllerBase
                 applied++;
             }
         }
+    }
+
+    [HttpPost("backfill-expense-cases")]
+    public async Task<ActionResult<BackfillExpenseInvoiceCasesResponse>> BackfillExpenseInvoiceCases(
+        [FromBody] BackfillExpenseInvoiceCasesRequest? request,
+        CancellationToken ct)
+    {
+        if (!await IsCurrentUserAdminAsync(ct))
+        {
+            return Forbid();
+        }
+
+        request ??= new BackfillExpenseInvoiceCasesRequest();
+        if (!request.DryRun && !request.Confirm)
+        {
+            return BadRequest(new { message = "Backfill requires confirm=true when dryRun=false." });
+        }
+
+        var limit = Math.Clamp(request.Limit.GetValueOrDefault(1_000), 1, 50_000);
+        var result = await ExpenseInvoiceCaseBackfillService.RunAsync(
+            _db,
+            request.DryRun,
+            limit,
+            request.PaymentIds,
+            ct);
+
+        return Ok(result);
     }
 
     [HttpPost("{id:int}/send-to-signing")]
