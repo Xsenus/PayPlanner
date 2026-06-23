@@ -2409,6 +2409,158 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task OverdueDeadlinesManagementExports_ApplyCasesVisibilityScope()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role
+        {
+            Name = $"deadline-export-role-{Guid.NewGuid():N}",
+            Description = "Deadline export role",
+        };
+        var visibleUser = new User
+        {
+            Email = $"visible-deadline-export-{Guid.NewGuid():N}@example.test",
+            FullName = "Visible Deadline Export User",
+            IsActive = true,
+            Role = role,
+        };
+        var hiddenUser = new User
+        {
+            Email = $"hidden-deadline-export-{Guid.NewGuid():N}@example.test",
+            FullName = "Hidden Deadline Export User",
+            IsActive = true,
+            Role = role,
+        };
+
+        db.Roles.Add(role);
+        db.Users.AddRange(visibleUser, hiddenUser);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Reports,
+                CanView = true,
+                CanExport = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Cases,
+                CanView = true,
+                ViewScope = DataVisibilityScope.Own,
+            });
+
+        var visibleClient = new Client { Name = "Visible deadline export client", ResponsibleUserId = visibleUser.Id };
+        var hiddenClient = new Client { Name = "Hidden deadline export client", ResponsibleUserId = hiddenUser.Id };
+        db.Clients.AddRange(visibleClient, hiddenClient);
+        await db.SaveChangesAsync();
+
+        var asOf = new DateTime(2026, 5, 26);
+        var visibleCase = new ClientCase
+        {
+            ClientId = visibleClient.Id,
+            CaseNumber = "DEADLINE-EXPORT-VISIBLE",
+            Title = "Visible deadline export case",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = visibleUser.Id,
+            CreatedAt = asOf.AddDays(-30),
+        };
+        var hiddenCase = new ClientCase
+        {
+            ClientId = hiddenClient.Id,
+            CaseNumber = "DEADLINE-EXPORT-HIDDEN",
+            Title = "Hidden deadline export case",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = hiddenUser.Id,
+            CreatedAt = asOf.AddDays(-30),
+        };
+        db.ClientCases.AddRange(visibleCase, hiddenCase);
+        await db.SaveChangesAsync();
+
+        db.ClientCaseProceduralDeadlines.AddRange(
+            new ClientCaseProceduralDeadline
+            {
+                ClientCaseId = visibleCase.Id,
+                DeadlineType = "appeal",
+                Title = "VISIBLE-DEADLINE-EXPORT",
+                DueAt = asOf.AddDays(-8),
+                Status = "active",
+                CreatedAt = asOf.AddDays(-20),
+            },
+            new ClientCaseProceduralDeadline
+            {
+                ClientCaseId = hiddenCase.Id,
+                DeadlineType = "appeal",
+                Title = "HIDDEN-DEADLINE-EXPORT",
+                DueAt = asOf.AddDays(-12),
+                Status = "active",
+                CreatedAt = asOf.AddDays(-20),
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateUserPrincipal(visibleUser.Id));
+
+        var csvAction = await controller.ExportManagementReportCsv(
+            "overdue-deadlines",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            asOf,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "appeal",
+            null,
+            null,
+            null,
+            20,
+            CancellationToken.None);
+        var printAction = await controller.PrintManagementReport(
+            "overdue-deadlines",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            asOf,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "appeal",
+            null,
+            null,
+            null,
+            20,
+            CancellationToken.None);
+
+        var csv = Assert.IsType<FileContentResult>(csvAction);
+        var csvText = Encoding.UTF8.GetString(csv.FileContents);
+        Assert.Contains("VISIBLE-DEADLINE-EXPORT", csvText, StringComparison.Ordinal);
+        Assert.DoesNotContain("HIDDEN-DEADLINE-EXPORT", csvText, StringComparison.Ordinal);
+
+        var print = Assert.IsType<ContentResult>(printAction);
+        Assert.Contains("VISIBLE-DEADLINE-EXPORT", print.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("HIDDEN-DEADLINE-EXPORT", print.Content, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task LegalWork_UsesCaseTaskAndPaymentVisibility()
     {
         await using var db = await CreateContextAsync();
