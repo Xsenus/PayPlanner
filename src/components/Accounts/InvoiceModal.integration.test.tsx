@@ -1159,6 +1159,106 @@ describe('InvoiceModal integration', () => {
     });
   });
 
+  it('moves due date together with invoice date while the due date was not changed manually', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const invoice = {
+      id: 532,
+      invoiceEntityId: 532,
+      number: '80',
+      date: '2026-06-09',
+      dueDate: '2026-06-09',
+      amount: 21000,
+      type: 'Income',
+      status: 'Overdue',
+      clientId: 1,
+      lineItems: [{ name: 'Service', quantity: 1, unit: 'pcs', price: 21000 }],
+    } as unknown as Invoice;
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        submitting={false}
+        clients={[createTestClient(1, 'Bannova Client')]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[]}
+      />,
+    );
+
+    const dateInputs = Array.from(document.querySelectorAll('input[type="date"]')) as HTMLInputElement[];
+    expect(dateInputs[0]?.value).toBe('2026-06-09');
+    expect(dateInputs[1]?.value).toBe('2026-06-09');
+
+    fireEvent.change(dateInputs[0], { target: { value: '2026-06-17' } });
+
+    await waitFor(() => {
+      expect(dateInputs[1]?.value).toBe('2026-06-17');
+    });
+
+    fireEvent.submit(document.getElementById('invoice-edit-form') as HTMLFormElement);
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+        date: '2026-06-17',
+        dueDate: '2026-06-17',
+      }));
+    });
+  });
+
+  it('keeps a manually selected due date when invoice date changes', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const invoice = {
+      id: 533,
+      invoiceEntityId: 533,
+      number: '81',
+      date: '2026-06-09',
+      dueDate: '2026-06-25',
+      amount: 21000,
+      type: 'Income',
+      status: 'Pending',
+      clientId: 1,
+      lineItems: [{ name: 'Service', quantity: 1, unit: 'pcs', price: 21000 }],
+    } as unknown as Invoice;
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        submitting={false}
+        clients={[createTestClient(1, 'Bannova Client')]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[]}
+      />,
+    );
+
+    const dateInputs = Array.from(document.querySelectorAll('input[type="date"]')) as HTMLInputElement[];
+    expect(dateInputs[0]?.value).toBe('2026-06-09');
+    expect(dateInputs[1]?.value).toBe('2026-06-25');
+
+    fireEvent.change(dateInputs[0], { target: { value: '2026-06-17' } });
+
+    await waitFor(() => {
+      expect(dateInputs[1]?.value).toBe('2026-06-25');
+    });
+
+    fireEvent.submit(document.getElementById('invoice-edit-form') as HTMLFormElement);
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+        date: '2026-06-17',
+        dueDate: '2026-06-25',
+      }));
+    });
+  });
+
   it('aligns due date with the last installment payment when the plan is applied from the editor', async () => {
     installmentPlannerPlanRef.current = {
       total: 10000,
