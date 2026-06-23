@@ -135,6 +135,22 @@ public class PushSubscriptionsControllerTests
         Assert.Equal("Network error", diagnostics.LastDeliveryError);
     }
 
+    [Fact]
+    public async Task GetDiagnostics_UsesNotificationViewPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var viewer = await CreateUserAsync(db, "notification-viewer@example.com", "notifications-viewer");
+        var blocked = await CreateUserAsync(db, "notification-blocked@example.com", "notifications-blocked");
+        await SetNotificationPermissionAsync(db, viewer, canView: true);
+        await SetNotificationPermissionAsync(db, blocked, canView: false);
+
+        var diagnostics = await CreateController(db, viewer.Id).GetDiagnostics(CancellationToken.None);
+        var blockedResult = await CreateController(db, blocked.Id).GetDiagnostics(CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(diagnostics.Result);
+        Assert.IsType<ForbidResult>(blockedResult.Result);
+    }
+
     private static PushSubscriptionsController CreateController(
         PaymentContext db,
         int userId,
@@ -184,6 +200,30 @@ public class PushSubscriptionsControllerTests
         db.Users.Add(user);
         await db.SaveChangesAsync();
         return user;
+    }
+
+    private static async Task SetNotificationPermissionAsync(PaymentContext db, User user, bool canView)
+    {
+        var permission = await db.RolePermissions
+            .SingleOrDefaultAsync(item => item.RoleId == user.RoleId && item.Section == RolePermissionCatalog.Notifications);
+        if (permission is null)
+        {
+            permission = new RolePermission
+            {
+                RoleId = user.RoleId,
+                Section = RolePermissionCatalog.Notifications,
+            };
+            db.RolePermissions.Add(permission);
+        }
+
+        permission.CanView = canView;
+        permission.CanCreate = false;
+        permission.CanEdit = false;
+        permission.CanDelete = false;
+        permission.CanExport = false;
+        permission.CanViewAnalytics = false;
+        permission.ViewScope = DataVisibilityScope.All;
+        await db.SaveChangesAsync();
     }
 
     private static T AssertOk<T>(ActionResult<T> result)

@@ -575,38 +575,18 @@ public class NotificationsController : ControllerBase
     }
 
     private async Task<bool> CanViewNotificationSettingsAsync(CancellationToken ct)
-    {
-        var userId = User.GetUserId();
-        if (!userId.HasValue)
-        {
-            return false;
-        }
-
-        if (await _context.IsUserAdminAsync(userId.Value, ct))
-        {
-            return true;
-        }
-
-        var permission = await _context.GetUserSectionPermissionAsync(userId.Value, RolePermissionCatalog.Notifications, ct);
-        return permission?.CanView == true;
-    }
+        => await _context.HasUserSectionPermissionAsync(
+            User,
+            RolePermissionCatalog.Notifications,
+            static permission => permission.CanView,
+            ct);
 
     private async Task<bool> CanEditNotificationSettingsAsync(CancellationToken ct)
-    {
-        var userId = User.GetUserId();
-        if (!userId.HasValue)
-        {
-            return false;
-        }
-
-        if (await _context.IsUserAdminAsync(userId.Value, ct))
-        {
-            return true;
-        }
-
-        var permission = await _context.GetUserSectionPermissionAsync(userId.Value, RolePermissionCatalog.Notifications, ct);
-        return permission?.CanEdit == true;
-    }
+        => await _context.HasUserSectionPermissionAsync(
+            User,
+            RolePermissionCatalog.Notifications,
+            static permission => permission.CanEdit,
+            ct);
 
     private static NotificationRecipient? BuildManualRecipient(SendNotificationTestRequest request, string channel)
     {

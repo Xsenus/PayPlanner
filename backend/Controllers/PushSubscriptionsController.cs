@@ -265,19 +265,9 @@ public sealed class PushSubscriptionsController : ControllerBase
     }
 
     private async Task<bool> CanViewNotificationSettingsAsync(CancellationToken ct)
-    {
-        var userId = User.GetUserId();
-        if (!userId.HasValue)
-        {
-            return false;
-        }
-
-        if (await _context.IsUserAdminAsync(userId.Value, ct))
-        {
-            return true;
-        }
-
-        var permission = await _context.GetUserSectionPermissionAsync(userId.Value, RolePermissionCatalog.Notifications, ct);
-        return permission?.CanView == true;
-    }
+        => await _context.HasUserSectionPermissionAsync(
+            User,
+            RolePermissionCatalog.Notifications,
+            static permission => permission.CanView,
+            ct);
 }
