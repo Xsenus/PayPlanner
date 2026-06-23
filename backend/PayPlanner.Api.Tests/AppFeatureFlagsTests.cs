@@ -1,3 +1,5 @@
+using System.Security.Claims;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -373,6 +375,26 @@ public class AppFeatureFlagsTests
     }
 
     [Fact]
+    public async Task CalendarSyncController_AdminEndpoints_ReturnForbidForNonAdminUser()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var user = await CreateCalendarSyncUserAsync(scope.Db, "calendar-sync-user", isAdmin: false);
+        var controller = CreateCalendarSyncControllerForUser(scope.Db, user.Id);
+
+        var updateResult = await controller.UpdateSettings(
+            new UpdateCalendarSyncSettingsRequest
+            {
+                ExternalCalendarSyncEnabled = true,
+            },
+            CancellationToken.None);
+        var logsResult = await controller.GetLogs(null, null, null, null, ct: CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(updateResult.Result);
+        Assert.IsType<ForbidResult>(logsResult.Result);
+        Assert.False(await scope.Db.SystemSettings.AnyAsync(item => item.Key == "calendarSync.settings", CancellationToken.None));
+    }
+
+    [Fact]
     public async Task CalendarSyncController_GetLogs_ReturnsUnifiedProviderLog()
     {
         await using var scope = await CreateDbScopeAsync();
@@ -519,6 +541,50 @@ public class AppFeatureFlagsTests
         Assert.Equal("Иван Иванов", item.CalendarOwnerName);
         Assert.Equal("Иван Иванов", item.UserName);
         Assert.Equal("calendar", item.TargetType);
+    }
+
+    private static CalendarSyncController CreateCalendarSyncControllerForUser(PaymentContext db, int userId)
+    {
+        var controller = new CalendarSyncController(
+            new TestOptionsSnapshot<AppFeatureFlagsOptions>(new AppFeatureFlagsOptions()),
+            db)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                    [
+                        new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
+                        new Claim(ClaimTypes.Name, "Test user"),
+                    ], "Test")),
+                },
+            },
+        };
+
+        return controller;
+    }
+
+    private static async Task<User> CreateCalendarSyncUserAsync(PaymentContext db, string name, bool isAdmin)
+    {
+        var role = new Role
+        {
+            Name = isAdmin ? "admin" : $"{name}-{Guid.NewGuid():N}",
+            Description = name,
+        };
+        var user = new User
+        {
+            Email = $"{name}-{Guid.NewGuid():N}@example.test",
+            FullName = name,
+            PasswordHash = "test",
+            Role = role,
+            IsActive = true,
+            IsApproved = true,
+        };
+
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        return user;
     }
 
     private sealed class TestOptionsSnapshot<T> : IOptionsSnapshot<T>

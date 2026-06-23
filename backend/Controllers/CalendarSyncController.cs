@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using System.Text.Json;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
@@ -36,6 +37,22 @@ public sealed class CalendarSyncController : ControllerBase
         _yandexBackgroundSync = yandexBackgroundSync;
     }
 
+    private async Task<ForbidResult?> RequireAdminAccessAsync(CancellationToken ct)
+    {
+        if (User?.Identity?.IsAuthenticated != true)
+        {
+            return null;
+        }
+
+        var userId = User.GetUserId();
+        if (!userId.HasValue || !await _db.IsUserAdminAsync(userId.Value, ct))
+        {
+            return Forbid();
+        }
+
+        return null;
+    }
+
     [HttpGet("providers")]
     public async Task<ActionResult<IReadOnlyList<CalendarSyncProviderDto>>> GetProviders(CancellationToken ct)
     {
@@ -65,6 +82,11 @@ public sealed class CalendarSyncController : ControllerBase
         [FromBody] UpdateCalendarSyncSettingsRequest request,
         CancellationToken ct)
     {
+        if (await RequireAdminAccessAsync(ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var previousSettings = await GetSettingsAsync(ct);
         var googleCalendarSyncEnabled = request.GoogleCalendarSyncEnabled
             ?? (request.ExternalCalendarSyncEnabled.HasValue ? request.ExternalCalendarSyncEnabled.Value : previousSettings.GoogleCalendarSyncEnabled);
@@ -127,6 +149,11 @@ public sealed class CalendarSyncController : ControllerBase
         [FromQuery] int pageSize = 50,
         CancellationToken ct = default)
     {
+        if (await RequireAdminAccessAsync(ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 200);
 
