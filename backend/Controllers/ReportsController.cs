@@ -107,6 +107,11 @@ public class ReportsController : ControllerBase
         CancellationToken ct)
         => _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Payments, isAllowed, ct);
 
+    private Task<bool> HasTasksPermissionAsync(
+        Func<RolePermissionValues, bool> isAllowed,
+        CancellationToken ct)
+        => _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Tasks, isAllowed, ct);
+
     private static bool IsPaymentBackedManagementReport(string normalizedReport)
         => normalizedReport is
             "cash-flow" or
@@ -997,6 +1002,27 @@ public class ReportsController : ControllerBase
                         _logger,
                         ct);
                     return (BuildCurrentCasesExportDocument(reportDto), null);
+                }
+
+            case "tasks":
+                {
+                    if (!await HasTasksPermissionAsync(static permission => permission.CanExport, ct))
+                    {
+                        return (null, Forbid());
+                    }
+
+                    var tasksVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
+                    if (tasksVisibility is null)
+                    {
+                        return (null, Unauthorized());
+                    }
+
+                    var effectiveScope = NormalizeTaskReportScope(status);
+                    var reportDto = await SqliteRetryHelper.ExecuteAsync(
+                        cancellationToken => BuildTaskReportAsync(effectiveAsOf, effectiveScope, responsibleUserId, effectiveLimit, tasksVisibility, cancellationToken),
+                        _logger,
+                        ct);
+                    return (BuildTaskExportDocument(reportDto, timeZone), null);
                 }
 
             case "lawyer-workload":
@@ -3310,6 +3336,54 @@ public class ReportsController : ControllerBase
                 ])).ToList()),
             ]);
 
+    private static ReportExportDocument BuildTaskExportDocument(TaskReportDto report, TimeZoneInfo timeZone)
+        => new(
+            "tasks-report",
+            "Отчет по задачам",
+            $"Дата среза: {DateCell(report.AsOf)}. Режим: {FormatTaskReportScope(report.Scope)}",
+            [
+                new("Всего задач", report.TotalTaskCount.ToString(CultureInfo.InvariantCulture)),
+                new("Открыто", report.OpenTaskCount.ToString(CultureInfo.InvariantCulture)),
+                new("Закрыто", report.ClosedTaskCount.ToString(CultureInfo.InvariantCulture)),
+                new("Просрочено", report.OverdueTaskCount.ToString(CultureInfo.InvariantCulture)),
+                new("На сегодня", report.DueTodayTaskCount.ToString(CultureInfo.InvariantCulture)),
+                new("Без исполнителя", report.WithoutAssigneeCount.ToString(CultureInfo.InvariantCulture)),
+            ],
+            [
+                new("Задачи", ["ID", "Задача", "Клиент", "Юрлицо", "Дело", "Объект", "Исполнитель", "Постановщик", "Срок", "План, ч", "Тип", "Приоритет", "Статус", "Просрочено", "Дней просрочки", "Результат"], report.Items.Select(item => new ReportExportRow([
+                    item.TaskId.ToString(CultureInfo.InvariantCulture),
+                    item.Title,
+                    item.ClientName,
+                    item.LegalEntityName,
+                    item.ClientCaseTitle,
+                    item.ObjectName,
+                    item.AssigneeName,
+                    item.AuthorName,
+                    DateTimeCell(item.DueAt, timeZone),
+                    (Math.Max(0, item.PlannedDurationMinutes) / 60m).ToString("0.##", CultureInfo.InvariantCulture),
+                    item.TypeLabel,
+                    item.PriorityLabel,
+                    item.StatusLabel,
+                    item.IsOverdue ? "Да" : "Нет",
+                    item.DaysOverdue?.ToString(CultureInfo.InvariantCulture) ?? string.Empty,
+                    item.Result,
+                ])).ToList()),
+                new("По статусам", ["Статус", "Всего", "Просрочено", "Доля"], report.ByStatus.Select(item => new ReportExportRow([
+                    item.StatusLabel,
+                    item.Count.ToString(CultureInfo.InvariantCulture),
+                    item.OverdueCount.ToString(CultureInfo.InvariantCulture),
+                    PercentCell(item.Share),
+                ])).ToList()),
+                new("По исполнителям", ["Исполнитель", "Всего", "Открыто", "Закрыто", "Просрочено", "Ближайший срок"], report.ByResponsible.Select(item => new ReportExportRow([
+                    item.AssigneeName,
+                    item.TotalTasks.ToString(CultureInfo.InvariantCulture),
+                    item.OpenTasks.ToString(CultureInfo.InvariantCulture),
+                    item.ClosedTasks.ToString(CultureInfo.InvariantCulture),
+                    item.OverdueTasks.ToString(CultureInfo.InvariantCulture),
+                    DateTimeCell(item.NearestDueAt, timeZone),
+                ])).ToList()),
+            ]);
+
     private static ReportExportDocument BuildLawyerWorkloadExportDocument(LawyerWorkloadReportDto report, TimeZoneInfo timeZone)
         => new(
             "lawyer-workload-report",
@@ -5051,6 +5125,14 @@ public class ReportsController : ControllerBase
         var normalized = scope?.Trim().ToLowerInvariant();
         return normalized is "open" or "closed" or "all" ? normalized : "open";
     }
+
+    private static string FormatTaskReportScope(string? scope)
+        => NormalizeTaskReportScope(scope) switch
+        {
+            "closed" => "Закрытые",
+            "all" => "Все",
+            _ => "Открытые",
+        };
 
     private static string ResolveTaskAssigneeName(TaskJournalItem task)
     {

@@ -290,6 +290,7 @@ public class ReportsControllerTests
             "spreadsheet-imports",
             "case-success",
             "current-cases",
+            "tasks",
             "lawyer-workload",
             "overdue-deadlines",
             "case-activity",
@@ -910,6 +911,73 @@ public class ReportsControllerTests
             null,
             null,
             null,
+            CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(action);
+    }
+
+    [Fact]
+    public async Task TasksManagementExport_RequiresTasksExportPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role
+        {
+            Name = $"reports-tasks-{Guid.NewGuid():N}",
+            Description = "Reports tasks export test role",
+        };
+        var user = new User
+        {
+            Email = $"reports-tasks-{Guid.NewGuid():N}@example.test",
+            FullName = "Reports tasks export user",
+            IsActive = true,
+            Role = role,
+        };
+
+        db.Roles.Add(role);
+        db.Users.Add(user);
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                Role = role,
+                Section = RolePermissionCatalog.Reports,
+                CanView = true,
+                CanExport = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                Role = role,
+                Section = RolePermissionCatalog.Tasks,
+                CanView = true,
+                CanExport = false,
+                ViewScope = DataVisibilityScope.All,
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateUserPrincipal(user.Id));
+
+        var action = await controller.ExportManagementReportExcel(
+            "tasks",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            new DateTime(2026, 5, 26),
+            "all",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            50,
             CancellationToken.None);
 
         Assert.IsType<ForbidResult>(action);
