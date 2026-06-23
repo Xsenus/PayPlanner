@@ -46,6 +46,20 @@ public sealed class S3StorageControllerTests
     }
 
     [Fact]
+    public async Task GetOverview_ForbidsAdminClaimWhenDatabaseRoleIsNotAdmin()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var user = await SeedUserAsync(scope.Db, permission => permission with { CanView = false });
+        var service = new FakeS3StorageService();
+        var controller = CreateController(scope.Db, service, CreateUserPrincipal(user.Id, isAdminClaim: true));
+
+        var response = await controller.GetOverview(CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(response.Result);
+        Assert.False(service.GetOverviewCalled);
+    }
+
+    [Fact]
     public async Task UpsertConnection_AllowsEditPermissionAndWritesAudit()
     {
         await using var scope = await CreateDbScopeAsync();
@@ -217,14 +231,20 @@ public sealed class S3StorageControllerTests
         return user;
     }
 
-    private static ClaimsPrincipal CreateUserPrincipal(int userId)
-        => new(new ClaimsIdentity(
-            new[]
-            {
-                new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
-                new Claim(ClaimTypes.Name, "S3 User"),
-            },
-            "test"));
+    private static ClaimsPrincipal CreateUserPrincipal(int userId, bool isAdminClaim = false)
+    {
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, userId.ToString()),
+            new(ClaimTypes.Name, "S3 User"),
+        };
+        if (isAdminClaim)
+        {
+            claims.Add(new Claim(ClaimTypes.Role, "admin"));
+        }
+
+        return new ClaimsPrincipal(new ClaimsIdentity(claims, "test"));
+    }
 
     private static async Task<TestDbScope> CreateDbScopeAsync()
     {

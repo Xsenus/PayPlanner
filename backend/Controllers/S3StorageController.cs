@@ -276,14 +276,14 @@ public sealed class S3StorageController : ControllerBase
     private async Task<ActionResult?> RequirePermissionAsync(Func<RolePermission, bool> isAllowed, CancellationToken ct)
     {
         var userId = User.GetUserId();
-        if (User.IsInRole("admin"))
+        if (!userId.HasValue)
         {
-            return null;
+            return User.IsInRole("admin") ? null : Forbid();
         }
 
-        if (userId is null)
+        if (await _db.IsUserAdminAsync(userId.Value, ct))
         {
-            return Forbid();
+            return null;
         }
 
         var permission = await _db.GetUserSectionPermissionAsync(userId.Value, RolePermissionCatalog.S3Storage, ct);
