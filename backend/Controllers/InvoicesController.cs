@@ -80,13 +80,13 @@ public class InvoicesController : ControllerBase
 
     private async Task<bool> IsCurrentUserAdminAsync(CancellationToken ct)
     {
-        if (User.IsInRole("admin"))
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
         {
-            return true;
+            return User.IsInRole("admin");
         }
 
-        var userId = User.GetUserId();
-        return userId.HasValue && await _db.IsUserAdminAsync(userId.Value, ct);
+        return await _db.IsUserAdminAsync(userId.Value, ct);
     }
 
     private async Task<IReadOnlyCollection<int>> ResolveInvoiceNotificationRecipientsAsync(
@@ -529,7 +529,7 @@ public class InvoicesController : ControllerBase
         [FromBody] RepairInvoicePaymentStateRequest? request,
         CancellationToken ct)
     {
-        if (!User.IsInRole("admin"))
+        if (!await IsCurrentUserAdminAsync(ct))
         {
             return Unauthorized();
         }
@@ -1892,7 +1892,7 @@ public class InvoicesController : ControllerBase
     [HttpPut("rules-settings")]
     public async Task<ActionResult<InvoiceRulesSettingsDto>> UpsertRulesSettings([FromBody] InvoiceRulesSettingsRequest request, CancellationToken ct)
     {
-        if (!User.IsInRole("admin"))
+        if (!await IsCurrentUserAdminAsync(ct))
         {
             return Forbid();
         }
@@ -1921,7 +1921,7 @@ public class InvoicesController : ControllerBase
         [FromBody] InvoiceDocumentTemplateSettingsRequest request,
         CancellationToken ct)
     {
-        if (!User.IsInRole("admin"))
+        if (!await IsCurrentUserAdminAsync(ct))
         {
             return Forbid();
         }
@@ -2163,7 +2163,7 @@ public class InvoicesController : ControllerBase
     [HttpPost("cleanup-counterparty-names")]
     public async Task<ActionResult<object>> CleanupCounterpartyNames(CancellationToken ct)
     {
-        if (!User.IsInRole("admin"))
+        if (!await IsCurrentUserAdminAsync(ct))
         {
             return Forbid();
         }
@@ -2198,7 +2198,7 @@ public class InvoicesController : ControllerBase
     [HttpPost("cleanup-orphan-invoices")]
     public async Task<ActionResult<object>> CleanupOrphanInvoices(CancellationToken ct)
     {
-        if (!User.IsInRole("admin"))
+        if (!await IsCurrentUserAdminAsync(ct))
         {
             return Forbid();
         }
@@ -2243,7 +2243,7 @@ public class InvoicesController : ControllerBase
         [FromQuery] bool dryRun = false,
         CancellationToken ct = default)
     {
-        if (!User.IsInRole("admin"))
+        if (!await IsCurrentUserAdminAsync(ct))
         {
             return Forbid();
         }
@@ -2991,7 +2991,7 @@ public class InvoicesController : ControllerBase
         Func<RolePermission, bool> isAllowed,
         CancellationToken ct)
     {
-        if (User.IsInRole("admin"))
+        if (await IsCurrentUserAdminAsync(ct))
         {
             return null;
         }

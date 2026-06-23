@@ -941,6 +941,33 @@ public class InvoiceDocumentTemplateTests
     }
 
     [Fact]
+    public async Task UpsertDocumentTemplateSettings_ForbidsAdminClaimWhenDatabaseRoleIsNotAdmin()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateAccountsUserAsync(db, "invoice-template-stale-admin", canExport: true);
+        var controller = CreateController(db, isAdmin: true, userId: user.Id);
+
+        var action = await controller.UpsertDocumentTemplateSettings(
+            new InvoiceDocumentTemplateSettingsRequest
+            {
+                ActiveTemplateKey = "default",
+                Templates =
+                [
+                    new InvoiceDocumentTemplateRequest
+                    {
+                        Key = "default",
+                        Name = "Default",
+                        Html = "<html><body>template</body></html>",
+                    },
+                ],
+            },
+            CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(action.Result);
+        Assert.Empty(await db.SystemSettings.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
     public async Task UpsertDocumentTemplateSettings_ReturnsValidationProblem_WhenModelStateIsInvalid()
     {
         await using var db = await CreateContextAsync();

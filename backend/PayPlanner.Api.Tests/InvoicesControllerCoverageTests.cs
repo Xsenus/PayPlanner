@@ -1010,6 +1010,31 @@ public class InvoicesControllerCoverageTests
     }
 
     [Fact]
+    public async Task AdminMaintenanceEndpoints_ForbidAdminClaimWhenDatabaseRoleIsNotAdmin()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db, "Stale Invoice Admin");
+        var controller = CreateController(db, isAdmin: true, userId: userId);
+
+        Assert.IsType<UnauthorizedResult>((await controller.RepairPaymentState(
+            new RepairInvoicePaymentStateRequest { DryRun = true },
+            CancellationToken.None)).Result);
+        Assert.IsType<ForbidResult>((await controller.UpsertRulesSettings(new InvoiceRulesSettingsRequest
+        {
+            MaxClientCasesPerInvoice = 2,
+            MaxActsPerInvoice = 3,
+        }, CancellationToken.None)).Result);
+        Assert.IsType<ForbidResult>((await controller.CleanupCounterpartyNames(CancellationToken.None)).Result);
+        Assert.IsType<ForbidResult>((await controller.CleanupOrphanInvoices(CancellationToken.None)).Result);
+        Assert.IsType<ForbidResult>((await controller.RepairLegacyInstallments(
+            invoiceEntityId: 1,
+            dryRun: true,
+            CancellationToken.None)).Result);
+
+        Assert.Empty(await db.SystemSettings.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
     public async Task BulkDelete_ReturnsUnauthorized_WhenCurrentUserIsHidden()
     {
         await using var db = await CreateContextAsync();
