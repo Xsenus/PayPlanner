@@ -50,8 +50,7 @@ public class UserActivityController : ControllerBase, IAsyncActionFilter
             return;
         }
 
-        var userId = context.HttpContext.User.GetUserId();
-        if (!userId.HasValue || !await _context.IsUserAdminAsync(userId.Value, context.HttpContext.RequestAborted))
+        if (!await _context.IsUserAdminOrLegacyFallbackAsync(context.HttpContext.User, context.HttpContext.RequestAborted))
         {
             context.Result = Forbid();
             return;

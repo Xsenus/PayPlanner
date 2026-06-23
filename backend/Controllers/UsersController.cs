@@ -26,8 +26,7 @@ public class UsersController : ControllerBase, IAsyncActionFilter
     [NonAction]
     public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
     {
-        var userId = context.HttpContext.User.GetUserId();
-        if (!userId.HasValue || !await _db.IsUserAdminAsync(userId.Value, context.HttpContext.RequestAborted))
+        if (!await _db.IsUserAdminOrLegacyFallbackAsync(context.HttpContext.User, context.HttpContext.RequestAborted))
         {
             context.Result = Forbid();
             return;

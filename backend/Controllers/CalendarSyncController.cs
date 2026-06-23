@@ -44,8 +44,7 @@ public sealed class CalendarSyncController : ControllerBase
             return null;
         }
 
-        var userId = User.GetUserId();
-        if (!userId.HasValue || !await _db.IsUserAdminAsync(userId.Value, ct))
+        if (!await _db.IsUserAdminOrLegacyFallbackAsync(User, ct))
         {
             return Forbid();
         }

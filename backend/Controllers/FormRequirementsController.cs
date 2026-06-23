@@ -306,8 +306,7 @@ public class FormRequirementsController : ControllerBase
     [Authorize(Policy = "Admin")]
     public async Task<ActionResult<FormFieldRequirementDto>> Upsert([FromBody] UpsertFormFieldRequirementRequest request, CancellationToken ct)
     {
-        var userId = User.GetUserId();
-        if (!userId.HasValue || !await _db.IsUserAdminAsync(userId.Value, ct))
+        if (!await _db.IsUserAdminOrLegacyFallbackAsync(User, ct))
         {
             return Forbid();
         }
