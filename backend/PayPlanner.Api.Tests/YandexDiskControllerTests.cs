@@ -355,6 +355,67 @@ public sealed class YandexDiskControllerTests
     }
 
     [Fact]
+    public async Task UploadCaseDocument_AppliesCaseVisibilityScope()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var user = await SeedUserAsync(
+            scope.Db,
+            permission => permission with { CanView = true, CanCreate = true },
+            (section, permission) => string.Equals(section, RolePermissionCatalog.Cases, StringComparison.OrdinalIgnoreCase)
+                ? permission with
+                {
+                    CanView = true,
+                    CanExport = true,
+                    ViewScope = DataVisibilityScope.Own,
+                }
+                : permission);
+        var otherUser = await SeedUserAsync(scope.Db, permission => permission with { CanView = true });
+        var hiddenClient = new Client
+        {
+            Name = "Скрытый клиент",
+            IsActive = true,
+            ResponsibleUserId = otherUser.Id,
+        };
+        scope.Db.Clients.Add(hiddenClient);
+        await scope.Db.SaveChangesAsync();
+        var hiddenCase = new ClientCase
+        {
+            ClientId = hiddenClient.Id,
+            Title = "Скрытое дело",
+            ResponsibleUserId = otherUser.Id,
+            CaseNumber = "HIDDEN-CASE",
+        };
+        scope.Db.ClientCases.Add(hiddenCase);
+        await scope.Db.SaveChangesAsync();
+        var hiddenDocument = new ClientCaseDocument
+        {
+            ClientCaseId = hiddenCase.Id,
+            DocumentKey = Guid.NewGuid().ToString("N"),
+            DocumentType = "Документ",
+            Status = "Загружен",
+            OriginalFileName = "hidden.pdf",
+            StoredFileName = "hidden.pdf",
+            StoragePath = Path.Combine(hiddenCase.Id.ToString(), "hidden.pdf"),
+            ContentType = "application/pdf",
+            SizeBytes = 10,
+            UploadedByUserId = otherUser.Id,
+            UploadedByName = otherUser.FullName,
+            UploadedAt = DateTime.UtcNow,
+        };
+        scope.Db.ClientCaseDocuments.Add(hiddenDocument);
+        await scope.Db.SaveChangesAsync();
+
+        var service = new FakeYandexDiskService();
+        var controller = CreateController(scope.Db, service, CreateUserPrincipal(user.Id));
+
+        var response = await controller.UploadCaseDocument(hiddenDocument.Id, overwrite: false, CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(response.Result);
+        Assert.False(service.UploadCrmDocumentCalled);
+        Assert.Empty(scope.Db.ObjectAuditEvents);
+    }
+
+    [Fact]
     public async Task UploadTaskFile_AppliesTaskVisibilityScope()
     {
         await using var scope = await CreateDbScopeAsync();
