@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
@@ -302,8 +303,15 @@ public class FormRequirementsController : ControllerBase
     }
 
     [HttpPut]
+    [Authorize(Policy = "Admin")]
     public async Task<ActionResult<FormFieldRequirementDto>> Upsert([FromBody] UpsertFormFieldRequirementRequest request, CancellationToken ct)
     {
+        var userId = User.GetUserId();
+        if (!userId.HasValue || !await _db.IsUserAdminAsync(userId.Value, ct))
+        {
+            return Forbid();
+        }
+
         var section = request.Section?.Trim();
         var fieldKey = request.FieldKey?.Trim();
         if (string.IsNullOrWhiteSpace(section) || string.IsNullOrWhiteSpace(fieldKey))
