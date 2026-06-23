@@ -214,6 +214,70 @@ public class BackendPermissionMatrixTests
         await AssertSectionAsync(db, accountant, RolePermissionCatalog.Contracts, true, true, true, false, false);
     }
 
+    [Fact]
+    public async Task AcceptedOperationalRoles_RespectClientCaseTaskAccessMatrix()
+    {
+        await using var db = await CreateContextAsync();
+        var secretary = await CreateUserWithPermissionsAsync(db, "secretary-operations", "Секретарь",
+        [
+            WorkLimited(RolePermissionCatalog.Clients),
+            WorkLimited(RolePermissionCatalog.Cases),
+            WorkLimited(RolePermissionCatalog.Tasks),
+            CalendarLimited(),
+            NotificationLimited(),
+            Denied(RolePermissionCatalog.Roles),
+            Denied(RolePermissionCatalog.Audit),
+        ]);
+        var lawyer = await CreateUserWithPermissionsAsync(db, "lawyer-operations", "Юрист",
+        [
+            WorkLimited(RolePermissionCatalog.Clients),
+            WorkLimited(RolePermissionCatalog.Cases),
+            WorkLimited(RolePermissionCatalog.Tasks),
+            CalendarLimited(),
+            NotificationLimited(),
+            Denied(RolePermissionCatalog.Roles),
+            Denied(RolePermissionCatalog.Audit),
+        ]);
+        var accountant = await CreateUserWithPermissionsAsync(db, "accountant-operations", "Бухгалтер",
+        [
+            ReadOnly(RolePermissionCatalog.Clients),
+            ReadOnly(RolePermissionCatalog.Cases),
+            NotificationLimited(),
+            Denied(RolePermissionCatalog.Roles),
+            Denied(RolePermissionCatalog.Audit),
+        ]);
+
+        await AssertSectionAsync(db, secretary, RolePermissionCatalog.Clients, true, true, true, false, false);
+        await AssertSectionAsync(db, secretary, RolePermissionCatalog.Cases, true, true, true, false, false);
+        await AssertSectionAsync(db, secretary, RolePermissionCatalog.Tasks, true, true, true, false, false);
+        await AssertSectionAsync(db, secretary, RolePermissionCatalog.Calendar, true, true, true, false, false);
+        await AssertSectionAsync(db, secretary, RolePermissionCatalog.Notifications, true, false, true, false, false);
+        await AssertSectionAsync(db, secretary, RolePermissionCatalog.Roles, false, false, false, false, false);
+        await AssertSectionAsync(db, secretary, RolePermissionCatalog.Audit, false, false, false, false, false);
+        await AssertVisibilityScopeAsync(db, secretary, RolePermissionCatalog.Clients, DataVisibilityScope.Own);
+        await AssertVisibilityScopeAsync(db, secretary, RolePermissionCatalog.Cases, DataVisibilityScope.Own);
+        await AssertVisibilityScopeAsync(db, secretary, RolePermissionCatalog.Tasks, DataVisibilityScope.Own);
+
+        await AssertSectionAsync(db, lawyer, RolePermissionCatalog.Clients, true, true, true, false, false);
+        await AssertSectionAsync(db, lawyer, RolePermissionCatalog.Cases, true, true, true, false, false);
+        await AssertSectionAsync(db, lawyer, RolePermissionCatalog.Tasks, true, true, true, false, false);
+        await AssertSectionAsync(db, lawyer, RolePermissionCatalog.Calendar, true, true, true, false, false);
+        await AssertSectionAsync(db, lawyer, RolePermissionCatalog.Notifications, true, false, true, false, false);
+        await AssertSectionAsync(db, lawyer, RolePermissionCatalog.Roles, false, false, false, false, false);
+        await AssertSectionAsync(db, lawyer, RolePermissionCatalog.Audit, false, false, false, false, false);
+        await AssertVisibilityScopeAsync(db, lawyer, RolePermissionCatalog.Clients, DataVisibilityScope.Own);
+        await AssertVisibilityScopeAsync(db, lawyer, RolePermissionCatalog.Cases, DataVisibilityScope.Own);
+        await AssertVisibilityScopeAsync(db, lawyer, RolePermissionCatalog.Tasks, DataVisibilityScope.Own);
+
+        await AssertSectionAsync(db, accountant, RolePermissionCatalog.Clients, true, false, false, false, false);
+        await AssertSectionAsync(db, accountant, RolePermissionCatalog.Cases, true, false, false, false, false);
+        await AssertSectionAsync(db, accountant, RolePermissionCatalog.Notifications, true, false, true, false, false);
+        await AssertSectionAsync(db, accountant, RolePermissionCatalog.Roles, false, false, false, false, false);
+        await AssertSectionAsync(db, accountant, RolePermissionCatalog.Audit, false, false, false, false, false);
+        await AssertVisibilityScopeAsync(db, accountant, RolePermissionCatalog.Clients, DataVisibilityScope.Own);
+        await AssertVisibilityScopeAsync(db, accountant, RolePermissionCatalog.Cases, DataVisibilityScope.Own);
+    }
+
     private static RolePermission Denied(string section)
         => new()
         {
@@ -226,12 +290,61 @@ public class BackendPermissionMatrixTests
             ViewScope = DataVisibilityScope.Own,
         };
 
+    private static RolePermission ReadOnly(string section)
+        => new()
+        {
+            Section = section,
+            CanView = true,
+            CanCreate = false,
+            CanEdit = false,
+            CanDelete = false,
+            CanExport = false,
+            ViewScope = DataVisibilityScope.Own,
+        };
+
+    private static RolePermission WorkLimited(string section)
+        => new()
+        {
+            Section = section,
+            CanView = true,
+            CanCreate = true,
+            CanEdit = true,
+            CanDelete = false,
+            CanExport = false,
+            ViewScope = DataVisibilityScope.Own,
+        };
+
     private static RolePermission DocumentLimited(string section)
         => new()
         {
             Section = section,
             CanView = true,
             CanCreate = true,
+            CanEdit = true,
+            CanDelete = false,
+            CanExport = false,
+            ViewScope = DataVisibilityScope.Own,
+        };
+
+    private static RolePermission CalendarLimited()
+        => new()
+        {
+            Section = RolePermissionCatalog.Calendar,
+            CanView = true,
+            CanCreate = true,
+            CanEdit = true,
+            CanDelete = false,
+            CanExport = false,
+            CanViewAnalytics = false,
+            ViewScope = DataVisibilityScope.Own,
+        };
+
+    private static RolePermission NotificationLimited()
+        => new()
+        {
+            Section = RolePermissionCatalog.Notifications,
+            CanView = true,
+            CanCreate = false,
             CanEdit = true,
             CanDelete = false,
             CanExport = false,
@@ -254,6 +367,21 @@ public class BackendPermissionMatrixTests
         Assert.Equal(canEdit, await db.HasUserSectionPermissionAsync(principal, section, static permission => permission.CanEdit));
         Assert.Equal(canDelete, await db.HasUserSectionPermissionAsync(principal, section, static permission => permission.CanDelete));
         Assert.Equal(canExport, await db.HasUserSectionPermissionAsync(principal, section, static permission => permission.CanExport));
+    }
+
+    private static async Task AssertVisibilityScopeAsync(
+        PaymentContext db,
+        User user,
+        string section,
+        string expectedScope)
+    {
+        var access = await db.ResolveDataVisibilityAsync(CreatePrincipal(user), section);
+
+        Assert.NotNull(access);
+        Assert.Equal(expectedScope, access.ViewScope);
+        Assert.False(access.IsAdmin);
+        Assert.True(access.CanSeeUser(user.Id));
+        Assert.False(access.CanSeeUser(user.Id + 10_000));
     }
 
     private static ClaimsPrincipal CreatePrincipal(User user, bool isAdmin = false)
