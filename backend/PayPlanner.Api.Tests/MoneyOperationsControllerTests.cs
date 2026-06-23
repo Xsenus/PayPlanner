@@ -5122,7 +5122,8 @@ public class MoneyOperationsControllerTests
     public async Task MoneyAccountsController_CreatesSingleDefaultPerSource()
     {
         await using var db = await CreateContextAsync();
-        var controller = new MoneyAccountsController(db);
+        var admin = await CreateUserAsync(db, "money-accounts-admin@example.test", "Администратор счетов", roleName: "admin");
+        var controller = CreateMoneyAccountsController(db, admin.Id);
 
         var firstAction = await controller.Create(new MoneyAccount
         {
@@ -5156,6 +5157,7 @@ public class MoneyOperationsControllerTests
     public async Task MoneyAccountsController_UpdateInactiveDefault_PromotesFallbackDefault()
     {
         await using var db = await CreateContextAsync();
+        var admin = await CreateUserAsync(db, "money-accounts-update-admin@example.test", "Администратор счетов", roleName: "admin");
         var primary = new MoneyAccount
         {
             Name = "Основной банк",
@@ -5177,7 +5179,7 @@ public class MoneyOperationsControllerTests
         db.MoneyAccounts.AddRange(primary, reserve);
         await db.SaveChangesAsync();
 
-        var controller = new MoneyAccountsController(db);
+        var controller = CreateMoneyAccountsController(db, admin.Id);
         var action = await controller.Update(primary.Id, new MoneyAccount
         {
             Name = primary.Name,
@@ -5197,6 +5199,7 @@ public class MoneyOperationsControllerTests
     public async Task MoneyAccountsController_DeleteUsedDefault_PromotesFallbackDefault()
     {
         await using var db = await CreateContextAsync();
+        var admin = await CreateUserAsync(db, "money-accounts-delete-admin@example.test", "Администратор счетов", roleName: "admin");
         var primary = new MoneyAccount
         {
             Name = "Основная касса",
@@ -5231,13 +5234,51 @@ public class MoneyOperationsControllerTests
         });
         await db.SaveChangesAsync();
 
-        var controller = new MoneyAccountsController(db);
+        var controller = CreateMoneyAccountsController(db, admin.Id);
         var action = await controller.Delete(primary.Id, CancellationToken.None);
 
         Assert.IsType<NoContentResult>(action);
         Assert.False(await db.MoneyAccounts.Where(item => item.Id == primary.Id).Select(item => item.IsDefault).SingleAsync());
         Assert.False(await db.MoneyAccounts.Where(item => item.Id == primary.Id).Select(item => item.IsActive).SingleAsync());
         Assert.True(await db.MoneyAccounts.Where(item => item.Id == reserve.Id).Select(item => item.IsDefault).SingleAsync());
+    }
+
+    [Fact]
+    public async Task MoneyAccountsController_Create_ForbidsAdminClaimWhenDatabaseRoleIsNotAdmin()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "money-accounts-forbid@example.test", "Не администратор");
+        var controller = CreateMoneyAccountsController(db, user.Id, isAdminClaim: true);
+
+        var action = await controller.Create(new MoneyAccount
+        {
+            Name = "Скрытый счет",
+            Source = MoneyOperationSource.Bank,
+            Currency = "RUB",
+            IsActive = true,
+        }, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(action.Result);
+        Assert.Empty(await db.MoneyAccounts.ToListAsync());
+    }
+
+    [Fact]
+    public async Task MoneyAccountsController_Create_AllowsUserWithAdminRoleInDatabase()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateUserAsync(db, "money-accounts-allow@example.test", "Администратор", roleName: "admin");
+        var controller = CreateMoneyAccountsController(db, admin.Id, isAdminClaim: false);
+
+        var action = await controller.Create(new MoneyAccount
+        {
+            Name = "Основной банк",
+            Source = MoneyOperationSource.Bank,
+            Currency = "RUB",
+            IsActive = true,
+        }, CancellationToken.None);
+
+        Assert.IsType<CreatedAtActionResult>(action.Result);
+        Assert.Equal(1, await db.MoneyAccounts.CountAsync());
     }
 
     private static async Task<PaymentContext> CreateContextAsync()
@@ -5258,15 +5299,16 @@ public class MoneyOperationsControllerTests
         PaymentContext db,
         string email,
         string fullName,
-        bool isActive = true)
+        bool isActive = true,
+        string roleName = "money-user")
     {
-        var role = await db.Roles.FirstOrDefaultAsync(item => item.Name == "money-user");
+        var role = await db.Roles.FirstOrDefaultAsync(item => item.Name == roleName);
         if (role is null)
         {
             role = new Role
             {
-                Name = "money-user",
-                Description = "Money operation test role",
+                Name = roleName,
+                Description = $"{roleName} test role",
                 CreatedAt = DateTime.UtcNow,
             };
             db.Roles.Add(role);
@@ -5287,6 +5329,32 @@ public class MoneyOperationsControllerTests
         db.Users.Add(user);
         await db.SaveChangesAsync();
         return user;
+    }
+
+    private static MoneyAccountsController CreateMoneyAccountsController(
+        PaymentContext db,
+        int userId,
+        bool isAdminClaim = true)
+    {
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, userId.ToString()),
+        };
+        if (isAdminClaim)
+        {
+            claims.Add(new Claim(ClaimTypes.Role, "admin"));
+        }
+
+        return new MoneyAccountsController(db)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth")),
+                },
+            },
+        };
     }
 
     private static MoneyOperationsController CreateController(PaymentContext db, int? userId = null, bool isAdminClaim = true)

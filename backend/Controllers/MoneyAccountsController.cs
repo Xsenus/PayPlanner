@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 
 namespace PayPlanner.Api.Controllers;
@@ -56,6 +57,11 @@ public class MoneyAccountsController : ControllerBase
     [Authorize(Policy = "Admin")]
     public async Task<ActionResult<MoneyAccount>> Create([FromBody] MoneyAccount model, CancellationToken ct)
     {
+        if (!await HasDatabaseAdminAccessAsync(ct))
+        {
+            return Forbid();
+        }
+
         var normalized = Normalize(model);
         if (string.IsNullOrWhiteSpace(normalized.Name))
         {
@@ -89,6 +95,11 @@ public class MoneyAccountsController : ControllerBase
     [Authorize(Policy = "Admin")]
     public async Task<ActionResult<MoneyAccount>> Update(int id, [FromBody] MoneyAccount model, CancellationToken ct)
     {
+        if (!await HasDatabaseAdminAccessAsync(ct))
+        {
+            return Forbid();
+        }
+
         var entity = await _db.MoneyAccounts.FirstOrDefaultAsync(item => item.Id == id, ct);
         if (entity is null)
         {
@@ -136,6 +147,11 @@ public class MoneyAccountsController : ControllerBase
     [Authorize(Policy = "Admin")]
     public async Task<IActionResult> Delete(int id, CancellationToken ct)
     {
+        if (!await HasDatabaseAdminAccessAsync(ct))
+        {
+            return Forbid();
+        }
+
         var entity = await _db.MoneyAccounts.FirstOrDefaultAsync(item => item.Id == id, ct);
         if (entity is null)
         {
@@ -160,6 +176,12 @@ public class MoneyAccountsController : ControllerBase
         await EnsureDefaultExistsAsync(source, ct);
         await _db.SaveChangesAsync(ct);
         return NoContent();
+    }
+
+    private async Task<bool> HasDatabaseAdminAccessAsync(CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        return userId.HasValue && await _db.IsUserAdminAsync(userId.Value, ct);
     }
 
     private async Task EnsureSingleDefaultAsync(MoneyAccount account, CancellationToken ct)
