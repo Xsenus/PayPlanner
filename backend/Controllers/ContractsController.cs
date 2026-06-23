@@ -66,7 +66,20 @@ public class ContractsController : ControllerBase
     private async Task<bool> IsDatabaseAdminAsync(CancellationToken ct)
     {
         var userId = User.GetUserId();
-        return userId.HasValue && await _db.IsUserAdminAsync(userId.Value, ct);
+        if (!userId.HasValue)
+        {
+            return User.IsInRole("admin");
+        }
+
+        var userExists = await _db.Users
+            .AsNoTracking()
+            .AnyAsync(user => user.Id == userId.Value, ct);
+        if (!userExists)
+        {
+            return User.IsInRole("admin");
+        }
+
+        return await _db.IsUserAdminAsync(userId.Value, ct);
     }
 
     private Task<TimeZoneInfo> ResolveContractTimeZoneAsync(CancellationToken ct)
@@ -654,7 +667,7 @@ public class ContractsController : ControllerBase
         [FromBody] InvoiceDocumentTemplateSettingsRequest request,
         CancellationToken ct)
     {
-        if (!User.IsInRole("admin"))
+        if (!await IsDatabaseAdminAsync(ct))
         {
             return Forbid();
         }
@@ -2270,7 +2283,7 @@ public class ContractsController : ControllerBase
             return null;
         }
 
-        if (principal.IsInRole("admin"))
+        if (await IsDatabaseAdminAsync(ct))
         {
             return null;
         }
