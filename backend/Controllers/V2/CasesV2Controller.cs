@@ -177,6 +177,16 @@ public class CasesV2Controller : ControllerBase
         return permission is not null && permission.CanEdit ? null : Forbid();
     }
 
+    private async Task<ActionResult?> RequireSectionPermissionAsync(
+        string section,
+        Func<RolePermissionValues, bool> predicate,
+        CancellationToken ct)
+    {
+        return await _db.HasUserSectionPermissionAsync(User, section, predicate, ct)
+            ? null
+            : Forbid();
+    }
+
     private Task<bool> CanViewCaseFinanceAsync(CancellationToken ct)
         => _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Payments, static permission => permission.CanView, ct);
 
@@ -5829,6 +5839,11 @@ public class CasesV2Controller : ControllerBase
             return forbidden;
         }
 
+        if (await RequireSectionPermissionAsync(RolePermissionCatalog.Accounts, static permission => permission.CanCreate, ct) is { } accountsForbidden)
+        {
+            return accountsForbidden;
+        }
+
         var loadResult = await LoadEditableWorkOrderAsync(id, ct);
         if (loadResult.Result is not null)
         {
@@ -5956,6 +5971,11 @@ public class CasesV2Controller : ControllerBase
             return forbidden;
         }
 
+        if (await RequireSectionPermissionAsync(RolePermissionCatalog.Acts, static permission => permission.CanCreate, ct) is { } actsForbidden)
+        {
+            return actsForbidden;
+        }
+
         var loadResult = await LoadEditableWorkOrderAsync(id, ct);
         if (loadResult.Result is not null)
         {
@@ -6074,6 +6094,11 @@ public class CasesV2Controller : ControllerBase
         if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
         {
             return forbidden;
+        }
+
+        if (await RequireSectionPermissionAsync(RolePermissionCatalog.Contracts, static permission => permission.CanCreate, ct) is { } contractsForbidden)
+        {
+            return contractsForbidden;
         }
 
         var loadResult = await LoadEditableWorkOrderAsync(id, ct);

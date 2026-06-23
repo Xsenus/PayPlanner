@@ -6283,6 +6283,7 @@ public class CasesV2ControllerTests
         await using var db = await CreateContextAsync();
         var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
         var executor = await CreateUserAsync(db, "executor@example.com", "Исполнитель");
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Accounts);
         var client = new Client
         {
             Name = "Клиент счета",
@@ -6382,6 +6383,7 @@ public class CasesV2ControllerTests
         await using var db = await CreateContextAsync();
         var owner = await CreateUserAsync(db, "work-order-act-owner@example.com", "Владелец акта");
         var executor = await CreateUserAsync(db, "work-order-act-executor@example.com", "Исполнитель акта");
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Acts);
         var client = new Client
         {
             Name = "Клиент акта",
@@ -6508,6 +6510,7 @@ public class CasesV2ControllerTests
     {
         await using var db = await CreateContextAsync();
         var owner = await CreateUserAsync(db, "work-order-contract-owner@example.com", "Владелец договора");
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Contracts);
         var client = new Client
         {
             Name = "Клиент договора",
@@ -6598,10 +6601,81 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task WorkOrder_DocumentCreationRequiresTargetSectionCreatePermission()
+    {
+        await using var db = await CreateContextAsync();
+        var noAccountsUser = await CreateUserAsync(db, "work-order-no-accounts@example.com", "Без счетов");
+        var noActsUser = await CreateUserAsync(db, "work-order-no-acts@example.com", "Без актов");
+        var noContractsUser = await CreateUserAsync(db, "work-order-no-contracts@example.com", "Без договоров");
+        await GrantSectionPermissionAsync(db, noAccountsUser, RolePermissionCatalog.Accounts, canCreate: false);
+        await GrantSectionPermissionAsync(db, noActsUser, RolePermissionCatalog.Acts, canCreate: false);
+        await GrantSectionPermissionAsync(db, noContractsUser, RolePermissionCatalog.Contracts, canCreate: false);
+        var client = new Client
+        {
+            Name = "Клиент проверки прав заказ-наряда",
+            IsActive = true,
+            ResponsibleUserId = noAccountsUser.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело проверки прав заказ-наряда",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = noAccountsUser.Id,
+        };
+        var workOrder = new ClientCaseWorkOrder
+        {
+            ClientCase = clientCase,
+            Title = "Расчет для проверки прав",
+            Status = "approved",
+            Currency = "RUB",
+            CreatedAt = DateTime.UtcNow,
+            Items =
+            [
+                new ClientCaseWorkOrderItem
+                {
+                    ServiceName = "Юридическая услуга",
+                    Quantity = 1,
+                    UnitPrice = 10000,
+                    TotalAmount = 10000,
+                    SortOrder = 1,
+                },
+            ],
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.ClientCaseWorkOrders.Add(workOrder);
+        await db.SaveChangesAsync();
+
+        var noAccountsController = CreateController(db, noAccountsUser);
+        var noActsController = CreateController(db, noActsUser);
+        var noContractsController = CreateController(db, noContractsUser);
+
+        Assert.IsType<ForbidResult>((await noAccountsController.CreateInvoiceFromWorkOrder(
+            clientCase.Id,
+            new CasesV2Controller.CreateClientCaseWorkOrderInvoiceRequest(),
+            CancellationToken.None)).Result);
+        Assert.IsType<ForbidResult>((await noActsController.CreateActFromWorkOrder(
+            clientCase.Id,
+            new CasesV2Controller.CreateClientCaseWorkOrderActRequest(),
+            CancellationToken.None)).Result);
+        Assert.IsType<ForbidResult>((await noContractsController.CreateContractFromWorkOrder(
+            clientCase.Id,
+            new CasesV2Controller.CreateClientCaseWorkOrderContractRequest(),
+            CancellationToken.None)).Result);
+
+        Assert.Equal(0, await db.Payments.CountAsync());
+        Assert.Equal(0, await db.Acts.CountAsync());
+        Assert.Equal(0, await db.Contracts.CountAsync());
+        Assert.Equal(0, await db.ClientCaseDocuments.CountAsync());
+    }
+
+    [Fact]
     public async Task WorkOrder_CreateInvoiceDefaultsDateToUserTimeZone()
     {
         await using var db = await CreateContextAsync();
         var owner = await CreateUserAsync(db, "work-order-timezone@example.com", "Work Order Owner");
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Accounts);
         var nowUtc = DateTime.UtcNow;
         var selectedZone = TimeZoneInfo.GetSystemTimeZones()
             .Select(zone => new
@@ -6761,6 +6835,7 @@ public class CasesV2ControllerTests
     {
         await using var db = await CreateContextAsync();
         var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Accounts);
         var client = new Client
         {
             Name = "Клиент документа заказ-наряда",
@@ -7384,6 +7459,47 @@ public class CasesV2ControllerTests
         db.Users.Add(user);
         await db.SaveChangesAsync();
         return user;
+    }
+
+    private static async Task GrantSectionPermissionAsync(
+        PaymentContext db,
+        User user,
+        string section,
+        bool canView = true,
+        bool canCreate = true,
+        bool canEdit = true,
+        bool canDelete = true,
+        bool canExport = true,
+        string viewScope = DataVisibilityScope.All)
+    {
+        var roleId = user.Role?.Id > 0 ? user.Role.Id : user.RoleId;
+        var permission = await db.RolePermissions
+            .SingleOrDefaultAsync(item => item.RoleId == roleId && item.Section == section);
+        if (permission is null)
+        {
+            db.RolePermissions.Add(new RolePermission
+            {
+                RoleId = roleId,
+                Section = section,
+                CanView = canView,
+                CanCreate = canCreate,
+                CanEdit = canEdit,
+                CanDelete = canDelete,
+                CanExport = canExport,
+                ViewScope = viewScope,
+            });
+        }
+        else
+        {
+            permission.CanView = canView;
+            permission.CanCreate = canCreate;
+            permission.CanEdit = canEdit;
+            permission.CanDelete = canDelete;
+            permission.CanExport = canExport;
+            permission.ViewScope = viewScope;
+        }
+
+        await db.SaveChangesAsync();
     }
 
     private static async Task<PaymentContext> CreateContextAsync()
