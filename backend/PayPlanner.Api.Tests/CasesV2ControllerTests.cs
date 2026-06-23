@@ -6410,6 +6410,92 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task WorkOrder_ReturnsNotFoundForHiddenCaseActions()
+    {
+        await using var db = await CreateContextAsync();
+        var viewer = await CreateUserAsync(db, "work-order-hidden-viewer@example.com", "Наблюдатель заказ-наряда");
+        var otherResponsible = await CreateUserAsync(db, "work-order-hidden-owner@example.com", "Другой ответственный");
+        var client = new Client
+        {
+            Name = "Скрытый клиент заказ-наряда",
+            IsActive = true,
+            ResponsibleUserId = otherResponsible.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Скрытое дело с заказ-нарядом",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = otherResponsible.Id,
+        };
+        var workOrder = new ClientCaseWorkOrder
+        {
+            ClientCase = clientCase,
+            Title = "Скрытый заказ-наряд",
+            Status = "draft",
+            Currency = "RUB",
+            Items =
+            [
+                new ClientCaseWorkOrderItem
+                {
+                    ServiceName = "Скрытая услуга",
+                    Quantity = 1,
+                    UnitPrice = 1000,
+                    TotalAmount = 1000,
+                    SortOrder = 1,
+                },
+            ],
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.ClientCaseWorkOrders.Add(workOrder);
+        await db.SaveChangesAsync();
+        var itemId = workOrder.Items.Single().Id;
+        var controller = CreateController(db, viewer);
+
+        var getResult = await controller.GetWorkOrder(clientCase.Id, CancellationToken.None);
+        var printResult = await controller.PrintWorkOrder(clientCase.Id, CancellationToken.None);
+        var updateResult = await controller.UpdateWorkOrder(clientCase.Id, new CasesV2Controller.UpsertClientCaseWorkOrderRequest
+        {
+            Title = "Попытка изменения",
+            Status = "draft",
+        }, CancellationToken.None);
+        var addItemResult = await controller.AddWorkOrderItem(clientCase.Id, new CasesV2Controller.UpsertClientCaseWorkOrderItemRequest
+        {
+            ServiceName = "Новая скрытая услуга",
+            Quantity = 1,
+            UnitPrice = 2000,
+        }, CancellationToken.None);
+        var updateItemResult = await controller.UpdateWorkOrderItem(clientCase.Id, itemId, new CasesV2Controller.UpsertClientCaseWorkOrderItemRequest
+        {
+            ServiceName = "Измененная скрытая услуга",
+            Quantity = 2,
+            UnitPrice = 2000,
+        }, CancellationToken.None);
+        var deleteItemResult = await controller.DeleteWorkOrderItem(clientCase.Id, itemId, CancellationToken.None);
+        var submitResult = await controller.SubmitWorkOrderApproval(clientCase.Id, new CasesV2Controller.ClientCaseWorkOrderApprovalRequest
+        {
+            Comment = "На согласование",
+        }, CancellationToken.None);
+        var deleteResult = await controller.DeleteWorkOrder(clientCase.Id, CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(getResult.Result);
+        Assert.IsType<NotFoundResult>(printResult);
+        Assert.IsType<NotFoundResult>(updateResult.Result);
+        Assert.IsType<NotFoundResult>(addItemResult.Result);
+        Assert.IsType<NotFoundResult>(updateItemResult.Result);
+        Assert.IsType<NotFoundResult>(deleteItemResult.Result);
+        Assert.IsType<NotFoundResult>(submitResult.Result);
+        Assert.IsType<NotFoundResult>(deleteResult);
+        var reloaded = await db.ClientCaseWorkOrders
+            .Include(item => item.Items)
+            .SingleAsync(item => item.Id == workOrder.Id);
+        Assert.Equal("Скрытый заказ-наряд", reloaded.Title);
+        Assert.Equal("draft", reloaded.Status);
+        Assert.Single(reloaded.Items);
+    }
+
+    [Fact]
     public async Task WorkOrder_ForbidsUserWithoutEditPermission()
     {
         await using var db = await CreateContextAsync();
