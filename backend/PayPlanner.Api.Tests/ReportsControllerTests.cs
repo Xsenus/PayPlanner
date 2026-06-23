@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -1015,6 +1016,130 @@ public class ReportsControllerTests
             CancellationToken.None);
 
         Assert.IsType<ForbidResult>(action);
+    }
+
+    [Fact]
+    public async Task CashFlowManagementExports_ApplyPaymentsVisibilityScope()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateReportsUserWithPaymentsPermissionAsync(
+            db,
+            reportsCanView: true,
+            reportsCanExport: true,
+            paymentsCanView: true,
+            paymentsCanExport: true,
+            paymentsViewScope: DataVisibilityScope.Own);
+        var hiddenUser = User("cash-flow-export-hidden-user");
+        db.Users.Add(hiddenUser);
+        await db.SaveChangesAsync();
+
+        var visibleClient = new Client { Name = "Visible export client", ResponsibleUserId = user.Id };
+        var hiddenClient = new Client { Name = "Hidden export client", ResponsibleUserId = hiddenUser.Id };
+        var visibleInvoice = new Invoice { Number = "CF-VISIBLE", Date = new DateTime(2026, 5, 10) };
+        var hiddenInvoice = new Invoice { Number = "CF-HIDDEN", Date = new DateTime(2026, 5, 11) };
+        db.Clients.AddRange(visibleClient, hiddenClient);
+        db.Invoices.AddRange(visibleInvoice, hiddenInvoice);
+        await db.SaveChangesAsync();
+
+        var visiblePayment = InvoicePayment(
+            "Main bank",
+            PaymentType.Income,
+            PaymentStatus.Completed,
+            InvoiceWorkflowStatus.Paid,
+            1_000m,
+            1_000m,
+            new DateTime(2026, 5, 10));
+        visiblePayment.InvoiceId = visibleInvoice.Id;
+        visiblePayment.ClientId = visibleClient.Id;
+        var hiddenPayment = InvoicePayment(
+            "Main bank",
+            PaymentType.Income,
+            PaymentStatus.Completed,
+            InvoiceWorkflowStatus.Paid,
+            9_000m,
+            9_000m,
+            new DateTime(2026, 5, 11));
+        hiddenPayment.InvoiceId = hiddenInvoice.Id;
+        hiddenPayment.ClientId = hiddenClient.Id;
+        db.Payments.AddRange(visiblePayment, hiddenPayment);
+        db.MoneyOperations.AddRange(
+            Operation(
+                MoneyOperationSource.Bank,
+                MoneyOperationDirection.Income,
+                MoneyOperationAccountingType.Fact,
+                1_000m,
+                new DateTime(2026, 5, 10),
+                "Main bank",
+                counterpartyName: "Visible export client",
+                linkedInvoiceId: visibleInvoice.Id),
+            Operation(
+                MoneyOperationSource.Bank,
+                MoneyOperationDirection.Income,
+                MoneyOperationAccountingType.Fact,
+                9_000m,
+                new DateTime(2026, 5, 11),
+                "Main bank",
+                counterpartyName: "Hidden export client",
+                linkedInvoiceId: hiddenInvoice.Id));
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateUserPrincipal(user.Id));
+
+        var csvAction = await controller.ExportManagementReportCsv(
+            "cash-flow",
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            CancellationToken.None);
+        var printAction = await controller.PrintManagementReport(
+            "cash-flow",
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            CancellationToken.None);
+
+        var csv = Assert.IsType<FileContentResult>(csvAction);
+        var csvText = Encoding.UTF8.GetString(csv.FileContents);
+        Assert.Contains("1000.00", csvText, StringComparison.Ordinal);
+        Assert.DoesNotContain("9000.00", csvText, StringComparison.Ordinal);
+
+        var print = Assert.IsType<ContentResult>(printAction);
+        Assert.Contains("1000.00", print.Content, StringComparison.Ordinal);
+        Assert.DoesNotContain("9000.00", print.Content, StringComparison.Ordinal);
     }
 
     [Fact]
