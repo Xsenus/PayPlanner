@@ -166,6 +166,96 @@ public class BackendPermissionMatrixTests
         Assert.True(access.CanSeeUser(admin.Id + 1000));
     }
 
+    [Fact]
+    public async Task AcceptedFinancialRoles_RespectCashAccessMatrix()
+    {
+        await using var db = await CreateContextAsync();
+        var secretary = await CreateUserWithPermissionsAsync(db, "secretary", "Секретарь",
+        [
+            Denied(RolePermissionCatalog.Payments),
+            Denied(RolePermissionCatalog.Reports),
+            DocumentLimited(RolePermissionCatalog.Accounts),
+            DocumentLimited(RolePermissionCatalog.Acts),
+            DocumentLimited(RolePermissionCatalog.Contracts),
+        ]);
+        var lawyer = await CreateUserWithPermissionsAsync(db, "lawyer", "Юрист",
+        [
+            Denied(RolePermissionCatalog.Payments),
+            Denied(RolePermissionCatalog.Reports),
+            Denied(RolePermissionCatalog.Accounts),
+            Denied(RolePermissionCatalog.Acts),
+            Denied(RolePermissionCatalog.Contracts),
+        ]);
+        var accountant = await CreateUserWithPermissionsAsync(db, "accountant", "Бухгалтер",
+        [
+            DocumentLimited(RolePermissionCatalog.Payments),
+            Denied(RolePermissionCatalog.Reports),
+            DocumentLimited(RolePermissionCatalog.Accounts),
+            DocumentLimited(RolePermissionCatalog.Acts),
+            DocumentLimited(RolePermissionCatalog.Contracts),
+        ]);
+
+        await AssertSectionAsync(db, secretary, RolePermissionCatalog.Payments, false, false, false, false, false);
+        await AssertSectionAsync(db, secretary, RolePermissionCatalog.Reports, false, false, false, false, false);
+        await AssertSectionAsync(db, secretary, RolePermissionCatalog.Accounts, true, true, true, false, false);
+        await AssertSectionAsync(db, secretary, RolePermissionCatalog.Acts, true, true, true, false, false);
+        await AssertSectionAsync(db, secretary, RolePermissionCatalog.Contracts, true, true, true, false, false);
+
+        await AssertSectionAsync(db, lawyer, RolePermissionCatalog.Payments, false, false, false, false, false);
+        await AssertSectionAsync(db, lawyer, RolePermissionCatalog.Reports, false, false, false, false, false);
+        await AssertSectionAsync(db, lawyer, RolePermissionCatalog.Accounts, false, false, false, false, false);
+        await AssertSectionAsync(db, lawyer, RolePermissionCatalog.Acts, false, false, false, false, false);
+        await AssertSectionAsync(db, lawyer, RolePermissionCatalog.Contracts, false, false, false, false, false);
+
+        await AssertSectionAsync(db, accountant, RolePermissionCatalog.Payments, true, true, true, false, false);
+        await AssertSectionAsync(db, accountant, RolePermissionCatalog.Reports, false, false, false, false, false);
+        await AssertSectionAsync(db, accountant, RolePermissionCatalog.Accounts, true, true, true, false, false);
+        await AssertSectionAsync(db, accountant, RolePermissionCatalog.Acts, true, true, true, false, false);
+        await AssertSectionAsync(db, accountant, RolePermissionCatalog.Contracts, true, true, true, false, false);
+    }
+
+    private static RolePermission Denied(string section)
+        => new()
+        {
+            Section = section,
+            CanView = false,
+            CanCreate = false,
+            CanEdit = false,
+            CanDelete = false,
+            CanExport = false,
+            ViewScope = DataVisibilityScope.Own,
+        };
+
+    private static RolePermission DocumentLimited(string section)
+        => new()
+        {
+            Section = section,
+            CanView = true,
+            CanCreate = true,
+            CanEdit = true,
+            CanDelete = false,
+            CanExport = false,
+            ViewScope = DataVisibilityScope.Own,
+        };
+
+    private static async Task AssertSectionAsync(
+        PaymentContext db,
+        User user,
+        string section,
+        bool canView,
+        bool canCreate,
+        bool canEdit,
+        bool canDelete,
+        bool canExport)
+    {
+        var principal = CreatePrincipal(user);
+        Assert.Equal(canView, await db.HasUserSectionPermissionAsync(principal, section, static permission => permission.CanView));
+        Assert.Equal(canCreate, await db.HasUserSectionPermissionAsync(principal, section, static permission => permission.CanCreate));
+        Assert.Equal(canEdit, await db.HasUserSectionPermissionAsync(principal, section, static permission => permission.CanEdit));
+        Assert.Equal(canDelete, await db.HasUserSectionPermissionAsync(principal, section, static permission => permission.CanDelete));
+        Assert.Equal(canExport, await db.HasUserSectionPermissionAsync(principal, section, static permission => permission.CanExport));
+    }
+
     private static ClaimsPrincipal CreatePrincipal(User user, bool isAdmin = false)
     {
         var claims = new List<Claim>
@@ -192,6 +282,35 @@ public class BackendPermissionMatrixTests
         await db.SaveChangesAsync();
 
         if (permission is not null)
+        {
+            permission.RoleId = role.Id;
+            db.RolePermissions.Add(permission);
+        }
+
+        var user = new User
+        {
+            Email = $"{name}@example.test",
+            PasswordHash = "hash",
+            FullName = name,
+            RoleId = role.Id,
+            IsActive = true
+        };
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        return user;
+    }
+
+    private static async Task<User> CreateUserWithPermissionsAsync(
+        PaymentContext db,
+        string name,
+        string roleName,
+        IEnumerable<RolePermission> permissions)
+    {
+        var role = new Role { Name = roleName, Description = roleName };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+
+        foreach (var permission in permissions)
         {
             permission.RoleId = role.Id;
             db.RolePermissions.Add(permission);
