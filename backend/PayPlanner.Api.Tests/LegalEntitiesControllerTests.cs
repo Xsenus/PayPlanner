@@ -1,6 +1,10 @@
 using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Controllers;
+using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Controllers;
@@ -16,6 +20,44 @@ namespace PayPlanner.Api.Tests;
 
 public class LegalEntitiesControllerTests
 {
+    [Fact]
+    public async Task AdminFilter_ReturnsForbid_ForUserWithoutAdminRoleInDatabase()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db);
+        var controller = CreateController(db, userId, isAdmin: true);
+        var context = CreateAdminActionExecutingContext(controller, userId);
+        var nextCalled = false;
+
+        await controller.OnActionExecutionAsync(context, () =>
+        {
+            nextCalled = true;
+            return Task.FromResult(new ActionExecutedContext(context, [], controller));
+        });
+
+        Assert.False(nextCalled);
+        Assert.IsType<ForbidResult>(context.Result);
+    }
+
+    [Fact]
+    public async Task AdminFilter_AllowsUserWithAdminRoleInDatabase()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db, roleName: "admin");
+        var controller = CreateController(db, userId, isAdmin: false);
+        var context = CreateAdminActionExecutingContext(controller, userId);
+        var nextCalled = false;
+
+        await controller.OnActionExecutionAsync(context, () =>
+        {
+            nextCalled = true;
+            return Task.FromResult(new ActionExecutedContext(context, [], controller));
+        });
+
+        Assert.True(nextCalled);
+        Assert.Null(context.Result);
+    }
+
     [Fact]
     public async Task UpdateMainCompanySettings_SavesMultipleCompanies_AndHidesThemFromLegalEntitiesRegistry()
     {
@@ -1022,11 +1064,11 @@ public class LegalEntitiesControllerTests
         return status.Id;
     }
 
-    private static async Task<int> CreateUserAsync(PaymentContext db)
+    private static async Task<int> CreateUserAsync(PaymentContext db, string? roleName = null)
     {
         var role = new Role
         {
-            Name = $"user-{Guid.NewGuid():N}",
+            Name = roleName ?? $"user-{Guid.NewGuid():N}",
             Description = "User",
         };
         db.Roles.Add(role);
@@ -1129,6 +1171,36 @@ public class LegalEntitiesControllerTests
         };
 
         return controller;
+    }
+
+    private static ActionExecutingContext CreateAdminActionExecutingContext(
+        LegalEntitiesController controller,
+        int userId)
+    {
+        var httpContext = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+                [
+                    new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
+                    new Claim(ClaimTypes.Name, $"User {userId}"),
+                    new Claim(ClaimTypes.Role, "admin"),
+                ],
+                "TestAuth")),
+        };
+        var actionContext = new ActionContext(
+            httpContext,
+            new RouteData(),
+            new ControllerActionDescriptor
+            {
+                EndpointMetadata = [new AuthorizeAttribute { Policy = "Admin" }],
+            });
+        controller.ControllerContext = new ControllerContext(actionContext);
+
+        return new ActionExecutingContext(
+            actionContext,
+            [],
+            new Dictionary<string, object?>(),
+            controller);
     }
 
     private sealed class NoopFormRequirementsService : IFormRequirementsService

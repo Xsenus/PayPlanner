@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
@@ -17,7 +18,7 @@ namespace PayPlanner.Api.Controllers;
 [ApiController]
 [Route("api/legal-entities")]
 [Authorize]
-public class LegalEntitiesController : ControllerBase
+public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
 {
     private const string LegacyMainCompanySettingKey = "legalEntities.mainCompanyId";
     private const string MainCompanyIdsSettingKey = "legalEntities.mainCompanyIds";
@@ -41,6 +42,28 @@ public class LegalEntitiesController : ControllerBase
         _db = db;
         _enrichmentService = enrichmentService;
         _formRequirements = formRequirements;
+    }
+
+    [NonAction]
+    public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
+    {
+        var requiresAdmin = context.ActionDescriptor.EndpointMetadata
+            .OfType<AuthorizeAttribute>()
+            .Any(attribute => string.Equals(attribute.Policy, "Admin", StringComparison.Ordinal));
+        if (!requiresAdmin)
+        {
+            await next();
+            return;
+        }
+
+        var userId = context.HttpContext.User.GetUserId();
+        if (!userId.HasValue || !await _db.IsUserAdminAsync(userId.Value, context.HttpContext.RequestAborted))
+        {
+            context.Result = Forbid();
+            return;
+        }
+
+        await next();
     }
 
     private bool IsAdmin()
