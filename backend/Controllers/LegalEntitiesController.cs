@@ -66,9 +66,6 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
         await next();
     }
 
-    private bool IsAdmin()
-        => User.IsInRole("admin");
-
     private static string BuildRelatedInvoiceKey(
         int? invoiceEntityId,
         string? invoiceNumber,
@@ -1717,7 +1714,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
     public async Task<ActionResult<LegalEntityDetailDto>> GetById(int id, CancellationToken ct)
     {
         var mainCompanyIds = (await LoadMainCompanySettingsStateAsync(ct)).CompanyIds;
-        if (!IsAdmin() && mainCompanyIds.Contains(id))
+        if (!await IsDatabaseAdminAsync(ct) && mainCompanyIds.Contains(id))
         {
             return NotFound();
         }
@@ -1737,6 +1734,12 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
         }
 
         return Ok(MapDetail(entity));
+    }
+
+    private async Task<bool> IsDatabaseAdminAsync(CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        return userId.HasValue && await _db.IsUserAdminAsync(userId.Value, ct);
     }
 
     [HttpGet("{id:int}/case-finance-summaries")]

@@ -59,6 +59,48 @@ public class LegalEntitiesControllerTests
     }
 
     [Fact]
+    public async Task GetById_HidesMainCompany_WhenAdminClaimIsNotAdminInDatabase()
+    {
+        await using var db = await CreateContextAsync();
+        var companyId = await CreateLegalEntityAsync(db, "Основная компания");
+        var userId = await CreateUserAsync(db);
+        var controller = CreateController(db, userId, isAdmin: true);
+        await controller.UpdateMainCompanySettings(
+            new UpdateMainCompanySettingsRequest
+            {
+                CompanyIds = [companyId],
+                DefaultCompanyId = companyId,
+            },
+            CancellationToken.None);
+
+        var action = await controller.GetById(companyId, CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(action.Result);
+    }
+
+    [Fact]
+    public async Task GetById_ReturnsMainCompany_ForUserWithAdminRoleInDatabase()
+    {
+        await using var db = await CreateContextAsync();
+        var companyId = await CreateLegalEntityAsync(db, "Основная компания");
+        var userId = await CreateUserAsync(db, roleName: "admin");
+        var controller = CreateController(db, userId, isAdmin: false);
+        await controller.UpdateMainCompanySettings(
+            new UpdateMainCompanySettingsRequest
+            {
+                CompanyIds = [companyId],
+                DefaultCompanyId = companyId,
+            },
+            CancellationToken.None);
+
+        var action = await controller.GetById(companyId, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var dto = Assert.IsType<LegalEntityDetailDto>(ok.Value);
+        Assert.Equal(companyId, dto.Id);
+    }
+
+    [Fact]
     public async Task UpdateMainCompanySettings_SavesMultipleCompanies_AndHidesThemFromLegalEntitiesRegistry()
     {
         await using var db = await CreateContextAsync();
