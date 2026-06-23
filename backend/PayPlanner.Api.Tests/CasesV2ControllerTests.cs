@@ -298,6 +298,103 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task GetById_AndRelatedParties_HideSensitiveContacts_ForAccountantWithoutCaseEditPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var accountant = await CreateUserAsync(db, "accountant-sensitive@example.com", "Бухгалтер");
+        accountant.Role!.Name = "Бухгалтер";
+        accountant.Role.Description = "Бухгалтер";
+        var casesPermission = accountant.Role.Permissions.Single(permission => permission.Section == RolePermissionCatalog.Cases);
+        casesPermission.CanEdit = false;
+        casesPermission.CanDelete = false;
+        casesPermission.CanExport = false;
+        await GrantSectionPermissionAsync(db, accountant, RolePermissionCatalog.Payments, canDelete: false, canExport: false, viewScope: DataVisibilityScope.Own);
+        await GrantSectionPermissionAsync(db, accountant, RolePermissionCatalog.Accounts, canDelete: false, canExport: false, viewScope: DataVisibilityScope.Own);
+
+        var legalEntity = new LegalEntity
+        {
+            ShortName = "ООО Закрытые данные",
+            FullName = "Общество с ограниченной ответственностью Закрытые данные",
+            Inn = "6312345678",
+            Kpp = "631201001",
+            Ogrn = "1236300000000",
+            Address = "Самара, Ленина, 1",
+            Phone = "+78461234567",
+            Email = "secret-company@example.test",
+            Director = "Директор Закрытый",
+            ResponsibleUserId = accountant.Id,
+        };
+        var client = new Client
+        {
+            Name = "Клиент бухгалтера с персональными данными",
+            IsActive = true,
+            ResponsibleUserId = accountant.Id,
+            Phone = "+79991234567",
+            Email = "accountant-client@example.test",
+            Address = "Самара, Полевая, 10",
+            Notes = "Закрытые заметки по клиенту",
+            LegalEntity = legalEntity,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело с финансовым доступом без раскрытия контактов",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = accountant.Id,
+        };
+        var legalEntityCase = new ClientCase
+        {
+            LegalEntity = legalEntity,
+            Title = "Дело юрлица с финансовым доступом без раскрытия реквизитов",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = accountant.Id,
+        };
+        db.ClientCases.AddRange(clientCase, legalEntityCase);
+        db.ClientCaseRelatedParties.Add(new ClientCaseRelatedParty
+        {
+            ClientCase = clientCase,
+            SourceType = "legalEntity",
+            LegalEntity = legalEntity,
+            DisplayName = legalEntity.ShortName,
+            Role = "Организация",
+            Phone = "+78467654321",
+            Email = "related-company@example.test",
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, accountant);
+
+        var caseResult = await controller.GetById(clientCase.Id, CancellationToken.None);
+
+        var caseOk = Assert.IsType<OkObjectResult>(caseResult);
+        var dto = Assert.IsType<ClientCase>(caseOk.Value);
+        Assert.False(dto.CanRevealSensitiveData);
+        Assert.Equal(string.Empty, dto.Client!.Phone);
+        Assert.Equal(string.Empty, dto.Client.Email);
+        Assert.Equal(string.Empty, dto.Client.Address);
+        Assert.Equal(string.Empty, dto.Client.Notes);
+
+        var legalEntityCaseResult = await controller.GetById(legalEntityCase.Id, CancellationToken.None);
+
+        var legalEntityCaseOk = Assert.IsType<OkObjectResult>(legalEntityCaseResult);
+        var legalEntityDto = Assert.IsType<ClientCase>(legalEntityCaseOk.Value);
+        Assert.False(legalEntityDto.CanRevealSensitiveData);
+        Assert.Null(legalEntityDto.LegalEntity!.Inn);
+        Assert.Null(legalEntityDto.LegalEntity.Kpp);
+        Assert.Null(legalEntityDto.LegalEntity.Ogrn);
+        Assert.Null(legalEntityDto.LegalEntity.Address);
+        Assert.Null(legalEntityDto.LegalEntity.Phone);
+        Assert.Null(legalEntityDto.LegalEntity.Email);
+        Assert.Null(legalEntityDto.LegalEntity.Director);
+
+        var partiesResult = await controller.GetRelatedParties(clientCase.Id, includeArchived: false, CancellationToken.None);
+
+        var partiesOk = Assert.IsType<OkObjectResult>(partiesResult.Result);
+        var party = Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<ClientCaseRelatedPartyDto>>(partiesOk.Value));
+        Assert.Equal(string.Empty, party.Phone);
+        Assert.Equal(string.Empty, party.Email);
+    }
+
+    [Fact]
     public async Task GetById_HidesSensitiveContacts_WhenAdminClaimIsNotAdminInDatabase()
     {
         await using var db = await CreateContextAsync();
