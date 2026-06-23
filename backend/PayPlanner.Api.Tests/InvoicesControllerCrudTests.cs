@@ -1685,6 +1685,96 @@ public class InvoicesControllerCrudTests
     }
 
     [Fact]
+    public async Task Update_WhenInvoiceDateChangesAndDueDateWasUntouched_SyncsDueDateAndSingleLinkedPayment()
+    {
+        await using var db = await CreateContextAsync();
+        await ConfigureInvoiceRulesAsync(db, maxClientCases: 2, maxActs: 2);
+
+        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Bannova Client");
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+
+        var createRequest = CreateRequest("INV-DATE-FOLLOW", clientId, new DateTime(2026, 6, 9), 21_000m);
+        createRequest.DueDate = new DateTime(2026, 6, 9);
+
+        var createAction = await controller.Create(createRequest, CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var createdDto = Assert.IsType<InvoiceDto>(created.Value);
+
+        var createdParent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);
+        var linkedPayment = new Payment
+        {
+            InvoiceId = createdParent.InvoiceId,
+            Account = createdParent.Account,
+            AccountDate = createdParent.AccountDate,
+            Date = new DateTime(2026, 6, 9),
+            PlannedDate = new DateTime(2026, 6, 9),
+            Amount = 21_000m,
+            PaidAmount = 0m,
+            Status = PaymentStatus.Pending,
+            Type = PaymentType.Income,
+            ClientId = clientId,
+            Description = "Одиночный платеж по счету",
+            DocumentKind = DocumentKind.Payment,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Payments.Add(linkedPayment);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var updateRequest = CreateRequest("INV-DATE-FOLLOW", clientId, new DateTime(2026, 6, 17), 21_000m);
+        updateRequest.DueDate = new DateTime(2026, 6, 9);
+
+        var updateAction = await controller.Update(createdDto.Id, updateRequest, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(updateAction.Result);
+        var updatedDto = Assert.IsType<InvoiceDto>(ok.Value);
+        Assert.Equal(new DateTime(2026, 6, 17), updatedDto.Date);
+        Assert.Equal(new DateTime(2026, 6, 17), updatedDto.DueDate);
+
+        db.ChangeTracker.Clear();
+        var updatedInvoicePayment = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);
+        var updatedLinkedPayment = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == linkedPayment.Id);
+        Assert.Equal(new DateTime(2026, 6, 17), updatedInvoicePayment.Date);
+        Assert.Equal(new DateTime(2026, 6, 17), updatedLinkedPayment.Date);
+        Assert.Equal(new DateTime(2026, 6, 17), updatedLinkedPayment.PlannedDate);
+    }
+
+    [Fact]
+    public async Task Update_WhenInvoiceDateChangesAndDueDateWasManual_KeepsRequestedDueDate()
+    {
+        await using var db = await CreateContextAsync();
+        await ConfigureInvoiceRulesAsync(db, maxClientCases: 2, maxActs: 2);
+
+        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Bannova Client");
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+
+        var createRequest = CreateRequest("INV-MANUAL-DUE", clientId, new DateTime(2026, 6, 9), 21_000m);
+        createRequest.DueDate = new DateTime(2026, 6, 25);
+
+        var createAction = await controller.Create(createRequest, CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var createdDto = Assert.IsType<InvoiceDto>(created.Value);
+
+        db.ChangeTracker.Clear();
+
+        var updateRequest = CreateRequest("INV-MANUAL-DUE", clientId, new DateTime(2026, 6, 17), 21_000m);
+        updateRequest.DueDate = new DateTime(2026, 6, 25);
+
+        var updateAction = await controller.Update(createdDto.Id, updateRequest, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(updateAction.Result);
+        var updatedDto = Assert.IsType<InvoiceDto>(ok.Value);
+        Assert.Equal(new DateTime(2026, 6, 17), updatedDto.Date);
+        Assert.Equal(new DateTime(2026, 6, 25), updatedDto.DueDate);
+
+        db.ChangeTracker.Clear();
+        var updatedInvoicePayment = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);
+        Assert.Equal(new DateTime(2026, 6, 25), updatedInvoicePayment.Date);
+    }
+
+    [Fact]
     public async Task Update_ForksProtectedRepresentativePayment_WhenInvoiceWouldOverwriteLegacyAdvance()
     {
         await using var db = await CreateContextAsync();

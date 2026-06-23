@@ -2551,7 +2551,18 @@ export function InvoiceModal({
     if (field === 'number') {
       setNumberEditedManually(true);
     }
-    setForm((prev) => ({ ...prev, [field]: value }));
+    setForm((prev) => {
+      if (
+        field === 'date'
+        && !installmentPlan
+        && !hasGeneratedRelatedPayments
+        && (!prev.dueDate || prev.dueDate === prev.date)
+      ) {
+        return { ...prev, date: value, dueDate: value };
+      }
+
+      return { ...prev, [field]: value };
+    });
   };
 
   const handleBooleanChange = (field: keyof Pick<FormState, 'isNotForAccounting'>) => (

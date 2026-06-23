@@ -1420,7 +1420,7 @@ public class InvoicesController : ControllerBase
 
         await using var updateTransaction = await _db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
 
-        var resolvedDueDate = ResolveInvoiceDueDate(request);
+        var resolvedDueDate = ResolveInvoiceDueDate(request, payment, invoiceDate);
         var resolvedExpenseClientId = ResolveInvoiceExpenseClientId(request);
         var resolvedExpenseLegalEntityId = ResolveInvoiceExpenseLegalEntityId(request);
         int? resolvedClientCaseId = clientCaseValidation.ClientCaseIds.Count > 0
@@ -4994,6 +4994,40 @@ public class InvoicesController : ControllerBase
         }
 
         return PaymentDomainService.NormalizeLocalDate(request.DueDate ?? request.Date);
+    }
+
+    private static DateTime ResolveInvoiceDueDate(
+        UpsertInvoiceRequest request,
+        Payment existingPayment,
+        DateTime nextInvoiceDate)
+    {
+        if (request.InstallmentPlan is not null)
+        {
+            return ResolveInvoiceDueDate(request);
+        }
+
+        var requestedDueDate = request.DueDate.HasValue
+            ? PaymentDomainService.NormalizeLocalDate(request.DueDate.Value)
+            : (DateTime?)null;
+        if (!requestedDueDate.HasValue)
+        {
+            return PaymentDomainService.NormalizeLocalDate(nextInvoiceDate);
+        }
+
+        var previousDueDate = PaymentDomainService.NormalizeLocalDate(existingPayment.Date);
+        var previousInvoiceDate = PaymentDomainService.NormalizeLocalDate(
+            existingPayment.Invoice?.Date
+            ?? existingPayment.AccountDate
+            ?? existingPayment.Date);
+
+        if (requestedDueDate.Value.Date == previousDueDate.Date
+            && previousDueDate.Date == previousInvoiceDate.Date
+            && nextInvoiceDate.Date != previousInvoiceDate.Date)
+        {
+            return PaymentDomainService.NormalizeLocalDate(nextInvoiceDate);
+        }
+
+        return requestedDueDate.Value;
     }
 
     private void ApplyInstallmentPayment(
