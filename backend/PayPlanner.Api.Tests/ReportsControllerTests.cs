@@ -5822,6 +5822,50 @@ services.Id,
     }
 
     [Fact]
+    public async Task SpreadsheetImports_ForbidAdminClaimWhenDatabaseRoleIsNotAdmin()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateReportsUserWithPaymentsPermissionAsync(
+            db,
+            reportsCanView: true,
+            reportsCanExport: true,
+            paymentsCanView: true,
+            paymentsCanExport: true);
+        var controller = CreateController(db, CreateUserPrincipal(user.Id, includeAdminRoleClaim: true));
+
+        var listAction = await controller.SpreadsheetImports(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            CancellationToken.None);
+        var exportAction = await controller.ExportManagementReportExcel(
+            "spreadsheet-imports",
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(listAction.Result);
+        Assert.IsType<ForbidResult>(exportAction);
+    }
+
+    [Fact]
     public async Task SpreadsheetImports_FiltersCreatedAtByProfileLocalDay()
     {
         await using var db = await CreateContextAsync();
@@ -6092,10 +6136,16 @@ services.Id,
             [new Claim(ClaimTypes.Role, "admin")],
             authenticationType: "Test"));
 
-    private static ClaimsPrincipal CreateUserPrincipal(int userId)
-        => new(new ClaimsIdentity(
-            [new Claim(ClaimTypes.NameIdentifier, userId.ToString())],
-            authenticationType: "Test"));
+    private static ClaimsPrincipal CreateUserPrincipal(int userId, bool includeAdminRoleClaim = false)
+    {
+        var claims = new List<Claim> { new(ClaimTypes.NameIdentifier, userId.ToString()) };
+        if (includeAdminRoleClaim)
+        {
+            claims.Add(new Claim(ClaimTypes.Role, "admin"));
+        }
+
+        return new ClaimsPrincipal(new ClaimsIdentity(claims, authenticationType: "Test"));
+    }
 
     private static async Task<User> CreateReportsUserWithTimeZoneAsync(PaymentContext db, string timeZoneId)
     {

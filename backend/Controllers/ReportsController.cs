@@ -60,7 +60,7 @@ public class ReportsController : ControllerBase
 
     private async Task<bool> CanViewReportsAsync(CancellationToken ct)
     {
-        if (User.IsInRole("admin"))
+        if (await IsCurrentUserAdminAsync(ct))
         {
             return true;
         }
@@ -82,7 +82,7 @@ public class ReportsController : ControllerBase
 
     private async Task<bool> CanExportReportsAsync(CancellationToken ct)
     {
-        if (User.IsInRole("admin"))
+        if (await IsCurrentUserAdminAsync(ct))
         {
             return true;
         }
@@ -139,13 +139,26 @@ public class ReportsController : ControllerBase
 
     private async Task<bool> CanAccessAdminReportsAsync(CancellationToken ct)
     {
-        if (User.IsInRole("admin"))
+        return await IsCurrentUserAdminAsync(ct);
+    }
+
+    private async Task<bool> IsCurrentUserAdminAsync(CancellationToken ct)
+    {
+        var userId = User.GetUserId();
+        if (!userId.HasValue)
         {
-            return true;
+            return User.IsInRole("admin");
         }
 
-        var userId = User.GetUserId();
-        return userId.HasValue && await _db.IsUserAdminAsync(userId.Value, ct);
+        var userExists = await _db.Users
+            .AsNoTracking()
+            .AnyAsync(user => user.Id == userId.Value, ct);
+        if (!userExists)
+        {
+            return User.IsInRole("admin");
+        }
+
+        return await _db.IsUserAdminAsync(userId.Value, ct);
     }
 
     private async Task<DateTime> ResolveReportTodayAsync(CancellationToken ct)
