@@ -1,6 +1,8 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Filters;
+using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Services;
@@ -10,11 +12,29 @@ namespace PayPlanner.Api.Controllers;
 [ApiController]
 [Route("api/users")]
 [Authorize(Policy = "Admin")]
-public class UsersController : ControllerBase
+public class UsersController : ControllerBase, IAsyncActionFilter
 {
+    private readonly PaymentContext _db;
     private readonly AuthService _svc;
 
-    public UsersController(AuthService svc) => _svc = svc;
+    public UsersController(AuthService svc, PaymentContext db)
+    {
+        _svc = svc;
+        _db = db;
+    }
+
+    [NonAction]
+    public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
+    {
+        var userId = context.HttpContext.User.GetUserId();
+        if (!userId.HasValue || !await _db.IsUserAdminAsync(userId.Value, context.HttpContext.RequestAborted))
+        {
+            context.Result = Forbid();
+            return;
+        }
+
+        await next();
+    }
 
     [HttpPost("{id:int}/approve")]
     public async Task<IActionResult> ApproveUser(int id)
