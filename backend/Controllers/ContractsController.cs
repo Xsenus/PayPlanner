@@ -71,10 +71,7 @@ public class ContractsController : ControllerBase
             return User.IsInRole("admin");
         }
 
-        var userExists = await _db.Users
-            .AsNoTracking()
-            .AnyAsync(user => user.Id == userId.Value, ct);
-        if (!userExists)
+        if (!await _db.Users.AsNoTracking().AnyAsync(ct))
         {
             return User.IsInRole("admin");
         }

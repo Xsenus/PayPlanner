@@ -5866,6 +5866,26 @@ services.Id,
     }
 
     [Fact]
+    public async Task SpreadsheetImports_ForbidAdminClaimWhenUserIsMissingInDatabase()
+    {
+        await using var db = await CreateContextAsync();
+        await CreateReportsUserWithPaymentsPermissionAsync(
+            db,
+            reportsCanView: true,
+            reportsCanExport: true,
+            paymentsCanView: true,
+            paymentsCanExport: true);
+        var controller = CreateController(db, CreateUserPrincipal(987654, includeAdminRoleClaim: true));
+
+        var action = await controller.SpreadsheetImports(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(action.Result);
+    }
+
+    [Fact]
     public async Task SpreadsheetImports_FiltersCreatedAtByProfileLocalDay()
     {
         await using var db = await CreateContextAsync();

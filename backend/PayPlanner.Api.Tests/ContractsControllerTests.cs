@@ -983,6 +983,26 @@ public class ContractsControllerTests
     }
 
     [Fact]
+    public async Task NumberingSettings_ForbidAdminClaimWhenUserIsMissingInDatabase()
+    {
+        await using var db = await CreateContextAsync();
+        await CreateContractUserAsync(db, "contracts-existing-user", canCreate: true, canEdit: true, canDelete: true);
+        var controller = CreateControllerForUser(db, 987654, includeAdminRoleClaim: true);
+
+        var result = await controller.UpsertNumberingSettings(
+            new ContractNumberingSettingsRequest
+            {
+                StartNumber = 10,
+                AllocationStrategy = "global",
+                Template = "{NNN}",
+            },
+            CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result.Result);
+        Assert.Empty(await db.SystemSettings.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
     public async Task DocumentTemplateSettings_ForbidAdminClaimWhenDatabaseRoleIsNotAdmin()
     {
         await using var db = await CreateContextAsync();
