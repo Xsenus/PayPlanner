@@ -1,6 +1,9 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Filters;
+using PayPlanner.Api.Data;
+using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
@@ -11,27 +14,43 @@ namespace PayPlanner.Api.Controllers;
 [ApiController]
 [Route("api/database")]
 [Authorize(Policy = "Admin")]
-public class DatabaseAdminController : ControllerBase
+public class DatabaseAdminController : ControllerBase, IAsyncActionFilter
 {
     private const long MaxImportFileSizeBytes = 1024L * 1024L * 1024L;
     private const int MaxImportFormValueCount = 50000;
     private static readonly JsonSerializerOptions SpreadsheetImportRequestJsonOptions = new(JsonSerializerDefaults.Web);
 
+    private readonly PaymentContext _db;
     private readonly DatabaseProviderInfo _databaseProvider;
     private readonly DatabaseBackupService _databaseBackupService;
     private readonly IDatabaseImportService _databaseImportService;
     private readonly ISpreadsheetImportService _spreadsheetImportService;
 
     public DatabaseAdminController(
+        PaymentContext db,
         DatabaseProviderInfo databaseProvider,
         DatabaseBackupService databaseBackupService,
         IDatabaseImportService databaseImportService,
         ISpreadsheetImportService spreadsheetImportService)
     {
+        _db = db;
         _databaseProvider = databaseProvider;
         _databaseBackupService = databaseBackupService;
         _databaseImportService = databaseImportService;
         _spreadsheetImportService = spreadsheetImportService;
+    }
+
+    [NonAction]
+    public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
+    {
+        var userId = context.HttpContext.User.GetUserId();
+        if (!userId.HasValue || !await _db.IsUserAdminAsync(userId.Value, context.HttpContext.RequestAborted))
+        {
+            context.Result = Forbid();
+            return;
+        }
+
+        await next();
     }
 
     [HttpGet("status")]

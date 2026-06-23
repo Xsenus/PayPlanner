@@ -29,6 +29,27 @@ namespace PayPlanner.Api.Tests;
 public class DatabaseAdminControllerSpreadsheetImportTests
 {
     [Fact]
+    public async Task DatabaseAdminEndpoints_ForbidUserWithoutAdminRoleInDatabase()
+    {
+        await using var connection = await CreateOpenConnectionAsync();
+        var backupDirectory = CreateTempDirectory();
+
+        try
+        {
+            using var server = await CreateServerAsync(connection, backupDirectory, userRoleName: "user");
+            using var client = server.CreateClient();
+
+            using var response = await client.GetAsync("/api/database/status");
+
+            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        }
+        finally
+        {
+            TryDeleteDirectory(backupDirectory);
+        }
+    }
+
+    [Fact]
     public async Task ApplySpreadsheetImport_WithJsonRequestPayload_Succeeds()
     {
         await using var connection = await CreateOpenConnectionAsync();
@@ -121,7 +142,10 @@ public class DatabaseAdminControllerSpreadsheetImportTests
         return payload;
     }
 
-    private static async Task<TestServer> CreateServerAsync(SqliteConnection connection, string backupDirectory)
+    private static async Task<TestServer> CreateServerAsync(
+        SqliteConnection connection,
+        string backupDirectory,
+        string userRoleName = "admin")
     {
         var builder = new WebHostBuilder()
             .ConfigureAppConfiguration(configuration =>
@@ -164,6 +188,26 @@ public class DatabaseAdminControllerSpreadsheetImportTests
         await using var scope = server.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
         await db.Database.EnsureCreatedAsync();
+        var role = new Role
+        {
+            Name = userRoleName,
+            Description = userRoleName,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Roles.Add(role);
+        db.Users.Add(new User
+        {
+            Id = TestAuthHandler.UserId,
+            Email = $"database-admin-{Guid.NewGuid():N}@example.test",
+            FullName = "Spreadsheet Import Test User",
+            PasswordHash = "hash",
+            Role = role,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
 
         return server;
     }
@@ -332,6 +376,7 @@ public class DatabaseAdminControllerSpreadsheetImportTests
     private sealed class TestAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions>
     {
         public const string SchemeName = "Test";
+        public const int UserId = 999;
 
         public TestAuthHandler(
             IOptionsMonitor<AuthenticationSchemeOptions> options,
@@ -345,7 +390,7 @@ public class DatabaseAdminControllerSpreadsheetImportTests
         {
             var claims = new[]
             {
-                new Claim(ClaimTypes.NameIdentifier, "999"),
+                new Claim(ClaimTypes.NameIdentifier, UserId.ToString()),
                 new Claim(ClaimTypes.Name, "Spreadsheet Import Test User"),
                 new Claim(ClaimTypes.Role, "admin"),
             };
