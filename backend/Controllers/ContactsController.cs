@@ -36,6 +36,13 @@ public class ContactsController : ControllerBase
         _formRequirements = formRequirements;
     }
 
+    private async Task<ActionResult?> RequireClientsPermissionAsync(
+        Func<RolePermissionValues, bool> isAllowed,
+        CancellationToken ct)
+        => await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Clients, isAllowed, ct)
+            ? null
+            : Forbid();
+
     [HttpGet]
     public async Task<ActionResult<List<ContactDirectoryItemDto>>> GetAll(
         [FromQuery] string? scope,
@@ -49,6 +56,11 @@ public class ContactsController : ControllerBase
         if (!access.UserId.HasValue)
         {
             return Unauthorized();
+        }
+
+        if (await RequireClientsPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
+        {
+            return forbidden;
         }
 
         var normalizedScope = NormalizeScope(scope);
@@ -141,6 +153,11 @@ public class ContactsController : ControllerBase
             return Unauthorized();
         }
 
+        if (await RequireClientsPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var client = await _db.Clients
             .ApplyClientVisibility(access.IsAdmin, access.UserId)
             .Include(x => x.LegalEntity)
@@ -206,6 +223,11 @@ public class ContactsController : ControllerBase
             return Unauthorized();
         }
 
+        if (await RequireClientsPermissionAsync(static permission => permission.CanCreate, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var legalEntity = await ResolveLegalEntityAsync(request.LegalEntityId, ct);
         if (request.LegalEntityId.HasValue && legalEntity is null)
         {
@@ -267,6 +289,11 @@ public class ContactsController : ControllerBase
             return Unauthorized();
         }
 
+        if (await RequireClientsPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var entity = await BuildVisibleExternalContactsQuery(access.UserId, access.IsAdmin)
             .Include(x => x.LegalEntity)
             .Include(x => x.ResponsibleUser)
@@ -321,6 +348,11 @@ public class ContactsController : ControllerBase
             return Unauthorized();
         }
 
+        if (await RequireClientsPermissionAsync(static permission => permission.CanDelete, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var entity = await BuildVisibleExternalContactsQuery(access.UserId, access.IsAdmin)
             .FirstOrDefaultAsync(x => x.Id == id, ct);
         if (entity is null)
@@ -342,18 +374,19 @@ public class ContactsController : ControllerBase
             return Unauthorized();
         }
 
-        if (!access.IsAdmin)
+        if (await RequireClientsPermissionAsync(static permission => permission.CanExport, ct) is { } forbidden)
         {
-            return Forbid();
+            return forbidden;
         }
 
         var clients = await _db.Clients
+            .ApplyClientVisibility(access.IsAdmin, access.UserId)
             .Include(x => x.LegalEntity)
             .Include(x => x.ResponsibleUser)
             .Where(x => x.IsActive)
             .ToListAsync(ct);
 
-        var externalContacts = await _db.ExternalContacts
+        var externalContacts = await BuildVisibleExternalContactsQuery(access.UserId, access.IsAdmin)
             .Include(x => x.LegalEntity)
             .Include(x => x.ResponsibleUser)
             .Where(x => x.IsActive)
@@ -392,6 +425,11 @@ public class ContactsController : ControllerBase
         if (!access.UserId.HasValue)
         {
             return Unauthorized();
+        }
+
+        if (await RequireClientsPermissionAsync(static permission => permission.CanCreate, ct) is { } forbidden)
+        {
+            return forbidden;
         }
 
         if (!access.IsAdmin)
