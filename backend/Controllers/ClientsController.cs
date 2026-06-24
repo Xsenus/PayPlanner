@@ -219,6 +219,7 @@ public class ClientsController : ControllerBase
             return Unauthorized();
         }
 
+        var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
         var normalizedClientRole = QueryExtensions.NormalizeClientRole(clientRole);
         var visiblePaymentsQuery = _db.Payments.ApplyPaymentVisibility(paymentsVisibility);
         var q = (normalizedClientRole switch
@@ -235,6 +236,15 @@ public class ClientsController : ControllerBase
 
         if (caseId.HasValue)
         {
+            var isCaseVisible = await _db.ClientCases
+                .AsNoTracking()
+                .ApplyClientCaseVisibility(casesVisibility)
+                .AnyAsync(clientCase => clientCase.Id == caseId.Value, ct);
+            if (!isCaseVisible)
+            {
+                q = q.Where(_ => false);
+            }
+
             q = q.Where(p =>
                 p.ClientCaseId == caseId.Value ||
                 p.InvoiceClientCases.Any(link => link.ClientCaseId == caseId.Value));

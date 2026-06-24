@@ -784,6 +784,90 @@ public class ClientsControllerTests
     }
 
     [Fact]
+    public async Task GetStats_HidesSelectedCase_WhenCasesViewAccessDenied()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db);
+        var roleId = await db.Users
+            .Where(user => user.Id == userId)
+            .Select(user => user.RoleId)
+            .SingleAsync();
+
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                RoleId = roleId,
+                Section = RolePermissionCatalog.Clients,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = roleId,
+                Section = RolePermissionCatalog.Cases,
+                CanView = false,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = roleId,
+                Section = RolePermissionCatalog.Payments,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            });
+
+        var client = new Client
+        {
+            Name = "Hidden Stats Client",
+            ResponsibleUserId = userId,
+            IsActive = true,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Hidden stats case",
+            Status = ClientCaseStatus.Open,
+        };
+
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        db.Payments.Add(new Payment
+        {
+            ClientId = client.Id,
+            ClientCaseId = clientCase.Id,
+            Amount = 10_000m,
+            PaidAmount = 10_000m,
+            CounterpartyName = client.Name,
+            Date = new DateTime(2026, 6, 24),
+            PlannedDate = new DateTime(2026, 6, 24),
+            DocumentKind = DocumentKind.Payment,
+            Status = PaymentStatus.Completed,
+            IsPaid = true,
+            Type = PaymentType.Income,
+            Notes = string.Empty,
+            SystemNotes = string.Empty,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, userId);
+
+        var action = await controller.GetStats(client.Id, clientCase.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action);
+        var stats = Assert.IsType<ClientStats>(ok.Value);
+
+        Assert.Equal(client.Id, stats.ClientId);
+        Assert.Equal(0m, stats.TotalIncome);
+        Assert.Equal(0m, stats.OutstandingIncome);
+        Assert.Equal(0m, stats.TotalExpenses);
+        Assert.Equal(0m, stats.OutstandingExpenses);
+        Assert.Equal(0, stats.TotalPayments);
+        Assert.Empty(stats.RecentPayments);
+    }
+
+    [Fact]
     public async Task GetStats_CountsPendingDebtAsOverdueByProfileTimeZone()
     {
         await using var db = await CreateContextAsync();
