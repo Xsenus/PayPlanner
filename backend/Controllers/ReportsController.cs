@@ -4316,8 +4316,25 @@ public class ReportsController : ControllerBase
 
         var visibleCases = await _db.ClientCases
             .AsNoTracking()
-            .WithCaseIncludes()
             .ApplyClientCaseVisibility(casesVisibility)
+            .Select(item => new CaseActivityCaseRow(
+                item.Id,
+                item.ClientId,
+                item.LegalEntityId,
+                item.CaseNumber,
+                item.Title,
+                item.CaseType,
+                item.Status,
+                item.ResponsibleUserId,
+                item.ResponsibleUser == null ? null : item.ResponsibleUser.FullName,
+                item.CreatedAt,
+                item.LastViewedAt,
+                item.ActivityConfirmedAt,
+                item.InactivityRemindersEnabled,
+                item.Client == null ? null : item.Client.Name,
+                item.Client == null ? null : item.Client.Company,
+                item.LegalEntity == null ? null : item.LegalEntity.ShortName,
+                item.LegalEntity == null ? null : item.LegalEntity.FullName))
             .ToListAsync(ct);
 
         var activeCases = visibleCases
@@ -4396,13 +4413,13 @@ public class ReportsController : ControllerBase
                     && (clientCase.ActivityConfirmedAt ?? clientCase.CreatedAt) <= cutoff
                     && clientCase.InactivityRemindersEnabled;
                 var isEscalated = isInactive && daysWithoutActivity >= escalationDays;
-                var owner = ResolveCaseOwner(clientCase);
+                var owner = ResolveCaseActivityOwner(clientCase);
 
                 return new CaseActivityReportItemDto
                 {
                     CaseId = clientCase.Id,
-                    CaseNumber = clientCase.CaseNumber,
-                    CaseTitle = clientCase.Title,
+                    CaseNumber = clientCase.CaseNumber ?? string.Empty,
+                    CaseTitle = clientCase.Title ?? string.Empty,
                     CaseType = NormalizeReportText(clientCase.CaseType, "Не указан"),
                     Status = clientCase.Status.ToString(),
                     StatusLabel = FormatCaseStatus(clientCase.Status),
@@ -4410,7 +4427,7 @@ public class ReportsController : ControllerBase
                     OwnerType = owner.OwnerType,
                     OwnerName = owner.OwnerName,
                     ResponsibleUserId = clientCase.ResponsibleUserId,
-                    ResponsibleName = ResolveCaseResponsibleName(clientCase),
+                    ResponsibleName = ResolveCaseActivityResponsibleName(clientCase),
                     CreatedAt = NormalizeReportInstant(clientCase.CreatedAt),
                     LastActivityAt = NormalizeReportInstant(lastActivityAt),
                     LastTaskAt = NormalizeReportInstant(lastTaskAt),
@@ -5394,8 +5411,69 @@ public class ReportsController : ControllerBase
         return lastActivity;
     }
 
+    private static DateTime ResolveCaseLastActivityAt(CaseActivityCaseRow clientCase, params DateTime?[] activitySignals)
+    {
+        var lastActivity = clientCase.CreatedAt;
+        foreach (var signal in activitySignals)
+        {
+            if (signal.HasValue && signal.Value > lastActivity)
+            {
+                lastActivity = signal.Value;
+            }
+        }
+
+        if (clientCase.LastViewedAt.HasValue && clientCase.LastViewedAt.Value > lastActivity)
+        {
+            lastActivity = clientCase.LastViewedAt.Value;
+        }
+
+        if (clientCase.ActivityConfirmedAt.HasValue && clientCase.ActivityConfirmedAt.Value > lastActivity)
+        {
+            lastActivity = clientCase.ActivityConfirmedAt.Value;
+        }
+
+        return lastActivity;
+    }
+
     private static string BuildCaseActivityReason(
         ClientCase clientCase,
+        int activeTaskCount,
+        DateTime lastActivityAt,
+        DateTime cutoff,
+        bool isInactive)
+    {
+        if (!clientCase.InactivityRemindersEnabled)
+        {
+            return "Автоконтроль по делу выключен";
+        }
+
+        if (activeTaskCount > 0)
+        {
+            return $"Есть активные задачи: {activeTaskCount}";
+        }
+
+        if ((clientCase.LastViewedAt ?? clientCase.CreatedAt) > cutoff)
+        {
+            return "Карточку дела недавно открывали";
+        }
+
+        if ((clientCase.ActivityConfirmedAt ?? clientCase.CreatedAt) > cutoff)
+        {
+            return "Активность подтверждена вручную";
+        }
+
+        if (lastActivityAt > cutoff)
+        {
+            return "Недавно была активность по задаче или делу";
+        }
+
+        return isInactive
+            ? "Нет активных задач и свежей активности по делу"
+            : "Не попадает под правило неактивности";
+    }
+
+    private static string BuildCaseActivityReason(
+        CaseActivityCaseRow clientCase,
         int activeTaskCount,
         DateTime lastActivityAt,
         DateTime cutoff,
@@ -5456,11 +5534,39 @@ public class ReportsController : ControllerBase
         return new CaseActivityOwner(null, "none", "Без владельца");
     }
 
+    private static CaseActivityOwner ResolveCaseActivityOwner(CaseActivityCaseRow item)
+    {
+        if (item.ClientId.HasValue)
+        {
+            return new CaseActivityOwner(
+                item.ClientId,
+                "client",
+                NormalizeReportText(
+                    !string.IsNullOrWhiteSpace(item.ClientName) ? item.ClientName : item.ClientCompany,
+                    "Клиент без имени"));
+        }
+
+        if (item.LegalEntityId.HasValue)
+        {
+            return new CaseActivityOwner(
+                item.LegalEntityId,
+                "legalEntity",
+                NormalizeReportText(
+                    !string.IsNullOrWhiteSpace(item.LegalEntityShortName) ? item.LegalEntityShortName : item.LegalEntityFullName,
+                    "Юридическое лицо без названия"));
+        }
+
+        return new CaseActivityOwner(null, "none", "Без владельца");
+    }
+
     private static string ResolveCaseResponsibleName(ClientCase item)
     {
         var name = item.ResponsibleUser?.FullName;
         return NormalizeReportText(name, "Не назначен");
     }
+
+    private static string ResolveCaseActivityResponsibleName(CaseActivityCaseRow item)
+        => NormalizeReportText(item.ResponsibleName, "Не назначен");
 
     private static string ResolveCaseOwnerName(ClientCase item)
     {
@@ -8989,6 +9095,25 @@ public class ReportsController : ControllerBase
 
     private sealed record ReportExportRow(
         IReadOnlyList<string> Cells);
+
+    private sealed record CaseActivityCaseRow(
+        int Id,
+        int? ClientId,
+        int? LegalEntityId,
+        string? CaseNumber,
+        string Title,
+        string? CaseType,
+        ClientCaseStatus Status,
+        int? ResponsibleUserId,
+        string? ResponsibleName,
+        DateTime CreatedAt,
+        DateTime? LastViewedAt,
+        DateTime? ActivityConfirmedAt,
+        bool InactivityRemindersEnabled,
+        string? ClientName,
+        string? ClientCompany,
+        string? LegalEntityShortName,
+        string? LegalEntityFullName);
 
     private sealed record CaseActivityTaskRow(
         int ClientCaseId,

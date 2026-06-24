@@ -1541,6 +1541,77 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task CaseActivity_HandlesLargeDatasetWithLimitedRows()
+    {
+        await using var db = await CreateContextAsync();
+        var now = DateTime.UtcNow;
+        var client = new Client
+        {
+            Name = "Large Activity Client",
+        };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        var cases = Enumerable.Range(1, 650)
+            .Select(index => new ClientCase
+            {
+                ClientId = client.Id,
+                CaseNumber = $"LARGE-{index:000}",
+                Title = $"Large activity case {index:000}",
+                Status = index % 13 == 0 ? ClientCaseStatus.Closed : ClientCaseStatus.Open,
+                CreatedAt = now.AddDays(-60),
+                LastViewedAt = now.AddDays(-60),
+                ActivityConfirmedAt = now.AddDays(-60),
+                InactivityRemindersEnabled = true,
+            })
+            .ToList();
+        db.ClientCases.AddRange(cases);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateAdminPrincipal());
+
+        var action = await controller.CaseActivity(14, 30, "inactive", 25, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var report = Assert.IsType<CaseActivityReportDto>(ok.Value);
+        Assert.Equal(650, report.TotalVisibleCases);
+        Assert.Equal(600, report.ActiveCaseCount);
+        Assert.Equal(50, report.FinishedCaseCount);
+        Assert.Equal(600, report.InactiveCaseCount);
+        Assert.Equal(600, report.EscalatedCaseCount);
+        Assert.Equal(25, report.Items.Count);
+        Assert.All(report.Items, item => Assert.True(item.IsInactive));
+
+        var printAction = await controller.PrintManagementReport(
+            "case-activity",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            now.Date,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "inactive",
+            14,
+            30,
+            25,
+            CancellationToken.None);
+        var print = Assert.IsType<ContentResult>(printAction);
+        Assert.Equal("text/html; charset=utf-8", print.ContentType);
+        Assert.Contains("Large activity case", print.Content);
+        Assert.Contains("LARGE-", print.Content);
+    }
+
+    [Fact]
     public async Task CaseActivityManagementExports_ApplyCasesVisibilityScope()
     {
         await using var db = await CreateContextAsync();
