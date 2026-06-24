@@ -588,6 +588,32 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task UpdateTask_ReturnsNotFoundForHiddenTask()
+    {
+        await using var db = await CreateContextAsync();
+        var current = await CreateTaskUserAsync(db, "task-update-own@example.com", "Ограниченный редактор", canEdit: true);
+        var other = await CreateTaskUserAsync(db, "task-update-other@example.com", "Другой редактор", canEdit: true);
+        var client = await CreateClientAsync(db, "Клиент редактирования задачи");
+        var hiddenTask = await CreateTaskAsync(db, other.Id, client.Id, other.Id);
+        var originalTitle = hiddenTask.Title;
+        var controller = CreateController(db, new RecordingNotificationService(), current);
+
+        var result = await controller.UpdateTask(hiddenTask.Id, new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            Title = "Попытка изменить скрытую задачу",
+            DueAt = DateTime.UtcNow.AddHours(3),
+            Status = "inProgress",
+        }, CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(result.Result);
+
+        var stored = await db.TaskJournalItems.SingleAsync(item => item.Id == hiddenTask.Id);
+        Assert.Equal(originalTitle, stored.Title);
+        Assert.Equal("new", stored.Status);
+    }
+
+    [Fact]
     public async Task UpdateStatus_DoneWithResult_NotifiesAuthor()
     {
         await using var db = await CreateContextAsync();
