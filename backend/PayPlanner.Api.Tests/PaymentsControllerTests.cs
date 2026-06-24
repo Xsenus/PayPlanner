@@ -2521,6 +2521,119 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task PaymentsV2_Create_WithHiddenClient_ReturnsBadRequestAndDoesNotCreatePayment()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreatePaymentsUserAsync(db, canExport: false, viewScope: DataVisibilityScope.All);
+        var otherUser = await CreatePaymentsUserAsync(db, canExport: false, viewScope: DataVisibilityScope.All);
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = user.RoleId,
+            Section = RolePermissionCatalog.Clients,
+            CanView = true,
+            ViewScope = DataVisibilityScope.Own,
+        });
+
+        var hiddenClient = new Client
+        {
+            Name = "Hidden v2 direct payment client",
+            ResponsibleUserId = otherUser.Id,
+        };
+        db.Clients.Add(hiddenClient);
+        await db.SaveChangesAsync();
+
+        var model = CreatePayment(new DateTime(2026, 6, 24), 3_900m, "Hidden v2 client payment");
+        model.ClientId = hiddenClient.Id;
+
+        var controller = CreatePaymentsV2Controller(db, user.Id);
+
+        var actionResult = await controller.Create(model, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(actionResult);
+        Assert.Contains("clientId", badRequest.Value?.ToString());
+        Assert.False(await db.Payments.AnyAsync(payment => payment.Description == "Hidden v2 client payment"));
+    }
+
+    [Fact]
+    public async Task PaymentsV2_Create_WithHiddenLegalEntity_ReturnsBadRequestAndDoesNotCreatePayment()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreatePaymentsUserAsync(db, canExport: false, viewScope: DataVisibilityScope.All);
+        var otherUser = await CreatePaymentsUserAsync(db, canExport: false, viewScope: DataVisibilityScope.All);
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = user.RoleId,
+            Section = RolePermissionCatalog.LegalEntities,
+            CanView = true,
+            ViewScope = DataVisibilityScope.Own,
+        });
+
+        var hiddenLegalEntity = new LegalEntity
+        {
+            ShortName = "Hidden v2 direct payment legal",
+            ResponsibleUserId = otherUser.Id,
+        };
+        db.LegalEntities.Add(hiddenLegalEntity);
+        await db.SaveChangesAsync();
+
+        var model = CreatePayment(new DateTime(2026, 6, 24), 6_700m, "Hidden v2 legal payment");
+        model.LegalEntityId = hiddenLegalEntity.Id;
+
+        var controller = CreatePaymentsV2Controller(db, user.Id);
+
+        var actionResult = await controller.Create(model, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(actionResult);
+        Assert.Contains("legalEntityId", badRequest.Value?.ToString());
+        Assert.False(await db.Payments.AnyAsync(payment => payment.Description == "Hidden v2 legal payment"));
+    }
+
+    [Fact]
+    public async Task PaymentsV2_Create_WithHiddenClientCase_ReturnsBadRequestAndDoesNotCreatePayment()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreatePaymentsUserAsync(db, canExport: false, viewScope: DataVisibilityScope.All);
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = user.RoleId,
+            Section = RolePermissionCatalog.Cases,
+            CanView = true,
+            ViewScope = DataVisibilityScope.Own,
+        });
+
+        var visibleClient = new Client
+        {
+            Name = "Visible v2 payment attribution client",
+            ResponsibleUserId = user.Id,
+        };
+        db.Clients.Add(visibleClient);
+        await db.SaveChangesAsync();
+
+        var hiddenCase = new ClientCase
+        {
+            ClientId = visibleClient.Id,
+            Title = "Hidden v2 payment attribution case",
+            ResponsibleUserId = user.Id,
+            IsHiddenFromExecutor = true,
+            Status = ClientCaseStatus.Open,
+        };
+        db.ClientCases.Add(hiddenCase);
+        await db.SaveChangesAsync();
+
+        var model = CreatePayment(new DateTime(2026, 6, 24), 4_600m, "Hidden v2 case payment");
+        model.ClientId = visibleClient.Id;
+        model.ClientCaseId = hiddenCase.Id;
+
+        var controller = CreatePaymentsV2Controller(db, user.Id);
+
+        var actionResult = await controller.Create(model, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(actionResult);
+        Assert.Contains("clientCaseId", badRequest.Value?.ToString());
+        Assert.False(await db.Payments.AnyAsync(payment => payment.Description == "Hidden v2 case payment"));
+    }
+
+    [Fact]
     public async Task UpdateInvoiceManaged_WithOverpayment_AddsClientBalanceCredit()
     {
         await using var db = await CreateContextAsync();
