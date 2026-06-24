@@ -832,6 +832,30 @@ public class ContractsControllerTests
     }
 
     [Fact]
+    public async Task GetDocument_ReturnsNotFoundForHiddenContract()
+    {
+        await using var db = await CreateContextAsync();
+        var (contractId, current) = await CreateHiddenContractDocumentFixtureAsync(db, "doc");
+        var controller = CreateControllerForUser(db, current.Id);
+
+        var actionResult = await controller.GetDocument(contractId, "html", templateKey: null, CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(actionResult);
+    }
+
+    [Fact]
+    public async Task GetTerminationAgreement_ReturnsNotFoundForHiddenContract()
+    {
+        await using var db = await CreateContextAsync();
+        var (contractId, current) = await CreateHiddenContractDocumentFixtureAsync(db, "termination", terminated: true);
+        var controller = CreateControllerForUser(db, current.Id);
+
+        var actionResult = await controller.GetTerminationAgreement(contractId, "html", CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(actionResult);
+    }
+
+    [Fact]
     public async Task SendEmail_UsesClientEmailAndAttachesContractDocument()
     {
         await using var db = await CreateContextAsync();
@@ -927,6 +951,23 @@ public class ContractsControllerTests
     }
 
     [Fact]
+    public async Task SendEmail_ReturnsNotFoundForHiddenContract()
+    {
+        await using var db = await CreateContextAsync();
+        var (contractId, current) = await CreateHiddenContractDocumentFixtureAsync(db, "mail");
+        var emailService = new CapturingEmailService();
+        var controller = CreateControllerForUser(db, current.Id, emailService);
+
+        var actionResult = await controller.SendEmail(
+            contractId,
+            new SendInvoiceEmailRequest { Format = "word" },
+            CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(actionResult);
+        Assert.Null(emailService.ToEmail);
+    }
+
+    [Fact]
     public async Task UploadDocumentToYandexDisk_UploadsContractDocumentAndWritesAudit()
     {
         await using var db = await CreateContextAsync();
@@ -984,6 +1025,25 @@ public class ContractsControllerTests
         Assert.Equal("/CRM/contract-CT-YD-1.doc", syncState.YandexDiskPath);
         Assert.Equal("contract-CT-YD-1.doc", syncState.FileName);
         Assert.Equal(1, syncState.AttemptCount);
+    }
+
+    [Fact]
+    public async Task UploadDocumentToYandexDisk_ReturnsNotFoundForHiddenContract()
+    {
+        await using var db = await CreateContextAsync();
+        var (contractId, current) = await CreateHiddenContractDocumentFixtureAsync(db, "yandex", canCreateYandexDisk: true);
+        var yandexDiskService = new CapturingYandexDiskService();
+        var controller = CreateControllerForUser(db, current.Id, yandexDiskService: yandexDiskService);
+
+        var actionResult = await controller.UploadDocumentToYandexDisk(
+            contractId,
+            "word",
+            templateKey: null,
+            overwrite: true,
+            CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(actionResult.Result);
+        Assert.Null(yandexDiskService.Upload);
     }
 
     [Fact]
@@ -2057,7 +2117,9 @@ public class ContractsControllerTests
         bool canEdit,
         bool canDelete,
         bool canView = true,
-        bool canExport = true)
+        bool canExport = true,
+        string viewScope = DataVisibilityScope.All,
+        bool canCreateYandexDisk = false)
     {
         var role = new Role
         {
@@ -2073,10 +2135,21 @@ public class ContractsControllerTests
                     CanEdit = canEdit,
                     CanDelete = canDelete,
                     CanExport = canExport,
-                    ViewScope = DataVisibilityScope.All,
+                    ViewScope = viewScope,
                 },
             },
         };
+        if (canCreateYandexDisk)
+        {
+            role.Permissions.Add(new RolePermission
+            {
+                Section = RolePermissionCatalog.YandexDisk,
+                CanView = true,
+                CanCreate = true,
+                ViewScope = DataVisibilityScope.All,
+            });
+        }
+
         var user = new User
         {
             Email = $"{name}-{Guid.NewGuid():N}@example.test",
@@ -2092,12 +2165,62 @@ public class ContractsControllerTests
         return user;
     }
 
+    private static async Task<(int ContractId, User Current)> CreateHiddenContractDocumentFixtureAsync(
+        PaymentContext db,
+        string name,
+        bool terminated = false,
+        bool canCreateYandexDisk = false)
+    {
+        var current = await CreateContractUserAsync(
+            db,
+            $"contracts-{name}-own",
+            canCreate: true,
+            canEdit: true,
+            canDelete: true,
+            canExport: true,
+            viewScope: DataVisibilityScope.Own,
+            canCreateYandexDisk: canCreateYandexDisk);
+        var owner = await CreateContractUserAsync(
+            db,
+            $"contracts-{name}-owner",
+            canCreate: true,
+            canEdit: true,
+            canDelete: true,
+            canExport: true);
+        var client = await CreateClientAsync(db, email: "client@example.com");
+        client.ResponsibleUserId = owner.Id;
+
+        var contract = new Contract
+        {
+            Number = $"CT-HIDDEN-{name.ToUpperInvariant()}",
+            Date = new DateTime(2026, 5, 21),
+            Title = "Скрытый договор",
+            BillingMode = ContractBillingMode.Fixed,
+            Amount = 45_000m,
+            Status = terminated ? ContractStatus.Terminated : ContractStatus.Draft,
+            TerminationDate = terminated ? new DateTime(2026, 6, 1) : null,
+            TerminationTerms = terminated ? "Соглашение сторон" : null,
+        };
+        db.Contracts.Add(contract);
+        await db.SaveChangesAsync();
+
+        db.ClientContracts.Add(new ClientContract
+        {
+            ContractId = contract.Id,
+            ClientId = client.Id,
+        });
+        await db.SaveChangesAsync();
+
+        return (contract.Id, current);
+    }
+
     private static ContractsController CreateControllerForUser(
         PaymentContext db,
         int userId,
         IEmailService? emailService = null,
+        IYandexDiskService? yandexDiskService = null,
         bool includeAdminRoleClaim = false)
-        => new(db, new NoopFormRequirementsService(), emailService: emailService)
+        => new(db, new NoopFormRequirementsService(), emailService: emailService, yandexDiskService: yandexDiskService)
         {
             ControllerContext = new ControllerContext
             {
