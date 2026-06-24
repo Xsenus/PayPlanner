@@ -1070,6 +1070,11 @@ public class ActsController : ControllerBase
         [FromQuery] bool? includeSignatureAndSeal = null,
         CancellationToken ct = default)
     {
+        if (await RequireActsPermissionAsync(permission => permission.CanExport, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var act = await LoadActDocumentAsync(id, ct);
         if (act is null)
         {

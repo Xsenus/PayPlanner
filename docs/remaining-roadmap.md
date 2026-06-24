@@ -77,6 +77,7 @@
 - `[x]` Базовый юридический модуль реализован: дела, задачи по делам, документы, судебные события, процессуальные сроки, роли, уведомления, navigation/deep-links и базовые отчеты.
 - `[x]` Для документов реализованы workflow-статусы счетов, актов и договоров, действия подписания/аннулирования, корректировочные акты, расторжение договоров, соглашение о расторжении, шаблоны и PDF/HTML/email-сценарии.
 - `[x]` 2026-06-23: отправка счетов, актов и договоров по email закрыта правами выгрузки соответствующего раздела. Проверено backend-тестами `SendInvoiceEmail_RequiresAccountsExportPermission`, `SendActEmail_RequiresActsExportPermission` и `SendEmail_RequiresContractExportPermission`.
+- `[x]` 2026-06-24: прямая печатная форма акта закрыта правом `Acts.CanExport` и object-level видимостью: роль без выгрузки получает запрет, а скрытый чужой акт по прямой ссылке не раскрывается. Проверено backend-тестами `ActsControllerTests.GetDocument_RequiresActsExportPermission` и `ActsControllerTests.GetDocument_ReturnsNotFoundForHiddenAct`.
 - `[x]` Для заказ-нарядов реализованы сущность, позиции, печать, approval workflow, создание счета, акта и договора из заказ-наряда.
 
 ## Оставшаяся приемка по уже реализованным направлениям

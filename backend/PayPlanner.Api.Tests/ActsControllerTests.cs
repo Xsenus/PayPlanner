@@ -2075,6 +2075,38 @@ public class ActsControllerTests
     }
 
     [Fact]
+    public async Task GetDocument_RequiresActsExportPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var act = await CreateManualActAsync(db, client.Id, "ACT-DOC-NO-EXPORT", 10_000m, ActStatus.Created);
+        var user = await CreateActsUserAsync(db, "acts-doc-no-export", canExport: false);
+        var controller = CreateControllerForUser(db, user.Id);
+
+        var action = await controller.GetDocument(act.Id, "html", false, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(action);
+    }
+
+    [Fact]
+    public async Task GetDocument_ReturnsNotFoundForHiddenAct()
+    {
+        await using var db = await CreateContextAsync();
+        var current = await CreateActsUserAsync(db, "acts-doc-own", canExport: true, viewScope: DataVisibilityScope.Own);
+        var owner = await CreateAdminUserAsync(db, "acts-doc-owner", "acts-doc-owner@example.com");
+        var client = await CreateClientAsync(db);
+        client.ResponsibleUserId = owner.Id;
+        var act = await CreateManualActAsync(db, client.Id, "ACT-DOC-HIDDEN", 10_000m, ActStatus.Created);
+        act.ResponsibleId = owner.Id;
+        await db.SaveChangesAsync();
+        var controller = CreateControllerForUser(db, current.Id);
+
+        var action = await controller.GetDocument(act.Id, "html", false, CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(action);
+    }
+
+    [Fact]
     public async Task GetDocument_ReturnsWordFile_ForUnknownFormat_AndSanitizesFileName()
     {
         await using var db = await CreateContextAsync();
