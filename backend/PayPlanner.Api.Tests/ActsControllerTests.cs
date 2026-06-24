@@ -225,6 +225,39 @@ public class ActsControllerTests
     }
 
     [Fact]
+    public async Task WorkflowActions_ReturnNotFoundForHiddenAct()
+    {
+        await using var db = await CreateContextAsync();
+        var current = await CreateActsUserAsync(db, "acts-workflow-own", canExport: true, viewScope: DataVisibilityScope.Own);
+        var other = await CreateAdminUserAsync(db, "Другой ответственный", "acts-workflow-other@example.com");
+        var client = await CreateClientAsync(db);
+        client.ResponsibleUserId = other.Id;
+        var hiddenAct = await CreateManualActAsync(db, client.Id, "ACT-HIDDEN-WORKFLOW", 12_000m, ActStatus.Created);
+        hiddenAct.ResponsibleId = other.Id;
+        await db.SaveChangesAsync();
+        var controller = CreateControllerForUser(db, current.Id);
+
+        var sendAction = await controller.SendToSigning(hiddenAct.Id, CancellationToken.None);
+        var signAction = await controller.MarkSigned(hiddenAct.Id, CancellationToken.None);
+        var cancelAction = await controller.Cancel(
+            hiddenAct.Id,
+            new CancelActRequest { Reason = "Попытка отменить скрытый акт" },
+            CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(sendAction.Result);
+        Assert.IsType<NotFoundResult>(signAction.Result);
+        Assert.IsType<NotFoundResult>(cancelAction.Result);
+
+        var stored = await db.Acts.AsNoTracking().SingleAsync(item => item.Id == hiddenAct.Id);
+        Assert.Equal(ActStatus.Created, stored.Status);
+        Assert.Equal(ActWorkflowStatus.Draft, stored.WorkflowStatus);
+        Assert.Null(stored.SentForSigningAt);
+        Assert.Null(stored.SignedAt);
+        Assert.Null(stored.CancelledAt);
+        Assert.Null(stored.CancelledReason);
+    }
+
+    [Fact]
     public async Task MarkSigned_NotifiesResponsibleWithActsAccess()
     {
         await using var db = await CreateContextAsync();
@@ -3043,7 +3076,11 @@ public class ActsControllerTests
         return user;
     }
 
-    private static async Task<User> CreateActsUserAsync(PaymentContext db, string name, bool canExport)
+    private static async Task<User> CreateActsUserAsync(
+        PaymentContext db,
+        string name,
+        bool canExport,
+        string viewScope = DataVisibilityScope.All)
     {
         var role = new Role
         {
@@ -3059,7 +3096,7 @@ public class ActsControllerTests
                     CanEdit = true,
                     CanDelete = true,
                     CanExport = canExport,
-                    ViewScope = DataVisibilityScope.All,
+                    ViewScope = viewScope,
                 },
             },
         };
