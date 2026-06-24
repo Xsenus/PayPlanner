@@ -2350,7 +2350,6 @@ public class PaymentsControllerTests
     {
         await using var db = await CreateContextAsync();
         var user = await CreatePaymentsUserAsync(db, canExport: false, viewScope: DataVisibilityScope.All);
-        var otherUser = await CreatePaymentsUserAsync(db, canExport: false, viewScope: DataVisibilityScope.All);
         db.RolePermissions.Add(new RolePermission
         {
             RoleId = user.RoleId,
@@ -2359,26 +2358,27 @@ public class PaymentsControllerTests
             ViewScope = DataVisibilityScope.Own,
         });
 
-        var hiddenClient = new Client
+        var visibleClient = new Client
         {
-            Name = "Hidden payment attribution client",
-            ResponsibleUserId = otherUser.Id,
+            Name = "Visible payment attribution client",
+            ResponsibleUserId = user.Id,
         };
-        db.Clients.Add(hiddenClient);
+        db.Clients.Add(visibleClient);
         await db.SaveChangesAsync();
 
         var hiddenCase = new ClientCase
         {
-            ClientId = hiddenClient.Id,
+            ClientId = visibleClient.Id,
             Title = "Hidden payment attribution case",
-            ResponsibleUserId = otherUser.Id,
+            ResponsibleUserId = user.Id,
+            IsHiddenFromExecutor = true,
             Status = ClientCaseStatus.Open,
         };
         db.ClientCases.Add(hiddenCase);
         await db.SaveChangesAsync();
 
         var model = CreatePayment(new DateTime(2026, 6, 24), 4_200m, "Hidden case payment");
-        model.ClientId = hiddenClient.Id;
+        model.ClientId = visibleClient.Id;
         model.ClientCaseId = hiddenCase.Id;
 
         var controller = CreatePaymentsController(db, user.Id);
@@ -2395,7 +2395,6 @@ public class PaymentsControllerTests
     {
         await using var db = await CreateContextAsync();
         var user = await CreatePaymentsUserAsync(db, canExport: false, viewScope: DataVisibilityScope.All);
-        var otherUser = await CreatePaymentsUserAsync(db, canExport: false, viewScope: DataVisibilityScope.All);
         db.RolePermissions.Add(new RolePermission
         {
             RoleId = user.RoleId,
@@ -2409,12 +2408,7 @@ public class PaymentsControllerTests
             Name = "Visible payment attribution client",
             ResponsibleUserId = user.Id,
         };
-        var hiddenClient = new Client
-        {
-            Name = "Hidden payment attribution update client",
-            ResponsibleUserId = otherUser.Id,
-        };
-        db.Clients.AddRange(visibleClient, hiddenClient);
+        db.Clients.Add(visibleClient);
         await db.SaveChangesAsync();
 
         var visibleCase = new ClientCase
@@ -2426,9 +2420,10 @@ public class PaymentsControllerTests
         };
         var hiddenCase = new ClientCase
         {
-            ClientId = hiddenClient.Id,
+            ClientId = visibleClient.Id,
             Title = "Hidden payment attribution update case",
-            ResponsibleUserId = otherUser.Id,
+            ResponsibleUserId = user.Id,
+            IsHiddenFromExecutor = true,
             Status = ClientCaseStatus.Open,
         };
         db.ClientCases.AddRange(visibleCase, hiddenCase);
@@ -2441,7 +2436,7 @@ public class PaymentsControllerTests
         await db.SaveChangesAsync();
 
         var update = CreatePayment(payment.Date, payment.Amount, "Attempt hidden case update");
-        update.ClientId = hiddenClient.Id;
+        update.ClientId = visibleClient.Id;
         update.ClientCaseId = hiddenCase.Id;
 
         var controller = CreatePaymentsController(db, user.Id);
@@ -2455,6 +2450,74 @@ public class PaymentsControllerTests
         Assert.Equal(visibleClient.Id, stored.ClientId);
         Assert.Equal(visibleCase.Id, stored.ClientCaseId);
         Assert.Equal("Visible payment before hidden case update", stored.Description);
+    }
+
+    [Fact]
+    public async Task Create_WithHiddenClient_ReturnsBadRequestAndDoesNotCreatePayment()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreatePaymentsUserAsync(db, canExport: false, viewScope: DataVisibilityScope.All);
+        var otherUser = await CreatePaymentsUserAsync(db, canExport: false, viewScope: DataVisibilityScope.All);
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = user.RoleId,
+            Section = RolePermissionCatalog.Clients,
+            CanView = true,
+            ViewScope = DataVisibilityScope.Own,
+        });
+
+        var hiddenClient = new Client
+        {
+            Name = "Hidden direct payment client",
+            ResponsibleUserId = otherUser.Id,
+        };
+        db.Clients.Add(hiddenClient);
+        await db.SaveChangesAsync();
+
+        var model = CreatePayment(new DateTime(2026, 6, 24), 3_700m, "Hidden client payment");
+        model.ClientId = hiddenClient.Id;
+
+        var controller = CreatePaymentsController(db, user.Id);
+
+        var actionResult = await controller.Create(model, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(actionResult);
+        Assert.Contains("clientId", badRequest.Value?.ToString());
+        Assert.False(await db.Payments.AnyAsync(payment => payment.Description == "Hidden client payment"));
+    }
+
+    [Fact]
+    public async Task Create_WithHiddenLegalEntity_ReturnsBadRequestAndDoesNotCreatePayment()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreatePaymentsUserAsync(db, canExport: false, viewScope: DataVisibilityScope.All);
+        var otherUser = await CreatePaymentsUserAsync(db, canExport: false, viewScope: DataVisibilityScope.All);
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = user.RoleId,
+            Section = RolePermissionCatalog.LegalEntities,
+            CanView = true,
+            ViewScope = DataVisibilityScope.Own,
+        });
+
+        var hiddenLegalEntity = new LegalEntity
+        {
+            ShortName = "Hidden direct payment legal",
+            ResponsibleUserId = otherUser.Id,
+        };
+        db.LegalEntities.Add(hiddenLegalEntity);
+        await db.SaveChangesAsync();
+
+        var model = CreatePayment(new DateTime(2026, 6, 24), 6_300m, "Hidden legal payment");
+        model.LegalEntityId = hiddenLegalEntity.Id;
+
+        var controller = CreatePaymentsController(db, user.Id);
+
+        var actionResult = await controller.Create(model, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(actionResult);
+        Assert.Contains("legalEntityId", badRequest.Value?.ToString());
+        Assert.False(await db.Payments.AnyAsync(payment => payment.Description == "Hidden legal payment"));
     }
 
     [Fact]
@@ -4252,11 +4315,16 @@ public class PaymentsControllerTests
     public async Task Create_UnallocatedPaidIncomePayment_MarksAdvanceAsRequiresDecision()
     {
         await using var db = await CreateContextAsync();
-        var client = new Client { Name = "Винокуров Валерий Витальевич" };
+        var user = await CreatePaymentsUserAsync(db, canExport: false);
+        var client = new Client
+        {
+            Name = "Винокуров Валерий Витальевич",
+            ResponsibleUserId = user.Id,
+        };
         db.Clients.Add(client);
         await db.SaveChangesAsync();
 
-        var controller = CreatePaymentsController(db, userId: 101);
+        var controller = CreatePaymentsController(db, user.Id);
         var payment = CreatePayment(new DateTime(2026, 3, 2), 7_100m, "Винокуров - раздел лицевых счетов");
         payment.ClientId = client.Id;
         payment.PaidAmount = 7_100m;
@@ -4398,11 +4466,16 @@ public class PaymentsControllerTests
     public async Task Create_PartiallyPaidUnallocatedIncomePayment_MarksAdvanceAsRequiresDecision()
     {
         await using var db = await CreateContextAsync();
-        var client = new Client { Name = "Клиент с частичным платежом" };
+        var user = await CreatePaymentsUserAsync(db, canExport: false);
+        var client = new Client
+        {
+            Name = "Клиент с частичным платежом",
+            ResponsibleUserId = user.Id,
+        };
         db.Clients.Add(client);
         await db.SaveChangesAsync();
 
-        var controller = CreatePaymentsController(db, userId: 102);
+        var controller = CreatePaymentsController(db, user.Id);
         var payment = CreatePayment(new DateTime(2026, 3, 5), 10_000m, "Частичный платеж без документов");
         payment.ClientId = client.Id;
         payment.PaidAmount = 4_000m;

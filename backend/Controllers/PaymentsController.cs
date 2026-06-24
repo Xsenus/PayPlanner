@@ -3826,6 +3826,9 @@ public class PaymentsController : ControllerBase
 
     private async Task<ActionResult?> ValidatePaymentAttributionAsync(Payment payment, CancellationToken ct)
     {
+        var clientsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Clients, ct);
+        var legalEntitiesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.LegalEntities, ct);
+
         var hasClient = payment.ClientId.HasValue && payment.ClientId.Value > 0;
         var hasLegalEntity = payment.LegalEntityId.HasValue && payment.LegalEntityId.Value > 0;
         if (hasClient && hasLegalEntity)
@@ -3837,10 +3840,11 @@ public class PaymentsController : ControllerBase
         {
             var clientExists = await _db.Clients
                 .AsNoTracking()
+                .ApplyClientVisibility(clientsVisibility)
                 .AnyAsync(client => client.Id == payment.ClientId!.Value, ct);
             if (!clientExists)
             {
-                return BadRequest($"Unknown clientId {payment.ClientId!.Value}");
+                return BadRequest($"clientId {payment.ClientId!.Value} is not available");
             }
         }
 
@@ -3848,10 +3852,11 @@ public class PaymentsController : ControllerBase
         {
             var legalEntityExists = await _db.LegalEntities
                 .AsNoTracking()
+                .ApplyLegalEntityVisibility(legalEntitiesVisibility)
                 .AnyAsync(entity => entity.Id == payment.LegalEntityId!.Value, ct);
             if (!legalEntityExists)
             {
-                return BadRequest($"Unknown legalEntityId {payment.LegalEntityId!.Value}");
+                return BadRequest($"legalEntityId {payment.LegalEntityId!.Value} is not available");
             }
         }
 
@@ -3866,10 +3871,11 @@ public class PaymentsController : ControllerBase
         {
             var expenseClientExists = await _db.Clients
                 .AsNoTracking()
+                .ApplyClientVisibility(clientsVisibility)
                 .AnyAsync(client => client.Id == payment.ExpenseClientId!.Value, ct);
             if (!expenseClientExists)
             {
-                return BadRequest($"Unknown expenseClientId {payment.ExpenseClientId!.Value}");
+                return BadRequest($"expenseClientId {payment.ExpenseClientId!.Value} is not available");
             }
         }
 
@@ -3877,10 +3883,11 @@ public class PaymentsController : ControllerBase
         {
             var expenseLegalEntityExists = await _db.LegalEntities
                 .AsNoTracking()
+                .ApplyLegalEntityVisibility(legalEntitiesVisibility)
                 .AnyAsync(entity => entity.Id == payment.ExpenseLegalEntityId!.Value, ct);
             if (!expenseLegalEntityExists)
             {
-                return BadRequest($"Unknown expenseLegalEntityId {payment.ExpenseLegalEntityId!.Value}");
+                return BadRequest($"expenseLegalEntityId {payment.ExpenseLegalEntityId!.Value} is not available");
             }
         }
 
