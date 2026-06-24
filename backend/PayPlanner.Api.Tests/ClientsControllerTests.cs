@@ -1527,6 +1527,144 @@ public class ClientsControllerTests
     }
 
     [Fact]
+    public async Task GetCaseExpenseDetails_HidesSelectedCase_WhenCasesViewAccessDenied()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db);
+        var roleId = await db.Users
+            .Where(user => user.Id == userId)
+            .Select(user => user.RoleId)
+            .SingleAsync();
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                RoleId = roleId,
+                Section = RolePermissionCatalog.Clients,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = roleId,
+                Section = RolePermissionCatalog.Cases,
+                CanView = false,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = roleId,
+                Section = RolePermissionCatalog.Payments,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            });
+
+        var supplier = new Client { Name = "Hidden Detail Supplier", IsActive = true };
+        var client = new Client { Name = "Hidden Detail Client", IsActive = true };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Hidden expense detail case",
+            Status = ClientCaseStatus.Open,
+        };
+        db.Clients.AddRange(supplier, client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        db.Payments.Add(new Payment
+        {
+            ClientId = supplier.Id,
+            ExpenseClientId = client.Id,
+            ClientCaseId = clientCase.Id,
+            Type = PaymentType.Expense,
+            Status = PaymentStatus.Pending,
+            Date = DateTime.UtcNow.Date,
+            PlannedDate = DateTime.UtcNow.Date,
+            Amount = 5000m,
+            PaidAmount = 2000m,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId);
+
+        var action = await controller.GetCaseExpenseDetails(
+            client.Id,
+            caseId: clientCase.Id,
+            clientRole: "expenseClient",
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action);
+        var rows = Assert.IsAssignableFrom<List<ClientCaseExpenseDetailDto>>(ok.Value);
+        Assert.Empty(rows);
+    }
+
+    [Fact]
+    public async Task GetCaseExpenseDetails_SupplierMode_HidesCases_WhenCasesViewAccessDenied()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db);
+        var roleId = await db.Users
+            .Where(user => user.Id == userId)
+            .Select(user => user.RoleId)
+            .SingleAsync();
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                RoleId = roleId,
+                Section = RolePermissionCatalog.Clients,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = roleId,
+                Section = RolePermissionCatalog.Cases,
+                CanView = false,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = roleId,
+                Section = RolePermissionCatalog.Payments,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            });
+
+        var supplier = new Client { Name = "Supplier Hidden Detail", IsActive = true };
+        var client = new Client { Name = "Matter Hidden Detail", IsActive = true };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Supplier hidden expense case",
+            Status = ClientCaseStatus.Open,
+        };
+        db.Clients.AddRange(supplier, client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        db.Payments.Add(new Payment
+        {
+            ClientId = supplier.Id,
+            ExpenseClientId = client.Id,
+            ClientCaseId = clientCase.Id,
+            Type = PaymentType.Expense,
+            Status = PaymentStatus.Pending,
+            Date = DateTime.UtcNow.Date,
+            PlannedDate = DateTime.UtcNow.Date,
+            Amount = 5000m,
+            PaidAmount = 2000m,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, userId);
+
+        var action = await controller.GetCaseExpenseDetails(
+            supplier.Id,
+            caseId: null,
+            clientRole: "counterparty",
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action);
+        var rows = Assert.IsAssignableFrom<List<ClientCaseExpenseDetailDto>>(ok.Value);
+        Assert.Empty(rows);
+    }
+
+    [Fact]
     public async Task GetCaseExpenseDetails_UsesProfileTimeZoneForExpenseStatus()
     {
         await using var db = await CreateContextAsync();

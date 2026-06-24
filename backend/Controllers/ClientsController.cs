@@ -431,6 +431,7 @@ public class ClientsController : ControllerBase
         {
             return Unauthorized();
         }
+        var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
 
         var normalizedClientRole = QueryExtensions.NormalizeClientRole(clientRole);
         var query = _db.Payments
@@ -459,6 +460,29 @@ public class ClientsController : ControllerBase
                 (payment.ExpenseClientId == null && payment.ClientId == id)),
         };
 
+        var visibleCaseIdsQuery = _db.ClientCases
+            .AsNoTracking()
+            .ApplyClientCaseVisibility(casesVisibility);
+        var visibleCaseIds = caseId.HasValue
+            ? await visibleCaseIdsQuery
+                .Where(clientCase => clientCase.Id == caseId.Value)
+                .Select(clientCase => clientCase.Id)
+                .ToListAsync(ct)
+            : normalizedClientRole == "counterparty"
+                ? await visibleCaseIdsQuery
+                    .Select(clientCase => clientCase.Id)
+                    .ToListAsync(ct)
+                : await visibleCaseIdsQuery
+                    .Where(clientCase => clientCase.ClientId == id)
+                    .Select(clientCase => clientCase.Id)
+                    .ToListAsync(ct);
+        var visibleCaseIdSet = visibleCaseIds.ToHashSet();
+
+        if (visibleCaseIdSet.Count == 0)
+        {
+            return Ok(new List<ClientCaseExpenseDetailDto>());
+        }
+
         if (caseId.HasValue)
         {
             query = query.Where(payment =>
@@ -467,12 +491,6 @@ public class ClientsController : ControllerBase
         }
         else if (normalizedClientRole != "counterparty")
         {
-            var visibleCaseIds = await _db.ClientCases
-                .AsNoTracking()
-                .Where(clientCase => clientCase.ClientId == id)
-                .Select(clientCase => clientCase.Id)
-                .ToListAsync(ct);
-
             query = query.Where(payment =>
                 (payment.ClientCaseId.HasValue && visibleCaseIds.Contains(payment.ClientCaseId.Value)) ||
                 payment.InvoiceClientCases.Any(link => visibleCaseIds.Contains(link.ClientCaseId)));
@@ -490,7 +508,7 @@ public class ClientsController : ControllerBase
 
         foreach (var payment in visiblePayments)
         {
-            var linkedCases = ResolveLinkedCases(payment, caseId).ToList();
+            var linkedCases = ResolveLinkedCases(payment, caseId, visibleCaseIdSet).ToList();
             if (linkedCases.Count == 0)
             {
                 continue;
@@ -599,13 +617,17 @@ public class ClientsController : ControllerBase
             .ToList();
     }
 
-    private static IEnumerable<ClientCase> ResolveLinkedCases(Payment payment, int? selectedCaseId)
+    private static IEnumerable<ClientCase> ResolveLinkedCases(
+        Payment payment,
+        int? selectedCaseId,
+        IReadOnlySet<int> visibleCaseIds)
     {
         var linkedCases = payment.InvoiceClientCases
             .Select(link => link.ClientCase)
             .Concat(payment.ClientCase is not null ? new[] { payment.ClientCase } : Array.Empty<ClientCase>())
             .Where(clientCase => clientCase is not null)
             .Cast<ClientCase>()
+            .Where(clientCase => visibleCaseIds.Contains(clientCase.Id))
             .GroupBy(clientCase => clientCase.Id)
             .Select(group => group.First());
 
