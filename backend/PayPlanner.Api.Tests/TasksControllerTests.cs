@@ -2795,6 +2795,37 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task CommentEndpoints_ReturnNotFoundForHiddenTask()
+    {
+        await using var db = await CreateContextAsync();
+        var current = await CreateTaskUserAsync(db, "task-comments-own@example.com", "Ограниченный пользователь", canEdit: true);
+        var other = await CreateTaskUserAsync(db, "task-comments-other@example.com", "Другой автор", canEdit: true);
+        var client = await CreateClientAsync(db, "Клиент комментариев задач");
+        var hiddenTask = await CreateTaskAsync(db, other.Id, client.Id, other.Id);
+        db.TaskJournalComments.Add(new TaskJournalComment
+        {
+            TaskJournalItemId = hiddenTask.Id,
+            AuthorUserId = other.Id,
+            AuthorName = other.FullName,
+            Kind = "comment",
+            Text = "Скрытый комментарий",
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), current);
+
+        var commentsResult = await controller.GetComments(hiddenTask.Id, CancellationToken.None);
+        var createResult = await controller.CreateComment(hiddenTask.Id, new CreateTaskJournalCommentRequest
+        {
+            Text = "Попытка добавить комментарий",
+        }, CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(commentsResult.Result);
+        Assert.IsType<NotFoundResult>(createResult.Result);
+        Assert.Equal(1, await db.TaskJournalComments.CountAsync(item => item.TaskJournalItemId == hiddenTask.Id));
+    }
+
+    [Fact]
     public async Task UploadFile_CreatesDocumentVersionsAndHistory()
     {
         await using var db = await CreateContextAsync();
