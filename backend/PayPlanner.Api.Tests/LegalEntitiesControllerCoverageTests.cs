@@ -441,6 +441,113 @@ public class LegalEntitiesControllerCoverageTests
     }
 
     [Fact]
+    public async Task GetPaged_HidesFinancialRelatedDocuments_WhenSectionViewAccessDenied()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, isActive: true);
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                RoleId = user.RoleId,
+                Section = RolePermissionCatalog.LegalEntities,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = user.RoleId,
+                Section = RolePermissionCatalog.Accounts,
+                CanView = false,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = user.RoleId,
+                Section = RolePermissionCatalog.Acts,
+                CanView = false,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = user.RoleId,
+                Section = RolePermissionCatalog.Contracts,
+                CanView = false,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = user.RoleId,
+                Section = RolePermissionCatalog.Payments,
+                CanView = false,
+                ViewScope = DataVisibilityScope.All,
+            });
+
+        var legalEntityId = await CreateLegalEntityAsync(db, "Restricted Legal", inn: "7700000111");
+        var contract = new Contract
+        {
+            Number = "LC-SEC",
+            Date = DateTime.UtcNow.Date,
+        };
+        db.Contracts.Add(contract);
+        await db.SaveChangesAsync();
+
+        db.LegalEntityContracts.Add(new LegalEntityContract
+        {
+            LegalEntityId = legalEntityId,
+            ContractId = contract.Id,
+        });
+        db.Acts.Add(new Act
+        {
+            LegalEntityId = legalEntityId,
+            Number = "LA-SEC",
+            Date = DateTime.UtcNow.Date,
+            Amount = 500m,
+        });
+        db.Payments.AddRange(
+            new Payment
+            {
+                LegalEntityId = legalEntityId,
+                DocumentKind = DocumentKind.Invoice,
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Pending,
+                Date = DateTime.UtcNow.Date,
+                Amount = 1000m,
+            },
+            new Payment
+            {
+                LegalEntityId = legalEntityId,
+                DocumentKind = DocumentKind.Payment,
+                Type = PaymentType.Income,
+                Status = PaymentStatus.Completed,
+                Date = DateTime.UtcNow.Date,
+                Amount = 2000m,
+            });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(
+            db,
+            new StubLegalEntityEnrichmentService(),
+            currentUserId: user.Id,
+            isAdmin: false);
+
+        var action = await controller.GetPaged(search: "Restricted", page: 1, pageSize: 10, ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var page = Assert.IsType<PagedResponse<LegalEntityListItemDto>>(ok.Value);
+        var item = Assert.Single(page.Items);
+
+        Assert.Equal(legalEntityId, item.Id);
+        Assert.Equal(0, item.ContractsCount);
+        Assert.Equal(0, item.InvoicesCount);
+        Assert.Equal(0, item.ActsCount);
+        Assert.Equal(0, item.PaymentsCount);
+        Assert.Empty(item.RelatedContracts);
+        Assert.Empty(item.RelatedInvoices);
+        Assert.Empty(item.RelatedActs);
+        Assert.Empty(item.RelatedPayments);
+    }
+
+    [Fact]
     public async Task GetPaged_DeduplicatesRelatedInvoices_WithSameVisibleNumber()
     {
         await using var db = await CreateContextAsync();

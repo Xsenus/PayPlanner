@@ -1388,6 +1388,14 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             .ToListAsync(ct);
 
         var itemIds = items.Select(item => item.Id).ToList();
+        var accountsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+        var actsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Acts, ct);
+        var contractsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Contracts, ct);
+        var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+        var visibleContracts = _db.Contracts
+            .AsNoTracking()
+            .ApplyContractVisibility(contractsVisibility);
+
         var casesCountByLegalEntity = itemIds.Count == 0
             ? new Dictionary<int, int>()
             : await _db.ClientCases
@@ -1438,6 +1446,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             ? new Dictionary<int, int>()
             : await _db.LegalEntityContracts
                 .AsNoTracking()
+                .Where(link => visibleContracts.Any(contract => contract.Id == link.ContractId))
                 .Where(link => itemIds.Contains(link.LegalEntityId))
                 .GroupBy(link => link.LegalEntityId)
                 .Select(group => new { LegalEntityId = group.Key, Count = group.Count() })
@@ -1448,6 +1457,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
         {
             var contractRows = await _db.LegalEntityContracts
                 .AsNoTracking()
+                .Where(link => visibleContracts.Any(contract => contract.Id == link.ContractId))
                 .Where(link => itemIds.Contains(link.LegalEntityId))
                 .Select(link => new
                 {
@@ -1482,6 +1492,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             ? new Dictionary<int, int>()
             : await _db.Acts
                 .AsNoTracking()
+                .ApplyActVisibility(actsVisibility)
                 .Where(act => act.LegalEntityId.HasValue
                     && itemIds.Contains(act.LegalEntityId.Value))
                 .GroupBy(act => act.LegalEntityId!.Value)
@@ -1493,6 +1504,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
         {
             var actRows = await _db.Acts
                 .AsNoTracking()
+                .ApplyActVisibility(actsVisibility)
                 .Where(act => act.LegalEntityId.HasValue
                     && itemIds.Contains(act.LegalEntityId.Value))
                 .Select(act => new
@@ -1537,6 +1549,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
         {
             var invoiceRows = await _db.Payments
                 .AsNoTracking()
+                .ApplyPaymentVisibility(accountsVisibility)
                 .Where(payment => payment.DocumentKind == DocumentKind.Invoice)
                 .Where(payment =>
                     (payment.LegalEntityId.HasValue
@@ -1624,6 +1637,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
 
             var paymentRows = await _db.Payments
                 .AsNoTracking()
+                .ApplyPaymentVisibility(paymentsVisibility)
                 .Where(payment => payment.DocumentKind != DocumentKind.Invoice)
                 .Where(payment =>
                     (payment.LegalEntityId.HasValue
