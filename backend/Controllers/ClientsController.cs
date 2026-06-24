@@ -305,14 +305,16 @@ public class ClientsController : ControllerBase
         {
             return Unauthorized();
         }
+        var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
 
         if (QueryExtensions.NormalizeClientRole(clientRole) == "counterparty")
         {
-            return Ok(await BuildSupplierCaseFinanceSummariesAsync(id, paymentsVisibility, ct));
+            return Ok(await BuildSupplierCaseFinanceSummariesAsync(id, paymentsVisibility, casesVisibility, ct));
         }
 
         var caseIds = await _db.ClientCases
             .AsNoTracking()
+            .ApplyClientCaseVisibility(casesVisibility)
             .Where(c => c.ClientId == id)
             .OrderByDescending(c => c.CreatedAt)
             .Select(c => c.Id)
@@ -525,8 +527,16 @@ public class ClientsController : ControllerBase
     private async Task<List<ClientCaseFinanceSummaryDto>> BuildSupplierCaseFinanceSummariesAsync(
         int supplierId,
         DataVisibilityAccess paymentsVisibility,
+        DataVisibilityAccess? casesVisibility,
         CancellationToken ct)
     {
+        var visibleCaseIds = await _db.ClientCases
+            .AsNoTracking()
+            .ApplyClientCaseVisibility(casesVisibility)
+            .Select(clientCase => clientCase.Id)
+            .ToListAsync(ct);
+        var visibleCaseIdSet = visibleCaseIds.ToHashSet();
+
         var payments = await _db.Payments
             .AsNoTracking()
             .ApplyPaymentVisibility(paymentsVisibility)
@@ -552,6 +562,7 @@ public class ClientsController : ControllerBase
                 .Concat(payment.ClientCase is not null ? new[] { payment.ClientCase } : Array.Empty<ClientCase>())
                 .Where(clientCase => clientCase is not null)
                 .Cast<ClientCase>()
+                .Where(clientCase => visibleCaseIdSet.Contains(clientCase.Id))
                 .GroupBy(clientCase => clientCase.Id)
                 .Select(group => group.First());
 
