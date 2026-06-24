@@ -351,6 +351,36 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task GetCaseControlAutomationDiagnostics_AppliesCaseOwnerVisibility()
+    {
+        await using var db = await CreateContextAsync();
+        var current = await CreateTaskUserAsync(db, "diagnostics-own@example.com", "Ограниченный пользователь", canEdit: false);
+        var otherResponsible = await CreateAdminUserAsync(db, "diagnostics-other@example.com", "Другой ответственный");
+        var visibleClient = await CreateClientAsync(db, "Видимый клиент диагностики");
+        visibleClient.ResponsibleUserId = current.Id;
+        var hiddenClient = await CreateClientAsync(db, "Скрытый клиент диагностики");
+        hiddenClient.ResponsibleUserId = otherResponsible.Id;
+        var visibleCase = await CreateCaseAsync(db, visibleClient.Id, "ВИДИМОЕ ДЕЛО");
+        var hiddenCase = await CreateCaseAsync(db, hiddenClient.Id, "СКРЫТОЕ ДЕЛО");
+        var now = DateTime.UtcNow;
+        visibleCase.CreatedAt = now.AddDays(-45);
+        hiddenCase.CreatedAt = now.AddDays(-45);
+        db.SystemSettings.AddRange(
+            new SystemSetting { Key = "tasks.automation.caseControl.enabled", Value = "true", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = "tasks.automation.caseControl.inactiveDays", Value = "14", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = "tasks.automation.caseControl.escalationDays", Value = "30", CreatedAt = now, UpdatedAt = now });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), current);
+
+        var result = await controller.GetCaseControlAutomationDiagnostics(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalAutomationDiagnosticsDto>(ok.Value);
+        Assert.Equal(1, dto.VisibleCandidateCount);
+        Assert.Equal(1, dto.VisibleEscalationCandidateCount);
+    }
+
+    [Fact]
     public async Task CreateTask_AllowsInternalTaskWithoutClient()
     {
         await using var db = await CreateContextAsync();
