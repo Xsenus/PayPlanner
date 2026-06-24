@@ -82,6 +82,9 @@ public class PaymentsV1Controller : ControllerBase
                 return BadRequest("IncomeType.PaymentType mismatches payment.Type");
         }
 
+        var createValidationError = await ValidatePaymentAttributionAsync(model, ct);
+        if (createValidationError is not null) return createValidationError;
+
         model.Account = string.IsNullOrWhiteSpace(model.Account) ? null : model.Account.Trim();
         _db.Payments.Add(model);
         await _db.SaveChangesAsync(ct);
@@ -139,6 +142,9 @@ public class PaymentsV1Controller : ControllerBase
         e.PaymentOrderNumber = model.PaymentOrderNumber;
         e.PaymentDocumentDate = model.PaymentDocumentDate;
 
+        var updateValidationError = await ValidatePaymentAttributionAsync(e, ct);
+        if (updateValidationError is not null) return updateValidationError;
+
         await InvoicePaymentStateService.RefreshAfterPaymentChangeAsync(_db, e, DateTime.UtcNow, ct);
         if (originalInvoiceId.HasValue
             && originalInvoiceId.Value > 0
@@ -179,5 +185,119 @@ public class PaymentsV1Controller : ControllerBase
         }
 
         return NoContent();
+    }
+
+    private async Task<ActionResult?> ValidatePaymentAttributionAsync(Payment payment, CancellationToken ct)
+    {
+        var clientsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Clients, ct);
+        var legalEntitiesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.LegalEntities, ct);
+
+        var hasClient = payment.ClientId.HasValue && payment.ClientId.Value > 0;
+        var hasLegalEntity = payment.LegalEntityId.HasValue && payment.LegalEntityId.Value > 0;
+        if (hasClient && hasLegalEntity)
+        {
+            return BadRequest("Payment must reference either clientId or legalEntityId, not both.");
+        }
+
+        if (hasClient)
+        {
+            var clientExists = await _db.Clients
+                .AsNoTracking()
+                .ApplyClientVisibility(clientsVisibility)
+                .AnyAsync(client => client.Id == payment.ClientId!.Value, ct);
+            if (!clientExists)
+            {
+                return BadRequest($"clientId {payment.ClientId!.Value} is not available");
+            }
+        }
+
+        if (hasLegalEntity)
+        {
+            var legalEntityExists = await _db.LegalEntities
+                .AsNoTracking()
+                .ApplyLegalEntityVisibility(legalEntitiesVisibility)
+                .AnyAsync(entity => entity.Id == payment.LegalEntityId!.Value, ct);
+            if (!legalEntityExists)
+            {
+                return BadRequest($"legalEntityId {payment.LegalEntityId!.Value} is not available");
+            }
+        }
+
+        var hasExpenseClient = payment.ExpenseClientId.HasValue && payment.ExpenseClientId.Value > 0;
+        var hasExpenseLegalEntity = payment.ExpenseLegalEntityId.HasValue && payment.ExpenseLegalEntityId.Value > 0;
+        if (hasExpenseClient && hasExpenseLegalEntity)
+        {
+            return BadRequest("Expense payment must reference either expenseClientId or expenseLegalEntityId, not both.");
+        }
+
+        if (payment.Type == PaymentType.Expense && hasExpenseClient)
+        {
+            var expenseClientExists = await _db.Clients
+                .AsNoTracking()
+                .ApplyClientVisibility(clientsVisibility)
+                .AnyAsync(client => client.Id == payment.ExpenseClientId!.Value, ct);
+            if (!expenseClientExists)
+            {
+                return BadRequest($"expenseClientId {payment.ExpenseClientId!.Value} is not available");
+            }
+        }
+
+        if (payment.Type == PaymentType.Expense && hasExpenseLegalEntity)
+        {
+            var expenseLegalEntityExists = await _db.LegalEntities
+                .AsNoTracking()
+                .ApplyLegalEntityVisibility(legalEntitiesVisibility)
+                .AnyAsync(entity => entity.Id == payment.ExpenseLegalEntityId!.Value, ct);
+            if (!expenseLegalEntityExists)
+            {
+                return BadRequest($"expenseLegalEntityId {payment.ExpenseLegalEntityId!.Value} is not available");
+            }
+        }
+
+        if (!payment.ClientCaseId.HasValue || payment.ClientCaseId.Value <= 0)
+        {
+            return null;
+        }
+
+        var caseOwnerClientId = payment.Type == PaymentType.Expense
+            ? payment.ExpenseClientId
+            : payment.ClientId;
+        var caseOwnerLegalEntityId = payment.Type == PaymentType.Expense
+            ? payment.ExpenseLegalEntityId
+            : payment.LegalEntityId;
+        var hasCaseOwnerClient = caseOwnerClientId.HasValue && caseOwnerClientId.Value > 0;
+        var hasCaseOwnerLegalEntity = caseOwnerLegalEntityId.HasValue && caseOwnerLegalEntityId.Value > 0;
+        if (hasCaseOwnerClient == hasCaseOwnerLegalEntity)
+        {
+            return payment.Type == PaymentType.Expense
+                ? BadRequest("ExpenseClientId or expenseLegalEntityId is required when clientCaseId is specified for expense payments.")
+                : BadRequest("ClientId or legalEntityId is required when clientCaseId is specified.");
+        }
+
+        var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
+        var clientCase = await _db.ClientCases
+            .AsNoTracking()
+            .ApplyClientCaseVisibility(casesVisibility)
+            .FirstOrDefaultAsync(item => item.Id == payment.ClientCaseId.Value, ct);
+        if (clientCase is null)
+        {
+            return BadRequest($"clientCaseId {payment.ClientCaseId.Value} is not available");
+        }
+
+        if (hasCaseOwnerClient && clientCase.ClientId != caseOwnerClientId!.Value)
+        {
+            return payment.Type == PaymentType.Expense
+                ? BadRequest($"clientCaseId {payment.ClientCaseId.Value} does not belong to expenseClientId {caseOwnerClientId.Value}")
+                : BadRequest($"clientCaseId {payment.ClientCaseId.Value} does not belong to clientId {caseOwnerClientId.Value}");
+        }
+
+        if (hasCaseOwnerLegalEntity && clientCase.LegalEntityId != caseOwnerLegalEntityId!.Value)
+        {
+            return payment.Type == PaymentType.Expense
+                ? BadRequest($"clientCaseId {payment.ClientCaseId.Value} does not belong to expenseLegalEntityId {caseOwnerLegalEntityId.Value}")
+                : BadRequest($"clientCaseId {payment.ClientCaseId.Value} does not belong to legalEntityId {caseOwnerLegalEntityId.Value}");
+        }
+
+        return null;
     }
 }
