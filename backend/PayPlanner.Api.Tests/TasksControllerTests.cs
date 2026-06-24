@@ -3417,6 +3417,43 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task BulkUpdateTasks_AppliesTaskVisibilityScope()
+    {
+        await using var db = await CreateContextAsync();
+        var current = await CreateTaskUserAsync(db, "bulk-update-own@example.com", "Ограниченный редактор", canEdit: true);
+        var other = await CreateTaskUserAsync(db, "bulk-update-other@example.com", "Другой редактор", canEdit: true);
+        var client = await CreateClientAsync(db, "Клиент массового изменения задач");
+        var visibleTask = await CreateTaskAsync(db, current.Id, client.Id, current.Id);
+        var hiddenTask = await CreateTaskAsync(db, other.Id, client.Id, other.Id);
+        visibleTask.Priority = "normal";
+        hiddenTask.Priority = "normal";
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), current);
+
+        var result = await controller.BulkUpdateTasks(new BulkUpdateTaskJournalItemsRequest
+        {
+            Ids = [visibleTask.Id, hiddenTask.Id],
+            Priority = "urgent",
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Equal(1, GetAnonymousInt(ok.Value, "updated"));
+        Assert.Equal(2, GetAnonymousInt(ok.Value, "requested"));
+        Assert.Equal(1, GetAnonymousInt(ok.Value, "skipped"));
+
+        var visiblePriority = await db.TaskJournalItems
+            .Where(item => item.Id == visibleTask.Id)
+            .Select(item => item.Priority)
+            .SingleAsync();
+        var hiddenPriority = await db.TaskJournalItems
+            .Where(item => item.Id == hiddenTask.Id)
+            .Select(item => item.Priority)
+            .SingleAsync();
+        Assert.Equal("urgent", visiblePriority);
+        Assert.Equal("normal", hiddenPriority);
+    }
+
+    [Fact]
     public async Task BulkDeleteTasks_RemovesSelectedTasks()
     {
         await using var db = await CreateContextAsync();
@@ -3444,6 +3481,43 @@ public class TasksControllerTests
             .Select(item => EF.Property<bool>(item, "IsDeleted"))
             .SingleAsync();
         Assert.True(deletedTaskIsDeleted);
+    }
+
+    [Fact]
+    public async Task BulkDeleteTasks_AppliesTaskVisibilityScope()
+    {
+        await using var db = await CreateContextAsync();
+        var current = await CreateTaskUserAsync(db, "bulk-delete-own@example.com", "Ограниченный редактор", canEdit: true);
+        var other = await CreateTaskUserAsync(db, "bulk-delete-other@example.com", "Другой редактор", canEdit: true);
+        var client = await CreateClientAsync(db, "Клиент массового удаления задач");
+        var visibleTask = await CreateTaskAsync(db, current.Id, client.Id, current.Id);
+        var hiddenTask = await CreateTaskAsync(db, other.Id, client.Id, other.Id);
+        var controller = CreateController(db, new RecordingNotificationService(), current);
+
+        var result = await controller.BulkDeleteTasks(new BulkDeleteTaskJournalItemsRequest
+        {
+            Ids = [visibleTask.Id, hiddenTask.Id],
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Equal(1, GetAnonymousInt(ok.Value, "updated"));
+        Assert.Equal(2, GetAnonymousInt(ok.Value, "requested"));
+        Assert.Equal(1, GetAnonymousInt(ok.Value, "skipped"));
+
+        Assert.False(await db.TaskJournalItems.AnyAsync(item => item.Id == visibleTask.Id));
+        Assert.True(await db.TaskJournalItems.AnyAsync(item => item.Id == hiddenTask.Id));
+        var visibleTaskIsDeleted = await db.TaskJournalItems
+            .IgnoreQueryFilters()
+            .Where(item => item.Id == visibleTask.Id)
+            .Select(item => EF.Property<bool>(item, "IsDeleted"))
+            .SingleAsync();
+        var hiddenTaskIsDeleted = await db.TaskJournalItems
+            .IgnoreQueryFilters()
+            .Where(item => item.Id == hiddenTask.Id)
+            .Select(item => EF.Property<bool>(item, "IsDeleted"))
+            .SingleAsync();
+        Assert.True(visibleTaskIsDeleted);
+        Assert.False(hiddenTaskIsDeleted);
     }
 
     [Fact]
