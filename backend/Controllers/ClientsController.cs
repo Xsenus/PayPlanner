@@ -152,7 +152,6 @@ public class ClientsController : ControllerBase
         }
 
         var clients = await BuildVisibleClientsQuery(access)
-            .Include(c => c.Cases)
             .Include(c => c.LegalEntity)
             .Include(c => c.ClientStatus)
             .Include(c => c.Addresses)
@@ -160,6 +159,27 @@ public class ClientsController : ControllerBase
             .AsNoTracking()
             .OrderBy(c => c.Name)
             .ToListAsync(ct);
+
+        var clientIds = clients.Select(client => client.Id).ToList();
+        if (clientIds.Count > 0)
+        {
+            var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
+            var visibleCases = await _db.ClientCases
+                .AsNoTracking()
+                .ApplyClientCaseVisibility(casesVisibility)
+                .Where(clientCase => clientCase.ClientId.HasValue && clientIds.Contains(clientCase.ClientId.Value))
+                .OrderByDescending(clientCase => clientCase.CreatedAt)
+                .ThenByDescending(clientCase => clientCase.Id)
+                .ToListAsync(ct);
+            var casesByClient = visibleCases
+                .GroupBy(clientCase => clientCase.ClientId!.Value)
+                .ToDictionary(group => group.Key, group => group.ToList());
+
+            foreach (var client in clients)
+            {
+                client.Cases = casesByClient.GetValueOrDefault(client.Id) ?? new List<ClientCase>();
+            }
+        }
 
         OrderClientAddresses(clients);
         PopulateResponsibleUserNames(clients);
@@ -176,7 +196,6 @@ public class ClientsController : ControllerBase
         }
 
         var client = await BuildVisibleClientsQuery(access)
-            .Include(c => c.Cases)
             .Include(c => c.LegalEntity)
             .Include(c => c.ClientStatus)
             .Include(c => c.Addresses)
@@ -187,6 +206,13 @@ public class ClientsController : ControllerBase
             OrderClientAddresses(client);
             client.ResponsibleUserName = FormatResponsibleUserName(client.ResponsibleUser);
             PopulateAuditMetadata(_db, client);
+            var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
+            client.Cases = await _db.ClientCases
+                .ApplyClientCaseVisibility(casesVisibility)
+                .Where(clientCase => clientCase.ClientId == client.Id)
+                .OrderByDescending(clientCase => clientCase.CreatedAt)
+                .ThenByDescending(clientCase => clientCase.Id)
+                .ToListAsync(ct);
             foreach (var clientCase in client.Cases)
             {
                 PopulateAuditMetadata(_db, clientCase);

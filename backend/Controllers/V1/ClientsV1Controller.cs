@@ -102,7 +102,6 @@ public class ClientsV1Controller : ControllerBase
         }
 
         var client = await BuildVisibleClientsQuery(access)
-            .Include(c => c.Cases)
             .Include(c => c.LegalEntity)
             .Include(c => c.ClientStatus)
             .Include(c => c.ResponsibleUser)
@@ -111,6 +110,14 @@ public class ClientsV1Controller : ControllerBase
         if (client is not null)
         {
             client.ResponsibleUserName = FormatResponsibleUserName(client.ResponsibleUser);
+            var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
+            client.Cases = await _db.ClientCases
+                .AsNoTracking()
+                .ApplyClientCaseVisibility(casesVisibility)
+                .Where(clientCase => clientCase.ClientId == client.Id)
+                .OrderByDescending(clientCase => clientCase.CreatedAt)
+                .ThenByDescending(clientCase => clientCase.Id)
+                .ToListAsync(ct);
         }
         return client is not null ? Ok(client) : NotFound();
     }
