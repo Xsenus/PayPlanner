@@ -795,6 +795,43 @@ public class ContractsControllerTests
     }
 
     [Fact]
+    public async Task GetDocument_RequiresContractExportPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db, email: "client@example.com");
+        var createResult = await CreateAdminController(db).Create(
+            new UpsertContractRequest
+            {
+                Number = "CT-DOC-FORBID",
+                Date = new DateTime(2026, 5, 21),
+                BillingMode = ContractBillingMode.Fixed,
+                Amount = 45_000m,
+                Clients = [new UpsertContractClientRequest { ClientId = client.Id }],
+            },
+            CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createResult.Result);
+        var createdDto = Assert.IsType<ContractDto>(created.Value);
+        var user = await CreateContractUserAsync(db, "contracts-doc-no-export", canCreate: true, canEdit: true, canDelete: true, canExport: false);
+        var controller = CreateControllerForUser(db, user.Id);
+
+        var actionResult = await controller.GetDocument(createdDto.Id, "html", templateKey: null, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(actionResult);
+    }
+
+    [Fact]
+    public async Task GetTerminationAgreement_RequiresContractExportPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateContractUserAsync(db, "contracts-termination-no-export", canCreate: true, canEdit: true, canDelete: true, canExport: false);
+        var controller = CreateControllerForUser(db, user.Id);
+
+        var actionResult = await controller.GetTerminationAgreement(123_456, "html", CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(actionResult);
+    }
+
+    [Fact]
     public async Task SendEmail_UsesClientEmailAndAttachesContractDocument()
     {
         await using var db = await CreateContextAsync();

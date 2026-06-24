@@ -1007,6 +1007,19 @@ public class InvoiceDocumentTemplateTests
     }
 
     [Fact]
+    public async Task GetDocument_RequiresAccountsExportPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        var user = await CreateAccountsUserAsync(db, "accounts-doc-no-export", canExport: false);
+        var controller = CreateController(db, isAdmin: false, userId: user.Id);
+
+        var result = await controller.GetDocument(paymentId, "html", templateKey: null, includeSignatureAndSeal: false, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result);
+    }
+
+    [Fact]
     public async Task UpsertDocumentTemplateSettings_ForbidsNonAdminUsers()
     {
         await using var db = await CreateContextAsync();

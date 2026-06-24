@@ -2698,6 +2698,11 @@ public class InvoicesController : ControllerBase
         [FromQuery] bool? includeSignatureAndSeal = null,
         CancellationToken ct = default)
     {
+        if (await RequireAccountsPermissionAsync(permission => permission.CanExport, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var payment = await LoadInvoiceDocumentPaymentAsync(id, ct);
 
         if (payment is null)

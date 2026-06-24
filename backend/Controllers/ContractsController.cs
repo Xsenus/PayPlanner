@@ -382,6 +382,11 @@ public class ContractsController : ControllerBase
         [FromQuery] string? templateKey = null,
         CancellationToken ct = default)
     {
+        if (await RequireSectionPermissionAsync(RolePermissionCatalog.Contracts, permission => permission.CanExport, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var contract = await LoadContractForDocumentAsync(id, ct);
         if (contract is null) return NotFound();
 
@@ -417,6 +422,11 @@ public class ContractsController : ControllerBase
     [HttpGet("{id:int}/termination-agreement")]
     public async Task<IActionResult> GetTerminationAgreement(int id, [FromQuery] string? format = "word", CancellationToken ct = default)
     {
+        if (await RequireSectionPermissionAsync(RolePermissionCatalog.Contracts, permission => permission.CanExport, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
         var contract = await LoadContractForDocumentAsync(id, ct);
         if (contract is null) return NotFound();
         if (!string.Equals(contract.Status, ContractStatus.Terminated, StringComparison.OrdinalIgnoreCase)
