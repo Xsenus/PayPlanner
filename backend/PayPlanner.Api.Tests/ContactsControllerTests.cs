@@ -7,6 +7,7 @@ using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
+using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using Xunit;
 
@@ -80,6 +81,97 @@ public class ContactsControllerTests
         Assert.DoesNotContain("Hidden External", xml);
     }
 
+    [Fact]
+    public async Task GetAll_WithAllScope_ReturnsContactsAcrossResponsibles()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateClientUserAsync(
+            db,
+            "contacts-all-scope",
+            canView: true,
+            canCreate: true,
+            canEdit: true,
+            canDelete: true,
+            canExport: true,
+            viewScope: DataVisibilityScope.All);
+        var otherUser = await CreateClientUserAsync(db, "contacts-all-scope-other", canView: true, canCreate: true, canEdit: true, canDelete: true, canExport: true);
+        await CreateClientAsync(db, otherUser.Id, "Other Responsible Client", "222");
+        await CreateExternalContactAsync(db, otherUser.Id, "Other Responsible External", "333");
+
+        var action = await CreateController(db, user.Id).GetAll(
+            scope: null,
+            search: null,
+            legalEntityId: null,
+            includeInactive: true,
+            syncOnly: null,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var items = Assert.IsType<List<ContactDirectoryItemDto>>(ok.Value);
+        Assert.Contains(items, item => item.FullName == "Other Responsible Client");
+        Assert.Contains(items, item => item.FullName == "Other Responsible External");
+    }
+
+    [Fact]
+    public async Task UpdateClientContact_WithAllScope_AllowsOtherResponsibleClient()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateClientUserAsync(
+            db,
+            "contacts-edit-all-scope",
+            canView: true,
+            canCreate: true,
+            canEdit: true,
+            canDelete: true,
+            canExport: true,
+            viewScope: DataVisibilityScope.All);
+        var otherUser = await CreateClientUserAsync(db, "contacts-edit-all-scope-other", canView: true, canCreate: true, canEdit: true, canDelete: true, canExport: true);
+        var client = await CreateClientAsync(db, otherUser.Id, "Other Client Before Update", "222");
+
+        var action = await CreateController(db, user.Id).UpdateClientContact(
+            client.Id,
+            BuildClientContactRequest("Other Client After Update"),
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var item = Assert.IsType<ContactDirectoryItemDto>(ok.Value);
+        Assert.Equal("Other Client After Update", item.FullName);
+
+        var stored = await db.Clients.AsNoTracking().SingleAsync(entity => entity.Id == client.Id);
+        Assert.Equal("Other Client After Update", stored.Name);
+        Assert.Equal(otherUser.Id, stored.ResponsibleUserId);
+    }
+
+    [Fact]
+    public async Task UpdateExternalContact_WithAllScope_AllowsOtherResponsibleContact()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateClientUserAsync(
+            db,
+            "contacts-external-all-scope",
+            canView: true,
+            canCreate: true,
+            canEdit: true,
+            canDelete: true,
+            canExport: true,
+            viewScope: DataVisibilityScope.All);
+        var otherUser = await CreateClientUserAsync(db, "contacts-external-all-scope-other", canView: true, canCreate: true, canEdit: true, canDelete: true, canExport: true);
+        var contact = await CreateExternalContactAsync(db, otherUser.Id, "Other External Before Update", "333");
+
+        var action = await CreateController(db, user.Id).UpdateExternalContact(
+            contact.Id,
+            BuildExternalContactRequest("Other External After Update"),
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var item = Assert.IsType<ContactDirectoryItemDto>(ok.Value);
+        Assert.Equal("Other External After Update", item.FullName);
+
+        var stored = await db.ExternalContacts.AsNoTracking().SingleAsync(entity => entity.Id == contact.Id);
+        Assert.Equal("Other External After Update", stored.FullName);
+        Assert.Equal(otherUser.Id, stored.ResponsibleUserId);
+    }
+
     private static UpsertExternalContactRequest BuildExternalContactRequest(string name)
         => new()
         {
@@ -147,7 +239,8 @@ public class ContactsControllerTests
         bool canCreate,
         bool canEdit,
         bool canDelete,
-        bool canExport)
+        bool canExport,
+        string viewScope = DataVisibilityScope.Own)
     {
         var role = new Role
         {
@@ -163,7 +256,7 @@ public class ContactsControllerTests
                     CanEdit = canEdit,
                     CanDelete = canDelete,
                     CanExport = canExport,
-                    ViewScope = DataVisibilityScope.All,
+                    ViewScope = viewScope,
                 },
             },
         };

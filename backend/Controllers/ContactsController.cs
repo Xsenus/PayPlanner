@@ -52,15 +52,15 @@ public class ContactsController : ControllerBase
         [FromQuery] bool? syncOnly = null,
         CancellationToken ct = default)
     {
-        var access = await GetCurrentAccessAsync(ct);
-        if (!access.UserId.HasValue)
-        {
-            return Unauthorized();
-        }
-
         if (await RequireClientsPermissionAsync(static permission => permission.CanView, ct) is { } forbidden)
         {
             return forbidden;
+        }
+
+        var access = await GetCurrentAccessAsync(ct);
+        if (access is null)
+        {
+            return Unauthorized();
         }
 
         var normalizedScope = NormalizeScope(scope);
@@ -69,7 +69,7 @@ public class ContactsController : ControllerBase
         if (!string.Equals(normalizedScope, "external", StringComparison.Ordinal))
         {
             IQueryable<Client> clientsQuery = _db.Clients
-                .ApplyClientVisibility(access.IsAdmin, access.UserId)
+                .ApplyClientVisibility(access)
                 .Include(x => x.LegalEntity)
                 .Include(x => x.ResponsibleUser);
 
@@ -89,7 +89,7 @@ public class ContactsController : ControllerBase
 
         if (!string.Equals(normalizedScope, "clients", StringComparison.Ordinal))
         {
-            IQueryable<ExternalContact> externalQuery = BuildVisibleExternalContactsQuery(access.UserId, access.IsAdmin)
+            IQueryable<ExternalContact> externalQuery = BuildVisibleExternalContactsQuery(access)
                 .Include(x => x.LegalEntity)
                 .Include(x => x.ResponsibleUser);
 
@@ -148,7 +148,7 @@ public class ContactsController : ControllerBase
         }
 
         var access = await GetCurrentAccessAsync(ct);
-        if (!access.UserId.HasValue)
+        if (access is null)
         {
             return Unauthorized();
         }
@@ -159,7 +159,7 @@ public class ContactsController : ControllerBase
         }
 
         var client = await _db.Clients
-            .ApplyClientVisibility(access.IsAdmin, access.UserId)
+            .ApplyClientVisibility(access)
             .Include(x => x.LegalEntity)
             .Include(x => x.ResponsibleUser)
             .FirstOrDefaultAsync(x => x.Id == id, ct);
@@ -218,7 +218,7 @@ public class ContactsController : ControllerBase
         }
 
         var access = await GetCurrentAccessAsync(ct);
-        if (!access.UserId.HasValue)
+        if (access is null)
         {
             return Unauthorized();
         }
@@ -234,7 +234,7 @@ public class ContactsController : ControllerBase
             return BadRequest("Указанное юридическое лицо не найдено.");
         }
 
-        var responsibleUserId = access.IsAdmin ? request.ResponsibleUserId ?? access.UserId.Value : access.UserId.Value;
+        var responsibleUserId = access.IsAdmin ? request.ResponsibleUserId ?? access.UserId : access.UserId;
         if (!await ResponsibleUserExistsAsync(responsibleUserId, ct))
         {
             return BadRequest("Указанный ответственный не найден.");
@@ -284,7 +284,7 @@ public class ContactsController : ControllerBase
         }
 
         var access = await GetCurrentAccessAsync(ct);
-        if (!access.UserId.HasValue)
+        if (access is null)
         {
             return Unauthorized();
         }
@@ -294,7 +294,7 @@ public class ContactsController : ControllerBase
             return forbidden;
         }
 
-        var entity = await BuildVisibleExternalContactsQuery(access.UserId, access.IsAdmin)
+        var entity = await BuildVisibleExternalContactsQuery(access)
             .Include(x => x.LegalEntity)
             .Include(x => x.ResponsibleUser)
             .FirstOrDefaultAsync(x => x.Id == id, ct);
@@ -343,7 +343,7 @@ public class ContactsController : ControllerBase
     public async Task<IActionResult> DeleteExternalContact(int id, CancellationToken ct)
     {
         var access = await GetCurrentAccessAsync(ct);
-        if (!access.UserId.HasValue)
+        if (access is null)
         {
             return Unauthorized();
         }
@@ -353,7 +353,7 @@ public class ContactsController : ControllerBase
             return forbidden;
         }
 
-        var entity = await BuildVisibleExternalContactsQuery(access.UserId, access.IsAdmin)
+        var entity = await BuildVisibleExternalContactsQuery(access)
             .FirstOrDefaultAsync(x => x.Id == id, ct);
         if (entity is null)
         {
@@ -369,7 +369,7 @@ public class ContactsController : ControllerBase
     public async Task<IActionResult> DownloadYealinkXml(CancellationToken ct)
     {
         var access = await GetCurrentAccessAsync(ct);
-        if (!access.UserId.HasValue)
+        if (access is null)
         {
             return Unauthorized();
         }
@@ -380,13 +380,13 @@ public class ContactsController : ControllerBase
         }
 
         var clients = await _db.Clients
-            .ApplyClientVisibility(access.IsAdmin, access.UserId)
+            .ApplyClientVisibility(access)
             .Include(x => x.LegalEntity)
             .Include(x => x.ResponsibleUser)
             .Where(x => x.IsActive)
             .ToListAsync(ct);
 
-        var externalContacts = await BuildVisibleExternalContactsQuery(access.UserId, access.IsAdmin)
+        var externalContacts = await BuildVisibleExternalContactsQuery(access)
             .Include(x => x.LegalEntity)
             .Include(x => x.ResponsibleUser)
             .Where(x => x.IsActive)
@@ -422,7 +422,7 @@ public class ContactsController : ControllerBase
         CancellationToken ct = default)
     {
         var access = await GetCurrentAccessAsync(ct);
-        if (!access.UserId.HasValue)
+        if (access is null)
         {
             return Unauthorized();
         }
@@ -594,7 +594,7 @@ public class ContactsController : ControllerBase
                             Phone = phones.FirstOrDefault() ?? string.Empty,
                             Email = string.Empty,
                             Notes = SerializeClientProfileObject(profile),
-                            ResponsibleUserId = access.UserId.Value,
+                            ResponsibleUserId = access.UserId,
                             IsActive = true,
                             CreatedAt = now,
                         };
@@ -614,7 +614,7 @@ public class ContactsController : ControllerBase
                             Notes = string.IsNullOrWhiteSpace(groupName)
                                 ? YealinkImportNote
                                 : $"{YealinkImportNote}. Группа: {groupName}",
-                            ResponsibleUserId = access.UserId.Value,
+                            ResponsibleUserId = access.UserId,
                             IsActive = true,
                             SyncToPhonebook = true,
                             CreatedAt = now,
@@ -647,32 +647,24 @@ public class ContactsController : ControllerBase
         return Ok(result);
     }
 
-    private async Task<(int? UserId, bool IsAdmin)> GetCurrentAccessAsync(CancellationToken ct)
-    {
-        var currentUserId = User.GetUserId();
-        if (!currentUserId.HasValue)
-        {
-            return (null, false);
-        }
+    private Task<DataVisibilityAccess?> GetCurrentAccessAsync(CancellationToken ct)
+        => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Clients, ct);
 
-        var isAdmin = await _db.IsUserAdminAsync(currentUserId.Value, ct);
-        return (currentUserId, isAdmin);
-    }
-
-    private IQueryable<ExternalContact> BuildVisibleExternalContactsQuery(int? currentUserId, bool isAdmin)
+    private IQueryable<ExternalContact> BuildVisibleExternalContactsQuery(DataVisibilityAccess? access)
     {
         var query = _db.ExternalContacts.AsQueryable();
-        if (isAdmin)
-        {
-            return query;
-        }
-
-        if (!currentUserId.HasValue)
+        if (access is null)
         {
             return query.Where(_ => false);
         }
 
-        return query.Where(x => x.ResponsibleUserId == currentUserId.Value);
+        if (access.SeesAll)
+        {
+            return query;
+        }
+
+        var visibleUserIds = access.VisibleUserIds.ToArray();
+        return query.Where(x => x.ResponsibleUserId.HasValue && visibleUserIds.Contains(x.ResponsibleUserId.Value));
     }
 
     private async Task<bool> ResponsibleUserExistsAsync(int? responsibleUserId, CancellationToken ct)
