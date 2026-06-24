@@ -232,7 +232,11 @@ public class ClientsV2Controller : ControllerBase
         {
             var accountsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
             var actsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Acts, ct);
+            var contractsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Contracts, ct);
             var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+            var visibleContracts = _db.Contracts
+                .AsNoTracking()
+                .ApplyContractVisibility(contractsVisibility);
 
             var casesCountByClient = await _db.ClientCases
                 .AsNoTracking()
@@ -265,6 +269,7 @@ public class ClientsV2Controller : ControllerBase
 
             var contractsCountByClient = await _db.ClientContracts
                 .AsNoTracking()
+                .Where(c => visibleContracts.Any(contract => contract.Id == c.ContractId))
                 .Where(c => itemIds.Contains(c.ClientId))
                 .GroupBy(c => c.ClientId)
                 .Select(g => new { ClientId = g.Key, Count = g.Count() })
@@ -272,6 +277,7 @@ public class ClientsV2Controller : ControllerBase
 
             var contractRows = await _db.ClientContracts
                 .AsNoTracking()
+                .Where(c => visibleContracts.Any(contract => contract.Id == c.ContractId))
                 .Where(c => itemIds.Contains(c.ClientId))
                 .Select(c => new
                 {

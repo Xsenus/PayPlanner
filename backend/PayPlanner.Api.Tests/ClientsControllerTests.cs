@@ -185,6 +185,13 @@ public class ClientsControllerTests
             new RolePermission
             {
                 RoleId = roleId,
+                Section = RolePermissionCatalog.Contracts,
+                CanView = false,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = roleId,
                 Section = RolePermissionCatalog.Payments,
                 CanView = false,
                 ViewScope = DataVisibilityScope.All,
@@ -199,6 +206,21 @@ public class ClientsControllerTests
         db.Clients.Add(client);
         await db.SaveChangesAsync();
 
+        var contract = new Contract
+        {
+            Number = "C-SEC",
+            Date = DateTime.UtcNow.Date,
+            BillingMode = ContractBillingMode.Fixed,
+            Amount = 3000m,
+        };
+        db.Contracts.Add(contract);
+        await db.SaveChangesAsync();
+
+        db.ClientContracts.Add(new ClientContract
+        {
+            ClientId = client.Id,
+            ContractId = contract.Id,
+        });
         db.Acts.Add(new Act
         {
             ClientId = client.Id,
@@ -258,9 +280,11 @@ public class ClientsControllerTests
         var item = Assert.Single(items);
 
         Assert.Equal(client.Id, item.Id);
+        Assert.Equal(0, item.ContractsCount);
         Assert.Equal(0, item.InvoicesCount);
         Assert.Equal(0, item.ActsCount);
         Assert.Equal(0, item.PaymentsCount);
+        Assert.Empty(item.RelatedContracts);
         Assert.Empty(item.RelatedInvoices);
         Assert.Empty(item.RelatedActs);
         Assert.Empty(item.RelatedPayments);
