@@ -614,6 +614,30 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task UpdateControl_ReturnsNotFoundForHiddenTask()
+    {
+        await using var db = await CreateContextAsync();
+        var current = await CreateTaskUserAsync(db, "task-control-own@example.com", "Ограниченный редактор", canEdit: true);
+        var other = await CreateTaskUserAsync(db, "task-control-other@example.com", "Другой редактор", canEdit: true);
+        var client = await CreateClientAsync(db, "Клиент контроля задачи");
+        var hiddenTask = await CreateTaskAsync(db, other.Id, client.Id, other.Id);
+        var controller = CreateController(db, new RecordingNotificationService(), current);
+
+        var result = await controller.UpdateControl(hiddenTask.Id, new UpdateTaskJournalControlRequest
+        {
+            IsUnderControl = true,
+        }, CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(result.Result);
+
+        var stored = await db.TaskJournalItems
+            .Include(item => item.Participants)
+            .SingleAsync(item => item.Id == hiddenTask.Id);
+        Assert.False(stored.IsUnderControl);
+        Assert.DoesNotContain(stored.Participants, participant => participant.UserId == current.Id);
+    }
+
+    [Fact]
     public async Task UpdateStatus_DoneWithResult_NotifiesAuthor()
     {
         await using var db = await CreateContextAsync();
@@ -3234,6 +3258,43 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task UpdateApproval_ReturnsNotFoundForHiddenTask()
+    {
+        await using var db = await CreateContextAsync();
+        var current = await CreateTaskUserAsync(db, "task-approval-own@example.com", "Ограниченный пользователь", canEdit: false);
+        var other = await CreateTaskUserAsync(db, "task-approval-other@example.com", "Другой согласующий", canEdit: true);
+        var client = await CreateClientAsync(db, "Клиент согласования задачи");
+        var hiddenTask = await CreateTaskAsync(db, other.Id, client.Id, other.Id);
+        hiddenTask.Status = "onApproval";
+        hiddenTask.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = other.Id,
+            Role = "approver",
+            DisplayName = other.FullName,
+            Email = other.Email,
+            ApprovalStatus = "pending",
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), current);
+
+        var result = await controller.UpdateApproval(hiddenTask.Id, new UpdateTaskJournalApprovalRequest
+        {
+            Decision = "approved",
+        }, CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(result.Result);
+
+        var stored = await db.TaskJournalItems
+            .Include(item => item.Participants)
+            .Include(item => item.Comments)
+            .SingleAsync(item => item.Id == hiddenTask.Id);
+        Assert.Equal("onApproval", stored.Status);
+        var participant = Assert.Single(stored.Participants, item => item.Role == "approver");
+        Assert.Equal("pending", participant.ApprovalStatus);
+        Assert.Empty(stored.Comments);
+    }
+
+    [Fact]
     public async Task UpdateApproval_AllApproversApprovedAllowsCompletion()
     {
         await using var db = await CreateContextAsync();
@@ -3536,6 +3597,28 @@ public class TasksControllerTests
         var cancelled = Assert.Single(notificationService.CancelledTaskIds);
         Assert.Equal(task.Id, cancelled.TaskId);
         Assert.Equal("Удалена", cancelled.Action);
+    }
+
+    [Fact]
+    public async Task DeleteTask_ReturnsNotFoundForHiddenTask()
+    {
+        await using var db = await CreateContextAsync();
+        var current = await CreateTaskUserAsync(db, "task-delete-own@example.com", "Ограниченный редактор", canEdit: true);
+        var other = await CreateTaskUserAsync(db, "task-delete-other@example.com", "Другой редактор", canEdit: true);
+        var client = await CreateClientAsync(db, "Клиент удаления задачи");
+        var hiddenTask = await CreateTaskAsync(db, other.Id, client.Id, other.Id);
+        var controller = CreateController(db, new RecordingNotificationService(), current);
+
+        var result = await controller.DeleteTask(hiddenTask.Id, CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(result);
+        Assert.True(await db.TaskJournalItems.AnyAsync(item => item.Id == hiddenTask.Id));
+        var hiddenTaskIsDeleted = await db.TaskJournalItems
+            .IgnoreQueryFilters()
+            .Where(item => item.Id == hiddenTask.Id)
+            .Select(item => EF.Property<bool>(item, "IsDeleted"))
+            .SingleAsync();
+        Assert.False(hiddenTaskIsDeleted);
     }
 
     [Fact]
