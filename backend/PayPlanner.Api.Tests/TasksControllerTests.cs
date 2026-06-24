@@ -805,6 +805,27 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task CreateDeadlineChangeRequest_ReturnsNotFoundForHiddenTask()
+    {
+        await using var db = await CreateContextAsync();
+        var current = await CreateTaskUserAsync(db, "deadline-own@example.com", "Ограниченный исполнитель", canEdit: false);
+        var other = await CreateTaskUserAsync(db, "deadline-other@example.com", "Другой исполнитель", canEdit: false);
+        var author = await CreateAdminUserAsync(db, "deadline-author@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Клиент переноса срока");
+        var hiddenTask = await CreateTaskAsync(db, author.Id, client.Id, other.Id);
+        var controller = CreateController(db, new RecordingNotificationService(), current);
+
+        var result = await controller.CreateDeadlineChangeRequest(hiddenTask.Id, new CreateTaskJournalDeadlineChangeRequest
+        {
+            RequestedDueAt = hiddenTask.DueAt.AddDays(1),
+            Reason = "Попытка переноса скрытой задачи",
+        }, CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(result.Result);
+        Assert.False(await db.TaskJournalComments.AnyAsync(item => item.TaskJournalItemId == hiddenTask.Id));
+    }
+
+    [Fact]
     public async Task GetTasks_SearchesByClientAndClientCase()
     {
         await using var db = await CreateContextAsync();
