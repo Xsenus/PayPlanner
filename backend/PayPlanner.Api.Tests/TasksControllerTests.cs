@@ -563,6 +563,21 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task GetTask_ReturnsNotFoundForHiddenTask()
+    {
+        await using var db = await CreateContextAsync();
+        var current = await CreateTaskUserAsync(db, "task-read-own@example.com", "Ограниченный пользователь", canEdit: false);
+        var other = await CreateTaskUserAsync(db, "task-read-other@example.com", "Другой пользователь", canEdit: true);
+        var client = await CreateClientAsync(db, "Клиент чтения задачи");
+        var hiddenTask = await CreateTaskAsync(db, other.Id, client.Id, other.Id);
+        var controller = CreateController(db, new RecordingNotificationService(), current);
+
+        var result = await controller.GetTask(hiddenTask.Id, CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(result.Result);
+    }
+
+    [Fact]
     public async Task UpdateTask_DoneWithoutResultRequiresResult()
     {
         await using var db = await CreateContextAsync();
@@ -2446,6 +2461,28 @@ public class TasksControllerTests
             notification.TaskId == task.Id
             && notification.Title == "Задача выполнена"
             && notification.Tone == "blue");
+    }
+
+    [Fact]
+    public async Task GetNotifications_ExcludesHiddenTasks()
+    {
+        await using var db = await CreateContextAsync();
+        var current = await CreateTaskUserAsync(db, "notifications-own@example.com", "Ограниченный пользователь", canEdit: false);
+        var other = await CreateTaskUserAsync(db, "notifications-other@example.com", "Другой пользователь", canEdit: true);
+        var client = await CreateClientAsync(db, "Клиент уведомлений задач");
+        var visibleTask = await CreateTaskAsync(db, current.Id, client.Id, current.Id);
+        var hiddenTask = await CreateTaskAsync(db, other.Id, client.Id, other.Id);
+        visibleTask.DueAt = DateTime.UtcNow.AddMinutes(20);
+        hiddenTask.DueAt = DateTime.UtcNow.AddMinutes(20);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), current);
+
+        var result = await controller.GetNotifications(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var notifications = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalNotificationDto>>(ok.Value);
+        Assert.Contains(notifications, notification => notification.TaskId == visibleTask.Id);
+        Assert.DoesNotContain(notifications, notification => notification.TaskId == hiddenTask.Id);
     }
 
     [Fact]
