@@ -74,6 +74,26 @@ public static class RolePermissionCatalog
             ? DataVisibilityScope.All
             : DataVisibilityScope.Own;
 
+    public static IReadOnlyDictionary<string, RolePermissionValues> BuildRestrictedDefaults(bool allowRoleManagement)
+    {
+        if (allowRoleManagement)
+        {
+            return BuildDefaults(allowRoleManagement: true);
+        }
+
+        return AllSections.ToDictionary(
+            section => section,
+            section => new RolePermissionValues(
+                CanView: false,
+                CanCreate: false,
+                CanEdit: false,
+                CanDelete: false,
+                CanExport: false,
+                CanViewAnalytics: false,
+                ViewScope: GetDefaultViewScope(section, allowRoleManagement: false)),
+            StringComparer.OrdinalIgnoreCase);
+    }
+
     public static IReadOnlyDictionary<string, RolePermissionValues> BuildDefaults(bool allowRoleManagement)
         => new Dictionary<string, RolePermissionValues>(StringComparer.OrdinalIgnoreCase)
         {
@@ -170,6 +190,22 @@ public static class RolePermissionCatalog
 
     public static List<RolePermission> CreateEntities(int roleId, bool allowRoleManagement)
         => BuildDefaults(allowRoleManagement)
+            .Select(pair => new RolePermission
+            {
+                RoleId = roleId,
+                Section = pair.Key,
+                CanView = pair.Value.CanView,
+                CanCreate = pair.Value.CanCreate,
+                CanEdit = pair.Value.CanEdit,
+                CanDelete = pair.Value.CanDelete,
+                CanExport = pair.Value.CanExport,
+                CanViewAnalytics = pair.Value.CanViewAnalytics,
+                ViewScope = pair.Value.ViewScope
+            })
+            .ToList();
+
+    public static List<RolePermission> CreateRestrictedEntities(int roleId, bool allowRoleManagement)
+        => BuildRestrictedDefaults(allowRoleManagement)
             .Select(pair => new RolePermission
             {
                 RoleId = roleId,

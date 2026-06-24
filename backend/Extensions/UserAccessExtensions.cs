@@ -66,19 +66,7 @@ public static class UserAccessExtensions
             return permission;
         }
 
-        var fallbackSection = RolePermissionCatalog.GetFallbackSection(section);
-        if (string.IsNullOrWhiteSpace(fallbackSection))
-        {
-            return null;
-        }
-
-        return await db.Users
-            .AsNoTracking()
-            .Where(u => u.Id == userId && u.IsActive)
-            .SelectMany(
-                u => db.RolePermissions
-                    .Where(item => item.RoleId == u.RoleId && item.Section == fallbackSection))
-            .FirstOrDefaultAsync(ct);
+        return null;
     }
 
     public static async Task<bool> HasUserSectionPermissionAsync(
@@ -116,7 +104,9 @@ public static class UserAccessExtensions
                 return false;
             }
 
-            var fallbackValues = RolePermissionCatalog.BuildDefaults(allowRoleManagement: principal.IsInRole("admin"))[section];
+            var fallbackValues = principal.IsInRole("admin")
+                ? RolePermissionCatalog.BuildDefaults(allowRoleManagement: true)[section]
+                : RolePermissionCatalog.BuildRestrictedDefaults(allowRoleManagement: false)[section];
             return fallbackValues.CanView && isAllowed(fallbackValues);
         }
 
@@ -132,26 +122,23 @@ public static class UserAccessExtensions
             .FirstOrDefaultAsync(ct);
         if (permission is null)
         {
-            var fallbackSection = RolePermissionCatalog.GetFallbackSection(section);
-            if (!string.IsNullOrWhiteSpace(fallbackSection))
+            if (!await db.RolePermissions.AsNoTracking().AnyAsync(item => item.RoleId == user.RoleId, ct))
             {
-                permission = await db.RolePermissions
-                    .AsNoTracking()
-                    .Where(item => item.RoleId == user.RoleId && item.Section == fallbackSection)
-                    .FirstOrDefaultAsync(ct);
+                var fallbackValues = RolePermissionCatalog.BuildDefaults(allowRoleManagement: false)[section];
+                return fallbackValues.CanView && isAllowed(fallbackValues);
             }
+
+            return false;
         }
 
-        var values = permission is null
-            ? RolePermissionCatalog.BuildDefaults(allowRoleManagement: false)[section]
-            : new RolePermissionValues(
-                permission.CanView,
-                permission.CanCreate,
-                permission.CanEdit,
-                permission.CanDelete,
-                permission.CanExport,
-                permission.CanViewAnalytics,
-                permission.ViewScope);
+        var values = new RolePermissionValues(
+            permission.CanView,
+            permission.CanCreate,
+            permission.CanEdit,
+            permission.CanDelete,
+            permission.CanExport,
+            permission.CanViewAnalytics,
+            permission.ViewScope);
 
         return values.CanView && isAllowed(values);
     }

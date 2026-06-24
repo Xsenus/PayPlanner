@@ -123,6 +123,40 @@ public class RolePermissionsAuditTests
     }
 
     [Fact]
+    public async Task Get_ReturnsClosedSections_WhenLegacyRoleMissesPermissions()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "legacy-lawyer-detail", Description = "Imported lawyer role" };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = role.Id,
+            Section = RolePermissionCatalog.Clients,
+            CanView = true,
+            CanCreate = true,
+            CanEdit = true,
+            CanDelete = true,
+            CanExport = true,
+            ViewScope = DataVisibilityScope.All,
+        });
+        await db.SaveChangesAsync();
+
+        var admin = await CreateAdminUserAsync(db);
+        var controller = CreateController(db, CreateAdminPrincipal(admin.Id));
+
+        var response = await controller.Get(role.Id, CancellationToken.None);
+
+        var dto = AssertOk<RolePermissionsDto>(response);
+        Assert.True(dto.Clients.CanView);
+        Assert.False(dto.Cases.CanView);
+        Assert.False(dto.Payments.CanView);
+        Assert.False(dto.Roles.CanView);
+        Assert.Equal(DataVisibilityScope.Own, dto.Cases.ViewScope);
+    }
+
+    [Fact]
     public async Task ExportAuditCsv_ReturnsRoleAuditRows()
     {
         await using var db = await CreateContextAsync();

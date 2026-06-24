@@ -123,3 +123,29 @@ export const defaultRolePermissions: RolePermissions = {
   yandexDisk: { ...defaultRestrictedMenuPermissions },
   s3Storage: { ...defaultRestrictedMenuPermissions },
 };
+
+export const defaultRestrictedRolePermissions: RolePermissions = {
+  calendar: {
+    ...defaultRestrictedMenuPermissions,
+    canViewAnalytics: false,
+    visibleUserIds: [],
+  },
+  reports: { ...defaultRestrictedMenuPermissions },
+  tasks: { ...defaultRestrictedMenuPermissions },
+  notes: { ...defaultRestrictedMenuPermissions },
+  calculator: { ...defaultRestrictedMenuPermissions },
+  legalEntities: { ...defaultRestrictedMenuPermissions },
+  clients: { ...defaultRestrictedMenuPermissions },
+  cases: { ...defaultRestrictedMenuPermissions },
+  accounts: { ...defaultRestrictedMenuPermissions },
+  acts: { ...defaultRestrictedMenuPermissions },
+  payments: { ...defaultRestrictedMenuPermissions },
+  contracts: { ...defaultRestrictedMenuPermissions },
+  dictionaries: { ...defaultRestrictedMenuPermissions },
+  notifications: { ...defaultRestrictedMenuPermissions },
+  roles: { ...defaultRestrictedMenuPermissions },
+  audit: { ...defaultRestrictedMenuPermissions },
+  integrations: { ...defaultRestrictedMenuPermissions },
+  yandexDisk: { ...defaultRestrictedMenuPermissions },
+  s3Storage: { ...defaultRestrictedMenuPermissions },
+};

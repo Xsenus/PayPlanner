@@ -278,7 +278,7 @@ public class RolePermissionsController : ControllerBase
             return BadRequest(new { message = "Стандартную роль администратора нельзя изменять." });
         }
 
-        var defaults = RolePermissionCatalog.BuildDefaults(false);
+        var defaults = RolePermissionCatalog.BuildRestrictedDefaults(false);
         var existing = await _db.RolePermissions
             .Where(rp => rp.RoleId == roleId)
             .ToListAsync(ct);
@@ -335,7 +335,9 @@ public class RolePermissionsController : ControllerBase
         bool allowRoleManagement,
         IReadOnlyCollection<int>? calendarVisibleUserIds = null)
     {
-        var dto = RolePermissionCatalog.CreateDto(allowRoleManagement);
+        var dto = allowRoleManagement
+            ? RolePermissionCatalog.CreateDto(allowRoleManagement: true)
+            : CreateRestrictedDto();
         foreach (var permission in permissions)
         {
             switch (permission.Section)
@@ -410,13 +412,34 @@ public class RolePermissionsController : ControllerBase
             }
         }
 
-        if (!permissions.Any(permission => string.Equals(permission.Section, RolePermissionCatalog.Cases, StringComparison.OrdinalIgnoreCase))
-            && permissions.FirstOrDefault(permission => string.Equals(permission.Section, RolePermissionCatalog.Clients, StringComparison.OrdinalIgnoreCase)) is { } clientsPermission)
-        {
-            dto.Cases = ToSection(clientsPermission);
-        }
-
         return dto;
+    }
+
+    private static RolePermissionsDto CreateRestrictedDto()
+    {
+        var defaults = RolePermissionCatalog.BuildRestrictedDefaults(allowRoleManagement: false);
+        return new RolePermissionsDto
+        {
+            Calendar = RolePermissionCatalog.ToCalendar(defaults[RolePermissionCatalog.Calendar]),
+            Tasks = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Tasks]),
+            Notes = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Notes]),
+            Reports = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Reports]),
+            Calculator = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Calculator]),
+            LegalEntities = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.LegalEntities]),
+            Clients = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Clients]),
+            Cases = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Cases]),
+            Accounts = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Accounts]),
+            Acts = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Acts]),
+            Payments = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Payments]),
+            Contracts = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Contracts]),
+            Dictionaries = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Dictionaries]),
+            Notifications = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Notifications]),
+            Roles = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Roles]),
+            Audit = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Audit]),
+            Integrations = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Integrations]),
+            YandexDisk = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.YandexDisk]),
+            S3Storage = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.S3Storage])
+        };
     }
 
     private async Task<IActionResult?> SyncCalendarVisibleUsersAsync(

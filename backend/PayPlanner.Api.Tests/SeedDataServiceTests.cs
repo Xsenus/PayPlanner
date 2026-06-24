@@ -28,6 +28,18 @@ public class SeedDataServiceTests
         Assert.Equal(firstSnapshot.RolePermissions, firstSnapshot.DistinctRolePermissionPairs);
         Assert.Equal(1, firstSnapshot.AdminUsers);
         Assert.True(await db.DocumentStatuses.AnyAsync(item => item.Code == DocumentWorkflowStatus.RequiresClientSignature));
+
+        var userPaymentsPermission = await db.RolePermissions
+            .AsNoTracking()
+            .SingleAsync(item => item.Role != null && item.Role.Name == "user" && item.Section == RolePermissionCatalog.Payments);
+        var adminPaymentsPermission = await db.RolePermissions
+            .AsNoTracking()
+            .SingleAsync(item => item.Role != null && item.Role.Name == "admin" && item.Section == RolePermissionCatalog.Payments);
+
+        Assert.False(userPaymentsPermission.CanView);
+        Assert.False(userPaymentsPermission.CanCreate);
+        Assert.True(adminPaymentsPermission.CanView);
+        Assert.True(adminPaymentsPermission.CanCreate);
     }
 
     private static async Task<SeedSnapshot> CreateSnapshotAsync(PaymentContext db)

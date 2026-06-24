@@ -567,7 +567,7 @@ namespace PayPlanner.Api.Services
 
             foreach (var role in roles)
             {
-                var defaults = RolePermissionCatalog.BuildDefaults(
+                var defaults = RolePermissionCatalog.BuildRestrictedDefaults(
                     string.Equals(role.Name, "admin", StringComparison.Ordinal));
 
                 foreach (var section in RolePermissionCatalog.AllSections)
@@ -1474,4 +1474,3 @@ namespace PayPlanner.Api.Services
         }
     }
 }
-

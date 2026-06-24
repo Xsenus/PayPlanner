@@ -6545,6 +6545,13 @@ services.Id,
     {
         await using var db = await CreateContextAsync();
         var user = await CreateReportsUserWithTimeZoneAsync(db, "Europe/Samara");
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = user.RoleId,
+            Section = RolePermissionCatalog.Payments,
+            CanView = true,
+            ViewScope = DataVisibilityScope.All,
+        });
         db.BankStatementImportBatches.AddRange(
             BankStatementImportBatch("local-may-first.txt", BankStatementImportBatchStatus.Applied, 10, 8, 2, 0, 0, new DateTime(2026, 4, 30, 21, 30, 0, DateTimeKind.Utc)),
             BankStatementImportBatch("local-may-second.txt", BankStatementImportBatchStatus.AppliedWithErrors, 20, 10, 5, 5, 0, new DateTime(2026, 5, 1, 20, 30, 0, DateTimeKind.Utc)));

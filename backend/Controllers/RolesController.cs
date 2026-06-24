@@ -128,7 +128,7 @@ public class RolesController : ControllerBase
         _db.Roles.Add(role);
         await _db.SaveChangesAsync(ct);
 
-        var defaultPermissions = RolePermissionCatalog.CreateEntities(role.Id, allowRoleManagement);
+        var defaultPermissions = RolePermissionCatalog.CreateRestrictedEntities(role.Id, allowRoleManagement);
         _db.RolePermissions.AddRange(defaultPermissions);
         await _db.SaveChangesAsync(ct);
 
@@ -294,7 +294,7 @@ public class RolesController : ControllerBase
 
     private static List<RolePermission> BuildCopiedPermissions(int roleId, Role sourceRole)
     {
-        var defaults = RolePermissionCatalog.BuildDefaults(IsProtectedRole(sourceRole));
+        var defaults = RolePermissionCatalog.BuildRestrictedDefaults(IsProtectedRole(sourceRole));
         var sourceBySection = sourceRole.Permissions
             .GroupBy(permission => permission.Section, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);

@@ -2351,6 +2351,7 @@ public class PaymentsControllerTests
     {
         await using var db = await CreateContextAsync();
         var user = await CreatePaymentsUserAsync(db, canExport: false, viewScope: DataVisibilityScope.All);
+        await GrantSectionPermissionAsync(db, user, RolePermissionCatalog.Clients, DataVisibilityScope.All);
         db.RolePermissions.Add(new RolePermission
         {
             RoleId = user.RoleId,
@@ -2396,6 +2397,7 @@ public class PaymentsControllerTests
     {
         await using var db = await CreateContextAsync();
         var user = await CreatePaymentsUserAsync(db, canExport: false, viewScope: DataVisibilityScope.All);
+        await GrantSectionPermissionAsync(db, user, RolePermissionCatalog.Clients, DataVisibilityScope.All);
         db.RolePermissions.Add(new RolePermission
         {
             RoleId = user.RoleId,
@@ -2594,6 +2596,7 @@ public class PaymentsControllerTests
     {
         await using var db = await CreateContextAsync();
         var user = await CreatePaymentsUserAsync(db, canExport: false, viewScope: DataVisibilityScope.All);
+        await GrantSectionPermissionAsync(db, user, RolePermissionCatalog.Clients, DataVisibilityScope.All);
         db.RolePermissions.Add(new RolePermission
         {
             RoleId = user.RoleId,
@@ -2707,6 +2710,7 @@ public class PaymentsControllerTests
     {
         await using var db = await CreateContextAsync();
         var user = await CreatePaymentsUserAsync(db, canExport: false, viewScope: DataVisibilityScope.All);
+        await GrantSectionPermissionAsync(db, user, RolePermissionCatalog.Clients, DataVisibilityScope.All);
         db.RolePermissions.Add(new RolePermission
         {
             RoleId = user.RoleId,
@@ -2752,6 +2756,7 @@ public class PaymentsControllerTests
     {
         await using var db = await CreateContextAsync();
         var user = await CreatePaymentsUserAsync(db, canExport: false, viewScope: DataVisibilityScope.All);
+        await GrantSectionPermissionAsync(db, user, RolePermissionCatalog.Clients, DataVisibilityScope.All);
         db.RolePermissions.Add(new RolePermission
         {
             RoleId = user.RoleId,
@@ -4606,6 +4611,7 @@ public class PaymentsControllerTests
     {
         await using var db = await CreateContextAsync();
         var user = await CreatePaymentsUserAsync(db, canExport: false);
+        await GrantSectionPermissionAsync(db, user, RolePermissionCatalog.Clients, DataVisibilityScope.All);
         var client = new Client
         {
             Name = "Винокуров Валерий Витальевич",
@@ -4636,6 +4642,7 @@ public class PaymentsControllerTests
     {
         await using var db = await CreateContextAsync();
         var user = await CreatePaymentsUserAsync(db, canExport: false);
+        await GrantSectionPermissionAsync(db, user, RolePermissionCatalog.Clients, DataVisibilityScope.All);
         var client = new Client
         {
             Name = "Клиент с авансом",
@@ -4677,6 +4684,7 @@ public class PaymentsControllerTests
     {
         await using var db = await CreateContextAsync();
         var user = await CreatePaymentsUserAsync(db, canExport: false);
+        await GrantSectionPermissionAsync(db, user, RolePermissionCatalog.Clients, DataVisibilityScope.All);
         var client = new Client
         {
             Name = "Клиент без дублей уведомлений",
@@ -4718,6 +4726,7 @@ public class PaymentsControllerTests
     {
         await using var db = await CreateContextAsync();
         var user = await CreatePaymentsUserAsync(db, canExport: false);
+        await GrantSectionPermissionAsync(db, user, RolePermissionCatalog.Clients, DataVisibilityScope.All);
         db.UserSettings.Add(new UserSetting
         {
             UserId = user.Id,
@@ -4757,6 +4766,7 @@ public class PaymentsControllerTests
     {
         await using var db = await CreateContextAsync();
         var user = await CreatePaymentsUserAsync(db, canExport: false);
+        await GrantSectionPermissionAsync(db, user, RolePermissionCatalog.Clients, DataVisibilityScope.All);
         var client = new Client
         {
             Name = "Клиент с частичным платежом",
@@ -6154,6 +6164,41 @@ public class PaymentsControllerTests
         db.Users.Add(user);
         await db.SaveChangesAsync();
         return user;
+    }
+
+    private static async Task GrantSectionPermissionAsync(
+        PaymentContext db,
+        User user,
+        string section,
+        string viewScope = DataVisibilityScope.All)
+    {
+        var permission = await db.RolePermissions
+            .SingleOrDefaultAsync(item => item.RoleId == user.RoleId && item.Section == section);
+        if (permission is null)
+        {
+            db.RolePermissions.Add(new RolePermission
+            {
+                RoleId = user.RoleId,
+                Section = section,
+                CanView = true,
+                CanCreate = true,
+                CanEdit = true,
+                CanDelete = true,
+                CanExport = true,
+                ViewScope = viewScope,
+            });
+        }
+        else
+        {
+            permission.CanView = true;
+            permission.CanCreate = true;
+            permission.CanEdit = true;
+            permission.CanDelete = true;
+            permission.CanExport = true;
+            permission.ViewScope = viewScope;
+        }
+
+        await db.SaveChangesAsync();
     }
 
     private sealed class NoopEmailService : IEmailService

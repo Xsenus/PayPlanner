@@ -84,6 +84,48 @@ public class BackendPermissionMatrixTests
     }
 
     [Theory]
+    [MemberData(nameof(CriticalSections))]
+    public async Task SectionActionPermissions_DenyMissingSection_ForExistingRegularUser(string section)
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, $"{section}-missing-actions", new RolePermission
+        {
+            Section = RolePermissionCatalog.Notifications,
+            CanView = true,
+            ViewScope = DataVisibilityScope.Own
+        });
+        var principal = CreatePrincipal(user);
+
+        Assert.False(await db.HasUserSectionPermissionAsync(principal, section, static permission => permission.CanView));
+        Assert.False(await db.HasUserSectionPermissionAsync(principal, section, static permission => permission.CanCreate));
+        Assert.False(await db.HasUserSectionPermissionAsync(principal, section, static permission => permission.CanEdit));
+        Assert.False(await db.HasUserSectionPermissionAsync(principal, section, static permission => permission.CanDelete));
+        Assert.False(await db.HasUserSectionPermissionAsync(principal, section, static permission => permission.CanExport));
+    }
+
+    [Fact]
+    public async Task SectionActionPermissions_DoNotOpenCasesFromLegacyClientPermissionFallback()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "legacy-client-only", new RolePermission
+        {
+            Section = RolePermissionCatalog.Clients,
+            CanView = true,
+            CanCreate = true,
+            CanEdit = true,
+            CanDelete = true,
+            CanExport = true,
+            ViewScope = DataVisibilityScope.All
+        });
+        var principal = CreatePrincipal(user);
+
+        var casesPermission = await db.GetUserSectionPermissionAsync(user.Id, RolePermissionCatalog.Cases);
+
+        Assert.Null(casesPermission);
+        Assert.False(await db.HasUserSectionPermissionAsync(principal, RolePermissionCatalog.Cases, static permission => permission.CanView));
+    }
+
+    [Theory]
     [MemberData(nameof(DataScopedSections))]
     public async Task DataVisibility_RestrictsRegularUserToOwnScope_ForDataScopedSections(string section)
     {
@@ -123,6 +165,23 @@ public class BackendPermissionMatrixTests
 
     [Theory]
     [MemberData(nameof(DataScopedSections))]
+    public async Task DataVisibility_DeniesRegularUserWithoutConfiguredSection(string section)
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, $"{section}-missing-visibility", new RolePermission
+        {
+            Section = RolePermissionCatalog.Notifications,
+            CanView = true,
+            ViewScope = DataVisibilityScope.Own
+        });
+
+        var access = await db.ResolveDataVisibilityAsync(CreatePrincipal(user), section);
+
+        Assert.Null(access);
+    }
+
+    [Theory]
+    [MemberData(nameof(DataScopedSections))]
     public async Task SectionActionPermissions_RespectExplicitActionDenials(string section)
     {
         await using var db = await CreateContextAsync();
@@ -145,6 +204,29 @@ public class BackendPermissionMatrixTests
         Assert.False(canCreate);
         Assert.True(canEdit);
         Assert.False(canDelete);
+    }
+
+    [Theory]
+    [MemberData(nameof(DataScopedSections))]
+    public async Task SectionActionPermissions_DenyActionsWhenViewIsDisabledEvenIfActionsAreEnabled(string section)
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, $"{section}-view-disabled-actions-enabled", new RolePermission
+        {
+            Section = section,
+            CanView = false,
+            CanCreate = true,
+            CanEdit = true,
+            CanDelete = true,
+            CanExport = true,
+            ViewScope = DataVisibilityScope.All
+        });
+        var principal = CreatePrincipal(user);
+
+        Assert.False(await db.HasUserSectionPermissionAsync(principal, section, static permission => permission.CanCreate));
+        Assert.False(await db.HasUserSectionPermissionAsync(principal, section, static permission => permission.CanEdit));
+        Assert.False(await db.HasUserSectionPermissionAsync(principal, section, static permission => permission.CanDelete));
+        Assert.False(await db.HasUserSectionPermissionAsync(principal, section, static permission => permission.CanExport));
     }
 
     [Theory]
