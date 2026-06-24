@@ -40,11 +40,13 @@ namespace PayPlanner.Api.Services.LegalEntities
         }
 
 
-        private async Task<(string? ApiKey, string? Secret)> ResolveCredentialsAsync(CancellationToken ct)
+        private sealed record DadataCredentials(string? ApiKey, string? Secret);
+
+        private async Task<DadataCredentials> ResolveCredentialsAsync(CancellationToken ct)
         {
             var userIdRaw = _httpContextAccessor.HttpContext?.User?.FindFirstValue(ClaimTypes.NameIdentifier);
             if (!int.TryParse(userIdRaw, out var userId))
-                return (_opt.ApiKey, _opt.Secret);
+                return new DadataCredentials(_opt.ApiKey, _opt.Secret);
 
             var keys = new[] { "integrations.dadata.apiKey", "integrations.dadata.secret" };
             var settings = await _db.UserSettings
@@ -55,10 +57,76 @@ namespace PayPlanner.Api.Services.LegalEntities
             var apiKey = settings.FirstOrDefault(item => item.Key == "integrations.dadata.apiKey")?.Value;
             var secret = settings.FirstOrDefault(item => item.Key == "integrations.dadata.secret")?.Value;
 
-            return (
-                string.IsNullOrWhiteSpace(apiKey) ? _opt.ApiKey : apiKey,
-                string.IsNullOrWhiteSpace(secret) ? _opt.Secret : secret
-            );
+            var userCredentials = new DadataCredentials(apiKey, secret);
+            if (HasCompleteCredentials(userCredentials))
+                return userCredentials;
+
+            var configuredCredentials = new DadataCredentials(_opt.ApiKey, _opt.Secret);
+            if (HasCompleteCredentials(configuredCredentials))
+                return configuredCredentials;
+
+            var sharedCredentials = await ResolveSharedCredentialsAsync(userId, keys, ct);
+            if (sharedCredentials is not null && HasCompleteCredentials(sharedCredentials))
+                return sharedCredentials;
+
+            return new DadataCredentials(
+                FirstNonWhiteSpace(userCredentials.ApiKey, configuredCredentials.ApiKey, sharedCredentials?.ApiKey),
+                FirstNonWhiteSpace(userCredentials.Secret, configuredCredentials.Secret, sharedCredentials?.Secret));
+        }
+
+        private async Task<DadataCredentials?> ResolveSharedCredentialsAsync(
+            int currentUserId,
+            IReadOnlyCollection<string> keys,
+            CancellationToken ct)
+        {
+            var settings = await _db.UserSettings
+                .AsNoTracking()
+                .Where(item =>
+                    item.UserId != currentUserId
+                    && keys.Contains(item.Key)
+                    && item.User != null
+                    && item.User.IsActive
+                    && !string.IsNullOrWhiteSpace(item.Value))
+                .Select(item => new
+                {
+                    item.UserId,
+                    item.Key,
+                    item.Value,
+                    item.UpdatedAt,
+                    IsAdmin = item.User!.Role != null && item.User.Role.Name == "admin",
+                })
+                .ToListAsync(ct);
+
+            return settings
+                .GroupBy(item => item.UserId)
+                .Select(group => new
+                {
+                    IsAdmin = group.Any(item => item.IsAdmin),
+                    UpdatedAt = group.Max(item => item.UpdatedAt),
+                    Credentials = new DadataCredentials(
+                        group.FirstOrDefault(item => item.Key == "integrations.dadata.apiKey")?.Value,
+                        group.FirstOrDefault(item => item.Key == "integrations.dadata.secret")?.Value),
+                })
+                .Where(item => item.IsAdmin && !string.IsNullOrWhiteSpace(item.Credentials.ApiKey))
+                .OrderByDescending(item => HasCompleteCredentials(item.Credentials))
+                .ThenByDescending(item => item.UpdatedAt)
+                .Select(item => item.Credentials)
+                .FirstOrDefault();
+        }
+
+        private static bool HasCompleteCredentials(DadataCredentials credentials)
+            => !string.IsNullOrWhiteSpace(credentials.ApiKey)
+               && !string.IsNullOrWhiteSpace(credentials.Secret);
+
+        private static string? FirstNonWhiteSpace(params string?[] values)
+        {
+            foreach (var value in values)
+            {
+                if (!string.IsNullOrWhiteSpace(value))
+                    return value;
+            }
+
+            return null;
         }
 
         private async Task<T?> CleanOneAsync<T>(string source, string kind, Func<JsonElement, T?> mapper,
@@ -422,10 +490,10 @@ namespace PayPlanner.Api.Services.LegalEntities
             value = Regex.Replace(value, @"\b(г|ул)\.\s*", "$1. ", RegexOptions.IgnoreCase);
             value = Regex.Replace(value, @"(?<=\p{L})\.(?=\d)", ". ");
             value = Regex.Replace(value, @"(?<=\d)\.(?=\p{L})", ", ");
-            value = Regex.Replace(value, @"\bд\.\s*", "д ", RegexOptions.IgnoreCase);
-            value = Regex.Replace(value, @"\bкв\.\s*", "кв ", RegexOptions.IgnoreCase);
-            value = Regex.Replace(value, @"(?<![,])\s+(д\s+\d)", ", $1", RegexOptions.IgnoreCase);
-            value = Regex.Replace(value, @"(?<![,])\s+(кв\s+\d)", ", $1", RegexOptions.IgnoreCase);
+            value = Regex.Replace(value, @"\b(д|дом)\.?\s*(?=\d)", "$1 ", RegexOptions.IgnoreCase);
+            value = Regex.Replace(value, @"\b(кв|квартира|оф|офис)\.?\s*(?=\d)", "$1 ", RegexOptions.IgnoreCase);
+            value = Regex.Replace(value, @"(?<![,])\s+((?:д|дом)\s+\d)", ", $1", RegexOptions.IgnoreCase);
+            value = Regex.Replace(value, @"(?<![,])\s+((?:кв|квартира|оф|офис)\s+\d)", ", $1", RegexOptions.IgnoreCase);
             return Regex.Replace(value, @"\s+", " ").Trim();
         }
 

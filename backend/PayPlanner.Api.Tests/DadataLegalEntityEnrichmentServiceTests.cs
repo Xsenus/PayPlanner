@@ -1,4 +1,5 @@
 using System.Net;
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
@@ -7,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Models;
 using PayPlanner.Api.Services.LegalEntities;
 using Xunit;
 
@@ -157,19 +159,149 @@ public sealed class DadataLegalEntityEnrichmentServiceTests
             secondBody.RootElement.GetProperty("query").GetString());
     }
 
-    private static DadataLegalEntityEnrichmentService CreateService(PaymentContext db, HttpMessageHandler handler)
+    [Fact]
+    public async Task SuggestAddressesAsync_NormalizesApartmentWithoutSpace_WhenFallbackQueryIsNeeded()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var handler = new RecordingDadataHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"suggestions":[]}""", Encoding.UTF8, "application/json"),
+        });
+        var service = CreateService(scope.Db, handler);
+
+        var suggestions = await service.SuggestAddressesAsync(
+            "новокуйбышевск, ул. Миронова, д. 8, кв12",
+            5,
+            CancellationToken.None);
+
+        Assert.Empty(suggestions);
+        Assert.Equal(2, handler.Requests.Count);
+        using var firstBody = JsonDocument.Parse(handler.Bodies[0]);
+        using var secondBody = JsonDocument.Parse(handler.Bodies[1]);
+        Assert.Equal(
+            "новокуйбышевск, ул. Миронова, д. 8, кв12",
+            firstBody.RootElement.GetProperty("query").GetString());
+        Assert.Equal(
+            "новокуйбышевск, ул. Миронова, д 8, кв 12",
+            secondBody.RootElement.GetProperty("query").GetString());
+    }
+
+    [Fact]
+    public async Task SuggestAddressesAsync_UsesSharedDadataCredentials_WhenCurrentUserHasNoKeys()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var adminRole = new Role { Name = "admin", Description = "Администратор" };
+        var userRole = new Role { Name = "manager", Description = "Менеджер" };
+        var admin = new User
+        {
+            Email = "admin@example.test",
+            FullName = "Администратор",
+            Role = adminRole,
+            IsActive = true,
+            IsApproved = true,
+        };
+        var user = new User
+        {
+            Email = "user@example.test",
+            FullName = "Менеджер",
+            Role = userRole,
+            IsActive = true,
+            IsApproved = true,
+        };
+        scope.Db.Users.AddRange(admin, user);
+        await scope.Db.SaveChangesAsync();
+
+        scope.Db.UserSettings.AddRange(
+            new UserSetting
+            {
+                UserId = admin.Id,
+                Key = "integrations.dadata.apiKey",
+                Value = "shared-token",
+                CreatedAt = DateTime.UtcNow.AddMinutes(-10),
+                UpdatedAt = DateTime.UtcNow.AddMinutes(-10),
+            },
+            new UserSetting
+            {
+                UserId = admin.Id,
+                Key = "integrations.dadata.secret",
+                Value = "shared-secret",
+                CreatedAt = DateTime.UtcNow.AddMinutes(-9),
+                UpdatedAt = DateTime.UtcNow.AddMinutes(-9),
+            });
+        await scope.Db.SaveChangesAsync();
+
+        var handler = new RecordingDadataHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                """
+                {
+                  "suggestions": [
+                    {
+                      "value": "г Новокуйбышевск, ул Миронова, д 8",
+                      "unrestricted_value": "446213, Самарская обл, г Новокуйбышевск, ул Миронова, д 8",
+                      "data": {
+                        "postal_code": "446213",
+                        "region_with_type": "Самарская обл",
+                        "city_with_type": "г Новокуйбышевск",
+                        "street_with_type": "ул Миронова",
+                        "house": "8"
+                      }
+                    }
+                  ]
+                }
+                """,
+                Encoding.UTF8,
+                "application/json"),
+        });
+        var accessor = new HttpContextAccessor
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = CreatePrincipal(user.Id),
+            },
+        };
+        var service = CreateService(
+            scope.Db,
+            handler,
+            accessor,
+            apiKey: string.Empty,
+            secret: string.Empty);
+
+        var suggestions = await service.SuggestAddressesAsync(
+            "новокуйбышевск, ул. Миронова, д. 8",
+            5,
+            CancellationToken.None);
+
+        var suggestion = Assert.Single(suggestions);
+        Assert.Equal("446213", suggestion.PostalCode);
+        Assert.Single(handler.Requests);
+        Assert.Equal("Token", handler.Requests[0].Headers.Authorization?.Scheme);
+        Assert.Equal("shared-token", handler.Requests[0].Headers.Authorization?.Parameter);
+    }
+
+    private static DadataLegalEntityEnrichmentService CreateService(
+        PaymentContext db,
+        HttpMessageHandler handler,
+        IHttpContextAccessor? httpContextAccessor = null,
+        string apiKey = "test-token",
+        string secret = "test-secret")
         => new(
             new HttpClient(handler) { BaseAddress = new Uri("https://dadata.test/") },
             Options.Create(new DadataOptions
             {
-                ApiKey = "test-token",
-                Secret = "test-secret",
+                ApiKey = apiKey,
+                Secret = secret,
                 BaseUrl = "https://dadata.test/suggestions/",
                 CleanerUrl = "https://dadata.test/clean/",
             }),
             NullLogger<DadataLegalEntityEnrichmentService>.Instance,
             db,
-            new HttpContextAccessor());
+            httpContextAccessor ?? new HttpContextAccessor());
+
+    private static ClaimsPrincipal CreatePrincipal(int userId)
+        => new(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, userId.ToString())],
+            "Test"));
 
     private static async Task<TestDbScope> CreateDbScopeAsync()
     {
