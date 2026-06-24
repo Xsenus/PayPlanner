@@ -11,6 +11,7 @@ public class StartupDataMaintenanceObservabilityTests
         "app release sync",
         "payment remainder transfer backfill",
         "task contractor payment backfill",
+        "legacy expense recipient backfill",
     ];
 
     [Fact]

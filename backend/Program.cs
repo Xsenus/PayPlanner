@@ -298,6 +298,7 @@ using (var scope = app.Services.CreateScope())
         await RunStartupStepAsync(startupLogger, "SQLite app release sync", async () => await AppReleaseSeedService.SyncAsync(ctx, app.Environment.ContentRootPath));
         await RunStartupStepAsync(startupLogger, "SQLite payment remainder transfer backfill", async () => await PaymentRemainderTransferBackfillService.EnsureLegacyLinksAsync(ctx));
         await RunStartupStepAsync(startupLogger, "SQLite task contractor payment backfill", async () => await TaskContractorPaymentBackfillService.EnsureGeneratedPaymentDetailsAsync(ctx));
+        await RunStartupStepAsync(startupLogger, "SQLite legacy expense recipient backfill", async () => await LegacyExpensePaymentRecipientBackfillService.EnsureRecognizedRecipientsAsync(ctx));
     }
     else
     {
@@ -308,6 +309,7 @@ using (var scope = app.Services.CreateScope())
         await RunStartupStepAsync(startupLogger, "PostgreSQL app release sync", async () => await AppReleaseSeedService.SyncAsync(pgContext, app.Environment.ContentRootPath));
         await RunStartupStepAsync(startupLogger, "PostgreSQL payment remainder transfer backfill", async () => await PaymentRemainderTransferBackfillService.EnsureLegacyLinksAsync(pgContext));
         await RunStartupStepAsync(startupLogger, "PostgreSQL task contractor payment backfill", async () => await TaskContractorPaymentBackfillService.EnsureGeneratedPaymentDetailsAsync(pgContext));
+        await RunStartupStepAsync(startupLogger, "PostgreSQL legacy expense recipient backfill", async () => await LegacyExpensePaymentRecipientBackfillService.EnsureRecognizedRecipientsAsync(pgContext));
     }
 }
 
