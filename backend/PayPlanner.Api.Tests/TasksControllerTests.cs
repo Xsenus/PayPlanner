@@ -2968,6 +2968,48 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task FileEndpoints_ReturnNotFoundForHiddenTask()
+    {
+        await using var db = await CreateContextAsync();
+        var current = await CreateTaskUserAsync(db, "task-files-own@example.com", "Ограниченный пользователь", canEdit: true);
+        var other = await CreateTaskUserAsync(db, "task-files-other@example.com", "Другой автор", canEdit: true);
+        var client = await CreateClientAsync(db, "Клиент файлов задач");
+        var hiddenTask = await CreateTaskAsync(db, other.Id, client.Id, other.Id);
+        var hiddenFile = new TaskJournalFile
+        {
+            TaskJournalItemId = hiddenTask.Id,
+            DocumentKey = Guid.NewGuid().ToString("N"),
+            Version = 1,
+            OriginalFileName = "hidden.txt",
+            StoredFileName = "hidden.txt",
+            StoragePath = Path.Combine(hiddenTask.Id.ToString(), "hidden.txt"),
+            ContentType = "text/plain",
+            SizeBytes = 10,
+            UploadedByUserId = other.Id,
+            UploadedByName = other.FullName,
+            UploadedAt = DateTime.UtcNow,
+        };
+        db.TaskJournalFiles.Add(hiddenFile);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), current);
+
+        var filesResult = await controller.GetFiles(hiddenTask.Id, CancellationToken.None);
+        var uploadResult = await controller.UploadFile(
+            hiddenTask.Id,
+            CreateFormFile("hidden update", "hidden-update.txt"),
+            null,
+            CancellationToken.None);
+        var downloadResult = await controller.DownloadFile(hiddenTask.Id, hiddenFile.Id, CancellationToken.None);
+        var deleteResult = await controller.DeleteFile(hiddenTask.Id, hiddenFile.Id, CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(filesResult.Result);
+        Assert.IsType<NotFoundResult>(uploadResult.Result);
+        Assert.IsType<NotFoundResult>(downloadResult);
+        Assert.IsType<NotFoundResult>(deleteResult);
+        Assert.True(await db.TaskJournalFiles.AnyAsync(item => item.Id == hiddenFile.Id));
+    }
+
+    [Fact]
     public async Task UpdateStatus_DoneRequiresApprovedApprovers()
     {
         await using var db = await CreateContextAsync();
