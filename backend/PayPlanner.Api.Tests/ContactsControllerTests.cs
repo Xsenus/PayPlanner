@@ -172,6 +172,99 @@ public class ContactsControllerTests
         Assert.Equal(otherUser.Id, stored.ResponsibleUserId);
     }
 
+    [Fact]
+    public async Task UpdateClientContact_WithHiddenLegalEntity_ReturnsBadRequestAndKeepsOriginalLink()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateClientUserAsync(
+            db,
+            "contacts-client-hidden-legal",
+            canView: true,
+            canCreate: true,
+            canEdit: true,
+            canDelete: true,
+            canExport: true,
+            viewScope: DataVisibilityScope.All,
+            legalEntityViewScope: DataVisibilityScope.Own);
+        var otherUser = await CreateClientUserAsync(db, "contacts-client-hidden-legal-other", canView: true, canCreate: true, canEdit: true, canDelete: true, canExport: true);
+        var client = await CreateClientAsync(db, user.Id, "Client before hidden legal", "222");
+        var visibleLegal = await CreateLegalEntityAsync(db, user.Id, "Visible legal");
+        var hiddenLegal = await CreateLegalEntityAsync(db, otherUser.Id, "Hidden legal");
+        client.LegalEntityId = visibleLegal.Id;
+        await db.SaveChangesAsync();
+
+        var request = BuildClientContactRequest("Client after hidden legal");
+        request.LegalEntityId = hiddenLegal.Id;
+
+        var action = await CreateController(db, user.Id).UpdateClientContact(client.Id, request, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(action.Result);
+        Assert.Contains("юридическое лицо", badRequest.Value?.ToString(), StringComparison.OrdinalIgnoreCase);
+
+        var stored = await db.Clients.AsNoTracking().SingleAsync(entity => entity.Id == client.Id);
+        Assert.Equal("Client before hidden legal", stored.Name);
+        Assert.Equal(visibleLegal.Id, stored.LegalEntityId);
+    }
+
+    [Fact]
+    public async Task CreateExternalContact_WithHiddenLegalEntity_ReturnsBadRequestAndDoesNotCreateContact()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateClientUserAsync(
+            db,
+            "contacts-external-hidden-legal",
+            canView: true,
+            canCreate: true,
+            canEdit: true,
+            canDelete: true,
+            canExport: true,
+            viewScope: DataVisibilityScope.All,
+            legalEntityViewScope: DataVisibilityScope.Own);
+        var otherUser = await CreateClientUserAsync(db, "contacts-external-hidden-legal-other", canView: true, canCreate: true, canEdit: true, canDelete: true, canExport: true);
+        var hiddenLegal = await CreateLegalEntityAsync(db, otherUser.Id, "Hidden external legal");
+
+        var request = BuildExternalContactRequest("External with hidden legal");
+        request.LegalEntityId = hiddenLegal.Id;
+
+        var action = await CreateController(db, user.Id).CreateExternalContact(request, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(action.Result);
+        Assert.Contains("юридическое лицо", badRequest.Value?.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.False(await db.ExternalContacts.AnyAsync(contact => contact.FullName == "External with hidden legal"));
+    }
+
+    [Fact]
+    public async Task UpdateExternalContact_WithHiddenLegalEntity_ReturnsBadRequestAndKeepsOriginalLink()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateClientUserAsync(
+            db,
+            "contacts-external-update-hidden-legal",
+            canView: true,
+            canCreate: true,
+            canEdit: true,
+            canDelete: true,
+            canExport: true,
+            viewScope: DataVisibilityScope.All,
+            legalEntityViewScope: DataVisibilityScope.Own);
+        var otherUser = await CreateClientUserAsync(db, "contacts-external-update-hidden-legal-other", canView: true, canCreate: true, canEdit: true, canDelete: true, canExport: true);
+        var visibleLegal = await CreateLegalEntityAsync(db, user.Id, "Visible external legal");
+        var hiddenLegal = await CreateLegalEntityAsync(db, otherUser.Id, "Hidden external update legal");
+        var contact = await CreateExternalContactAsync(db, user.Id, "External before hidden legal", legalEntityId: visibleLegal.Id);
+
+        var request = BuildExternalContactRequest("External after hidden legal");
+        request.LegalEntityId = hiddenLegal.Id;
+
+        var action = await CreateController(db, user.Id).UpdateExternalContact(contact.Id, request, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(action.Result);
+        Assert.Contains("юридическое лицо", badRequest.Value?.ToString(), StringComparison.OrdinalIgnoreCase);
+
+        var stored = await db.ExternalContacts.AsNoTracking().SingleAsync(entity => entity.Id == contact.Id);
+        Assert.Equal("External before hidden legal", stored.FullName);
+        Assert.Equal(visibleLegal.Id, stored.LegalEntityId);
+    }
+
     private static UpsertExternalContactRequest BuildExternalContactRequest(string name)
         => new()
         {
@@ -215,7 +308,8 @@ public class ContactsControllerTests
         PaymentContext db,
         int responsibleUserId,
         string name = "External Contact",
-        string phone = "79994445566")
+        string phone = "79994445566",
+        int? legalEntityId = null)
     {
         var contact = new ExternalContact
         {
@@ -223,6 +317,7 @@ public class ContactsControllerTests
             Phone = phone,
             PhonesJson = System.Text.Json.JsonSerializer.Serialize(new[] { phone }),
             ResponsibleUserId = responsibleUserId,
+            LegalEntityId = legalEntityId,
             IsActive = true,
             SyncToPhonebook = true,
             CreatedAt = DateTime.UtcNow,
@@ -230,6 +325,22 @@ public class ContactsControllerTests
         db.ExternalContacts.Add(contact);
         await db.SaveChangesAsync();
         return contact;
+    }
+
+    private static async Task<LegalEntity> CreateLegalEntityAsync(
+        PaymentContext db,
+        int responsibleUserId,
+        string shortName)
+    {
+        var entity = new LegalEntity
+        {
+            ShortName = shortName,
+            ResponsibleUserId = responsibleUserId,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.LegalEntities.Add(entity);
+        await db.SaveChangesAsync();
+        return entity;
     }
 
     private static async Task<User> CreateClientUserAsync(
@@ -240,25 +351,37 @@ public class ContactsControllerTests
         bool canEdit,
         bool canDelete,
         bool canExport,
-        string viewScope = DataVisibilityScope.Own)
+        string viewScope = DataVisibilityScope.Own,
+        string? legalEntityViewScope = null)
     {
+        var permissions = new List<RolePermission>
+        {
+            new()
+            {
+                Section = RolePermissionCatalog.Clients,
+                CanView = canView,
+                CanCreate = canCreate,
+                CanEdit = canEdit,
+                CanDelete = canDelete,
+                CanExport = canExport,
+                ViewScope = viewScope,
+            },
+        };
+        if (!string.IsNullOrWhiteSpace(legalEntityViewScope))
+        {
+            permissions.Add(new RolePermission
+            {
+                Section = RolePermissionCatalog.LegalEntities,
+                CanView = true,
+                ViewScope = legalEntityViewScope,
+            });
+        }
+
         var role = new Role
         {
             Name = $"{name}-{Guid.NewGuid():N}",
             Description = name,
-            Permissions =
-            {
-                new RolePermission
-                {
-                    Section = RolePermissionCatalog.Clients,
-                    CanView = canView,
-                    CanCreate = canCreate,
-                    CanEdit = canEdit,
-                    CanDelete = canDelete,
-                    CanExport = canExport,
-                    ViewScope = viewScope,
-                },
-            },
+            Permissions = permissions,
         };
         var user = new User
         {

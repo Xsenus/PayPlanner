@@ -172,7 +172,7 @@ public class ContactsController : ControllerBase
         LegalEntity? legalEntity = null;
         if (request.LegalEntityId.HasValue)
         {
-            legalEntity = await _db.LegalEntities.FirstOrDefaultAsync(x => x.Id == request.LegalEntityId.Value, ct);
+            legalEntity = await ResolveVisibleLegalEntityAsync(request.LegalEntityId.Value, ct);
             if (legalEntity is null)
             {
                 return BadRequest("Указанное юридическое лицо не найдено.");
@@ -684,7 +684,15 @@ public class ContactsController : ControllerBase
             return Task.FromResult<LegalEntity?>(null);
         }
 
-        return _db.LegalEntities.FirstOrDefaultAsync(x => x.Id == legalEntityId.Value, ct);
+        return ResolveVisibleLegalEntityAsync(legalEntityId.Value, ct);
+    }
+
+    private async Task<LegalEntity?> ResolveVisibleLegalEntityAsync(int legalEntityId, CancellationToken ct)
+    {
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.LegalEntities, ct);
+        return await _db.LegalEntities
+            .ApplyLegalEntityVisibility(visibility)
+            .FirstOrDefaultAsync(x => x.Id == legalEntityId, ct);
     }
 
     private static string NormalizeScope(string? scope)
