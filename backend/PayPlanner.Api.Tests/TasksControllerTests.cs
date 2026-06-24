@@ -90,6 +90,22 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task GetAssignees_WithoutTaskAssignmentPermissionAppliesUserVisibility()
+    {
+        await using var db = await CreateContextAsync();
+        var current = await CreateTaskUserAsync(db, "assignees-own@example.com", "Ограниченный пользователь", canEdit: false);
+        var hiddenAssignee = await CreateTaskUserAsync(db, "assignees-hidden@example.com", "Скрытый сотрудник", canEdit: false);
+        var controller = CreateController(db, new RecordingNotificationService(), current);
+
+        var result = await controller.GetAssignees(ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var items = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalAssigneeDto>>(ok.Value);
+        Assert.Contains(items, item => item.Id == current.Id);
+        Assert.DoesNotContain(items, item => item.Id == hiddenAssignee.Id);
+    }
+
+    [Fact]
     public async Task GetAssignees_UsesSpecificCalendarVisibilityForCalendarView()
     {
         await using var db = await CreateContextAsync();
