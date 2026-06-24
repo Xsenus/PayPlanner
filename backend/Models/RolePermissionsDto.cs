@@ -34,6 +34,7 @@ public class RolePermissionsDto
     public MenuSectionPermissionsDto Notifications { get; set; } = new();
     public MenuSectionPermissionsDto Roles { get; set; } = new();
     public MenuSectionPermissionsDto Audit { get; set; } = new();
+    public MenuSectionPermissionsDto Integrations { get; set; } = new();
     public MenuSectionPermissionsDto YandexDisk { get; set; } = new();
     public MenuSectionPermissionsDto S3Storage { get; set; } = new();
 }

@@ -170,6 +170,12 @@ const SECTION_CONFIG: Record<MenuSectionKey, SectionConfig> = {
     description: 'Просмотр удалённых объектов и восстановление записей.',
     icon: ShieldCheck,
   },
+  integrations: {
+    key: 'integrations',
+    title: 'Интеграции',
+    description: 'Просмотр и изменение серверных ключей внешних сервисов.',
+    icon: Settings,
+  },
   yandexDisk: {
     key: 'yandexDisk',
     title: 'Я.Диск',
@@ -207,7 +213,7 @@ const GROUPS: GroupConfig[] = [
     key: 'administration',
     title: 'Администрирование прав',
     description: 'Просмотр ролей, уведомлений и делегирование управления правилами.',
-    sections: ['notifications', 'roles', 'audit', 'yandexDisk', 's3Storage'],
+    sections: ['notifications', 'roles', 'audit', 'integrations', 'yandexDisk', 's3Storage'],
   },
 ];
 
@@ -432,7 +438,7 @@ function getOpenedSectionsCount(permissions: RolePermissions, sections: MenuSect
 function getEnabledPermissionCount(sectionKey: MenuSectionKey, permissions: RolePermissions) {
   const section = permissions[sectionKey];
 
-  if (sectionKey === 'audit' || sectionKey === 'notifications') {
+  if (sectionKey === 'audit' || sectionKey === 'notifications' || sectionKey === 'integrations') {
     let count = 0;
     if (section.canView) {
       count += 1;
@@ -461,7 +467,7 @@ function getTotalPermissionCount(sectionKey: MenuSectionKey) {
     return AUDIT_PERMISSION_META.length;
   }
 
-  if (sectionKey === 'notifications') {
+  if (sectionKey === 'notifications' || sectionKey === 'integrations') {
     return NOTIFICATION_PERMISSION_META.length;
   }
 
@@ -664,7 +670,7 @@ export function RolePermissionsModal({
 
   const setSectionAll = (sectionKey: MenuSectionKey, value: boolean) => {
     updateSection(sectionKey, (section) => {
-      if (sectionKey === 'audit' || sectionKey === 'notifications') {
+      if (sectionKey === 'audit' || sectionKey === 'notifications' || sectionKey === 'integrations') {
         return {
           ...section,
           canView: value,
@@ -712,6 +718,18 @@ export function RolePermissionsModal({
         if (key === 'notifications') {
           next.notifications = {
             ...prev.notifications,
+            canView: value,
+            canCreate: false,
+            canEdit: value,
+            canDelete: false,
+            canExport: false,
+          };
+          continue;
+        }
+
+        if (key === 'integrations') {
+          next.integrations = {
+            ...prev.integrations,
             canView: value,
             canCreate: false,
             canEdit: value,
@@ -968,7 +986,7 @@ export function RolePermissionsModal({
                       ? ROLES_PERMISSION_META
                       : sectionKey === 'audit'
                         ? AUDIT_PERMISSION_META
-                        : sectionKey === 'notifications'
+                        : sectionKey === 'notifications' || sectionKey === 'integrations'
                           ? NOTIFICATION_PERMISSION_META
                           : sectionKey === 'yandexDisk' || sectionKey === 's3Storage'
                             ? STORAGE_PERMISSION_META

@@ -34,6 +34,7 @@ import { YandexDisk } from '../YandexDisk/YandexDisk';
 import type {
   ContractNumberingSettingsDto,
   ContractRulesSettingsDto,
+  DadataIntegrationSettingsDto,
   DatabaseImportResultDto,
   DatabaseStatusDto,
   FormRequirementSectionMetadataDto,
@@ -160,6 +161,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
   const [error, setError] = useState<string | null>(null);
   const [dadataToken, setDadataToken] = useState('');
   const [dadataSecret, setDadataSecret] = useState('');
+  const [dadataSettings, setDadataSettings] = useState<DadataIntegrationSettingsDto | null>(null);
   const [credentialsLoading, setCredentialsLoading] = useState(false);
   const [credentialsMessage, setCredentialsMessage] = useState<string | null>(null);
   const [mergeKind, setMergeKind] = useState<MergeKind>('organization-forms');
@@ -207,6 +209,8 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
   const isAdminRole = isAdmin();
   const canViewNotificationSettings = isAdminRole || permissions.notifications.canView;
   const canEditNotificationSettings = isAdminRole || permissions.notifications.canEdit;
+  const canViewIntegrationSettings = isAdminRole || Boolean(permissions.integrations?.canView);
+  const canEditIntegrationSettings = isAdminRole || Boolean(permissions.integrations?.canEdit);
   const canViewMaintenanceSettings = isAdminRole || permissions.audit.canView;
   const canViewYandexDiskSettings = isAdminRole || Boolean(permissions.yandexDisk?.canView);
   const canViewS3StorageSettings = isAdminRole || Boolean(permissions.s3Storage?.canView);
@@ -245,6 +249,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
     if (!restrictedSettingsMode) return SETTINGS_SECTIONS;
 
     const allowed: SettingsSection[] = [];
+    if (canViewIntegrationSettings) allowed.push('integrations');
     if (canViewNotificationSettings) allowed.push('notifications');
     if (canViewMaintenanceSettings) allowed.push('db-maintenance');
     if (canViewYandexDiskSettings) allowed.push('yandex-disk');
@@ -252,6 +257,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
     return allowed;
   }, [
     canViewMaintenanceSettings,
+    canViewIntegrationSettings,
     canViewNotificationSettings,
     canViewS3StorageSettings,
     canViewYandexDiskSettings,
@@ -482,23 +488,43 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
     setCredentialsLoading(true);
     setCredentialsMessage(null);
     try {
-      const [tokenSetting, secretSetting] = await Promise.all([
-        apiService.getUserSetting('integrations.dadata.apiKey').catch(() => null),
-        apiService.getUserSetting('integrations.dadata.secret').catch(() => null),
-      ]);
-      setDadataToken(tokenSetting?.value ?? '');
-      setDadataSecret(secretSetting?.value ?? '');
+      const settings = await apiService.getDadataIntegrationSettings();
+      setDadataSettings(settings);
+      setDadataToken('');
+      setDadataSecret('');
     } catch (e) {
-      setCredentialsMessage(e instanceof Error ? e.message : 'Не удалось загрузить ключи DaData');
+      const message = getErrorMessage(e, 'Не удалось загрузить серверные ключи DaData');
+      setCredentialsMessage(message);
+      setDadataSettings(null);
     } finally {
       setCredentialsLoading(false);
     }
   };
 
   const saveDaDataCredentials = async () => {
+    if (!canEditIntegrationSettings || dadataSettings?.canEdit === false) {
+      const message = 'Недостаточно прав для изменения ключей DaData';
+      setCredentialsMessage(message);
+      toast.error(message, 'Интеграции');
+      return;
+    }
+
+    const payload: { apiKey?: string; secret?: string } = {};
+    const nextToken = dadataToken.trim();
+    const nextSecret = dadataSecret.trim();
+    if (nextToken) payload.apiKey = nextToken;
+    if (nextSecret) payload.secret = nextSecret;
+
+    if (!payload.apiKey && !payload.secret) {
+      const message = 'Введите новый токен или секретный ключ DaData';
+      setCredentialsMessage(message);
+      toast.error(message, 'Интеграции');
+      return;
+    }
+
     const approved = await confirm({
       title: 'Подтверждение действия',
-      description: 'Сохранить ключи DaData в пользовательских настройках',
+      description: 'Сохранить серверные ключи DaData для всей CRM',
       confirmLabel: 'Сохранить',
       cancelLabel: 'Отмена',
     });
@@ -507,15 +533,15 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
     setCredentialsLoading(true);
     setCredentialsMessage(null);
     try {
-      await Promise.all([
-        apiService.upsertUserSetting('integrations.dadata.apiKey', dadataToken.trim()),
-        apiService.upsertUserSetting('integrations.dadata.secret', dadataSecret.trim()),
-      ]);
-      const message = 'Ключи DaData сохранены';
+      const settings = await apiService.updateDadataIntegrationSettings(payload);
+      setDadataSettings(settings);
+      setDadataToken('');
+      setDadataSecret('');
+      const message = 'Серверные ключи DaData сохранены';
       setCredentialsMessage(message);
       toast.success(message, 'Интеграции');
     } catch (e) {
-      const message = getErrorMessage(e, 'Не удалось сохранить ключи DaData');
+      const message = getErrorMessage(e, 'Не удалось сохранить серверные ключи DaData');
       setCredentialsMessage(message);
       toast.error(message, 'Интеграции');
     } finally {
@@ -743,7 +769,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
   };
 
   useEffect(() => {
-    if (activeSection === 'integrations') {
+    if (activeSection === 'integrations' && canViewIntegrationSettings) {
       void loadDaDataCredentials();
     }
     if (activeSection === 'general') {
@@ -761,7 +787,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
     if (activeSection === 'form-requirements') {
       void loadFormRequirements();
     }
-  }, [activeDatabaseOperationsSubsection, activeSection, loadDatabaseStatus, loadDuplicates, mergeKind]);
+  }, [activeDatabaseOperationsSubsection, activeSection, canViewIntegrationSettings, loadDatabaseStatus, loadDuplicates, mergeKind]);
 
   return (
     <div className="p-3 lg:p-4">
@@ -844,7 +870,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
               </div>
               )}
 
-              {(!restrictedSettingsMode || canViewNotificationSettings || canViewYandexDiskSettings || canViewS3StorageSettings) && (
+              {(!restrictedSettingsMode || canViewIntegrationSettings || canViewNotificationSettings || canViewYandexDiskSettings || canViewS3StorageSettings) && (
               <div className="rounded-2xl border border-violet-200 bg-gradient-to-br from-violet-50 to-white p-3 shadow-sm">
                 <div className="flex items-center gap-3 rounded-xl border border-violet-100 bg-white/90 px-3 py-3 shadow-sm">
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100 text-violet-700">
@@ -856,7 +882,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
                   </div>
                 </div>
                 <div className="mt-3 space-y-2">
-                  {!restrictedSettingsMode && (
+                  {(canViewIntegrationSettings || !restrictedSettingsMode) && (
                   <button
                     type="button"
                     onClick={() => selectSection('integrations')}
@@ -1624,7 +1650,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
             )}
 
 
-            {activeSection === 'integrations' && !restrictedSettingsMode && (
+            {activeSection === 'integrations' && canViewIntegrationSettings && (
               <div className="space-y-6">
                 <div className="rounded-3xl border border-gray-200 bg-white p-6 shadow-sm">
                   <div className="flex flex-col gap-4">
@@ -1704,22 +1730,37 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
                       <label className="block">
                         <span className="text-sm font-medium text-gray-700">DaData API token</span>
                         <input
+                          type="password"
+                          autoComplete="new-password"
                           value={dadataToken}
                           onChange={(event) => setDadataToken(event.target.value)}
+                          disabled={credentialsLoading || !canEditIntegrationSettings || dadataSettings?.canEdit === false}
                           className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                          placeholder="Введите токен"
+                          placeholder={dadataSettings?.apiKeyConfigured ? `Сохранён: ${dadataSettings.apiKeyMasked}` : 'Введите токен'}
                         />
                       </label>
                       <label className="block">
                         <span className="text-sm font-medium text-gray-700">DaData Secret key</span>
                         <input
+                          type="password"
+                          autoComplete="new-password"
                           value={dadataSecret}
                           onChange={(event) => setDadataSecret(event.target.value)}
+                          disabled={credentialsLoading || !canEditIntegrationSettings || dadataSettings?.canEdit === false}
                           className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                          placeholder="Введите секретный ключ"
+                          placeholder={dadataSettings?.secretConfigured ? `Сохранён: ${dadataSettings.secretMasked}` : 'Введите секретный ключ'}
                         />
                       </label>
                     </div>
+
+                    <p className="mt-3 text-xs text-gray-500">
+                      Сохранённые значения не показываются в браузере. Чтобы заменить ключ, введите новое значение; пустое поле сохранит текущий ключ без изменений.
+                    </p>
+                    {!canEditIntegrationSettings || dadataSettings?.canEdit === false ? (
+                      <p className="mt-2 text-xs text-amber-700">
+                        У вас есть доступ только к просмотру: ключи скрыты и недоступны для изменения.
+                      </p>
+                    ) : null}
 
                     <div className="mt-6 flex min-h-10 items-end justify-between gap-3">
                       {credentialsMessage ? (
@@ -1730,7 +1771,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
                       <button
                         type="button"
                         onClick={saveDaDataCredentials}
-                        disabled={credentialsLoading}
+                        disabled={credentialsLoading || !canEditIntegrationSettings || dadataSettings?.canEdit === false}
                         className="ml-auto inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         <Save className="h-4 w-4" />

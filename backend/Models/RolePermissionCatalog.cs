@@ -21,6 +21,7 @@ public static class RolePermissionCatalog
     public const string Notifications = "notifications";
     public const string Roles = "roles";
     public const string Audit = "audit";
+    public const string Integrations = "integrations";
     public const string YandexDisk = "yandexDisk";
     public const string S3Storage = "s3Storage";
 
@@ -42,6 +43,7 @@ public static class RolePermissionCatalog
         Notifications,
         Roles,
         Audit,
+        Integrations,
         YandexDisk,
         S3Storage
     ];
@@ -112,6 +114,14 @@ public static class RolePermissionCatalog
                 false,
                 false,
                 GetDefaultViewScope(Audit, allowRoleManagement)),
+            [Integrations] = new(
+                allowRoleManagement,
+                false,
+                allowRoleManagement,
+                false,
+                false,
+                false,
+                GetDefaultViewScope(Integrations, allowRoleManagement)),
             [YandexDisk] = new(
                 allowRoleManagement,
                 allowRoleManagement,
@@ -152,6 +162,7 @@ public static class RolePermissionCatalog
             Notifications = ToSection(defaults[Notifications]),
             Roles = ToSection(defaults[Roles]),
             Audit = ToSection(defaults[Audit]),
+            Integrations = ToSection(defaults[Integrations]),
             YandexDisk = ToSection(defaults[YandexDisk]),
             S3Storage = ToSection(defaults[S3Storage])
         };

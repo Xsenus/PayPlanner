@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppSettings } from './AppSettings';
 
@@ -40,6 +40,27 @@ vi.mock('./BankDirectorySettings', () => ({
 }));
 
 describe('AppSettings', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (input) => {
+      if (String(input).includes('/integrations/dadata/settings')) {
+        return new Response(JSON.stringify({
+          apiKeyConfigured: true,
+          secretConfigured: true,
+          apiKeyMasked: '••••6314',
+          secretMasked: '••••2906',
+          canEdit: true,
+          updatedAt: '2026-06-24T08:30:00Z',
+        }), {
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      return new Response('{}', {
+        headers: { 'content-type': 'application/json' },
+      });
+    }));
+  });
+
   it('keeps the settings menu in its own scroll area', () => {
     render(<AppSettings initialSection="companies" />);
 
@@ -63,5 +84,19 @@ describe('AppSettings', () => {
     expect(container.firstElementChild?.className).toContain('p-3');
     expect(container.firstElementChild?.className).toContain('lg:p-4');
     expect(screen.getByTestId('settings-content').className).toContain('space-y-3');
+  });
+
+  it('shows masked DaData credentials in password inputs', async () => {
+    render(<AppSettings initialSection="integrations" />);
+
+    const tokenInput = await screen.findByPlaceholderText('Сохранён: ••••6314') as HTMLInputElement;
+    const secretInput = await screen.findByPlaceholderText('Сохранён: ••••2906') as HTMLInputElement;
+
+    expect(tokenInput.type).toBe('password');
+    expect(secretInput.type).toBe('password');
+    expect(tokenInput.value).toBe('');
+    expect(secretInput.value).toBe('');
+    expect(screen.queryByDisplayValue(/60b3fe73/i)).toBeNull();
+    expect(screen.queryByDisplayValue(/56fe56f/i)).toBeNull();
   });
 });

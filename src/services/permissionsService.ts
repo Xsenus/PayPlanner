@@ -54,6 +54,7 @@ function normalizePermissions(perms?: Partial<RolePermissions> | null): RolePerm
     notifications: normalizeSectionPermissions(defaultRolePermissions.notifications, source.notifications),
     roles: normalizeSectionPermissions(defaultRolePermissions.roles, source.roles),
     audit: normalizeSectionPermissions(defaultRolePermissions.audit, source.audit),
+    integrations: normalizeSectionPermissions(defaultRolePermissions.integrations, source.integrations),
     yandexDisk: normalizeSectionPermissions(defaultRolePermissions.yandexDisk, source.yandexDisk),
     s3Storage: normalizeSectionPermissions(defaultRolePermissions.s3Storage, source.s3Storage),
   };
@@ -77,6 +78,7 @@ function clonePermissions(perms: RolePermissions): RolePermissions {
     notifications: { ...perms.notifications },
     roles: { ...perms.roles },
     audit: { ...perms.audit },
+    integrations: { ...perms.integrations },
     yandexDisk: { ...perms.yandexDisk },
     s3Storage: { ...perms.s3Storage },
   };

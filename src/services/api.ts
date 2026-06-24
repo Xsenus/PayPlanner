@@ -97,6 +97,20 @@ export interface UserSettingDto {
   updatedAt?: string;
 }
 
+export interface DadataIntegrationSettingsDto {
+  apiKeyConfigured: boolean;
+  secretConfigured: boolean;
+  apiKeyMasked: string;
+  secretMasked: string;
+  canEdit: boolean;
+  updatedAt?: string | null;
+}
+
+export interface UpdateDadataIntegrationSettingsRequest {
+  apiKey?: string | null;
+  secret?: string | null;
+}
+
 export interface AppFeatureFlagsDto {
   legal: {
     externalCourtSync: boolean;
@@ -4641,6 +4655,19 @@ export class ApiService {
     return this.request<CleanedAddress>('/clients/dadata/clean-address', {
       method: 'POST',
       body: JSON.stringify({ address }),
+    });
+  }
+
+
+  async getDadataIntegrationSettings() {
+    return this.request<DadataIntegrationSettingsDto>('/integrations/dadata/settings');
+  }
+
+
+  async updateDadataIntegrationSettings(payload: UpdateDadataIntegrationSettingsRequest) {
+    return this.request<DadataIntegrationSettingsDto>('/integrations/dadata/settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
     });
   }
 

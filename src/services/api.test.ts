@@ -88,6 +88,30 @@ describe('sticky notes realtime contract', () => {
 });
 
 describe('client DaData API', () => {
+  it('uses server integration settings endpoints for DaData credentials', async () => {
+    const payload = {
+      apiKeyConfigured: true,
+      secretConfigured: true,
+      apiKeyMasked: '••••6314',
+      secretMasked: '••••2906',
+      canEdit: true,
+    };
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(apiService.getDadataIntegrationSettings()).resolves.toEqual(payload);
+    await apiService.updateDadataIntegrationSettings({ apiKey: 'token' });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/integrations/dadata/settings');
+    expect(fetchMock.mock.calls[0][1]?.method).toBeUndefined();
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/integrations/dadata/settings');
+    expect(fetchMock.mock.calls[1][1]?.method).toBe('PUT');
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({ apiKey: 'token' });
+  });
+
   it('uses the client clean-address endpoint without legacy fallback routes', async () => {
     const payload = {
       result: '446200, Самарская обл, г Новокуйбышевск, ул Дзержинского, д 14, кв 9',

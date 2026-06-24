@@ -22,6 +22,7 @@ public class BackendPermissionMatrixTests
         yield return [RolePermissionCatalog.Reports];
         yield return [RolePermissionCatalog.Roles];
         yield return [RolePermissionCatalog.Audit];
+        yield return [RolePermissionCatalog.Integrations];
         yield return [RolePermissionCatalog.YandexDisk];
         yield return [RolePermissionCatalog.S3Storage];
     }

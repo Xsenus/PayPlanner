@@ -180,9 +180,10 @@ function AppContent() {
   const isAdminRole = (user?.role?.name ?? '').toLowerCase() === 'admin';
   const canManageRoles = isAdminRole || permissions.roles.canView;
   const canViewAudit = isAdminRole || permissions.audit.canView;
+  const canViewIntegrations = isAdminRole || Boolean(permissions.integrations?.canView);
   const canViewYandexDisk = isAdminRole || Boolean(permissions.yandexDisk?.canView);
   const canViewS3Storage = isAdminRole || Boolean(permissions.s3Storage?.canView);
-  const canViewSettings = canViewAudit || permissions.notifications.canView || canViewYandexDisk || canViewS3Storage;
+  const canViewSettings = canViewAudit || permissions.notifications.canView || canViewIntegrations || canViewYandexDisk || canViewS3Storage;
 
   const tabNames: Record<string, string> = useMemo(
     () => ({

@@ -398,6 +398,9 @@ public class RolePermissionsController : ControllerBase
                 case RolePermissionCatalog.Audit:
                     dto.Audit = ToSection(permission);
                     break;
+                case RolePermissionCatalog.Integrations:
+                    dto.Integrations = ToSection(permission);
+                    break;
                 case RolePermissionCatalog.YandexDisk:
                     dto.YandexDisk = ToSection(permission);
                     break;
@@ -664,6 +667,8 @@ public class RolePermissionsController : ControllerBase
                 && (permission.CanCreate || permission.CanDelete || permission.CanExport || permission.CanViewAnalytics))
             || (string.Equals(permission.Section, RolePermissionCatalog.Notifications, StringComparison.OrdinalIgnoreCase)
                 && (permission.CanCreate || permission.CanDelete || permission.CanExport || permission.CanViewAnalytics))
+            || (string.Equals(permission.Section, RolePermissionCatalog.Integrations, StringComparison.OrdinalIgnoreCase)
+                && (permission.CanCreate || permission.CanDelete || permission.CanExport || permission.CanViewAnalytics))
             || (string.Equals(permission.Section, RolePermissionCatalog.Notes, StringComparison.OrdinalIgnoreCase)
                 && (permission.CanExport || permission.CanViewAnalytics))
             || (string.Equals(permission.Section, RolePermissionCatalog.YandexDisk, StringComparison.OrdinalIgnoreCase)
@@ -693,6 +698,7 @@ public class RolePermissionsController : ControllerBase
             [RolePermissionCatalog.Notifications] = ToValues(dto.Notifications),
             [RolePermissionCatalog.Roles] = ToValues(dto.Roles),
             [RolePermissionCatalog.Audit] = ToValues(dto.Audit),
+            [RolePermissionCatalog.Integrations] = ToValues(dto.Integrations),
             [RolePermissionCatalog.YandexDisk] = ToValues(dto.YandexDisk),
             [RolePermissionCatalog.S3Storage] = ToValues(dto.S3Storage),
         };

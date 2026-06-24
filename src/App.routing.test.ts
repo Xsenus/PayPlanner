@@ -51,6 +51,7 @@ function createPermissions(overrides: Partial<RolePermissions> = {}): RolePermis
     notifications: { ...defaultRolePermissions.notifications, ...overrides.notifications },
     roles: { ...defaultRolePermissions.roles, ...overrides.roles },
     audit: { ...defaultRolePermissions.audit, ...overrides.audit },
+    integrations: { ...defaultRolePermissions.integrations, ...overrides.integrations },
     yandexDisk: { ...defaultRolePermissions.yandexDisk, ...overrides.yandexDisk },
     s3Storage: { ...defaultRolePermissions.s3Storage, ...overrides.s3Storage },
   };
@@ -100,6 +101,7 @@ function createOperationalRolePermissions(role: 'secretary' | 'lawyer' | 'accoun
     },
     roles: deniedSection,
     audit: deniedSection,
+    integrations: deniedSection,
     yandexDisk: deniedSection,
     s3Storage: deniedSection,
   });
@@ -402,7 +404,7 @@ describe('App real role route access matrix', () => {
     const options = {
       canManageRoles: permissions.roles.canView,
       canViewAudit: permissions.audit.canView,
-      canViewSettings: permissions.notifications.canView || permissions.yandexDisk.canView || permissions.s3Storage.canView,
+      canViewSettings: permissions.notifications.canView || permissions.integrations.canView || permissions.yandexDisk.canView || permissions.s3Storage.canView,
       canViewYandexDisk: permissions.yandexDisk.canView,
       canViewS3Storage: permissions.s3Storage.canView,
     };

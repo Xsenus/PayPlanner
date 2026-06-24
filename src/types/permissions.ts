@@ -15,6 +15,7 @@ export type MenuSectionKey =
   | 'notifications'
   | 'roles'
   | 'audit'
+  | 'integrations'
   | 'yandexDisk'
   | 's3Storage';
 
@@ -66,6 +67,7 @@ export const MENU_SECTION_KEYS: MenuSectionKey[] = [
   'notifications',
   'roles',
   'audit',
+  'integrations',
   'yandexDisk',
   's3Storage',
 ];
@@ -117,6 +119,7 @@ export const defaultRolePermissions: RolePermissions = {
   notifications: { ...defaultRestrictedMenuPermissions },
   roles: { ...defaultRestrictedMenuPermissions },
   audit: { ...defaultRestrictedMenuPermissions },
+  integrations: { ...defaultRestrictedMenuPermissions },
   yandexDisk: { ...defaultRestrictedMenuPermissions },
   s3Storage: { ...defaultRestrictedMenuPermissions },
 };

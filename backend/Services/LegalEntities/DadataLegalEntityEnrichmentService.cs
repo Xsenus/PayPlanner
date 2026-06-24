@@ -5,9 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
-using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
-using System.Security.Claims;
 using PayPlanner.Api.Data;
 
 namespace PayPlanner.Api.Services.LegalEntities
@@ -22,16 +20,14 @@ namespace PayPlanner.Api.Services.LegalEntities
         private readonly ILogger<DadataLegalEntityEnrichmentService> _logger;
         private readonly DadataOptions _opt;
         private readonly PaymentContext _db;
-        private readonly IHttpContextAccessor _httpContextAccessor;
 
         public DadataLegalEntityEnrichmentService(HttpClient httpClient, IOptions<DadataOptions> options,
-            ILogger<DadataLegalEntityEnrichmentService> logger, PaymentContext db, IHttpContextAccessor httpContextAccessor)
+            ILogger<DadataLegalEntityEnrichmentService> logger, PaymentContext db)
         {
             _http = httpClient;
             _logger = logger;
             _opt = options.Value;
             _db = db;
-            _httpContextAccessor = httpContextAccessor;
 
             _http.Timeout = TimeSpan.FromSeconds(_opt.TimeoutSeconds);
 
@@ -42,48 +38,43 @@ namespace PayPlanner.Api.Services.LegalEntities
 
         private sealed record DadataCredentials(string? ApiKey, string? Secret);
 
+        public const string ApiKeySettingKey = "integrations.dadata.apiKey";
+        public const string SecretSettingKey = "integrations.dadata.secret";
+
         private async Task<DadataCredentials> ResolveCredentialsAsync(CancellationToken ct)
         {
-            var userIdRaw = _httpContextAccessor.HttpContext?.User?.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (!int.TryParse(userIdRaw, out var userId))
-                return new DadataCredentials(_opt.ApiKey, _opt.Secret);
-
-            var keys = new[] { "integrations.dadata.apiKey", "integrations.dadata.secret" };
-            var settings = await _db.UserSettings
+            var keys = new[] { ApiKeySettingKey, SecretSettingKey };
+            var settings = await _db.SystemSettings
                 .AsNoTracking()
-                .Where(item => item.UserId == userId && keys.Contains(item.Key))
+                .Where(item => keys.Contains(item.Key))
                 .ToListAsync(ct);
 
-            var apiKey = settings.FirstOrDefault(item => item.Key == "integrations.dadata.apiKey")?.Value;
-            var secret = settings.FirstOrDefault(item => item.Key == "integrations.dadata.secret")?.Value;
+            var systemCredentials = new DadataCredentials(
+                settings.FirstOrDefault(item => item.Key == ApiKeySettingKey)?.Value,
+                settings.FirstOrDefault(item => item.Key == SecretSettingKey)?.Value);
 
-            var userCredentials = new DadataCredentials(apiKey, secret);
-            if (HasCompleteCredentials(userCredentials))
-                return userCredentials;
+            if (HasCompleteCredentials(systemCredentials))
+                return systemCredentials;
 
             var configuredCredentials = new DadataCredentials(_opt.ApiKey, _opt.Secret);
             if (HasCompleteCredentials(configuredCredentials))
                 return configuredCredentials;
 
-            var sharedCredentials = await ResolveSharedCredentialsAsync(userId, keys, ct);
-            if (sharedCredentials is not null && HasCompleteCredentials(sharedCredentials))
-                return sharedCredentials;
+            var legacyCredentials = await ResolveLegacyAdminCredentialsAsync(keys, ct);
+            if (legacyCredentials is not null && HasCompleteCredentials(legacyCredentials))
+                return legacyCredentials;
 
             return new DadataCredentials(
-                FirstNonWhiteSpace(userCredentials.ApiKey, configuredCredentials.ApiKey, sharedCredentials?.ApiKey),
-                FirstNonWhiteSpace(userCredentials.Secret, configuredCredentials.Secret, sharedCredentials?.Secret));
+                FirstNonWhiteSpace(systemCredentials.ApiKey, configuredCredentials.ApiKey, legacyCredentials?.ApiKey),
+                FirstNonWhiteSpace(systemCredentials.Secret, configuredCredentials.Secret, legacyCredentials?.Secret));
         }
 
-        private async Task<DadataCredentials?> ResolveSharedCredentialsAsync(
-            int currentUserId,
-            IReadOnlyCollection<string> keys,
-            CancellationToken ct)
+        private async Task<DadataCredentials?> ResolveLegacyAdminCredentialsAsync(IReadOnlyCollection<string> keys, CancellationToken ct)
         {
             var settings = await _db.UserSettings
                 .AsNoTracking()
                 .Where(item =>
-                    item.UserId != currentUserId
-                    && keys.Contains(item.Key)
+                    keys.Contains(item.Key)
                     && item.User != null
                     && item.User.IsActive
                     && !string.IsNullOrWhiteSpace(item.Value))
@@ -104,8 +95,8 @@ namespace PayPlanner.Api.Services.LegalEntities
                     IsAdmin = group.Any(item => item.IsAdmin),
                     UpdatedAt = group.Max(item => item.UpdatedAt),
                     Credentials = new DadataCredentials(
-                        group.FirstOrDefault(item => item.Key == "integrations.dadata.apiKey")?.Value,
-                        group.FirstOrDefault(item => item.Key == "integrations.dadata.secret")?.Value),
+                        group.FirstOrDefault(item => item.Key == ApiKeySettingKey)?.Value,
+                        group.FirstOrDefault(item => item.Key == SecretSettingKey)?.Value),
                 })
                 .Where(item => item.IsAdmin && !string.IsNullOrWhiteSpace(item.Credentials.ApiKey))
                 .OrderByDescending(item => HasCompleteCredentials(item.Credentials))

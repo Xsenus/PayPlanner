@@ -1,8 +1,6 @@
 using System.Net;
-using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
-using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -95,7 +93,7 @@ public sealed class DadataLegalEntityEnrichmentServiceTests
         using var cts = new CancellationTokenSource();
         await cts.CancelAsync();
 
-        await Assert.ThrowsAsync<TaskCanceledException>(() =>
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
             service.SuggestAddressesAsync("Новосибирск", 5, cts.Token));
     }
 
@@ -187,11 +185,46 @@ public sealed class DadataLegalEntityEnrichmentServiceTests
     }
 
     [Fact]
-    public async Task SuggestAddressesAsync_UsesSharedDadataCredentials_WhenCurrentUserHasNoKeys()
+    public async Task SuggestAddressesAsync_UsesServerDadataCredentials()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        scope.Db.SystemSettings.AddRange(
+            new SystemSetting
+            {
+                Key = DadataLegalEntityEnrichmentService.ApiKeySettingKey,
+                Value = "server-token",
+                CreatedAt = DateTime.UtcNow.AddMinutes(-10),
+                UpdatedAt = DateTime.UtcNow.AddMinutes(-10),
+            },
+            new SystemSetting
+            {
+                Key = DadataLegalEntityEnrichmentService.SecretSettingKey,
+                Value = "server-secret",
+                CreatedAt = DateTime.UtcNow.AddMinutes(-9),
+                UpdatedAt = DateTime.UtcNow.AddMinutes(-9),
+            });
+        await scope.Db.SaveChangesAsync();
+
+        var handler = CreateSuccessfulAddressSuggestHandler();
+        var service = CreateService(scope.Db, handler, apiKey: string.Empty, secret: string.Empty);
+
+        var suggestions = await service.SuggestAddressesAsync(
+            "новокуйбышевск, ул. Миронова, д. 8",
+            5,
+            CancellationToken.None);
+
+        var suggestion = Assert.Single(suggestions);
+        Assert.Equal("446213", suggestion.PostalCode);
+        Assert.Single(handler.Requests);
+        Assert.Equal("Token", handler.Requests[0].Headers.Authorization?.Scheme);
+        Assert.Equal("server-token", handler.Requests[0].Headers.Authorization?.Parameter);
+    }
+
+    [Fact]
+    public async Task SuggestAddressesAsync_UsesLegacyAdminCredentials_WhenServerKeysAreEmpty()
     {
         await using var scope = await CreateDbScopeAsync();
         var adminRole = new Role { Name = "admin", Description = "Администратор" };
-        var userRole = new Role { Name = "manager", Description = "Менеджер" };
         var admin = new User
         {
             Email = "admin@example.test",
@@ -200,37 +233,62 @@ public sealed class DadataLegalEntityEnrichmentServiceTests
             IsActive = true,
             IsApproved = true,
         };
-        var user = new User
-        {
-            Email = "user@example.test",
-            FullName = "Менеджер",
-            Role = userRole,
-            IsActive = true,
-            IsApproved = true,
-        };
-        scope.Db.Users.AddRange(admin, user);
+        scope.Db.Users.Add(admin);
         await scope.Db.SaveChangesAsync();
 
         scope.Db.UserSettings.AddRange(
             new UserSetting
             {
                 UserId = admin.Id,
-                Key = "integrations.dadata.apiKey",
-                Value = "shared-token",
+                Key = DadataLegalEntityEnrichmentService.ApiKeySettingKey,
+                Value = "legacy-token",
                 CreatedAt = DateTime.UtcNow.AddMinutes(-10),
                 UpdatedAt = DateTime.UtcNow.AddMinutes(-10),
             },
             new UserSetting
             {
                 UserId = admin.Id,
-                Key = "integrations.dadata.secret",
-                Value = "shared-secret",
+                Key = DadataLegalEntityEnrichmentService.SecretSettingKey,
+                Value = "legacy-secret",
                 CreatedAt = DateTime.UtcNow.AddMinutes(-9),
                 UpdatedAt = DateTime.UtcNow.AddMinutes(-9),
             });
         await scope.Db.SaveChangesAsync();
 
-        var handler = new RecordingDadataHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        var handler = CreateSuccessfulAddressSuggestHandler();
+        var service = CreateService(scope.Db, handler, apiKey: string.Empty, secret: string.Empty);
+
+        var suggestions = await service.SuggestAddressesAsync(
+            "новокуйбышевск, ул. Миронова, д. 8",
+            5,
+            CancellationToken.None);
+
+        var suggestion = Assert.Single(suggestions);
+        Assert.Equal("446213", suggestion.PostalCode);
+        Assert.Single(handler.Requests);
+        Assert.Equal("Token", handler.Requests[0].Headers.Authorization?.Scheme);
+        Assert.Equal("legacy-token", handler.Requests[0].Headers.Authorization?.Parameter);
+    }
+
+    private static DadataLegalEntityEnrichmentService CreateService(
+        PaymentContext db,
+        HttpMessageHandler handler,
+        string apiKey = "test-token",
+        string secret = "test-secret")
+        => new(
+            new HttpClient(handler) { BaseAddress = new Uri("https://dadata.test/") },
+            Options.Create(new DadataOptions
+            {
+                ApiKey = apiKey,
+                Secret = secret,
+                BaseUrl = "https://dadata.test/suggestions/",
+                CleanerUrl = "https://dadata.test/clean/",
+            }),
+            NullLogger<DadataLegalEntityEnrichmentService>.Instance,
+            db);
+
+    private static RecordingDadataHandler CreateSuccessfulAddressSuggestHandler()
+        => new(_ => new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(
                 """
@@ -253,55 +311,6 @@ public sealed class DadataLegalEntityEnrichmentServiceTests
                 Encoding.UTF8,
                 "application/json"),
         });
-        var accessor = new HttpContextAccessor
-        {
-            HttpContext = new DefaultHttpContext
-            {
-                User = CreatePrincipal(user.Id),
-            },
-        };
-        var service = CreateService(
-            scope.Db,
-            handler,
-            accessor,
-            apiKey: string.Empty,
-            secret: string.Empty);
-
-        var suggestions = await service.SuggestAddressesAsync(
-            "новокуйбышевск, ул. Миронова, д. 8",
-            5,
-            CancellationToken.None);
-
-        var suggestion = Assert.Single(suggestions);
-        Assert.Equal("446213", suggestion.PostalCode);
-        Assert.Single(handler.Requests);
-        Assert.Equal("Token", handler.Requests[0].Headers.Authorization?.Scheme);
-        Assert.Equal("shared-token", handler.Requests[0].Headers.Authorization?.Parameter);
-    }
-
-    private static DadataLegalEntityEnrichmentService CreateService(
-        PaymentContext db,
-        HttpMessageHandler handler,
-        IHttpContextAccessor? httpContextAccessor = null,
-        string apiKey = "test-token",
-        string secret = "test-secret")
-        => new(
-            new HttpClient(handler) { BaseAddress = new Uri("https://dadata.test/") },
-            Options.Create(new DadataOptions
-            {
-                ApiKey = apiKey,
-                Secret = secret,
-                BaseUrl = "https://dadata.test/suggestions/",
-                CleanerUrl = "https://dadata.test/clean/",
-            }),
-            NullLogger<DadataLegalEntityEnrichmentService>.Instance,
-            db,
-            httpContextAccessor ?? new HttpContextAccessor());
-
-    private static ClaimsPrincipal CreatePrincipal(int userId)
-        => new(new ClaimsIdentity(
-            [new Claim(ClaimTypes.NameIdentifier, userId.ToString())],
-            "Test"));
 
     private static async Task<TestDbScope> CreateDbScopeAsync()
     {
