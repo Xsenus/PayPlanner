@@ -1805,11 +1805,13 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
     [HttpGet("{id:int}/case-finance-summaries")]
     public async Task<ActionResult<IEnumerable<ClientCaseFinanceSummaryDto>>> GetCaseFinanceSummaries(int id, CancellationToken ct)
     {
-        if (!await _db.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Payments, static permission => permission.CanView, ct))
+        var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+        if (paymentsVisibility is null)
         {
             return Forbid();
         }
 
+        var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
         var visibleQuery = await ApplyCompanyVisibilityAsync(_db.LegalEntities.AsQueryable(), ct);
         var exists = await visibleQuery.AsNoTracking().AnyAsync(entity => entity.Id == id, ct);
         if (!exists)
@@ -1819,6 +1821,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
 
         var cases = await _db.ClientCases
             .AsNoTracking()
+            .ApplyClientCaseVisibility(casesVisibility)
             .Where(clientCase => clientCase.LegalEntityId == id)
             .OrderByDescending(clientCase => clientCase.CreatedAt)
             .ThenByDescending(clientCase => clientCase.Id)
@@ -1850,6 +1853,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
 
         var payments = await _db.Payments
             .AsNoTracking()
+            .ApplyPaymentVisibility(paymentsVisibility)
             .Include(payment => payment.InvoiceClientCases)
             .Where(payment => payment.Status != PaymentStatus.Cancelled)
             .Where(payment =>

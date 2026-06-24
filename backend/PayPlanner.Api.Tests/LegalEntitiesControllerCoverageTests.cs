@@ -829,6 +829,164 @@ public class LegalEntitiesControllerCoverageTests
     }
 
     [Fact]
+    public async Task GetCaseFinanceSummaries_HidesCases_WhenCasesViewAccessDenied()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role
+        {
+            Name = $"legal-finance-no-cases-{Guid.NewGuid():N}",
+            Description = "Legal finance without cases",
+            Permissions =
+            [
+                new RolePermission
+                {
+                    Section = RolePermissionCatalog.LegalEntities,
+                    CanView = true,
+                    ViewScope = DataVisibilityScope.All,
+                },
+                new RolePermission
+                {
+                    Section = RolePermissionCatalog.Cases,
+                    CanView = false,
+                    ViewScope = DataVisibilityScope.All,
+                },
+                new RolePermission
+                {
+                    Section = RolePermissionCatalog.Payments,
+                    CanView = true,
+                    ViewScope = DataVisibilityScope.All,
+                },
+            ],
+        };
+        var user = new User
+        {
+            Email = $"legal-finance-no-cases-{Guid.NewGuid():N}@example.com",
+            PasswordHash = "hash",
+            FullName = "Legal finance without cases",
+            Role = role,
+            IsEmployee = true,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        var legalEntityId = await CreateLegalEntityAsync(db, "Hidden Cases Legal", inn: "7700000299");
+        var clientCase = new ClientCase
+        {
+            LegalEntityId = legalEntityId,
+            Title = "Hidden case finance",
+            Status = ClientCaseStatus.Open,
+        };
+        db.Users.Add(user);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        db.Payments.Add(new Payment
+        {
+            LegalEntityId = legalEntityId,
+            ClientCaseId = clientCase.Id,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Date = DateTime.UtcNow.Date,
+            PlannedDate = DateTime.UtcNow.Date,
+            Amount = 1000m,
+            PaidAmount = 400m,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(
+            db,
+            new StubLegalEntityEnrichmentService(),
+            currentUserId: user.Id,
+            isAdmin: false);
+
+        var action = await controller.GetCaseFinanceSummaries(legalEntityId, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var summaries = Assert.IsAssignableFrom<IEnumerable<ClientCaseFinanceSummaryDto>>(ok.Value);
+        Assert.Empty(summaries);
+    }
+
+    [Fact]
+    public async Task GetCaseFinanceSummaries_HidesPaymentsOutsidePaymentVisibilityScope()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role
+        {
+            Name = $"legal-finance-own-payments-{Guid.NewGuid():N}",
+            Description = "Legal finance own payments",
+            Permissions =
+            [
+                new RolePermission
+                {
+                    Section = RolePermissionCatalog.LegalEntities,
+                    CanView = true,
+                    ViewScope = DataVisibilityScope.All,
+                },
+                new RolePermission
+                {
+                    Section = RolePermissionCatalog.Cases,
+                    CanView = true,
+                    ViewScope = DataVisibilityScope.All,
+                },
+                new RolePermission
+                {
+                    Section = RolePermissionCatalog.Payments,
+                    CanView = true,
+                    ViewScope = DataVisibilityScope.Own,
+                },
+            ],
+        };
+        var user = new User
+        {
+            Email = $"legal-finance-own-payments-{Guid.NewGuid():N}@example.com",
+            PasswordHash = "hash",
+            FullName = "Legal finance own payments",
+            Role = role,
+            IsEmployee = true,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        var legalEntityId = await CreateLegalEntityAsync(db, "Hidden Payments Legal", inn: "7700000399");
+        var clientCase = new ClientCase
+        {
+            LegalEntityId = legalEntityId,
+            Title = "Visible case without visible payments",
+            Status = ClientCaseStatus.Open,
+        };
+        db.Users.Add(user);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        db.Payments.Add(new Payment
+        {
+            LegalEntityId = legalEntityId,
+            ClientCaseId = clientCase.Id,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Date = DateTime.UtcNow.Date,
+            PlannedDate = DateTime.UtcNow.Date,
+            Amount = 1000m,
+            PaidAmount = 400m,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(
+            db,
+            new StubLegalEntityEnrichmentService(),
+            currentUserId: user.Id,
+            isAdmin: false);
+
+        var action = await controller.GetCaseFinanceSummaries(legalEntityId, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var summary = Assert.Single(Assert.IsAssignableFrom<IEnumerable<ClientCaseFinanceSummaryDto>>(ok.Value));
+        Assert.Equal(clientCase.Id, summary.CaseId);
+        Assert.Equal(0m, summary.IncomeTotal);
+        Assert.Equal(0m, summary.IncomePaid);
+        Assert.Equal(0m, summary.IncomeOutstanding);
+        Assert.Equal(0, summary.IncomeCount);
+    }
+
+    [Fact]
     public async Task Suggest_RejectsEmptyInput()
     {
         await using var db = await CreateContextAsync();
