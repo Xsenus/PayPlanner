@@ -307,6 +307,60 @@ public class ClientsControllerTests
     }
 
     [Fact]
+    public async Task V2GetById_HidesCases_WhenCasesViewAccessDenied()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db);
+        var roleId = await db.Users
+            .Where(user => user.Id == userId)
+            .Select(user => user.RoleId)
+            .SingleAsync();
+
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                RoleId = roleId,
+                Section = RolePermissionCatalog.Clients,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = roleId,
+                Section = RolePermissionCatalog.Cases,
+                CanView = false,
+                ViewScope = DataVisibilityScope.All,
+            });
+
+        var client = new Client
+        {
+            Name = "Client details with hidden cases",
+            IsActive = true,
+            ResponsibleUserId = userId,
+        };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+
+        db.ClientCases.Add(new ClientCase
+        {
+            ClientId = client.Id,
+            Title = "Hidden details case",
+            Status = ClientCaseStatus.Open,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateV2Controller(db, userId);
+
+        var action = await controller.GetById(client.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action);
+        var result = Assert.IsType<Client>(ok.Value);
+
+        Assert.Equal(client.Id, result.Id);
+        Assert.Empty(result.Cases);
+    }
+
+    [Fact]
     public async Task V2WriteEndpoints_RequireClientActionPermissions()
     {
         await using var db = await CreateContextAsync();
