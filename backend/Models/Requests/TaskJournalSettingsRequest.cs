@@ -5,6 +5,7 @@ public class TaskJournalSettingsRequest
     public bool RestrictExecutorEditing { get; set; } = true;
     public bool AllowExecutorDeadlineChangeRequests { get; set; } = true;
     public bool RequireCompletionResult { get; set; } = true;
+    public string? TaskCardWindowMode { get; set; } = "legacy";
     public bool CaseInactivityAutomationEnabled { get; set; } = true;
     public int CaseInactivityDays { get; set; } = 14;
     public int CaseInactivityLimit { get; set; } = 25;

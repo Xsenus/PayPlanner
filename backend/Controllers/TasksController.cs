@@ -70,6 +70,9 @@ public class TasksController : ControllerBase
     private const string RestrictExecutorEditingSettingKey = "tasks.restrictExecutorEditing";
     private const string AllowExecutorDeadlineChangeRequestsSettingKey = "tasks.allowExecutorDeadlineChangeRequests";
     private const string RequireCompletionResultSettingKey = "tasks.requireCompletionResult";
+    private const string TaskCardWindowModeSettingKey = "tasks.taskCardWindowMode";
+    private const string TaskCardWindowModeLegacy = "legacy";
+    private const string TaskCardWindowModeModern = "modern";
     private const string CaseInactivityAutomationEnabledSettingKey = "tasks.automation.caseControl.enabled";
     private const string CaseInactivityAutomationDaysSettingKey = "tasks.automation.caseControl.inactiveDays";
     private const string CaseInactivityAutomationLimitSettingKey = "tasks.automation.caseControl.limit";
@@ -329,10 +332,12 @@ public class TasksController : ControllerBase
         var escalationUserId = requestedEscalationUserId > 0
             ? requestedEscalationUserId.ToString()
             : "0";
+        var taskCardWindowMode = NormalizeTaskCardWindowMode(request.TaskCardWindowMode);
 
         await UpsertSystemSettingAsync(RestrictExecutorEditingSettingKey, request.RestrictExecutorEditing ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(AllowExecutorDeadlineChangeRequestsSettingKey, request.AllowExecutorDeadlineChangeRequests ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(RequireCompletionResultSettingKey, request.RequireCompletionResult ? "true" : "false", now, ct);
+        await UpsertSystemSettingAsync(TaskCardWindowModeSettingKey, taskCardWindowMode, now, ct);
         await UpsertSystemSettingAsync(CaseInactivityAutomationEnabledSettingKey, request.CaseInactivityAutomationEnabled ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(CaseInactivityAutomationDaysSettingKey, inactivityDays.ToString(), now, ct);
         await UpsertSystemSettingAsync(CaseInactivityAutomationLimitSettingKey, inactivityLimit.ToString(), now, ct);
@@ -2830,6 +2835,7 @@ public class TasksController : ControllerBase
                 item.Key == RestrictExecutorEditingSettingKey ||
                 item.Key == AllowExecutorDeadlineChangeRequestsSettingKey ||
                 item.Key == RequireCompletionResultSettingKey ||
+                item.Key == TaskCardWindowModeSettingKey ||
                 item.Key == CaseInactivityAutomationEnabledSettingKey ||
                 item.Key == CaseInactivityAutomationDaysSettingKey ||
                 item.Key == CaseInactivityAutomationLimitSettingKey ||
@@ -2846,6 +2852,7 @@ public class TasksController : ControllerBase
             RestrictExecutorEditing = ParseBoolSetting(settings.GetValueOrDefault(RestrictExecutorEditingSettingKey), true),
             AllowExecutorDeadlineChangeRequests = ParseBoolSetting(settings.GetValueOrDefault(AllowExecutorDeadlineChangeRequestsSettingKey), true),
             RequireCompletionResult = ParseBoolSetting(settings.GetValueOrDefault(RequireCompletionResultSettingKey), true),
+            TaskCardWindowMode = NormalizeTaskCardWindowMode(settings.GetValueOrDefault(TaskCardWindowModeSettingKey)),
             CaseInactivityAutomationEnabled = ParseBoolSetting(settings.GetValueOrDefault(CaseInactivityAutomationEnabledSettingKey), true),
             CaseInactivityDays = inactivityDays,
             CaseInactivityLimit = Math.Clamp(ParseIntSetting(settings.GetValueOrDefault(CaseInactivityAutomationLimitSettingKey), 25), 1, 100),
@@ -2853,6 +2860,13 @@ public class TasksController : ControllerBase
             CaseInactivityEscalationDays = Math.Clamp(ParseIntSetting(settings.GetValueOrDefault(CaseInactivityAutomationEscalationDaysSettingKey), 30), inactivityDays, 365),
             CaseInactivityEscalationUserId = escalationUserId > 0 ? escalationUserId : null,
         };
+    }
+
+    private static string NormalizeTaskCardWindowMode(string? value)
+    {
+        return string.Equals(value, TaskCardWindowModeModern, StringComparison.OrdinalIgnoreCase)
+            ? TaskCardWindowModeModern
+            : TaskCardWindowModeLegacy;
     }
 
     private async Task UpsertSystemSettingAsync(string key, string value, DateTime nowUtc, CancellationToken ct)

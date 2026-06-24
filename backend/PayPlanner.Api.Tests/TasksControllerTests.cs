@@ -277,6 +277,7 @@ public class TasksControllerTests
             RestrictExecutorEditing = false,
             AllowExecutorDeadlineChangeRequests = false,
             RequireCompletionResult = false,
+            TaskCardWindowMode = "modern",
             CaseInactivityAutomationEnabled = false,
             CaseInactivityDays = 400,
             CaseInactivityLimit = 0,
@@ -291,6 +292,7 @@ public class TasksControllerTests
         Assert.False(dto.RestrictExecutorEditing);
         Assert.False(dto.AllowExecutorDeadlineChangeRequests);
         Assert.False(dto.RequireCompletionResult);
+        Assert.Equal("modern", dto.TaskCardWindowMode);
         Assert.False(dto.CaseInactivityAutomationEnabled);
         Assert.Equal(365, dto.CaseInactivityDays);
         Assert.Equal(1, dto.CaseInactivityLimit);
@@ -314,6 +316,11 @@ public class TasksControllerTests
             .AsNoTracking()
             .SingleAsync(item => item.Key == "tasks.requireCompletionResult");
         Assert.Equal("false", requireCompletionResult.Value);
+
+        var taskCardWindowMode = await db.SystemSettings
+            .AsNoTracking()
+            .SingleAsync(item => item.Key == "tasks.taskCardWindowMode");
+        Assert.Equal("modern", taskCardWindowMode.Value);
     }
 
     [Fact]

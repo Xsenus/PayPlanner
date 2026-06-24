@@ -9,6 +9,7 @@ const DEFAULT_SETTINGS: TaskJournalSettingsDto = {
   restrictExecutorEditing: true,
   allowExecutorDeadlineChangeRequests: true,
   requireCompletionResult: true,
+  taskCardWindowMode: 'legacy',
   caseInactivityAutomationEnabled: true,
   caseInactivityDays: 14,
   caseInactivityLimit: 25,
@@ -112,6 +113,38 @@ export function TaskJournalSettings() {
       </div>
 
       <div className="space-y-3">
+        <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-3 text-sm text-gray-700">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <div className="font-semibold text-gray-900">Окно карточки задачи</div>
+              <div className="mt-1 text-gray-600">
+                Администратор выбирает вид карточки сразу для всех сотрудников. Старая карточка остается доступной для быстрого возврата.
+              </div>
+            </div>
+            <div className="inline-flex rounded-xl bg-white p-1 shadow-sm ring-1 ring-blue-100" role="group" aria-label="Окно карточки задачи">
+              {([
+                { value: 'legacy', label: 'Старая' },
+                { value: 'modern', label: 'Новая' },
+              ] as const).map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setSettings((prev) => ({ ...prev, taskCardWindowMode: option.value }))}
+                  disabled={loading || saving}
+                  className={`rounded-lg px-3 py-1.5 text-sm font-semibold transition ${
+                    settings.taskCardWindowMode === option.value
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-slate-600 hover:bg-blue-50'
+                  } disabled:cursor-not-allowed disabled:opacity-60`}
+                  aria-pressed={settings.taskCardWindowMode === option.value}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
         <label className="flex items-start gap-3 rounded-2xl border border-gray-200 bg-white p-4 text-sm text-gray-700">
           <input
             type="checkbox"

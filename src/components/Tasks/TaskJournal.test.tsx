@@ -274,6 +274,7 @@ async function renderJournal(
     restrictExecutorEditing: true,
     allowExecutorDeadlineChangeRequests: true,
     requireCompletionResult: true,
+    taskCardWindowMode: 'legacy',
     caseInactivityAutomationEnabled: true,
     caseInactivityDays: 14,
     caseInactivityLimit: 25,
@@ -524,6 +525,31 @@ describe('TaskJournal', () => {
     await waitFor(() => {
       expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(101, 'inProgress', undefined);
     });
+  });
+
+  it('opens the modern task card when the global setting is enabled', async () => {
+    await renderJournal([createTask()], {
+      settings: { taskCardWindowMode: 'modern' },
+    });
+
+    await openFirstTaskForEdit();
+
+    expect(await screen.findByTestId('task-modern-card-window')).toBeTruthy();
+    expect(screen.queryByTestId('task-legacy-card-window')).toBeNull();
+  });
+
+  it('keeps result disabled in the modern task card until completion', async () => {
+    await renderJournal([createTask()], {
+      settings: { taskCardWindowMode: 'modern' },
+    });
+
+    await openFirstTaskForEdit();
+
+    const resultInput = await screen.findByTestId('task-result-field') as HTMLTextAreaElement;
+    expect(resultInput.disabled).toBe(true);
+
+    fireEvent.change(screen.getByTestId('task-editor-status-select'), { target: { value: 'done' } });
+    expect(resultInput.disabled).toBe(false);
   });
 
   it('loads and creates tasks inside a client context', async () => {
@@ -2245,7 +2271,7 @@ describe('TaskJournal', () => {
     }));
   });
 
-  it('opens executor task in view mode and saves only result', async () => {
+  it('opens executor task in view mode and saves result only after completion starts', async () => {
     authState.isAdmin = false;
     authState.user = { id: 7, fullName: 'Исполнитель', email: 'assignee@example.com' };
     await renderJournal([
@@ -2266,12 +2292,14 @@ describe('TaskJournal', () => {
     const titleInput = screen.getByDisplayValue('Тестовая задача') as HTMLInputElement;
     expect(titleInput.disabled).toBe(true);
 
-    const resultInput = screen.getByPlaceholderText('Опишите подробно, что было сделано и какой результат был достигнут.') as HTMLTextAreaElement;
-    expect(resultInput.disabled).toBe(false);
+    const resultInput = screen.getByTestId('task-result-field') as HTMLTextAreaElement;
+    expect(resultInput.disabled).toBe(true);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Завершить' }).at(-1)!);
+    await waitFor(() => expect(resultInput.disabled).toBe(false));
     fireEvent.change(resultInput, { target: { value: 'Результат исполнителя' } });
     fireEvent.click(screen.getByRole('button', { name: 'Сохранить результат' }));
 
-    await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(101, 'new', 'Результат исполнителя'));
+    await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(101, 'done', 'Результат исполнителя'));
     expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
   });
 

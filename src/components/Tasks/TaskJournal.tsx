@@ -151,6 +151,7 @@ const DEFAULT_TASK_JOURNAL_SETTINGS: TaskJournalSettingsDto = {
   restrictExecutorEditing: true,
   allowExecutorDeadlineChangeRequests: true,
   requireCompletionResult: true,
+  taskCardWindowMode: 'legacy',
   caseInactivityAutomationEnabled: true,
   caseInactivityDays: 14,
   caseInactivityLimit: 25,
@@ -3059,12 +3060,13 @@ export function TaskJournal({
     : 'Задачи по контрагентам, делам, платежам, звонкам и документам: исполнитель, срок, результат и напоминания в одном рабочем журнале.';
   const isRouteTaskPage = !isApprovalsMode && Boolean(routeTaskId && routeTaskId > 0);
   const routeTaskState = isRouteTaskPage && modal?.task?.id === routeTaskId ? modal : null;
+  const TaskCardComponent = taskSettings.taskCardWindowMode === 'modern' ? ModernTaskModal : TaskModal;
 
   if (isRouteTaskPage) {
     return (
       <div className="min-h-screen bg-slate-50">
         {routeTaskState ? (
-          <TaskModal
+          <TaskCardComponent
             key={`page-${routeTaskState.task!.id}-${routeTaskState.mode}`}
             presentation="page"
             state={routeTaskState}
@@ -3654,7 +3656,7 @@ export function TaskJournal({
       </div>
 
       {modal ? (
-        <TaskModal
+        <TaskCardComponent
           key={modal.task ? `edit-${modal.task.id}` : 'create'}
           presentation="modal"
           state={modal}
@@ -5631,29 +5633,11 @@ function TaskDaySchedulePanel({
   );
 }
 
-function TaskModal({
-  presentation = 'modal',
-  state,
-  tasks,
-  timeZoneId,
-  assignees,
-  clients,
-  legalEntities,
-  counterpartyOptions,
-  currentUserId,
-  currentUserName,
-  taskSettings,
-  notificationDefaults,
-  canSwitchToEdit,
-  onClose,
-  onEnableEdit,
-  onSave,
-  onResultSave,
-  onApprovalDecision,
-  onDelete,
-  onDuplicate,
-}: {
+type TaskCardChrome = 'legacy' | 'modern';
+
+type TaskModalProps = {
   presentation?: 'modal' | 'page';
+  chrome?: TaskCardChrome;
   state: ModalState;
   tasks: TaskJournalItem[];
   timeZoneId: string;
@@ -5678,10 +5662,39 @@ function TaskModal({
   ) => void | Promise<void>;
   onDelete: (task: TaskJournalItem) => boolean | Promise<boolean>;
   onDuplicate: (task: TaskJournalItem) => boolean | Promise<boolean>;
-}) {
+};
+
+function ModernTaskModal(props: TaskModalProps) {
+  return <TaskModal {...props} chrome="modern" />;
+}
+
+function TaskModal({
+  presentation = 'modal',
+  chrome = 'legacy',
+  state,
+  tasks,
+  timeZoneId,
+  assignees,
+  clients,
+  legalEntities,
+  counterpartyOptions,
+  currentUserId,
+  currentUserName,
+  taskSettings,
+  notificationDefaults,
+  canSwitchToEdit,
+  onClose,
+  onEnableEdit,
+  onSave,
+  onResultSave,
+  onApprovalDecision,
+  onDelete,
+  onDuplicate,
+}: TaskModalProps) {
   const toast = useToast();
   const { confirm } = useDialog();
   const isPage = presentation === 'page';
+  const isModernChrome = chrome === 'modern';
   const taskId = state?.task?.id ?? null;
   const requireCompletionResult = taskSettings.requireCompletionResult !== false;
   const titleInputRef = useRef<HTMLInputElement | null>(null);
@@ -5832,6 +5845,7 @@ function TaskModal({
 
   const update = <K extends keyof TaskForm>(key: K, value: TaskForm[K]) => {
     if (isReadOnly && key !== 'result') return;
+    if (key === 'result' && form.status !== 'done') return;
     if (key === 'result' && resultError) {
       setResultError(null);
     }
@@ -6224,10 +6238,517 @@ function TaskModal({
     }
   };
 
+  const shellClassName = isPage
+    ? isModernChrome
+      ? 'mx-auto max-w-[1320px] p-3 sm:p-4 lg:p-5'
+      : 'mx-auto max-w-[1320px] p-4 sm:p-6 lg:p-8'
+    : isModernChrome
+      ? 'fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-3 backdrop-blur-sm sm:p-4'
+      : 'fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm';
+  const panelClassName = isPage
+    ? isModernChrome
+      ? 'flex w-full flex-col overflow-visible rounded-xl border border-slate-200 bg-white shadow-sm'
+      : 'flex w-full flex-col overflow-visible rounded-2xl border border-slate-200 bg-white shadow-sm'
+    : isModernChrome
+      ? 'flex max-h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl'
+      : 'flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl';
+  const headerClassName = isModernChrome
+    ? 'flex flex-col gap-3 border-b border-slate-200 bg-slate-50/80 px-5 py-4 lg:flex-row lg:items-start lg:justify-between'
+    : 'flex flex-col gap-4 border-b border-slate-200 px-6 py-5 lg:flex-row lg:items-start lg:justify-between';
+  const bodyClassName = isPage
+    ? isModernChrome ? 'px-5 py-4' : 'px-6 py-5'
+    : isModernChrome ? 'min-h-0 overflow-y-auto px-5 py-4' : 'min-h-0 overflow-y-auto px-6 py-5';
+  const canEditResult = form.status === 'done';
+  const statusOption = STATUS_OPTIONS.find((option) => option.value === form.status) ?? STATUS_OPTIONS[0];
+  const priorityOption = PRIORITY_OPTIONS.find((option) => option.value === form.priority) ?? PRIORITY_OPTIONS[1];
+  const typeOption = TYPE_OPTIONS.find((option) => option.value === form.type) ?? TYPE_OPTIONS[0];
+  const dueAtText = form.dueAt ? formatDateTime(fromLocalInputValue(form.dueAt)) : 'Не задано';
+  const selectedCaseTitle = selectableClientCases.find((item) => item.id === form.clientCaseId)?.title ?? state?.task?.clientCaseTitle ?? '';
+  const visibleObservers = getVisibleParticipantsByRole('observer');
+  const visibleApprovers = getVisibleParticipantsByRole('approver');
+
+  if (isModernChrome) {
+    const TypeIcon = typeOption.icon;
+    const titleText = state?.mode === 'view'
+      ? 'Просмотр задачи'
+      : state?.mode === 'edit'
+        ? 'Редактировать задачу'
+        : 'Новая задача';
+
+    return (
+      <div className={shellClassName} data-testid="task-modern-card-window">
+        <div className={panelClassName}>
+          <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-3">
+            <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm text-slate-500">
+              <span className="truncate font-semibold text-slate-700">{form.objectName || 'Выберите проект'}</span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />
+              <span className="truncate">{selectedCaseTitle || 'Без дела'}</span>
+              {state?.task ? (
+                <>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-slate-300" />
+                  <span className="shrink-0">#{state.task.id}</span>
+                </>
+              ) : null}
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              {state?.task ? (
+                <button
+                  type="button"
+                  onClick={() => void saveWithStatus('inProgress')}
+                  disabled={isReadOnly && !canSwitchToEdit}
+                  className="inline-flex h-9 items-center gap-2 rounded-lg bg-blue-50 px-3 text-sm font-semibold text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Play className="h-4 w-4" />
+                  Запустить
+                </button>
+              ) : null}
+              <button type="button" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100" title="Просмотр" aria-label="Просмотр">
+                <Eye className="h-4 w-4" />
+              </button>
+              <button type="button" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-amber-600 transition hover:bg-amber-50" title="Напоминание" aria-label="Напоминание">
+                <Bell className="h-4 w-4" />
+              </button>
+              {state?.task && !isReadOnly ? (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setActionMenuOpen((open) => !open)}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100"
+                    title="Еще"
+                    aria-label="Еще"
+                  >
+                    <MoreHorizontal className="h-4 w-4" />
+                  </button>
+                  {actionMenuOpen ? (
+                    <div className="absolute right-0 z-20 mt-2 w-56 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 text-sm shadow-xl">
+                      <button type="button" onClick={() => void handleDuplicateTask()} className="block w-full px-3 py-2 text-left text-slate-700 transition hover:bg-slate-50">Дублировать задачу</button>
+                      <button type="button" onClick={() => void handleDeleteTask()} className="block w-full px-3 py-2 text-left text-rose-600 transition hover:bg-rose-50">Удалить задачу</button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+              {!isPage ? (
+                <button type="button" onClick={onClose} className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" aria-label="Закрыть">
+                  <X className="h-5 w-5" />
+                </button>
+              ) : (
+                <button type="button" onClick={onClose} className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
+                  <ArrowLeft className="h-4 w-4" />
+                  К журналу
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className={isPage ? 'grid gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_300px]' : 'grid min-h-0 gap-4 overflow-y-auto p-4 xl:grid-cols-[minmax(0,1fr)_300px]'}>
+            <main className="min-w-0 space-y-4">
+              <section className="space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+                    <ClipboardList className="h-3.5 w-3.5" />
+                    {titleText}
+                  </span>
+                  <span className="inline-flex items-center gap-2 rounded-full bg-orange-50 px-3 py-1 text-xs font-semibold text-orange-700">
+                    <span className="h-2 w-2 rounded-full bg-orange-500" />
+                    {statusOption.label}
+                  </span>
+                </div>
+                <h2 className="sr-only">{titleText}</h2>
+                <input
+                  ref={titleInputRef}
+                  value={form.title}
+                  onChange={(event) => update('title', event.target.value)}
+                  disabled={isReadOnly}
+                  data-testid="task-title-input"
+                  className="w-full border-0 border-b border-slate-200 bg-transparent px-0 py-2 text-2xl font-semibold text-slate-950 outline-none transition placeholder:text-slate-300 focus:border-blue-400 focus:ring-0"
+                  placeholder="Введите название задачи"
+                />
+              </section>
+
+              <section className="rounded-xl border border-slate-200 bg-white p-3">
+                <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700">
+                  <ListFilter className="h-4 w-4" />
+                  Описание задачи
+                </div>
+                <textarea
+                  value={form.description}
+                  onChange={(event) => update('description', event.target.value)}
+                  disabled={isReadOnly}
+                  data-testid="task-description-field"
+                  className="min-h-[126px] w-full resize-y rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-500"
+                  rows={5}
+                  placeholder="Добавить описание"
+                />
+              </section>
+
+              <section className={`rounded-xl border p-3 ${canEditResult ? 'border-emerald-200 bg-emerald-50/50' : 'border-dashed border-slate-200 bg-slate-50'}`}>
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                    <CheckCircle2 className={`h-4 w-4 ${canEditResult ? 'text-emerald-600' : 'text-slate-400'}`} />
+                    Результат
+                  </div>
+                  {!canEditResult ? (
+                    <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-500 ring-1 ring-slate-200">
+                      Доступен при завершении
+                    </span>
+                  ) : null}
+                </div>
+                <textarea
+                  value={form.result}
+                  onChange={(event) => update('result', event.target.value)}
+                  disabled={!canEditResult}
+                  data-testid="task-result-field"
+                  className="min-h-[92px] w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                  rows={4}
+                  placeholder={canEditResult ? TASK_COMPLETION_RESULT_HINT : 'Результат появится при завершении задачи'}
+                />
+                {resultError ? <p className="mt-2 text-xs font-semibold text-rose-600">{resultError}</p> : null}
+              </section>
+
+              <section className="rounded-xl border border-slate-200 bg-white">
+                <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-3 py-2 text-sm">
+                  <span className="rounded-lg bg-blue-50 px-3 py-1.5 font-semibold text-blue-700">Комментарии {comments.length}</span>
+                  <span className="rounded-lg px-3 py-1.5 font-semibold text-slate-500">Файлы {files.length}</span>
+                  <span className="rounded-lg px-3 py-1.5 font-semibold text-slate-500">Таймер</span>
+                  <span className="rounded-lg px-3 py-1.5 font-semibold text-slate-500">Активность</span>
+                </div>
+                <div className="min-h-[220px] space-y-3 p-3">
+                  {!taskId ? (
+                    <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+                      Комментарии и файлы появятся после сохранения задачи.
+                    </div>
+                  ) : commentsLoading ? (
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">Загружаем историю...</div>
+                  ) : comments.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">Здесь пока нет сообщений.</div>
+                  ) : (
+                    <div className="max-h-[260px] space-y-2 overflow-y-auto pr-1">
+                      {comments.map((comment) => (
+                        <article key={comment.id} className={`max-w-[82%] rounded-2xl px-3 py-2 text-sm shadow-sm ${comment.kind === 'system' ? 'bg-slate-100 text-slate-600' : 'ml-auto bg-blue-500 text-white'}`}>
+                          <div className="font-semibold">{comment.authorName}</div>
+                          <div className="mt-1 whitespace-pre-wrap">{comment.text}</div>
+                          <div className={`mt-1 text-[11px] ${comment.kind === 'system' ? 'text-slate-400' : 'text-blue-100'}`}>{formatDateTime(comment.createdAt)}</div>
+                        </article>
+                      ))}
+                    </div>
+                  )}
+                  {taskId ? (
+                    <div className="flex items-end gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
+                      <button type="button" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white" title="Упомянуть" aria-label="Упомянуть">
+                        @
+                      </button>
+                      <textarea
+                        value={commentText}
+                        onChange={(event) => setCommentText(event.target.value)}
+                        className="min-h-[40px] flex-1 resize-none border-0 bg-transparent px-2 py-2 text-sm outline-none placeholder:text-slate-400 focus:ring-0"
+                        rows={1}
+                        maxLength={4000}
+                        placeholder="Напишите комментарий..."
+                      />
+                      {canManageFiles ? (
+                        <button type="button" onClick={() => newFileInputRef.current?.click()} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white" title="Прикрепить файл" aria-label="Прикрепить файл">
+                          <UploadCloud className="h-4 w-4" />
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={handleAddComment}
+                        disabled={commentSaving || !commentText.trim()}
+                        className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-500 text-white transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-60"
+                        aria-label="Отправить комментарий"
+                      >
+                        {commentSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              </section>
+
+              {fileGroups.length > 0 ? (
+                <section className="rounded-xl border border-slate-200 bg-white p-3">
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+                      <FileText className="h-4 w-4" />
+                      Файлы
+                    </div>
+                    {canManageFiles ? (
+                      <button type="button" onClick={() => newFileInputRef.current?.click()} className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-100">
+                        <Plus className="h-4 w-4" />
+                        Добавить
+                      </button>
+                    ) : null}
+                  </div>
+                  <div className="space-y-2">
+                    {fileGroups.map((group) => (
+                      <div key={group.documentKey} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                        <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white text-slate-600 ring-1 ring-slate-200">
+                          <FileText className="h-4 w-4" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm font-semibold text-slate-800">{group.latest.originalFileName}</div>
+                          <div className="text-xs text-slate-500">v{group.latest.version} · {formatFileSize(group.latest.sizeBytes)}</div>
+                        </div>
+                        <button type="button" onClick={() => void handleDownloadFile(group.latest)} className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-blue-600 transition hover:bg-white" title="Скачать" aria-label="Скачать файл">
+                          <Download className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+
+              <input
+                ref={newFileInputRef}
+                type="file"
+                className="hidden"
+                onChange={(event) => {
+                  void handleUploadFile(event.currentTarget.files);
+                  event.currentTarget.value = '';
+                }}
+              />
+            </main>
+
+            <aside className="space-y-3 xl:sticky xl:top-0 xl:self-start">
+              <div className="grid grid-cols-[minmax(0,1fr)_44px] gap-2">
+                <select
+                  value={form.status}
+                  onChange={(event) => update('status', event.target.value as TaskJournalStatus)}
+                  disabled={isReadOnly}
+                  data-testid="task-editor-status-select"
+                  className="h-11 rounded-xl border border-orange-300 bg-white px-3 text-sm font-semibold text-slate-700 outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 disabled:bg-slate-50"
+                >
+                  {STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => void handleCompletionAction()}
+                  disabled={isLockedViewWithEditAccess}
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                  title={completionButtonLabel}
+                  aria-label={completionButtonLabel}
+                >
+                  <CheckCircle2 className="h-5 w-5" />
+                </button>
+              </div>
+
+              <section className="space-y-2 rounded-xl border border-slate-200 bg-white p-2">
+                <ModernTaskQuickField icon={<UsersRound className="h-4 w-4" />} label="Исполнитель">
+                  <select
+                    value={form.assigneeUserId ?? ''}
+                    onChange={(event) => setPrimaryAssignee(Number(event.target.value) || null)}
+                    disabled={isReadOnly}
+                    data-testid="task-assignee-select"
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white"
+                  >
+                    <option value="">Без исполнителя</option>
+                    {assignees.map((assignee) => (
+                      <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
+                    ))}
+                  </select>
+                </ModernTaskQuickField>
+                <ModernTaskQuickField icon={<CalendarClock className="h-4 w-4" />} label="Дата">
+                  <input
+                    type="datetime-local"
+                    value={form.dueAt}
+                    onChange={(event) => update('dueAt', event.target.value)}
+                    disabled={isReadOnly}
+                    data-testid="task-due-at-input"
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white"
+                  />
+                  <div className="mt-1 text-xs text-slate-500">{dueAtText}</div>
+                </ModernTaskQuickField>
+                <ModernTaskQuickField icon={<Clock3 className="h-4 w-4" />} label="Длительность">
+                  <select
+                    value={normalizeTaskDuration(form.plannedDurationMinutes)}
+                    onChange={(event) => update('plannedDurationMinutes', Number(event.target.value))}
+                    disabled={isReadOnly}
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white"
+                  >
+                    {[15, 30, 45, 60, 90, 120, 180, 240, 360, 480].map((minutes) => (
+                      <option key={minutes} value={minutes}>{formatDuration(minutes)}</option>
+                    ))}
+                  </select>
+                </ModernTaskQuickField>
+                <ModernTaskQuickField icon={<TypeIcon className="h-4 w-4" />} label="Тип задачи">
+                  <select value={form.type} onChange={(event) => update('type', event.target.value as TaskJournalType)} disabled={isReadOnly} className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white">
+                    {TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                </ModernTaskQuickField>
+                <ModernTaskQuickField icon={<Scale className="h-4 w-4" />} label="Приоритет">
+                  <select value={form.priority} onChange={(event) => update('priority', event.target.value as TaskJournalPriority)} disabled={isReadOnly} className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white">
+                    {PRIORITY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                  <div className="mt-1 text-xs text-slate-500">{priorityOption.label}</div>
+                </ModernTaskQuickField>
+                <ModernTaskQuickField icon={<FileText className="h-4 w-4" />} label="Файлы">
+                  <button
+                    type="button"
+                    onClick={() => newFileInputRef.current?.click()}
+                    disabled={!canManageFiles || uploadingDocumentKey !== null}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-2 py-2 text-sm font-semibold text-slate-600 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <UploadCloud className="h-4 w-4" />
+                    {files.length ? `${files.length} файлов` : 'Добавить файл'}
+                  </button>
+                </ModernTaskQuickField>
+                <ModernTaskQuickField icon={<ClipboardList className="h-4 w-4" />} label="Подзадачи">
+                  <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-2 py-2 text-sm text-slate-500">0/0</div>
+                </ModernTaskQuickField>
+              </section>
+
+              <section className="rounded-xl border border-slate-200 bg-white p-3">
+                <div className="mb-2 text-sm font-semibold text-slate-700">Связи</div>
+                <label className="mb-2 flex items-center gap-2 text-sm text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(form.isInternal)}
+                    disabled={isReadOnly}
+                    onChange={(event) => handleInternalChange(event.target.checked)}
+                    data-testid="task-internal-checkbox"
+                    className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                  />
+                  Внутренняя задача
+                </label>
+                <LookupSelect
+                  value={selectedCounterpartyValue}
+                  options={counterpartyOptions}
+                  onChange={handleCounterpartyChange}
+                  placeholder="Контрагент"
+                  title="Выбор контрагента"
+                  dictionaryLabel="Открыть справочник"
+                  searchPlaceholder="Поиск"
+                  emptyOptionLabel="Контрагент не выбран"
+                  buttonClassName="h-10 border-slate-200 text-sm"
+                  disabled={isReadOnly || form.isInternal}
+                />
+                <select
+                  aria-label="Дело"
+                  value={form.clientCaseId ?? ''}
+                  onChange={(event) => handleCaseChange(event.target.value)}
+                  disabled={isReadOnly || form.isInternal || (!form.clientId && !form.legalEntityId) || casesLoading}
+                  className="mt-2 w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white disabled:text-slate-400"
+                >
+                  <option value="">Без дела</option>
+                  {selectableClientCases.map((clientCase) => (
+                    <option key={clientCase.id} value={clientCase.id}>{clientCase.title}</option>
+                  ))}
+                </select>
+              </section>
+
+              <section className="rounded-xl border border-slate-200 bg-white p-3">
+                <div className="mb-2 text-sm font-semibold text-slate-700">Участники</div>
+                <ModernParticipantRow label="Согласующие" count={visibleApprovers.length} />
+                <ModernParticipantRow label="Наблюдатели" count={visibleObservers.length} />
+                {!isReadOnly ? (
+                  <div className="mt-2 grid gap-2">
+                    <select
+                      aria-label="Добавить согласующего"
+                      value=""
+                      onChange={(event) => {
+                        const selected = assignees.find((assignee) => assignee.id === Number(event.target.value));
+                        if (selected) addParticipant('approver', selected);
+                      }}
+                      className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white"
+                    >
+                      <option value="">Добавить согласующего</option>
+                      {getAvailableAssigneesForRole('approver').map((assignee) => (
+                        <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
+                      ))}
+                    </select>
+                    <select
+                      aria-label="Добавить наблюдателя"
+                      value=""
+                      onChange={(event) => {
+                        const selected = assignees.find((assignee) => assignee.id === Number(event.target.value));
+                        if (selected) addParticipant('observer', selected);
+                      }}
+                      className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white"
+                    >
+                      <option value="">Добавить наблюдателя</option>
+                      {availableObservers.map((assignee) => (
+                        <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
+              </section>
+
+              <section className="rounded-xl border border-slate-200 bg-white p-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="text-sm font-semibold text-slate-700">Метки</span>
+                  <Bookmark className="h-4 w-4 text-slate-400" />
+                </div>
+                <input
+                  value={tagText}
+                  disabled={isReadOnly}
+                  onChange={(event) => {
+                    if (isReadOnly) return;
+                    setTagText(event.target.value);
+                    update('tags', unique(event.target.value.split(',')));
+                  }}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white"
+                  placeholder="метка, еще метка"
+                />
+                {form.tags.length ? (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {form.tags.map((tag) => (
+                      <span key={tag} className="rounded-md bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700">{tag}</span>
+                    ))}
+                  </div>
+                ) : null}
+              </section>
+
+              {canRequestDeadlineChange ? (
+                <section className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+                  <div className="mb-2 text-sm font-semibold text-amber-900">Запрос переноса срока</div>
+                  <input type="datetime-local" value={deadlineRequestDueAt} onChange={(event) => setDeadlineRequestDueAt(event.target.value)} className="w-full rounded-lg border border-amber-200 bg-white px-2 py-2 text-sm" />
+                  <textarea value={deadlineRequestReason} onChange={(event) => setDeadlineRequestReason(event.target.value)} className="mt-2 min-h-[64px] w-full rounded-lg border border-amber-200 bg-white px-2 py-2 text-sm" placeholder="Причина" />
+                  <button type="button" onClick={() => void handleDeadlineRequest()} disabled={deadlineRequestSaving || !deadlineRequestDueAt} className="mt-2 w-full rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-amber-600 disabled:opacity-60">
+                    {deadlineRequestSaving ? 'Отправляем...' : 'Запросить перенос'}
+                  </button>
+                </section>
+              ) : null}
+
+              <section className="rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-500">
+                <div>Создано: {state?.task ? formatDateTime(state.task.createdAt) : 'после сохранения'}</div>
+                <div className="mt-1">Создатель: {taskAuthorLabel}</div>
+                <div className="mt-1 truncate">Тип: {typeOption.label}</div>
+              </section>
+            </aside>
+          </div>
+
+          <div className="flex flex-col gap-2 border-t border-slate-200 bg-slate-50 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <input
+              value={changeComment}
+              onChange={(event) => setChangeComment(event.target.value)}
+              disabled={!taskId || isReadOnly}
+              className="h-10 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none placeholder:text-slate-400 focus:border-blue-400 disabled:bg-slate-100"
+              placeholder="Комментарий к изменению"
+            />
+            <div className="flex shrink-0 justify-end gap-2">
+              <button type="button" onClick={onClose} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">
+                {isPage ? 'К журналу задач' : 'Отмена'}
+              </button>
+              {isLockedViewWithEditAccess ? (
+                <button type="button" onClick={onEnableEdit} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800">
+                  Редактировать задачу
+                </button>
+              ) : !isReadOnly ? (
+                <button type="button" onClick={() => void handleSaveForm()} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700">
+                  {state?.task ? 'Сохранить' : 'Создать задачу'}
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className={isPage ? 'mx-auto max-w-[1320px] p-4 sm:p-6 lg:p-8' : 'fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm'}>
-      <div className={isPage ? 'flex w-full flex-col overflow-visible rounded-2xl border border-slate-200 bg-white shadow-sm' : 'flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl'}>
-        <div className="flex flex-col gap-4 border-b border-slate-200 px-6 py-5 lg:flex-row lg:items-start lg:justify-between">
+    <div className={shellClassName} data-testid={isModernChrome ? 'task-modern-card-window' : 'task-legacy-card-window'}>
+      <div className={panelClassName}>
+        <div className={headerClassName}>
           <div className="min-w-0">
             {isPage ? (
               <button
@@ -6327,7 +6848,7 @@ function TaskModal({
           </div>
         </div>
 
-        <div className={isPage ? 'px-6 py-5' : 'min-h-0 overflow-y-auto px-6 py-5'}>
+        <div className={bodyClassName}>
           {quickPanel === 'assignee' ? (
             <section className="mb-5 rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
               <Field label="Новый исполнитель">
@@ -6758,8 +7279,8 @@ function TaskModal({
               <textarea value={form.description} onChange={(event) => update('description', event.target.value)} disabled={isReadOnly} data-testid="task-description-field" className="form-textarea min-h-[140px] resize-y" rows={6} placeholder="Контекст, телефоны, комментарии, откуда пришла задача" />
             </Field>
             <Field label="Результат">
-              <textarea value={form.result} onChange={(event) => update('result', event.target.value)} data-testid="task-result-field" className="form-textarea min-h-[120px] resize-y" rows={5} placeholder={TASK_COMPLETION_RESULT_HINT} />
-              <p className="mt-1 text-xs text-slate-500">{TASK_COMPLETION_RESULT_HINT}</p>
+              <textarea value={form.result} onChange={(event) => update('result', event.target.value)} disabled={!canEditResult} data-testid="task-result-field" className="form-textarea min-h-[120px] resize-y" rows={5} placeholder={canEditResult ? TASK_COMPLETION_RESULT_HINT : 'Результат доступен при завершении задачи'} />
+              <p className="mt-1 text-xs text-slate-500">{canEditResult ? TASK_COMPLETION_RESULT_HINT : 'Поле станет доступным после выбора завершенного статуса или нажатия кнопки завершения.'}</p>
               {resultError ? <p className="mt-1 text-xs font-semibold text-rose-600">{resultError}</p> : null}
             </Field>
           </div>
@@ -7149,6 +7670,29 @@ function Field({ label, children, className = '' }: { label: string; children: R
     <div className={`block ${className}`}>
       <span className="mb-2 block text-sm font-semibold text-slate-700">{label}</span>
       {children}
+    </div>
+  );
+}
+
+function ModernTaskQuickField({ icon, label, children }: { icon: ReactNode; label: string; children: ReactNode }) {
+  return (
+    <div className="rounded-xl bg-slate-50 p-2">
+      <div className="mb-1.5 flex items-center gap-2 text-sm font-semibold text-slate-700">
+        <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-white text-slate-500 ring-1 ring-slate-200">
+          {icon}
+        </span>
+        {label}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function ModernParticipantRow({ label, count }: { label: string; count: number }) {
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
+      <span className="font-semibold text-slate-700">{label}</span>
+      <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-slate-500 ring-1 ring-slate-200">{count}</span>
     </div>
   );
 }

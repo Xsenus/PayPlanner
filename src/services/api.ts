@@ -1598,6 +1598,7 @@ export interface TaskJournalSettingsDto {
   restrictExecutorEditing: boolean;
   allowExecutorDeadlineChangeRequests: boolean;
   requireCompletionResult: boolean;
+  taskCardWindowMode: 'legacy' | 'modern';
   caseInactivityAutomationEnabled: boolean;
   caseInactivityDays: number;
   caseInactivityLimit: number;
@@ -1626,6 +1627,7 @@ export interface UpdateTaskJournalSettingsRequest {
   restrictExecutorEditing: boolean;
   allowExecutorDeadlineChangeRequests: boolean;
   requireCompletionResult: boolean;
+  taskCardWindowMode: 'legacy' | 'modern';
   caseInactivityAutomationEnabled: boolean;
   caseInactivityDays: number;
   caseInactivityLimit: number;
