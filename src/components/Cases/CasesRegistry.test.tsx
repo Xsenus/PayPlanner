@@ -735,6 +735,13 @@ describe('CasesRegistry', () => {
         page: 1,
       }));
     });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Удалить сохраненное представление' }));
+
+    await waitFor(() => {
+      expect(JSON.parse(window.localStorage.getItem('pp.cases_registry_views.v1') ?? '[]')).toHaveLength(0);
+    });
+    expect(screen.getByText('Представление «Активные Земцов» удалено.')).toBeTruthy();
   });
 
   it('runs row quick actions for task creation and case finance', async () => {
