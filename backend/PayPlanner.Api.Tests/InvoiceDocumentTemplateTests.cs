@@ -1020,6 +1020,23 @@ public class InvoiceDocumentTemplateTests
     }
 
     [Fact]
+    public async Task GetDocument_ReturnsNotFoundForHiddenInvoice()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        var current = await CreateAccountsUserAsync(db, "accounts-doc-own", canExport: true, viewScope: DataVisibilityScope.Own);
+        var owner = await CreateAccountsUserAsync(db, "accounts-doc-owner", canExport: true);
+        var payment = await db.Payments.Include(item => item.Client).SingleAsync(item => item.Id == paymentId);
+        payment.Client!.ResponsibleUserId = owner.Id;
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, isAdmin: false, userId: current.Id);
+
+        var result = await controller.GetDocument(paymentId, "html", templateKey: null, includeSignatureAndSeal: false, CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(result);
+    }
+
+    [Fact]
     public async Task UpsertDocumentTemplateSettings_ForbidsNonAdminUsers()
     {
         await using var db = await CreateContextAsync();
@@ -1707,7 +1724,11 @@ public class InvoiceDocumentTemplateTests
         return db;
     }
 
-    private static async Task<User> CreateAccountsUserAsync(PaymentContext db, string name, bool canExport)
+    private static async Task<User> CreateAccountsUserAsync(
+        PaymentContext db,
+        string name,
+        bool canExport,
+        string viewScope = DataVisibilityScope.All)
     {
         var role = new Role
         {
@@ -1723,7 +1744,7 @@ public class InvoiceDocumentTemplateTests
                     CanEdit = true,
                     CanDelete = true,
                     CanExport = canExport,
-                    ViewScope = DataVisibilityScope.All,
+                    ViewScope = viewScope,
                 },
             },
         };

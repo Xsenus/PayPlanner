@@ -6392,8 +6392,15 @@ public class InvoicesController : ControllerBase
 
     private async Task<Payment?> LoadInvoiceDocumentPaymentAsync(int id, CancellationToken ct)
     {
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+        if (visibility is null)
+        {
+            return null;
+        }
+
         return await _db.Payments
             .AsNoTracking()
+            .ApplyPaymentVisibility(visibility)
             .Include(p => p.Invoice)
             .Include(p => p.Client)
                 .ThenInclude(client => client!.Addresses)
