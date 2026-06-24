@@ -3904,12 +3904,14 @@ public class PaymentsController : ControllerBase
                 : BadRequest("ClientId or legalEntityId is required when clientCaseId is specified.");
         }
 
+        var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
         var clientCase = await _db.ClientCases
             .AsNoTracking()
+            .ApplyClientCaseVisibility(casesVisibility)
             .FirstOrDefaultAsync(item => item.Id == payment.ClientCaseId.Value, ct);
         if (clientCase is null)
         {
-            return BadRequest($"Unknown clientCaseId {payment.ClientCaseId.Value}");
+            return BadRequest($"clientCaseId {payment.ClientCaseId.Value} is not available");
         }
 
         if (hasCaseOwnerClient && clientCase.ClientId != caseOwnerClientId!.Value)
