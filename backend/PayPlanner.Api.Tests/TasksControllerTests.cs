@@ -2020,6 +2020,41 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task ExportCalendar_AppliesTaskVisibilityScope()
+    {
+        await using var db = await CreateContextAsync();
+        var current = await CreateTaskUserAsync(db, "task-ics-own@example.com", "Ограниченный пользователь", canEdit: false);
+        var other = await CreateTaskUserAsync(db, "task-ics-other@example.com", "Другой автор", canEdit: false);
+        var client = await CreateClientAsync(db, "Клиент календаря с ограничением");
+        var visibleTask = await CreateTaskAsync(db, current.Id, client.Id);
+        visibleTask.Title = "Своя задача для календаря";
+        visibleTask.DueAt = new DateTime(2026, 5, 10, 9, 0, 0, DateTimeKind.Utc);
+        var hiddenTask = await CreateTaskAsync(db, other.Id, client.Id);
+        hiddenTask.Title = "Чужая задача для календаря";
+        hiddenTask.DueAt = new DateTime(2026, 5, 11, 9, 0, 0, DateTimeKind.Utc);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), current);
+
+        var result = await controller.ExportCalendar(
+            from: null,
+            to: null,
+            clientId: null,
+            legalEntityId: null,
+            reminderMinutes: null,
+            ct: CancellationToken.None);
+
+        var file = Assert.IsType<FileContentResult>(result);
+        var content = Encoding.UTF8.GetString(file.FileContents);
+
+        Assert.Contains("SUMMARY:Своя задача для календаря", content);
+        Assert.DoesNotContain("SUMMARY:Чужая задача для календаря", content);
+
+        var auditEvent = await db.ObjectAuditEvents.SingleAsync(item => item.ObjectType == CalendarExportAudit.ObjectType);
+        using var metadata = JsonDocument.Parse(auditEvent.MetadataJson!);
+        Assert.Equal(1, metadata.RootElement.GetProperty("exportedEventCount").GetInt32());
+    }
+
+    [Fact]
     public async Task ExportCalendar_UsesCustomReminderMinutes()
     {
         await using var db = await CreateContextAsync();
@@ -2110,6 +2145,46 @@ public class TasksControllerTests
         Assert.Contains("Ожидает", content);
         Assert.Contains("Просрочена", content);
         Assert.Contains("На контроль", content);
+    }
+
+    [Fact]
+    public async Task ExportPlanningReport_AppliesTaskVisibilityScope()
+    {
+        await using var db = await CreateContextAsync();
+        var current = await CreateTaskUserAsync(db, "planning-own@example.com", "Ограниченный планировщик", canEdit: false);
+        var other = await CreateTaskUserAsync(db, "planning-other@example.com", "Другой планировщик", canEdit: false);
+        var client = await CreateClientAsync(db, "Клиент планинга с ограничением");
+        var visibleTask = await CreateTaskAsync(db, current.Id, client.Id, result: "Видимый результат");
+        visibleTask.Title = "Своя задача для планинга";
+        visibleTask.Status = "waiting";
+        visibleTask.DueAt = DateTime.UtcNow.AddDays(-1);
+        var hiddenTask = await CreateTaskAsync(db, other.Id, client.Id, result: "Скрытый результат");
+        hiddenTask.Title = "Чужая задача для планинга";
+        hiddenTask.Status = "waiting";
+        hiddenTask.DueAt = DateTime.UtcNow.AddDays(-1);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), current);
+
+        var result = await controller.ExportPlanningReport(
+            format: "html",
+            search: null,
+            status: "active",
+            type: null,
+            assigneeUserId: null,
+            from: null,
+            to: null,
+            clientCaseId: null,
+            clientId: null,
+            legalEntityId: null,
+            ct: CancellationToken.None);
+
+        var file = Assert.IsType<FileContentResult>(result);
+        var content = Encoding.UTF8.GetString(file.FileContents);
+
+        Assert.Contains("Своя задача для планинга", content);
+        Assert.Contains("Видимый результат", content);
+        Assert.DoesNotContain("Чужая задача для планинга", content);
+        Assert.DoesNotContain("Скрытый результат", content);
     }
 
     [Fact]
