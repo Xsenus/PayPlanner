@@ -1,11 +1,16 @@
 using System;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using PayPlanner.Api.Data;
 
 #nullable disable
 
 namespace PayPlanner.Api.Migrations
 {
     /// <inheritdoc />
+    [Migration("20260503090000_AddCashInventories")]
+    [DbContext(typeof(PaymentContext))]
     public partial class AddCashInventories : Migration
     {
         /// <inheritdoc />

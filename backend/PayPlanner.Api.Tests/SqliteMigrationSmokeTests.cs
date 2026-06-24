@@ -1,8 +1,14 @@
+using System.Security.Claims;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Data.Sqlite;
+using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Requests;
+using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services.Notifications;
 using Xunit;
 
@@ -38,17 +44,24 @@ public class SqliteMigrationSmokeTests
                 _ = await context.Users.Take(1).ToListAsync();
                 _ = await context.TaskJournalItems.Take(1).ToListAsync();
 
+                var adminRole = await context.Roles.SingleOrDefaultAsync(role => role.Name == "admin")
+                    ?? new Role
+                    {
+                        Name = "admin",
+                        Description = "Администратор",
+                        CreatedAt = DateTime.UtcNow,
+                    };
+                if (adminRole.Id == 0)
+                {
+                    context.Roles.Add(adminRole);
+                }
+
                 var user = new User
                 {
                     Email = "sqlite-push-smoke@example.com",
                     FullName = "SQLite Push Smoke",
                     PasswordHash = "hash",
-                    Role = new Role
-                    {
-                        Name = $"sqlite-push-smoke-{Guid.NewGuid():N}",
-                        Description = "SQLite push smoke role",
-                        CreatedAt = DateTime.UtcNow,
-                    },
+                    Role = adminRole,
                     IsActive = true,
                     IsApproved = true,
                     CreatedAt = DateTime.UtcNow,
@@ -95,6 +108,61 @@ public class SqliteMigrationSmokeTests
                     SentAt = DateTime.UtcNow,
                 });
                 await context.SaveChangesAsync();
+
+                var bankController = CreateBanksController(context, user.Id);
+                var bankAction = await bankController.CreateBank(
+                    new BankUpsertRequest
+                    {
+                        Name = "Локальный банк",
+                        Bik = "044525104",
+                        CorrespondentAccount = "30101810745374525104",
+                        City = "Самара",
+                        IsForeign = false,
+                    },
+                    CancellationToken.None);
+                var bankCreated = Assert.IsType<CreatedAtActionResult>(bankAction.Result);
+                var bank = Assert.IsType<BankDto>(bankCreated.Value);
+                Assert.Equal("Локальный банк", bank.Name);
+
+                var cashController = CreateCashOrdersController(context, user.Id);
+                var orderAction = await cashController.Create(new CashOrder
+                {
+                    Type = CashOrderType.Incoming,
+                    Status = CashOrderStatus.Posted,
+                    Date = new DateTime(2026, 6, 24),
+                    Amount = 2_500m,
+                    Currency = "RUB",
+                    Account = "Основная касса",
+                    PayerName = "Тестовый клиент",
+                    Basis = "Локальная проверка кассы",
+                }, CancellationToken.None);
+                var orderCreated = Assert.IsType<CreatedResult>(orderAction);
+                var order = Assert.IsType<CashOrderDto>(orderCreated.Value);
+                Assert.StartsWith("ПКО-2026-", order.Number);
+
+                var cashBookAction = await cashController.GetCashBook(
+                    new DateTime(2026, 6, 24),
+                    new DateTime(2026, 6, 24),
+                    "Основная касса",
+                    ct: CancellationToken.None);
+                var cashBook = Assert.IsType<CashBookResponseDto>(
+                    Assert.IsType<OkObjectResult>(cashBookAction.Result).Value);
+                Assert.Equal(2_500m, cashBook.Income);
+                Assert.Equal(2_500m, cashBook.ClosingBalance);
+
+                var inventoryAction = await cashController.CreateInventory(
+                    new CashInventoryCreateRequest
+                    {
+                        Date = new DateTime(2026, 6, 24),
+                        AccountName = "Основная касса",
+                        ActualBalance = 2_500m,
+                        CreateCorrection = false,
+                        Comment = "Локальная SQLite-проверка",
+                    },
+                    CancellationToken.None);
+                var inventoryCreated = Assert.IsType<CreatedResult>(inventoryAction);
+                var inventory = Assert.IsType<CashInventoryDto>(inventoryCreated.Value);
+                Assert.StartsWith("ИНВК-2026-", inventory.Number);
             }
 
             await using (var verificationContext = new PaymentContext(options))
@@ -102,6 +170,9 @@ public class SqliteMigrationSmokeTests
                 var storedSubscription = await verificationContext.UserPushSubscriptions.SingleAsync();
                 var storedNotification = await verificationContext.UserNotifications.SingleAsync();
                 var storedDelivery = await verificationContext.NotificationDeliveries.SingleAsync();
+                var storedBank = await verificationContext.Banks.SingleAsync();
+                var storedCashOrder = await verificationContext.CashOrders.SingleAsync();
+                var storedInventory = await verificationContext.CashInventories.SingleAsync();
 
                 Assert.True(storedSubscription.IsActive);
                 Assert.Equal("Edge", storedSubscription.Browser);
@@ -110,6 +181,9 @@ public class SqliteMigrationSmokeTests
                 Assert.Equal(NotificationDeliveryStatus.Sent, storedDelivery.Status);
                 Assert.Equal(storedNotification.EventKey, storedDelivery.EventKey);
                 Assert.Equal(storedNotification.RecipientUserId, storedDelivery.RecipientUserId);
+                Assert.Equal("Локальный банк", storedBank.Name);
+                Assert.Equal(2_500m, storedCashOrder.Amount);
+                Assert.Equal(2_500m, storedInventory.ActualBalance);
             }
         }
         finally
@@ -120,6 +194,38 @@ public class SqliteMigrationSmokeTests
             DeleteIfExists(databasePath + "-wal");
         }
     }
+
+    private static BanksController CreateBanksController(PaymentContext context, int userId)
+        => new(context)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = CreateAdminPrincipal(userId),
+                },
+            },
+        };
+
+    private static CashOrdersController CreateCashOrdersController(PaymentContext context, int userId)
+        => new(context)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = CreateAdminPrincipal(userId),
+                },
+            },
+        };
+
+    private static ClaimsPrincipal CreateAdminPrincipal(int userId)
+        => new(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
+            new Claim(ClaimTypes.Role, "admin"),
+        ],
+        authenticationType: "Test"));
 
     private static void DeleteIfExists(string path)
     {
