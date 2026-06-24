@@ -1390,6 +1390,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
         var itemIds = items.Select(item => item.Id).ToList();
         var accountsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
         var actsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Acts, ct);
+        var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
         var contractsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Contracts, ct);
         var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
         var visibleContracts = _db.Contracts
@@ -1400,6 +1401,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             ? new Dictionary<int, int>()
             : await _db.ClientCases
                 .AsNoTracking()
+                .ApplyClientCaseVisibility(casesVisibility)
                 .Where(clientCase => clientCase.LegalEntityId.HasValue
                     && itemIds.Contains(clientCase.LegalEntityId.Value))
                 .GroupBy(clientCase => clientCase.LegalEntityId!.Value)
@@ -1411,6 +1413,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
         {
             var caseRows = await _db.ClientCases
                 .AsNoTracking()
+                .ApplyClientCaseVisibility(casesVisibility)
                 .Where(clientCase => clientCase.LegalEntityId.HasValue
                     && itemIds.Contains(clientCase.LegalEntityId.Value))
                 .OrderByDescending(clientCase => clientCase.CreatedAt)

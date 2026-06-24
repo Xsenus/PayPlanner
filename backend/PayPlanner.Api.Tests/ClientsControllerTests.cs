@@ -185,6 +185,13 @@ public class ClientsControllerTests
             new RolePermission
             {
                 RoleId = roleId,
+                Section = RolePermissionCatalog.Cases,
+                CanView = false,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = roleId,
                 Section = RolePermissionCatalog.Contracts,
                 CanView = false,
                 ViewScope = DataVisibilityScope.All,
@@ -220,6 +227,12 @@ public class ClientsControllerTests
         {
             ClientId = client.Id,
             ContractId = contract.Id,
+        });
+        db.ClientCases.Add(new ClientCase
+        {
+            ClientId = client.Id,
+            Title = "Hidden case",
+            Status = ClientCaseStatus.Open,
         });
         db.Acts.Add(new Act
         {
@@ -280,10 +293,13 @@ public class ClientsControllerTests
         var item = Assert.Single(items);
 
         Assert.Equal(client.Id, item.Id);
+        Assert.Equal(0, item.CasesCount);
         Assert.Equal(0, item.ContractsCount);
         Assert.Equal(0, item.InvoicesCount);
         Assert.Equal(0, item.ActsCount);
         Assert.Equal(0, item.PaymentsCount);
+        Assert.Empty(item.Cases);
+        Assert.Empty(item.RelatedCases);
         Assert.Empty(item.RelatedContracts);
         Assert.Empty(item.RelatedInvoices);
         Assert.Empty(item.RelatedActs);

@@ -470,6 +470,13 @@ public class LegalEntitiesControllerCoverageTests
             new RolePermission
             {
                 RoleId = user.RoleId,
+                Section = RolePermissionCatalog.Cases,
+                CanView = false,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = user.RoleId,
                 Section = RolePermissionCatalog.Contracts,
                 CanView = false,
                 ViewScope = DataVisibilityScope.All,
@@ -495,6 +502,12 @@ public class LegalEntitiesControllerCoverageTests
         {
             LegalEntityId = legalEntityId,
             ContractId = contract.Id,
+        });
+        db.ClientCases.Add(new ClientCase
+        {
+            LegalEntityId = legalEntityId,
+            Title = "Hidden legal case",
+            Status = ClientCaseStatus.Open,
         });
         db.Acts.Add(new Act
         {
@@ -537,10 +550,12 @@ public class LegalEntitiesControllerCoverageTests
         var item = Assert.Single(page.Items);
 
         Assert.Equal(legalEntityId, item.Id);
+        Assert.Equal(0, item.CasesCount);
         Assert.Equal(0, item.ContractsCount);
         Assert.Equal(0, item.InvoicesCount);
         Assert.Equal(0, item.ActsCount);
         Assert.Equal(0, item.PaymentsCount);
+        Assert.Empty(item.RelatedCases);
         Assert.Empty(item.RelatedContracts);
         Assert.Empty(item.RelatedInvoices);
         Assert.Empty(item.RelatedActs);

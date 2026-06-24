@@ -232,6 +232,7 @@ public class ClientsV2Controller : ControllerBase
         {
             var accountsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
             var actsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Acts, ct);
+            var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
             var contractsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Contracts, ct);
             var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
             var visibleContracts = _db.Contracts
@@ -240,6 +241,7 @@ public class ClientsV2Controller : ControllerBase
 
             var casesCountByClient = await _db.ClientCases
                 .AsNoTracking()
+                .ApplyClientCaseVisibility(casesVisibility)
                 .Where(c => c.ClientId.HasValue && itemIds.Contains(c.ClientId.Value))
                 .GroupBy(c => c.ClientId!.Value)
                 .Select(g => new { ClientId = g.Key, Count = g.Count() })
@@ -247,6 +249,7 @@ public class ClientsV2Controller : ControllerBase
 
             var casesByClient = await _db.ClientCases
                 .AsNoTracking()
+                .ApplyClientCaseVisibility(casesVisibility)
                 .Where(c => c.ClientId.HasValue && itemIds.Contains(c.ClientId.Value))
                 .OrderByDescending(c => c.CreatedAt)
                 .ThenByDescending(c => c.Id)
