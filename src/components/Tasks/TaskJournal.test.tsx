@@ -665,6 +665,66 @@ describe('TaskJournal', () => {
     expect(toastMock.success).toHaveBeenCalledWith('Отчет по задачам выгружен в Word.', 'Отчет по задачам');
   });
 
+  it('exports task journal CSV and planning reports with current filters', async () => {
+    let exportedBlob: Blob | null = null;
+    const createObjectUrl = vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => {
+      exportedBlob = blob as Blob;
+      return 'blob:task-export';
+    });
+    const revokeObjectUrl = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+
+    try {
+      await renderJournal([
+        createTask({
+          title: 'Подготовить документы',
+          clientId: 10,
+          clientName: 'Иванов Иван Иванович',
+          clientCaseId: 100,
+          clientCaseTitle: 'БАНКРОТСТВО',
+        }),
+      ], {
+        contextFilter: {
+          clientId: 10,
+          objectName: 'Иванов Иван Иванович',
+          title: 'Иванов Иван Иванович',
+        },
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: 'CSV' }));
+
+      expect(anchorClick).toHaveBeenCalledTimes(1);
+      expect(revokeObjectUrl).toHaveBeenCalledWith('blob:task-export');
+      expect(exportedBlob).not.toBeNull();
+      const csv = await exportedBlob!.text();
+      expect(csv).toContain('"Контрагент";"Дело";"Наименование задачи"');
+      expect(csv).toContain('"Иванов Иван Иванович";"БАНКРОТСТВО";"Подготовить документы"');
+      expect(toastMock.success).toHaveBeenCalledWith('Журнал задач экспортирован в CSV.', 'Журнал задач');
+
+      fireEvent.click(screen.getByRole('button', { name: 'PDF' }));
+
+      await waitFor(() => expect(apiMock.downloadTaskPlanningReport).toHaveBeenCalledWith(expect.objectContaining({
+        format: 'pdf',
+        status: 'active',
+        clientId: 10,
+      })));
+
+      fireEvent.click(screen.getByRole('button', { name: 'HTML' }));
+
+      await waitFor(() => expect(apiMock.downloadTaskPlanningReport).toHaveBeenCalledWith(expect.objectContaining({
+        format: 'html',
+        status: 'active',
+        clientId: 10,
+      })));
+      expect(toastMock.success).toHaveBeenCalledWith('Отчет по задачам выгружен в PDF.', 'Отчет по задачам');
+      expect(toastMock.success).toHaveBeenCalledWith('Отчет по задачам выгружен в HTML.', 'Отчет по задачам');
+    } finally {
+      createObjectUrl.mockRestore();
+      revokeObjectUrl.mockRestore();
+      anchorClick.mockRestore();
+    }
+  });
+
   it('shows case deadlines and court events in calendar mode', async () => {
     apiMock.getCaseCalendarSummary.mockResolvedValue({
       from: todayAt(0),
