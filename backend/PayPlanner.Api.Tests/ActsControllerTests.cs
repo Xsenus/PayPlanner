@@ -2310,6 +2310,23 @@ public class ActsControllerTests
     }
 
     [Fact]
+    public async Task SendActEmail_ReturnsNotFoundForHiddenAct()
+    {
+        await using var db = await CreateContextAsync();
+        var (actId, current) = await CreateHiddenActDocumentFixtureAsync(db, "mail");
+        var emailService = new RecordingEmailService();
+        var controller = CreateControllerForUser(db, current.Id, emailService);
+
+        var action = await controller.SendActEmail(
+            actId,
+            new SendInvoiceEmailRequest { Email = "hidden@example.test", Format = "word" },
+            CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(action);
+        Assert.Null(emailService.ToEmail);
+    }
+
+    [Fact]
     public async Task SendActEmail_ReturnsProblem_WhenPdfServiceIsMissing()
     {
         await using var db = await CreateContextAsync();
@@ -2378,6 +2395,25 @@ public class ActsControllerTests
         Assert.Equal("/CRM/act-ACT-YD-1.doc", syncState.YandexDiskPath);
         Assert.Equal("act-ACT-YD-1.doc", syncState.FileName);
         Assert.Equal(1, syncState.AttemptCount);
+    }
+
+    [Fact]
+    public async Task UploadDocumentToYandexDisk_ReturnsNotFoundForHiddenAct()
+    {
+        await using var db = await CreateContextAsync();
+        var (actId, current) = await CreateHiddenActDocumentFixtureAsync(db, "yandex", canCreateYandexDisk: true);
+        var yandexDiskService = new RecordingYandexDiskService();
+        var controller = CreateControllerForUser(db, current.Id, yandexDiskService: yandexDiskService);
+
+        var action = await controller.UploadDocumentToYandexDisk(
+            actId,
+            "word",
+            includeSignatureAndSeal: false,
+            overwrite: true,
+            CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(action.Result);
+        Assert.Null(yandexDiskService.Upload);
     }
 
     [Fact]
@@ -3112,7 +3148,8 @@ public class ActsControllerTests
         PaymentContext db,
         string name,
         bool canExport,
-        string viewScope = DataVisibilityScope.All)
+        string viewScope = DataVisibilityScope.All,
+        bool canCreateYandexDisk = false)
     {
         var role = new Role
         {
@@ -3132,6 +3169,17 @@ public class ActsControllerTests
                 },
             },
         };
+        if (canCreateYandexDisk)
+        {
+            role.Permissions.Add(new RolePermission
+            {
+                Section = RolePermissionCatalog.YandexDisk,
+                CanView = true,
+                CanCreate = true,
+                ViewScope = DataVisibilityScope.All,
+            });
+        }
+
         var user = new User
         {
             Email = $"{name}-{Guid.NewGuid():N}@example.test",
@@ -3147,15 +3195,38 @@ public class ActsControllerTests
         return user;
     }
 
+    private static async Task<(int ActId, User Current)> CreateHiddenActDocumentFixtureAsync(
+        PaymentContext db,
+        string name,
+        bool canCreateYandexDisk = false)
+    {
+        var current = await CreateActsUserAsync(
+            db,
+            $"acts-{name}-own",
+            canExport: true,
+            viewScope: DataVisibilityScope.Own,
+            canCreateYandexDisk: canCreateYandexDisk);
+        var owner = await CreateAdminUserAsync(db, $"acts-{name}-owner", $"acts-{name}-owner@example.com");
+        var client = await CreateClientAsync(db);
+        client.Email = "client@example.com";
+        client.ResponsibleUserId = owner.Id;
+        var act = await CreateManualActAsync(db, client.Id, $"ACT-HIDDEN-{name.ToUpperInvariant()}", 10_000m, ActStatus.Created);
+        act.ResponsibleId = owner.Id;
+        await db.SaveChangesAsync();
+        return (act.Id, current);
+    }
+
     private static ActsController CreateControllerForUser(
         PaymentContext db,
         int userId,
         IEmailService? emailService = null,
+        IYandexDiskService? yandexDiskService = null,
         bool includeAdminRoleClaim = false)
         => new(
             db,
             new NoopFormRequirementsService(),
-            emailService: emailService)
+            emailService: emailService,
+            yandexDiskService: yandexDiskService)
         {
             ControllerContext = new ControllerContext
             {
