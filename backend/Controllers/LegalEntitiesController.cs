@@ -336,9 +336,19 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
         }
     }
 
-    private LegalEntityDetailDto MapDetail(LegalEntity entity, bool includeInlineAssets = true)
+    private LegalEntityDetailDto MapDetail(
+        LegalEntity entity,
+        bool includeInlineAssets = true,
+        IReadOnlySet<int>? visibleClientIds = null)
     {
         var audit = _db.ReadAuditSnapshot(entity);
+        var visibleClients = visibleClientIds is null
+            ? entity.Clients
+            : entity.Clients.Where(client => visibleClientIds.Contains(client.Id));
+        var visibleClientList = visibleClients
+            .OrderBy(client => client.Name)
+            .ToList();
+
         return new()
         {
             Id = entity.Id,
@@ -410,7 +420,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             ContactPhonesJson = entity.ContactPhonesJson,
             ContactEmailsJson = entity.ContactEmailsJson,
             Notes = entity.Notes,
-            ClientsCount = entity.Clients.Count,
+            ClientsCount = visibleClientList.Count,
             CreatedAt = entity.CreatedAt,
             UpdatedAt = entity.UpdatedAt,
             AuditCreatedByUserId = audit?.CreatedByUserId,
@@ -422,8 +432,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             AuditDeletedAt = audit?.DeletedAt,
             AuditDeletedByUserId = audit?.DeletedByUserId,
             AuditDeletedByUserName = audit?.DeletedByUserName,
-            Clients = entity.Clients
-                .OrderBy(c => c.Name)
+            Clients = visibleClientList
                 .Select(c => new LegalEntityClientDto
                 {
                     Id = c.Id,
@@ -439,6 +448,38 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
                 .Select(MapAddress)
                 .ToList(),
         };
+    }
+
+    private async Task<HashSet<int>> LoadVisibleClientIdsAsync(IEnumerable<LegalEntity> entities, CancellationToken ct)
+    {
+        var clientIds = entities
+            .SelectMany(entity => entity.Clients.Select(client => client.Id))
+            .Distinct()
+            .ToList();
+
+        if (clientIds.Count == 0)
+        {
+            return new HashSet<int>();
+        }
+
+        var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Clients, ct);
+        var ids = await _db.Clients
+            .AsNoTracking()
+            .ApplyClientVisibility(visibility)
+            .Where(client => clientIds.Contains(client.Id))
+            .Select(client => client.Id)
+            .ToListAsync(ct);
+
+        return ids.ToHashSet();
+    }
+
+    private async Task<LegalEntityDetailDto> MapDetailForCurrentUserAsync(
+        LegalEntity entity,
+        CancellationToken ct,
+        bool includeInlineAssets = true)
+    {
+        var visibleClientIds = await LoadVisibleClientIdsAsync([entity], ct);
+        return MapDetail(entity, includeInlineAssets, visibleClientIds);
     }
 
     private async Task<LegalEntity?> LoadLegalEntityForDetailAsync(int id, CancellationToken ct)
@@ -1084,7 +1125,8 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync(ct);
 
         var responseEntity = await LoadLegalEntityForDetailAsync(entity.Id, ct);
-        return Created($"/api/legal-entities/{entity.Id}", MapDetail(responseEntity ?? entity, includeInlineAssets: false));
+        var response = await MapDetailForCurrentUserAsync(responseEntity ?? entity, ct, includeInlineAssets: false);
+        return Created($"/api/legal-entities/{entity.Id}", response);
     }
 
     [HttpDelete("{id:int}")]
@@ -1231,7 +1273,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             return NotFound("Головная организация не найдена.");
         }
 
-        return Ok(MapDetail(entity));
+        return Ok(await MapDetailForCurrentUserAsync(entity, ct));
     }
 
     [HttpPut("company-profile/main/{id:int}")]
@@ -1343,7 +1385,8 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             .OrderBy(le => le.ShortName)
             .ToListAsync(ct);
 
-        return Ok(items.Select(item => MapDetail(item)));
+        var visibleClientIds = await LoadVisibleClientIdsAsync(items, ct);
+        return Ok(items.Select(item => MapDetail(item, visibleClientIds: visibleClientIds)));
     }
 
     [HttpGet("paged")]
@@ -1703,11 +1746,12 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             }
         }
 
+        var visibleClientIds = await LoadVisibleClientIdsAsync(items, ct);
         return Ok(new PagedResponse<LegalEntityListItemDto>
         {
             Items = items.Select(item =>
             {
-                var dto = MapDetail(item);
+                var dto = MapDetail(item, visibleClientIds: visibleClientIds);
                 dto.CasesCount = casesCountByLegalEntity.GetValueOrDefault(item.Id);
                 dto.ContractsCount = contractsCountByLegalEntity.GetValueOrDefault(item.Id);
                 dto.InvoicesCount = invoicesCountByLegalEntity.GetValueOrDefault(item.Id);
@@ -1749,7 +1793,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             return NotFound();
         }
 
-        return Ok(MapDetail(entity));
+        return Ok(await MapDetailForCurrentUserAsync(entity, ct));
     }
 
     private async Task<bool> IsDatabaseAdminAsync(CancellationToken ct)
@@ -2017,7 +2061,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync(ct);
 
         var responseEntity = await LoadLegalEntityForDetailAsync(entity.Id, ct);
-        return Ok(MapDetail(responseEntity ?? entity, includeInlineAssets: false));
+        return Ok(await MapDetailForCurrentUserAsync(responseEntity ?? entity, ct, includeInlineAssets: false));
     }
 
     /// <summary>

@@ -456,6 +456,13 @@ public class LegalEntitiesControllerCoverageTests
             new RolePermission
             {
                 RoleId = user.RoleId,
+                Section = RolePermissionCatalog.Clients,
+                CanView = false,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = user.RoleId,
                 Section = RolePermissionCatalog.Accounts,
                 CanView = false,
                 ViewScope = DataVisibilityScope.All,
@@ -490,6 +497,14 @@ public class LegalEntitiesControllerCoverageTests
             });
 
         var legalEntityId = await CreateLegalEntityAsync(db, "Restricted Legal", inn: "7700000111");
+        db.Clients.Add(new Client
+        {
+            Name = "Hidden client",
+            Email = "hidden-client@example.com",
+            Phone = "+70000000000",
+            IsActive = true,
+            LegalEntityId = legalEntityId,
+        });
         var contract = new Contract
         {
             Number = "LC-SEC",
@@ -550,16 +565,66 @@ public class LegalEntitiesControllerCoverageTests
         var item = Assert.Single(page.Items);
 
         Assert.Equal(legalEntityId, item.Id);
+        Assert.Equal(0, item.ClientsCount);
         Assert.Equal(0, item.CasesCount);
         Assert.Equal(0, item.ContractsCount);
         Assert.Equal(0, item.InvoicesCount);
         Assert.Equal(0, item.ActsCount);
         Assert.Equal(0, item.PaymentsCount);
+        Assert.Empty(item.Clients);
         Assert.Empty(item.RelatedCases);
         Assert.Empty(item.RelatedContracts);
         Assert.Empty(item.RelatedInvoices);
         Assert.Empty(item.RelatedActs);
         Assert.Empty(item.RelatedPayments);
+    }
+
+    [Fact]
+    public async Task GetById_HidesLinkedClients_WhenClientsViewAccessDenied()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, isActive: true);
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                RoleId = user.RoleId,
+                Section = RolePermissionCatalog.LegalEntities,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                RoleId = user.RoleId,
+                Section = RolePermissionCatalog.Clients,
+                CanView = false,
+                ViewScope = DataVisibilityScope.All,
+            });
+
+        var legalEntityId = await CreateLegalEntityAsync(db, "Client Hidden Legal", inn: "7700000222");
+        db.Clients.Add(new Client
+        {
+            Name = "Sensitive Client",
+            Email = "sensitive@example.com",
+            Phone = "+79990000000",
+            IsActive = true,
+            LegalEntityId = legalEntityId,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(
+            db,
+            new StubLegalEntityEnrichmentService(),
+            currentUserId: user.Id,
+            isAdmin: false);
+
+        var action = await controller.GetById(legalEntityId, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var item = Assert.IsType<LegalEntityDetailDto>(ok.Value);
+
+        Assert.Equal(legalEntityId, item.Id);
+        Assert.Equal(0, item.ClientsCount);
+        Assert.Empty(item.Clients);
     }
 
     [Fact]
