@@ -1464,6 +1464,58 @@ public class InvoiceDocumentTemplateTests
         Assert.Equal(1, syncState.AttemptCount);
     }
 
+    [Fact]
+    public async Task SendInvoiceEmail_ReturnsNotFoundForHiddenInvoice()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        var current = await CreateAccountsUserAsync(db, "accounts-mail-own", canExport: true, viewScope: DataVisibilityScope.Own);
+        var owner = await CreateAccountsUserAsync(db, "accounts-mail-owner", canExport: true);
+        var payment = await db.Payments.Include(item => item.Client).SingleAsync(item => item.Id == paymentId);
+        payment.Client!.ResponsibleUserId = owner.Id;
+        await db.SaveChangesAsync();
+        var emailService = new RecordingEmailService();
+        var controller = CreateController(db, isAdmin: false, emailService: emailService, userId: current.Id);
+
+        var result = await controller.SendInvoiceEmail(
+            paymentId,
+            new SendInvoiceEmailRequest { Email = "hidden@example.test", Format = "word" },
+            CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(result);
+        Assert.Null(emailService.ToEmail);
+    }
+
+    [Fact]
+    public async Task UploadDocumentToYandexDisk_ReturnsNotFoundForHiddenInvoice()
+    {
+        await using var db = await CreateContextAsync();
+        var paymentId = await CreateInvoiceDocumentFixtureAsync(db);
+        var current = await CreateAccountsUserAsync(
+            db,
+            "accounts-yandex-own",
+            canExport: true,
+            viewScope: DataVisibilityScope.Own,
+            canCreateYandexDisk: true);
+        var owner = await CreateAccountsUserAsync(db, "accounts-yandex-owner", canExport: true);
+        var payment = await db.Payments.Include(item => item.Client).SingleAsync(item => item.Id == paymentId);
+        payment.Client!.ResponsibleUserId = owner.Id;
+        await db.SaveChangesAsync();
+        var yandexDiskService = new RecordingYandexDiskService();
+        var controller = CreateController(db, isAdmin: false, yandexDiskService: yandexDiskService, userId: current.Id);
+
+        var result = await controller.UploadDocumentToYandexDisk(
+            paymentId,
+            "word",
+            templateKey: null,
+            includeSignatureAndSeal: false,
+            overwrite: true,
+            CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(result.Result);
+        Assert.Null(yandexDiskService.Upload);
+    }
+
     private static async Task<int> CreateInvoiceDocumentFixtureAsync(PaymentContext db, bool createNormalizedPassport = true)
     {
         var client = new Client
@@ -1728,7 +1780,8 @@ public class InvoiceDocumentTemplateTests
         PaymentContext db,
         string name,
         bool canExport,
-        string viewScope = DataVisibilityScope.All)
+        string viewScope = DataVisibilityScope.All,
+        bool canCreateYandexDisk = false)
     {
         var role = new Role
         {
@@ -1748,6 +1801,17 @@ public class InvoiceDocumentTemplateTests
                 },
             },
         };
+        if (canCreateYandexDisk)
+        {
+            role.Permissions.Add(new RolePermission
+            {
+                Section = RolePermissionCatalog.YandexDisk,
+                CanView = true,
+                CanCreate = true,
+                ViewScope = DataVisibilityScope.All,
+            });
+        }
+
         var user = new User
         {
             Email = $"{name}-{Guid.NewGuid():N}@example.test",
