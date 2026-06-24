@@ -1552,6 +1552,34 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task CreateAutomationTasksForCandidates_AppliesCaseOwnerVisibility()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateTaskUserAsync(db, "bulk-automation-author@example.com", "Автор", canEdit: false, canCreate: true);
+        var otherResponsible = await CreateAdminUserAsync(db, "bulk-automation-other@example.com", "Другой ответственный");
+        var visibleClient = await CreateClientAsync(db, "Видимый клиент автоконтроля");
+        visibleClient.ResponsibleUserId = author.Id;
+        var hiddenClient = await CreateClientAsync(db, "Скрытый клиент автоконтроля");
+        hiddenClient.ResponsibleUserId = otherResponsible.Id;
+        var visibleCase = await CreateCaseAsync(db, visibleClient.Id, "ВИДИМОЕ ДЕЛО");
+        var hiddenCase = await CreateCaseAsync(db, hiddenClient.Id, "СКРЫТОЕ ДЕЛО");
+        visibleCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
+        hiddenCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.CreateAutomationTasksForCandidates(limit: 10, ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalAutomationCreateResultDto>(ok.Value);
+        var createdTask = Assert.Single(dto.CreatedTasks);
+        Assert.Equal(visibleCase.Id, createdTask.ClientCaseId);
+        Assert.DoesNotContain(dto.CreatedTasks, item => item.ClientCaseId == hiddenCase.Id);
+        Assert.True(await db.TaskJournalItems.AnyAsync(item => item.ClientCaseId == visibleCase.Id));
+        Assert.False(await db.TaskJournalItems.AnyAsync(item => item.ClientCaseId == hiddenCase.Id));
+    }
+
+    [Fact]
     public async Task TaskJournalAutomationScheduler_CreatesControlTaskForInactiveCase()
     {
         await using var db = await CreateContextAsync();
