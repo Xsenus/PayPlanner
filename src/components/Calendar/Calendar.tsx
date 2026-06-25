@@ -117,6 +117,8 @@ export function Calendar({ onOpenClient }: CalendarProps) {
   const [tableSettingsOpen, setTableSettingsOpen] = useState(false);
   const permissions = useRolePermissions(user?.role?.id);
   const calendarPermissions = permissions.calendar;
+  const canOpenLinkedClients = permissions.clients?.canView === true;
+  const canOpenLinkedCases = permissions.cases?.canView === true;
   const [permissionMessage, setPermissionMessage] = useState<string | null>(null);
 
   const [statsReloadKey, setStatsReloadKey] = useState(0);
@@ -830,7 +832,11 @@ export function Calendar({ onOpenClient }: CalendarProps) {
             payments={filteredPayments}
             onEditPayment={handleEditPayment}
             newPaymentIds={newIds}
-            onOpenClient={onOpenClient}
+            onOpenClient={
+              canOpenLinkedClients
+                ? (clientId, caseId) => onOpenClient?.(clientId, canOpenLinkedCases ? caseId : undefined)
+                : undefined
+            }
           />
         ) : (
           <>
@@ -843,6 +849,8 @@ export function Calendar({ onOpenClient }: CalendarProps) {
               canAdd={calendarPermissions.canCreate}
               canEdit={calendarPermissions.canEdit}
               canDelete={calendarPermissions.canDelete}
+              canOpenClients={canOpenLinkedClients}
+              canOpenCases={canOpenLinkedCases}
               canEditPayment={() => true}
               canDeletePayment={(payment) => payment.documentKind !== 'Invoice' && !isTransferredRemainderPayment(payment) && !isPartialRemainderSourcePayment(payment)}
               columns={visiblePaymentColumns}

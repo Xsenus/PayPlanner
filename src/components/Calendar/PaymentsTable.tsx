@@ -45,6 +45,8 @@ interface PaymentsTableProps {
   canAdd: boolean;
   canEdit: boolean;
   canDelete: boolean;
+  canOpenClients?: boolean;
+  canOpenCases?: boolean;
   canEditPayment?: (payment: Payment) => boolean;
   canDeletePayment?: (payment: Payment) => boolean;
   columns?: PaymentTableColumnDefinition[];
@@ -82,6 +84,8 @@ export function PaymentsTable({
   canAdd,
   canEdit,
   canDelete,
+  canOpenClients = true,
+  canOpenCases = true,
   canEditPayment,
   canDeletePayment,
   columns,
@@ -184,6 +188,7 @@ export function PaymentsTable({
         : payment.invoiceId
         ? `Счет ID ${payment.invoiceId}`
         : null;
+      const canOpenPaymentClient = Boolean(canOpenClients && onOpenClient && payment.clientId);
 
       switch (columnKey) {
         case 'date':
@@ -193,19 +198,23 @@ export function PaymentsTable({
         case 'client':
           return payment.client ? (
             <div className="leading-tight">
-              <button
-                type="button"
-                className="block w-full text-left text-blue-600 hover:underline"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  if (payment.clientId) {
-                    onOpenClient?.(payment.clientId, payment.clientCaseId ?? undefined);
-                  }
-                }}>
-                <span className="block font-medium">
+              {canOpenPaymentClient ? (
+                <button
+                  type="button"
+                  className="block w-full text-left text-blue-600 hover:underline"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onOpenClient(payment.clientId as number, canOpenCases ? payment.clientCaseId ?? undefined : undefined);
+                  }}>
+                  <span className="block font-medium">
+                    {payment.type === 'Expense' ? `Поставщик: ${payment.client.name}` : payment.client.name}
+                  </span>
+                </button>
+              ) : (
+                <span className="block font-medium text-slate-900">
                   {payment.type === 'Expense' ? `Поставщик: ${payment.client.name}` : payment.client.name}
                 </span>
-              </button>
+              )}
               {payment.type === 'Expense' && payment.expenseClient?.name ? (
                 <span className="mt-0.5 block truncate text-xs leading-tight text-gray-500">
                   {`Клиент расхода: ${payment.expenseClient.name}`}
@@ -374,7 +383,7 @@ export function PaymentsTable({
           return '—';
       }
     },
-    [canEdit, formatDate, onAcceptAdvance, onAllocateAdvance, onIgnoreAdvance, onOpenClient, onRefundAdvance, onStatusChange, statusLabels, t],
+    [canEdit, canOpenCases, canOpenClients, formatDate, onAcceptAdvance, onAllocateAdvance, onIgnoreAdvance, onOpenClient, onRefundAdvance, onStatusChange, statusLabels, t],
   );
 
   const isEditAllowed = useCallback(
