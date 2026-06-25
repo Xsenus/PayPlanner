@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -70,7 +70,9 @@ const authState = vi.hoisted((): { user: { id: number; fullName: string; email: 
 }));
 
 const permissionsState = vi.hoisted(() => ({
+  taskCanCreate: true,
   taskCanEdit: true,
+  taskCanDelete: true,
   taskCanExport: true,
   caseCanExport: true,
   taskViewScope: 'all' as 'own' | 'department' | 'all',
@@ -138,7 +140,9 @@ vi.mock('../../hooks/useRolePermissions', () => ({
       },
       tasks: {
         ...section,
+        canCreate: permissionsState.taskCanCreate,
         canEdit: permissionsState.taskCanEdit,
+        canDelete: permissionsState.taskCanDelete,
         canExport: permissionsState.taskCanExport,
         viewScope: permissionsState.taskViewScope,
       },
@@ -354,7 +358,9 @@ describe('TaskJournal', () => {
     window.localStorage.clear();
     authState.user = { id: 7, fullName: 'Администратор', email: 'admin@example.com' };
     authState.isAdmin = true;
+    permissionsState.taskCanCreate = true;
     permissionsState.taskCanEdit = true;
+    permissionsState.taskCanDelete = true;
     permissionsState.taskCanExport = true;
     permissionsState.caseCanExport = true;
     permissionsState.taskViewScope = 'all';
@@ -670,6 +676,45 @@ describe('TaskJournal', () => {
     expect(screen.queryByRole('button', { name: 'PDF' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'HTML' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'ICS' })).toBeNull();
+  });
+
+  it('hides task creation controls when create permission is denied', async () => {
+    authState.isAdmin = false;
+    permissionsState.taskCanCreate = false;
+
+    await renderJournal();
+
+    expect(screen.queryByRole('button', { name: /Добавить задачу/i })).toBeNull();
+
+    cleanup();
+    window.localStorage.clear();
+    await renderJournal(undefined, { initialView: 'calendar' });
+
+    expect(screen.queryByTitle('Создать задачу на дату')).toBeNull();
+    expect(apiMock.createTaskJournalItem).not.toHaveBeenCalled();
+  });
+
+  it('hides task delete controls when delete permission is denied', async () => {
+    authState.isAdmin = false;
+    authState.user = { id: 8, fullName: 'Постановщик', email: 'author@example.com' };
+    permissionsState.taskCanDelete = false;
+
+    await renderJournal([createTask({
+      assigneeUserId: 8,
+      assigneeName: 'Постановщик',
+      authorUserId: 8,
+      authorName: 'Постановщик',
+      title: 'Задача без удаления',
+    })], { waitForTitle: 'Задача без удаления' });
+
+    expect(screen.queryByTitle('Удалить')).toBeNull();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Выбрать задачу Задача без удаления' }));
+
+    expect(screen.getByTestId('task-bulk-actions')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Удалить выбранные' })).toBeNull();
+    expect(apiMock.deleteTaskJournalItem).not.toHaveBeenCalled();
+    expect(apiMock.bulkDeleteTaskJournalItems).not.toHaveBeenCalled();
   });
 
   it('exports client planning report in Word format', async () => {
