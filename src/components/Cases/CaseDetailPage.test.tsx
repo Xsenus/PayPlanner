@@ -848,6 +848,31 @@ describe('CaseDetailPage', () => {
     expect(await screen.findByText('Массовое изменение')).toBeTruthy();
   });
 
+  it('hides case tasks and does not load task data when task access is closed', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canViewTasks={false} canCreateTasks={false} />);
+
+    expect(await screen.findByText('ЗЕМЦОВ - банкротство')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Задачи' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Создать задачу/u })).toBeNull();
+    expect(apiService.getTaskJournalItems).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+    expect(await screen.findByText('Заявление.docx')).toBeTruthy();
+    expect(screen.queryByRole('option', { name: 'Задача' })).toBeNull();
+    expect(apiService.getTaskJournalItems).not.toHaveBeenCalled();
+  });
+
+  it('keeps case tasks read-only when task creation is closed', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canViewTasks canCreateTasks={false} />);
+
+    expect(await screen.findByText('ЗЕМЦОВ - банкротство')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Создать задачу/u })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Задачи' }));
+    expect(await screen.findByText('Проверить движение по делу')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^Создать$/u })).toBeNull();
+  });
+
   it('shows case activity and document upload timestamps in the profile time zone', async () => {
     vi.mocked(apiService.getUserSetting).mockResolvedValue({ key: 'profile.timeZoneId', value: 'Europe/Samara' });
     vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({

@@ -75,6 +75,8 @@ interface CaseDetailPageProps {
   canEdit?: boolean;
   canDelete?: boolean;
   canViewFinance?: boolean;
+  canViewTasks?: boolean;
+  canCreateTasks?: boolean;
 }
 
 type CaseDetailTab = 'overview' | 'participants' | 'tasks' | 'court' | 'finance' | 'workOrder' | 'documents' | 'conversation' | 'history';
@@ -993,9 +995,12 @@ export function CaseDetailPage({
   canEdit = true,
   canDelete = true,
   canViewFinance = true,
+  canViewTasks = true,
+  canCreateTasks = true,
 }: CaseDetailPageProps) {
   const { confirm, prompt } = useDialog();
   const initialViewState = readCaseDetailViewState(caseId);
+  const canCreateCaseTask = canViewTasks && canCreateTasks;
   const [caseItem, setCaseItem] = useState<ClientCase | null>(null);
   const [caseTimeZoneId, setCaseTimeZoneId] = useState(() => normalizeUserTimeZoneId());
   const [responsibles, setResponsibles] = useState<ActResponsible[]>([]);
@@ -1017,7 +1022,8 @@ export function CaseDetailPage({
   const [participantLegalEntities, setParticipantLegalEntities] = useState<LegalEntitySummary[]>([]);
   const [participantContacts, setParticipantContacts] = useState<ContactDirectoryItemDto[]>([]);
   const [activeTab, setActiveTab] = useState<CaseDetailTab>(
-    canViewFinance || initialViewState.activeTab !== 'finance'
+    (canViewFinance || initialViewState.activeTab !== 'finance')
+      && (canViewTasks || initialViewState.activeTab !== 'tasks')
       ? initialViewState.activeTab ?? 'overview'
       : 'overview',
   );
@@ -1153,19 +1159,20 @@ export function CaseDetailPage({
   const documentSourceOptions = useMemo(
     () => buildDocumentSourceOptions(
       documentSourceType,
-      tasks,
+      canViewTasks ? tasks : [],
       courtEvents,
       workOrder,
       canViewFinance ? financeDetail : null,
     ),
-    [canViewFinance, courtEvents, documentSourceType, financeDetail, tasks, workOrder],
+    [canViewFinance, canViewTasks, courtEvents, documentSourceType, financeDetail, tasks, workOrder],
   );
   const documentTypeListId = useMemo(() => `case-document-types-${caseId}`, [caseId]);
 
   useEffect(() => {
     const savedState = readCaseDetailViewState(caseId);
     setActiveTab(
-      canViewFinance || savedState.activeTab !== 'finance'
+      (canViewFinance || savedState.activeTab !== 'finance')
+        && (canViewTasks || savedState.activeTab !== 'tasks')
         ? savedState.activeTab ?? 'overview'
         : 'overview',
     );
@@ -1213,20 +1220,38 @@ export function CaseDetailPage({
     setCourtPartyRoleDraft('');
     setCourtPartyRepresentativeDraft('');
     setCourtPartyNotesDraft('');
-  }, [canViewFinance, caseId]);
+  }, [canViewFinance, canViewTasks, caseId]);
 
   const visibleDetailTabs = useMemo(
-    () => DETAIL_TABS.filter((tab) => canViewFinance || tab.key !== 'finance'),
-    [canViewFinance],
+    () => DETAIL_TABS.filter((tab) =>
+      (canViewFinance || tab.key !== 'finance')
+      && (canViewTasks || tab.key !== 'tasks'),
+    ),
+    [canViewFinance, canViewTasks],
   );
 
   useEffect(() => {
-    if (!canViewFinance && activeTab === 'finance') {
+    if ((!canViewFinance && activeTab === 'finance') || (!canViewTasks && activeTab === 'tasks')) {
       setActiveTab('overview');
+    }
+
+    if (!canViewFinance && activeTab === 'finance') {
       setFinanceDetail(null);
       setFinanceLoading(false);
     }
-  }, [activeTab, canViewFinance]);
+
+    if (!canViewTasks && activeTab === 'tasks') {
+      setTasks([]);
+      setTasksLoading(false);
+    }
+  }, [activeTab, canViewFinance, canViewTasks]);
+
+  useEffect(() => {
+    if (!canViewTasks && documentSourceType === 'task') {
+      setDocumentSourceType('case');
+      setDocumentSourceId('');
+    }
+  }, [canViewTasks, documentSourceType]);
 
   useEffect(() => {
     setParticipantSourceId('');
@@ -1377,6 +1402,12 @@ export function CaseDetailPage({
   }, []);
 
   useEffect(() => {
+    if (!canViewTasks) {
+      setTasks([]);
+      setTasksLoading(false);
+      return;
+    }
+
     if (activeTab !== 'tasks' && activeTab !== 'documents') return;
 
     let cancelled = false;
@@ -1395,7 +1426,7 @@ export function CaseDetailPage({
     return () => {
       cancelled = true;
     };
-  }, [activeTab, caseId, reloadToken]);
+  }, [activeTab, canViewTasks, caseId, reloadToken]);
 
   useEffect(() => {
     if (activeTab !== 'participants') return;
@@ -2768,14 +2799,16 @@ export function CaseDetailPage({
   };
 
   const createTaskForCase = async () => {
-    if (!caseItem) return;
+    if (!caseItem || !canCreateCaseTask) return;
 
     setCreatingTask(true);
     setError(null);
     try {
       await apiService.createTaskJournalItem(buildCaseTaskPayload(caseItem, caseTimeZoneId));
       setReloadToken((value) => value + 1);
-      setActiveTab('tasks');
+      if (canViewTasks) {
+        setActiveTab('tasks');
+      }
       setNotice('Задача по делу создана.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось создать задачу по делу.');
@@ -2889,9 +2922,11 @@ export function CaseDetailPage({
               <button type="button" onClick={() => void copyCaseLink()} className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-slate-200 px-4 text-sm font-medium text-slate-700 hover:bg-slate-50">
                 {copiedLink ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />} {copiedLink ? 'Ссылка скопирована' : 'Ссылка'}
               </button>
-              <button type="button" onClick={() => void createTaskForCase()} disabled={creatingTask} className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
-                {creatingTask ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardPlus className="h-4 w-4" />} Создать задачу
-              </button>
+              {canCreateCaseTask ? (
+                <button type="button" onClick={() => void createTaskForCase()} disabled={creatingTask} className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
+                  {creatingTask ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardPlus className="h-4 w-4" />} Создать задачу
+                </button>
+              ) : null}
               <button type="button" onClick={() => void generateDocument()} disabled={generatingDocument} className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-blue-200 px-4 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50">
                 {generatingDocument ? <Loader2 className="h-4 w-4 animate-spin" /> : <FilePlus2 className="h-4 w-4" />} Документ
               </button>
@@ -3177,6 +3212,7 @@ export function CaseDetailPage({
                 onFilterChange={setTaskFilter}
                 onCreateTask={createTaskForCase}
                 creatingTask={creatingTask}
+                canCreateTask={canCreateCaseTask}
               />
             )
           ) : null}
@@ -3408,7 +3444,7 @@ export function CaseDetailPage({
                         className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
                       >
                         <option value="case">Только дело</option>
-                        <option value="task">Задача</option>
+                        {canViewTasks ? <option value="task">Задача</option> : null}
                         <option value="courtEvent">Судебное событие</option>
                         <option value="workOrder">Заказ-наряд</option>
                         <option value="invoice">Счет</option>
@@ -4984,6 +5020,7 @@ function TaskList({
   onFilterChange,
   onCreateTask,
   creatingTask,
+  canCreateTask,
 }: {
   tasks: TaskJournalItem[];
   allTasks: TaskJournalItem[];
@@ -4992,6 +5029,7 @@ function TaskList({
   onFilterChange: (filter: CaseTaskFilter) => void;
   onCreateTask: () => void;
   creatingTask: boolean;
+  canCreateTask: boolean;
 }) {
   const counts: Record<CaseTaskFilter, number> = {
     all: allTasks.length,
@@ -5018,13 +5056,15 @@ function TaskList({
                 {option.label} · {counts[option.value]}
               </button>
             ))}
-            <button
-              type="button"
-              onClick={() => void onCreateTask()}
-              disabled={creatingTask}
-              className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
-              {creatingTask ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardPlus className="h-4 w-4" />} Создать
-            </button>
+            {canCreateTask ? (
+              <button
+                type="button"
+                onClick={() => void onCreateTask()}
+                disabled={creatingTask}
+                className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
+                {creatingTask ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardPlus className="h-4 w-4" />} Создать
+              </button>
+            ) : null}
           </div>
         </div>
       </div>
