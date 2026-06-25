@@ -75,6 +75,7 @@ const permissionsState = vi.hoisted(() => ({
   taskCanDelete: true,
   taskCanExport: true,
   caseCanExport: true,
+  yandexDiskCanCreate: true,
   taskViewScope: 'all' as 'own' | 'department' | 'all',
   calendarViewScope: 'all' as 'own' | 'department' | 'all' | 'specific',
   calendarVisibleUserIds: [] as number[],
@@ -158,6 +159,7 @@ vi.mock('../../hooks/useRolePermissions', () => ({
       dictionaries: { ...section },
       roles: { ...section },
       audit: { ...section },
+      yandexDisk: { ...section, canCreate: permissionsState.yandexDiskCanCreate },
     };
   },
 }));
@@ -363,6 +365,7 @@ describe('TaskJournal', () => {
     permissionsState.taskCanDelete = true;
     permissionsState.taskCanExport = true;
     permissionsState.caseCanExport = true;
+    permissionsState.yandexDiskCanCreate = true;
     permissionsState.taskViewScope = 'all';
     permissionsState.calendarViewScope = 'all';
     permissionsState.calendarVisibleUserIds = [];
@@ -3100,5 +3103,47 @@ describe('TaskJournal', () => {
     });
 
     await waitFor(() => expect(apiMock.uploadTaskJournalFile).toHaveBeenCalledWith(101, expect.any(File), 'doc-1'));
+  });
+
+  it.each([
+    { taskCanExport: false, yandexDiskCanCreate: true },
+    { taskCanExport: true, yandexDiskCanCreate: false },
+  ])('hides task file yandex upload action when required permissions are denied %#', async ({ taskCanExport, yandexDiskCanCreate }) => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Постановщик', email: 'author@example.com' };
+    permissionsState.taskCanExport = taskCanExport;
+    permissionsState.yandexDiskCanCreate = yandexDiskCanCreate;
+    apiMock.getTaskJournalFiles.mockResolvedValueOnce([
+      {
+        id: 600,
+        taskJournalItemId: 101,
+        documentKey: 'doc-1',
+        version: 1,
+        originalFileName: 'document.pdf',
+        contentType: 'application/pdf',
+        sizeBytes: 1024,
+        uploadedByUserId: 7,
+        uploadedByName: 'Постановщик',
+        uploadedAt: todayAt(10),
+        isLatestVersion: true,
+        clientCaseDocumentId: 42,
+      },
+    ]);
+
+    await renderJournal([
+      createTask({
+        authorUserId: 7,
+        authorName: 'Постановщик',
+        assigneeUserId: 7,
+        assigneeName: 'Постановщик',
+      }),
+    ]);
+
+    await openFirstTaskForEdit();
+
+    expect((await screen.findAllByText('document.pdf')).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: 'Скачать файл' }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Отправить файл на Я.Диск' })).toBeNull();
+    expect(apiMock.uploadTaskJournalFileToYandexDisk).not.toHaveBeenCalled();
   });
 });

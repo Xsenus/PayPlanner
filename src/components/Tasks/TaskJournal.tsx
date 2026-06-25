@@ -1677,6 +1677,7 @@ export function TaskJournal({
   const canDeleteTasks = isAdminUser || permissions.tasks.canDelete;
   const canExportTasks = isAdminUser || permissions.tasks.canExport;
   const canExportCases = isAdminUser || permissions.cases.canExport;
+  const canSendTaskFilesToYandexDisk = isAdminUser || (canExportTasks && permissions.yandexDisk?.canCreate === true);
   const taskCalendarViewScope = normalizeTaskCalendarViewScope(permissions.calendar.viewScope);
   const calendarVisibleUserIds = useMemo(
     () => permissions.calendar.visibleUserIds ?? [],
@@ -3151,6 +3152,7 @@ export function TaskJournal({
             canSwitchToEdit={canEditModalTask}
             canDeleteTask={canDeleteTasks}
             canDuplicateTask={canCreateTasks}
+            canSendFilesToYandexDisk={canSendTaskFilesToYandexDisk}
             onClose={closeTaskModal}
             onEnableEdit={() => setModal((current) => current?.task ? { ...current, mode: 'edit' } : current)}
             onSave={handleSave}
@@ -3745,6 +3747,7 @@ export function TaskJournal({
           canSwitchToEdit={canEditModalTask}
           canDeleteTask={canDeleteTasks}
           canDuplicateTask={canCreateTasks}
+          canSendFilesToYandexDisk={canSendTaskFilesToYandexDisk}
           onClose={closeTaskModal}
           onEnableEdit={() => setModal((current) => current?.task ? { ...current, mode: 'edit' } : current)}
           onSave={handleSave}
@@ -5738,6 +5741,7 @@ type TaskModalProps = {
   canSwitchToEdit: boolean;
   canDeleteTask: boolean;
   canDuplicateTask: boolean;
+  canSendFilesToYandexDisk: boolean;
   onClose: () => void;
   onEnableEdit: () => void;
   onSave: (form: TaskForm, taskId?: number) => void | Promise<void>;
@@ -5773,6 +5777,7 @@ function TaskModal({
   canSwitchToEdit,
   canDeleteTask,
   canDuplicateTask,
+  canSendFilesToYandexDisk,
   onClose,
   onEnableEdit,
   onSave,
@@ -6298,6 +6303,10 @@ function TaskModal({
 
   const handleSendFileToYandexDisk = async (file: TaskJournalFile) => {
     if (!taskId) return;
+    if (!canSendFilesToYandexDisk) {
+      toast.error('У роли нет права отправлять файлы задач на Я.Диск.', 'Я.Диск');
+      return;
+    }
 
     setSendingYandexFileId(file.id);
     try {
@@ -7591,16 +7600,18 @@ function TaskModal({
                             >
                               <Download className="h-4 w-4" />
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => void handleSendFileToYandexDisk(file)}
-                              disabled={sendingYandexFileId === file.id}
-                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-sky-200 text-sky-600 transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
-                              title="Отправить на Я.Диск"
-                              aria-label="Отправить файл на Я.Диск"
-                            >
-                              {sendingYandexFileId === file.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
-                            </button>
+                            {canSendFilesToYandexDisk ? (
+                              <button
+                                type="button"
+                                onClick={() => void handleSendFileToYandexDisk(file)}
+                                disabled={sendingYandexFileId === file.id}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-sky-200 text-sky-600 transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                title="Отправить на Я.Диск"
+                                aria-label="Отправить файл на Я.Диск"
+                              >
+                                {sendingYandexFileId === file.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+                              </button>
+                            ) : null}
                             {canManageFiles ? (
                             <button
                               type="button"
