@@ -136,7 +136,7 @@
 ### 2. Закрыть frontend
 
 - [x] Вынести единую `tab -> permission` карту и использовать ее в `App`, `Navigation`, route helpers и тестах.
-- [~] Скрывать не только пункты меню, но и вложенные кнопки действий в карточках: список юрлиц фильтрует связанные дела/договоры/счета/акты/платежи по правам; карточки клиента/дела и остальные вложенные действия еще требуют отдельной проверки.
+- [~] Скрывать не только пункты меню, но и вложенные кнопки действий в карточках: список юрлиц фильтрует связанные дела/договоры/счета/акты/платежи по правам; карточка клиента скрывает быстрые финансовые кнопки без права просмотра раздела; карточка дела и остальные вложенные действия еще требуют отдельной проверки.
 - [x] Для detail/create страниц проверять доступ к родительскому разделу и операции: например `contractCreate` требует `contracts.canView && contracts.canCreate`, `actCreate` требует `acts.canView && acts.canCreate`.
 - [x] Привести справочники к правам роли: просмотр по `dictionaries.canView`, создание по `dictionaries.canCreate`, редактирование по `dictionaries.canEdit`, удаление по `dictionaries.canDelete`.
 - [x] Разделить личные уведомления и админские настройки уведомлений, чтобы запрет настроек не ломал личный inbox.
@@ -350,6 +350,7 @@ npm run test:unit
 - 25.06.2026: админские API справочников переведены с общего admin-only на права `dictionaries`: создание, редактирование, включение/выключение, объединение дублей и удаление проверяются отдельными операциями роли.
 - 25.06.2026: подтверждена граница уведомлений: `NotificationInboxController` остается личным авторизованным inbox, а `NotificationsController` закрывает настройки рассылок через `notifications.canView/canEdit`.
 - 25.06.2026: список юрлиц в табличном режиме фильтрует колонки и клики по связанным делам, договорам, счетам, актам и платежам через права `cases/contracts/accounts/acts/payments.canView`.
+- 25.06.2026: быстрые финансовые действия в карточке клиента для счетов, актов и договоров теперь требуют одновременно `canView` и `canCreate`, чтобы закрытый раздел не открывался через кнопку создания.
 
 ## Предварительная рекомендация по роли "Юрист"
 
@@ -367,6 +368,7 @@ npm run test:unit
 - [x] `npm exec vitest run src/components/Dictionaries/Dictionaries.test.tsx src/App.routing.test.ts src/services/permissionsService.test.ts src/hooks/useRolePermissions.test.tsx src/components/Navigation/Navigation.test.tsx -- --runInBand` — пройдено 59 тестов.
 - [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~AppRelease|FullyQualifiedName~BackendPermissionMatrixTests"` — пройдено 107 тестов.
 - [x] `npm exec vitest run src/components/LegalEntities/LegalEntities.test.tsx src/components/Contacts/UnifiedContacts.test.tsx -- --runInBand` — пройдено 11 тестов.
+- [x] `npm exec vitest run src/components/Clients/ClientDetail.integration.test.tsx -- --runInBand` — пройдено 36 тестов.
 - [x] `npm run lint` — ошибок нет, остались существующие предупреждения по React hooks / fast refresh.
 - [x] `npm run build` — сборка успешна, остались существующие предупреждения Vite/Rolldown по стороннему `@microsoft/signalr` и размеру chunk.
 - [x] `git diff --check` — замечаний нет.

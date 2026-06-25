@@ -732,6 +732,21 @@ describe('ClientDetail integration', () => {
     expect(apiService.getPaymentsV2).not.toHaveBeenCalled();
   });
 
+  it('hides client finance create shortcuts when create is allowed but view is closed', async () => {
+    Object.assign(permissionsResult.clients, { canCreate: true });
+    Object.assign(permissionsResult.accounts, { canView: false, canCreate: true });
+    Object.assign(permissionsResult.acts, { canView: false, canCreate: true });
+    Object.assign(permissionsResult.contracts, { canView: false, canCreate: true });
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+
+    await screen.findByRole('button', { name: /Карточка клиента/ });
+
+    expect(screen.queryByRole('button', { name: /Добавить сч/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Добавить акт/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Добавить договор/ })).toBeNull();
+  });
+
   it('opens balance journal and audit from compact header actions', async () => {
     const user = userEvent.setup();
     vi.mocked(apiService.getClientBalance).mockResolvedValue({ clientId: 1, balance: 750 });

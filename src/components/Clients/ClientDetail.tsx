@@ -6145,7 +6145,7 @@ export function ClientDetail({
                 </span>
               </div>
             )}
-            {accountPermissions.canCreate && (
+            {accountPermissions.canView && accountPermissions.canCreate && (
               <div className="flex flex-col items-center gap-1">
                 <button
                   type="button"
@@ -6161,7 +6161,7 @@ export function ClientDetail({
                 </span>
               </div>
             )}
-            {actPermissions.canCreate && (
+            {actPermissions.canView && actPermissions.canCreate && (
               <div className="flex flex-col items-center gap-1">
                 <button
                   type="button"
@@ -6177,7 +6177,7 @@ export function ClientDetail({
                 </span>
               </div>
             )}
-            {contractPermissions.canCreate && (
+            {contractPermissions.canView && contractPermissions.canCreate && (
               <div className="flex flex-col items-center gap-1">
                 <button
                   type="button"
