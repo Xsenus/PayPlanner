@@ -426,6 +426,49 @@ public class BackendPermissionMatrixTests
     }
 
     [Fact]
+    public async Task LawyerRoleTemplate_ProtectsClosedApiSections()
+    {
+        await using var db = await CreateContextAsync();
+        var lawyer = await CreateUserWithPermissionsAsync(
+            db,
+            "lawyer-template-api",
+            "\u0421\u0442\u0430\u0440\u0448\u0438\u0439 \u044e\u0440\u0438\u0441\u0442",
+            RolePermissionCatalog.BuildDefaultsForRole(
+                    "\u0421\u0442\u0430\u0440\u0448\u0438\u0439 \u044e\u0440\u0438\u0441\u0442",
+                    allowRoleManagement: false)
+                .Select(pair => ToRolePermission(pair.Key, pair.Value)));
+
+        foreach (var section in new[]
+        {
+            RolePermissionCatalog.Tasks,
+            RolePermissionCatalog.Calendar,
+            RolePermissionCatalog.Clients,
+            RolePermissionCatalog.Cases,
+            RolePermissionCatalog.Notifications,
+        })
+        {
+            await AssertSectionFilterAsync(db, lawyer, section, shouldAllow: true);
+        }
+
+        foreach (var section in new[]
+        {
+            RolePermissionCatalog.Payments,
+            RolePermissionCatalog.Accounts,
+            RolePermissionCatalog.Acts,
+            RolePermissionCatalog.Contracts,
+            RolePermissionCatalog.Reports,
+            RolePermissionCatalog.Roles,
+            RolePermissionCatalog.Audit,
+            RolePermissionCatalog.Integrations,
+            RolePermissionCatalog.YandexDisk,
+            RolePermissionCatalog.S3Storage,
+        })
+        {
+            await AssertSectionFilterAsync(db, lawyer, section, shouldAllow: false);
+        }
+    }
+
+    [Fact]
     public async Task AcceptedFinancialRoles_RespectCashAccessMatrix()
     {
         await using var db = await CreateContextAsync();
@@ -610,6 +653,19 @@ public class BackendPermissionMatrixTests
             ViewScope = DataVisibilityScope.Own,
         };
 
+    private static RolePermission ToRolePermission(string section, RolePermissionValues values)
+        => new()
+        {
+            Section = section,
+            CanView = values.CanView,
+            CanCreate = values.CanCreate,
+            CanEdit = values.CanEdit,
+            CanDelete = values.CanDelete,
+            CanExport = values.CanExport,
+            CanViewAnalytics = values.CanViewAnalytics,
+            ViewScope = values.ViewScope,
+        };
+
     private static async Task AssertSectionAsync(
         PaymentContext db,
         User user,
@@ -641,6 +697,32 @@ public class BackendPermissionMatrixTests
         Assert.False(access.IsAdmin);
         Assert.True(access.CanSeeUser(user.Id));
         Assert.False(access.CanSeeUser(user.Id + 10_000));
+    }
+
+    private static async Task AssertSectionFilterAsync(PaymentContext db, User user, string section, bool shouldAllow)
+    {
+        var filter = new RequireSectionPermissionFilter(
+            section,
+            RequireSectionPermissionOperations.View,
+            db);
+        var context = CreateActionExecutingContext(CreatePrincipal(user));
+        var nextWasCalled = false;
+
+        await filter.OnActionExecutionAsync(context, () =>
+        {
+            nextWasCalled = true;
+            return Task.FromResult(CreateActionExecutedContext(context));
+        });
+
+        Assert.Equal(shouldAllow, nextWasCalled);
+        if (shouldAllow)
+        {
+            Assert.Null(context.Result);
+        }
+        else
+        {
+            Assert.IsType<ForbidResult>(context.Result);
+        }
     }
 
     private static async Task<(int VisibleId, int HiddenId)> SeedDataScopedRecordsAsync(

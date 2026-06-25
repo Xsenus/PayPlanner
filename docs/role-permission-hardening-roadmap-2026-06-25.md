@@ -287,8 +287,8 @@ npm run test:unit
 ### 6. Локальная БД и production acceptance
 
 - [ ] На локальной БД создать/найти роль юриста, закрыть все лишние разделы, войти под тестовым пользователем и пройти меню.
-- [ ] Проверить прямые URL для закрытых разделов.
-- [ ] Проверить API напрямую на закрытые разделы.
+- [x] Проверить прямые URL для закрытых разделов: frontend routing-test покрывает безопасный шаблон юриста и прямые tab-ключи финансов, документов, ролей, аудита, интеграций и хранилищ.
+- [x] Проверить API напрямую на закрытые разделы: backend filter-test подтверждает `ForbidResult` для закрытых секций шаблона юриста и пропуск разрешенных рабочих секций.
 - [ ] Проверить старую и новую карточку задачи, если меняются права задач/файлов/комментариев/подзадач.
 - [acceptance] После деплоя проверить на production реального юриста или тестового пользователя с такой же ролью.
 - [acceptance] Получить от заказчика подтверждение, что у юриста пропали лишние разделы и остались рабочие задачи.
@@ -430,6 +430,7 @@ npm run test:unit
 - 25.06.2026: добавлен безопасный шаблон прав для роли «Юрист»: задачи, календарь, клиенты и дела открываются в области `own`, личные уведомления доступны, а финансы, документы, отчеты, роли, аудит, интеграции, Я.Диск и S3 остаются закрытыми. Шаблон применяется при создании роли с названием «Юрист»/`lawyer`, при сбросе прав и при seed/backfill недостающих строк, не перезаписывая уже заданные вручную права.
 - 25.06.2026: targeted backend tests после шаблона юриста пройдены: `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~BackendPermissionMatrixTests|FullyQualifiedName~SeedDataServiceTests|FullyQualifiedName~AppRelease"` 131/131.
 - 25.06.2026: локальная БД проверена временной ролью `lawyer-template-temp-codex`: после старта backend seed добавил 19 строк прав, открыл только задачи/календарь/клиентов/дела в `own` и уведомления, закрыл финансы, документы, отчеты, роли, аудит, интеграции, Я.Диск и S3; временная роль после проверки удалена.
+- 25.06.2026: добавлены regression-тесты для шаблона юриста на прямые API/URL: backend `RequireSectionPermissionFilter` запрещает закрытые секции до выполнения действия, frontend `App.routing.test.ts` запрещает прямые финансовые, документные, административные и storage tab-ключи для safe-шаблона юриста.
 
 ## Предварительная рекомендация по роли "Юрист"
 
@@ -478,6 +479,8 @@ npm run test:unit
 - [x] `npm exec vitest run src/components/LegalEntities/LegalEntityModal.integration.test.tsx src/components/Contacts/UnifiedContacts.test.tsx src/components/Clients/ClientDetail.integration.test.tsx -- --runInBand` — пройдено 56 тестов после прокидывания прав в карточки юрлица/клиента/контактов.
 - [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~BackendPermissionMatrixTests|FullyQualifiedName~AppRelease"` — пройдено 127 тестов после обновления release note по карточке платежа.
 - [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~BackendPermissionMatrixTests|FullyQualifiedName~SeedDataServiceTests|FullyQualifiedName~AppRelease"` — пройдено 131 тест после добавления безопасного шаблона роли «Юрист».
+- [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~BackendPermissionMatrixTests|FullyQualifiedName~SeedDataServiceTests|FullyQualifiedName~AppRelease"` — пройдено 132 теста после добавления API regression-test для safe-шаблона юриста.
+- [x] `npm exec vitest run src/App.routing.test.ts --reporter dot` — пройдено 44 теста, включая прямые tab-ключи закрытых разделов для safe-шаблона юриста.
 - [x] `npm run lint` — ошибок нет, остались существующие предупреждения по React hooks / fast refresh.
 - [x] `npm run build` — сборка успешна, остались существующие предупреждения Vite/Rolldown по стороннему `@microsoft/signalr` и размеру chunk.
 - [x] `git diff --check` — замечаний нет.

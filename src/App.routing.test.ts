@@ -30,7 +30,7 @@ import {
   isTasksListPath,
   TAB_ACCESS_RULES,
 } from './appRouting';
-import { defaultRolePermissions, type RolePermissions } from './types/permissions';
+import { defaultRestrictedRolePermissions, defaultRolePermissions, type RolePermissions } from './types/permissions';
 import { ALL_TABS, type Tab } from './types/tabs';
 
 function createPermissions(overrides: Partial<RolePermissions> = {}): RolePermissions {
@@ -86,6 +86,10 @@ const readOnlySection = {
 } as const;
 
 function createOperationalRolePermissions(role: 'secretary' | 'lawyer' | 'accountant'): RolePermissions {
+  if (role === 'lawyer') {
+    return createLawyerTemplatePermissions();
+  }
+
   const permissions = createPermissions({
     calendar: { ...workLimitedSection, canViewAnalytics: false },
     tasks: role === 'accountant' ? deniedSection : workLimitedSection,
@@ -108,6 +112,17 @@ function createOperationalRolePermissions(role: 'secretary' | 'lawyer' | 'accoun
   });
 
   return permissions;
+}
+
+function createLawyerTemplatePermissions(): RolePermissions {
+  return {
+    ...defaultRestrictedRolePermissions,
+    calendar: { ...workLimitedSection, canViewAnalytics: false, visibleUserIds: [] },
+    tasks: { ...workLimitedSection },
+    clients: { ...workLimitedSection },
+    cases: { ...workLimitedSection },
+    notifications: { ...readOnlySection, canEdit: true },
+  };
 }
 
 describe('App payment routing helpers', () => {
@@ -437,6 +452,62 @@ describe('App real role route access matrix', () => {
 
     for (const tab of deniedTabs) {
       expect(canAccessTab(tab, permissions, options), `${role} should not access ${tab}`).toBe(false);
+    }
+  });
+
+  it('blocks lawyer template direct tabs for closed financial and admin sections', () => {
+    const permissions = createLawyerTemplatePermissions();
+    const options = {
+      canManageRoles: permissions.roles.canView,
+      canViewAudit: permissions.audit.canView,
+      canViewSettings: permissions.notifications.canView || permissions.integrations.canView || permissions.yandexDisk.canView || permissions.s3Storage.canView,
+      canViewYandexDisk: permissions.yandexDisk.canView,
+      canViewS3Storage: permissions.s3Storage.canView,
+    };
+
+    const allowedTabs: Tab[] = ['calendar', 'tasks', 'tasksCalendar', 'clients', 'clientDetail', 'cases', 'caseDetail', 'notifications', 'settings'];
+    const deniedTabs: Tab[] = [
+      'reports',
+      'calculator',
+      'legalEntities',
+      'contactsLegal',
+      'accounts',
+      'accountsIncome',
+      'accountsExpense',
+      'installments',
+      'acts',
+      'actsIncome',
+      'actsExpense',
+      'actCreate',
+      'actDetail',
+      'payments',
+      'paymentsIncome',
+      'paymentsExpense',
+      'moneyBank',
+      'moneyCash',
+      'moneyCards',
+      'moneyEMoney',
+      'moneyTotal',
+      'contracts',
+      'contractCreate',
+      'contractDetail',
+      'roles',
+      'audit',
+      'yandexDisk',
+      's3Storage',
+      'dictionaries',
+      'companyProfile',
+      'users',
+      'userDetail',
+      'userActivity',
+    ];
+
+    for (const tab of allowedTabs) {
+      expect(canAccessTab(tab, permissions, options), `lawyer should access ${tab}`).toBe(true);
+    }
+
+    for (const tab of deniedTabs) {
+      expect(canAccessTab(tab, permissions, options), `lawyer should not access ${tab}`).toBe(false);
     }
   });
 });
