@@ -554,6 +554,13 @@ export function Accounts({
   const canCreate = permissions.accounts.canCreate;
   const canEdit = permissions.accounts.canEdit;
   const canDelete = permissions.accounts.canDelete;
+  const canViewPayments = permissions.payments.canView;
+  const canCreatePayment = canViewPayments && permissions.payments.canCreate;
+  const canEditPayment = canViewPayments && permissions.payments.canEdit;
+  const canDeletePayment = canViewPayments && permissions.payments.canDelete;
+  const canViewActs = permissions.acts.canView;
+  const canCreateAct = canViewActs && permissions.acts.canCreate;
+  const canEditAct = canViewActs && permissions.acts.canEdit;
 
   const defaultPeriod = useMemo<PeriodFilter>(() => ({ mode: 'preset', preset: 'year_to_date' }), []);
   const storagePrefix = useMemo(() => `pp.accounts.${user?.id ?? 'guest'}`, [user?.id]);
@@ -2106,6 +2113,7 @@ export function Accounts({
   );
 
   const openPaymentCreateModal = (invoice: Invoice | null | undefined) => {
+    if (!canCreatePayment) return;
     const context = buildPaymentModalInvoiceContext(invoice);
     if (!context) {
       toast.error('Сначала сохраните счет, затем можно добавлять связанные платежи.', 'Платежи счета');
@@ -2119,6 +2127,7 @@ export function Accounts({
   };
 
   const openLinkedPaymentEditModal = (payment: Payment, invoice?: Invoice | null) => {
+    if (!canEditPayment) return;
     setEditingPayment(payment);
     setPaymentModalInvoiceContext(buildPaymentModalInvoiceContext(invoice));
     setPaymentModalType(payment.type ?? 'Income');
@@ -2133,6 +2142,9 @@ export function Accounts({
 
   const handleSubmitPayment = async (payload: PaymentPayload | ({ id: number } & PaymentPayload)) => {
     const isUpdate = 'id' in payload;
+    if ((isUpdate && !canEditPayment) || (!isUpdate && !canCreatePayment)) {
+      return;
+    }
     const invoiceManagedEditingPayment =
       isUpdate
       && editingPayment
@@ -2245,7 +2257,7 @@ export function Accounts({
       );
       return;
     }
-    if (!canDelete) return;
+    if (!canDeletePayment) return;
     const approved = await confirm({
       title: 'Удаление платежа',
       description: 'Удалить связанный платеж?',
@@ -2261,6 +2273,7 @@ export function Accounts({
   };
 
   const openActCreateModal = (row: AccountRow) => {
+    if (!canCreateAct) return;
     setExpandedActListKey(null);
     const normalizedDate =
       toDateInputValue(row.invoice?.date ?? row.dueDate) || formatLocalYMD(new Date());
@@ -2295,6 +2308,7 @@ export function Accounts({
   };
 
   const openActEditModal = (act: Act, row: AccountRow) => {
+    if (!canEditAct) return;
     setExpandedActListKey(null);
     if (onOpenActPage) {
       onOpenActPage(act.id, {
@@ -2334,6 +2348,9 @@ export function Accounts({
   };
 
   const handleSubmitAct = async (payload: ActInput) => {
+    if ((actModalMode === 'edit' && !canEditAct) || (actModalMode !== 'edit' && !canCreateAct)) {
+      return;
+    }
     setActModalSubmitting(true);
     setActModalError(null);
     try {
@@ -2455,7 +2472,7 @@ export function Accounts({
 
   const paymentModalElement = (
     <PaymentModal
-      isOpen={paymentModalOpen}
+      isOpen={paymentModalOpen && canViewPayments}
       onClose={handleClosePaymentModal}
       onSubmit={handleSubmitPayment}
       onTransferRemainder={handleTransferPaymentRemainder}
@@ -2468,7 +2485,7 @@ export function Accounts({
         await refreshAccounts();
       }}
       onDelete={
-        canDelete
+        canDeletePayment
         && (!editingPayment || (editingPayment.documentKind !== 'Invoice' && !isTransferredRemainderPayment(editingPayment) && !isPartialRemainderSourcePayment(editingPayment)))
           ? async (id) => {
               await apiService.deletePayment(id);
@@ -2479,7 +2496,7 @@ export function Accounts({
           : undefined
       }
       onCreateRemainder={
-        !editingPayment || !isInvoiceManagedPayment(editingPayment)
+        canCreatePayment && (!editingPayment || !isInvoiceManagedPayment(editingPayment))
           ? async (payload) => {
               const created = await apiService.createPayment(payload);
               await refreshAccounts();
@@ -2517,8 +2534,8 @@ export function Accounts({
           onBack={() => closeEditPage({ restoreClientContext: true })}
           onOpenClient={openClientFromEditor}
           onOpenContract={onOpenContract}
-          onOpenActPage={onOpenActPage}
-          onOpenPayment={onOpenPayment}
+          onOpenActPage={canViewActs ? onOpenActPage : undefined}
+          onOpenPayment={canViewPayments ? onOpenPayment : undefined}
           onSubmit={submitInvoice}
           submitting={submitting}
           errorMessage={modalError}
@@ -2534,14 +2551,14 @@ export function Accounts({
           defaultResponsibleId={user?.id}
           defaultType={typeFilter === 'All' ? undefined : typeFilter}
           lockType={lockType}
-          relatedPayments={currentPageAccountRow?.payments ?? []}
-          paymentsLoading={isLoading || isRefreshing}
+          relatedPayments={canViewPayments ? currentPageAccountRow?.payments ?? [] : []}
+          paymentsLoading={canViewPayments && (isLoading || isRefreshing)}
           onRefreshRequested={refreshAccounts}
-          onAddRelatedPayment={canEdit ? () => openPaymentCreateModal(currentPageInvoice) : undefined}
-          onEditRelatedPayment={canEdit ? (payment) => openLinkedPaymentEditModal(payment, currentPageInvoice) : undefined}
-          onDeleteRelatedPayment={canDelete ? handleDeletePayment : undefined}
+          onAddRelatedPayment={canCreatePayment ? () => openPaymentCreateModal(currentPageInvoice) : undefined}
+          onEditRelatedPayment={canEditPayment ? (payment) => openLinkedPaymentEditModal(payment, currentPageInvoice) : undefined}
+          onDeleteRelatedPayment={canDeletePayment ? handleDeletePayment : undefined}
           onCreateActPage={
-            onCreateActPage
+            canCreateAct && onCreateActPage
               ? (initialValues, options) => onCreateActPage(initialValues, {
                 invoiceId: options?.invoiceId ?? currentPageInvoice.id,
                 invoiceSeed: options?.invoiceSeed ?? currentPageInvoice,
@@ -3282,12 +3299,19 @@ export function Accounts({
                               case 'paidDate':
                                 return <td key={column.key} className="px-4 py-3 text-center align-middle">{formatDate(row.paidDate)}</td>;
                               case 'act':
+                                if (!canViewActs) {
+                                  return (
+                                    <td key={column.key} className="px-4 py-3 text-center align-middle">
+                                      <span className="text-slate-400">—</span>
+                                    </td>
+                                  );
+                                }
                                 return (
                                   <td key={column.key} className="px-4 py-3 text-center align-middle">
                                     <div className="relative flex items-center justify-center gap-1.5">
                                       {primaryAct ? (
                                         <>
-                                          {canCreate && (
+                                          {canCreateAct && (
                                             <button
                                               type="button"
                                               onClick={(event) => { event.stopPropagation(); openActCreateModal(row); }}
@@ -3374,7 +3398,7 @@ export function Accounts({
                                           )}
                                         </>
                                       ) : (
-                                        canCreate ? (
+                                        canCreateAct ? (
                                           <button
                                             type="button"
                                             onClick={(event) => { event.stopPropagation(); openActCreateModal(row); }}
@@ -3472,7 +3496,7 @@ export function Accounts({
                             </td>
                           )}
                         </tr>
-                        {isExpanded && (row.payments.length > 0 || canEdit) && (
+                        {isExpanded && canViewPayments && (row.payments.length > 0 || canCreatePayment) && (
                           <tr>
                             <td colSpan={colSpan} className="bg-gray-50 px-4 py-3">
                               <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
@@ -3481,7 +3505,7 @@ export function Accounts({
                                     {t('paymentOperations') ?? 'Операции по счёту'}
                                   </div>
                                   <div className="flex items-center gap-2">
-                                    {canEdit && invoice && (
+                                    {canCreatePayment && invoice && (
                                       <button
                                         type="button"
                                         onClick={() => openPaymentCreateModal(invoice)}
@@ -3496,11 +3520,11 @@ export function Accounts({
                                 <div className="overflow-x-auto">
                                   <table className="min-w-full table-fixed divide-y divide-gray-100 text-sm">
                                     <colgroup>
-                                      <col style={{ width: canEdit || canDelete ? '18%' : '22%' }} />
+                                      <col style={{ width: canEditPayment || canDeletePayment ? '18%' : '22%' }} />
                                       <col style={{ width: '18%' }} />
                                       <col style={{ width: '18%' }} />
-                                      <col style={{ width: canEdit || canDelete ? '30%' : '42%' }} />
-                                      {(canEdit || canDelete) ? <col style={{ width: '16%' }} /> : null}
+                                      <col style={{ width: canEditPayment || canDeletePayment ? '30%' : '42%' }} />
+                                      {(canEditPayment || canDeletePayment) ? <col style={{ width: '16%' }} /> : null}
                                     </colgroup>
                                     <thead className="bg-gray-50 text-left text-xs font-medium uppercase text-gray-500">
                                       <tr>
@@ -3508,7 +3532,7 @@ export function Accounts({
                                         <th className="px-4 py-2">{t('amount') ?? 'Сумма'}</th>
                                         <th className="px-4 py-2">{t('status') ?? 'Статус'}</th>
                                         <th className="px-4 py-2">{t('description') ?? 'Описание'}</th>
-                                        {(canEdit || canDelete) && (
+                                        {(canEditPayment || canDeletePayment) && (
                                           <th className="px-4 py-2 text-right">{t('actions') ?? 'Действия'}</th>
                                         )}
                                       </tr>
@@ -3517,8 +3541,8 @@ export function Accounts({
                                       {row.payments.map((payment) => (
                                         <tr
                                           key={payment.id}
-                                          className={canEdit ? 'cursor-pointer hover:bg-gray-50/80' : undefined}
-                                          onClick={canEdit ? () => openLinkedPaymentEditModal(payment, invoice) : undefined}
+                                          className={canEditPayment ? 'cursor-pointer hover:bg-gray-50/80' : undefined}
+                                          onClick={canEditPayment ? () => openLinkedPaymentEditModal(payment, invoice) : undefined}
                                         >
                                           <td className="px-4 py-2">{formatDate(resolvePaymentOperationDate(payment))}</td>
                                           <td className="px-4 py-2 font-semibold text-gray-900">
@@ -3542,10 +3566,10 @@ export function Accounts({
                                               <span>{payment.description || '—'}</span>
                                             </div>
                                           </td>
-                                          {(canEdit || canDelete) && (
+                                          {(canEditPayment || canDeletePayment) && (
                                             <td className="px-4 py-2">
                                               <div className="flex items-center justify-end gap-2">
-                                                {canEdit && (
+                                                {canEditPayment && (
                                                   <button
                                                     type="button"
                                                     onClick={(event) => {
@@ -3559,7 +3583,7 @@ export function Accounts({
                                                     <Pencil className="h-4 w-4" />
                                                   </button>
                                                 )}
-                                                {canDelete && payment.documentKind !== 'Invoice' && !isTransferredRemainderPayment(payment) && !isPartialRemainderSourcePayment(payment) && (
+                                                {canDeletePayment && payment.documentKind !== 'Invoice' && !isTransferredRemainderPayment(payment) && !isPartialRemainderSourcePayment(payment) && (
                                                   <button
                                                     type="button"
                                                     onClick={(event) => {
@@ -3716,7 +3740,7 @@ export function Accounts({
           resumeDraft={resumeInvoiceDraft}
           onClose={closeModal}
           onOpenClient={openClientFromEditor}
-          onOpenActPage={onOpenActPage}
+          onOpenActPage={canViewActs ? onOpenActPage : undefined}
           onSubmit={submitInvoice}
           submitting={submitting}
           errorMessage={modalError}
@@ -3734,7 +3758,7 @@ export function Accounts({
           lockType={lockType}
           onRefreshRequested={refreshAccounts}
           onCreateActPage={
-            onCreateActPage
+            canCreateAct && onCreateActPage
               ? (initialValues, options) => onCreateActPage(initialValues, {
                 invoiceId: options?.invoiceId ?? selectedInvoice?.id ?? null,
                 invoiceSeed: options?.invoiceSeed ?? selectedInvoice ?? null,
@@ -3744,7 +3768,7 @@ export function Accounts({
         />
 
         <ActModal
-          open={actModalOpen}
+          open={actModalOpen && canViewActs}
           mode={actModalMode}
           act={activeAct}
           onClose={closeActModal}

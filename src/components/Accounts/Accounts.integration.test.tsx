@@ -25,6 +25,7 @@ const {
   getDocumentStatusesMock,
   getClientBalanceMock,
   applyClientBalanceMock,
+  rolePermissionsResult,
 } = vi.hoisted(() => ({
   createPaymentMock: vi.fn(),
   getActResponsiblesMock: vi.fn(),
@@ -45,15 +46,17 @@ const {
   getDocumentStatusesMock: vi.fn(),
   getClientBalanceMock: vi.fn(),
   applyClientBalanceMock: vi.fn(),
+  rolePermissionsResult: {
+    clients: { canView: false, canCreate: false, canEdit: false, canDelete: false },
+    accounts: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+    acts: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+    contracts: { canView: false, canCreate: false, canEdit: false, canDelete: false },
+    payments: { canView: true, canCreate: true, canEdit: true, canDelete: false },
+  },
 }));
 
 function createPermissions() {
-  return {
-    clients: { canView: false, canCreate: false, canEdit: false, canDelete: false },
-    accounts: { canView: true, canCreate: true, canEdit: true, canDelete: false },
-    acts: { canView: false, canCreate: false, canEdit: false, canDelete: false },
-    contracts: { canView: false, canCreate: false, canEdit: false, canDelete: false },
-  };
+  return rolePermissionsResult;
 }
 
 function createInvoice(overrides: Partial<Invoice> = {}): Invoice {
@@ -568,6 +571,11 @@ describe('Accounts integration', () => {
   const peekInvoiceEditorDraftMock = vi.mocked(peekInvoiceEditorDraft);
 
   beforeEach(() => {
+    Object.assign(rolePermissionsResult.clients, { canView: false, canCreate: false, canEdit: false, canDelete: false });
+    Object.assign(rolePermissionsResult.accounts, { canView: true, canCreate: true, canEdit: true, canDelete: false });
+    Object.assign(rolePermissionsResult.acts, { canView: true, canCreate: true, canEdit: true, canDelete: false });
+    Object.assign(rolePermissionsResult.contracts, { canView: false, canCreate: false, canEdit: false, canDelete: false });
+    Object.assign(rolePermissionsResult.payments, { canView: true, canCreate: true, canEdit: true, canDelete: false });
     getActResponsiblesMock.mockReset();
     getAccountsRegistryResultMock.mockReset();
     getPayablesDashboardResultMock.mockReset();
@@ -1011,6 +1019,36 @@ describe('Accounts integration', () => {
     expect(screen.getByText('payments-loading:false')).toBeTruthy();
   });
 
+  it('does not pass related payment actions into invoice editor without payment rights', async () => {
+    Object.assign(rolePermissionsResult.payments, {
+      canView: false,
+      canCreate: true,
+      canEdit: true,
+      canDelete: true,
+    });
+
+    render(<Accounts routeInvoiceId={528} />);
+
+    await waitFor(() => expect(getInvoiceMock).toHaveBeenCalledWith(528));
+    expect(await screen.findByTestId('invoice-modal')).toBeTruthy();
+
+    const props = invoiceModalPropsSpy.mock.calls.at(-1)?.[0] as {
+      relatedPayments?: Payment[];
+      onAddRelatedPayment?: unknown;
+      onEditRelatedPayment?: unknown;
+      onDeleteRelatedPayment?: unknown;
+      onOpenPayment?: unknown;
+    };
+
+    expect(props.relatedPayments).toEqual([]);
+    expect(props.onAddRelatedPayment).toBeUndefined();
+    expect(props.onEditRelatedPayment).toBeUndefined();
+    expect(props.onDeleteRelatedPayment).toBeUndefined();
+    expect(props.onOpenPayment).toBeUndefined();
+    expect(screen.queryByText('Representative payment for invoice 24')).toBeNull();
+    expect(screen.queryByText('Sibling payment for invoice 24')).toBeNull();
+  });
+
   it('opens act creation as a dedicated page from the accounts registry', async () => {
     const onCreateActPage = vi.fn();
 
@@ -1030,6 +1068,21 @@ describe('Accounts integration', () => {
       invoiceId: null,
       invoiceSeed: expect.objectContaining({ id: 528, number: '24' }),
     }));
+  });
+
+  it('hides act creation in the accounts registry without act rights', async () => {
+    Object.assign(rolePermissionsResult.acts, {
+      canView: false,
+      canCreate: true,
+      canEdit: true,
+      canDelete: true,
+    });
+    const onCreateActPage = vi.fn();
+
+    render(<Accounts onCreateActPage={onCreateActPage} />);
+
+    expect(screen.queryByRole('button', { name: 'Создать акт из счёта' })).toBeNull();
+    expect(onCreateActPage).not.toHaveBeenCalled();
   });
 
   it('opens an existing act as a dedicated page from the accounts registry', async () => {
