@@ -1,13 +1,28 @@
 import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { defaultRestrictedRolePermissions, defaultRolePermissions, type RolePermissions } from '../../types/permissions';
 import { AppSettings } from './AppSettings';
+
+const authMockState = vi.hoisted(() => ({
+  isAdmin: true,
+}));
+
+const permissionsMockState = vi.hoisted(() => ({
+  permissions: undefined as unknown,
+}));
 
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({
-    user: { role: { id: 1, name: 'admin' } },
-    isAdmin: () => true,
+    user: {
+      role: authMockState.isAdmin ? { id: 1, name: 'admin' } : { id: 2, name: 'Юрист' },
+    },
+    isAdmin: () => authMockState.isAdmin,
   }),
+}));
+
+vi.mock('../../hooks/useRolePermissions', () => ({
+  useRolePermissions: () => permissionsMockState.permissions,
 }));
 
 vi.mock('../../hooks/useDialog', () => ({
@@ -39,8 +54,49 @@ vi.mock('./BankDirectorySettings', () => ({
   BankDirectorySettings: () => <div>Банки</div>,
 }));
 
+vi.mock('./NotificationSettings', () => ({
+  NotificationSettings: () => <div>Настройки уведомлений mock</div>,
+}));
+
+vi.mock('../YandexDisk/YandexDisk', () => ({
+  YandexDisk: () => <div>Я.Диск mock</div>,
+}));
+
+vi.mock('../S3Storage/S3Storage', () => ({
+  S3Storage: () => <div>S3 mock</div>,
+}));
+
+function buildPermissions(overrides: Partial<RolePermissions> = {}): RolePermissions {
+  return {
+    ...defaultRestrictedRolePermissions,
+    ...overrides,
+    calendar: { ...defaultRestrictedRolePermissions.calendar, ...overrides.calendar },
+    tasks: { ...defaultRestrictedRolePermissions.tasks, ...overrides.tasks },
+    notes: { ...defaultRestrictedRolePermissions.notes, ...overrides.notes },
+    reports: { ...defaultRestrictedRolePermissions.reports, ...overrides.reports },
+    calculator: { ...defaultRestrictedRolePermissions.calculator, ...overrides.calculator },
+    legalEntities: { ...defaultRestrictedRolePermissions.legalEntities, ...overrides.legalEntities },
+    clients: { ...defaultRestrictedRolePermissions.clients, ...overrides.clients },
+    cases: { ...defaultRestrictedRolePermissions.cases, ...overrides.cases },
+    accounts: { ...defaultRestrictedRolePermissions.accounts, ...overrides.accounts },
+    acts: { ...defaultRestrictedRolePermissions.acts, ...overrides.acts },
+    payments: { ...defaultRestrictedRolePermissions.payments, ...overrides.payments },
+    contracts: { ...defaultRestrictedRolePermissions.contracts, ...overrides.contracts },
+    dictionaries: { ...defaultRestrictedRolePermissions.dictionaries, ...overrides.dictionaries },
+    notifications: { ...defaultRestrictedRolePermissions.notifications, ...overrides.notifications },
+    roles: { ...defaultRestrictedRolePermissions.roles, ...overrides.roles },
+    audit: { ...defaultRestrictedRolePermissions.audit, ...overrides.audit },
+    integrations: { ...defaultRestrictedRolePermissions.integrations, ...overrides.integrations },
+    yandexDisk: { ...defaultRestrictedRolePermissions.yandexDisk, ...overrides.yandexDisk },
+    s3Storage: { ...defaultRestrictedRolePermissions.s3Storage, ...overrides.s3Storage },
+  };
+}
+
 describe('AppSettings', () => {
   beforeEach(() => {
+    authMockState.isAdmin = true;
+    permissionsMockState.permissions = defaultRolePermissions;
+
     vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (input) => {
       if (String(input).includes('/integrations/dadata/settings')) {
         return new Response(JSON.stringify({
@@ -98,5 +154,27 @@ describe('AppSettings', () => {
     expect(secretInput.value).toBe('');
     expect(screen.queryByDisplayValue(/60b3fe73/i)).toBeNull();
     expect(screen.queryByDisplayValue(/56fe56f/i)).toBeNull();
+  });
+
+  it('shows only permitted settings sections for a restricted notification role', async () => {
+    authMockState.isAdmin = false;
+    permissionsMockState.permissions = buildPermissions({
+      notifications: {
+        ...defaultRestrictedRolePermissions.notifications,
+        canView: true,
+        canEdit: true,
+      },
+    });
+
+    render(<AppSettings initialSection="yandex-disk" />);
+
+    expect(await screen.findByText('Настройки уведомлений mock')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Уведомления/i })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Ключи интеграций/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Я\.Диск/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /S3-хранилища/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Обслуживание базы данных/i })).toBeNull();
+    expect(screen.queryByText('Я.Диск mock')).toBeNull();
+    expect(screen.queryByText('S3 mock')).toBeNull();
   });
 });
