@@ -1107,6 +1107,33 @@ function isTaskReadOnlyForCurrentUser(
   return task.authorUserId !== currentUserId && !isTaskExecutorForUser(task, currentUserId);
 }
 
+function canPostTaskCommentForCurrentUser(
+  task: TaskJournalItem | null | undefined,
+  currentUserId: number | null,
+  canSwitchToEdit: boolean,
+) {
+  if (!task) {
+    return false;
+  }
+
+  if (canSwitchToEdit) {
+    return true;
+  }
+
+  if (!currentUserId) {
+    return false;
+  }
+
+  if (task.authorUserId === currentUserId || task.assigneeUserId === currentUserId) {
+    return true;
+  }
+
+  return (task.participants ?? []).some((participant) =>
+    participant.userId === currentUserId &&
+    participant.role.toLowerCase() !== 'observer',
+  );
+}
+
 function priorityClass(priority: TaskJournalPriority) {
   switch (priority) {
     case 'urgent':
@@ -5903,6 +5930,7 @@ function TaskModal({
   const isReadOnly = state?.mode === 'view';
   const isLockedViewWithEditAccess = Boolean(isReadOnly && canSwitchToEdit);
   const canRequestDeadlineChange = Boolean(taskId && isReadOnly && !canSwitchToEdit && taskSettings.allowExecutorDeadlineChangeRequests);
+  const canPostComment = Boolean(taskId && canPostTaskCommentForCurrentUser(state?.task, currentUserId, canSwitchToEdit));
   const canManageFiles = Boolean(taskId && !isReadOnly);
   const taskAuthorLabel = state?.task ? getTaskAuthorName(state.task) : currentUserName || 'Текущий пользователь';
 
@@ -6200,6 +6228,10 @@ function TaskModal({
   const handleAddComment = async () => {
     const text = commentText.trim();
     if (!taskId || !text) return;
+    if (!canPostComment) {
+      toast.error('У вас нет права добавить комментарий к этой задаче.', 'Журнал задач');
+      return;
+    }
 
     setCommentSaving(true);
     try {
@@ -6499,7 +6531,7 @@ function TaskModal({
                       ))}
                     </div>
                   )}
-                  {taskId ? (
+                  {taskId && canPostComment ? (
                     <div className="flex items-end gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
                       <button type="button" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white" title="Упомянуть" aria-label="Упомянуть">
                         @
@@ -7612,28 +7644,30 @@ function TaskModal({
               </div>
             ) : (
               <>
-                <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <textarea
-                    value={commentText}
-                    onChange={(event) => setCommentText(event.target.value)}
-                    className="form-textarea min-h-[84px] bg-white"
-                    rows={3}
-                    placeholder="Введите комментарий"
-                    maxLength={4000}
-                  />
-                  <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <span className="text-xs text-slate-400">{commentText.trim().length}/4000</span>
-                    <button
-                      type="button"
-                      onClick={handleAddComment}
-                      disabled={commentSaving || !commentText.trim()}
-                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-                    >
-                      <MessageSquare className="h-4 w-4" />
-                      {commentSaving ? 'Добавляем...' : 'Добавить комментарий'}
-                    </button>
+                {canPostComment ? (
+                  <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <textarea
+                      value={commentText}
+                      onChange={(event) => setCommentText(event.target.value)}
+                      className="form-textarea min-h-[84px] bg-white"
+                      rows={3}
+                      placeholder="Введите комментарий"
+                      maxLength={4000}
+                    />
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <span className="text-xs text-slate-400">{commentText.trim().length}/4000</span>
+                      <button
+                        type="button"
+                        onClick={handleAddComment}
+                        disabled={commentSaving || !commentText.trim()}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                      >
+                        <MessageSquare className="h-4 w-4" />
+                        {commentSaving ? 'Добавляем...' : 'Добавить комментарий'}
+                      </button>
+                    </div>
                   </div>
-                </div>
+                ) : null}
 
                 <div className="mt-4 space-y-3">
                   {commentsLoading ? (

@@ -2369,7 +2369,32 @@ describe('TaskJournal', () => {
     fireEvent.click(screen.getByTitle('Просмотр'));
     expect(await screen.findByRole('heading', { name: 'Просмотр задачи' })).toBeTruthy();
     expect((screen.getByDisplayValue('Тестовая задача') as HTMLInputElement).disabled).toBe(true);
+    expect(screen.queryByPlaceholderText('Введите комментарий')).toBeNull();
     expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+  });
+
+  it('allows executor to comment on a read-only task', async () => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Исполнитель', email: 'assignee@example.com' };
+    await renderJournal([
+      createTask({
+        assigneeUserId: 7,
+        assigneeName: 'Исполнитель',
+        authorUserId: 8,
+        authorName: 'Постановщик',
+        participants: [
+          { userId: 7, role: 'assignee', displayName: 'Исполнитель', approvalStatus: 'pending' },
+        ],
+      }),
+    ]);
+
+    fireEvent.click(screen.getByTitle('Просмотр'));
+    expect(await screen.findByRole('heading', { name: 'Просмотр задачи' })).toBeTruthy();
+
+    fireEvent.change(screen.getByPlaceholderText('Введите комментарий'), { target: { value: 'Комментарий исполнителя' } });
+    fireEvent.click(screen.getByRole('button', { name: /Добавить комментарий/i }));
+
+    await waitFor(() => expect(apiMock.createTaskJournalComment).toHaveBeenCalledWith(101, 'Комментарий исполнителя'));
   });
 
   it('allows executor to request deadline change without moving task directly', async () => {
