@@ -12,8 +12,13 @@ public sealed class RequireSectionPermissionAttribute : TypeFilterAttribute
     public RequireSectionPermissionAttribute(string section, string operation = RequireSectionPermissionOperations.View)
         : base(typeof(RequireSectionPermissionFilter))
     {
+        Section = section;
+        Operation = operation;
         Arguments = [section, operation];
     }
+
+    public string Section { get; }
+    public string Operation { get; }
 }
 
 public static class RequireSectionPermissionOperations

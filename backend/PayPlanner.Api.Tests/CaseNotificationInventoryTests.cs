@@ -1,4 +1,8 @@
 ﻿using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc.Routing;
+using PayPlanner.Api.Controllers;
+using PayPlanner.Api.Filters;
 using PayPlanner.Api.Services.Notifications;
 using Xunit;
 
@@ -144,6 +148,29 @@ public class CaseNotificationInventoryTests
         Assert.Contains("UserNotificationTypes.CaseDocument", inboxSource, StringComparison.Ordinal);
         Assert.Contains("visibleCaseIds.Contains", inboxSource, StringComparison.Ordinal);
         Assert.Contains("visibleCaseDocumentIds.Contains", inboxSource, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PersonalNotificationInbox_RemainsSeparateFromAdminNotificationSettings()
+    {
+        var inboxController = typeof(NotificationInboxController);
+        var inboxActions = inboxController
+            .GetMethods()
+            .Where(method => method.DeclaringType == inboxController)
+            .Where(method => method.GetCustomAttributes(typeof(HttpMethodAttribute), inherit: true).Any())
+            .ToList();
+        var notificationSettingsSource = ReadSourceFile("backend", "Controllers", "NotificationsController.cs");
+
+        Assert.NotNull(inboxController.GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true).SingleOrDefault());
+        Assert.Empty(inboxController.GetCustomAttributes(typeof(RequireSectionPermissionAttribute), inherit: true));
+        Assert.All(
+            inboxActions,
+            action => Assert.Empty(action.GetCustomAttributes(typeof(RequireSectionPermissionAttribute), inherit: true)));
+        Assert.Contains("CanViewNotificationSettingsAsync(CancellationToken ct)", notificationSettingsSource, StringComparison.Ordinal);
+        Assert.Contains("CanEditNotificationSettingsAsync(CancellationToken ct)", notificationSettingsSource, StringComparison.Ordinal);
+        Assert.Contains("RolePermissionCatalog.Notifications", notificationSettingsSource, StringComparison.Ordinal);
+        Assert.Contains("permission.CanView", notificationSettingsSource, StringComparison.Ordinal);
+        Assert.Contains("permission.CanEdit", notificationSettingsSource, StringComparison.Ordinal);
     }
 
     [Fact]

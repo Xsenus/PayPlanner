@@ -98,8 +98,8 @@
 - [ ] Акты: списки, карточка, создание из счета/договора.
 - [ ] Платежи: доходные/расходные, деньги/банк/касса/карты/e-money/итого, платежные статусы, авансы.
 - [ ] Договоры: список, карточка, создание, связанные счета/акты/платежи.
-- [ ] Справочники: просмотр и редактирование справочников; сейчас редактирование местами завязано на admin, нужно привести к `dictionaries.canEdit`.
-- [ ] Уведомления: раздел личных уведомлений отдельно от админских настроек рассылок; определить, что доступно обычному сотруднику.
+- [x] Справочники: просмотр, создание, редактирование и удаление справочников подчинены правам `dictionaries.canView/canCreate/canEdit/canDelete`; прежняя жесткая привязка редактирования к admin снята.
+- [x] Уведомления: личный inbox оставлен доступным авторизованному пользователю, админские настройки рассылок закрываются через `notifications.canView/canEdit`.
 - [ ] Роли: список ролей, копирование, изменение прав, удаление.
 - [ ] Пользователи: список пользователей и карточка пользователя; либо оставить строго admin-only, либо добавить явный ключ прав в каталог.
 - [ ] Контроль пользователей: активность пользователей; либо строго admin-only, либо отдельный ключ прав.
@@ -138,8 +138,8 @@
 - [x] Вынести единую `tab -> permission` карту и использовать ее в `App`, `Navigation`, route helpers и тестах.
 - [ ] Скрывать не только пункты меню, но и вложенные кнопки действий в карточках: финансы дела, связанные счета/акты/платежи/договоры, карточки клиента/дела.
 - [x] Для detail/create страниц проверять доступ к родительскому разделу и операции: например `contractCreate` требует `contracts.canView && contracts.canCreate`, `actCreate` требует `acts.canView && acts.canCreate`.
-- [ ] Привести справочники к правам роли: просмотр по `dictionaries.canView`, редактирование по `dictionaries.canEdit`, удаление по `dictionaries.canDelete`.
-- [ ] Разделить личные уведомления и админские настройки уведомлений, чтобы запрет настроек не ломал личный inbox.
+- [x] Привести справочники к правам роли: просмотр по `dictionaries.canView`, создание по `dictionaries.canCreate`, редактирование по `dictionaries.canEdit`, удаление по `dictionaries.canDelete`.
+- [x] Разделить личные уведомления и админские настройки уведомлений, чтобы запрет настроек не ломал личный inbox.
 - [x] Добавить экран отказа/редирект при прямом URL в закрытый раздел.
 
 #### Как выполнять
@@ -347,6 +347,8 @@ npm run test:unit
 - 25.06.2026: добавлена единая frontend-карта `TAB_ACCESS_RULES`; новая вкладка без явного правила доступа теперь ловится тестом и типизацией.
 - 25.06.2026: добавлен backend-фильтр `RequireSectionPermissionAttribute` для декларативной проверки `view/create/edit/delete/export/analytics`.
 - 25.06.2026: закрыты секционными правами прямые API рассрочки, справочников чтения, клиентских паспортов, доверенностей, Google/Yandex календарей и финансовой статистики `Stats/StatsV2`.
+- 25.06.2026: админские API справочников переведены с общего admin-only на права `dictionaries`: создание, редактирование, включение/выключение, объединение дублей и удаление проверяются отдельными операциями роли.
+- 25.06.2026: подтверждена граница уведомлений: `NotificationInboxController` остается личным авторизованным inbox, а `NotificationsController` закрывает настройки рассылок через `notifications.canView/canEdit`.
 
 ## Предварительная рекомендация по роли "Юрист"
 
@@ -359,8 +361,9 @@ npm run test:unit
 
 ## Фактические проверки 25.06.2026
 
-- [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore` — пройдено 1871 тестов.
-- [x] `npm exec vitest run src/App.routing.test.ts src/services/permissionsService.test.ts src/hooks/useRolePermissions.test.tsx src/components/Navigation/Navigation.test.tsx -- --runInBand` — пройдено 56 тестов.
+- [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj` — пройдено 1871 тестов.
+- [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~DictionariesAdminServiceTests|FullyQualifiedName~BackendPermissionMatrixTests|FullyQualifiedName~CaseNotificationInventoryTests"` — пройдено 116 тестов.
+- [x] `npm exec vitest run src/components/Dictionaries/Dictionaries.test.tsx src/App.routing.test.ts src/services/permissionsService.test.ts src/hooks/useRolePermissions.test.tsx src/components/Navigation/Navigation.test.tsx -- --runInBand` — пройдено 59 тестов.
 - [x] `npm run lint` — ошибок нет, остались существующие предупреждения по React hooks / fast refresh.
 - [x] `npm run build` — сборка успешна, остались существующие предупреждения Vite/Rolldown по стороннему `@microsoft/signalr` и размеру chunk.
 - [x] `git diff --check` — замечаний нет.

@@ -3,6 +3,7 @@ import { Plus, Pencil, Trash2, Check, X, ShieldAlert } from 'lucide-react';
 import { apiService, type DictKind } from '../../services/api';
 import type { ClientStatus, DealType, DocumentStatusEntity, IncomeType, PaymentSource, ServiceCategoryDictionaryItem, ServiceDictionaryItem } from '../../types';
 import { useAuth } from '../../contexts/AuthContext';
+import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { isDocumentStatusCodeAllowedForKind } from '../../utils/documentStatusSettings';
 
 function sortRows<T extends RowState>(rows: T[]): T[] {
@@ -216,8 +217,12 @@ function isDocumentStatusScopeAllowed(
 }
 
 export const Dictionaries = () => {
-  const { isAdmin } = useAuth();
-  const canEdit = isAdmin(); // админ может создавать/редактировать/удалять
+  const { isAdmin, user } = useAuth();
+  const permissions = useRolePermissions(user?.role?.id);
+  const isAdminRole = isAdmin();
+  const canCreate = isAdminRole || permissions.dictionaries.canCreate;
+  const canEdit = isAdminRole || permissions.dictionaries.canEdit;
+  const canDelete = isAdminRole || permissions.dictionaries.canDelete;
   const [activeTab, setActiveTab] = useState<VisibleKind>('deal-types');
   const [data, setData] = useState<Record<VisibleKind, RowState[]>>({
     'deal-types': [],
@@ -285,7 +290,7 @@ export const Dictionaries = () => {
   }, [loadKind]);
 
   const addNew = (kind: VisibleKind) => {
-    if (!canEdit) return; // только админам
+    if (!canCreate) return;
     setData((prev) => ({
       ...prev,
       [kind]: [
@@ -346,7 +351,7 @@ export const Dictionaries = () => {
     idx: number,
     item: Omit<FullDictItem, 'id' | 'createdAt'>,
   ) {
-    if (!canEdit) return;
+    if (!canCreate) return;
     if (!item.name.trim()) return setError('Название не должно быть пустым');
     if (supportsServiceCategory(kind) && item.name.trim().length > SERVICE_NAME_MAX_LENGTH) {
       return setError(`Название услуги не должно быть длиннее ${SERVICE_NAME_MAX_LENGTH} символов`);
@@ -449,7 +454,7 @@ export const Dictionaries = () => {
 
   async function doDelete() {
     if (!confirmDelete) return;
-    if (!canEdit) return;
+    if (!canDelete) return;
     setBusy(true);
     setError(null);
     try {
@@ -827,11 +832,15 @@ export const Dictionaries = () => {
 
   function ViewRow({
     item,
+    canEditItem,
+    canDeleteItem,
     onEdit,
     onDelete,
     kind,
   }: {
     item: FullDictItem;
+    canEditItem: boolean;
+    canDeleteItem: boolean;
     onEdit: () => void;
     onDelete: () => void;
     kind: VisibleKind;
@@ -890,16 +899,18 @@ export const Dictionaries = () => {
           )}
         </div>
         <div className="col-span-4 lg:col-span-3 flex justify-end gap-2">
-          {canEdit && (
+          {(canEditItem || canDeleteItem) && (
             <>
-              <button
-                onClick={onEdit}
-                className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition"
-                aria-label={`Редактировать ${item.name}`}
-                title="Редактировать">
-                <Pencil className="h-4 w-4" />
-              </button>
-              {!isDocumentStatusKind(kind) && (
+              {canEditItem && (
+                <button
+                  onClick={onEdit}
+                  className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition"
+                  aria-label={`Редактировать ${item.name}`}
+                  title="Редактировать">
+                  <Pencil className="h-4 w-4" />
+                </button>
+              )}
+              {canDeleteItem && !isDocumentStatusKind(kind) && (
                 <button
                   onClick={onDelete}
                   className="p-2 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition"
@@ -921,10 +932,10 @@ export const Dictionaries = () => {
         <div className="mb-4">
           <h1 className="text-3xl font-bold text-slate-900">Справочники</h1>
 
-          {!canEdit && (
+          {!canCreate && !canEdit && !canDelete && (
             <div className="mt-3 flex items-center gap-2 text-xs text-slate-600">
               <ShieldAlert className="w-4 h-4 text-slate-500" />
-              Редактирование доступно только администраторам.
+              Редактирование доступно только пользователям с правами на изменение справочников.
             </div>
           )}
         </div>
@@ -984,7 +995,7 @@ export const Dictionaries = () => {
                 <div className="text-sm text-slate-600">Всего: {data[activeTab]?.length ?? 0}</div>
               </div>
 
-              {canEdit && !isDocumentStatusKind(activeTab) && (
+              {canCreate && !isDocumentStatusKind(activeTab) && (
                 <button
                   onClick={() => addNew(activeTab)}
                   className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm bg-slate-900 text-white hover:bg-slate-800 transition">
@@ -1003,11 +1014,13 @@ export const Dictionaries = () => {
                       key={key}
                       item={row.item}
                       kind={activeTab}
+                      canEditItem={canEdit}
+                      canDeleteItem={canDelete}
                       onEdit={() =>
                         canEdit && setRow(activeTab, idx, (prev) => ({ ...prev, mode: 'edit' }))
                       }
                       onDelete={() =>
-                        canEdit && setConfirmDelete({ kind: activeTab, id: row.item.id })
+                        canDelete && setConfirmDelete({ kind: activeTab, id: row.item.id })
                       }
                     />
                   );
@@ -1020,13 +1033,15 @@ export const Dictionaries = () => {
                       key={key}
                       item={row.item}
                       kind={activeTab}
+                      canEditItem={false}
+                      canDeleteItem={false}
                       onEdit={() => {}}
                       onDelete={() => {}}
                     />
                   );
                 }
                 // 'new'
-                return canEdit ? (
+                return canCreate ? (
                   <NewRow key={key} idx={idx} kind={activeTab} item={row.item} />
                 ) : null;
               })}
@@ -1034,7 +1049,7 @@ export const Dictionaries = () => {
           </section>
         </div>
 
-        {canEdit && confirmDelete && (
+        {canDelete && confirmDelete && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
             <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4">
               <div className="p-6">
