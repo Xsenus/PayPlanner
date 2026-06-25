@@ -1015,6 +1015,68 @@ describe('CaseDetailPage', () => {
     expect(apiService.getCaseFinance).not.toHaveBeenCalled();
   });
 
+  it('hides case sidebar finance shortcuts without finance permission', async () => {
+    const onCreateInvoice = vi.fn();
+    const onCreatePayment = vi.fn();
+
+    render(
+      <CaseDetailPage
+        caseId={15}
+        onBack={vi.fn()}
+        canViewFinance={false}
+        onCreateInvoice={onCreateInvoice}
+        onCreatePayment={onCreatePayment}
+      />,
+    );
+
+    await screen.findByText('Клиент по делу');
+
+    expect(screen.queryByRole('button', { name: 'Счет' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Платеж' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Финансы дела' })).toBeNull();
+    expect(onCreateInvoice).not.toHaveBeenCalled();
+    expect(onCreatePayment).not.toHaveBeenCalled();
+  });
+
+  it('hides work order document creation actions without finance permission', async () => {
+    vi.mocked(apiService.getCaseWorkOrder).mockResolvedValue({
+      id: 31,
+      clientCaseId: 15,
+      title: 'Предварительный расчет',
+      status: 'approved',
+      statusLabel: 'Согласован',
+      currency: 'RUB',
+      notes: null,
+      totalAmount: 24000,
+      items: [
+        {
+          id: 41,
+          clientCaseWorkOrderId: 31,
+          serviceName: 'Подготовка заявления',
+          description: 'Пакет документов',
+          executorUserId: 7,
+          executorName: 'Кожеваткин Андрей Владимирович',
+          dueDate: '2026-06-01',
+          quantity: 2,
+          unitPrice: 12000,
+          totalAmount: 24000,
+          sortOrder: 1,
+        },
+      ],
+    });
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canViewFinance={false} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Заказ-наряд' }));
+    await waitFor(() => expect(apiService.getCaseWorkOrder).toHaveBeenCalledWith(15));
+
+    expect(await screen.findByDisplayValue('Предварительный расчет')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Создать счет' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Создать акт' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Создать договор' })).toBeNull();
+  });
+
   it('opens the work order print form from the work order tab', async () => {
     vi.mocked(apiService.getCaseWorkOrder).mockResolvedValue({
       id: 31,

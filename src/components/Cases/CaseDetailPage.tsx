@@ -3021,7 +3021,7 @@ export function CaseDetailPage({
               onOpenClient={onOpenClient}
               onOpenLegalEntity={onOpenLegalEntity}
               onOpenFinance={canViewFinance ? onOpenFinance : undefined}
-              onCreateInvoice={onCreateInvoice}
+              onCreateInvoice={canViewFinance ? onCreateInvoice : undefined}
               onCreatePayment={canViewFinance ? onCreatePayment : undefined}
             />
             <div className="min-w-0">
@@ -3308,9 +3308,9 @@ export function CaseDetailPage({
               onApprovalCommentChange={setWorkOrderApprovalComment}
               onSaveHeader={() => void saveWorkOrderHeader()}
               onDeleteHeader={() => void deleteWorkOrder()}
-              onCreateInvoice={() => void createInvoiceFromWorkOrder()}
-              onCreateAct={() => void createActFromWorkOrder()}
-              onCreateContract={() => void createContractFromWorkOrder()}
+              onCreateInvoice={canViewFinance ? () => void createInvoiceFromWorkOrder() : undefined}
+              onCreateAct={canViewFinance ? () => void createActFromWorkOrder() : undefined}
+              onCreateContract={canViewFinance ? () => void createContractFromWorkOrder() : undefined}
               onPrint={() => void printWorkOrder()}
               onGenerateDocument={() => void generateWorkOrderDocument()}
               onSubmitApproval={() => void runWorkOrderApprovalAction('submit')}
@@ -4088,9 +4088,9 @@ function WorkOrderPanel({
   onApprovalCommentChange: (value: string) => void;
   onSaveHeader: () => void;
   onDeleteHeader: () => void;
-  onCreateInvoice: () => void;
-  onCreateAct: () => void;
-  onCreateContract: () => void;
+  onCreateInvoice?: () => void;
+  onCreateAct?: () => void;
+  onCreateContract?: () => void;
   onPrint: () => void;
   onGenerateDocument: () => void;
   onSubmitApproval: () => void;
@@ -4182,7 +4182,7 @@ function WorkOrderPanel({
               {approvalAction === 'revision' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} На доработку
             </button>
           ) : null}
-          {hasWorkOrder ? (
+          {hasWorkOrder && onCreateInvoice ? (
             <button
               type="button"
               onClick={onCreateInvoice}
@@ -4191,7 +4191,7 @@ function WorkOrderPanel({
               {creatingInvoice ? <Loader2 className="h-4 w-4 animate-spin" /> : <WalletCards className="h-4 w-4" />} Создать счет
             </button>
           ) : null}
-          {hasWorkOrder ? (
+          {hasWorkOrder && onCreateAct ? (
             <button
               type="button"
               onClick={onCreateAct}
@@ -4200,7 +4200,7 @@ function WorkOrderPanel({
               {creatingAct ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />} Создать акт
             </button>
           ) : null}
-          {hasWorkOrder ? (
+          {hasWorkOrder && onCreateContract ? (
             <button
               type="button"
               onClick={onCreateContract}
