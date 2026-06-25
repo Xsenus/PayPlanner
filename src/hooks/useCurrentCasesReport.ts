@@ -10,7 +10,12 @@ export interface CurrentCasesReportFilters {
   limit?: number;
 }
 
-export function useCurrentCasesReport(filters: CurrentCasesReportFilters) {
+export interface CurrentCasesReportOptions {
+  enabled?: boolean;
+}
+
+export function useCurrentCasesReport(filters: CurrentCasesReportFilters, options: CurrentCasesReportOptions = {}) {
+  const enabled = options.enabled ?? true;
   const [report, setReport] = useState<CurrentCasesReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,6 +33,14 @@ export function useCurrentCasesReport(filters: CurrentCasesReportFilters) {
   );
 
   const load = useCallback(async () => {
+    if (!enabled) {
+      requestIdRef.current += 1;
+      setReport(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     setLoading(true);
@@ -52,7 +65,7 @@ export function useCurrentCasesReport(filters: CurrentCasesReportFilters) {
         setLoading(false);
       }
     }
-  }, [stableFilters]);
+  }, [enabled, stableFilters]);
 
   useEffect(() => {
     void load();

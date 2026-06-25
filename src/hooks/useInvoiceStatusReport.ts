@@ -14,7 +14,12 @@ export interface InvoiceStatusReportFilters {
   incomeTypeId?: number;
 }
 
-export function useInvoiceStatusReport(filters: InvoiceStatusReportFilters) {
+export interface InvoiceStatusReportOptions {
+  enabled?: boolean;
+}
+
+export function useInvoiceStatusReport(filters: InvoiceStatusReportFilters, options: InvoiceStatusReportOptions = {}) {
+  const enabled = options.enabled ?? true;
   const [report, setReport] = useState<InvoiceStatusReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +41,14 @@ export function useInvoiceStatusReport(filters: InvoiceStatusReportFilters) {
   );
 
   const load = useCallback(async () => {
+    if (!enabled) {
+      requestIdRef.current += 1;
+      setReport(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     setLoading(true);
@@ -60,7 +73,7 @@ export function useInvoiceStatusReport(filters: InvoiceStatusReportFilters) {
         setLoading(false);
       }
     }
-  }, [stableFilters]);
+  }, [enabled, stableFilters]);
 
   useEffect(() => {
     void load();

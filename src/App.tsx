@@ -1069,13 +1069,13 @@ function AppContent() {
         return permissions.reports.canView
           ? (
               <Reports
-                onOpenCase={(caseId) => {
+                onOpenCase={permissions.cases.canView ? (caseId) => {
                   setSelectedCaseId(caseId);
                   setCaseReturnTab('reports');
                   setActiveTab('caseDetail');
-                }}
-                onOpenCaseSection={openCaseDetailSection}
-                onOpenTask={(taskId) => openTaskDetail(taskId, { returnTo: 'reports' })}
+                } : undefined}
+                onOpenCaseSection={permissions.cases.canView ? openCaseDetailSection : undefined}
+                onOpenTask={permissions.tasks.canView ? (taskId) => openTaskDetail(taskId, { returnTo: 'reports' }) : undefined}
               />
             )
           : renderNoAccess('Просмотр отчетов недоступен для вашей роли.');

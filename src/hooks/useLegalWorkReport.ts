@@ -10,7 +10,12 @@ export interface LegalWorkReportFilters {
   caseType?: string;
 }
 
-export function useLegalWorkReport(filters: LegalWorkReportFilters) {
+export interface LegalWorkReportOptions {
+  enabled?: boolean;
+}
+
+export function useLegalWorkReport(filters: LegalWorkReportFilters, options: LegalWorkReportOptions = {}) {
+  const enabled = options.enabled ?? true;
   const [report, setReport] = useState<LegalWorkReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,6 +33,14 @@ export function useLegalWorkReport(filters: LegalWorkReportFilters) {
   );
 
   const load = useCallback(async () => {
+    if (!enabled) {
+      requestIdRef.current += 1;
+      setReport(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     setLoading(true);
@@ -52,7 +65,7 @@ export function useLegalWorkReport(filters: LegalWorkReportFilters) {
         setLoading(false);
       }
     }
-  }, [stableFilters]);
+  }, [enabled, stableFilters]);
 
   useEffect(() => {
     void load();

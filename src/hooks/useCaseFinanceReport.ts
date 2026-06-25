@@ -11,7 +11,12 @@ export interface CaseFinanceReportFilters {
   limit?: number;
 }
 
-export function useCaseFinanceReport(filters: CaseFinanceReportFilters) {
+export interface CaseFinanceReportOptions {
+  enabled?: boolean;
+}
+
+export function useCaseFinanceReport(filters: CaseFinanceReportFilters, options: CaseFinanceReportOptions = {}) {
+  const enabled = options.enabled ?? true;
   const [report, setReport] = useState<CaseFinanceReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,6 +35,14 @@ export function useCaseFinanceReport(filters: CaseFinanceReportFilters) {
   );
 
   const load = useCallback(async () => {
+    if (!enabled) {
+      requestIdRef.current += 1;
+      setReport(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     setLoading(true);
@@ -54,7 +67,7 @@ export function useCaseFinanceReport(filters: CaseFinanceReportFilters) {
         setLoading(false);
       }
     }
-  }, [stableFilters]);
+  }, [enabled, stableFilters]);
 
   useEffect(() => {
     void load();
