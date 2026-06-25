@@ -19,6 +19,8 @@ const authState = vi.hoisted(() => ({
 
 const permissionsState = vi.hoisted(() => ({
   casesCanExport: true,
+  clientsCanView: true,
+  legalEntitiesCanView: true,
   paymentsCanView: true,
 }));
 
@@ -105,8 +107,8 @@ vi.mock('../../hooks/useRolePermissions', () => ({
       tasks: { ...section },
       reports: { ...section },
       calculator: { ...section },
-      legalEntities: { ...section },
-      clients: { ...section },
+      legalEntities: { ...section, canView: permissionsState.legalEntitiesCanView },
+      clients: { ...section, canView: permissionsState.clientsCanView },
       cases: { ...section, canExport: permissionsState.casesCanExport },
       accounts: { ...section },
       acts: { ...section },
@@ -174,6 +176,8 @@ describe('CasesRegistry', () => {
     dialogMock.prompt.mockResolvedValue('\u0410\u043a\u0442\u0438\u0432\u043d\u044b\u0435 \u0417\u0435\u043c\u0446\u043e\u0432');
     authState.isAdmin = true;
     permissionsState.casesCanExport = true;
+    permissionsState.clientsCanView = true;
+    permissionsState.legalEntitiesCanView = true;
     permissionsState.paymentsCanView = true;
     window.localStorage.removeItem('pp.cases_registry_views.v1');
     vi.mocked(apiService.getCasesV2).mockReset();
@@ -299,6 +303,32 @@ describe('CasesRegistry', () => {
       sortBy: 'createdAt',
       sortDir: 'desc',
     }));
+  });
+
+  it('keeps case owners closed when clients and legal entities are hidden', async () => {
+    authState.isAdmin = false;
+    permissionsState.clientsCanView = false;
+    permissionsState.legalEntitiesCanView = false;
+    const onOpenClient = vi.fn();
+    const onOpenLegalEntity = vi.fn();
+
+    render(<CasesRegistry onOpenClient={onOpenClient} onOpenLegalEntity={onOpenLegalEntity} />);
+
+    expect(await screen.findByText('ЗЕМЦОВ - банкротство')).toBeTruthy();
+    expect(screen.getAllByText('Земцов Виктор Александрович').length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByRole('button', { name: '2026-001' }));
+
+    expect(onOpenClient).not.toHaveBeenCalled();
+    expect(onOpenLegalEntity).not.toHaveBeenCalled();
+
+    const createButton = screen.getByRole('button', { name: 'Создать дело' }) as HTMLButtonElement;
+    expect(createButton.disabled).toBe(true);
+    fireEvent.click(createButton);
+
+    expect(screen.queryByText('Выбор владельца дела')).toBeNull();
+    expect(apiService.getClients).not.toHaveBeenCalled();
+    expect(apiService.getLegalEntities).not.toHaveBeenCalled();
   });
 
   it('passes filters to the cases api', async () => {

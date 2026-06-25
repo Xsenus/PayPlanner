@@ -14,7 +14,7 @@ import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { formatDateTimeInTimeZone } from '../../utils/timeZoneDate';
 import { CaseModal } from '../Clients/CaseModal';
-import { CounterpartyPickerModal, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
+import { CounterpartyPickerModal, type CounterpartyKind, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 
 type SortKey =
@@ -380,7 +380,16 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
   const canEditCases = isAdmin() || permissions.cases.canEdit;
   const canExportCases = isAdmin() || permissions.cases.canExport;
   const canViewFinance = isAdmin() || permissions.payments.canView;
+  const canViewClients = isAdmin() || permissions.clients.canView;
+  const canViewLegalEntities = isAdmin() || permissions.legalEntities.canView;
   const canManageCaseAccess = canEditCases;
+  const allowedOwnerScopes = useMemo<CounterpartyKind[]>(() => {
+    const scopes: CounterpartyKind[] = [];
+    if (canViewClients) scopes.push('client');
+    if (canViewLegalEntities) scopes.push('legalEntity');
+    return scopes;
+  }, [canViewClients, canViewLegalEntities]);
+  const canSelectCaseOwner = allowedOwnerScopes.length > 0;
   const [items, setItems] = useState<ClientCase[]>([]);
   const [accessRequests, setAccessRequests] = useState<ClientCaseAccessRequest[]>([]);
   const [accessRequestsLoading, setAccessRequestsLoading] = useState(false);
@@ -1018,23 +1027,23 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
       return;
     }
 
-    if (item.clientId) {
+    if (item.clientId && canViewClients) {
       onOpenClient?.(item.clientId, item.id);
       return;
     }
 
-    if (item.legalEntityId) {
+    if (item.legalEntityId && canViewLegalEntities) {
       onOpenLegalEntity?.(item.legalEntityId, item.id);
     }
   };
 
   const openOwner = (item: ClientCase) => {
-    if (item.clientId) {
+    if (item.clientId && canViewClients) {
       onOpenClient?.(item.clientId);
       return;
     }
 
-    if (item.legalEntityId) {
+    if (item.legalEntityId && canViewLegalEntities) {
       onOpenLegalEntity?.(item.legalEntityId);
     }
   };
@@ -1386,8 +1395,13 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
             {allowCreate ? (
               <button
                 type="button"
-                onClick={() => setOwnerPickerOpen(true)}
-                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">
+                onClick={() => {
+                  if (canSelectCaseOwner) {
+                    setOwnerPickerOpen(true);
+                  }
+                }}
+                disabled={!canSelectCaseOwner}
+                className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60">
                 <Plus className="h-4 w-4" /> Создать дело
               </button>
             ) : null}
@@ -1874,6 +1888,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
         open={ownerPickerOpen}
         title="Выбор владельца дела"
         counterpartyRole="client"
+        allowedScopes={allowedOwnerScopes}
         onClose={() => setOwnerPickerOpen(false)}
         onSelect={startCreateCase}
       />
@@ -1887,6 +1902,8 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
           onSave={createCase}
           allowEdit={allowCreate}
           canViewFinance={canViewFinance}
+          canUseContactRelatedParties={canViewClients}
+          canUseLegalEntityRelatedParties={canViewLegalEntities}
         />
       ) : null}
       {editingCase ? (
@@ -1898,6 +1915,8 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
           onSave={updateCase}
           allowEdit={canEditCases}
           canViewFinance={canViewFinance}
+          canUseContactRelatedParties={canViewClients}
+          canUseLegalEntityRelatedParties={canViewLegalEntities}
         />
       ) : null}
       {caseContextMenu ? (
@@ -1944,7 +1963,10 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
             type="button"
             role="menuitem"
             onClick={() => runContextMenuAction(() => openOwner(caseContextMenu.item))}
-            disabled={!caseContextMenu.item.clientId && !caseContextMenu.item.legalEntityId}
+            disabled={
+              (!caseContextMenu.item.clientId || !canViewClients)
+              && (!caseContextMenu.item.legalEntityId || !canViewLegalEntities)
+            }
             className="flex w-full items-center gap-2 px-3 py-2 text-left text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
             <UserRound className="h-4 w-4 text-slate-700" /> Открыть владельца
           </button>

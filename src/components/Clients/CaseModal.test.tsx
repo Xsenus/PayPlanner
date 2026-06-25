@@ -266,6 +266,26 @@ describe('CaseModal', () => {
     expect((await screen.findAllByText('Земцов Виктор Александрович')).length).toBeGreaterThan(1);
   });
 
+  it('does not load related party directories when clients and legal entities are hidden', async () => {
+    render(
+      <CaseModal
+        isOpen
+        onClose={vi.fn()}
+        caseData={createCase()}
+        onSave={vi.fn()}
+        canUseContactRelatedParties={false}
+        canUseLegalEntityRelatedParties={false}
+      />,
+    );
+
+    expect(await screen.findByText('Справочники клиентов и организаций закрыты для вашей роли.')).toBeTruthy();
+    expect(apiService.getContacts).not.toHaveBeenCalled();
+    expect(apiService.getLegalEntitiesPaged).not.toHaveBeenCalled();
+    expect((screen.getByLabelText('Тип связанного участника') as HTMLSelectElement).disabled).toBe(true);
+    expect((screen.getByLabelText('Роль связанного участника') as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Добавить' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('saves registry, deadline and court fields', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
 
