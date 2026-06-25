@@ -237,7 +237,7 @@
 ### 5. Тесты
 
 - [~] Backend unit/integration: закрытая роль получает `403` на ключевые защищенные controller/action; добавлен тест общего `RequireSectionPermissionFilter`, полный endpoint-by-endpoint e2e остается отдельным acceptance-прогоном.
-- [ ] Backend data scope: пользователь не открывает чужую карточку по прямому ID.
+- [x] Backend data scope: пользователь не открывает чужую карточку по прямому ID; regression-test `DataVisibility_FiltersDirectIdQueries_ForOwnScope` покрывает прямой поиск по `Id` после `Apply*Visibility` для календаря, задач, клиентов, юрлиц, дел, счетов, актов, платежей и договоров.
 - [ ] Backend regression: admin видит все, системные endpoints не ломаются.
 - [x] Frontend tests: закрытый раздел не показывается в меню и не рендерится при прямом `ppTab`.
 - [ ] Frontend tests: кнопки связанных финансов/документов скрыты, если нет прав на соответствующий раздел.
@@ -418,6 +418,8 @@ npm run test:unit
 - 25.06.2026: проверки после доработки комментариев задач пройдены: `npm exec vitest run src/components/Tasks/TaskJournal.test.tsx -- --runInBand` 103/103, `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `dotnet test ... BackendPermissionMatrixTests/AppRelease` 107/107, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
 - 25.06.2026: карточка задачи теперь показывает действие отправки файла на Я.Диск только при одновременном доступе к экспорту задач и созданию файлов в разделе Я.Диск; обработчик действия дополнительно проверяет эти права перед API-вызовом.
 - 25.06.2026: проверки после доработки файлов задач пройдены: `npm exec vitest run src/components/Tasks/TaskJournal.test.tsx -- --runInBand` 105/105, `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~BackendPermissionMatrixTests|FullyQualifiedName~AppRelease"` 107/107, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
+- 25.06.2026: добавлен backend regression-test на прямой поиск чужих записей по ID при `ViewScope=Own`: календарь, задачи, клиенты, юрлица, дела, счета, акты, платежи и договоры должны возвращать только записи из видимой области; targeted test `BackendPermissionMatrixTests` прошел: 116/116.
+- 25.06.2026: проверки после regression-test по прямым ID пройдены: `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~BackendPermissionMatrixTests|FullyQualifiedName~AppRelease"` 116/116, `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
 
 ## Предварительная рекомендация по роли "Юрист"
 

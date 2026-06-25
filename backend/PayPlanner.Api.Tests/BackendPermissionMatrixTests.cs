@@ -154,6 +154,26 @@ public class BackendPermissionMatrixTests
 
     [Theory]
     [MemberData(nameof(DataScopedSections))]
+    public async Task DataVisibility_FiltersDirectIdQueries_ForOwnScope(string section)
+    {
+        await using var db = await CreateContextAsync();
+        var current = await CreateUserAsync(db, $"{section}-direct-own", new RolePermission
+        {
+            Section = section,
+            CanView = true,
+            ViewScope = DataVisibilityScope.Own
+        });
+        var other = await CreateUserAsync(db, $"{section}-direct-hidden", roleName: $"{section}-direct-hidden-role");
+        var access = await db.ResolveDataVisibilityAsync(CreatePrincipal(current), section);
+        Assert.NotNull(access);
+        var (visibleId, hiddenId) = await SeedDataScopedRecordsAsync(db, section, current.Id, other.Id);
+
+        Assert.True(await IsDataScopedRecordVisibleAsync(db, section, access, visibleId));
+        Assert.False(await IsDataScopedRecordVisibleAsync(db, section, access, hiddenId));
+    }
+
+    [Theory]
+    [MemberData(nameof(DataScopedSections))]
     public async Task DataVisibility_DeniesRegularUserWithoutSectionViewAccess(string section)
     {
         await using var db = await CreateContextAsync();
@@ -526,6 +546,164 @@ public class BackendPermissionMatrixTests
         Assert.True(access.CanSeeUser(user.Id));
         Assert.False(access.CanSeeUser(user.Id + 10_000));
     }
+
+    private static async Task<(int VisibleId, int HiddenId)> SeedDataScopedRecordsAsync(
+        PaymentContext db,
+        string section,
+        int visibleUserId,
+        int hiddenUserId)
+    {
+        switch (section)
+        {
+            case RolePermissionCatalog.Clients:
+            {
+                var visible = new Client { Name = "Visible client", ResponsibleUserId = visibleUserId };
+                var hidden = new Client { Name = "Hidden client", ResponsibleUserId = hiddenUserId };
+                db.Clients.AddRange(visible, hidden);
+                await db.SaveChangesAsync();
+                return (visible.Id, hidden.Id);
+            }
+            case RolePermissionCatalog.LegalEntities:
+            {
+                var visible = new LegalEntity { ShortName = "Visible legal", ResponsibleUserId = visibleUserId };
+                var hidden = new LegalEntity { ShortName = "Hidden legal", ResponsibleUserId = hiddenUserId };
+                db.LegalEntities.AddRange(visible, hidden);
+                await db.SaveChangesAsync();
+                return (visible.Id, hidden.Id);
+            }
+            case RolePermissionCatalog.Cases:
+            {
+                var visibleClient = new Client { Name = "Visible case client", ResponsibleUserId = visibleUserId };
+                var hiddenClient = new Client { Name = "Hidden case client", ResponsibleUserId = hiddenUserId };
+                var visible = new ClientCase { Title = "Visible case", Client = visibleClient, ResponsibleUserId = visibleUserId };
+                var hidden = new ClientCase { Title = "Hidden case", Client = hiddenClient, ResponsibleUserId = hiddenUserId };
+                db.ClientCases.AddRange(visible, hidden);
+                await db.SaveChangesAsync();
+                return (visible.Id, hidden.Id);
+            }
+            case RolePermissionCatalog.Calendar:
+            {
+                var visible = new TaskJournalItem
+                {
+                    Title = "Visible calendar task",
+                    ObjectName = "Visible calendar task",
+                    AssigneeUserId = visibleUserId,
+                    AuthorUserId = hiddenUserId,
+                    DueAt = DateTime.UtcNow.AddDays(1)
+                };
+                var hidden = new TaskJournalItem
+                {
+                    Title = "Hidden calendar task",
+                    ObjectName = "Hidden calendar task",
+                    AssigneeUserId = hiddenUserId,
+                    AuthorUserId = visibleUserId,
+                    DueAt = DateTime.UtcNow.AddDays(1)
+                };
+                db.TaskJournalItems.AddRange(visible, hidden);
+                await db.SaveChangesAsync();
+                return (visible.Id, hidden.Id);
+            }
+            case RolePermissionCatalog.Tasks:
+            {
+                var visible = new TaskJournalItem
+                {
+                    Title = "Visible task",
+                    ObjectName = "Visible task",
+                    AssigneeUserId = hiddenUserId,
+                    AuthorUserId = visibleUserId,
+                    DueAt = DateTime.UtcNow.AddDays(1)
+                };
+                var hidden = new TaskJournalItem
+                {
+                    Title = "Hidden task",
+                    ObjectName = "Hidden task",
+                    AssigneeUserId = hiddenUserId,
+                    AuthorUserId = hiddenUserId,
+                    DueAt = DateTime.UtcNow.AddDays(1)
+                };
+                db.TaskJournalItems.AddRange(visible, hidden);
+                await db.SaveChangesAsync();
+                return (visible.Id, hidden.Id);
+            }
+            case RolePermissionCatalog.Accounts:
+            case RolePermissionCatalog.Payments:
+            {
+                var visibleClient = new Client { Name = $"Visible {section} client", ResponsibleUserId = visibleUserId };
+                var hiddenClient = new Client { Name = $"Hidden {section} client", ResponsibleUserId = hiddenUserId };
+                var visible = new Payment
+                {
+                    Client = visibleClient,
+                    Type = PaymentType.Income,
+                    Status = PaymentStatus.Pending,
+                    DocumentKind = section == RolePermissionCatalog.Accounts ? DocumentKind.Invoice : DocumentKind.Payment,
+                    Amount = 1_000m,
+                    Date = DateTime.UtcNow.Date,
+                    PlannedDate = DateTime.UtcNow.Date
+                };
+                var hidden = new Payment
+                {
+                    Client = hiddenClient,
+                    Type = PaymentType.Income,
+                    Status = PaymentStatus.Pending,
+                    DocumentKind = section == RolePermissionCatalog.Accounts ? DocumentKind.Invoice : DocumentKind.Payment,
+                    Amount = 1_000m,
+                    Date = DateTime.UtcNow.Date,
+                    PlannedDate = DateTime.UtcNow.Date
+                };
+                db.Payments.AddRange(visible, hidden);
+                await db.SaveChangesAsync();
+                return (visible.Id, hidden.Id);
+            }
+            case RolePermissionCatalog.Acts:
+            {
+                var visibleClient = new Client { Name = "Visible act client", ResponsibleUserId = visibleUserId };
+                var hiddenClient = new Client { Name = "Hidden act client", ResponsibleUserId = hiddenUserId };
+                var visible = new Act { Number = "ACT-VISIBLE", Date = DateTime.UtcNow.Date, Amount = 1_000m, Client = visibleClient };
+                var hidden = new Act { Number = "ACT-HIDDEN", Date = DateTime.UtcNow.Date, Amount = 1_000m, Client = hiddenClient };
+                db.Acts.AddRange(visible, hidden);
+                await db.SaveChangesAsync();
+                return (visible.Id, hidden.Id);
+            }
+            case RolePermissionCatalog.Contracts:
+            {
+                var visibleClient = new Client { Name = "Visible contract client", ResponsibleUserId = visibleUserId };
+                var hiddenClient = new Client { Name = "Hidden contract client", ResponsibleUserId = hiddenUserId };
+                var visible = new Contract { Number = "CONTRACT-VISIBLE", Date = DateTime.UtcNow.Date, Status = ContractStatus.Draft };
+                var hidden = new Contract { Number = "CONTRACT-HIDDEN", Date = DateTime.UtcNow.Date, Status = ContractStatus.Draft };
+                visible.ClientContracts.Add(new ClientContract { Client = visibleClient, Contract = visible });
+                hidden.ClientContracts.Add(new ClientContract { Client = hiddenClient, Contract = hidden });
+                db.Contracts.AddRange(visible, hidden);
+                await db.SaveChangesAsync();
+                return (visible.Id, hidden.Id);
+            }
+            default:
+                throw new ArgumentOutOfRangeException(nameof(section), section, "Unsupported data scoped section.");
+        }
+    }
+
+    private static Task<bool> IsDataScopedRecordVisibleAsync(
+        PaymentContext db,
+        string section,
+        DataVisibilityAccess access,
+        int id)
+        => section switch
+        {
+            RolePermissionCatalog.Calendar or RolePermissionCatalog.Tasks =>
+                db.TaskJournalItems.ApplyTaskVisibility(access).AnyAsync(item => item.Id == id),
+            RolePermissionCatalog.LegalEntities =>
+                db.LegalEntities.ApplyLegalEntityVisibility(access).AnyAsync(item => item.Id == id),
+            RolePermissionCatalog.Clients =>
+                db.Clients.ApplyClientVisibility(access).AnyAsync(item => item.Id == id),
+            RolePermissionCatalog.Cases =>
+                db.ClientCases.ApplyClientCaseVisibility(access).AnyAsync(item => item.Id == id),
+            RolePermissionCatalog.Accounts or RolePermissionCatalog.Payments =>
+                db.Payments.ApplyPaymentVisibility(access).AnyAsync(item => item.Id == id),
+            RolePermissionCatalog.Acts =>
+                db.Acts.ApplyActVisibility(access).AnyAsync(item => item.Id == id),
+            RolePermissionCatalog.Contracts =>
+                db.Contracts.ApplyContractVisibility(access).AnyAsync(item => item.Id == id),
+            _ => throw new ArgumentOutOfRangeException(nameof(section), section, "Unsupported data scoped section.")
+        };
 
     private static ClaimsPrincipal CreatePrincipal(User user, bool isAdmin = false)
     {
