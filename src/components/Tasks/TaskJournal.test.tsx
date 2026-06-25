@@ -3106,9 +3106,15 @@ describe('TaskJournal', () => {
   });
 
   it.each([
-    { taskCanExport: false, yandexDiskCanCreate: true },
-    { taskCanExport: true, yandexDiskCanCreate: false },
-  ])('hides task file yandex upload action when required permissions are denied %#', async ({ taskCanExport, yandexDiskCanCreate }) => {
+    { taskCanExport: false, yandexDiskCanCreate: true, taskCardWindowMode: 'legacy' as const },
+    { taskCanExport: true, yandexDiskCanCreate: false, taskCardWindowMode: 'legacy' as const },
+    { taskCanExport: false, yandexDiskCanCreate: true, taskCardWindowMode: 'modern' as const },
+    { taskCanExport: true, yandexDiskCanCreate: false, taskCardWindowMode: 'modern' as const },
+  ])('hides task file yandex upload action when required permissions are denied %#', async ({
+    taskCanExport,
+    yandexDiskCanCreate,
+    taskCardWindowMode,
+  }) => {
     authState.isAdmin = false;
     authState.user = { id: 7, fullName: 'Постановщик', email: 'author@example.com' };
     permissionsState.taskCanExport = taskCanExport;
@@ -3137,10 +3143,11 @@ describe('TaskJournal', () => {
         assigneeUserId: 7,
         assigneeName: 'Постановщик',
       }),
-    ]);
+    ], { settings: { taskCardWindowMode } });
 
     await openFirstTaskForEdit();
 
+    expect(await screen.findByTestId(`task-${taskCardWindowMode}-card-window`)).toBeTruthy();
     expect((await screen.findAllByText('document.pdf')).length).toBeGreaterThan(0);
     expect(screen.getAllByRole('button', { name: 'Скачать файл' }).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Отправить файл на Я.Диск' })).toBeNull();
