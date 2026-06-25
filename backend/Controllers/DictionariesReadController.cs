@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Filters;
 using PayPlanner.Api.Helpers;
 using PayPlanner.Api.Models;
 
@@ -10,6 +11,7 @@ namespace PayPlanner.Api.Controllers;
 [ApiController]
 [Route("api/dictionaries")]
 [Authorize]
+[RequireSectionPermission(RolePermissionCatalog.Dictionaries)]
 public class DictionariesReadController : ControllerBase
 {
     private readonly PaymentContext _db;

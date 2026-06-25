@@ -60,6 +60,12 @@ function findLinkByHref(tabHref: string) {
     .find((link) => link.getAttribute('href') === tabHref || (link as HTMLAnchorElement).href === normalizedHref);
 }
 
+async function waitForNavigationPermissions() {
+  await waitFor(() => {
+    expect(findLinkByHref(getTabHref('calendar'))).toBeTruthy();
+  });
+}
+
 describe('Navigation links', () => {
   beforeEach(() => {
     window.history.replaceState({}, '', '/');
@@ -81,8 +87,9 @@ describe('Navigation links', () => {
     });
   });
 
-  it('renders navigation destinations as real links', () => {
+  it('renders navigation destinations as real links', async () => {
     renderNavigation();
+    await waitForNavigationPermissions();
 
     expect(screen.getByRole('complementary', { name: 'Навигация' })).toBeTruthy();
     expect(screen.getByRole('navigation', { name: 'Навигация' })).toBeTruthy();
@@ -98,8 +105,9 @@ describe('Navigation links', () => {
     expect(findLinkByHref(getTabHref('s3Storage'))).toBeFalsy();
   });
 
-  it('keeps every tab either visible in navigation or explicitly whitelisted as hidden', () => {
+  it('keeps every tab either visible in navigation or explicitly whitelisted as hidden', async () => {
     renderNavigation();
+    await waitForNavigationPermissions();
 
     const hiddenTabs = new Set<Tab>(HIDDEN_NAVIGATION_TABS);
     const visibleTabs = ALL_TABS.filter((tab) => !hiddenTabs.has(tab));
@@ -110,8 +118,9 @@ describe('Navigation links', () => {
     expect(renderedTabs.sort()).toEqual(visibleTabs.sort());
   });
 
-  it('opens the task calendar submenu inside the single page app', () => {
+  it('opens the task calendar submenu inside the single page app', async () => {
     const onTabChange = renderNavigation();
+    await waitForNavigationPermissions();
     const link = findLinkByHref(getTabHref('tasksCalendar'));
 
     expect(link).toBeTruthy();
@@ -123,6 +132,7 @@ describe('Navigation links', () => {
   it('supports keyboard access for navigation links', async () => {
     const user = userEvent.setup();
     const onTabChange = renderNavigation();
+    await waitForNavigationPermissions();
     const clientsLink = screen.getByRole('link', { name: /Клиенты/i });
 
     clientsLink.focus();
@@ -133,8 +143,9 @@ describe('Navigation links', () => {
     expect(onTabChange).toHaveBeenCalledWith('clients');
   });
 
-  it('opens the approvals submenu inside the single page app', () => {
+  it('opens the approvals submenu inside the single page app', async () => {
     const onTabChange = renderNavigation();
+    await waitForNavigationPermissions();
     const link = findLinkByHref(getTabHref('tasksApprovals'));
 
     expect(link).toBeTruthy();
@@ -143,8 +154,9 @@ describe('Navigation links', () => {
     expect(onTabChange).toHaveBeenCalledWith('tasksApprovals');
   });
 
-  it('keeps normal left clicks inside the single page app', () => {
+  it('keeps normal left clicks inside the single page app', async () => {
     const onTabChange = renderNavigation();
+    await waitForNavigationPermissions();
     const link = screen.getByRole('link', { name: /Клиенты/i });
 
     const clickEvent = new MouseEvent('click', {
@@ -159,8 +171,9 @@ describe('Navigation links', () => {
     expect(onTabChange).toHaveBeenCalledWith('clients');
   });
 
-  it('allows browser tab gestures on navigation links', () => {
+  it('allows browser tab gestures on navigation links', async () => {
     const onTabChange = renderNavigation();
+    await waitForNavigationPermissions();
     const link = findLinkByHref(getTabHref('moneyEMoney'));
 
     expect(link).toBeTruthy();

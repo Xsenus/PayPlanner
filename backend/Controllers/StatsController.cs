@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Filters;
 using PayPlanner.Api.Models;
 
 namespace PayPlanner.Api.Controllers;
@@ -9,6 +10,7 @@ namespace PayPlanner.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
+[RequireSectionPermission(RolePermissionCatalog.Payments)]
 public class StatsController : ControllerBase
 {
     private readonly PaymentContext _db;

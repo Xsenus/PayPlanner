@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using PayPlanner.Api.Filters;
+using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Services;
 
@@ -8,6 +10,7 @@ namespace PayPlanner.Api.Controllers;
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
+[RequireSectionPermission(RolePermissionCatalog.Accounts)]
 public class InstallmentsController : ControllerBase
 {
     private readonly InstallmentService _svc;

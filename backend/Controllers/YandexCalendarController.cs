@@ -2,6 +2,8 @@ using System.Text;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using PayPlanner.Api.Extensions;
+using PayPlanner.Api.Filters;
+using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
@@ -20,6 +22,7 @@ public sealed class YandexCalendarController : ControllerBase
     }
 
     [Authorize]
+    [RequireSectionPermission(RolePermissionCatalog.Calendar)]
     [HttpGet("status")]
     public async Task<ActionResult<YandexCalendarStatusDto>> GetStatus(CancellationToken ct)
     {
@@ -33,6 +36,7 @@ public sealed class YandexCalendarController : ControllerBase
     }
 
     [Authorize]
+    [RequireSectionPermission(RolePermissionCatalog.Calendar, RequireSectionPermissionOperations.Edit)]
     [HttpPost("auth/start")]
     public async Task<ActionResult<YandexCalendarStartAuthResponseDto>> StartAuth(
         [FromBody] StartYandexCalendarAuthRequest request,
@@ -55,6 +59,7 @@ public sealed class YandexCalendarController : ControllerBase
     }
 
     [Authorize]
+    [RequireSectionPermission(RolePermissionCatalog.Calendar)]
     [HttpGet("auth/status/{state}")]
     public async Task<ActionResult<YandexCalendarAuthStatusDto>> GetAuthStatus(string state, CancellationToken ct)
     {
@@ -88,6 +93,7 @@ public sealed class YandexCalendarController : ControllerBase
     }
 
     [Authorize]
+    [RequireSectionPermission(RolePermissionCatalog.Calendar, RequireSectionPermissionOperations.Edit)]
     [HttpPut("settings")]
     public async Task<ActionResult<YandexCalendarStatusDto>> UpdateSettings(
         [FromBody] UpdateYandexCalendarSettingsRequest request,
@@ -114,6 +120,7 @@ public sealed class YandexCalendarController : ControllerBase
     }
 
     [Authorize]
+    [RequireSectionPermission(RolePermissionCatalog.Calendar, RequireSectionPermissionOperations.Edit)]
     [HttpPost("sync-now")]
     public async Task<ActionResult<YandexCalendarSyncNowResultDto>> SyncNow(CancellationToken ct)
     {
@@ -143,6 +150,7 @@ public sealed class YandexCalendarController : ControllerBase
     }
 
     [Authorize]
+    [RequireSectionPermission(RolePermissionCatalog.Calendar, RequireSectionPermissionOperations.Edit)]
     [HttpDelete("connection")]
     public async Task<ActionResult<YandexCalendarStatusDto>> Disconnect(CancellationToken ct)
     {

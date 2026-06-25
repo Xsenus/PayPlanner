@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Filters;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 
@@ -10,6 +11,7 @@ namespace PayPlanner.Api.Controllers;
 [ApiController]
 [Route("api/clients/{clientId:int}/powers-of-attorney")]
 [Authorize]
+[RequireSectionPermission(RolePermissionCatalog.Clients)]
 public class PowerOfAttorneyController : ControllerBase
 {
     private readonly PaymentContext _db;
@@ -28,6 +30,7 @@ public class PowerOfAttorneyController : ControllerBase
             .ToListAsync(ct));
 
     [HttpPost]
+    [RequireSectionPermission(RolePermissionCatalog.Clients, RequireSectionPermissionOperations.Create)]
     public async Task<IActionResult> Create(int clientId, [FromBody] UpsertPowerOfAttorneyRequest model, CancellationToken ct)
     {
         var clientExists = await _db.Clients.AsNoTracking().AnyAsync(c => c.Id == clientId, ct);
@@ -50,6 +53,7 @@ public class PowerOfAttorneyController : ControllerBase
     }
 
     [HttpPut("{id:int}")]
+    [RequireSectionPermission(RolePermissionCatalog.Clients, RequireSectionPermissionOperations.Edit)]
     public async Task<IActionResult> Update(int clientId, int id, [FromBody] UpsertPowerOfAttorneyRequest model, CancellationToken ct)
     {
         var entity = await _db.PowersOfAttorney.FirstOrDefaultAsync(x => x.ClientId == clientId && x.Id == id, ct);
@@ -68,6 +72,7 @@ public class PowerOfAttorneyController : ControllerBase
     }
 
     [HttpDelete("{id:int}")]
+    [RequireSectionPermission(RolePermissionCatalog.Clients, RequireSectionPermissionOperations.Delete)]
     public async Task<IActionResult> Delete(int clientId, int id, CancellationToken ct)
     {
         var entity = await _db.PowersOfAttorney.FirstOrDefaultAsync(x => x.ClientId == clientId && x.Id == id, ct);

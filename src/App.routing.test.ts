@@ -28,9 +28,10 @@ import {
   isTasksApprovalsPath,
   isTasksCalendarPath,
   isTasksListPath,
+  TAB_ACCESS_RULES,
 } from './appRouting';
 import { defaultRolePermissions, type RolePermissions } from './types/permissions';
-import type { Tab } from './types/tabs';
+import { ALL_TABS, type Tab } from './types/tabs';
 
 function createPermissions(overrides: Partial<RolePermissions> = {}): RolePermissions {
   return {
@@ -379,6 +380,27 @@ describe('App negative deep-link guards', () => {
 
     expect(getInitialTab()).toBe(expectedTab);
     expect(canAccessTab(expectedTab, permissions)).toBe(false);
+  });
+
+  it('keeps tab access rules exhaustive for every declared tab', () => {
+    expect(Object.keys(TAB_ACCESS_RULES).sort()).toEqual([...ALL_TABS].sort());
+  });
+
+  it.each([
+    {
+      tab: 'actCreate' as Tab,
+      permissions: createPermissions({
+        acts: { ...defaultRolePermissions.acts, canView: false, canCreate: true },
+      }),
+    },
+    {
+      tab: 'contractCreate' as Tab,
+      permissions: createPermissions({
+        contracts: { ...defaultRolePermissions.contracts, canView: false, canCreate: true },
+      }),
+    },
+  ])('denies $tab when create is enabled but the parent section is closed', ({ tab, permissions }) => {
+    expect(canAccessTab(tab, permissions)).toBe(false);
   });
 });
 

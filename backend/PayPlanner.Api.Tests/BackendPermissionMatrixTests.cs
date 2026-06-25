@@ -1,8 +1,14 @@
 using System.Security.Claims;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Abstractions;
+using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
+using PayPlanner.Api.Filters;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
 using Xunit;
@@ -227,6 +233,60 @@ public class BackendPermissionMatrixTests
         Assert.False(await db.HasUserSectionPermissionAsync(principal, section, static permission => permission.CanEdit));
         Assert.False(await db.HasUserSectionPermissionAsync(principal, section, static permission => permission.CanDelete));
         Assert.False(await db.HasUserSectionPermissionAsync(principal, section, static permission => permission.CanExport));
+    }
+
+    [Fact]
+    public async Task RequireSectionPermissionFilter_ForbidsClosedSectionBeforeActionRuns()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "filter-payments-denied", new RolePermission
+        {
+            Section = RolePermissionCatalog.Payments,
+            CanView = false,
+            ViewScope = DataVisibilityScope.Own
+        });
+        var filter = new RequireSectionPermissionFilter(
+            RolePermissionCatalog.Payments,
+            RequireSectionPermissionOperations.View,
+            db);
+        var context = CreateActionExecutingContext(CreatePrincipal(user));
+        var nextWasCalled = false;
+
+        await filter.OnActionExecutionAsync(context, () =>
+        {
+            nextWasCalled = true;
+            return Task.FromResult(CreateActionExecutedContext(context));
+        });
+
+        Assert.False(nextWasCalled);
+        Assert.IsType<ForbidResult>(context.Result);
+    }
+
+    [Fact]
+    public async Task RequireSectionPermissionFilter_AllowsOpenSectionToRunAction()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "filter-payments-allowed", new RolePermission
+        {
+            Section = RolePermissionCatalog.Payments,
+            CanView = true,
+            ViewScope = DataVisibilityScope.Own
+        });
+        var filter = new RequireSectionPermissionFilter(
+            RolePermissionCatalog.Payments,
+            RequireSectionPermissionOperations.View,
+            db);
+        var context = CreateActionExecutingContext(CreatePrincipal(user));
+        var nextWasCalled = false;
+
+        await filter.OnActionExecutionAsync(context, () =>
+        {
+            nextWasCalled = true;
+            return Task.FromResult(CreateActionExecutedContext(context));
+        });
+
+        Assert.True(nextWasCalled);
+        Assert.Null(context.Result);
     }
 
     [Theory]
@@ -481,6 +541,16 @@ public class BackendPermissionMatrixTests
 
         return new ClaimsPrincipal(new ClaimsIdentity(claims, "test"));
     }
+
+    private static ActionExecutingContext CreateActionExecutingContext(ClaimsPrincipal principal)
+    {
+        var httpContext = new DefaultHttpContext { User = principal };
+        var actionContext = new ActionContext(httpContext, new RouteData(), new ActionDescriptor());
+        return new ActionExecutingContext(actionContext, [], new Dictionary<string, object?>(), controller: new object());
+    }
+
+    private static ActionExecutedContext CreateActionExecutedContext(ActionExecutingContext context)
+        => new(context, [], controller: new object());
 
     private static async Task<User> CreateUserAsync(
         PaymentContext db,

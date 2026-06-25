@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
+using PayPlanner.Api.Filters;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
 
@@ -11,6 +12,7 @@ namespace PayPlanner.Api.Controllers.V2;
 [ApiController]
 [Route("api/v2/stats")]
 [Authorize]
+[RequireSectionPermission(RolePermissionCatalog.Payments)]
 public class StatsV2Controller : ControllerBase
 {
     private readonly StatsSummaryService _svc;

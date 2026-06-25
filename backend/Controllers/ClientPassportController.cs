@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Filters;
 using PayPlanner.Api.Models;
 
 namespace PayPlanner.Api.Controllers;
@@ -9,6 +10,7 @@ namespace PayPlanner.Api.Controllers;
 [ApiController]
 [Route("api/clients/{clientId:int}/passport")]
 [Authorize]
+[RequireSectionPermission(RolePermissionCatalog.Clients)]
 public class ClientPassportController : ControllerBase
 {
     private readonly PaymentContext _db;
@@ -36,6 +38,7 @@ public class ClientPassportController : ControllerBase
     }
 
     [HttpPut]
+    [RequireSectionPermission(RolePermissionCatalog.Clients, RequireSectionPermissionOperations.Edit)]
     public async Task<IActionResult> Upsert(int clientId, [FromBody] ClientPassport model, CancellationToken ct)
     {
         var exists = await _db.Clients.AsNoTracking().AnyAsync(c => c.Id == clientId, ct);

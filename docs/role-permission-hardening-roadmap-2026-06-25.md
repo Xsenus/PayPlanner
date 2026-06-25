@@ -15,7 +15,7 @@
 - [x] Backend уже имеет общий helper `HasUserSectionPermissionAsync` и механизм `ViewScope`.
 - [x] Найденный риск закрыт в коде: для существующего не-admin пользователя отсутствие строки права больше не открывает раздел на backend, а frontend до загрузки прав использует закрытый fallback.
 - [!] `notifications` сейчас выглядит как общий доступный раздел в верхнем уровне приложения/навигации и требует отдельного решения: оставить всем "личные уведомления" или отделить их от админских настроек уведомлений.
-- [!] Разделы `users`, `userActivity`, `profile`, `companyProfile`, detail/create-страницы и вложенные действия должны быть явно проверены: часть из них не является отдельным ключом каталога, но все равно открывает данные.
+- [x] Разделы `users`, `userActivity`, `profile`, `companyProfile`, detail/create-страницы и вложенные действия проверены на уровне frontend route map: `profile` оставлен личным разделом, `users/userActivity/companyProfile` оставлены admin-only, detail/create-страницы привязаны к родительскому разделу.
 
 ## Цель
 
@@ -113,10 +113,10 @@
 
 ### 1. Инвентаризация и единая карта доступа
 
-- [~] Сопоставить каждый `Tab` frontend с ключом права из `RolePermissionCatalog`.
-- [~] Сопоставить каждый backend controller/action с ключом раздела и требуемым действием: view/create/edit/delete/export/analytics. Базовый общий helper прав усилен, точечный аудит всех controller/action остается отдельным большим проходом.
+- [x] Сопоставить каждый `Tab` frontend с ключом права из `RolePermissionCatalog`.
+- [x] Сопоставить каждый backend controller/action с ключом раздела и требуемым действием: view/create/edit/delete/export/analytics. Контроллеры просканированы рекурсивно; рабочие API закрыты секционными правами, `AuthController` и `ProfileController` зафиксированы как системное/личное исключение.
 - [ ] Найти все переходы не через боковое меню: ссылки из карточек, топбар, уведомления, breadcrumbs, правый клик, действия в таблицах, deep links.
-- [ ] Зафиксировать исключения: личный профиль, личные уведомления, системные health/auth endpoints.
+- [x] Зафиксировать исключения: личный профиль, личные уведомления, системные health/auth endpoints.
 
 #### Как выполнять
 
@@ -135,12 +135,12 @@
 
 ### 2. Закрыть frontend
 
-- [ ] Вынести единую `tab -> permission` карту и использовать ее в `App`, `Navigation`, route helpers и тестах.
+- [x] Вынести единую `tab -> permission` карту и использовать ее в `App`, `Navigation`, route helpers и тестах.
 - [ ] Скрывать не только пункты меню, но и вложенные кнопки действий в карточках: финансы дела, связанные счета/акты/платежи/договоры, карточки клиента/дела.
-- [ ] Для detail/create страниц проверять доступ к родительскому разделу и операции: например `contractCreate` требует `contracts.canCreate`, `actCreate` требует `acts.canCreate`.
+- [x] Для detail/create страниц проверять доступ к родительскому разделу и операции: например `contractCreate` требует `contracts.canView && contracts.canCreate`, `actCreate` требует `acts.canView && acts.canCreate`.
 - [ ] Привести справочники к правам роли: просмотр по `dictionaries.canView`, редактирование по `dictionaries.canEdit`, удаление по `dictionaries.canDelete`.
 - [ ] Разделить личные уведомления и админские настройки уведомлений, чтобы запрет настроек не ломал личный inbox.
-- [ ] Добавить экран отказа/редирект при прямом URL в закрытый раздел.
+- [x] Добавить экран отказа/редирект при прямом URL в закрытый раздел.
 
 #### Как выполнять
 
@@ -170,9 +170,9 @@
 
 ### 3. Закрыть backend
 
-- [ ] Ввести/доработать единый способ проверки прав в контроллерах: `view/create/edit/delete/export/analytics`.
-- [ ] Проверить и закрыть API для клиентов, юрлиц, дел, задач, календаря, счетов, актов, платежей, договоров, отчетов, справочников, ролей, аудита, интеграций, файловых хранилищ.
-- [ ] Убедиться, что агрегаты и виджеты не отдают закрытые данные через связанные endpoint'ы.
+- [x] Ввести/доработать единый способ проверки прав в контроллерах: `view/create/edit/delete/export/analytics`.
+- [x] Проверить и закрыть API для клиентов, юрлиц, дел, задач, календаря, счетов, актов, платежей, договоров, отчетов, справочников, ролей, аудита, интеграций, файловых хранилищ.
+- [x] Убедиться, что агрегаты и виджеты не отдают закрытые данные через связанные endpoint'ы: `StatsController` и `StatsV2Controller` закрыты правом просмотра платежей.
 - [ ] Для `ViewScope` проверить списки и карточки: если роль видит только свои данные, чужие записи не должны открываться прямым ID.
 - [x] Для отсутствующей строки права по разделу выбрано безопасное поведение:
   - [x] Для не-admin отсутствующее право считается закрытым.
@@ -221,10 +221,10 @@
 
 ### 5. Тесты
 
-- [ ] Backend unit/integration: закрытая роль получает `403` на каждый защищенный controller/action.
+- [~] Backend unit/integration: закрытая роль получает `403` на ключевые защищенные controller/action; добавлен тест общего `RequireSectionPermissionFilter`, полный endpoint-by-endpoint e2e остается отдельным acceptance-прогоном.
 - [ ] Backend data scope: пользователь не открывает чужую карточку по прямому ID.
 - [ ] Backend regression: admin видит все, системные endpoints не ломаются.
-- [ ] Frontend tests: закрытый раздел не показывается в меню и не рендерится при прямом `ppTab`.
+- [x] Frontend tests: закрытый раздел не показывается в меню и не рендерится при прямом `ppTab`.
 - [ ] Frontend tests: кнопки связанных финансов/документов скрыты, если нет прав на соответствующий раздел.
 - [x] Role permissions tests: отсутствие строки права не открывает раздел случайно.
 - [ ] E2E/local smoke на тестовой роли "Юрист": видны только разрешенные разделы.
@@ -327,8 +327,8 @@ npm run test:unit
 
 ## Definition of Done
 
-- [ ] Все разделы из матрицы имеют явное правило доступа на frontend и backend.
-- [ ] Закрытый раздел не доступен через меню, прямой URL, карточки, быстрые действия и API.
+- [x] Все разделы из матрицы имеют явное правило доступа на frontend и backend.
+- [~] Закрытый раздел не доступен через меню, прямой URL, карточки, быстрые действия и API; локальные code/tests пройдены, production-проверка под реальным юристом остается acceptance.
 - [x] Недостающие строки прав в БД не открывают разделы случайно.
 - [ ] Роль юриста проверена локально и, после деплоя, на production.
 - [x] Добавлены тесты на frontend/backend.
@@ -344,6 +344,9 @@ npm run test:unit
 - 25.06.2026: новая роль создается с закрытыми разделами, если это не admin; администратор включает нужные разделы вручную.
 - 25.06.2026: frontend service прав до загрузки роли и при частичном DTO использует закрытые значения, чтобы не показывать лишние разделы временно.
 - 25.06.2026: добавлены targeted tests: `BackendPermissionMatrixTests`, `RolePermissionsAuditTests`, `SeedDataServiceTests`, `permissionsService.test.ts`.
+- 25.06.2026: добавлена единая frontend-карта `TAB_ACCESS_RULES`; новая вкладка без явного правила доступа теперь ловится тестом и типизацией.
+- 25.06.2026: добавлен backend-фильтр `RequireSectionPermissionAttribute` для декларативной проверки `view/create/edit/delete/export/analytics`.
+- 25.06.2026: закрыты секционными правами прямые API рассрочки, справочников чтения, клиентских паспортов, доверенностей, Google/Yandex календарей и финансовой статистики `Stats/StatsV2`.
 
 ## Предварительная рекомендация по роли "Юрист"
 
@@ -356,8 +359,8 @@ npm run test:unit
 
 ## Фактические проверки 25.06.2026
 
-- [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj` — пройдено 1869 тестов.
-- [x] `npm exec vitest run src/services/permissionsService.test.ts src/hooks/useRolePermissions.test.tsx -- --runInBand` — пройдено 5 тестов.
+- [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore` — пройдено 1871 тестов.
+- [x] `npm exec vitest run src/App.routing.test.ts src/services/permissionsService.test.ts src/hooks/useRolePermissions.test.tsx src/components/Navigation/Navigation.test.tsx -- --runInBand` — пройдено 56 тестов.
 - [x] `npm run lint` — ошибок нет, остались существующие предупреждения по React hooks / fast refresh.
 - [x] `npm run build` — сборка успешна, остались существующие предупреждения Vite/Rolldown по стороннему `@microsoft/signalr` и размеру chunk.
 - [x] `git diff --check` — замечаний нет.
