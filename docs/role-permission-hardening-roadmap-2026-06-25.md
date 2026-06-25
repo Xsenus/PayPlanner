@@ -100,7 +100,7 @@
 - [~] Договоры: список, карточка, создание, связанные счета/акты/платежи; карточка закрывает связанные счета/акты/деньги и переходы в клиентов, список договоров не загружает справочник клиентов и не открывает клиента без права `clients`, а создание/редактирование договора не открывает выбор клиентов или юрлиц без прав `clients/legalEntities`.
 - [x] Справочники: просмотр, создание, редактирование и удаление справочников подчинены правам `dictionaries.canView/canCreate/canEdit/canDelete`; прежняя жесткая привязка редактирования к admin снята.
 - [x] Уведомления: личный inbox оставлен доступным авторизованному пользователю, админские настройки рассылок закрываются через `notifications.canView/canEdit`.
-- [ ] Роли: список ролей, копирование, изменение прав, удаление.
+- [x] Роли: список ролей, копирование, изменение прав и удаление закрыты через `roles.canView/canCreate/canEdit/canDelete`; аудит готовности ролей и история роли дополнительно требуют `audit.canView`.
 - [ ] Пользователи: список пользователей и карточка пользователя; либо оставить строго admin-only, либо добавить явный ключ прав в каталог.
 - [ ] Контроль пользователей: активность пользователей; либо строго admin-only, либо отдельный ключ прав.
 - [ ] Аудит: журнал объектов, восстановление удаленных объектов, техобслуживание БД.
@@ -148,6 +148,7 @@
 - [x] Таблицы платежей в журнале и календаре проверяют связанные клиенты и дела через `clients` и `cases`: контрагент остается текстом без права на клиентов, а `caseId` не передается в переход без права на дела.
 - [x] Денежный журнал проверяет связанные счета и проекты через `accounts` и `clients`: счет/проект остаются текстом без права на соответствующий раздел, а бейдж сверенного счета не открывает закрытый раздел счетов.
 - [x] Раздел «Дела» проверяет владельцев и связанных участников через `clients` и `legalEntities`: создание дела не открывает выбор владельца без доступных справочников, переходы к владельцу отключены без прав, а карточка дела не загружает закрытые справочники клиентов и юрлиц для связанных участников.
+- [x] Раздел «Роли» разделяет управление ролями и аудит: список, копирование, редактирование прав и удаление остаются на `roles.*`, а аудит готовности ролей и история роли показываются только при `audit.canView`.
 - [x] Для detail/create страниц проверять доступ к родительскому разделу и операции: например `contractCreate` требует `contracts.canView && contracts.canCreate`, `actCreate` требует `acts.canView && acts.canCreate`.
 - [x] Привести справочники к правам роли: просмотр по `dictionaries.canView`, создание по `dictionaries.canCreate`, редактирование по `dictionaries.canEdit`, удаление по `dictionaries.canDelete`.
 - [x] Разделить личные уведомления и админские настройки уведомлений, чтобы запрет настроек не ломал личный inbox.
@@ -384,6 +385,8 @@ npm run test:unit
 - 25.06.2026: проверки после доработки денежного журнала пройдены: `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `dotnet test ... BackendPermissionMatrixTests/AppRelease` 107/107, `MoneyOperations.integration.test.tsx` 58/58, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
 - 25.06.2026: реестр и карточка дела теперь проверяют владельцев, выбор владельца и связанных участников через `clients/legalEntities`; targeted tests `CasesRegistry.test.tsx` и `CaseModal.test.tsx` прошли: 34/34.
 - 25.06.2026: проверки после доработки владельцев и связанных участников дела пройдены: `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `dotnet test ... BackendPermissionMatrixTests/AppRelease` 107/107, `CasesRegistry.test.tsx` + `CaseModal.test.tsx` 34/34, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
+- 25.06.2026: раздел ролей теперь разделяет управление ролями и аудит: список, копирование, изменение прав и удаление остаются на `roles.*`, а аудит готовности ролей и история роли требуют `audit.canView`; targeted tests `Roles.access.test.tsx`, `RolePermissionAuditPanel.test.tsx`, `RolePermissionsAuditTests` прошли: 17/17.
+- 25.06.2026: проверки после разделения ролей и аудита пройдены: `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `dotnet test ... BackendPermissionMatrixTests/AppRelease` 107/107, `Roles.access.test.tsx` + `RolePermissionAuditPanel.test.tsx` 6/6, `RolePermissionsAuditTests` 11/11, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
 
 ## Предварительная рекомендация по роли "Юрист"
 
@@ -404,6 +407,8 @@ npm run test:unit
 - [x] `npm exec vitest run src/components/Clients/ClientDetail.integration.test.tsx -- --runInBand` — пройдено 37 тестов.
 - [x] `npx vitest run src/components/Cases/CasesRegistry.test.tsx --reporter dot` — пройдено 23 теста.
 - [x] `npx vitest run src/components/Clients/CaseModal.test.tsx --reporter dot` — пройдено 11 тестов.
+- [x] `npx vitest run src/components/Roles/Roles.access.test.tsx src/components/Roles/RolePermissionAuditPanel.test.tsx --reporter dot` — пройдено 6 тестов.
+- [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~RolePermissionsAuditTests"` — пройдено 11 тестов.
 - [x] `npm run lint` — ошибок нет, остались существующие предупреждения по React hooks / fast refresh.
 - [x] `npm run build` — сборка успешна, остались существующие предупреждения Vite/Rolldown по стороннему `@microsoft/signalr` и размеру chunk.
 - [x] `git diff --check` — замечаний нет.

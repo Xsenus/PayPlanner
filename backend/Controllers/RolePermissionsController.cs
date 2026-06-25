@@ -37,7 +37,7 @@ public class RolePermissionsController : ControllerBase
     public async Task<ActionResult<RolePermissionAuditReportDto>> GetAudit(CancellationToken ct)
     {
         var access = await _roleAccess.GetSnapshotAsync(User, ct);
-        if (!access.IsAdmin && !access.CanView)
+        if (!await CanViewRoleAuditAsync(access, ct))
         {
             return Forbid();
         }
@@ -70,7 +70,7 @@ public class RolePermissionsController : ControllerBase
     public async Task<IActionResult> ExportAuditCsv(CancellationToken ct)
     {
         var access = await _roleAccess.GetSnapshotAsync(User, ct);
-        if (!access.IsAdmin && !access.CanView)
+        if (!await CanViewRoleAuditAsync(access, ct))
         {
             return Forbid();
         }
@@ -89,6 +89,25 @@ public class RolePermissionsController : ControllerBase
         var bytes = BuildAuditCsv(roleAudits);
         var fileName = $"role-permissions-audit-{DateTime.UtcNow:yyyyMMdd-HHmmss}.csv";
         return File(bytes, "text/csv; charset=utf-8", fileName);
+    }
+
+    private async Task<bool> CanViewRoleAuditAsync(RoleManagementAccessSnapshot access, CancellationToken ct)
+    {
+        if (access.IsAdmin)
+        {
+            return true;
+        }
+
+        if (!access.CanView)
+        {
+            return false;
+        }
+
+        return await _db.HasUserSectionPermissionAsync(
+            User,
+            RolePermissionCatalog.Audit,
+            static permission => permission.CanView,
+            ct);
     }
 
     [HttpGet("{roleId:int}")]

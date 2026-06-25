@@ -208,6 +208,72 @@ public class RolePermissionsAuditTests
     }
 
     [Fact]
+    public async Task GetAudit_ForbidsUserWithoutAuditViewPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "role-viewer", Description = "Role viewer without audit" };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = role.Id,
+            Section = RolePermissionCatalog.Roles,
+            CanView = true,
+            ViewScope = DataVisibilityScope.Own,
+        });
+        var user = new User
+        {
+            Email = "role-viewer@example.com",
+            PasswordHash = "hash",
+            FullName = "Role Viewer",
+            RoleId = role.Id,
+            IsActive = true,
+        };
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateUserPrincipal(user.Id));
+
+        var response = await controller.GetAudit(CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(response.Result);
+    }
+
+    [Fact]
+    public async Task ExportAuditCsv_ForbidsUserWithoutAuditViewPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "role-export-viewer", Description = "Role viewer without audit export" };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = role.Id,
+            Section = RolePermissionCatalog.Roles,
+            CanView = true,
+            ViewScope = DataVisibilityScope.Own,
+        });
+        var user = new User
+        {
+            Email = "role-export-viewer@example.com",
+            PasswordHash = "hash",
+            FullName = "Role Export Viewer",
+            RoleId = role.Id,
+            IsActive = true,
+        };
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, CreateUserPrincipal(user.Id));
+
+        var response = await controller.ExportAuditCsv(CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(response);
+    }
+
+    [Fact]
     public async Task GetAudit_ForbidsAdminClaimWhenDatabaseRoleIsNotAdmin()
     {
         await using var db = await CreateContextAsync();
