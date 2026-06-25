@@ -5,7 +5,7 @@ import Navigation from './Navigation';
 import { getTabHref } from '../../appRouting';
 import { ALL_TABS, type Tab } from '../../types/tabs';
 import { apiService } from '../../services/api';
-import { defaultRolePermissions } from '../../types/permissions';
+import { defaultRestrictedRolePermissions, defaultRolePermissions, type RolePermissions } from '../../types/permissions';
 
 const authState = vi.hoisted(() => ({
   isAdmin: true,
@@ -53,6 +53,33 @@ const HIDDEN_NAVIGATION_TABS = [
   's3Storage',
 ] as const satisfies readonly Tab[];
 
+const lawyerWorkSection = {
+  canView: true,
+  canCreate: true,
+  canEdit: true,
+  canDelete: false,
+  canExport: false,
+  viewScope: 'own',
+} as const;
+
+function createLawyerTemplatePermissions(): RolePermissions {
+  return {
+    ...defaultRestrictedRolePermissions,
+    calendar: { ...lawyerWorkSection, canViewAnalytics: false, visibleUserIds: [] },
+    tasks: { ...lawyerWorkSection },
+    clients: { ...lawyerWorkSection },
+    cases: { ...lawyerWorkSection },
+    notifications: {
+      canView: true,
+      canCreate: false,
+      canEdit: true,
+      canDelete: false,
+      canExport: false,
+      viewScope: 'all',
+    },
+  };
+}
+
 function renderNavigation(onTabChange = vi.fn()) {
   window.localStorage.setItem('pp.sidebar_expanded', JSON.stringify(expandedSections));
   render(<Navigation activeTab="calendar" onTabChange={onTabChange} />);
@@ -76,6 +103,7 @@ describe('Navigation links', () => {
   beforeEach(() => {
     window.history.replaceState({}, '', '/');
     window.localStorage.clear();
+    vi.clearAllMocks();
     authState.isAdmin = true;
     authState.roleId = 1;
     authState.roleName = 'admin';
@@ -132,6 +160,71 @@ describe('Navigation links', () => {
     expect(findLinkByHref(getTabHref('audit'))).toBeFalsy();
     expect(findLinkByHref(getTabHref('yandexDisk'))).toBeFalsy();
     expect(findLinkByHref(getTabHref('s3Storage'))).toBeFalsy();
+  });
+
+  it('shows only safe lawyer template sections in the left menu', async () => {
+    authState.isAdmin = false;
+    authState.roleId = 100;
+    authState.roleName = 'Юрист';
+    apiMock.getRolePermissions.mockResolvedValueOnce(createLawyerTemplatePermissions());
+
+    renderNavigation();
+
+    await waitForNavigationPermissions();
+
+    const visibleTabs: Tab[] = [
+      'calendar',
+      'notifications',
+      'tasks',
+      'tasksControl',
+      'tasksApprovals',
+      'tasksCalendar',
+      'clients',
+      'cases',
+      'contacts',
+      'contactsClients',
+      'settings',
+    ];
+    const hiddenTabs: Tab[] = [
+      'notes',
+      'reports',
+      'calculator',
+      'legalEntities',
+      'contactsLegal',
+      'accounts',
+      'accountsIncome',
+      'accountsExpense',
+      'installments',
+      'moneyBank',
+      'moneyCash',
+      'moneyCards',
+      'moneyEMoney',
+      'moneyTotal',
+      'payments',
+      'paymentsIncome',
+      'paymentsExpense',
+      'acts',
+      'actsIncome',
+      'actsExpense',
+      'contracts',
+      'dictionaries',
+      'roles',
+      'audit',
+      'users',
+      'userActivity',
+      'yandexDisk',
+      's3Storage',
+    ];
+
+    for (const tab of visibleTabs) {
+      expect(findLinkByHref(getTabHref(tab)), `lawyer menu should show ${tab}`).toBeTruthy();
+    }
+
+    for (const tab of hiddenTabs) {
+      expect(findLinkByHref(getTabHref(tab)), `lawyer menu should hide ${tab}`).toBeFalsy();
+    }
+
+    expect(apiMock.getPaymentsV2).not.toHaveBeenCalled();
   });
 
   it('keeps every tab either visible in navigation or explicitly whitelisted as hidden', async () => {
