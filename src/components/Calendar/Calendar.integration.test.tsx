@@ -12,6 +12,10 @@ const paymentsResult = {
   refresh: vi.fn(),
 };
 
+const permissionsState = vi.hoisted(() => ({
+  tasksCanView: true,
+}));
+
 function createPersistedTableSettings(
   columns: Array<{ key: string; defaultWidth?: number; defaultVisible?: boolean }>,
   defaultPageSize: number,
@@ -66,6 +70,16 @@ vi.mock('../../hooks/useRolePermissions', () => ({
       canEdit: true,
       canDelete: true,
       canViewAnalytics: true,
+    },
+    tasks: {
+      canView: permissionsState.tasksCanView,
+      canCreate: true,
+      canEdit: true,
+      canDelete: true,
+      canExport: true,
+      canViewAnalytics: true,
+      viewScope: 'all',
+      visibleUserIds: [],
     },
   }),
 }));
@@ -159,6 +173,7 @@ vi.mock('../Tasks/TaskJournal', () => ({
 describe('Calendar integration', () => {
   beforeEach(() => {
     paymentsResult.payments = [];
+    permissionsState.tasksCanView = true;
     localStorage.removeItem('pp.calendar_view');
     localStorage.removeItem('pp.calendar_section_mode');
   });
@@ -204,5 +219,20 @@ describe('Calendar integration', () => {
     expect((await screen.findByTestId('crm-task-calendar')).textContent).toContain('timeline');
     expect(screen.queryByTestId('calendar-grid')).toBeNull();
     expect(localStorage.getItem('pp.calendar_section_mode')).toBe('crm');
+  });
+
+  it('does not restore or show the CRM task calendar when task access is closed', async () => {
+    permissionsState.tasksCanView = false;
+    localStorage.setItem('pp.calendar_section_mode', 'crm');
+
+    render(<Calendar />);
+
+    expect(screen.queryByRole('button', { name: 'CRM' })).toBeNull();
+    expect(screen.queryByTestId('crm-task-calendar')).toBeNull();
+    expect(await screen.findByTestId('calendar-grid')).toBeTruthy();
+
+    await waitFor(() => {
+      expect(localStorage.getItem('pp.calendar_section_mode')).toBe('finance');
+    });
   });
 });

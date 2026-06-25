@@ -86,7 +86,7 @@
 
 ## Матрица разделов для проверки
 
-- [~] Календарь: меню, страница, события, таблица платежей в календаре, аналитика календаря, Google/Yandex calendar panels; таблица и карточки платежей в календаре уже не открывают клиентов/дела без прав `clients/cases`.
+- [~] Календарь: меню, страница, события, таблица платежей в календаре, аналитика календаря, Google/Yandex calendar panels; таблица и карточки платежей в календаре уже не открывают клиентов/дела без прав `clients/cases`, а встроенный CRM-календарь задач открывается только при `tasks.canView`.
 - [ ] Задачи: журнал задач, контроль, согласования, календарь задач, карточка задачи, старая и новая форма, комментарии, файлы, подзадачи.
 - [x] Заметки: список досок, карточки заметок, совместный доступ, SignalR hub, inbox и уведомления проверяют `notes.canView/canCreate/canEdit/canDelete`; toast по заметке без доступа к разделу больше не предлагает открыть доску.
 - [x] Отчеты: группы отчетов, финансовые сводки, фильтры, статусные отчеты по счетам/актам/договорам и переходы в задачи/дела показываются и загружаются только при правах на соответствующие разделы.
@@ -410,6 +410,8 @@ npm run test:unit
 - 25.06.2026: проверки после доработки калькулятора пройдены: `npm exec vitest run src/components/Accounts/InstallmentPlanner.integration.test.tsx src/App.routing.test.ts` 46/46, `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `dotnet test ... BackendPermissionMatrixTests/AppRelease` 107/107, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
 - 25.06.2026: карточка дела теперь проверяет связанные задачи через `tasks`: без просмотра задач вкладка «Задачи» скрыта, список задач и task-источники документов не загружаются, а без права создания скрыты кнопки создания задачи.
 - 25.06.2026: проверки после доработки задач карточки дела пройдены: `npm exec vitest run src/components/Cases/CaseDetailPage.test.tsx src/App.routing.test.ts` 87/87, `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `dotnet test ... BackendPermissionMatrixTests/AppRelease` 107/107, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
+- 25.06.2026: финансовый календарь теперь проверяет встроенный CRM-календарь задач через `tasks`: без просмотра задач скрывается переключатель CRM, сохраненный режим CRM сбрасывается в финансы, а `TaskJournal` не загружается через календарь.
+- 25.06.2026: проверки после доработки CRM-календаря задач пройдены: `npm exec vitest run src/components/Calendar/Calendar.integration.test.tsx src/App.routing.test.ts` 46/46, `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `dotnet test ... BackendPermissionMatrixTests/AppRelease` 107/107, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
 
 ## Предварительная рекомендация по роли "Юрист"
 
@@ -452,6 +454,7 @@ npm run test:unit
 - [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~ReportsControllerTests|FullyQualifiedName~BackendPermissionMatrixTests|FullyQualifiedName~AppRelease"` — пройдено 193 теста после обновления отчетов и release note.
 - [x] `npm exec vitest run src/components/Accounts/InstallmentPlanner.integration.test.tsx src/App.routing.test.ts` — пройдено 46 тестов, включая read-only режим калькулятора без права создавать платежи и скрытие поля дела без `cases`.
 - [x] `npm exec vitest run src/components/Cases/CaseDetailPage.test.tsx` — пройдено 44 теста, включая скрытие связанных задач дела без `tasks.canView` и read-only режим без `tasks.canCreate`.
+- [x] `npm exec vitest run src/components/Calendar/Calendar.integration.test.tsx src/App.routing.test.ts` — пройдено 46 тестов, включая запрет встроенного CRM-календаря задач без `tasks.canView`.
 - [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~BackendPermissionMatrixTests|FullyQualifiedName~AppRelease"` — пройдено 107 тестов после обновления release note.
 - [x] `npm run lint` — ошибок нет, остались существующие предупреждения по React hooks / fast refresh.
 - [x] `npm run build` — сборка успешна, остались существующие предупреждения Vite/Rolldown по стороннему `@microsoft/signalr` и размеру chunk.
