@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
+import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { apiService, type ContractRulesSettingsDto } from '../../services/api';
 import type { Act, Contract, ContractInput, ContractLegalEntity, Invoice, Payment } from '../../types';
 import {
@@ -167,6 +168,10 @@ export function ContractDetailPage({
   const { user } = useAuth();
   const toast = useToast();
   const { confirm, prompt } = useDialog();
+  const rolePermissions = useRolePermissions(user?.role?.id);
+  const canViewInvoices = rolePermissions.accounts.canView;
+  const canViewActs = rolePermissions.acts.canView;
+  const canViewPayments = rolePermissions.payments.canView;
   const requiresFinancialActionReason = Boolean(user?.requiresFinancialActionReason);
   const [contract, setContract] = useState<Contract | null>(null);
   const [contractRules, setContractRules] = useState<ContractRulesSettingsDto>({
@@ -183,6 +188,16 @@ export function ContractDetailPage({
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const [pickerOpen, setPickerOpen] = useState(false);
+  const visibleTabs = useMemo(
+    () =>
+      (Object.keys(tabLabels) as Tab[]).filter((tab) => {
+        if (tab === 'invoices') return canViewInvoices;
+        if (tab === 'acts') return canViewActs;
+        if (tab === 'money') return canViewPayments;
+        return true;
+      }),
+    [canViewActs, canViewInvoices, canViewPayments],
+  );
 
   const {
     columnOrder: clientColumnOrder,
@@ -359,6 +374,12 @@ export function ContractDetailPage({
   }, [activeTab]);
 
   useEffect(() => {
+    if (!visibleTabs.includes(activeTab)) {
+      setActiveTab(visibleTabs[0] ?? 'clients');
+    }
+  }, [activeTab, visibleTabs]);
+
+  useEffect(() => {
     setInvoicePage(1);
   }, [invoicePageSize]);
 
@@ -379,7 +400,10 @@ export function ContractDetailPage({
   }, [paymentPageSize]);
 
   useEffect(() => {
-    if (activeTab !== 'invoices') return;
+    if (activeTab !== 'invoices' || !canViewInvoices) {
+      setInvoiceState(createTabListState());
+      return;
+    }
 
     const contractId = contract?.id ?? null;
     if (invoiceScope === 'contract' ? !contractId : !contractClientIdsQuery) {
@@ -426,10 +450,13 @@ export function ContractDetailPage({
     return () => {
       cancel = true;
     };
-  }, [activeTab, contract?.id, contractClientIdsQuery, invoicePage, invoicePageSize, invoiceScope]);
+  }, [activeTab, canViewInvoices, contract?.id, contractClientIdsQuery, invoicePage, invoicePageSize, invoiceScope]);
 
   useEffect(() => {
-    if (activeTab !== 'acts') return;
+    if (activeTab !== 'acts' || !canViewActs) {
+      setActState(createTabListState());
+      return;
+    }
 
     const contractId = contract?.id ?? null;
     if (actScope === 'contract' ? !contractId : !contractClientIdsQuery) {
@@ -476,10 +503,13 @@ export function ContractDetailPage({
     return () => {
       cancel = true;
     };
-  }, [activeTab, actPage, actPageSize, actScope, contract?.id, contractClientIdsQuery]);
+  }, [activeTab, actPage, actPageSize, actScope, canViewActs, contract?.id, contractClientIdsQuery]);
 
   useEffect(() => {
-    if (activeTab !== 'money') return;
+    if (activeTab !== 'money' || !canViewPayments) {
+      setPaymentState(createTabListState());
+      return;
+    }
 
     if (!contract?.id) {
       setPaymentState(createTabListState());
@@ -524,7 +554,7 @@ export function ContractDetailPage({
     return () => {
       cancel = true;
     };
-  }, [activeTab, contract?.id, paymentPage, paymentPageSize]);
+  }, [activeTab, canViewPayments, contract?.id, paymentPage, paymentPageSize]);
 
   const selectedPickerValue = useMemo<CounterpartySelection[]>(
     () => [
@@ -1348,7 +1378,7 @@ export function ContractDetailPage({
       ) : null}
 
       <div className="mb-3 flex gap-2">
-        {(Object.keys(tabLabels) as Tab[]).map((tab) => (
+        {visibleTabs.map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -1567,7 +1597,7 @@ export function ContractDetailPage({
         </div>
       )}
 
-      {activeTab === 'invoices' && (
+      {activeTab === 'invoices' && canViewInvoices && (
         <div className="rounded border bg-white">
           <div className="flex items-center justify-between border-b px-4 py-3">
             <div>
@@ -1728,7 +1758,7 @@ export function ContractDetailPage({
                           {column.key === 'number' ? (
                             <button
                               className="text-blue-700 hover:underline"
-                              onClick={() => onOpenInvoiceEditor?.(item.id)}
+                              onClick={() => canViewInvoices && onOpenInvoiceEditor?.(item.id)}
                             >
                               {item.number}
                             </button>
@@ -1769,7 +1799,7 @@ export function ContractDetailPage({
         </div>
       )}
 
-      {activeTab === 'acts' && (
+      {activeTab === 'acts' && canViewActs && (
         <div className="rounded border bg-white">
           <div className="flex items-center justify-between border-b px-4 py-3">
             <div>
@@ -1930,7 +1960,7 @@ export function ContractDetailPage({
                           {column.key === 'number' ? (
                             <button
                               className="text-blue-700 hover:underline"
-                              onClick={() => onOpenActEditor?.(item.id)}
+                              onClick={() => canViewActs && onOpenActEditor?.(item.id)}
                             >
                               {item.number}
                             </button>
@@ -1978,7 +2008,7 @@ export function ContractDetailPage({
         </div>
       )}
 
-      {activeTab === 'money' && (
+      {activeTab === 'money' && canViewPayments && (
         <div className="rounded border bg-white">
           <div className="flex items-center justify-between border-b px-4 py-3">
             <h3 className="font-semibold">Платежи договора</h3>
@@ -2113,7 +2143,7 @@ export function ContractDetailPage({
                           {column.key === 'id' ? (
                             <button
                               className="text-blue-700 hover:underline"
-                              onClick={() => onOpenMoneyEditor?.(item.id)}
+                              onClick={() => canViewPayments && onOpenMoneyEditor?.(item.id)}
                             >
                               {item.id}
                             </button>

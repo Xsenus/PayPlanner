@@ -3,9 +3,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Contract } from '../../types';
 import { ContractDetailPage } from './ContractDetailPage';
 
-const { dialogConfirmMock, dialogPromptMock } = vi.hoisted(() => ({
+const { dialogConfirmMock, dialogPromptMock, rolePermissionsResult } = vi.hoisted(() => ({
   dialogConfirmMock: vi.fn(),
   dialogPromptMock: vi.fn(),
+  rolePermissionsResult: {
+    accounts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+    acts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+    payments: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+  },
 }));
 
 function createPersistedTableSettings(
@@ -78,6 +83,10 @@ vi.mock('../../hooks/usePersistedTableSettings', () => ({
   }) => createPersistedTableSettings(columns, defaultPageSize),
 }));
 
+vi.mock('../../hooks/useRolePermissions', () => ({
+  useRolePermissions: () => rolePermissionsResult,
+}));
+
 vi.mock('../ui/TableColumnSettings', () => ({
   TableColumnSettings: () => <div data-testid="table-column-settings" />,
 }));
@@ -144,6 +153,9 @@ const contractFixture = {
 describe('ContractDetailPage integration', () => {
   beforeEach(() => {
     vi.useRealTimers();
+    Object.assign(rolePermissionsResult.accounts, { canView: true, canCreate: false, canEdit: false, canDelete: false });
+    Object.assign(rolePermissionsResult.acts, { canView: true, canCreate: false, canEdit: false, canDelete: false });
+    Object.assign(rolePermissionsResult.payments, { canView: true, canCreate: false, canEdit: false, canDelete: false });
     vi.mocked(apiService.getContract).mockReset();
     vi.mocked(apiService.getContractRulesSettings).mockReset();
     vi.mocked(apiService.getInvoices).mockReset();
@@ -358,6 +370,30 @@ describe('ContractDetailPage integration', () => {
     });
 
     expect(screen.getByText('Платежи договора')).toBeTruthy();
+  });
+
+  it('hides related financial tabs and does not load them without section rights', async () => {
+    Object.assign(rolePermissionsResult.accounts, { canView: false });
+    Object.assign(rolePermissionsResult.acts, { canView: false });
+    Object.assign(rolePermissionsResult.payments, { canView: false });
+
+    render(
+      <ContractDetailPage
+        contractId={77}
+        onBack={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(apiService.getContract).toHaveBeenCalledWith(77);
+    });
+
+    expect(screen.queryByRole('button', { name: 'РЎС‡РµС‚Р°' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'РђРєС‚С‹' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Р”РµРЅСЊРіРё' })).toBeNull();
+    expect(apiService.getInvoices).not.toHaveBeenCalled();
+    expect(apiService.getActs).not.toHaveBeenCalled();
+    expect(apiService.getPaymentsV2).not.toHaveBeenCalled();
   });
 
   it('downloads and sends contract documents from the detail header', async () => {
