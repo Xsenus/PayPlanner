@@ -455,7 +455,7 @@ describe('App real role route access matrix', () => {
     }
   });
 
-  it('blocks lawyer template direct tabs for closed financial and admin sections', () => {
+  it('keeps lawyer template direct tab access explicit for every app tab', () => {
     const permissions = createLawyerTemplatePermissions();
     const options = {
       canManageRoles: permissions.roles.canView,
@@ -465,49 +465,26 @@ describe('App real role route access matrix', () => {
       canViewS3Storage: permissions.s3Storage.canView,
     };
 
-    const allowedTabs: Tab[] = ['calendar', 'tasks', 'tasksCalendar', 'clients', 'clientDetail', 'cases', 'caseDetail', 'notifications', 'settings'];
-    const deniedTabs: Tab[] = [
-      'reports',
-      'calculator',
-      'legalEntities',
-      'contactsLegal',
-      'accounts',
-      'accountsIncome',
-      'accountsExpense',
-      'installments',
-      'acts',
-      'actsIncome',
-      'actsExpense',
-      'actCreate',
-      'actDetail',
-      'payments',
-      'paymentsIncome',
-      'paymentsExpense',
-      'moneyBank',
-      'moneyCash',
-      'moneyCards',
-      'moneyEMoney',
-      'moneyTotal',
-      'contracts',
-      'contractCreate',
-      'contractDetail',
-      'roles',
-      'audit',
-      'yandexDisk',
-      's3Storage',
-      'dictionaries',
-      'companyProfile',
-      'users',
-      'userDetail',
-      'userActivity',
-    ];
+    const allowedTabs = new Set<Tab>([
+      'notifications',
+      'profile',
+      'calendar',
+      'tasks',
+      'tasksControl',
+      'tasksApprovals',
+      'tasksCalendar',
+      'cases',
+      'caseDetail',
+      'clients',
+      'contacts',
+      'contactsClients',
+      'contactsExternal',
+      'clientDetail',
+      'settings',
+    ]);
 
-    for (const tab of allowedTabs) {
-      expect(canAccessTab(tab, permissions, options), `lawyer should access ${tab}`).toBe(true);
-    }
-
-    for (const tab of deniedTabs) {
-      expect(canAccessTab(tab, permissions, options), `lawyer should not access ${tab}`).toBe(false);
+    for (const tab of ALL_TABS) {
+      expect(canAccessTab(tab, permissions, options), `lawyer direct tab access mismatch for ${tab}`).toBe(allowedTabs.has(tab));
     }
   });
 });
