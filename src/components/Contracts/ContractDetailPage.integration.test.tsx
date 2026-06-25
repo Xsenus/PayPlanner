@@ -7,6 +7,7 @@ const { dialogConfirmMock, dialogPromptMock, rolePermissionsResult } = vi.hoiste
   dialogConfirmMock: vi.fn(),
   dialogPromptMock: vi.fn(),
   rolePermissionsResult: {
+    clients: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     accounts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     acts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     payments: { canView: true, canCreate: false, canEdit: false, canDelete: false },
@@ -153,6 +154,7 @@ const contractFixture = {
 describe('ContractDetailPage integration', () => {
   beforeEach(() => {
     vi.useRealTimers();
+    Object.assign(rolePermissionsResult.clients, { canView: true, canCreate: false, canEdit: false, canDelete: false });
     Object.assign(rolePermissionsResult.accounts, { canView: true, canCreate: false, canEdit: false, canDelete: false });
     Object.assign(rolePermissionsResult.acts, { canView: true, canCreate: false, canEdit: false, canDelete: false });
     Object.assign(rolePermissionsResult.payments, { canView: true, canCreate: false, canEdit: false, canDelete: false });
@@ -394,6 +396,27 @@ describe('ContractDetailPage integration', () => {
     expect(apiService.getInvoices).not.toHaveBeenCalled();
     expect(apiService.getActs).not.toHaveBeenCalled();
     expect(apiService.getPaymentsV2).not.toHaveBeenCalled();
+  });
+
+  it('keeps contract clients as plain text when clients section is hidden', async () => {
+    Object.assign(rolePermissionsResult.clients, { canView: false });
+    const onOpenClient = vi.fn();
+
+    render(
+      <ContractDetailPage
+        contractId={77}
+        onBack={vi.fn()}
+        onOpenClient={onOpenClient}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(apiService.getContract).toHaveBeenCalledWith(77);
+    });
+
+    expect(screen.getByText('Клиент 1')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Клиент 1' })).toBeNull();
+    expect(onOpenClient).not.toHaveBeenCalled();
   });
 
   it('downloads and sends contract documents from the detail header', async () => {

@@ -169,6 +169,7 @@ export function ContractDetailPage({
   const toast = useToast();
   const { confirm, prompt } = useDialog();
   const rolePermissions = useRolePermissions(user?.role?.id);
+  const canViewClients = rolePermissions.clients.canView;
   const canViewInvoices = rolePermissions.accounts.canView;
   const canViewActs = rolePermissions.acts.canView;
   const canViewPayments = rolePermissions.payments.canView;
@@ -1494,12 +1495,16 @@ export function ContractDetailPage({
                           className="max-w-0 overflow-hidden px-3 py-2 align-top"
                         >
                           {column.key === 'name' ? (
+                            canViewClients && onOpenClient ? (
                             <button
                               className="text-blue-700 hover:underline"
-                              onClick={() => onOpenClient?.(client.id)}
+                              onClick={() => onOpenClient(client.id)}
                             >
                               {client.name}
                             </button>
+                            ) : (
+                              <span>{client.name}</span>
+                            )
                           ) : column.key === 'company' ? (
                             client.company || '—'
                           ) : (
