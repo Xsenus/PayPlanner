@@ -94,6 +94,28 @@ public static class RolePermissionCatalog
             StringComparer.OrdinalIgnoreCase);
     }
 
+    public static IReadOnlyDictionary<string, RolePermissionValues> BuildDefaultsForRole(
+        string? roleName,
+        bool allowRoleManagement)
+    {
+        if (allowRoleManagement)
+        {
+            return BuildDefaults(allowRoleManagement: true);
+        }
+
+        return IsLawyerRoleName(roleName)
+            ? BuildLawyerDefaults()
+            : BuildRestrictedDefaults(allowRoleManagement: false);
+    }
+
+    public static bool IsLawyerRoleName(string? roleName)
+    {
+        var normalized = roleName?.Trim().ToLowerInvariant();
+        return !string.IsNullOrEmpty(normalized)
+            && (normalized.Contains("lawyer", StringComparison.Ordinal)
+                || normalized.Contains("\u044e\u0440\u0438\u0441\u0442", StringComparison.Ordinal));
+    }
+
     public static IReadOnlyDictionary<string, RolePermissionValues> BuildDefaults(bool allowRoleManagement)
         => new Dictionary<string, RolePermissionValues>(StringComparer.OrdinalIgnoreCase)
         {
@@ -204,8 +226,8 @@ public static class RolePermissionCatalog
             })
             .ToList();
 
-    public static List<RolePermission> CreateRestrictedEntities(int roleId, bool allowRoleManagement)
-        => BuildRestrictedDefaults(allowRoleManagement)
+    public static List<RolePermission> CreateRestrictedEntities(int roleId, bool allowRoleManagement, string? roleName = null)
+        => BuildDefaultsForRole(roleName, allowRoleManagement)
             .Select(pair => new RolePermission
             {
                 RoleId = roleId,
@@ -219,6 +241,37 @@ public static class RolePermissionCatalog
                 ViewScope = pair.Value.ViewScope
             })
             .ToList();
+
+    private static IReadOnlyDictionary<string, RolePermissionValues> BuildLawyerDefaults()
+    {
+        var defaults = BuildRestrictedDefaults(allowRoleManagement: false)
+            .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+
+        defaults[Calendar] = WorkLimited(Calendar);
+        defaults[Tasks] = WorkLimited(Tasks);
+        defaults[Clients] = WorkLimited(Clients);
+        defaults[Cases] = WorkLimited(Cases);
+        defaults[Notifications] = new(
+            CanView: true,
+            CanCreate: false,
+            CanEdit: true,
+            CanDelete: false,
+            CanExport: false,
+            CanViewAnalytics: false,
+            ViewScope: DataVisibilityScope.All);
+
+        return defaults;
+    }
+
+    private static RolePermissionValues WorkLimited(string section)
+        => new(
+            CanView: true,
+            CanCreate: true,
+            CanEdit: true,
+            CanDelete: false,
+            CanExport: false,
+            CanViewAnalytics: false,
+            ViewScope: GetDefaultViewScope(section, allowRoleManagement: false));
 
     public static MenuSectionPermissionsDto ToSection(RolePermissionValues values)
         => new()

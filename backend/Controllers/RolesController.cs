@@ -128,7 +128,7 @@ public class RolesController : ControllerBase
         _db.Roles.Add(role);
         await _db.SaveChangesAsync(ct);
 
-        var defaultPermissions = RolePermissionCatalog.CreateRestrictedEntities(role.Id, allowRoleManagement);
+        var defaultPermissions = RolePermissionCatalog.CreateRestrictedEntities(role.Id, allowRoleManagement, normalizedName);
         _db.RolePermissions.AddRange(defaultPermissions);
         await _db.SaveChangesAsync(ct);
 

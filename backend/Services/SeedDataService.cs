@@ -567,8 +567,8 @@ namespace PayPlanner.Api.Services
 
             foreach (var role in roles)
             {
-                var defaults = RolePermissionCatalog.BuildRestrictedDefaults(
-                    string.Equals(role.Name, "admin", StringComparison.Ordinal));
+                var allowRoleManagement = string.Equals(role.Name, "admin", StringComparison.Ordinal);
+                var defaults = RolePermissionCatalog.BuildDefaultsForRole(role.Name, allowRoleManagement);
 
                 foreach (var section in RolePermissionCatalog.AllSections)
                 {

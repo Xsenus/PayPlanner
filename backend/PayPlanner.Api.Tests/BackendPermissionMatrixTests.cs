@@ -387,6 +387,45 @@ public class BackendPermissionMatrixTests
     }
 
     [Fact]
+    public void LawyerRoleTemplate_OpensOnlyOperationalSections()
+    {
+        var defaults = RolePermissionCatalog.BuildDefaultsForRole("\u042e\u0440\u0438\u0441\u0442", allowRoleManagement: false);
+
+        Assert.True(RolePermissionCatalog.IsLawyerRoleName("\u0421\u0442\u0430\u0440\u0448\u0438\u0439 \u044e\u0440\u0438\u0441\u0442"));
+        Assert.True(RolePermissionCatalog.IsLawyerRoleName("lawyer-template-temp-codex"));
+        Assert.True(defaults[RolePermissionCatalog.Tasks].CanView);
+        Assert.True(defaults[RolePermissionCatalog.Tasks].CanCreate);
+        Assert.True(defaults[RolePermissionCatalog.Calendar].CanView);
+        Assert.True(defaults[RolePermissionCatalog.Clients].CanView);
+        Assert.True(defaults[RolePermissionCatalog.Cases].CanView);
+        Assert.True(defaults[RolePermissionCatalog.Notifications].CanView);
+        Assert.Equal(DataVisibilityScope.Own, defaults[RolePermissionCatalog.Tasks].ViewScope);
+        Assert.Equal(DataVisibilityScope.Own, defaults[RolePermissionCatalog.Clients].ViewScope);
+        Assert.Equal(DataVisibilityScope.Own, defaults[RolePermissionCatalog.Cases].ViewScope);
+
+        foreach (var section in new[]
+        {
+            RolePermissionCatalog.Payments,
+            RolePermissionCatalog.Accounts,
+            RolePermissionCatalog.Acts,
+            RolePermissionCatalog.Contracts,
+            RolePermissionCatalog.Reports,
+            RolePermissionCatalog.Roles,
+            RolePermissionCatalog.Audit,
+            RolePermissionCatalog.Integrations,
+            RolePermissionCatalog.YandexDisk,
+            RolePermissionCatalog.S3Storage,
+        })
+        {
+            Assert.False(defaults[section].CanView);
+            Assert.False(defaults[section].CanCreate);
+            Assert.False(defaults[section].CanEdit);
+            Assert.False(defaults[section].CanDelete);
+            Assert.False(defaults[section].CanExport);
+        }
+    }
+
+    [Fact]
     public async Task AcceptedFinancialRoles_RespectCashAccessMatrix()
     {
         await using var db = await CreateContextAsync();

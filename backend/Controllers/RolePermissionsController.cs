@@ -297,7 +297,7 @@ public class RolePermissionsController : ControllerBase
             return BadRequest(new { message = "Стандартную роль администратора нельзя изменять." });
         }
 
-        var defaults = RolePermissionCatalog.BuildRestrictedDefaults(false);
+        var defaults = RolePermissionCatalog.BuildDefaultsForRole(role.Name, allowRoleManagement: false);
         var existing = await _db.RolePermissions
             .Where(rp => rp.RoleId == roleId)
             .ToListAsync(ct);
