@@ -132,6 +132,10 @@ describe('LegalEntityModal integration', () => {
     vi.mocked(apiService.cleanAddress).mockReset();
     vi.mocked(apiService.getMainCompanySettings).mockReset();
     vi.mocked(apiService.getCasesV1).mockReset();
+    vi.mocked(apiService.getInvoices).mockReset();
+    vi.mocked(apiService.getInvoicesSummary).mockReset();
+    vi.mocked(apiService.getActs).mockReset();
+    vi.mocked(apiService.getActsSummary).mockReset();
     vi.mocked(apiService.getPaymentsV2).mockReset();
     vi.mocked(apiService.getLegalEntityCaseFinanceSummaries).mockReset();
     vi.mocked(apiService.suggestClientAddresses).mockResolvedValue([]);
@@ -141,6 +145,10 @@ describe('LegalEntityModal integration', () => {
       companies: [{ id: 9, shortName: 'Наша компания', clientsCount: 0, createdAt: '2026-04-09T13:18:06Z' }],
     });
     vi.mocked(apiService.getCasesV1).mockResolvedValue([]);
+    vi.mocked(apiService.getInvoices).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 5 });
+    vi.mocked(apiService.getInvoicesSummary).mockResolvedValue(null);
+    vi.mocked(apiService.getActs).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 5 });
+    vi.mocked(apiService.getActsSummary).mockResolvedValue(null);
     vi.mocked(apiService.getPaymentsV2).mockResolvedValue({
       items: [],
       total: 0,
@@ -179,6 +187,41 @@ describe('LegalEntityModal integration', () => {
 
     expect(apiService.getPaymentsV2).not.toHaveBeenCalled();
     expect(apiService.getLegalEntityCaseFinanceSummaries).not.toHaveBeenCalled();
+    expect(screen.queryByText('Платежи')).toBeNull();
+  });
+
+  it('does not load or show closed related sections in legal entity card', async () => {
+    const initial = createInitialLegalEntity({ id: 9, shortName: 'Наша компания' });
+
+    render(
+      <LegalEntityModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(initial)}
+        initial={initial}
+        suggest={vi.fn().mockResolvedValue([])}
+        findById={vi.fn()}
+        allowEdit
+        allowDelete={false}
+        canViewCases={false}
+        canViewAccounts={false}
+        canViewActs={false}
+        canViewPayments={false}
+      />,
+    );
+
+    await waitFor(() => expect(apiService.getMainCompanySettings).toHaveBeenCalled());
+
+    expect(apiService.getCasesV1).not.toHaveBeenCalled();
+    expect(apiService.getInvoices).not.toHaveBeenCalled();
+    expect(apiService.getInvoicesSummary).not.toHaveBeenCalled();
+    expect(apiService.getActs).not.toHaveBeenCalled();
+    expect(apiService.getActsSummary).not.toHaveBeenCalled();
+    expect(apiService.getPaymentsV2).not.toHaveBeenCalled();
+    expect(apiService.getLegalEntityCaseFinanceSummaries).not.toHaveBeenCalled();
+    expect(screen.queryByText('Дела и документы')).toBeNull();
+    expect(screen.queryByText('Счета')).toBeNull();
+    expect(screen.queryByText('Акты')).toBeNull();
     expect(screen.queryByText('Платежи')).toBeNull();
   });
 
