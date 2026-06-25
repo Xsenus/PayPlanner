@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Abstractions;
@@ -6,6 +7,7 @@ using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Filters;
@@ -309,6 +311,28 @@ public class BackendPermissionMatrixTests
         Assert.Null(context.Result);
     }
 
+    [Fact]
+    public async Task RequireSectionPermissionFilter_AllowsDatabaseAdminWithoutConfiguredSection()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateUserAsync(db, "filter-admin-without-section", roleName: "admin");
+        var filter = new RequireSectionPermissionFilter(
+            RolePermissionCatalog.Payments,
+            RequireSectionPermissionOperations.View,
+            db);
+        var context = CreateActionExecutingContext(CreatePrincipal(admin));
+        var nextWasCalled = false;
+
+        await filter.OnActionExecutionAsync(context, () =>
+        {
+            nextWasCalled = true;
+            return Task.FromResult(CreateActionExecutedContext(context));
+        });
+
+        Assert.True(nextWasCalled);
+        Assert.Null(context.Result);
+    }
+
     [Theory]
     [MemberData(nameof(DataScopedSections))]
     public async Task DataVisibility_AllowsAdminAcrossDataScopedSections(string section)
@@ -327,6 +351,39 @@ public class BackendPermissionMatrixTests
         Assert.True(access.IsAdmin);
         Assert.Equal(DataVisibilityScope.All, access.ViewScope);
         Assert.True(access.CanSeeUser(admin.Id + 1000));
+    }
+
+    [Theory]
+    [MemberData(nameof(DataScopedSections))]
+    public async Task DataVisibility_AllowsAdminWithoutConfiguredSection(string section)
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateUserAsync(db, $"{section}-admin-no-section", roleName: "admin");
+
+        var access = await db.ResolveDataVisibilityAsync(CreatePrincipal(admin), section);
+
+        Assert.NotNull(access);
+        Assert.True(access.IsAdmin);
+        Assert.Equal(DataVisibilityScope.All, access.ViewScope);
+        Assert.True(access.CanSeeUser(admin.Id + 1000));
+    }
+
+    [Fact]
+    public void HealthEndpoint_RemainsAnonymousAndReturnsOk()
+    {
+        var allowAnonymous = typeof(HealthController)
+            .GetMethod(nameof(HealthController.Get))?
+            .GetCustomAttributes(typeof(AllowAnonymousAttribute), inherit: false)
+            .Any() == true;
+        var controller = new HealthController();
+
+        var result = controller.Get();
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        Assert.True(allowAnonymous);
+        Assert.NotNull(ok.Value);
+        var status = ok.Value.GetType().GetProperty("status")?.GetValue(ok.Value);
+        Assert.Equal("ok", status);
     }
 
     [Fact]

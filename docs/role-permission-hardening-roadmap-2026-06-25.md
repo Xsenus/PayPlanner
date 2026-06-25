@@ -188,7 +188,7 @@
 - [x] Ввести/доработать единый способ проверки прав в контроллерах: `view/create/edit/delete/export/analytics`.
 - [x] Проверить и закрыть API для клиентов, юрлиц, дел, задач, календаря, счетов, актов, платежей, договоров, отчетов, справочников, ролей, аудита, интеграций, файловых хранилищ.
 - [x] Убедиться, что агрегаты и виджеты не отдают закрытые данные через связанные endpoint'ы: `StatsController` и `StatsV2Controller` закрыты правом просмотра платежей.
-- [ ] Для `ViewScope` проверить списки и карточки: если роль видит только свои данные, чужие записи не должны открываться прямым ID.
+- [x] Для `ViewScope` проверить списки и карточки: если роль видит только свои данные, чужие записи не должны открываться прямым ID; backend regression покрывает прямой `Id` после `Apply*Visibility` для всех data-scoped разделов.
 - [x] Для отсутствующей строки права по разделу выбрано безопасное поведение:
   - [x] Для не-admin отсутствующее право считается закрытым.
   - [x] При старте недостающие строки ролей дозаполняются закрытыми значениями для обычных ролей и полными правами для admin.
@@ -238,7 +238,7 @@
 
 - [~] Backend unit/integration: закрытая роль получает `403` на ключевые защищенные controller/action; добавлен тест общего `RequireSectionPermissionFilter`, полный endpoint-by-endpoint e2e остается отдельным acceptance-прогоном.
 - [x] Backend data scope: пользователь не открывает чужую карточку по прямому ID; regression-test `DataVisibility_FiltersDirectIdQueries_ForOwnScope` покрывает прямой поиск по `Id` после `Apply*Visibility` для календаря, задач, клиентов, юрлиц, дел, счетов, актов, платежей и договоров.
-- [ ] Backend regression: admin видит все, системные endpoints не ломаются.
+- [x] Backend regression: admin видит все, системные endpoints не ломаются; tests подтверждают admin-доступ без строки секции, прохождение `RequireSectionPermissionFilter` для admin и публичный `/api/health`.
 - [x] Frontend tests: закрытый раздел не показывается в меню и не рендерится при прямом `ppTab`.
 - [ ] Frontend tests: кнопки связанных финансов/документов скрыты, если нет прав на соответствующий раздел.
 - [x] Role permissions tests: отсутствие строки права не открывает раздел случайно.
@@ -420,6 +420,8 @@ npm run test:unit
 - 25.06.2026: проверки после доработки файлов задач пройдены: `npm exec vitest run src/components/Tasks/TaskJournal.test.tsx -- --runInBand` 105/105, `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~BackendPermissionMatrixTests|FullyQualifiedName~AppRelease"` 107/107, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
 - 25.06.2026: добавлен backend regression-test на прямой поиск чужих записей по ID при `ViewScope=Own`: календарь, задачи, клиенты, юрлица, дела, счета, акты, платежи и договоры должны возвращать только записи из видимой области; targeted test `BackendPermissionMatrixTests` прошел: 116/116.
 - 25.06.2026: проверки после regression-test по прямым ID пройдены: `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~BackendPermissionMatrixTests|FullyQualifiedName~AppRelease"` 116/116, `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
+- 25.06.2026: добавлен backend regression-test для admin и системных endpoint'ов: admin без отдельной строки секции сохраняет доступ ко всем data-scoped разделам, секционный фильтр пропускает admin, а `/api/health` остается `AllowAnonymous` и возвращает `ok`; targeted test `BackendPermissionMatrixTests` прошел: 127/127.
+- 25.06.2026: проверки после regression-test admin/system endpoints пройдены: `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~BackendPermissionMatrixTests|FullyQualifiedName~AppRelease"` 127/127, `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
 
 ## Предварительная рекомендация по роли "Юрист"
 
