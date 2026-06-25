@@ -58,6 +58,10 @@ vi.mock('./NotificationSettings', () => ({
   NotificationSettings: () => <div>Настройки уведомлений mock</div>,
 }));
 
+vi.mock('./DatabaseMaintenanceSettings', () => ({
+  DatabaseMaintenanceSettings: () => <div>Обслуживание базы данных mock</div>,
+}));
+
 vi.mock('../YandexDisk/YandexDisk', () => ({
   YandexDisk: () => <div>Я.Диск mock</div>,
 }));
@@ -174,6 +178,29 @@ describe('AppSettings', () => {
     expect(screen.queryByRole('button', { name: /Я\.Диск/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /S3-хранилища/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /Обслуживание базы данных/i })).toBeNull();
+    expect(screen.queryByText('Я.Диск mock')).toBeNull();
+    expect(screen.queryByText('S3 mock')).toBeNull();
+  });
+
+  it('shows only database maintenance settings for a restricted audit role', async () => {
+    authMockState.isAdmin = false;
+    permissionsMockState.permissions = buildPermissions({
+      audit: {
+        ...defaultRestrictedRolePermissions.audit,
+        canView: true,
+      },
+    });
+
+    render(<AppSettings initialSection="integrations" />);
+
+    expect(await screen.findByText('Обслуживание базы данных mock')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Обслуживание/i })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Ключи интеграций/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Уведомления/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Я\.Диск/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /S3-хранилища/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Версия и обновления/i })).toBeNull();
+    expect(screen.queryByText('Настройки уведомлений mock')).toBeNull();
     expect(screen.queryByText('Я.Диск mock')).toBeNull();
     expect(screen.queryByText('S3 mock')).toBeNull();
   });
