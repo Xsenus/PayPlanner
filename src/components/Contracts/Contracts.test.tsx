@@ -4,6 +4,10 @@ import { defaultRolePermissions } from '../../types/permissions';
 import type { Contract } from '../../types';
 import { Contracts } from './Contracts';
 
+const { useRolePermissionsMock } = vi.hoisted(() => ({
+  useRolePermissionsMock: vi.fn(),
+}));
+
 function createPersistedTableSettings(
   columns: Array<{ key: string; defaultWidth?: number; defaultVisible?: boolean }>,
   defaultPageSize: number,
@@ -53,7 +57,7 @@ vi.mock('../../hooks/useDialog', () => ({
 }));
 
 vi.mock('../../hooks/useRolePermissions', () => ({
-  useRolePermissions: () => defaultRolePermissions,
+  useRolePermissions: useRolePermissionsMock,
 }));
 
 vi.mock('../../hooks/useToast', () => ({
@@ -163,6 +167,7 @@ const concludedContract: Contract = {
 describe('Contracts', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useRolePermissionsMock.mockReturnValue(defaultRolePermissions);
     vi.mocked(apiService.getClientsV1).mockResolvedValue([]);
     vi.mocked(apiService.getContracts).mockResolvedValue({
       items: [concludedContract],
@@ -187,5 +192,25 @@ describe('Contracts', () => {
         expect.objectContaining({ status: 'Concluded' }),
       );
     });
+  });
+
+  it('keeps client links and client filter closed when clients section is hidden', async () => {
+    useRolePermissionsMock.mockReturnValue({
+      ...defaultRolePermissions,
+      clients: {
+        ...defaultRolePermissions.clients,
+        canView: false,
+      },
+    });
+    const onOpenClient = vi.fn();
+
+    render(<Contracts onOpenClient={onOpenClient} />);
+
+    expect(await screen.findByText('DOG-17')).toBeTruthy();
+    expect(screen.getByText('Баннова Мария Александровна')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Баннова Мария Александровна/ })).toBeNull();
+    expect(screen.queryByLabelText('Клиент')).toBeNull();
+    expect(apiService.getClientsV1).not.toHaveBeenCalled();
+    expect(onOpenClient).not.toHaveBeenCalled();
   });
 });

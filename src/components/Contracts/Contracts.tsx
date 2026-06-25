@@ -81,7 +81,9 @@ function formatMoney(value?: number | null) {
 export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
   const { user } = useAuth();
   const { setActiveTab } = useTabNavigation();
-  const permissions = useRolePermissions(user?.role?.id).contracts;
+  const rolePermissions = useRolePermissions(user?.role?.id);
+  const permissions = rolePermissions.contracts;
+  const canViewLinkedClients = rolePermissions.clients.canView;
   const toast = useToast();
   const { confirm } = useDialog();
   const { t } = useTranslation();
@@ -104,7 +106,7 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
   const [statusChangeError, setStatusChangeError] = useState<string | null>(null);
 
   const debouncedSearch = useDebouncedValue(search.trim(), 350);
-  const clientIdFilter = clientFilter === 'all' ? undefined : Number(clientFilter);
+  const clientIdFilter = canViewLinkedClients && clientFilter !== 'all' ? Number(clientFilter) : undefined;
 
   const {
     columnOrder,
@@ -154,11 +156,16 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
   }, [from, to, clientFilter, statusFilter, debouncedSearch, sortState, pageSize]);
 
   useEffect(() => {
+    if (!canViewLinkedClients) {
+      setClients([]);
+      return;
+    }
+
     void apiService
       .getClientsV1({ sortBy: 'name', sortDir: 'asc' })
       .then((data) => setClients(data ?? []))
       .catch(() => setClients([]));
-  }, []);
+  }, [canViewLinkedClients]);
 
   useEffect(() => {
     if (!error) return;
@@ -424,18 +431,28 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
         return (contract.clients.length + (contract.legalEntities?.length ?? 0)) > 0 ? (
           <div className="flex flex-wrap gap-2">
             {contract.clients.map((client) => (
-              <button
-                key={client.id}
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onOpenClient?.(client.id);
-                }}
-                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-blue-700 transition-colors hover:border-blue-200 hover:bg-blue-50"
-              >
-                <span className="max-w-[180px] truncate">{client.name}</span>
-                {client.clientStatus ? <ClientStatusBadge status={client.clientStatus} /> : null}
-              </button>
+              canViewLinkedClients && onOpenClient ? (
+                <button
+                  key={client.id}
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onOpenClient(client.id);
+                  }}
+                  className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-blue-700 transition-colors hover:border-blue-200 hover:bg-blue-50"
+                >
+                  <span className="max-w-[180px] truncate">{client.name}</span>
+                  {client.clientStatus ? <ClientStatusBadge status={client.clientStatus} /> : null}
+                </button>
+              ) : (
+                <span
+                  key={client.id}
+                  className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-700"
+                >
+                  <span className="max-w-[180px] truncate">{client.name}</span>
+                  {client.clientStatus ? <ClientStatusBadge status={client.clientStatus} /> : null}
+                </span>
+              )
             ))}
             {(contract.legalEntities ?? []).map((entity) => (
               <span
@@ -539,20 +556,22 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
               />
             </label>
-            <LookupSelect
-              label={t('contractsClientFilter') ?? t('client') ?? 'Клиент'}
-              value={clientFilter === 'all' ? '' : clientFilter}
-              options={clientOptions}
-              onChange={(value) => setClientFilter(value || 'all')}
-              placeholder={t('allClients') ?? 'Все клиенты'}
-              title="Выбор клиента"
-              dictionaryLabel="Открыть справочник"
-              searchPlaceholder="Поиск по ФИО, компании, телефону или email"
-              emptyOptionLabel={t('allClients') ?? 'Все клиенты'}
-              emptyOptionDescription="Показать договоры всех клиентов"
-              buttonClassName="border-gray-300 text-slate-700 focus:border-blue-500"
-              noOptionsText="Клиенты не найдены"
-            />
+            {canViewLinkedClients ? (
+              <LookupSelect
+                label={t('contractsClientFilter') ?? t('client') ?? 'Клиент'}
+                value={clientFilter === 'all' ? '' : clientFilter}
+                options={clientOptions}
+                onChange={(value) => setClientFilter(value || 'all')}
+                placeholder={t('allClients') ?? 'Все клиенты'}
+                title="Выбор клиента"
+                dictionaryLabel="Открыть справочник"
+                searchPlaceholder="Поиск по ФИО, компании, телефону или email"
+                emptyOptionLabel={t('allClients') ?? 'Все клиенты'}
+                emptyOptionDescription="Показать договоры всех клиентов"
+                buttonClassName="border-gray-300 text-slate-700 focus:border-blue-500"
+                noOptionsText="Клиенты не найдены"
+              />
+            ) : null}
             <label className="flex flex-col gap-1 text-sm text-slate-700">
               Статус
               <select
