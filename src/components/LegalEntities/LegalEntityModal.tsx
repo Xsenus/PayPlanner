@@ -117,6 +117,7 @@ interface LegalEntityModalProps {
   compactReadOnlyView?: boolean;
   canViewCases?: boolean;
   canViewAccounts?: boolean;
+  canCreateAccounts?: boolean;
   canViewActs?: boolean;
   canViewPayments?: boolean;
 }
@@ -744,6 +745,7 @@ export function LegalEntityModal({
   compactReadOnlyView = false,
   canViewCases = true,
   canViewAccounts = true,
+  canCreateAccounts = true,
   canViewActs = true,
   canViewPayments = true,
 }: LegalEntityModalProps) {
@@ -5073,6 +5075,8 @@ export function LegalEntityModal({
           onTransferRemainder={transferPaymentRemainder}
           onRollbackRemainderTransfer={rollbackPaymentRemainderTransfer}
           onAdjustRemainderTransfer={adjustPaymentRemainderTransfer}
+          canViewLinkedInvoices={canViewAccounts}
+          canCreateLinkedInvoices={canViewAccounts && canCreateAccounts && !readOnly}
           defaultLegalEntityId={currentLegalEntityId ?? undefined}
           defaultClientCaseId={selectedCaseId}
           casesPrefetch={canViewCases ? legalEntityCases : []}

@@ -909,6 +909,8 @@ export function Calendar({ onOpenClient }: CalendarProps) {
           onTransferRemainder={handleTransferRemainder}
           onRollbackRemainderTransfer={handleRollbackRemainderTransfer}
           onAdjustRemainderTransfer={handleAdjustRemainderTransfer}
+          canViewLinkedInvoices={permissions.accounts?.canView === true}
+          canCreateLinkedInvoices={permissions.accounts?.canView === true && permissions.accounts?.canCreate === true}
           onBalanceApplied={async () => {
             await refreshPayments();
             bumpStats();

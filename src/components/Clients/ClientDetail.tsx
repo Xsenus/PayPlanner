@@ -10900,6 +10900,8 @@ export function ClientDetail({
           onTransferRemainder={transferPaymentRemainder}
           onRollbackRemainderTransfer={rollbackPaymentRemainderTransfer}
           onAdjustRemainderTransfer={adjustPaymentRemainderTransfer}
+          canViewLinkedInvoices={accountPermissions.canView}
+          canCreateLinkedInvoices={accountPermissions.canView && accountPermissions.canCreate}
           availableClientBalance={clientBalance?.balance ?? 0}
           onApplyClientBalance={applyClientBalanceToPayment}
           onBalanceApplied={async () => {
@@ -10978,6 +10980,11 @@ export function ClientDetail({
           findById={(payload) => apiService.findLegalEntityById(payload)}
           allowEdit={clientPermissions.canEdit}
           allowDelete={false}
+          canViewCases={casePermissions.canView}
+          canViewAccounts={accountPermissions.canView}
+          canCreateAccounts={accountPermissions.canView && accountPermissions.canCreate}
+          canViewActs={actPermissions.canView}
+          canViewPayments={paymentPermissions.canView}
           titleOverride={
             legalEntityModalInitial
               ? "Реквизиты юридического лица"

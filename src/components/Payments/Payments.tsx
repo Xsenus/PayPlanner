@@ -372,6 +372,8 @@ export function Payments({
   const paymentsPermissions = permissions.payments;
   const canOpenLinkedClients = permissions.clients?.canView === true;
   const canOpenLinkedCases = permissions.cases?.canView === true;
+  const canViewLinkedInvoices = permissions.accounts?.canView === true;
+  const canCreateLinkedInvoices = canViewLinkedInvoices && permissions.accounts?.canCreate === true;
   const { t, formatDate } = useTranslation();
   const { clients } = useClients();
   const { dealTypes, incomeTypes, paymentSources } = useDictionaries();
@@ -2973,6 +2975,8 @@ export function Payments({
         onTransferRemainder={handleTransferRemainder}
         onRollbackRemainderTransfer={handleRollbackRemainderTransfer}
         onAdjustRemainderTransfer={handleAdjustRemainderTransfer}
+        canViewLinkedInvoices={canViewLinkedInvoices}
+        canCreateLinkedInvoices={canCreateLinkedInvoices}
         onBalanceApplied={async () => {
           await refresh();
         }}

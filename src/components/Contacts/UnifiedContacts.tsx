@@ -834,6 +834,11 @@ export function UnifiedContacts({
           findById={(payload) => apiService.findLegalEntityById(payload)}
           allowEdit={canEditLegalEntities}
           allowDelete={false}
+          canViewCases={permissions.cases.canView}
+          canViewAccounts={permissions.accounts.canView}
+          canCreateAccounts={permissions.accounts.canView && permissions.accounts.canCreate}
+          canViewActs={permissions.acts.canView}
+          canViewPayments={permissions.payments.canView}
           mode="page"
           onBack={closeLegalDetailPage}
         />

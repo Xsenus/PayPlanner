@@ -2511,6 +2511,8 @@ export function Accounts({
       onTransferRemainder={handleTransferPaymentRemainder}
       onRollbackRemainderTransfer={handleRollbackPaymentRemainderTransfer}
       onAdjustRemainderTransfer={handleAdjustPaymentRemainderTransfer}
+      canViewLinkedInvoices={permissions.accounts.canView}
+      canCreateLinkedInvoices={permissions.accounts.canView && permissions.accounts.canCreate}
       payment={editingPayment ?? undefined}
       type={paymentModalType}
       linkedInvoice={paymentModalInvoiceContext}
