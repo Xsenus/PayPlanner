@@ -1782,7 +1782,7 @@ function AppContent() {
           onOpenAct={(actId) => openActDetail(actId, { tab: 'notifications' })}
           onOpenContract={(contractId) => openContractDetail(contractId, { returnTo: activeTab })}
           onOpenCalendar={permissions.calendar.canView ? () => handleTabChange('calendar') : handleOpenNotifications}
-          onOpenNotes={permissions.notes.canView ? () => handleTabChange('notes') : handleOpenNotifications}
+          onOpenNotes={permissions.notes.canView ? () => handleTabChange('notes') : undefined}
           onOpenNotifications={handleOpenNotifications}
         />
         <DoubleHorizontalScrollbars />

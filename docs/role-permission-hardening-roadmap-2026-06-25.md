@@ -88,7 +88,7 @@
 
 - [~] Календарь: меню, страница, события, таблица платежей в календаре, аналитика календаря, Google/Yandex calendar panels; таблица и карточки платежей в календаре уже не открывают клиентов/дела без прав `clients/cases`.
 - [ ] Задачи: журнал задач, контроль, согласования, календарь задач, карточка задачи, старая и новая форма, комментарии, файлы, подзадачи.
-- [ ] Заметки: список, карточки, совместный доступ, уведомления.
+- [x] Заметки: список досок, карточки заметок, совместный доступ, SignalR hub, inbox и уведомления проверяют `notes.canView/canCreate/canEdit/canDelete`; toast по заметке без доступа к разделу больше не предлагает открыть доску.
 - [ ] Отчеты: все вкладки отчетов и финансовые сводки.
 - [ ] Калькулятор: вход в раздел и сохранение/экспорт, если есть.
 - [ ] Контакты/клиенты: физлица, карточка клиента, связи с делами, счета/акты/платежи/договоры в карточке.
@@ -396,6 +396,8 @@ npm run test:unit
 - 25.06.2026: проверки после разделения sidebar-настроек пройдены: `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `dotnet test ... BackendPermissionMatrixTests/AppRelease` 107/107, `Navigation.test.tsx` 9/9, `App.routing.test.ts` 43/43, `AppSettings/YandexDisk/S3Storage` 15/15, backend tests по интеграциям/Я.Диску/S3/AuthProviders 57/57, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
 - 25.06.2026: личный профиль проверен как доступный рабочим ролям без лишних административных блоков: вкладка «Аудит» в профиле показывается только admin или роли с `audit.canView`, а обычная роль без аудита видит профиль без этой вкладки; targeted UI test `ProfilePage.test.tsx` прошел: 2/2.
 - 25.06.2026: проверки после закрытия аудита личного профиля пройдены: `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `npx vitest run src/components/Profile/ProfilePage.test.tsx src/App.routing.test.ts --reporter dot` 45/45, `dotnet test ... ProfileControllerTests` 1/1, `dotnet test ... BackendPermissionMatrixTests/AppRelease` 107/107, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
+- 25.06.2026: раздел «Заметки» закрыт по правам на уровне меню, прямого `/notes`, API досок/заметок, SignalR hub, кандидатов совместного доступа и центра уведомлений; дополнительно исправлен toast по заметке для роли без `notes.canView`: действие больше не обещает открыть доску. Targeted tests `RealtimeNotificationToasts.test.tsx` + `App.routing.test.ts` прошли 67/67, backend `StickyNotesControllerTests|NotesHubTests|NotificationInboxControllerTests` прошли 50/50.
+- 25.06.2026: проверки после уточнения уведомлений заметок пройдены: `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `dotnet test ... BackendPermissionMatrixTests/AppRelease` 107/107, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
 
 ## Предварительная рекомендация по роли "Юрист"
 
@@ -430,6 +432,8 @@ npm run test:unit
 - [x] `npx vitest run src/components/Profile/ProfilePage.test.tsx --reporter dot` — пройдено 2 теста, включая скрытие вкладки аудита в личном профиле без `audit.canView`.
 - [x] `npx vitest run src/components/Profile/ProfilePage.test.tsx src/App.routing.test.ts --reporter dot` — пройдено 45 тестов.
 - [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~ProfileControllerTests"` — пройден 1 тест личного профиля.
+- [x] `npx vitest run src/components/Notifications/RealtimeNotificationToasts.test.tsx src/App.routing.test.ts --reporter dot` — пройдено 67 тестов, включая fallback для уведомлений заметок без обработчика доски.
+- [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~StickyNotesControllerTests|FullyQualifiedName~NotesHubTests|FullyQualifiedName~NotificationInboxControllerTests"` — пройдено 50 тестов по заметкам, SignalR и inbox.
 - [x] `npm run lint` — ошибок нет, остались существующие предупреждения по React hooks / fast refresh.
 - [x] `npm run build` — сборка успешна, остались существующие предупреждения Vite/Rolldown по стороннему `@microsoft/signalr` и размеру chunk.
 - [x] `git diff --check` — замечаний нет.

@@ -482,6 +482,41 @@ describe('RealtimeNotificationToasts', () => {
     expect(openNotes).toHaveBeenCalledTimes(1);
   });
 
+  it('opens notification center for note toast when the notes board action is unavailable', async () => {
+    const openNotifications = vi.fn();
+    render(<RealtimeNotificationToasts userId={5} onOpenNotifications={openNotifications} />);
+
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.({
+        id: 51,
+        recipientUserId: 5,
+        type: 'stickyNoteUpdated',
+        eventKey: 'note:board:5:updated',
+        title: 'Обновлена заметка',
+        bodyPreview: 'На общей доске изменили заметку.',
+        tone: 'blue',
+        objectType: 'note',
+        objectId: 5,
+        taskJournalItemId: null,
+        createdAt: '2026-05-25T10:00:00Z',
+      });
+    });
+
+    expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Обновлена заметка',
+      actionLabel: 'Открыть уведомления',
+      dedupeKey: 'note:5',
+      domain: 'note',
+    }));
+
+    const toastOptions = toastMock.showToast.mock.calls[0][0] as { onAction: () => void };
+    act(() => toastOptions.onAction());
+
+    expect(openNotifications).toHaveBeenCalledTimes(1);
+  });
+
   it('recognizes sticky note toast by type when object type is not normalized', async () => {
     const openNotes = vi.fn();
     render(<RealtimeNotificationToasts userId={5} onOpenNotes={openNotes} />);
