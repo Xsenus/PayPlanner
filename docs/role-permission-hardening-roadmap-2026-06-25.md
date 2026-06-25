@@ -92,7 +92,7 @@
 - [ ] Отчеты: все вкладки отчетов и финансовые сводки.
 - [ ] Калькулятор: вход в раздел и сохранение/экспорт, если есть.
 - [ ] Контакты/клиенты: физлица, карточка клиента, связи с делами, счета/акты/платежи/договоры в карточке.
-- [ ] Юрлица: список, карточка, связи с клиентами/делами/финансами.
+- [~] Юрлица: список юрлиц закрывает связанные дела/договоры/счета/акты/платежи по правам разделов; карточка и вложенные связи остаются в дальнейшей проверке.
 - [ ] Дела: реестр, карточка дела, финансы дела, задачи дела, календарь оплат, документы.
 - [ ] Счета: доходные/расходные, карточка счета, связанные платежи, документы.
 - [ ] Акты: списки, карточка, создание из счета/договора.
@@ -136,7 +136,7 @@
 ### 2. Закрыть frontend
 
 - [x] Вынести единую `tab -> permission` карту и использовать ее в `App`, `Navigation`, route helpers и тестах.
-- [ ] Скрывать не только пункты меню, но и вложенные кнопки действий в карточках: финансы дела, связанные счета/акты/платежи/договоры, карточки клиента/дела.
+- [~] Скрывать не только пункты меню, но и вложенные кнопки действий в карточках: список юрлиц фильтрует связанные дела/договоры/счета/акты/платежи по правам; карточки клиента/дела и остальные вложенные действия еще требуют отдельной проверки.
 - [x] Для detail/create страниц проверять доступ к родительскому разделу и операции: например `contractCreate` требует `contracts.canView && contracts.canCreate`, `actCreate` требует `acts.canView && acts.canCreate`.
 - [x] Привести справочники к правам роли: просмотр по `dictionaries.canView`, создание по `dictionaries.canCreate`, редактирование по `dictionaries.canEdit`, удаление по `dictionaries.canDelete`.
 - [x] Разделить личные уведомления и админские настройки уведомлений, чтобы запрет настроек не ломал личный inbox.
@@ -349,6 +349,7 @@ npm run test:unit
 - 25.06.2026: закрыты секционными правами прямые API рассрочки, справочников чтения, клиентских паспортов, доверенностей, Google/Yandex календарей и финансовой статистики `Stats/StatsV2`.
 - 25.06.2026: админские API справочников переведены с общего admin-only на права `dictionaries`: создание, редактирование, включение/выключение, объединение дублей и удаление проверяются отдельными операциями роли.
 - 25.06.2026: подтверждена граница уведомлений: `NotificationInboxController` остается личным авторизованным inbox, а `NotificationsController` закрывает настройки рассылок через `notifications.canView/canEdit`.
+- 25.06.2026: список юрлиц в табличном режиме фильтрует колонки и клики по связанным делам, договорам, счетам, актам и платежам через права `cases/contracts/accounts/acts/payments.canView`.
 
 ## Предварительная рекомендация по роли "Юрист"
 
@@ -364,6 +365,8 @@ npm run test:unit
 - [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj` — пройдено 1871 тестов.
 - [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~DictionariesAdminServiceTests|FullyQualifiedName~BackendPermissionMatrixTests|FullyQualifiedName~CaseNotificationInventoryTests"` — пройдено 116 тестов.
 - [x] `npm exec vitest run src/components/Dictionaries/Dictionaries.test.tsx src/App.routing.test.ts src/services/permissionsService.test.ts src/hooks/useRolePermissions.test.tsx src/components/Navigation/Navigation.test.tsx -- --runInBand` — пройдено 59 тестов.
+- [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~AppRelease|FullyQualifiedName~BackendPermissionMatrixTests"` — пройдено 107 тестов.
+- [x] `npm exec vitest run src/components/LegalEntities/LegalEntities.test.tsx src/components/Contacts/UnifiedContacts.test.tsx -- --runInBand` — пройдено 11 тестов.
 - [x] `npm run lint` — ошибок нет, остались существующие предупреждения по React hooks / fast refresh.
 - [x] `npm run build` — сборка успешна, остались существующие предупреждения Vite/Rolldown по стороннему `@microsoft/signalr` и размеру chunk.
 - [x] `git diff --check` — замечаний нет.
