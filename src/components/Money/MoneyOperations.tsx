@@ -797,6 +797,7 @@ function CashOrderModal({
   canCreate,
   canEdit,
   canDelete,
+  canViewAudit,
 }: {
   order: CashOrder | null;
   open: boolean;
@@ -813,6 +814,7 @@ function CashOrderModal({
   canCreate: boolean;
   canEdit: boolean;
   canDelete: boolean;
+  canViewAudit: boolean;
 }) {
   const [form, setForm] = useState<CashOrder | null>(order ? mapCashOrderToForm(order) : null);
   const [error, setError] = useState<string | null>(null);
@@ -1079,14 +1081,16 @@ function CashOrderModal({
               <Printer className="h-4 w-4" />
               Печать
             </button>
-            <button
-              type="button"
-              onClick={() => setHistoryOpen(true)}
-              disabled={!isPersisted}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
-              <History className="h-4 w-4" />
-              История
-            </button>
+            {canViewAudit ? (
+              <button
+                type="button"
+                onClick={() => setHistoryOpen(true)}
+                disabled={!isPersisted}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                <History className="h-4 w-4" />
+                История
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => setHelpOpen(true)}
@@ -2284,6 +2288,7 @@ export function MoneyOperations({
   const canDeleteMoneyOperations = permissions.payments.canDelete;
   const canOpenLinkedAccounts = permissions.accounts?.canView === true;
   const canOpenLinkedClients = permissions.clients?.canView === true;
+  const canViewAudit = permissions.audit?.canView === true;
   const openLinkedInvoice = canOpenLinkedAccounts ? onOpenInvoice : undefined;
   const { setActiveTab } = useTabNavigation();
   const toast = useToast();
@@ -5759,6 +5764,7 @@ export function MoneyOperations({
         canCreate={canCreateMoneyOperations}
         canEdit={canEditMoneyOperations}
         canDelete={canDeleteMoneyOperations}
+        canViewAudit={canViewAudit}
       />
 
       {selectedBankImport &&

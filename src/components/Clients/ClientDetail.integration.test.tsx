@@ -109,6 +109,7 @@ function createPermissions() {
     contracts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     payments: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     tasks: { canView: true, canCreate: false, canEdit: false, canDelete: false, canExport: false },
+    audit: { canView: false, canCreate: false, canEdit: false, canDelete: false, canExport: false },
   };
 }
 
@@ -560,6 +561,7 @@ describe('ClientDetail integration', () => {
     Object.assign(permissionsResult.contracts, createPermissions().contracts);
     Object.assign(permissionsResult.payments, createPermissions().payments);
     Object.assign(permissionsResult.tasks, createPermissions().tasks);
+    Object.assign(permissionsResult.audit, createPermissions().audit);
     confirmMock.mockReset();
     confirmMock.mockResolvedValue(true);
     toastInfoMock.mockReset();
@@ -773,6 +775,7 @@ describe('ClientDetail integration', () => {
 
   it('opens balance journal and audit from compact header actions', async () => {
     const user = userEvent.setup();
+    permissionsResult.audit.canView = true;
     vi.mocked(apiService.getClientBalance).mockResolvedValue({ clientId: 1, balance: 750 });
     vi.mocked(apiService.getClientCaseFinanceSummaries).mockResolvedValue([
       {

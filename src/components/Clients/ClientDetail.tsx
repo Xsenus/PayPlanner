@@ -1387,6 +1387,7 @@ export function ClientDetail({
   const actPermissions = permissions.acts;
   const paymentPermissions = permissions.payments;
   const contractPermissions = permissions.contracts;
+  const canViewAudit = userIsAdmin || permissions.audit?.canView === true;
   const allowedContractCounterpartyScopes = useMemo<CounterpartyKind[]>(() => {
     const scopes: CounterpartyKind[] = [];
     if (clientPermissions.canView) scopes.push("client");
@@ -6091,15 +6092,17 @@ export function ClientDetail({
                 </span>
               </button>
             ) : null}
-            <button
-              type="button"
-              onClick={() => setClientAuditOpen(true)}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors hover:bg-slate-50"
-              title="История клиента"
-              aria-label="История клиента"
-            >
-              <History className="h-5 w-5" />
-            </button>
+            {canViewAudit ? (
+              <button
+                type="button"
+                onClick={() => setClientAuditOpen(true)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors hover:bg-slate-50"
+                title="История клиента"
+                aria-label="История клиента"
+              >
+                <History className="h-5 w-5" />
+              </button>
+            ) : null}
           </div>
         </div>
 

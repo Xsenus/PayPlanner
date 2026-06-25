@@ -1,6 +1,8 @@
 import { Clock3, History, Shield, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useAuth } from '../../contexts/AuthContext';
+import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { getObjectAuditTypeLabel } from '../../utils/objectAudit';
 import { AuditInfoCard } from './AuditInfoCard';
 import { ObjectAuditHistoryCard } from './ObjectAuditHistoryCard';
@@ -192,9 +194,12 @@ export function ObjectAuditLauncher({
   className = '',
   buttonClassName = '',
 }: ObjectAuditLauncherProps) {
+  const { user, isAdmin } = useAuth();
+  const permissions = useRolePermissions(user?.role?.id);
   const [open, setOpen] = useState(false);
+  const canViewAudit = isAdmin() || permissions.audit?.canView === true;
 
-  if (!objectId || objectId <= 0) {
+  if (!canViewAudit || !objectId || objectId <= 0) {
     return null;
   }
 
