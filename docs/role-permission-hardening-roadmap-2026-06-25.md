@@ -14,7 +14,7 @@
 - [x] Frontend уже скрывает многие пункты навигации и страницы через `useRolePermissions`.
 - [x] Backend уже имеет общий helper `HasUserSectionPermissionAsync` и механизм `ViewScope`.
 - [x] Найденный риск закрыт в коде: для существующего не-admin пользователя отсутствие строки права больше не открывает раздел на backend, а frontend до загрузки прав использует закрытый fallback.
-- [!] `notifications` сейчас выглядит как общий доступный раздел в верхнем уровне приложения/навигации и требует отдельного решения: оставить всем "личные уведомления" или отделить их от админских настроек уведомлений.
+- [x] `notifications` разделен на личный inbox и админские настройки: личные уведомления остаются доступными авторизованному пользователю, админские настройки закрыты правами `notifications`, а переходы из уведомлений в связанные задачи/дела/финансы показываются только при праве на соответствующий раздел.
 - [x] Разделы `users`, `userActivity`, `profile`, `companyProfile`, detail/create-страницы и вложенные действия проверены на уровне frontend route map: `profile` оставлен личным разделом, `users/userActivity/companyProfile` оставлены admin-only, detail/create-страницы привязаны к родительскому разделу.
 
 ## Цель
@@ -99,7 +99,7 @@
 - [~] Платежи: доходные/расходные, деньги/банк/касса/карты/e-money/итого, платежные статусы, авансы; таблица платежей уже не открывает клиентов/дела без прав `clients/cases`, а денежный журнал не открывает связанные счета и быстрые переходы в счета/клиентов без прав `accounts/clients`.
 - [~] Договоры: список, карточка, создание, связанные счета/акты/платежи; карточка закрывает связанные счета/акты/деньги и переходы в клиентов, список договоров не загружает справочник клиентов и не открывает клиента без права `clients`, а создание/редактирование договора не открывает выбор клиентов или юрлиц без прав `clients/legalEntities`.
 - [x] Справочники: просмотр, создание, редактирование и удаление справочников подчинены правам `dictionaries.canView/canCreate/canEdit/canDelete`; прежняя жесткая привязка редактирования к admin снята.
-- [x] Уведомления: личный inbox оставлен доступным авторизованному пользователю, админские настройки рассылок закрываются через `notifications.canView/canEdit`.
+- [x] Уведомления: личный inbox оставлен доступным авторизованному пользователю, админские настройки рассылок закрываются через `notifications.canView/canEdit`, а переходы из центра уведомлений и realtime-toast в задачи, дела, платежи, счета, акты и договоры передаются только при доступе к соответствующим разделам.
 - [x] Роли: список ролей, копирование, изменение прав и удаление закрыты через `roles.canView/canCreate/canEdit/canDelete`; аудит готовности ролей и история роли дополнительно требуют `audit.canView`.
 - [x] Пользователи: список пользователей и карточка пользователя оставлены строго admin-only; рабочие роли не получают доступ через меню, tab/deep-link и backend `/api/users`.
 - [x] Контроль пользователей: активность пользователей оставлена строго admin-only; рабочие роли не получают доступ через меню, tab/deep-link и backend `/api/user-activity` admin endpoints.
@@ -154,6 +154,7 @@
 - [x] Для detail/create страниц проверять доступ к родительскому разделу и операции: например `contractCreate` требует `contracts.canView && contracts.canCreate`, `actCreate` требует `acts.canView && acts.canCreate`.
 - [x] Привести справочники к правам роли: просмотр по `dictionaries.canView`, создание по `dictionaries.canCreate`, редактирование по `dictionaries.canEdit`, удаление по `dictionaries.canDelete`.
 - [x] Разделить личные уведомления и админские настройки уведомлений, чтобы запрет настроек не ломал личный inbox.
+- [x] Закрыть переходы из личных уведомлений в связанные закрытые разделы: центр уведомлений и realtime-toast не показывают действия для задач, дел, платежей, счетов, актов и договоров без прав на соответствующий раздел.
 - [x] Добавить экран отказа/редирект при прямом URL в закрытый раздел.
 
 #### Как выполнять
@@ -401,6 +402,8 @@ npm run test:unit
 - 25.06.2026: проверки после уточнения уведомлений заметок пройдены: `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `dotnet test ... BackendPermissionMatrixTests/AppRelease` 107/107, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
 - 25.06.2026: общий раздел «Контакты» дополнительно закрывает связанные колонки, сохраненные настройки таблицы, карточные счетчики и реквизиты через права `cases/contracts/accounts/acts/payments/clients/legalEntities`; targeted tests `UnifiedContacts.test.tsx` + `App.routing.test.ts` прошли 55/55.
 - 25.06.2026: проверки после доработки общего раздела «Контакты» пройдены: `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `dotnet test ... BackendPermissionMatrixTests/AppRelease` 107/107, `UnifiedContacts.test.tsx` + `App.routing.test.ts` 55/55, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
+- 25.06.2026: личные уведомления теперь не передают обработчики переходов в закрытые разделы: `App` передает `NotificationCenter` и `RealtimeNotificationToasts` переходы в задачи/дела/платежи/счета/акты/договоры только при `canView` соответствующего раздела; targeted tests `NotificationCenter.test.tsx` + `RealtimeNotificationToasts.test.tsx` + `App.routing.test.ts` прошли 83/83.
+- 25.06.2026: проверки после закрытия переходов из личных уведомлений пройдены: `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `dotnet test ... BackendPermissionMatrixTests/AppRelease` 107/107, `NotificationCenter.test.tsx` + `RealtimeNotificationToasts.test.tsx` + `App.routing.test.ts` 83/83, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
 
 ## Предварительная рекомендация по роли "Юрист"
 
@@ -438,6 +441,7 @@ npm run test:unit
 - [x] `npx vitest run src/components/Notifications/RealtimeNotificationToasts.test.tsx src/App.routing.test.ts --reporter dot` — пройдено 67 тестов, включая fallback для уведомлений заметок без обработчика доски.
 - [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~StickyNotesControllerTests|FullyQualifiedName~NotesHubTests|FullyQualifiedName~NotificationInboxControllerTests"` — пройдено 50 тестов по заметкам, SignalR и inbox.
 - [x] `npx vitest run src/components/Contacts/UnifiedContacts.test.tsx src/App.routing.test.ts --reporter dot` — пройдено 55 тестов, включая скрытие связанных колонок и счетчиков контактов без прав.
+- [x] `npx vitest run src/components/Notifications/NotificationCenter.test.tsx src/components/Notifications/RealtimeNotificationToasts.test.tsx src/App.routing.test.ts --reporter dot` — пройдено 83 теста, включая скрытие переходов из личных уведомлений в закрытые разделы.
 - [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~BackendPermissionMatrixTests|FullyQualifiedName~AppRelease"` — пройдено 107 тестов после обновления release note.
 - [x] `npm run lint` — ошибок нет, остались существующие предупреждения по React hooks / fast refresh.
 - [x] `npm run build` — сборка успешна, остались существующие предупреждения Vite/Rolldown по стороннему `@microsoft/signalr` и размеру chunk.

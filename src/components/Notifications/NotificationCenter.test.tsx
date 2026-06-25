@@ -305,6 +305,27 @@ describe('NotificationCenter', () => {
     expect(handlers[handlerName]).toHaveBeenCalledWith(777);
   });
 
+  it.each([
+    ['payment', 'Рљ РїР»Р°С‚РµР¶Сѓ'],
+    ['invoice', 'Рљ СЃС‡РµС‚Сѓ'],
+    ['act', 'Рљ Р°РєС‚Сѓ'],
+    ['contract', 'Рљ РґРѕРіРѕРІРѕСЂСѓ'],
+  ] as const)('hides linked %s action when the section handler is unavailable', async (objectType, buttonLabel) => {
+    const item = createNotification({
+      id: 33,
+      title: `Р—Р°РєСЂС‹С‚С‹Р№ СЃРІСЏР·Р°РЅРЅС‹Р№ РѕР±СЉРµРєС‚ ${objectType}`,
+      objectType,
+      objectId: 778,
+      taskId: null,
+    });
+    apiMock.getUserNotifications.mockResolvedValue(createPage([item]));
+
+    render(<NotificationCenter />);
+
+    expect(await screen.findByText(`Р—Р°РєСЂС‹С‚С‹Р№ СЃРІСЏР·Р°РЅРЅС‹Р№ РѕР±СЉРµРєС‚ ${objectType}`)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: buttonLabel })).toBeNull();
+  });
+
   it('opens case document notifications on the documents tab', async () => {
     const onOpenCase = vi.fn();
     const onOpenCaseDocument = vi.fn();
