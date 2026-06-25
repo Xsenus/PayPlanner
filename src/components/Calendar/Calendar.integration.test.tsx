@@ -14,6 +14,7 @@ const paymentsResult = {
 
 const permissionsState = vi.hoisted(() => ({
   tasksCanView: true,
+  calendarCanViewAnalytics: true,
 }));
 
 function createPersistedTableSettings(
@@ -69,7 +70,7 @@ vi.mock('../../hooks/useRolePermissions', () => ({
       canCreate: true,
       canEdit: true,
       canDelete: true,
-      canViewAnalytics: true,
+      canViewAnalytics: permissionsState.calendarCanViewAnalytics,
     },
     tasks: {
       canView: permissionsState.tasksCanView,
@@ -153,7 +154,7 @@ vi.mock('../MonthRange/MonthRangePicker', () => ({
 }));
 
 vi.mock('../Statistics/TwoTypeStats', () => ({
-  TwoTypeStats: () => null,
+  TwoTypeStats: () => <div data-testid="calendar-analytics">analytics</div>,
 }));
 
 vi.mock('../ui/TableColumnSettings', () => ({
@@ -174,6 +175,7 @@ describe('Calendar integration', () => {
   beforeEach(() => {
     paymentsResult.payments = [];
     permissionsState.tasksCanView = true;
+    permissionsState.calendarCanViewAnalytics = true;
     localStorage.removeItem('pp.calendar_view');
     localStorage.removeItem('pp.calendar_section_mode');
   });
@@ -234,5 +236,15 @@ describe('Calendar integration', () => {
     await waitFor(() => {
       expect(localStorage.getItem('pp.calendar_section_mode')).toBe('finance');
     });
+  });
+
+  it('hides calendar analytics when analytics permission is closed', async () => {
+    permissionsState.calendarCanViewAnalytics = false;
+
+    render(<Calendar />);
+
+    expect(screen.queryByTestId('calendar-analytics')).toBeNull();
+    expect(await screen.findByText('Просмотр аналитики недоступен для вашей роли.')).toBeTruthy();
+    expect(screen.getByTestId('calendar-grid')).toBeTruthy();
   });
 });
