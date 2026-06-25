@@ -7,10 +7,16 @@ import { ALL_TABS, type Tab } from '../../types/tabs';
 import { apiService } from '../../services/api';
 import { defaultRolePermissions } from '../../types/permissions';
 
+const authState = vi.hoisted(() => ({
+  isAdmin: true,
+  roleId: 1,
+  roleName: 'admin',
+}));
+
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({
-    user: { id: 1, role: { id: 1, name: 'admin' } },
-    isAdmin: () => true,
+    user: { id: 1, role: { id: authState.roleId, name: authState.roleName } },
+    isAdmin: () => authState.isAdmin,
   }),
 }));
 
@@ -70,6 +76,9 @@ describe('Navigation links', () => {
   beforeEach(() => {
     window.history.replaceState({}, '', '/');
     window.localStorage.clear();
+    authState.isAdmin = true;
+    authState.roleId = 1;
+    authState.roleName = 'admin';
     apiMock.getRolePermissions.mockResolvedValue(defaultRolePermissions);
     apiMock.getPaymentsV2.mockResolvedValue({
       items: [],
@@ -101,6 +110,26 @@ describe('Navigation links', () => {
     expect(findLinkByHref(getTabHref('accountsIncome'))).toBeTruthy();
     expect(findLinkByHref(getTabHref('moneyEMoney'))).toBeTruthy();
     expect(findLinkByHref(getTabHref('settings'))).toBeTruthy();
+    expect(findLinkByHref(getTabHref('yandexDisk'))).toBeFalsy();
+    expect(findLinkByHref(getTabHref('s3Storage'))).toBeFalsy();
+  });
+
+  it('shows settings for a non-admin role that can view integrations only', async () => {
+    authState.isAdmin = false;
+    authState.roleId = 99;
+    authState.roleName = 'lawyer';
+    apiMock.getRolePermissions.mockResolvedValueOnce({
+      ...defaultRolePermissions,
+      integrations: { ...defaultRolePermissions.integrations, canView: true },
+    });
+
+    renderNavigation();
+
+    await waitFor(() => {
+      expect(findLinkByHref(getTabHref('settings'))).toBeTruthy();
+    });
+    expect(findLinkByHref(getTabHref('roles'))).toBeFalsy();
+    expect(findLinkByHref(getTabHref('audit'))).toBeFalsy();
     expect(findLinkByHref(getTabHref('yandexDisk'))).toBeFalsy();
     expect(findLinkByHref(getTabHref('s3Storage'))).toBeFalsy();
   });

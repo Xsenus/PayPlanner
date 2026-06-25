@@ -356,9 +356,11 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
   }, [permissions, t]);
 
   const canManageRoles = isAdmin() || permissions.roles.canView;
+  const canViewAudit = isAdmin() || permissions.audit.canView;
+  const canViewIntegrations = isAdmin() || Boolean(permissions.integrations?.canView);
   const canViewYandexDisk = isAdmin() || Boolean(permissions.yandexDisk?.canView);
   const canViewS3Storage = isAdmin() || Boolean(permissions.s3Storage?.canView);
-  const canViewSettings = isAdmin() || permissions.audit.canView || permissions.notifications.canView || canViewYandexDisk || canViewS3Storage;
+  const canViewSettings = isAdmin() || canViewAudit || permissions.notifications.canView || canViewIntegrations || canViewYandexDisk || canViewS3Storage;
 
   const adminItems = useMemo<SidebarItem[]>(() => {
     if (!isAdmin() && !canManageRoles && !canViewSettings && !canViewYandexDisk && !canViewS3Storage) {
@@ -372,7 +374,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
       ...(canManageRoles
         ? [{ id: 'roles', tab: 'roles' as Tab, label: '\u0420\u043e\u043b\u0438', icon: Shield }]
         : []),
-      ...(canViewSettings
+      ...(canViewAudit
         ? [{ id: 'audit', tab: 'audit' as Tab, label: 'Аудит объектов', icon: History }]
         : []),
       ...(isAdmin()
@@ -384,7 +386,7 @@ export default function Navigation({ activeTab, onTabChange }: NavigationProps) 
         ? [{ id: 'settings', tab: 'settings' as Tab, label: '\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438', icon: Settings }]
         : []),
     ];
-  }, [canManageRoles, canViewSettings, canViewYandexDisk, canViewS3Storage, isAdmin]);
+  }, [canManageRoles, canViewAudit, canViewSettings, canViewYandexDisk, canViewS3Storage, isAdmin]);
 
   const sidebarItems = useMemo(() => [...mainItems, ...adminItems], [mainItems, adminItems]);
 

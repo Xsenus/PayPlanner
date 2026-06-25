@@ -103,10 +103,10 @@
 - [x] Роли: список ролей, копирование, изменение прав и удаление закрыты через `roles.canView/canCreate/canEdit/canDelete`; аудит готовности ролей и история роли дополнительно требуют `audit.canView`.
 - [x] Пользователи: список пользователей и карточка пользователя оставлены строго admin-only; рабочие роли не получают доступ через меню, tab/deep-link и backend `/api/users`.
 - [x] Контроль пользователей: активность пользователей оставлена строго admin-only; рабочие роли не получают доступ через меню, tab/deep-link и backend `/api/user-activity` admin endpoints.
-- [~] Аудит: журнал объектов, история объектов в карточках, восстановление удаленных объектов, техобслуживание БД; встроенные кнопки истории объекта и прямые окна аудита уже скрываются без `audit.canView`, backend журнала аудита возвращает `403` без права просмотра.
-- [ ] Интеграции: DaData, календарные провайдеры, импорт, внешние настройки.
-- [ ] Яндекс.Диск: раздел и вложенные настройки синхронизации.
-- [ ] S3: раздел и вложенные настройки.
+- [~] Аудит: журнал объектов, история объектов в карточках, восстановление удаленных объектов, техобслуживание БД; встроенные кнопки истории объекта, прямые окна аудита и пункт sidebar уже скрываются без `audit.canView`, backend журнала аудита возвращает `403` без права просмотра.
+- [~] Интеграции: DaData, календарные провайдеры, импорт, внешние настройки; пункт «Настройки» теперь появляется при `integrations.canView`, но не раскрывает аудит/Я.Диск/S3 без отдельных прав.
+- [~] Яндекс.Диск: раздел и вложенные настройки синхронизации закрыты отдельным `yandexDisk`; direct tab guard и backend controller tests подтверждают запрет без права просмотра.
+- [~] S3: раздел и вложенные настройки закрыты отдельным `s3Storage`; direct tab guard и backend controller tests подтверждают запрет без права просмотра.
 - [ ] Профиль: личный профиль должен оставаться доступным самому пользователю, но без чужих данных и админских блоков.
 
 ## План реализации
@@ -392,6 +392,8 @@ npm run test:unit
 - 25.06.2026: проверки после закрытия встроенной истории объектов пройдены: `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `dotnet test ... BackendPermissionMatrixTests/AppRelease` 107/107, `ObjectAuditControllerTests` 3/3, `ObjectAuditModal.access.test.tsx` 3/3, `ClientDetail.integration.test.tsx` 37/37, `MoneyOperations.integration.test.tsx` 58/58, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
 - 25.06.2026: разделы пользователей, карточка пользователя, контроль пользователей и профиль компании закреплены как строго admin-only; frontend route matrix теперь явно проверяет запрет для юриста, секретаря и бухгалтера, backend admin-filter тесты по `/api/users`, `/api/admin/users` и `/api/user-activity` подтверждают `403` для пользователя без admin-роли в БД.
 - 25.06.2026: проверки после закрепления admin-only разделов пройдены: `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `dotnet test ... BackendPermissionMatrixTests/AppRelease` 107/107, `App.routing.test.ts` 43/43, `UsersControllerTests/AdminUsersControllerTests/UserActivityControllerOnlineTests` 8/8, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
+- 25.06.2026: sidebar настроек разделен точнее: роль с `integrations.canView` видит пункт «Настройки», но пункт «Аудит объектов» показывается только при `audit.canView`, а Я.Диск и S3 остаются закрытыми своими правами; targeted UI tests `Navigation.test.tsx` и `App.routing.test.ts` прошли: 52/52, backend tests по интеграциям/Я.Диску/S3 прошли: 57/57.
+- 25.06.2026: проверки после разделения sidebar-настроек пройдены: `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `dotnet test ... BackendPermissionMatrixTests/AppRelease` 107/107, `Navigation.test.tsx` 9/9, `App.routing.test.ts` 43/43, `AppSettings/YandexDisk/S3Storage` 15/15, backend tests по интеграциям/Я.Диску/S3/AuthProviders 57/57, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
 
 ## Предварительная рекомендация по роли "Юрист"
 
@@ -420,6 +422,9 @@ npm run test:unit
 - [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~ObjectAuditControllerTests"` — пройдено 3 теста.
 - [x] `npx vitest run src/App.routing.test.ts --reporter dot` — пройдено 43 теста, включая admin-only вкладки `companyProfile/users/userDetail/userActivity` для рабочих ролей.
 - [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~UsersControllerTests|FullyQualifiedName~AdminUsersControllerTests|FullyQualifiedName~UserActivityControllerOnlineTests"` — пройдено 8 тестов backend admin-filter для пользователей и контроля пользователей.
+- [x] `npx vitest run src/components/Navigation/Navigation.test.tsx --reporter dot` — пройдено 9 тестов, включая доступ к настройкам по `integrations.canView` без утечки аудита/Я.Диска/S3.
+- [x] `npx vitest run src/components/Settings/AppSettings.test.tsx src/components/YandexDisk/YandexDisk.test.tsx src/components/S3Storage/S3Storage.test.tsx --reporter dot` — пройдено 15 тестов.
+- [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~DadataIntegrationSettingsControllerTests|FullyQualifiedName~AppFeatureFlagsTests|FullyQualifiedName~S3StorageControllerTests|FullyQualifiedName~YandexDiskControllerTests|FullyQualifiedName~AuthProvidersAdminControllerTests"` — пройдено 57 тестов.
 - [x] `npm run lint` — ошибок нет, остались существующие предупреждения по React hooks / fast refresh.
 - [x] `npm run build` — сборка успешна, остались существующие предупреждения Vite/Rolldown по стороннему `@microsoft/signalr` и размеру chunk.
 - [x] `git diff --check` — замечаний нет.
