@@ -101,8 +101,8 @@
 - [x] Справочники: просмотр, создание, редактирование и удаление справочников подчинены правам `dictionaries.canView/canCreate/canEdit/canDelete`; прежняя жесткая привязка редактирования к admin снята.
 - [x] Уведомления: личный inbox оставлен доступным авторизованному пользователю, админские настройки рассылок закрываются через `notifications.canView/canEdit`.
 - [x] Роли: список ролей, копирование, изменение прав и удаление закрыты через `roles.canView/canCreate/canEdit/canDelete`; аудит готовности ролей и история роли дополнительно требуют `audit.canView`.
-- [ ] Пользователи: список пользователей и карточка пользователя; либо оставить строго admin-only, либо добавить явный ключ прав в каталог.
-- [ ] Контроль пользователей: активность пользователей; либо строго admin-only, либо отдельный ключ прав.
+- [x] Пользователи: список пользователей и карточка пользователя оставлены строго admin-only; рабочие роли не получают доступ через меню, tab/deep-link и backend `/api/users`.
+- [x] Контроль пользователей: активность пользователей оставлена строго admin-only; рабочие роли не получают доступ через меню, tab/deep-link и backend `/api/user-activity` admin endpoints.
 - [~] Аудит: журнал объектов, история объектов в карточках, восстановление удаленных объектов, техобслуживание БД; встроенные кнопки истории объекта и прямые окна аудита уже скрываются без `audit.canView`, backend журнала аудита возвращает `403` без права просмотра.
 - [ ] Интеграции: DaData, календарные провайдеры, импорт, внешние настройки.
 - [ ] Яндекс.Диск: раздел и вложенные настройки синхронизации.
@@ -390,6 +390,8 @@ npm run test:unit
 - 25.06.2026: проверки после разделения ролей и аудита пройдены: `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `dotnet test ... BackendPermissionMatrixTests/AppRelease` 107/107, `Roles.access.test.tsx` + `RolePermissionAuditPanel.test.tsx` 6/6, `RolePermissionsAuditTests` 11/11, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
 - 25.06.2026: встроенные кнопки истории объекта в карточках и прямые окна аудита теперь скрываются без `audit.canView`; targeted tests `ObjectAuditModal.access.test.tsx` и `ObjectAuditControllerTests` прошли: 6/6.
 - 25.06.2026: проверки после закрытия встроенной истории объектов пройдены: `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `dotnet test ... BackendPermissionMatrixTests/AppRelease` 107/107, `ObjectAuditControllerTests` 3/3, `ObjectAuditModal.access.test.tsx` 3/3, `ClientDetail.integration.test.tsx` 37/37, `MoneyOperations.integration.test.tsx` 58/58, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
+- 25.06.2026: разделы пользователей, карточка пользователя, контроль пользователей и профиль компании закреплены как строго admin-only; frontend route matrix теперь явно проверяет запрет для юриста, секретаря и бухгалтера, backend admin-filter тесты по `/api/users`, `/api/admin/users` и `/api/user-activity` подтверждают `403` для пользователя без admin-роли в БД.
+- 25.06.2026: проверки после закрепления admin-only разделов пройдены: `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `dotnet test ... BackendPermissionMatrixTests/AppRelease` 107/107, `App.routing.test.ts` 43/43, `UsersControllerTests/AdminUsersControllerTests/UserActivityControllerOnlineTests` 8/8, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
 
 ## Предварительная рекомендация по роли "Юрист"
 
@@ -416,6 +418,8 @@ npm run test:unit
 - [x] `npx vitest run src/components/Clients/ClientDetail.integration.test.tsx --reporter dot` — пройдено 37 тестов.
 - [x] `npx vitest run src/components/Money/MoneyOperations.integration.test.tsx --reporter dot` — пройдено 58 тестов.
 - [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~ObjectAuditControllerTests"` — пройдено 3 теста.
+- [x] `npx vitest run src/App.routing.test.ts --reporter dot` — пройдено 43 теста, включая admin-only вкладки `companyProfile/users/userDetail/userActivity` для рабочих ролей.
+- [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~UsersControllerTests|FullyQualifiedName~AdminUsersControllerTests|FullyQualifiedName~UserActivityControllerOnlineTests"` — пройдено 8 тестов backend admin-filter для пользователей и контроля пользователей.
 - [x] `npm run lint` — ошибок нет, остались существующие предупреждения по React hooks / fast refresh.
 - [x] `npm run build` — сборка успешна, остались существующие предупреждения Vite/Rolldown по стороннему `@microsoft/signalr` и размеру chunk.
 - [x] `git diff --check` — замечаний нет.

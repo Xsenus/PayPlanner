@@ -409,17 +409,17 @@ describe('App real role route access matrix', () => {
     {
       role: 'secretary' as const,
       allowedTabs: ['calendar', 'tasks', 'tasksCalendar', 'clients', 'cases', 'notifications', 'settings'] as Tab[],
-      deniedTabs: ['accounts', 'acts', 'payments', 'contracts', 'reports', 'roles', 'audit', 'yandexDisk', 's3Storage'] as Tab[],
+      deniedTabs: ['accounts', 'acts', 'payments', 'contracts', 'reports', 'roles', 'audit', 'yandexDisk', 's3Storage', 'companyProfile', 'users', 'userDetail', 'userActivity'] as Tab[],
     },
     {
       role: 'lawyer' as const,
       allowedTabs: ['calendar', 'tasks', 'tasksCalendar', 'clients', 'cases', 'notifications', 'settings'] as Tab[],
-      deniedTabs: ['accounts', 'acts', 'payments', 'contracts', 'reports', 'roles', 'audit', 'yandexDisk', 's3Storage'] as Tab[],
+      deniedTabs: ['accounts', 'acts', 'payments', 'contracts', 'reports', 'roles', 'audit', 'yandexDisk', 's3Storage', 'companyProfile', 'users', 'userDetail', 'userActivity'] as Tab[],
     },
     {
       role: 'accountant' as const,
       allowedTabs: ['calendar', 'clients', 'cases', 'accounts', 'acts', 'payments', 'contracts', 'notifications', 'settings'] as Tab[],
-      deniedTabs: ['tasks', 'tasksControl', 'tasksApprovals', 'tasksCalendar', 'reports', 'roles', 'audit', 'yandexDisk', 's3Storage'] as Tab[],
+      deniedTabs: ['tasks', 'tasksControl', 'tasksApprovals', 'tasksCalendar', 'reports', 'roles', 'audit', 'yandexDisk', 's3Storage', 'companyProfile', 'users', 'userDetail', 'userActivity'] as Tab[],
     },
   ])('applies expected menu access for $role', ({ role, allowedTabs, deniedTabs }) => {
     const permissions = createOperationalRolePermissions(role);
