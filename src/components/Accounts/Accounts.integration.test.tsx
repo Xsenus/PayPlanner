@@ -11,6 +11,7 @@ const {
   getAccountsRegistryResultMock,
   getPayablesDashboardResultMock,
   getClientsMock,
+  getLegalEntitiesMock,
   getContractsMock,
   getInvoiceMock,
   invoiceModalPropsSpy,
@@ -32,6 +33,7 @@ const {
   getAccountsRegistryResultMock: vi.fn(),
   getPayablesDashboardResultMock: vi.fn(),
   getClientsMock: vi.fn(),
+  getLegalEntitiesMock: vi.fn(),
   getContractsMock: vi.fn(),
   getInvoiceMock: vi.fn(),
   invoiceModalPropsSpy: vi.fn(),
@@ -48,6 +50,7 @@ const {
   applyClientBalanceMock: vi.fn(),
   rolePermissionsResult: {
     clients: { canView: false, canCreate: false, canEdit: false, canDelete: false },
+    legalEntities: { canView: false, canCreate: false, canEdit: false, canDelete: false },
     accounts: { canView: true, canCreate: true, canEdit: true, canDelete: false },
     acts: { canView: true, canCreate: true, canEdit: true, canDelete: false },
     contracts: { canView: false, canCreate: false, canEdit: false, canDelete: false },
@@ -311,6 +314,7 @@ vi.mock('../../services/api', () => ({
     createPayment: createPaymentMock,
     getInvoice: getInvoiceMock,
     getClients: getClientsMock,
+    getLegalEntities: getLegalEntitiesMock,
     getContracts: getContractsMock,
     getActResponsibles: getActResponsiblesMock,
     updateInvoiceWorkflowStatus: updateInvoiceWorkflowStatusMock,
@@ -336,6 +340,11 @@ vi.mock('./InvoiceModal', () => ({
     onBack?: () => void;
     onClose?: () => void;
     onEditRelatedPayment?: (payment: Payment) => void;
+    allowedCounterpartyScopes?: string[];
+    clients?: Client[];
+    legalEntities?: unknown[];
+    onOpenClient?: unknown;
+    onOpenContract?: unknown;
   }) => {
     invoiceModalPropsSpy(props);
     if (!props.open) {
@@ -572,6 +581,7 @@ describe('Accounts integration', () => {
 
   beforeEach(() => {
     Object.assign(rolePermissionsResult.clients, { canView: false, canCreate: false, canEdit: false, canDelete: false });
+    Object.assign(rolePermissionsResult.legalEntities, { canView: false, canCreate: false, canEdit: false, canDelete: false });
     Object.assign(rolePermissionsResult.accounts, { canView: true, canCreate: true, canEdit: true, canDelete: false });
     Object.assign(rolePermissionsResult.acts, { canView: true, canCreate: true, canEdit: true, canDelete: false });
     Object.assign(rolePermissionsResult.contracts, { canView: false, canCreate: false, canEdit: false, canDelete: false });
@@ -580,6 +590,7 @@ describe('Accounts integration', () => {
     getAccountsRegistryResultMock.mockReset();
     getPayablesDashboardResultMock.mockReset();
     getClientsMock.mockReset();
+    getLegalEntitiesMock.mockReset();
     getContractsMock.mockReset();
     getInvoiceMock.mockReset();
     invoiceModalPropsSpy.mockReset();
@@ -638,6 +649,7 @@ describe('Accounts integration', () => {
     });
     getInvoiceMock.mockResolvedValue(createInvoice());
     getClientsMock.mockResolvedValue([createClient()]);
+    getLegalEntitiesMock.mockResolvedValue([]);
     getContractsMock.mockResolvedValue({
       items: [createContract()],
       total: 1,
@@ -688,6 +700,9 @@ describe('Accounts integration', () => {
   });
 
   it('passes client role filters into the accounts registry query', async () => {
+    Object.assign(rolePermissionsResult.clients, { canView: true });
+    Object.assign(rolePermissionsResult.contracts, { canView: true });
+
     render(<Accounts />);
 
     fireEvent.click(screen.getByRole('button', { name: /Все контрагенты/i }));
@@ -716,6 +731,8 @@ describe('Accounts integration', () => {
   });
 
   it('passes selected contract into the accounts registry query', async () => {
+    Object.assign(rolePermissionsResult.contracts, { canView: true });
+
     render(<Accounts />);
 
     await waitFor(() => {
@@ -1047,6 +1064,33 @@ describe('Accounts integration', () => {
     expect(props.onOpenPayment).toBeUndefined();
     expect(screen.queryByText('Representative payment for invoice 24')).toBeNull();
     expect(screen.queryByText('Sibling payment for invoice 24')).toBeNull();
+  });
+
+  it('does not load closed counterparty and contract lookups for the invoice editor', async () => {
+    render(<Accounts onOpenClient={vi.fn()} onOpenContract={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Добавить сч[её]т/i }));
+
+    await waitFor(() => {
+      expect(invoiceModalPropsSpy).toHaveBeenCalledWith(expect.objectContaining({ open: true }));
+    });
+
+    const props = invoiceModalPropsSpy.mock.calls.at(-1)?.[0] as {
+      allowedCounterpartyScopes?: string[];
+      clients?: Client[];
+      legalEntities?: unknown[];
+      onOpenClient?: unknown;
+      onOpenContract?: unknown;
+    };
+
+    expect(props.allowedCounterpartyScopes).toEqual([]);
+    expect(props.clients).toEqual([]);
+    expect(props.legalEntities).toEqual([]);
+    expect(props.onOpenClient).toBeUndefined();
+    expect(props.onOpenContract).toBeUndefined();
+    expect(getClientsMock).not.toHaveBeenCalled();
+    expect(getLegalEntitiesMock).not.toHaveBeenCalled();
+    expect(getContractsMock).not.toHaveBeenCalled();
   });
 
   it('opens act creation as a dedicated page from the accounts registry', async () => {
