@@ -91,7 +91,7 @@
 - [x] Заметки: список досок, карточки заметок, совместный доступ, SignalR hub, inbox и уведомления проверяют `notes.canView/canCreate/canEdit/canDelete`; toast по заметке без доступа к разделу больше не предлагает открыть доску.
 - [ ] Отчеты: все вкладки отчетов и финансовые сводки.
 - [ ] Калькулятор: вход в раздел и сохранение/экспорт, если есть.
-- [ ] Контакты/клиенты: физлица, карточка клиента, связи с делами, счета/акты/платежи/договоры в карточке.
+- [~] Контакты/клиенты: физлица, карточка клиента, связи с делами, счета/акты/платежи/договоры в карточке; общий раздел контактов уже фильтрует таблицу, сохраненные колонки, карточные счетчики и реквизиты связанных юрлиц/клиентов через права `cases/contracts/accounts/acts/payments/legalEntities/clients`.
 - [~] Юрлица: список юрлиц закрывает связанные дела/договоры/счета/акты/платежи по правам разделов; карточка юрлица закрывает связанные дела/счета/акты/платежи, их загрузку, счетчики, блоки и кнопки создания; отдельные договорные связи в карточке юрлица не найдены и остаются в общей проверке связанных переходов.
 - [~] Дела: реестр и карточка дела уже проверяют финансы, владельцев, выбор владельца и связанных участников через права `payments/clients/legalEntities`; задачи дела, календарь оплат и документы остаются в общей проверке раздела.
 - [~] Счета: доходные/расходные, карточка счета, связанные платежи, документы; журнал и форма счета не загружают закрытые справочники клиентов/юрлиц/договоров, не передают переходы в закрытые клиенты/договоры и не применяют сохраненные фильтры по закрытым разделам.
@@ -148,6 +148,7 @@
 - [x] Таблицы платежей в журнале и календаре проверяют связанные клиенты и дела через `clients` и `cases`: контрагент остается текстом без права на клиентов, а `caseId` не передается в переход без права на дела.
 - [x] Денежный журнал проверяет связанные счета и проекты через `accounts` и `clients`: счет/проект остаются текстом без права на соответствующий раздел, а бейдж сверенного счета не открывает закрытый раздел счетов.
 - [x] Раздел «Дела» проверяет владельцев и связанных участников через `clients` и `legalEntities`: создание дела не открывает выбор владельца без доступных справочников, переходы к владельцу отключены без прав, а карточка дела не загружает закрытые справочники клиентов и юрлиц для связанных участников.
+- [x] Общий раздел «Контакты» проверяет связанные колонки и карточные счетчики через права `cases/contracts/accounts/acts/payments/clients/legalEntities`: сохраненные настройки таблицы не возвращают скрытые колонки, физлица не показывают реквизиты связанного юрлица без доступа к юрлицам, а юрлица не показывают счетчик клиентов без доступа к клиентам.
 - [x] Раздел «Роли» разделяет управление ролями и аудит: список, копирование, редактирование прав и удаление остаются на `roles.*`, а аудит готовности ролей и история роли показываются только при `audit.canView`.
 - [x] Встроенный аудит объектов проверяет `audit.canView`: общий блок истории объекта скрывается без права на аудит, а прямые кнопки истории клиента и кассового ордера не показываются роли без доступа к разделу «Аудит».
 - [x] Для detail/create страниц проверять доступ к родительскому разделу и операции: например `contractCreate` требует `contracts.canView && contracts.canCreate`, `actCreate` требует `acts.canView && acts.canCreate`.
@@ -398,6 +399,8 @@ npm run test:unit
 - 25.06.2026: проверки после закрытия аудита личного профиля пройдены: `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `npx vitest run src/components/Profile/ProfilePage.test.tsx src/App.routing.test.ts --reporter dot` 45/45, `dotnet test ... ProfileControllerTests` 1/1, `dotnet test ... BackendPermissionMatrixTests/AppRelease` 107/107, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
 - 25.06.2026: раздел «Заметки» закрыт по правам на уровне меню, прямого `/notes`, API досок/заметок, SignalR hub, кандидатов совместного доступа и центра уведомлений; дополнительно исправлен toast по заметке для роли без `notes.canView`: действие больше не обещает открыть доску. Targeted tests `RealtimeNotificationToasts.test.tsx` + `App.routing.test.ts` прошли 67/67, backend `StickyNotesControllerTests|NotesHubTests|NotificationInboxControllerTests` прошли 50/50.
 - 25.06.2026: проверки после уточнения уведомлений заметок пройдены: `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `dotnet test ... BackendPermissionMatrixTests/AppRelease` 107/107, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
+- 25.06.2026: общий раздел «Контакты» дополнительно закрывает связанные колонки, сохраненные настройки таблицы, карточные счетчики и реквизиты через права `cases/contracts/accounts/acts/payments/clients/legalEntities`; targeted tests `UnifiedContacts.test.tsx` + `App.routing.test.ts` прошли 55/55.
+- 25.06.2026: проверки после доработки общего раздела «Контакты» пройдены: `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `dotnet test ... BackendPermissionMatrixTests/AppRelease` 107/107, `UnifiedContacts.test.tsx` + `App.routing.test.ts` 55/55, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
 
 ## Предварительная рекомендация по роли "Юрист"
 
@@ -434,6 +437,8 @@ npm run test:unit
 - [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~ProfileControllerTests"` — пройден 1 тест личного профиля.
 - [x] `npx vitest run src/components/Notifications/RealtimeNotificationToasts.test.tsx src/App.routing.test.ts --reporter dot` — пройдено 67 тестов, включая fallback для уведомлений заметок без обработчика доски.
 - [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~StickyNotesControllerTests|FullyQualifiedName~NotesHubTests|FullyQualifiedName~NotificationInboxControllerTests"` — пройдено 50 тестов по заметкам, SignalR и inbox.
+- [x] `npx vitest run src/components/Contacts/UnifiedContacts.test.tsx src/App.routing.test.ts --reporter dot` — пройдено 55 тестов, включая скрытие связанных колонок и счетчиков контактов без прав.
+- [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~BackendPermissionMatrixTests|FullyQualifiedName~AppRelease"` — пройдено 107 тестов после обновления release note.
 - [x] `npm run lint` — ошибок нет, остались существующие предупреждения по React hooks / fast refresh.
 - [x] `npm run build` — сборка успешна, остались существующие предупреждения Vite/Rolldown по стороннему `@microsoft/signalr` и размеру chunk.
 - [x] `git diff --check` — замечаний нет.

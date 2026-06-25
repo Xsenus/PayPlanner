@@ -135,6 +135,14 @@ type ContactColumnConfig = {
   defaultVisible?: boolean;
 };
 
+const CLIENT_LEGAL_ENTITY_COLUMN_KEYS = new Set<ContactColumnKey>([
+  'legalShortName',
+  'legalFullName',
+  'legalInn',
+  'legalKpp',
+  'legalOgrn',
+]);
+
 const COMMON_CONTACT_COLUMNS: ContactColumnConfig[] = [
   { key: 'contact', label: 'Контакт', defaultWidth: 360 },
   { key: 'phone', label: 'Телефон', defaultWidth: 150 },
@@ -378,6 +386,9 @@ export function UnifiedContacts({
   const canEditLegalEntities = permissions.legalEntities.canEdit;
   const isContactColumnAllowed = useCallback(
     (columnKey: ContactColumnKey) => {
+      if (CLIENT_LEGAL_ENTITY_COLUMN_KEYS.has(columnKey)) return canViewLegalEntities;
+      if (columnKey === 'clientsCount') return canViewClients;
+      if (columnKey === 'cases') return permissions.cases.canView;
       if (columnKey === 'invoices') return permissions.accounts.canView;
       if (columnKey === 'acts') return permissions.acts.canView;
       if (columnKey === 'payments') return permissions.payments.canView;
@@ -387,8 +398,11 @@ export function UnifiedContacts({
     [
       permissions.accounts.canView,
       permissions.acts.canView,
+      permissions.cases.canView,
       permissions.contracts.canView,
       permissions.payments.canView,
+      canViewClients,
+      canViewLegalEntities,
     ],
   );
   const settingsScope = lockKind ? initialKind : 'all';
@@ -835,8 +849,48 @@ export function UnifiedContacts({
         </span>
         <span className="truncate font-semibold text-slate-900">{item.title}</span>
       </div>
-      <div className="mt-1 truncate text-sm text-slate-500">{item.subtitle}</div>
+      <div className="mt-1 truncate text-sm text-slate-500">{getContactSubtitle(item)}</div>
     </div>
+  );
+
+  const getContactSubtitle = (item: UnifiedContact) => {
+    if (item.kind === 'client' && !canViewLegalEntities) {
+      return normalize(item.client.company) || kindLabel(item.kind);
+    }
+
+    return item.subtitle;
+  };
+
+  const getContactInn = (item: UnifiedContact) => {
+    if (item.kind === 'client' && !canViewLegalEntities) {
+      return '';
+    }
+
+    return item.inn;
+  };
+
+  const getContactKpp = (item: UnifiedContact) => {
+    if (item.kind === 'client' && !canViewLegalEntities) {
+      return '';
+    }
+
+    return item.kpp;
+  };
+
+  const getContactAddress = (item: UnifiedContact) => {
+    if (item.kind === 'client' && !canViewLegalEntities) {
+      return normalize(item.client.address);
+    }
+
+    return item.address;
+  };
+
+  const getLegalClientsMetric = (item: UnifiedContact) => (
+    canViewClients && item.kind === 'legal' ? item.legalEntity.clientsCount ?? 0 : '—'
+  );
+
+  const getLegalFooterText = (item: UnifiedContact) => (
+    item.kind === 'legal' && !canViewClients ? kindLabel(item.kind) : item.statusText
   );
 
   const renderTableCell = (item: UnifiedContact, columnKey: ContactColumnKey) => {
@@ -853,13 +907,13 @@ export function UnifiedContacts({
       case 'email':
         return item.email || '—';
       case 'inn':
-        return item.inn || '—';
+        return getContactInn(item) || '—';
       case 'kpp':
-        return item.kpp || '—';
+        return getContactKpp(item) || '—';
       case 'ogrn':
         return legal?.ogrn || '—';
       case 'address':
-        return item.address || '—';
+        return getContactAddress(item) || '—';
       case 'responsible':
         return client?.responsibleUserName || legal?.responsibleUserName || '—';
       case 'status':
@@ -929,7 +983,7 @@ export function UnifiedContacts({
       case 'treasuryAccountNumber':
         return legal?.treasuryAccountNumber || '—';
       case 'clientsCount':
-        return item.kind === 'legal' ? item.legalEntity.clientsCount ?? 0 : '—';
+        return item.kind === 'legal' ? getLegalClientsMetric(item) : '—';
       case 'cases':
         return renderRelatedLinks(
           getCaseLinks(item),
@@ -1123,20 +1177,20 @@ export function UnifiedContacts({
                   <FieldCell icon={<Mail className="h-4 w-4" />} label="Email" value={item.email} />
                 </div>
                 <div className="grid min-w-0 grid-cols-2 gap-4">
-                  <FieldCell icon={<Building2 className="h-4 w-4" />} label="ИНН" value={item.inn} />
-                  <FieldCell icon={<Building2 className="h-4 w-4" />} label="КПП" value={item.kpp} />
+                  <FieldCell icon={<Building2 className="h-4 w-4" />} label="ИНН" value={getContactInn(item)} />
+                  <FieldCell icon={<Building2 className="h-4 w-4" />} label="КПП" value={getContactKpp(item)} />
                 </div>
-                <FieldCell icon={<MapPin className="h-4 w-4" />} label="Адрес" value={item.address} />
+                <FieldCell icon={<MapPin className="h-4 w-4" />} label="Адрес" value={getContactAddress(item)} />
               </div>
 
               <div className="mt-4 grid grid-cols-3 gap-2">
-                <MetricTile label={item.kind === 'legal' ? 'Клиенты' : 'Статус'} value={item.kind === 'legal' ? item.legalEntity.clientsCount ?? 0 : item.statusText} />
-                <MetricTile label="Дела" value={getCaseCount(item)} />
-                <MetricTile label="Счета" value={getInvoiceCount(item)} />
+                <MetricTile label={item.kind === 'legal' ? 'Клиенты' : 'Статус'} value={item.kind === 'legal' ? getLegalClientsMetric(item) : item.statusText} />
+                <MetricTile label="Дела" value={permissions.cases.canView ? getCaseCount(item) : '—'} />
+                <MetricTile label="Счета" value={permissions.accounts.canView ? getInvoiceCount(item) : '—'} />
               </div>
 
               <div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500">
-                <span className="truncate pr-3">{item.kind === 'legal' ? item.statusText : kindLabel(item.kind)}</span>
+                <span className="truncate pr-3">{item.kind === 'legal' ? getLegalFooterText(item) : kindLabel(item.kind)}</span>
                 <span>{formatDate(item.createdAt, profileTimeZoneId)}</span>
               </div>
             </button>
