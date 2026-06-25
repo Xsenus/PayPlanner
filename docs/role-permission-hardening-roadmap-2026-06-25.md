@@ -137,6 +137,7 @@
 
 - [x] Вынести единую `tab -> permission` карту и использовать ее в `App`, `Navigation`, route helpers и тестах.
 - [~] Скрывать не только пункты меню, но и вложенные кнопки действий в карточках: список юрлиц фильтрует связанные дела/договоры/счета/акты/платежи по правам; карточка клиента скрывает быстрые финансовые кнопки без права просмотра раздела; карточка дела скрывает быстрые финансовые действия в боковой панели и заказ-наряде без права просмотра финансов; остальные вложенные действия еще требуют отдельной проверки.
+- [x] Карточка клиента переводит вкладку «Дела», кнопку создания дела, редактирование/удаление дела, загрузку списка дел и финансовую сводку по делам на права `cases`; если роль видит клиента, но не видит дела, связанные дела не загружаются и не показываются.
 - [x] Для detail/create страниц проверять доступ к родительскому разделу и операции: например `contractCreate` требует `contracts.canView && contracts.canCreate`, `actCreate` требует `acts.canView && acts.canCreate`.
 - [x] Привести справочники к правам роли: просмотр по `dictionaries.canView`, создание по `dictionaries.canCreate`, редактирование по `dictionaries.canEdit`, удаление по `dictionaries.canDelete`.
 - [x] Разделить личные уведомления и админские настройки уведомлений, чтобы запрет настроек не ломал личный inbox.
@@ -355,6 +356,8 @@ npm run test:unit
 - 25.06.2026: проверки после доработки карточки дела пройдены: `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `dotnet test ... BackendPermissionMatrixTests/AppRelease` 107/107, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
 - 25.06.2026: карточка юрлица получила отдельные права `canViewCases/canViewAccounts/canViewActs/canViewPayments` для связанных блоков; targeted test `LegalEntityModal.integration.test.tsx` прошел: 7/7.
 - 25.06.2026: проверки после доработки карточки юрлица пройдены: `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `dotnet test ... BackendPermissionMatrixTests/AppRelease` 107/107, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
+- 25.06.2026: карточка клиента теперь проверяет вкладку «Дела», создание/изменение/удаление дела, загрузку списка дел и сводку по делам через `cases`; targeted test `ClientDetail.integration.test.tsx` прошел: 37/37.
+- 25.06.2026: проверки после доработки дел в карточке клиента пройдены: `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `dotnet test ... BackendPermissionMatrixTests/AppRelease` 107/107, `ClientDetail.integration.test.tsx` 37/37, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
 
 ## Предварительная рекомендация по роли "Юрист"
 
@@ -372,7 +375,7 @@ npm run test:unit
 - [x] `npm exec vitest run src/components/Dictionaries/Dictionaries.test.tsx src/App.routing.test.ts src/services/permissionsService.test.ts src/hooks/useRolePermissions.test.tsx src/components/Navigation/Navigation.test.tsx -- --runInBand` — пройдено 59 тестов.
 - [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~AppRelease|FullyQualifiedName~BackendPermissionMatrixTests"` — пройдено 107 тестов.
 - [x] `npm exec vitest run src/components/LegalEntities/LegalEntities.test.tsx src/components/Contacts/UnifiedContacts.test.tsx -- --runInBand` — пройдено 11 тестов.
-- [x] `npm exec vitest run src/components/Clients/ClientDetail.integration.test.tsx -- --runInBand` — пройдено 36 тестов.
+- [x] `npm exec vitest run src/components/Clients/ClientDetail.integration.test.tsx -- --runInBand` — пройдено 37 тестов.
 - [x] `npm run lint` — ошибок нет, остались существующие предупреждения по React hooks / fast refresh.
 - [x] `npm run build` — сборка успешна, остались существующие предупреждения Vite/Rolldown по стороннему `@microsoft/signalr` и размеру chunk.
 - [x] `git diff --check` — замечаний нет.

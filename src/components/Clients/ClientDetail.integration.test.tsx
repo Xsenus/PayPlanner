@@ -102,6 +102,7 @@ const {
 function createPermissions() {
   return {
     clients: { canView: true, canCreate: false, canEdit: true, canDelete: false },
+    cases: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     accounts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     acts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     contracts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
@@ -552,6 +553,7 @@ vi.mock('./ClientStatusBadge', () => ({
 describe('ClientDetail integration', () => {
   beforeEach(() => {
     Object.assign(permissionsResult.clients, createPermissions().clients);
+    Object.assign(permissionsResult.cases, createPermissions().cases);
     Object.assign(permissionsResult.accounts, createPermissions().accounts);
     Object.assign(permissionsResult.acts, createPermissions().acts);
     Object.assign(permissionsResult.contracts, createPermissions().contracts);
@@ -697,6 +699,7 @@ describe('ClientDetail integration', () => {
 
   it('shows compact labels under client quick action buttons', async () => {
     Object.assign(permissionsResult.clients, { canCreate: true });
+    Object.assign(permissionsResult.cases, { canCreate: true });
     Object.assign(permissionsResult.accounts, { canCreate: true });
     Object.assign(permissionsResult.acts, { canCreate: true });
     Object.assign(permissionsResult.contracts, { canCreate: true });
@@ -730,6 +733,26 @@ describe('ClientDetail integration', () => {
     expect(apiService.getClientBalance).not.toHaveBeenCalled();
     expect(apiService.getClientCaseFinanceSummaries).not.toHaveBeenCalled();
     expect(apiService.getPaymentsV2).not.toHaveBeenCalled();
+  });
+
+  it('hides client case actions and keeps the case section disabled without case rights', async () => {
+    Object.assign(permissionsResult.clients, { canView: true, canCreate: true });
+    Object.assign(permissionsResult.cases, {
+      canView: false,
+      canCreate: true,
+      canEdit: true,
+      canDelete: true,
+    });
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="cases" />);
+
+    await screen.findByRole('heading', { name: 'Иванов Иван Иванович' });
+
+    expect(screen.queryByRole('button', { name: 'Добавить дело' })).toBeNull();
+    await waitFor(() => {
+      expect(useClientCasesMock).toHaveBeenCalledWith(1, expect.objectContaining({ enabled: false }));
+    });
+    expect(apiService.getClientCaseFinanceSummaries).not.toHaveBeenCalled();
   });
 
   it('hides client finance create shortcuts when create is allowed but view is closed', async () => {
