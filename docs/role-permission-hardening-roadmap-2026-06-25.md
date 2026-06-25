@@ -107,7 +107,7 @@
 - [~] Интеграции: DaData, календарные провайдеры, импорт, внешние настройки; пункт «Настройки» теперь появляется при `integrations.canView`, но не раскрывает аудит/Я.Диск/S3 без отдельных прав.
 - [~] Яндекс.Диск: раздел и вложенные настройки синхронизации закрыты отдельным `yandexDisk`; direct tab guard и backend controller tests подтверждают запрет без права просмотра.
 - [~] S3: раздел и вложенные настройки закрыты отдельным `s3Storage`; direct tab guard и backend controller tests подтверждают запрет без права просмотра.
-- [ ] Профиль: личный профиль должен оставаться доступным самому пользователю, но без чужих данных и админских блоков.
+- [x] Профиль: личный профиль остается доступным самому пользователю; вкладка аудита профиля скрывается без `audit.canView`, а `GET/PUT /api/profile`, смена пароля, фото, внешние входы и баланс исполнителя работают только с текущим пользователем.
 
 ## План реализации
 
@@ -394,6 +394,8 @@ npm run test:unit
 - 25.06.2026: проверки после закрепления admin-only разделов пройдены: `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `dotnet test ... BackendPermissionMatrixTests/AppRelease` 107/107, `App.routing.test.ts` 43/43, `UsersControllerTests/AdminUsersControllerTests/UserActivityControllerOnlineTests` 8/8, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
 - 25.06.2026: sidebar настроек разделен точнее: роль с `integrations.canView` видит пункт «Настройки», но пункт «Аудит объектов» показывается только при `audit.canView`, а Я.Диск и S3 остаются закрытыми своими правами; targeted UI tests `Navigation.test.tsx` и `App.routing.test.ts` прошли: 52/52, backend tests по интеграциям/Я.Диску/S3 прошли: 57/57.
 - 25.06.2026: проверки после разделения sidebar-настроек пройдены: `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `dotnet test ... BackendPermissionMatrixTests/AppRelease` 107/107, `Navigation.test.tsx` 9/9, `App.routing.test.ts` 43/43, `AppSettings/YandexDisk/S3Storage` 15/15, backend tests по интеграциям/Я.Диску/S3/AuthProviders 57/57, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
+- 25.06.2026: личный профиль проверен как доступный рабочим ролям без лишних административных блоков: вкладка «Аудит» в профиле показывается только admin или роли с `audit.canView`, а обычная роль без аудита видит профиль без этой вкладки; targeted UI test `ProfilePage.test.tsx` прошел: 2/2.
+- 25.06.2026: проверки после закрытия аудита личного профиля пройдены: `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `npx vitest run src/components/Profile/ProfilePage.test.tsx src/App.routing.test.ts --reporter dot` 45/45, `dotnet test ... ProfileControllerTests` 1/1, `dotnet test ... BackendPermissionMatrixTests/AppRelease` 107/107, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
 
 ## Предварительная рекомендация по роли "Юрист"
 
@@ -425,6 +427,9 @@ npm run test:unit
 - [x] `npx vitest run src/components/Navigation/Navigation.test.tsx --reporter dot` — пройдено 9 тестов, включая доступ к настройкам по `integrations.canView` без утечки аудита/Я.Диска/S3.
 - [x] `npx vitest run src/components/Settings/AppSettings.test.tsx src/components/YandexDisk/YandexDisk.test.tsx src/components/S3Storage/S3Storage.test.tsx --reporter dot` — пройдено 15 тестов.
 - [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~DadataIntegrationSettingsControllerTests|FullyQualifiedName~AppFeatureFlagsTests|FullyQualifiedName~S3StorageControllerTests|FullyQualifiedName~YandexDiskControllerTests|FullyQualifiedName~AuthProvidersAdminControllerTests"` — пройдено 57 тестов.
+- [x] `npx vitest run src/components/Profile/ProfilePage.test.tsx --reporter dot` — пройдено 2 теста, включая скрытие вкладки аудита в личном профиле без `audit.canView`.
+- [x] `npx vitest run src/components/Profile/ProfilePage.test.tsx src/App.routing.test.ts --reporter dot` — пройдено 45 тестов.
+- [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~ProfileControllerTests"` — пройден 1 тест личного профиля.
 - [x] `npm run lint` — ошибок нет, остались существующие предупреждения по React hooks / fast refresh.
 - [x] `npm run build` — сборка успешна, остались существующие предупреждения Vite/Rolldown по стороннему `@microsoft/signalr` и размеру chunk.
 - [x] `git diff --check` — замечаний нет.
