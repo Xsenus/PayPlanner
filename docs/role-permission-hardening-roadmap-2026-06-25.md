@@ -90,7 +90,7 @@
 - [ ] Задачи: журнал задач, контроль, согласования, календарь задач, карточка задачи, старая и новая форма, комментарии, файлы, подзадачи.
 - [x] Заметки: список досок, карточки заметок, совместный доступ, SignalR hub, inbox и уведомления проверяют `notes.canView/canCreate/canEdit/canDelete`; toast по заметке без доступа к разделу больше не предлагает открыть доску.
 - [x] Отчеты: группы отчетов, финансовые сводки, фильтры, статусные отчеты по счетам/актам/договорам и переходы в задачи/дела показываются и загружаются только при правах на соответствующие разделы.
-- [ ] Калькулятор: вход в раздел и сохранение/экспорт, если есть.
+- [x] Калькулятор: вход в раздел и сохранение/экспорт, если есть. Расчет остается доступен по праву `calculator`, выбор клиентов/юрлиц/дел закрыт через `clients/legalEntities/cases`, сохранение графика в платежи требует `payments.canView` и `payments.canCreate`.
 - [~] Контакты/клиенты: физлица, карточка клиента, связи с делами, счета/акты/платежи/договоры в карточке; общий раздел контактов уже фильтрует таблицу, сохраненные колонки, карточные счетчики и реквизиты связанных юрлиц/клиентов через права `cases/contracts/accounts/acts/payments/legalEntities/clients`.
 - [~] Юрлица: список юрлиц закрывает связанные дела/договоры/счета/акты/платежи по правам разделов; карточка юрлица закрывает связанные дела/счета/акты/платежи, их загрузку, счетчики, блоки и кнопки создания; отдельные договорные связи в карточке юрлица не найдены и остаются в общей проверке связанных переходов.
 - [~] Дела: реестр и карточка дела уже проверяют финансы, владельцев, выбор владельца и связанных участников через права `payments/clients/legalEntities`; задачи дела, календарь оплат и документы остаются в общей проверке раздела.
@@ -406,6 +406,8 @@ npm run test:unit
 - 25.06.2026: проверки после закрытия переходов из личных уведомлений пройдены: `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `dotnet test ... BackendPermissionMatrixTests/AppRelease` 107/107, `NotificationCenter.test.tsx` + `RealtimeNotificationToasts.test.tsx` + `App.routing.test.ts` 83/83, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
 - 25.06.2026: раздел «Отчеты» разделяет внутренние группы и источники данных по правам: платежные отчеты и периодная финансовая сводка требуют `payments`, отчет по задачам требует `tasks`, юридические отчеты и переходы требуют `cases/tasks/accounts` по конкретному блоку, статусные отчеты требуют `accounts/acts/contracts`, а фильтры клиентов/дел/договоров/справочников не загружают закрытые разделы.
 - 25.06.2026: проверки после доработки отчетов пройдены: `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `dotnet test ... ReportsControllerTests/BackendPermissionMatrixTests/AppRelease` 193/193, `Reports.test.ts` + `App.routing.test.ts` 46/46, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
+- 25.06.2026: калькулятор рассрочки теперь оставляет расчет по праву `calculator`, но не загружает клиентов без `clients`, не открывает юрлиц без `legalEntities`, не показывает поле дела без `cases` и не дает сохранять график в платежи без `payments.canView/payments.canCreate`.
+- 25.06.2026: проверки после доработки калькулятора пройдены: `npm exec vitest run src/components/Accounts/InstallmentPlanner.integration.test.tsx src/App.routing.test.ts` 46/46, `npm run lint` без ошибок (19 старых предупреждений), `npm run build`, `dotnet test ... BackendPermissionMatrixTests/AppRelease` 107/107, UTF-8/JSON, `git diff --check`, локальный API на БД `/api/health` 200.
 
 ## Предварительная рекомендация по роли "Юрист"
 
@@ -446,6 +448,7 @@ npm run test:unit
 - [x] `npx vitest run src/components/Notifications/NotificationCenter.test.tsx src/components/Notifications/RealtimeNotificationToasts.test.tsx src/App.routing.test.ts --reporter dot` — пройдено 83 теста, включая скрытие переходов из личных уведомлений в закрытые разделы.
 - [x] `npx vitest run src/components/Reports/Reports.test.ts src/App.routing.test.ts --reporter dot` — пройдено 46 тестов, включая матрицу внутренних групп отчетов и routing guards.
 - [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~ReportsControllerTests|FullyQualifiedName~BackendPermissionMatrixTests|FullyQualifiedName~AppRelease"` — пройдено 193 теста после обновления отчетов и release note.
+- [x] `npm exec vitest run src/components/Accounts/InstallmentPlanner.integration.test.tsx src/App.routing.test.ts` — пройдено 46 тестов, включая read-only режим калькулятора без права создавать платежи и скрытие поля дела без `cases`.
 - [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~BackendPermissionMatrixTests|FullyQualifiedName~AppRelease"` — пройдено 107 тестов после обновления release note.
 - [x] `npm run lint` — ошибок нет, остались существующие предупреждения по React hooks / fast refresh.
 - [x] `npm run build` — сборка успешна, остались существующие предупреждения Vite/Rolldown по стороннему `@microsoft/signalr` и размеру chunk.

@@ -35,6 +35,7 @@ export type ClientsListMode = 'all' | 'paged';
 
 export type ClientsListOptions = {
   mode?: ClientsListMode;
+  enabled?: boolean;
   search?: string;
   isActive?: boolean;
   sortBy?: 'name' | 'createdAt';
@@ -45,8 +46,9 @@ export type ClientsListOptions = {
 };
 
 export function useClients(options?: ClientsListOptions) {
+  const enabled = options?.enabled ?? true;
   const [clients, setClients] = useState<Client[]>([]);
-  const [loadingInitial, setLoadingInitial] = useState(true);
+  const [loadingInitial, setLoadingInitial] = useState(enabled);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
@@ -54,6 +56,17 @@ export function useClients(options?: ClientsListOptions) {
   const requestIdRef = useRef(0);
 
   const fetchClients = useCallback(async (mode?: 'initial' | 'refresh') => {
+    if (!enabled) {
+      requestIdRef.current += 1;
+      hasLoadedRef.current = true;
+      setClients([]);
+      setTotal(0);
+      setError(null);
+      setLoadingInitial(false);
+      setRefreshing(false);
+      return;
+    }
+
     const nextMode = mode ?? (hasLoadedRef.current ? 'refresh' : 'initial');
     const requestId = ++requestIdRef.current;
 
@@ -122,7 +135,7 @@ export function useClients(options?: ClientsListOptions) {
         }
       }
     }
-  }, [options]);
+  }, [enabled, options]);
 
   useEffect(() => {
     void fetchClients();
