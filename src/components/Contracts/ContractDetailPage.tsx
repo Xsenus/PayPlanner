@@ -18,7 +18,7 @@ import { useToast } from '../../hooks/useToast';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
-import { CounterpartyPickerModal, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
+import { CounterpartyPickerModal, type CounterpartyKind, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
 
 interface Props {
   contractId: number;
@@ -170,9 +170,17 @@ export function ContractDetailPage({
   const { confirm, prompt } = useDialog();
   const rolePermissions = useRolePermissions(user?.role?.id);
   const canViewClients = rolePermissions.clients.canView;
+  const canViewLegalEntities = rolePermissions.legalEntities.canView;
   const canViewInvoices = rolePermissions.accounts.canView;
   const canViewActs = rolePermissions.acts.canView;
   const canViewPayments = rolePermissions.payments.canView;
+  const allowedCounterpartyScopes = useMemo<CounterpartyKind[]>(() => {
+    const scopes: CounterpartyKind[] = [];
+    if (canViewClients) scopes.push('client');
+    if (canViewLegalEntities) scopes.push('legalEntity');
+    return scopes;
+  }, [canViewClients, canViewLegalEntities]);
+  const canSelectCounterparties = allowedCounterpartyScopes.length > 0;
   const requiresFinancialActionReason = Boolean(user?.requiresFinancialActionReason);
   const [contract, setContract] = useState<Contract | null>(null);
   const [contractRules, setContractRules] = useState<ContractRulesSettingsDto>({
@@ -1404,9 +1412,13 @@ export function ContractDetailPage({
                 {settingsOpen ? 'Скрыть настройки' : 'Настроить таблицу'}
               </button>
               <button
-                onClick={() => setPickerOpen(true)}
-                disabled={!editMode}
-                className="inline-flex items-center gap-2 rounded border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm text-emerald-700 disabled:opacity-60"
+                onClick={() => {
+                  if (canSelectCounterparties) {
+                    setPickerOpen(true);
+                  }
+                }}
+                disabled={!editMode || !canSelectCounterparties}
+                className="inline-flex items-center gap-2 rounded border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm text-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Plus className="h-4 w-4" />
                 Добавить контрагента
@@ -2194,6 +2206,7 @@ export function ContractDetailPage({
         mode="multiple"
         title="Выбор контрагентов"
         selected={selectedPickerValue}
+        allowedScopes={allowedCounterpartyScopes}
         onApply={handleApplyCounterparties}
         onClose={() => setPickerOpen(false)}
       />

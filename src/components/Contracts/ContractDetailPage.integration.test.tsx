@@ -8,6 +8,7 @@ const { dialogConfirmMock, dialogPromptMock, rolePermissionsResult } = vi.hoiste
   dialogPromptMock: vi.fn(),
   rolePermissionsResult: {
     clients: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+    legalEntities: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     accounts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     acts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     payments: { canView: true, canCreate: false, canEdit: false, canDelete: false },
@@ -155,6 +156,7 @@ describe('ContractDetailPage integration', () => {
   beforeEach(() => {
     vi.useRealTimers();
     Object.assign(rolePermissionsResult.clients, { canView: true, canCreate: false, canEdit: false, canDelete: false });
+    Object.assign(rolePermissionsResult.legalEntities, { canView: true, canCreate: false, canEdit: false, canDelete: false });
     Object.assign(rolePermissionsResult.accounts, { canView: true, canCreate: false, canEdit: false, canDelete: false });
     Object.assign(rolePermissionsResult.acts, { canView: true, canCreate: false, canEdit: false, canDelete: false });
     Object.assign(rolePermissionsResult.payments, { canView: true, canCreate: false, canEdit: false, canDelete: false });
@@ -417,6 +419,27 @@ describe('ContractDetailPage integration', () => {
     expect(screen.getByText('Клиент 1')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Клиент 1' })).toBeNull();
     expect(onOpenClient).not.toHaveBeenCalled();
+  });
+
+  it('disables counterparty selection when clients and legal entities are hidden', async () => {
+    Object.assign(rolePermissionsResult.clients, { canView: false });
+    Object.assign(rolePermissionsResult.legalEntities, { canView: false });
+
+    render(
+      <ContractDetailPage
+        contractId={77}
+        onBack={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(apiService.getContract).toHaveBeenCalledWith(77);
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+
+    const addCounterpartyButton = screen.getByRole('button', { name: 'Добавить контрагента' }) as HTMLButtonElement;
+    expect(addCounterpartyButton.disabled).toBe(true);
   });
 
   it('downloads and sends contract documents from the detail header', async () => {

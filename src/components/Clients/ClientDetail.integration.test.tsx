@@ -102,6 +102,7 @@ const {
 function createPermissions() {
   return {
     clients: { canView: true, canCreate: false, canEdit: true, canDelete: false },
+    legalEntities: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     cases: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     accounts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     acts: { canView: true, canCreate: false, canEdit: false, canDelete: false },

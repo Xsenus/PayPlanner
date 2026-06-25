@@ -93,6 +93,7 @@ import { formatDateTimeInTimeZone } from "../../utils/timeZoneDate";
 import { ActModal } from "../Acts/ActModal";
 import { InvoiceModal } from "../Accounts/InvoiceModal";
 import { ContractModal } from "../Contracts/ContractModal";
+import type { CounterpartyKind } from "../ui/CounterpartyPickerModal";
 import { LegalEntityModal } from "../LegalEntities/LegalEntityModal";
 import { FormPromptModal } from "../ui/FormPromptModal";
 import { LookupSelect } from "../ui/LookupSelect";
@@ -1380,11 +1381,18 @@ export function ClientDetail({
   const permissions = useRolePermissions(user?.role?.id);
   const userIsAdmin = isAdmin();
   const clientPermissions = permissions.clients;
+  const legalEntityPermissions = permissions.legalEntities;
   const casePermissions = permissions.cases;
   const accountPermissions = permissions.accounts;
   const actPermissions = permissions.acts;
   const paymentPermissions = permissions.payments;
   const contractPermissions = permissions.contracts;
+  const allowedContractCounterpartyScopes = useMemo<CounterpartyKind[]>(() => {
+    const scopes: CounterpartyKind[] = [];
+    if (clientPermissions.canView) scopes.push("client");
+    if (legalEntityPermissions.canView) scopes.push("legalEntity");
+    return scopes;
+  }, [clientPermissions.canView, legalEntityPermissions.canView]);
   const sectionPermissions = useCallback(
     (section: ClientDetailSection) =>
       permissions[SECTION_PERMISSION_MAP[section]],
@@ -10876,6 +10884,7 @@ export function ClientDetail({
           submitting={contractSubmitting}
           errorMessage={contractModalError}
           defaultClients={contractDefaultClients}
+          allowedCounterpartyScopes={allowedContractCounterpartyScopes}
         />
 
         {payModalOpen ? (

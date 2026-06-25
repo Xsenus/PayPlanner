@@ -153,11 +153,11 @@ export function CounterpartyPickerModal({
   onApply,
 }: CounterpartyPickerModalProps) {
   const normalizedScopes = useMemo(
-    () => (allowedScopes.length > 0 ? allowedScopes : DEFAULT_SCOPES),
+    () => allowedScopes,
     [allowedScopes],
   );
   const resolveScope = useCallback(
-    (value: CounterpartyKind) => (normalizedScopes.includes(value) ? value : normalizedScopes[0]),
+    (value: CounterpartyKind) => (normalizedScopes.includes(value) ? value : (normalizedScopes[0] ?? value)),
     [normalizedScopes],
   );
   const [scope, setScope] = useState<CounterpartyKind>(() => resolveScope(initialScope));
@@ -186,6 +186,13 @@ export function CounterpartyPickerModal({
 
   useEffect(() => {
     if (!open) return;
+    if (!normalizedScopes.includes(scope)) {
+      setItems([]);
+      setTotal(0);
+      setLoading(false);
+      setError(null);
+      return;
+    }
 
     let cancelled = false;
     const load = async () => {
@@ -230,7 +237,7 @@ export function CounterpartyPickerModal({
     return () => {
       cancelled = true;
     };
-  }, [counterpartyRole, debouncedQuery, open, page, pageSize, scope]);
+  }, [counterpartyRole, debouncedQuery, normalizedScopes, open, page, pageSize, scope]);
 
   const selectedKeys = useMemo(() => new Set(draftSelected.map(selectionKey)), [draftSelected]);
   const disabledKeySet = useMemo(() => new Set(disabledKeys), [disabledKeys]);
@@ -305,6 +312,11 @@ export function CounterpartyPickerModal({
         </div>
 
         <div className="space-y-3 border-b border-slate-200 p-4">
+          {normalizedScopes.length === 0 ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              Выбор контрагентов недоступен для вашей роли.
+            </div>
+          ) : null}
           {normalizedScopes.length > 1 ? (
             <div className="grid grid-cols-2 rounded-lg border border-slate-200 bg-slate-50 p-1 text-sm font-medium">
               {normalizedScopes.includes('client') ? (
@@ -334,6 +346,7 @@ export function CounterpartyPickerModal({
             </div>
           ) : null}
 
+          {normalizedScopes.length > 0 ? (
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
@@ -348,6 +361,7 @@ export function CounterpartyPickerModal({
               className="w-full rounded-lg border border-slate-300 py-2.5 pl-9 pr-3 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
             />
           </div>
+          ) : null}
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto p-4">
@@ -374,7 +388,7 @@ export function CounterpartyPickerModal({
             </div>
           ) : items.length === 0 ? (
             <div className="flex h-full min-h-72 items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-10 text-center text-sm text-slate-500">
-              Контрагенты не найдены
+              {normalizedScopes.length === 0 ? 'Нет доступных типов контрагентов' : 'Контрагенты не найдены'}
             </div>
           ) : (
             <div className="overflow-hidden rounded-xl border border-slate-200">

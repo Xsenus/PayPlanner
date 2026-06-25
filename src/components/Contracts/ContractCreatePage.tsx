@@ -1,5 +1,7 @@
 import { ArrowLeft, Loader2, Plus, Save, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
+import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useToast } from '../../hooks/useToast';
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
@@ -7,7 +9,7 @@ import { apiService, type ContractRulesSettingsDto } from '../../services/api';
 import type { ContractBillingMode, ContractClient, ContractInput, ContractLegalEntity, ContractStatus } from '../../types';
 import { fromInputToApiDate, todayYMDInTimeZone } from '../../utils/dateUtils';
 import { TablePagination } from '../ui/TablePagination';
-import { CounterpartyPickerModal, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
+import { CounterpartyPickerModal, type CounterpartyKind, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
 
 interface ContractCreatePageProps {
   onBack: () => void;
@@ -61,8 +63,17 @@ function legalEntityName(entity: Pick<ContractLegalEntity, 'shortName' | 'fullNa
 
 export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProps) {
   const { t } = useTranslation();
+  const { user } = useAuth();
   const toast = useToast();
+  const rolePermissions = useRolePermissions(user?.role?.id);
   const profileTimeZoneId = useUserTimeZone();
+  const allowedCounterpartyScopes = useMemo<CounterpartyKind[]>(() => {
+    const scopes: CounterpartyKind[] = [];
+    if (rolePermissions.clients.canView) scopes.push('client');
+    if (rolePermissions.legalEntities.canView) scopes.push('legalEntity');
+    return scopes;
+  }, [rolePermissions.clients.canView, rolePermissions.legalEntities.canView]);
+  const canSelectCounterparties = allowedCounterpartyScopes.length > 0;
   const defaultDate = todayYMDInTimeZone(profileTimeZoneId);
   const defaultDateRef = useRef(defaultDate);
   const [form, setForm] = useState<FormState>(() => createInitialForm(profileTimeZoneId));
@@ -390,8 +401,13 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
               <h3 className="font-semibold text-slate-900">Контрагенты договора</h3>
               <button
                 type="button"
-                onClick={() => setPickerOpen(true)}
-                className="inline-flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm text-emerald-700"
+                onClick={() => {
+                  if (canSelectCounterparties) {
+                    setPickerOpen(true);
+                  }
+                }}
+                disabled={!canSelectCounterparties}
+                className="inline-flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm text-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <Plus className="h-4 w-4" />
                 Добавить контрагента
@@ -494,6 +510,7 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
         mode="multiple"
         title="Выбор контрагентов"
         selected={selectedPickerValue}
+        allowedScopes={allowedCounterpartyScopes}
         onApply={handleApplyCounterparties}
         onClose={() => setPickerOpen(false)}
       />
