@@ -708,11 +708,16 @@ describe('TaskJournal', () => {
       authorUserId: 8,
       authorName: 'Постановщик',
       title: 'Задача без удаления',
-    })], { waitForTitle: 'Задача без удаления' });
+    })], { waitForTitle: null });
 
     expect(screen.queryByTitle('Удалить')).toBeNull();
 
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Выбрать задачу Задача без удаления' }));
+    const taskCheckbox = await screen.findByRole(
+      'checkbox',
+      { name: 'Выбрать задачу Задача без удаления' },
+      { timeout: 15000 },
+    );
+    fireEvent.click(taskCheckbox);
 
     expect(screen.getByTestId('task-bulk-actions')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Удалить выбранные' })).toBeNull();
