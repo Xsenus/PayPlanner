@@ -2,10 +2,15 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Dictionaries } from './Dictionaries';
+import { defaultRolePermissions } from '../../types/permissions';
 
 const apiMocks = vi.hoisted(() => ({
   getDict: vi.fn(),
   getIncomeTypes: vi.fn(),
+}));
+
+const permissionMocks = vi.hoisted(() => ({
+  useRolePermissions: vi.fn(),
 }));
 
 vi.mock('../../services/api', () => ({
@@ -17,8 +22,13 @@ vi.mock('../../services/api', () => ({
 
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({
-    isAdmin: () => true,
+    user: { id: 1, role: { id: 10, name: 'dictionary-editor' } },
+    isAdmin: () => false,
   }),
+}));
+
+vi.mock('../../hooks/useRolePermissions', () => ({
+  useRolePermissions: permissionMocks.useRolePermissions,
 }));
 
 const dictionaryItem = (id: number, name: string) => ({
@@ -36,6 +46,16 @@ describe('Dictionaries page layout', () => {
     apiMocks.getIncomeTypes.mockReset();
     apiMocks.getDict.mockResolvedValue([]);
     apiMocks.getIncomeTypes.mockResolvedValue([dictionaryItem(1, 'Доход от услуг')]);
+    permissionMocks.useRolePermissions.mockReturnValue({
+      ...defaultRolePermissions,
+      dictionaries: {
+        ...defaultRolePermissions.dictionaries,
+        canView: true,
+        canCreate: true,
+        canEdit: true,
+        canDelete: true,
+      },
+    });
   });
 
   it('keeps dictionaries and entries in internal scroll areas', async () => {
@@ -62,5 +82,27 @@ describe('Dictionaries page layout', () => {
 
     expect(screen.getByRole('button', { name: 'Редактировать Доход от услуг' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Удалить Доход от услуг' })).toBeTruthy();
+  });
+
+  it('hides row actions when dictionary role permissions are read-only', async () => {
+    permissionMocks.useRolePermissions.mockReturnValue({
+      ...defaultRolePermissions,
+      dictionaries: {
+        ...defaultRolePermissions.dictionaries,
+        canView: true,
+        canCreate: false,
+        canEdit: false,
+        canDelete: false,
+      },
+    });
+
+    render(<Dictionaries />);
+
+    await waitFor(() => expect(apiMocks.getIncomeTypes).toHaveBeenCalled());
+    await userEvent.click(screen.getByRole('button', { name: /Тип дохода/ }));
+    await screen.findByText('Доход от услуг');
+
+    expect(screen.queryByRole('button', { name: 'Редактировать Доход от услуг' })).toBeFalsy();
+    expect(screen.queryByRole('button', { name: 'Удалить Доход от услуг' })).toBeFalsy();
   });
 });

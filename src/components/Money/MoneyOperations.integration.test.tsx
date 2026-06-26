@@ -115,6 +115,8 @@ const {
 });
 
 const permissionsState = vi.hoisted(() => ({
+  accountsCanView: true,
+  clientsCanView: true,
   paymentsCanCreate: true,
   paymentsCanEdit: true,
   paymentsCanDelete: true,
@@ -142,9 +144,9 @@ vi.mock('../../hooks/useRolePermissions', () => ({
       reports: { ...section },
       calculator: { ...section },
       legalEntities: { ...section },
-      clients: { ...section },
+      clients: { ...section, canView: permissionsState.clientsCanView },
       cases: { ...section },
-      accounts: { ...section },
+      accounts: { ...section, canView: permissionsState.accountsCanView },
       acts: { ...section },
       payments: {
         ...section,
@@ -415,6 +417,8 @@ describe('MoneyOperations integration', () => {
     updateCashOrderMock.mockReset();
     updateMoneyOperationMock.mockReset();
     upsertUserSettingMock.mockReset();
+    permissionsState.accountsCanView = true;
+    permissionsState.clientsCanView = true;
     permissionsState.paymentsCanCreate = true;
     permissionsState.paymentsCanEdit = true;
     permissionsState.paymentsCanDelete = true;
@@ -2043,6 +2047,51 @@ describe('MoneyOperations integration', () => {
     await user.click(screen.getByRole('button', { name: 'Счёт 33' }));
 
     expect(onOpenInvoice).toHaveBeenCalledWith(33, 'Income');
+  });
+
+  it('keeps linked invoice as text when accounts section is hidden', async () => {
+    const user = userEvent.setup();
+    const onOpenInvoice = vi.fn();
+    permissionsState.accountsCanView = false;
+    operations = [
+      createOperation({
+        id: 11,
+        source: 'Bank',
+        direction: 'Income',
+        counterpartyName: 'Клиент без счетов',
+        linkedInvoiceId: 44,
+        linkedInvoiceNumber: '44',
+        paidAccountName: '44',
+        matchStatus: 'Matched',
+      }),
+    ];
+
+    render(<MoneyOperations source="Total" onOpenInvoice={onOpenInvoice} />);
+
+    await screen.findByText('Общий баланс');
+    await user.click(screen.getByRole('button', { name: 'ОДДС' }));
+    await screen.findByText('Клиент без счетов');
+
+    expect(screen.getByText('Счёт 44')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Счёт 44' })).toBeNull();
+    expect(onOpenInvoice).not.toHaveBeenCalled();
+  });
+
+  it('keeps money account link as text when accounts section is hidden', async () => {
+    permissionsState.accountsCanView = false;
+    operations = [
+      createOperation({
+        id: 12,
+        source: 'Bank',
+        accountName: 'Расчетный счет без доступа',
+      }),
+    ];
+
+    render(<MoneyOperations source="Bank" />);
+
+    await screen.findByText('Расчетный счет без доступа');
+    expect(screen.queryByRole('button', { name: 'Расчетный счет без доступа' })).toBeNull();
+    expect(setActiveTabMock).not.toHaveBeenCalledWith('accounts');
   });
 
   it('deletes a custom money operation after confirmation', async () => {

@@ -144,7 +144,6 @@ export function LegalEntities({
     handleColumnDragEnd,
     handleResizeStart,
     getColumnWidth,
-    getTableWidth,
     resetTableSettings,
   } = usePersistedTableSettings<LegalEntityColumnKey>({
     storageKey: 'pp.legal_entities_table_settings.v1',
@@ -205,6 +204,41 @@ export function LegalEntities({
   const totalPages = useMemo(
     () => Math.max(1, Math.ceil((total || 0) / (pageSize || 1))),
     [pageSize, total],
+  );
+
+  const canUseColumn = useCallback(
+    (columnKey: LegalEntityColumnKey) => {
+      if (columnKey === 'cases') return permissions.cases.canView;
+      if (columnKey === 'contracts') return permissions.contracts.canView;
+      if (columnKey === 'invoices') return permissions.accounts.canView;
+      if (columnKey === 'acts') return permissions.acts.canView;
+      if (columnKey === 'payments') return permissions.payments.canView;
+      return true;
+    },
+    [
+      permissions.accounts.canView,
+      permissions.acts.canView,
+      permissions.cases.canView,
+      permissions.contracts.canView,
+      permissions.payments.canView,
+    ],
+  );
+
+  const availableColumns = useMemo(
+    () => LEGAL_ENTITY_COLUMNS.filter((column) => canUseColumn(column.key)),
+    [canUseColumn],
+  );
+  const allowedColumnOrder = useMemo(
+    () => columnOrder.filter(canUseColumn),
+    [canUseColumn, columnOrder],
+  );
+  const allowedOrderedVisibleColumns = useMemo(
+    () => orderedVisibleColumns.filter(canUseColumn),
+    [canUseColumn, orderedVisibleColumns],
+  );
+  const allowedVisibleColumns = useMemo(
+    () => visibleColumns.filter(canUseColumn),
+    [canUseColumn, visibleColumns],
   );
 
   const canCreate = legalPermissions.canCreate;
@@ -425,7 +459,7 @@ export function LegalEntities({
         return renderRelatedLinks(
           entity.relatedCases,
           entity.casesCount ?? 0,
-          onOpenCase
+          permissions.cases.canView && onOpenCase
             ? (link) => onOpenCase(link.id, link.clientId, entity.id)
             : undefined,
           (link) => Boolean(link.clientId),
@@ -434,25 +468,29 @@ export function LegalEntities({
         return renderRelatedLinks(
           entity.relatedContracts,
           entity.contractsCount ?? 0,
-          onOpenContract ? (link) => onOpenContract(link.id) : undefined,
+          permissions.contracts.canView && onOpenContract ? (link) => onOpenContract(link.id) : undefined,
         );
       case 'invoices':
         return renderRelatedLinks(
           entity.relatedInvoices,
           entity.invoicesCount ?? 0,
-          onOpenInvoice ? (link) => onOpenInvoice(link.id, normalizeRelatedPaymentKind(link.type)) : undefined,
+          permissions.accounts.canView && onOpenInvoice
+            ? (link) => onOpenInvoice(link.id, normalizeRelatedPaymentKind(link.type))
+            : undefined,
         );
       case 'acts':
         return renderRelatedLinks(
           entity.relatedActs,
           entity.actsCount ?? 0,
-          onOpenAct ? (link) => onOpenAct(link.id) : undefined,
+          permissions.acts.canView && onOpenAct ? (link) => onOpenAct(link.id) : undefined,
         );
       case 'payments':
         return renderRelatedLinks(
           entity.relatedPayments,
           entity.paymentsCount ?? 0,
-          onOpenPayment ? (link) => onOpenPayment(link.id, normalizeRelatedPaymentKind(link.type)) : undefined,
+          permissions.payments.canView && onOpenPayment
+            ? (link) => onOpenPayment(link.id, normalizeRelatedPaymentKind(link.type))
+            : undefined,
         );
       case 'createdAt':
         return <span className="text-sm text-slate-600">{formatDate(entity.createdAt)}</span>;
@@ -543,12 +581,12 @@ export function LegalEntities({
       {settingsOpen && viewMode === 'table' ? (
         <div className="mb-6">
           <TableColumnSettings
-            columns={LEGAL_ENTITY_COLUMNS.map((column) => ({
+            columns={availableColumns.map((column) => ({
               key: column.key,
               label: column.label,
             }))}
-            columnOrder={columnOrder}
-            visibleColumns={visibleColumns}
+            columnOrder={allowedColumnOrder}
+            visibleColumns={allowedVisibleColumns}
             draggingColumn={draggingColumn}
             onToggleColumn={toggleColumn}
             onMoveColumn={moveColumn}
@@ -606,6 +644,10 @@ export function LegalEntities({
           findById={(payload) => apiService.findLegalEntityById(payload)}
           allowEdit={editing ? allowDetailEdit : canCreate}
           allowDelete={allowDetailDelete}
+          canViewCases={permissions.cases.canView}
+          canViewAccounts={permissions.accounts.canView}
+          canCreateAccounts={permissions.accounts.canView && permissions.accounts.canCreate}
+          canViewActs={permissions.acts.canView}
           canViewPayments={permissions.payments.canView}
           mode="page"
           onBack={() => {
@@ -759,17 +801,23 @@ export function LegalEntities({
           <div className="overflow-x-auto">
             <table
               className="w-full min-w-[1180px] table-fixed"
-              style={{ width: getTableWidth(160, 1180), minWidth: '100%' }}
+              style={{
+                width: Math.max(
+                  1180,
+                  allowedOrderedVisibleColumns.reduce((sum, columnKey) => sum + getColumnWidth(columnKey), 160),
+                ),
+                minWidth: '100%',
+              }}
             >
               <colgroup>
-                {orderedVisibleColumns.map((columnKey) => (
+                {allowedOrderedVisibleColumns.map((columnKey) => (
                   <col key={columnKey} style={{ width: getColumnWidth(columnKey) }} />
                 ))}
                 <col style={{ width: 160 }} />
               </colgroup>
               <thead className="border-b border-gray-200 bg-gray-50">
                 <tr>
-                  {orderedVisibleColumns.map((columnKey) => (
+                  {allowedOrderedVisibleColumns.map((columnKey) => (
                     <th
                       key={columnKey}
                       style={{ width: getColumnWidth(columnKey) }}
@@ -806,7 +854,7 @@ export function LegalEntities({
               <tbody className="divide-y divide-gray-200 text-sm text-gray-700">
                 {items.map((entity) => (
                   <tr key={entity.id} className="hover:bg-gray-50">
-                    {orderedVisibleColumns.map((columnKey) => (
+                    {allowedOrderedVisibleColumns.map((columnKey) => (
                       <td
                         key={columnKey}
                         style={{ width: getColumnWidth(columnKey) }}

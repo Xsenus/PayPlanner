@@ -139,6 +139,9 @@ public class CasesV2Controller : ControllerBase
     private Task<DataVisibilityAccess?> ResolveCasesVisibilityAsync(CancellationToken ct)
         => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
 
+    private ActionResult MissingCasesVisibilityResult()
+        => User.GetUserId().HasValue ? Forbid() : Unauthorized();
+
     private async Task<ActionResult?> RequireCasesPermissionAsync(
         Func<RolePermission, bool> predicate,
         CancellationToken ct)
@@ -264,7 +267,7 @@ public class CasesV2Controller : ControllerBase
         var visibility = await ResolveCasesVisibilityAsync(ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return MissingCasesVisibilityResult();
         }
 
         page = Math.Max(1, page);

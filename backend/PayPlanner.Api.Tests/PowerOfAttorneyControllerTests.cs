@@ -116,8 +116,38 @@ public class PowerOfAttorneyControllerTests
         await using var scope = server.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
         await db.Database.EnsureCreatedAsync();
+        await SeedAuthenticatedUserAsync(db);
 
         return server;
+    }
+
+    private static async Task SeedAuthenticatedUserAsync(PaymentContext db)
+    {
+        var role = new Role { Name = "client-editor", Description = "Client editor" };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = role.Id,
+            Section = RolePermissionCatalog.Clients,
+            CanView = true,
+            CanCreate = true,
+            CanEdit = true,
+            CanDelete = true,
+            ViewScope = DataVisibilityScope.All,
+        });
+        db.Users.Add(new User
+        {
+            Id = TestAuthHandler.UserId,
+            Email = "poa-test@example.test",
+            PasswordHash = "hash",
+            FullName = "Integration Test User",
+            RoleId = role.Id,
+            IsActive = true,
+            IsApproved = true,
+        });
+        await db.SaveChangesAsync();
     }
 
     private static async Task<int> CreateClientAsync(IServiceProvider services)
@@ -155,6 +185,7 @@ public class PowerOfAttorneyControllerTests
     private sealed class TestAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions>
     {
         public const string SchemeName = "Test";
+        public const int UserId = 999;
 
         public TestAuthHandler(
             IOptionsMonitor<AuthenticationSchemeOptions> options,
@@ -168,7 +199,7 @@ public class PowerOfAttorneyControllerTests
         {
             var claims = new[]
             {
-                new Claim(ClaimTypes.NameIdentifier, "999"),
+                new Claim(ClaimTypes.NameIdentifier, UserId.ToString()),
                 new Claim(ClaimTypes.Name, "Integration Test User"),
             };
 

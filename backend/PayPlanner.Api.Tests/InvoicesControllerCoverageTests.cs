@@ -963,6 +963,53 @@ public class InvoicesControllerCoverageTests
     }
 
     [Fact]
+    public async Task Get_ForbidsAuthenticatedUserWithoutAccountsView()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db, "No Accounts View");
+        var user = await db.Users.Include(item => item.Role).SingleAsync(item => item.Id == userId);
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = user.RoleId,
+            Section = RolePermissionCatalog.Accounts,
+            CanView = false,
+            CanCreate = false,
+            CanEdit = false,
+            CanDelete = false,
+            CanExport = false,
+            CanViewAnalytics = false,
+            ViewScope = DataVisibilityScope.Own,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, isAdmin: false, userId: userId);
+
+        var result = await controller.Get(
+            from: null,
+            to: null,
+            status: null,
+            clientId: null,
+            clientIds: null,
+            contractId: null,
+            caseId: null,
+            responsibleId: null,
+            search: null,
+            type: null,
+            sortBy: null,
+            sortDir: null,
+            clientRole: null,
+            legalEntityId: null,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None,
+            workflowStatus: null,
+            actId: null,
+            paymentId: null);
+
+        Assert.IsType<ForbidResult>(result);
+    }
+
+    [Fact]
     public async Task NumberingEndpoints_RequireAuthenticatedUser_AndRejectInvalidStartNumber()
     {
         await using var db = await CreateContextAsync();

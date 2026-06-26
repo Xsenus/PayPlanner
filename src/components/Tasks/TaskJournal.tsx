@@ -1107,6 +1107,33 @@ function isTaskReadOnlyForCurrentUser(
   return task.authorUserId !== currentUserId && !isTaskExecutorForUser(task, currentUserId);
 }
 
+function canPostTaskCommentForCurrentUser(
+  task: TaskJournalItem | null | undefined,
+  currentUserId: number | null,
+  canSwitchToEdit: boolean,
+) {
+  if (!task) {
+    return false;
+  }
+
+  if (canSwitchToEdit) {
+    return true;
+  }
+
+  if (!currentUserId) {
+    return false;
+  }
+
+  if (task.authorUserId === currentUserId || task.assigneeUserId === currentUserId) {
+    return true;
+  }
+
+  return (task.participants ?? []).some((participant) =>
+    participant.userId === currentUserId &&
+    participant.role.toLowerCase() !== 'observer',
+  );
+}
+
 function priorityClass(priority: TaskJournalPriority) {
   switch (priority) {
     case 'urgent':
@@ -1646,8 +1673,11 @@ export function TaskJournal({
   const [currentTimeZoneId, setCurrentTimeZoneId] = useState(() => normalizeUserTimeZoneId());
   const isAdminUser = isAdmin();
   const permissions = useRolePermissions(user?.role?.id);
+  const canCreateTasks = isAdminUser || permissions.tasks.canCreate;
+  const canDeleteTasks = isAdminUser || permissions.tasks.canDelete;
   const canExportTasks = isAdminUser || permissions.tasks.canExport;
   const canExportCases = isAdminUser || permissions.cases.canExport;
+  const canSendTaskFilesToYandexDisk = isAdminUser || (canExportTasks && permissions.yandexDisk?.canCreate === true);
   const taskCalendarViewScope = normalizeTaskCalendarViewScope(permissions.calendar.viewScope);
   const calendarVisibleUserIds = useMemo(
     () => permissions.calendar.visibleUserIds ?? [],
@@ -1921,13 +1951,22 @@ export function TaskJournal({
   );
 
   const openTaskCreate = useCallback(() => {
+    if (!canCreateTasks) {
+      toast.error('У роли нет права на создание задач.', 'Журнал задач');
+      return;
+    }
+
     setModal({ mode: 'create', defaults: taskContextDefaults });
     setHighlightedTaskId(null);
     onRouteTaskChange?.(null);
-  }, [onRouteTaskChange, taskContextDefaults]);
+  }, [canCreateTasks, onRouteTaskChange, taskContextDefaults, toast]);
 
   const openTaskCreateForDate = useCallback((date: Date) => {
     if (isApprovalsMode) {
+      return;
+    }
+    if (!canCreateTasks) {
+      toast.error('У роли нет права на создание задач.', 'Журнал задач');
       return;
     }
 
@@ -1935,7 +1974,7 @@ export function TaskJournal({
     setModal({ mode: 'create', dueAt: buildDefaultDueAtForDate(date), defaults: taskContextDefaults });
     setHighlightedTaskId(null);
     onRouteTaskChange?.(null);
-  }, [isApprovalsMode, onRouteTaskChange, taskContextDefaults]);
+  }, [canCreateTasks, isApprovalsMode, onRouteTaskChange, taskContextDefaults, toast]);
 
   const closeTaskModal = useCallback(() => {
     setModal(null);
@@ -1950,7 +1989,7 @@ export function TaskJournal({
     settings: TaskJournalSettingsDto,
     searchValue: string,
   ) => {
-    if (embedded || underControlOnly || isApprovalsMode || !settings.caseInactivityAutomationEnabled) {
+    if (embedded || underControlOnly || isApprovalsMode || !canCreateTasks || !settings.caseInactivityAutomationEnabled) {
       return [];
     }
 
@@ -1960,7 +1999,7 @@ export function TaskJournal({
       escalationDays: settings.caseInactivityEscalationDays,
       search: searchValue.trim() || undefined,
     });
-  }, [embedded, isApprovalsMode, underControlOnly]);
+  }, [canCreateTasks, embedded, isApprovalsMode, underControlOnly]);
 
   const refreshTasks = useCallback(async () => {
     setLoading(true);
@@ -2138,6 +2177,11 @@ export function TaskJournal({
   }, [refreshCaseCalendarEvents]);
 
   const createAutomationTask = useCallback(async (candidate: TaskJournalCaseAutomationCandidate) => {
+    if (!canCreateTasks) {
+      toast.error('У роли нет права на создание задач.', 'Автоконтроль дел');
+      return;
+    }
+
     setCreatingAutomationCaseId(candidate.clientCaseId);
     try {
       const created = await apiService.createTaskJournalCaseAutomationTask(candidate.clientCaseId);
@@ -2150,9 +2194,14 @@ export function TaskJournal({
     } finally {
       setCreatingAutomationCaseId(null);
     }
-  }, [emitTaskChange, openTaskEditor, refreshTasks, toast]);
+  }, [canCreateTasks, emitTaskChange, openTaskEditor, refreshTasks, toast]);
 
   const createAllAutomationTasks = useCallback(async () => {
+    if (!canCreateTasks) {
+      toast.error('У роли нет права на создание задач.', 'Автоконтроль дел');
+      return;
+    }
+
     if (automationCandidates.length === 0) {
       return;
     }
@@ -2171,7 +2220,7 @@ export function TaskJournal({
     } finally {
       setCreatingAutomationAll(false);
     }
-  }, [automationCandidates.length, emitTaskChange, openTaskEditor, refreshTasks, toast]);
+  }, [automationCandidates.length, canCreateTasks, emitTaskChange, openTaskEditor, refreshTasks, toast]);
 
   useEffect(() => {
     if (!(routeTaskId && routeTaskId > 0)) {
@@ -2527,6 +2576,11 @@ export function TaskJournal({
   };
 
   const handleBulkDelete = async () => {
+    if (!canDeleteTasks) {
+      toast.error('У роли нет права на удаление задач.', 'Журнал задач');
+      return;
+    }
+
     const ids = selectedTasksForBulk.map((task) => task.id);
     if (ids.length === 0) {
       toast.error('Выберите задачи для массового удаления.', 'Журнал задач');
@@ -2559,6 +2613,11 @@ export function TaskJournal({
   };
 
   const handleSave = async (form: TaskForm, taskId?: number) => {
+    if (!taskId && !canCreateTasks) {
+      toast.error('У роли нет права на создание задач.', 'Журнал задач');
+      return;
+    }
+
     if (!form.isInternal && !form.clientId && !form.legalEntityId) {
       toast.error('Укажите контрагента задачи.', 'Журнал задач');
       return;
@@ -2701,6 +2760,11 @@ export function TaskJournal({
   };
 
   const handleDelete = async (task: TaskJournalItem) => {
+    if (!canDeleteTasks) {
+      toast.error('У роли нет права на удаление задач.', 'Журнал задач');
+      return false;
+    }
+
     const accepted = await confirm({
       title: 'Удалить задачу?',
       description: `Задача "${task.title}" будет удалена из журнала.`,
@@ -2726,6 +2790,11 @@ export function TaskJournal({
   };
 
   const handleDuplicateTask = async (task: TaskJournalItem) => {
+    if (!canCreateTasks) {
+      toast.error('У роли нет права на создание задач.', 'Журнал задач');
+      return false;
+    }
+
     const participants = (task.participants ?? []).map((participant) => ({
       ...participant,
       id: undefined,
@@ -3081,6 +3150,9 @@ export function TaskJournal({
             taskSettings={taskSettings}
             notificationDefaults={taskNotificationDefaults}
             canSwitchToEdit={canEditModalTask}
+            canDeleteTask={canDeleteTasks}
+            canDuplicateTask={canCreateTasks}
+            canSendFilesToYandexDisk={canSendTaskFilesToYandexDisk}
             onClose={closeTaskModal}
             onEnableEdit={() => setModal((current) => current?.task ? { ...current, mode: 'edit' } : current)}
             onSave={handleSave}
@@ -3174,7 +3246,7 @@ export function TaskJournal({
                   </label>
                 </>
               ) : null}
-              {!isApprovalsMode ? (
+              {!isApprovalsMode && canCreateTasks ? (
                 <button
                   type="button"
                   onClick={openTaskCreate}
@@ -3516,6 +3588,7 @@ export function TaskJournal({
             dueAt={bulkDueAt}
             saving={bulkSaving}
             deleting={bulkDeleting}
+            canDelete={canDeleteTasks}
             onAssigneeChange={setBulkAssigneeUserId}
             onPriorityChange={setBulkPriority}
             onStatusChange={setBulkStatus}
@@ -3559,6 +3632,7 @@ export function TaskJournal({
             onToggleAllVisibleSelection={toggleAllVisibleSelection}
             onEdit={openTaskEditor}
             onDelete={handleDelete}
+            canDeleteTasks={canDeleteTasks}
             onStatusChange={setTaskStatus}
             onToggleControl={toggleTaskControl}
             onDone={(task) => setTaskStatus(task, 'done')}
@@ -3601,7 +3675,7 @@ export function TaskJournal({
               onNext={() => shiftCalendarPeriod(1)}
               onToday={resetCalendarPeriod}
               onSelectDate={setCalendarSelectedDate}
-              onCreateDate={openTaskCreateForDate}
+              onCreateDate={canCreateTasks ? openTaskCreateForDate : undefined}
               onMoveTask={handleCalendarTaskMove}
               onResizeTask={handleCalendarTaskResize}
               onEdit={openTaskEditor}
@@ -3641,7 +3715,7 @@ export function TaskJournal({
               onPrevious={() => shiftTimelineWeek(-1)}
               onNext={() => shiftTimelineWeek(1)}
               onToday={resetCalendarPeriod}
-              onCreateDate={openTaskCreateForDate}
+              onCreateDate={canCreateTasks ? openTaskCreateForDate : undefined}
               onMoveTask={handleTimelineTaskMove}
               onEdit={openTaskEditor}
               onDone={(task) => setTaskStatus(task, 'done')}
@@ -3671,6 +3745,9 @@ export function TaskJournal({
           taskSettings={taskSettings}
           notificationDefaults={taskNotificationDefaults}
           canSwitchToEdit={canEditModalTask}
+          canDeleteTask={canDeleteTasks}
+          canDuplicateTask={canCreateTasks}
+          canSendFilesToYandexDisk={canSendTaskFilesToYandexDisk}
           onClose={closeTaskModal}
           onEnableEdit={() => setModal((current) => current?.task ? { ...current, mode: 'edit' } : current)}
           onSave={handleSave}
@@ -3912,6 +3989,7 @@ function TaskBulkActionsPanel({
   dueAt,
   saving,
   deleting,
+  canDelete,
   onAssigneeChange,
   onPriorityChange,
   onStatusChange,
@@ -3928,6 +4006,7 @@ function TaskBulkActionsPanel({
   dueAt: string;
   saving: boolean;
   deleting: boolean;
+  canDelete: boolean;
   onAssigneeChange: (value: string) => void;
   onPriorityChange: (value: TaskJournalPriority | '') => void;
   onStatusChange: (value: TaskJournalStatus | '') => void;
@@ -4008,15 +4087,17 @@ function TaskBulkActionsPanel({
           >
             Снять выбор
           </button>
-          <button
-            type="button"
-            onClick={onDelete}
-            disabled={busy}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-rose-200 bg-white px-4 text-sm font-semibold text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <Trash2 className="h-4 w-4" />
-            {deleting ? 'Удаляем...' : 'Удалить выбранные'}
-          </button>
+          {canDelete ? (
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={busy}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-rose-200 bg-white px-4 text-sm font-semibold text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <Trash2 className="h-4 w-4" />
+              {deleting ? 'Удаляем...' : 'Удалить выбранные'}
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={onApply}
@@ -4048,6 +4129,7 @@ function TaskTable({
   onToggleAllVisibleSelection,
   onEdit,
   onDelete,
+  canDeleteTasks,
   onStatusChange,
   onToggleControl,
   onDone,
@@ -4068,6 +4150,7 @@ function TaskTable({
   onToggleAllVisibleSelection: (checked: boolean) => void;
   onEdit: (task: TaskJournalItem) => void;
   onDelete: (task: TaskJournalItem) => void;
+  canDeleteTasks: boolean;
   onStatusChange: (task: TaskJournalItem, status: TaskJournalStatus) => void;
   onToggleControl: (task: TaskJournalItem) => void;
   onDone: (task: TaskJournalItem) => void;
@@ -4278,7 +4361,7 @@ function TaskTable({
                       <button type="button" onClick={() => onEdit(task)} className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" title="Просмотр">
                         <Eye className="h-4 w-4" />
                       </button>
-                      {!isReadOnly ? (
+                      {!isReadOnly && canDeleteTasks ? (
                         <button type="button" onClick={() => onDelete(task)} className="rounded-xl p-2 text-rose-500 transition hover:bg-rose-50 hover:text-rose-700" title="Удалить">
                           <Trash2 className="h-4 w-4" />
                         </button>
@@ -4562,7 +4645,7 @@ function TaskTimelineCalendar({
   onPrevious: () => void;
   onNext: () => void;
   onToday: () => void;
-  onCreateDate: (date: Date) => void;
+  onCreateDate?: (date: Date) => void;
   onMoveTask: (task: TaskJournalItem, dueAt: Date) => void;
   onEdit: (task: TaskJournalItem) => void;
   onDone: (task: TaskJournalItem) => void;
@@ -4774,14 +4857,16 @@ function TaskTimelineCalendar({
                       <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">{WEEKDAY_LABELS[visibleDays.indexOf(day)]}</div>
                       <div className="mt-1 text-2xl font-semibold text-slate-900">{day.getDate()}</div>
                       <div className="mt-1 text-xs text-slate-500">{dayTasks.length} · {formatDuration(dayDuration)}</div>
-                      <button
-                        type="button"
-                        onClick={() => onCreateDate(day)}
-                        className="mt-2 inline-flex h-7 items-center justify-center rounded-lg border border-blue-200 bg-white px-2 text-xs font-semibold text-blue-700 transition hover:bg-blue-50"
-                      >
-                        <Plus className="mr-1 h-3.5 w-3.5" />
-                        Задача
-                      </button>
+                      {onCreateDate ? (
+                        <button
+                          type="button"
+                          onClick={() => onCreateDate(day)}
+                          className="mt-2 inline-flex h-7 items-center justify-center rounded-lg border border-blue-200 bg-white px-2 text-xs font-semibold text-blue-700 transition hover:bg-blue-50"
+                        >
+                          <Plus className="mr-1 h-3.5 w-3.5" />
+                          Задача
+                        </button>
+                      ) : null}
                     </div>
                   );
                 })}
@@ -4969,7 +5054,7 @@ function TaskCalendar({
   onNext: () => void;
   onToday: () => void;
   onSelectDate: (date: Date) => void;
-  onCreateDate: (date: Date) => void;
+  onCreateDate?: (date: Date) => void;
   onMoveTask: (task: TaskJournalItem, date: Date) => void;
   onResizeTask: (task: TaskJournalItem, deltaMinutes: -15 | 15) => void;
   onEdit: (task: TaskJournalItem) => void;
@@ -5263,15 +5348,17 @@ function TaskCalendar({
                         ) : null}
                       </button>
                       <span className="flex shrink-0 items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => onCreateDate(day)}
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:border-blue-200 hover:text-blue-600"
-                          title="Создать задачу на дату"
-                          aria-label="Создать задачу на дату"
-                        >
-                          <Plus className="h-3.5 w-3.5" />
-                        </button>
+                        {onCreateDate ? (
+                          <button
+                            type="button"
+                            onClick={() => onCreateDate(day)}
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:border-blue-200 hover:text-blue-600"
+                            title="Создать задачу на дату"
+                            aria-label="Создать задачу на дату"
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                          </button>
+                        ) : null}
                         {isCurrentDay ? <span className="h-2 w-2 rounded-full bg-blue-500" /> : null}
                         {dayTasks.length > 0 ? (
                           <span className="rounded-full bg-slate-900 px-2 py-0.5 text-xs font-semibold text-white">{dayTasks.length}</span>
@@ -5357,14 +5444,16 @@ function TaskCalendar({
                     <p className="mt-0.5 text-xs text-slate-500">Плановая загрузка: {formatDuration(selectedTotalDuration)}</p>
                   ) : null}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => onCreateDate(selectedDate)}
-                  className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50"
-                >
-                  <Plus className="h-4 w-4" />
-                  Создать
-                </button>
+                {onCreateDate ? (
+                  <button
+                    type="button"
+                    onClick={() => onCreateDate(selectedDate)}
+                    className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Создать
+                  </button>
+                ) : null}
               </div>
             </div>
 
@@ -5650,6 +5739,9 @@ type TaskModalProps = {
   taskSettings: TaskJournalSettingsDto;
   notificationDefaults: TaskNotificationDefaults;
   canSwitchToEdit: boolean;
+  canDeleteTask: boolean;
+  canDuplicateTask: boolean;
+  canSendFilesToYandexDisk: boolean;
   onClose: () => void;
   onEnableEdit: () => void;
   onSave: (form: TaskForm, taskId?: number) => void | Promise<void>;
@@ -5683,6 +5775,9 @@ function TaskModal({
   taskSettings,
   notificationDefaults,
   canSwitchToEdit,
+  canDeleteTask,
+  canDuplicateTask,
+  canSendFilesToYandexDisk,
   onClose,
   onEnableEdit,
   onSave,
@@ -5840,6 +5935,7 @@ function TaskModal({
   const isReadOnly = state?.mode === 'view';
   const isLockedViewWithEditAccess = Boolean(isReadOnly && canSwitchToEdit);
   const canRequestDeadlineChange = Boolean(taskId && isReadOnly && !canSwitchToEdit && taskSettings.allowExecutorDeadlineChangeRequests);
+  const canPostComment = Boolean(taskId && canPostTaskCommentForCurrentUser(state?.task, currentUserId, canSwitchToEdit));
   const canManageFiles = Boolean(taskId && !isReadOnly);
   const taskAuthorLabel = state?.task ? getTaskAuthorName(state.task) : currentUserName || 'Текущий пользователь';
 
@@ -6048,7 +6144,7 @@ function TaskModal({
 
   const handleDeleteTask = async () => {
     const task = state?.task;
-    if (!task || isReadOnly) return;
+    if (!task || isReadOnly || !canDeleteTask) return;
     const deleted = await onDelete(task);
     if (deleted) {
       onClose();
@@ -6057,7 +6153,7 @@ function TaskModal({
 
   const handleDuplicateTask = async () => {
     const task = state?.task;
-    if (!task || isReadOnly) return;
+    if (!task || isReadOnly || !canDuplicateTask) return;
     await onDuplicate(task);
   };
 
@@ -6137,6 +6233,10 @@ function TaskModal({
   const handleAddComment = async () => {
     const text = commentText.trim();
     if (!taskId || !text) return;
+    if (!canPostComment) {
+      toast.error('У вас нет права добавить комментарий к этой задаче.', 'Журнал задач');
+      return;
+    }
 
     setCommentSaving(true);
     try {
@@ -6203,6 +6303,10 @@ function TaskModal({
 
   const handleSendFileToYandexDisk = async (file: TaskJournalFile) => {
     if (!taskId) return;
+    if (!canSendFilesToYandexDisk) {
+      toast.error('У роли нет права отправлять файлы задач на Я.Диск.', 'Я.Диск');
+      return;
+    }
 
     setSendingYandexFileId(file.id);
     try {
@@ -6308,7 +6412,7 @@ function TaskModal({
               <button type="button" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-amber-600 transition hover:bg-amber-50" title="Напоминание" aria-label="Напоминание">
                 <Bell className="h-4 w-4" />
               </button>
-              {state?.task && !isReadOnly ? (
+              {state?.task && !isReadOnly && (canDuplicateTask || canDeleteTask) ? (
                 <div className="relative">
                   <button
                     type="button"
@@ -6321,8 +6425,12 @@ function TaskModal({
                   </button>
                   {actionMenuOpen ? (
                     <div className="absolute right-0 z-20 mt-2 w-56 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 text-sm shadow-xl">
-                      <button type="button" onClick={() => void handleDuplicateTask()} className="block w-full px-3 py-2 text-left text-slate-700 transition hover:bg-slate-50">Дублировать задачу</button>
-                      <button type="button" onClick={() => void handleDeleteTask()} className="block w-full px-3 py-2 text-left text-rose-600 transition hover:bg-rose-50">Удалить задачу</button>
+                      {canDuplicateTask ? (
+                        <button type="button" onClick={() => void handleDuplicateTask()} className="block w-full px-3 py-2 text-left text-slate-700 transition hover:bg-slate-50">Дублировать задачу</button>
+                      ) : null}
+                      {canDeleteTask ? (
+                        <button type="button" onClick={() => void handleDeleteTask()} className="block w-full px-3 py-2 text-left text-rose-600 transition hover:bg-rose-50">Удалить задачу</button>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
@@ -6432,7 +6540,7 @@ function TaskModal({
                       ))}
                     </div>
                   )}
-                  {taskId ? (
+                  {taskId && canPostComment ? (
                     <div className="flex items-end gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
                       <button type="button" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-white" title="Упомянуть" aria-label="Упомянуть">
                         @
@@ -6828,12 +6936,16 @@ function TaskModal({
                         <button type="button" onClick={() => void saveWithStatus('inProgress')} className="block w-full px-4 py-2 text-left text-slate-700 transition hover:bg-slate-50">
                           Вернуть в работу
                         </button>
-                        <button type="button" onClick={() => void handleDuplicateTask()} className="block w-full px-4 py-2 text-left text-slate-700 transition hover:bg-slate-50">
-                          Дублировать
-                        </button>
-                        <button type="button" onClick={() => void handleDeleteTask()} className="block w-full px-4 py-2 text-left text-rose-600 transition hover:bg-rose-50">
-                          Удалить
-                        </button>
+                        {canDuplicateTask ? (
+                          <button type="button" onClick={() => void handleDuplicateTask()} className="block w-full px-4 py-2 text-left text-slate-700 transition hover:bg-slate-50">
+                            Дублировать
+                          </button>
+                        ) : null}
+                        {canDeleteTask ? (
+                          <button type="button" onClick={() => void handleDeleteTask()} className="block w-full px-4 py-2 text-left text-rose-600 transition hover:bg-rose-50">
+                            Удалить
+                          </button>
+                        ) : null}
                       </div>
                     ) : null}
                   </div>
@@ -7488,16 +7600,18 @@ function TaskModal({
                             >
                               <Download className="h-4 w-4" />
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => void handleSendFileToYandexDisk(file)}
-                              disabled={sendingYandexFileId === file.id}
-                              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-sky-200 text-sky-600 transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
-                              title="Отправить на Я.Диск"
-                              aria-label="Отправить файл на Я.Диск"
-                            >
-                              {sendingYandexFileId === file.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
-                            </button>
+                            {canSendFilesToYandexDisk ? (
+                              <button
+                                type="button"
+                                onClick={() => void handleSendFileToYandexDisk(file)}
+                                disabled={sendingYandexFileId === file.id}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-sky-200 text-sky-600 transition hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                title="Отправить на Я.Диск"
+                                aria-label="Отправить файл на Я.Диск"
+                              >
+                                {sendingYandexFileId === file.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+                              </button>
+                            ) : null}
                             {canManageFiles ? (
                             <button
                               type="button"
@@ -7541,28 +7655,30 @@ function TaskModal({
               </div>
             ) : (
               <>
-                <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <textarea
-                    value={commentText}
-                    onChange={(event) => setCommentText(event.target.value)}
-                    className="form-textarea min-h-[84px] bg-white"
-                    rows={3}
-                    placeholder="Введите комментарий"
-                    maxLength={4000}
-                  />
-                  <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <span className="text-xs text-slate-400">{commentText.trim().length}/4000</span>
-                    <button
-                      type="button"
-                      onClick={handleAddComment}
-                      disabled={commentSaving || !commentText.trim()}
-                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-                    >
-                      <MessageSquare className="h-4 w-4" />
-                      {commentSaving ? 'Добавляем...' : 'Добавить комментарий'}
-                    </button>
+                {canPostComment ? (
+                  <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <textarea
+                      value={commentText}
+                      onChange={(event) => setCommentText(event.target.value)}
+                      className="form-textarea min-h-[84px] bg-white"
+                      rows={3}
+                      placeholder="Введите комментарий"
+                      maxLength={4000}
+                    />
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <span className="text-xs text-slate-400">{commentText.trim().length}/4000</span>
+                      <button
+                        type="button"
+                        onClick={handleAddComment}
+                        disabled={commentSaving || !commentText.trim()}
+                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                      >
+                        <MessageSquare className="h-4 w-4" />
+                        {commentSaving ? 'Добавляем...' : 'Добавить комментарий'}
+                      </button>
+                    </div>
                   </div>
-                </div>
+                ) : null}
 
                 <div className="mt-4 space-y-3">
                   {commentsLoading ? (

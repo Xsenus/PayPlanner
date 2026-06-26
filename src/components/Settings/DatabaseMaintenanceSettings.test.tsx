@@ -7,6 +7,15 @@ const mocks = vi.hoisted(() => ({
     error: vi.fn(),
     success: vi.fn(),
   },
+  authState: {
+    isAdmin: true,
+  },
+  permissionsState: {
+    audit: {
+      canView: true,
+      canEdit: true,
+    },
+  },
   updateDatabaseBackupSettingsMock: vi.fn(),
   getDatabaseStatusMock: vi.fn(),
   getUserActivityMaintenanceMock: vi.fn(),
@@ -21,17 +30,12 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({
     user: { id: 1, role: { id: 1, name: 'admin' } },
-    isAdmin: () => true,
+    isAdmin: () => mocks.authState.isAdmin,
   }),
 }));
 
 vi.mock('../../hooks/useRolePermissions', () => ({
-  useRolePermissions: () => ({
-    audit: {
-      canView: true,
-      canEdit: true,
-    },
-  }),
+  useRolePermissions: () => mocks.permissionsState,
 }));
 
 vi.mock('../../hooks/useDialog', () => ({
@@ -118,6 +122,11 @@ function buildBackupOverview() {
 describe('DatabaseMaintenanceSettings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.authState.isAdmin = true;
+    mocks.permissionsState.audit = {
+      canView: true,
+      canEdit: true,
+    };
     mocks.getUserSettingMock.mockResolvedValue({ key: 'profile.timeZoneId', value: 'Europe/Samara' });
     mocks.getDatabaseStatusMock.mockResolvedValue({
       provider: 'sqlite',
@@ -297,5 +306,19 @@ describe('DatabaseMaintenanceSettings', () => {
 
     await waitFor(() => expect(mocks.retryDatabaseBackupYandexDiskUploadMock).toHaveBeenCalledWith('yandex-failed-result'));
     expect(await screen.findByText('Выгрузка резервной копии на Яндекс.Диск повторена.')).toBeTruthy();
+  });
+
+  it('hides deleted objects maintenance tab without audit view permission', async () => {
+    mocks.authState.isAdmin = false;
+    mocks.permissionsState.audit = {
+      canView: false,
+      canEdit: false,
+    };
+
+    render(<DatabaseMaintenanceSettings />);
+
+    await waitFor(() => expect(mocks.getDatabaseBackupOverviewMock).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: /Удалённые объекты/i })).toBeNull();
+    expect(screen.queryByText('Deleted objects')).toBeNull();
   });
 });

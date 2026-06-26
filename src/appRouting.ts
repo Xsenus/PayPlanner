@@ -31,85 +31,62 @@ type TabAccessOptions = {
   canViewS3Storage?: boolean;
 };
 
+type TabAccessRule = (permissions: RolePermissions, options: TabAccessOptions) => boolean;
+
+export const TAB_ACCESS_RULES = {
+  notifications: () => true,
+  profile: () => true,
+  calendar: (permissions) => permissions.calendar.canView,
+  tasks: (permissions) => permissions.tasks.canView,
+  tasksControl: (permissions) => permissions.tasks.canView,
+  tasksApprovals: (permissions) => permissions.tasks.canView,
+  tasksCalendar: (permissions) => permissions.tasks.canView,
+  notes: (permissions) => permissions.notes.canView,
+  reports: (permissions) => permissions.reports.canView,
+  calculator: (permissions) => permissions.calculator.canView,
+  legalEntities: (permissions) => permissions.legalEntities.canView,
+  cases: (permissions) => permissions.cases.canView,
+  caseDetail: (permissions) => permissions.cases.canView,
+  clients: (permissions) => permissions.clients.canView,
+  contacts: (permissions) => permissions.clients.canView || permissions.legalEntities.canView,
+  contactsClients: (permissions) => permissions.clients.canView,
+  contactsLegal: (permissions) => permissions.legalEntities.canView,
+  contactsExternal: (permissions) => permissions.clients.canView,
+  clientDetail: (permissions) => permissions.clients.canView,
+  accounts: (permissions) => permissions.accounts.canView,
+  accountsIncome: (permissions) => permissions.accounts.canView,
+  accountsExpense: (permissions) => permissions.accounts.canView,
+  installments: (permissions) => permissions.accounts.canView,
+  acts: (permissions) => permissions.acts.canView,
+  actsIncome: (permissions) => permissions.acts.canView,
+  actsExpense: (permissions) => permissions.acts.canView,
+  actCreate: (permissions) => permissions.acts.canView && permissions.acts.canCreate,
+  actDetail: (permissions) => permissions.acts.canView,
+  payments: (permissions) => permissions.payments.canView,
+  paymentsIncome: (permissions) => permissions.payments.canView,
+  paymentsExpense: (permissions) => permissions.payments.canView,
+  moneyBank: (permissions) => permissions.payments.canView,
+  moneyCash: (permissions) => permissions.payments.canView,
+  moneyCards: (permissions) => permissions.payments.canView,
+  moneyEMoney: (permissions) => permissions.payments.canView,
+  moneyTotal: (permissions) => permissions.payments.canView,
+  contracts: (permissions) => permissions.contracts.canView,
+  contractCreate: (permissions) => permissions.contracts.canView && permissions.contracts.canCreate,
+  contractDetail: (permissions) => permissions.contracts.canView,
+  companyProfile: (_permissions, options) => options.isAdminRole === true,
+  users: (_permissions, options) => options.isAdminRole === true,
+  userDetail: (_permissions, options) => options.isAdminRole === true,
+  userActivity: (_permissions, options) => options.isAdminRole === true,
+  roles: (_permissions, options) => options.canManageRoles === true,
+  audit: (_permissions, options) => options.canViewAudit === true,
+  yandexDisk: (_permissions, options) => options.canViewYandexDisk === true,
+  s3Storage: (_permissions, options) => options.canViewS3Storage === true,
+  settings: (_permissions, options) => options.canViewSettings === true,
+  dictionaries: (permissions) => permissions.dictionaries.canView,
+} satisfies Record<Tab, TabAccessRule>;
+
 export function canAccessTab(tab: Tab, permissions: RolePermissions, options: TabAccessOptions = {}): boolean {
-  switch (tab) {
-    case 'notifications':
-    case 'profile':
-      return true;
-    case 'calendar':
-      return permissions.calendar.canView;
-    case 'tasks':
-    case 'tasksControl':
-    case 'tasksApprovals':
-    case 'tasksCalendar':
-      return permissions.tasks.canView;
-    case 'notes':
-      return permissions.notes.canView;
-    case 'reports':
-      return permissions.reports.canView;
-    case 'calculator':
-      return permissions.calculator.canView;
-    case 'legalEntities':
-      return permissions.legalEntities.canView;
-    case 'cases':
-    case 'caseDetail':
-      return permissions.cases.canView;
-    case 'clients':
-    case 'contacts':
-      return permissions.clients.canView || permissions.legalEntities.canView;
-    case 'contactsClients':
-      return permissions.clients.canView;
-    case 'contactsLegal':
-      return permissions.legalEntities.canView;
-    case 'contactsExternal':
-    case 'clientDetail':
-      return permissions.clients.canView;
-    case 'accounts':
-    case 'accountsIncome':
-    case 'accountsExpense':
-    case 'installments':
-      return permissions.accounts.canView;
-    case 'acts':
-    case 'actsIncome':
-    case 'actsExpense':
-    case 'actDetail':
-      return permissions.acts.canView;
-    case 'actCreate':
-      return permissions.acts.canCreate;
-    case 'payments':
-    case 'paymentsIncome':
-    case 'paymentsExpense':
-    case 'moneyBank':
-    case 'moneyCash':
-    case 'moneyCards':
-    case 'moneyEMoney':
-    case 'moneyTotal':
-      return permissions.payments.canView;
-    case 'contracts':
-    case 'contractDetail':
-      return permissions.contracts.canView;
-    case 'contractCreate':
-      return permissions.contracts.canCreate;
-    case 'companyProfile':
-    case 'users':
-    case 'userDetail':
-    case 'userActivity':
-      return options.isAdminRole === true;
-    case 'audit':
-      return options.canViewAudit === true;
-    case 'yandexDisk':
-      return options.canViewYandexDisk === true;
-    case 's3Storage':
-      return options.canViewS3Storage === true;
-    case 'settings':
-      return options.canViewSettings === true;
-    case 'roles':
-      return options.canManageRoles === true;
-    case 'dictionaries':
-      return permissions.dictionaries.canView;
-    default:
-      return true;
-  }
+  return TAB_ACCESS_RULES[tab](permissions, options);
 }
 
 export function getPathInvoiceId(): number | null {

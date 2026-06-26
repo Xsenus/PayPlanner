@@ -377,6 +377,41 @@ describe('RealtimeNotificationToasts', () => {
     expect(openPayment).toHaveBeenCalledWith(321);
   });
 
+  it('opens notification center for payment toast when the payment action is unavailable', async () => {
+    const openNotifications = vi.fn();
+    render(<RealtimeNotificationToasts userId={5} onOpenNotifications={openNotifications} />);
+
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.({
+        id: 52,
+        recipientUserId: 5,
+        type: 'paymentAdvanceReviewRequired',
+        eventKey: 'payment:322:advance-review',
+        title: 'РџСЂРѕРІРµСЂСЊС‚Рµ РїР»Р°С‚РµР¶',
+        bodyPreview: 'РџРѕ РїР»Р°С‚РµР¶Сѓ С‚СЂРµР±СѓРµС‚СЃСЏ РїСЂРѕРІРµСЂРєР° Р°РІР°РЅСЃР°.',
+        tone: 'rose',
+        objectType: 'payment',
+        objectId: 322,
+        taskJournalItemId: null,
+        createdAt: '2026-05-25T10:00:00Z',
+      });
+    });
+
+    expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'РџСЂРѕРІРµСЂСЊС‚Рµ РїР»Р°С‚РµР¶',
+      actionLabel: 'Открыть уведомления',
+      dedupeKey: 'payment:322',
+      domain: 'payment',
+    }));
+
+    const toastOptions = toastMock.showToast.mock.calls[0][0] as { onAction: () => void };
+    act(() => toastOptions.onAction());
+
+    expect(openNotifications).toHaveBeenCalledTimes(1);
+  });
+
   it('falls back to notification center when a supported toast has no linked handler', async () => {
     const openNotifications = vi.fn();
     render(<RealtimeNotificationToasts userId={5} onOpenNotifications={openNotifications} />);
@@ -480,6 +515,41 @@ describe('RealtimeNotificationToasts', () => {
     act(() => toastOptions.onAction());
 
     expect(openNotes).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens notification center for note toast when the notes board action is unavailable', async () => {
+    const openNotifications = vi.fn();
+    render(<RealtimeNotificationToasts userId={5} onOpenNotifications={openNotifications} />);
+
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.({
+        id: 51,
+        recipientUserId: 5,
+        type: 'stickyNoteUpdated',
+        eventKey: 'note:board:5:updated',
+        title: 'Обновлена заметка',
+        bodyPreview: 'На общей доске изменили заметку.',
+        tone: 'blue',
+        objectType: 'note',
+        objectId: 5,
+        taskJournalItemId: null,
+        createdAt: '2026-05-25T10:00:00Z',
+      });
+    });
+
+    expect(toastMock.showToast).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Обновлена заметка',
+      actionLabel: 'Открыть уведомления',
+      dedupeKey: 'note:5',
+      domain: 'note',
+    }));
+
+    const toastOptions = toastMock.showToast.mock.calls[0][0] as { onAction: () => void };
+    act(() => toastOptions.onAction());
+
+    expect(openNotifications).toHaveBeenCalledTimes(1);
   });
 
   it('recognizes sticky note toast by type when object type is not normalized', async () => {

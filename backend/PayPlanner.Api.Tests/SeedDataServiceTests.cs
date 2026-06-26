@@ -28,6 +28,109 @@ public class SeedDataServiceTests
         Assert.Equal(firstSnapshot.RolePermissions, firstSnapshot.DistinctRolePermissionPairs);
         Assert.Equal(1, firstSnapshot.AdminUsers);
         Assert.True(await db.DocumentStatuses.AnyAsync(item => item.Code == DocumentWorkflowStatus.RequiresClientSignature));
+
+        var userPaymentsPermission = await db.RolePermissions
+            .AsNoTracking()
+            .SingleAsync(item => item.Role != null && item.Role.Name == "user" && item.Section == RolePermissionCatalog.Payments);
+        var adminPaymentsPermission = await db.RolePermissions
+            .AsNoTracking()
+            .SingleAsync(item => item.Role != null && item.Role.Name == "admin" && item.Section == RolePermissionCatalog.Payments);
+
+        Assert.False(userPaymentsPermission.CanView);
+        Assert.False(userPaymentsPermission.CanCreate);
+        Assert.True(adminPaymentsPermission.CanView);
+        Assert.True(adminPaymentsPermission.CanCreate);
+    }
+
+    [Fact]
+    public async Task SeedAsync_ForLawyerRoleAddsSafeOperationalPermissions()
+    {
+        await using var db = await CreateContextAsync();
+        db.Roles.Add(new Role { Name = "\u042e\u0440\u0438\u0441\u0442", Description = "\u0422\u0435\u0441\u0442\u043e\u0432\u0430\u044f \u0440\u043e\u043b\u044c \u044e\u0440\u0438\u0441\u0442\u0430" });
+        await db.SaveChangesAsync();
+
+        await SeedDataService.SeedAsync(db);
+
+        var lawyerRole = await db.Roles
+            .AsNoTracking()
+            .SingleAsync(item => item.Name == "\u042e\u0440\u0438\u0441\u0442");
+        var permissions = await db.RolePermissions
+            .AsNoTracking()
+            .Where(item => item.RoleId == lawyerRole.Id)
+            .ToDictionaryAsync(item => item.Section);
+
+        Assert.Equal(RolePermissionCatalog.AllSections.Length, permissions.Count);
+        Assert.True(permissions[RolePermissionCatalog.Tasks].CanView);
+        Assert.True(permissions[RolePermissionCatalog.Tasks].CanCreate);
+        Assert.True(permissions[RolePermissionCatalog.Calendar].CanView);
+        Assert.False(permissions[RolePermissionCatalog.Clients].CanView);
+        Assert.False(permissions[RolePermissionCatalog.Cases].CanView);
+        Assert.True(permissions[RolePermissionCatalog.Notifications].CanView);
+        Assert.Equal(DataVisibilityScope.Own, permissions[RolePermissionCatalog.Tasks].ViewScope);
+        Assert.Equal(DataVisibilityScope.Own, permissions[RolePermissionCatalog.Clients].ViewScope);
+        Assert.Equal(DataVisibilityScope.Own, permissions[RolePermissionCatalog.Cases].ViewScope);
+
+        foreach (var section in new[]
+        {
+            RolePermissionCatalog.Payments,
+            RolePermissionCatalog.Accounts,
+            RolePermissionCatalog.Acts,
+            RolePermissionCatalog.Contracts,
+            RolePermissionCatalog.Reports,
+            RolePermissionCatalog.Roles,
+            RolePermissionCatalog.Audit,
+            RolePermissionCatalog.Integrations,
+            RolePermissionCatalog.YandexDisk,
+            RolePermissionCatalog.S3Storage,
+        })
+        {
+            Assert.False(permissions[section].CanView);
+            Assert.False(permissions[section].CanCreate);
+            Assert.False(permissions[section].CanEdit);
+            Assert.False(permissions[section].CanDelete);
+            Assert.False(permissions[section].CanExport);
+        }
+    }
+
+    [Fact]
+    public async Task SeedAsync_ForLawyerRoleDoesNotOverwriteExistingManualPermissions()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "lawyer", Description = "Manual lawyer role" };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = role.Id,
+            Section = RolePermissionCatalog.Payments,
+            CanView = true,
+            CanCreate = true,
+            CanEdit = false,
+            CanDelete = false,
+            CanExport = false,
+            ViewScope = DataVisibilityScope.Own,
+        });
+        await db.SaveChangesAsync();
+
+        await SeedDataService.SeedAsync(db);
+
+        var paymentPermission = await db.RolePermissions
+            .AsNoTracking()
+            .SingleAsync(item => item.RoleId == role.Id && item.Section == RolePermissionCatalog.Payments);
+        var accountsPermission = await db.RolePermissions
+            .AsNoTracking()
+            .SingleAsync(item => item.RoleId == role.Id && item.Section == RolePermissionCatalog.Accounts);
+        var tasksPermission = await db.RolePermissions
+            .AsNoTracking()
+            .SingleAsync(item => item.RoleId == role.Id && item.Section == RolePermissionCatalog.Tasks);
+
+        Assert.True(paymentPermission.CanView);
+        Assert.True(paymentPermission.CanCreate);
+        Assert.False(accountsPermission.CanView);
+        Assert.True(tasksPermission.CanView);
+        Assert.True(tasksPermission.CanCreate);
+        Assert.Equal(RolePermissionCatalog.AllSections.Length, await db.RolePermissions.CountAsync(item => item.RoleId == role.Id));
     }
 
     private static async Task<SeedSnapshot> CreateSnapshotAsync(PaymentContext db)

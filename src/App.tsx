@@ -995,13 +995,13 @@ function AppContent() {
       case 'notifications':
         return (
           <NotificationCenter
-            onOpenTask={(taskId) => openTaskDetail(taskId, { returnTo: 'notifications' })}
-            onOpenCase={openRelatedCase}
-            onOpenCaseDocument={(caseId) => openCaseDetailSection(caseId, 'documents')}
-            onOpenPayment={(paymentId) => openPaymentPage(paymentId)}
-            onOpenInvoice={(invoiceId) => openInvoicePage(invoiceId, { returnTo: { tab: 'notifications' } })}
-            onOpenAct={(actId) => openActDetail(actId, { tab: 'notifications' })}
-            onOpenContract={(contractId) => openContractDetail(contractId, { returnTo: 'notifications' })}
+            onOpenTask={permissions.tasks.canView ? (taskId) => openTaskDetail(taskId, { returnTo: 'notifications' }) : undefined}
+            onOpenCase={permissions.cases.canView ? openRelatedCase : undefined}
+            onOpenCaseDocument={permissions.cases.canView ? (caseId) => openCaseDetailSection(caseId, 'documents') : undefined}
+            onOpenPayment={permissions.payments.canView ? (paymentId) => openPaymentPage(paymentId) : undefined}
+            onOpenInvoice={permissions.accounts.canView ? (invoiceId) => openInvoicePage(invoiceId, { returnTo: { tab: 'notifications' } }) : undefined}
+            onOpenAct={permissions.acts.canView ? (actId) => openActDetail(actId, { tab: 'notifications' }) : undefined}
+            onOpenContract={permissions.contracts.canView ? (contractId) => openContractDetail(contractId, { returnTo: 'notifications' }) : undefined}
           />
         );
 
@@ -1069,13 +1069,13 @@ function AppContent() {
         return permissions.reports.canView
           ? (
               <Reports
-                onOpenCase={(caseId) => {
+                onOpenCase={permissions.cases.canView ? (caseId) => {
                   setSelectedCaseId(caseId);
                   setCaseReturnTab('reports');
                   setActiveTab('caseDetail');
-                }}
-                onOpenCaseSection={openCaseDetailSection}
-                onOpenTask={(taskId) => openTaskDetail(taskId, { returnTo: 'reports' })}
+                } : undefined}
+                onOpenCaseSection={permissions.cases.canView ? openCaseDetailSection : undefined}
+                onOpenTask={permissions.tasks.canView ? (taskId) => openTaskDetail(taskId, { returnTo: 'reports' }) : undefined}
               />
             )
           : renderNoAccess('Просмотр отчетов недоступен для вашей роли.');
@@ -1168,6 +1168,8 @@ function AppContent() {
             canEdit={permissions.cases.canEdit}
             canDelete={permissions.cases.canDelete}
             canViewFinance={permissions.payments.canView}
+            canViewTasks={permissions.tasks.canView}
+            canCreateTasks={permissions.tasks.canView && permissions.tasks.canCreate}
             onBack={() => {
               setSelectedCaseId(null);
               setActiveTab(caseReturnTab === 'caseDetail' ? 'cases' : caseReturnTab);
@@ -1774,15 +1776,15 @@ function AppContent() {
       <div className="min-h-screen bg-gray-50">
         <RealtimeNotificationToasts
           userId={user.id}
-          onOpenTask={(taskId) => openTaskDetail(taskId, { returnTo: activeTab })}
-          onOpenCase={openRelatedCase}
-          onOpenCaseDocument={(caseId) => openCaseDetailSection(caseId, 'documents')}
-          onOpenPayment={(paymentId) => openPaymentPage(paymentId)}
-          onOpenInvoice={(invoiceId) => openInvoicePage(invoiceId)}
-          onOpenAct={(actId) => openActDetail(actId, { tab: 'notifications' })}
-          onOpenContract={(contractId) => openContractDetail(contractId, { returnTo: activeTab })}
+          onOpenTask={permissions.tasks.canView ? (taskId) => openTaskDetail(taskId, { returnTo: activeTab }) : undefined}
+          onOpenCase={permissions.cases.canView ? openRelatedCase : undefined}
+          onOpenCaseDocument={permissions.cases.canView ? (caseId) => openCaseDetailSection(caseId, 'documents') : undefined}
+          onOpenPayment={permissions.payments.canView ? (paymentId) => openPaymentPage(paymentId) : undefined}
+          onOpenInvoice={permissions.accounts.canView ? (invoiceId) => openInvoicePage(invoiceId) : undefined}
+          onOpenAct={permissions.acts.canView ? (actId) => openActDetail(actId, { tab: 'notifications' }) : undefined}
+          onOpenContract={permissions.contracts.canView ? (contractId) => openContractDetail(contractId, { returnTo: activeTab }) : undefined}
           onOpenCalendar={permissions.calendar.canView ? () => handleTabChange('calendar') : handleOpenNotifications}
-          onOpenNotes={permissions.notes.canView ? () => handleTabChange('notes') : handleOpenNotifications}
+          onOpenNotes={permissions.notes.canView ? () => handleTabChange('notes') : undefined}
           onOpenNotifications={handleOpenNotifications}
         />
         <DoubleHorizontalScrollbars />

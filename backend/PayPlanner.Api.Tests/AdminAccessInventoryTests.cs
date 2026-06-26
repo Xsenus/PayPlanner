@@ -11,7 +11,6 @@ public class AdminAccessInventoryTests
         yield return ["AuthProvidersAdminController.cs"];
         yield return ["CalendarSyncController.cs"];
         yield return ["DatabaseAdminController.cs"];
-        yield return ["DictionariesAdminController.cs"];
         yield return ["FormRequirementsController.cs"];
         yield return ["LegalEntitiesController.cs"];
         yield return ["SystemJobsController.cs"];

@@ -58,6 +58,9 @@ public class ActsController : ControllerBase
     private Task<DataVisibilityAccess?> ResolveActsVisibilityAsync(CancellationToken ct)
         => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Acts, ct);
 
+    private ActionResult MissingActsVisibilityResult()
+        => User.GetUserId().HasValue ? Forbid() : Unauthorized();
+
     private async Task<ActionResult?> RequireActsPermissionAsync(
         Func<RolePermissionValues, bool> isAllowed,
         CancellationToken ct)
@@ -240,7 +243,7 @@ public class ActsController : ControllerBase
         var visibility = await ResolveActsVisibilityAsync(ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return MissingActsVisibilityResult();
         }
 
         var normalizedWorkflowStatus = NormalizeActWorkflowStatusOrNull(workflowStatus);
@@ -384,7 +387,7 @@ public class ActsController : ControllerBase
         var visibility = await ResolveActsVisibilityAsync(ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return MissingActsVisibilityResult();
         }
 
         var dto = await _db.Acts.AsNoTracking()
@@ -625,7 +628,7 @@ public class ActsController : ControllerBase
         var visibility = await ResolveActsVisibilityAsync(ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return MissingActsVisibilityResult();
         }
 
         var original = await _db.Acts
@@ -740,7 +743,7 @@ public class ActsController : ControllerBase
         var visibility = await ResolveActsVisibilityAsync(ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return MissingActsVisibilityResult();
         }
 
         var normalizedWorkflowStatus = NormalizeActWorkflowStatusOrNull(workflowStatus);
@@ -970,7 +973,7 @@ public class ActsController : ControllerBase
         var visibility = await ResolveActsVisibilityAsync(ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return MissingActsVisibilityResult();
         }
 
         var act = await _db.Acts
@@ -1041,7 +1044,7 @@ public class ActsController : ControllerBase
         var visibility = await ResolveActsVisibilityAsync(ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return MissingActsVisibilityResult();
         }
 
         var act = await _db.Acts

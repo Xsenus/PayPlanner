@@ -11,7 +11,12 @@ export interface CaseSuccessReportFilters {
   limit?: number;
 }
 
-export function useCaseSuccessReport(filters: CaseSuccessReportFilters) {
+export interface CaseSuccessReportOptions {
+  enabled?: boolean;
+}
+
+export function useCaseSuccessReport(filters: CaseSuccessReportFilters, options: CaseSuccessReportOptions = {}) {
+  const enabled = options.enabled ?? true;
   const [report, setReport] = useState<CaseSuccessReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,6 +35,14 @@ export function useCaseSuccessReport(filters: CaseSuccessReportFilters) {
   );
 
   const load = useCallback(async () => {
+    if (!enabled) {
+      requestIdRef.current += 1;
+      setReport(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     setLoading(true);
@@ -54,7 +67,7 @@ export function useCaseSuccessReport(filters: CaseSuccessReportFilters) {
         setLoading(false);
       }
     }
-  }, [stableFilters]);
+  }, [enabled, stableFilters]);
 
   useEffect(() => {
     void load();

@@ -14,7 +14,12 @@ export interface ActStatusReportFilters {
   incomeTypeId?: number;
 }
 
-export function useActStatusReport(filters: ActStatusReportFilters) {
+export interface ActStatusReportOptions {
+  enabled?: boolean;
+}
+
+export function useActStatusReport(filters: ActStatusReportFilters, options: ActStatusReportOptions = {}) {
+  const enabled = options.enabled ?? true;
   const [report, setReport] = useState<ActStatusReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +41,14 @@ export function useActStatusReport(filters: ActStatusReportFilters) {
   );
 
   const load = useCallback(async () => {
+    if (!enabled) {
+      requestIdRef.current += 1;
+      setReport(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     setLoading(true);
@@ -60,7 +73,7 @@ export function useActStatusReport(filters: ActStatusReportFilters) {
         setLoading(false);
       }
     }
-  }, [stableFilters]);
+  }, [enabled, stableFilters]);
 
   useEffect(() => {
     void load();

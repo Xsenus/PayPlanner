@@ -26,6 +26,11 @@ export interface PeriodResult {
   refresh: () => void;
 }
 
+export interface PeriodStatsOptions {
+  enabled?: boolean;
+  pollInterval?: number;
+}
+
 function normalizeRange(fromYM: YM, toYM: YM): { fromYM: YM; toYM: YM } {
   return fromYM <= toYM ? { fromYM, toYM } : { fromYM: toYM, toYM: fromYM };
 }
@@ -73,7 +78,9 @@ function buildTypeBucket(bucket: SummaryBucket, type: 'Income' | 'Expense'): Typ
   };
 }
 
-export function usePeriodStats(fromYM: YM, toYM: YM, pollInterval?: number): PeriodResult {
+export function usePeriodStats(fromYM: YM, toYM: YM, options: PeriodStatsOptions = {}): PeriodResult {
+  const enabled = options.enabled ?? true;
+  const pollInterval = options.pollInterval;
   const [stats, setStats] = useState<MonthlyStats | null>(null);
   const [types, setTypes] = useState<{ income: TypeBucket; expense: TypeBucket } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -82,6 +89,14 @@ export function usePeriodStats(fromYM: YM, toYM: YM, pollInterval?: number): Per
 
   const fetchAll = useCallback(
     async (silent = false) => {
+      if (!enabled) {
+        setStats(null);
+        setTypes(null);
+        setError(null);
+        setLoading(false);
+        return;
+      }
+
       try {
         if (!silent) setLoading(true);
         setError(null);
@@ -102,7 +117,7 @@ export function usePeriodStats(fromYM: YM, toYM: YM, pollInterval?: number): Per
         if (!silent) setLoading(false);
       }
     },
-    [fromYM, toYM],
+    [enabled, fromYM, toYM],
   );
 
   useEffect(() => {

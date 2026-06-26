@@ -848,6 +848,31 @@ describe('CaseDetailPage', () => {
     expect(await screen.findByText('Массовое изменение')).toBeTruthy();
   });
 
+  it('hides case tasks and does not load task data when task access is closed', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canViewTasks={false} canCreateTasks={false} />);
+
+    expect(await screen.findByText('ЗЕМЦОВ - банкротство')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Задачи' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Создать задачу/u })).toBeNull();
+    expect(apiService.getTaskJournalItems).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Документы' }));
+    expect(await screen.findByText('Заявление.docx')).toBeTruthy();
+    expect(screen.queryByRole('option', { name: 'Задача' })).toBeNull();
+    expect(apiService.getTaskJournalItems).not.toHaveBeenCalled();
+  });
+
+  it('keeps case tasks read-only when task creation is closed', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canViewTasks canCreateTasks={false} />);
+
+    expect(await screen.findByText('ЗЕМЦОВ - банкротство')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Создать задачу/u })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Задачи' }));
+    expect(await screen.findByText('Проверить движение по делу')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^Создать$/u })).toBeNull();
+  });
+
   it('shows case activity and document upload timestamps in the profile time zone', async () => {
     vi.mocked(apiService.getUserSetting).mockResolvedValue({ key: 'profile.timeZoneId', value: 'Europe/Samara' });
     vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
@@ -1013,6 +1038,68 @@ describe('CaseDetailPage', () => {
 
     expect(screen.queryByRole('button', { name: 'Финансы' })).toBeNull();
     expect(apiService.getCaseFinance).not.toHaveBeenCalled();
+  });
+
+  it('hides case sidebar finance shortcuts without finance permission', async () => {
+    const onCreateInvoice = vi.fn();
+    const onCreatePayment = vi.fn();
+
+    render(
+      <CaseDetailPage
+        caseId={15}
+        onBack={vi.fn()}
+        canViewFinance={false}
+        onCreateInvoice={onCreateInvoice}
+        onCreatePayment={onCreatePayment}
+      />,
+    );
+
+    await screen.findByText('Клиент по делу');
+
+    expect(screen.queryByRole('button', { name: 'Счет' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Платеж' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Финансы дела' })).toBeNull();
+    expect(onCreateInvoice).not.toHaveBeenCalled();
+    expect(onCreatePayment).not.toHaveBeenCalled();
+  });
+
+  it('hides work order document creation actions without finance permission', async () => {
+    vi.mocked(apiService.getCaseWorkOrder).mockResolvedValue({
+      id: 31,
+      clientCaseId: 15,
+      title: 'Предварительный расчет',
+      status: 'approved',
+      statusLabel: 'Согласован',
+      currency: 'RUB',
+      notes: null,
+      totalAmount: 24000,
+      items: [
+        {
+          id: 41,
+          clientCaseWorkOrderId: 31,
+          serviceName: 'Подготовка заявления',
+          description: 'Пакет документов',
+          executorUserId: 7,
+          executorName: 'Кожеваткин Андрей Владимирович',
+          dueDate: '2026-06-01',
+          quantity: 2,
+          unitPrice: 12000,
+          totalAmount: 24000,
+          sortOrder: 1,
+        },
+      ],
+    });
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canViewFinance={false} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Заказ-наряд' }));
+    await waitFor(() => expect(apiService.getCaseWorkOrder).toHaveBeenCalledWith(15));
+
+    expect(await screen.findByDisplayValue('Предварительный расчет')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Создать счет' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Создать акт' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Создать договор' })).toBeNull();
   });
 
   it('opens the work order print form from the work order tab', async () => {

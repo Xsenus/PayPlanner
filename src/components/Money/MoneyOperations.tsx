@@ -797,6 +797,7 @@ function CashOrderModal({
   canCreate,
   canEdit,
   canDelete,
+  canViewAudit,
 }: {
   order: CashOrder | null;
   open: boolean;
@@ -813,6 +814,7 @@ function CashOrderModal({
   canCreate: boolean;
   canEdit: boolean;
   canDelete: boolean;
+  canViewAudit: boolean;
 }) {
   const [form, setForm] = useState<CashOrder | null>(order ? mapCashOrderToForm(order) : null);
   const [error, setError] = useState<string | null>(null);
@@ -1079,14 +1081,16 @@ function CashOrderModal({
               <Printer className="h-4 w-4" />
               Печать
             </button>
-            <button
-              type="button"
-              onClick={() => setHistoryOpen(true)}
-              disabled={!isPersisted}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
-              <History className="h-4 w-4" />
-              История
-            </button>
+            {canViewAudit ? (
+              <button
+                type="button"
+                onClick={() => setHistoryOpen(true)}
+                disabled={!isPersisted}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                <History className="h-4 w-4" />
+                История
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => setHelpOpen(true)}
@@ -2282,6 +2286,10 @@ export function MoneyOperations({
   const canCreateMoneyOperations = permissions.payments.canCreate;
   const canEditMoneyOperations = permissions.payments.canEdit;
   const canDeleteMoneyOperations = permissions.payments.canDelete;
+  const canOpenLinkedAccounts = permissions.accounts?.canView === true;
+  const canOpenLinkedClients = permissions.clients?.canView === true;
+  const canViewAudit = permissions.audit?.canView === true;
+  const openLinkedInvoice = canOpenLinkedAccounts ? onOpenInvoice : undefined;
   const { setActiveTab } = useTabNavigation();
   const toast = useToast();
   const { confirm } = useDialog();
@@ -3781,7 +3789,7 @@ export function MoneyOperations({
       case 'currency':
         return item.currency ?? 'RUB';
       case 'accountName':
-        return item.accountName ? (
+        return item.accountName && canOpenLinkedAccounts ? (
           <button
             type="button"
             onClick={() => setActiveTab('accounts')}
@@ -3789,14 +3797,14 @@ export function MoneyOperations({
             {item.accountName}
           </button>
         ) : (
-          '—'
+          item.accountName ?? '—'
         );
       case 'counterpartyName':
         return item.counterpartyName ?? '—';
       case 'responsibleName':
         return item.responsibleName ?? '—';
       case 'projectName':
-        return item.projectName ? (
+        return item.projectName && canOpenLinkedClients ? (
           <button
             type="button"
             onClick={() => setActiveTab('clients')}
@@ -3804,7 +3812,7 @@ export function MoneyOperations({
             {item.projectName}
           </button>
         ) : (
-          '—'
+          item.projectName ?? '—'
         );
       case 'salesPointName':
         return item.salesPointName ?? '—';
@@ -3819,10 +3827,10 @@ export function MoneyOperations({
           </div>
         );
       case 'paidAccountName':
-        return item.linkedInvoiceId && onOpenInvoice ? (
+        return item.linkedInvoiceId && openLinkedInvoice ? (
           <button
             type="button"
-            onClick={() => onOpenInvoice(item.linkedInvoiceId!, item.direction === 'Expense' ? 'Expense' : 'Income')}
+            onClick={() => openLinkedInvoice(item.linkedInvoiceId!, item.direction === 'Expense' ? 'Expense' : 'Income')}
             className="text-blue-600 underline-offset-2 hover:underline">
             {item.paidAccountName || item.linkedInvoiceNumber || `Счёт ${item.linkedInvoiceId}`}
           </button>
@@ -3834,7 +3842,7 @@ export function MoneyOperations({
       case 'linkedActNumber':
         return item.linkedActNumber ?? '—';
       case 'matchStatus':
-        return renderMatchStatusBadge(item, onOpenInvoice, handleEdit);
+        return renderMatchStatusBadge(item, openLinkedInvoice, handleEdit);
       case 'attachmentSummary':
         return item.attachmentSummary ? (
           <div className="line-clamp-2 text-slate-700" title={item.attachmentSummary}>
@@ -4302,7 +4310,7 @@ export function MoneyOperations({
                               {item.purpose || '—'}
                             </div>
                           </td>
-                          <td className="px-3 py-2">{renderMatchStatusBadge(item, onOpenInvoice, handleEdit)}</td>
+                          <td className="px-3 py-2">{renderMatchStatusBadge(item, openLinkedInvoice, handleEdit)}</td>
                           <td className="px-3 py-2 text-right">
                             <div className="inline-flex items-center gap-2">
                               {item.matchStatus === 'ClarificationRequired' && (
@@ -5756,6 +5764,7 @@ export function MoneyOperations({
         canCreate={canCreateMoneyOperations}
         canEdit={canEditMoneyOperations}
         canDelete={canDeleteMoneyOperations}
+        canViewAudit={canViewAudit}
       />
 
       {selectedBankImport &&

@@ -96,4 +96,60 @@ describe('PaymentsTable', () => {
     expect(onOpenClient).toHaveBeenCalledWith(12, 34);
     expect(onEditPayment).not.toHaveBeenCalled();
   });
+
+  it('renders client as plain text when client section is hidden', () => {
+    const payment = createPayment({
+      clientId: 12,
+      clientCaseId: 34,
+      client: { id: 12, name: 'Client A' },
+    } as Partial<Payment>);
+    const onEditPayment = vi.fn();
+    const onOpenClient = vi.fn();
+
+    render(
+      <PaymentsTable
+        payments={[payment]}
+        onEditPayment={onEditPayment}
+        onOpenClient={onOpenClient}
+        canAdd={false}
+        canEdit
+        canDelete={false}
+        canOpenClients={false}
+      />,
+    );
+
+    expect(screen.getByText('Client A')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Client A/ })).toBeNull();
+    fireEvent.click(screen.getByText('Client A').closest('tr')!);
+
+    expect(onOpenClient).not.toHaveBeenCalled();
+    expect(onEditPayment).toHaveBeenCalledWith(payment);
+  });
+
+  it('does not pass case id when cases section is hidden', () => {
+    const payment = createPayment({
+      clientId: 12,
+      clientCaseId: 34,
+      client: { id: 12, name: 'Client A' },
+    } as Partial<Payment>);
+    const onEditPayment = vi.fn();
+    const onOpenClient = vi.fn();
+
+    render(
+      <PaymentsTable
+        payments={[payment]}
+        onEditPayment={onEditPayment}
+        onOpenClient={onOpenClient}
+        canAdd={false}
+        canEdit
+        canDelete={false}
+        canOpenCases={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Client A/ }));
+
+    expect(onOpenClient).toHaveBeenCalledWith(12, undefined);
+    expect(onEditPayment).not.toHaveBeenCalled();
+  });
 });

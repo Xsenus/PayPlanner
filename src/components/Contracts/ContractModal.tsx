@@ -6,7 +6,7 @@ import { fromInputToApiDate, todayYMDInTimeZone, toDateInputValue } from '../../
 import { useTranslation } from '../../hooks/useTranslation';
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
-import { CounterpartyPickerModal, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
+import { CounterpartyPickerModal, type CounterpartyKind, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
 
 interface ContractModalProps {
   open: boolean;
@@ -17,6 +17,7 @@ interface ContractModalProps {
   submitting: boolean;
   errorMessage?: string | null;
   defaultClients?: ContractClient[];
+  allowedCounterpartyScopes?: CounterpartyKind[];
   overlayClassName?: string;
 }
 
@@ -97,6 +98,7 @@ export function ContractModal({
   submitting,
   errorMessage,
   defaultClients,
+  allowedCounterpartyScopes,
   overlayClassName,
 }: ContractModalProps) {
   const { t } = useTranslation();
@@ -116,6 +118,7 @@ export function ContractModal({
     () => buildInitialCounterparties(contract, defaultClients),
   );
   const [pickerOpen, setPickerOpen] = useState(false);
+  const canSelectCounterparties = allowedCounterpartyScopes === undefined || allowedCounterpartyScopes.length > 0;
 
   useEffect(() => {
     if (open) {
@@ -492,8 +495,13 @@ export function ContractModal({
             <span className="font-medium text-slate-700">{t('contractClients') ?? 'Контрагенты'}</span>
             <button
               type="button"
-              onClick={() => setPickerOpen(true)}
-              className="inline-flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100"
+              onClick={() => {
+                if (canSelectCounterparties) {
+                  setPickerOpen(true);
+                }
+              }}
+              disabled={!canSelectCounterparties}
+              className="inline-flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <Plus className="h-4 w-4" />
               Добавить
@@ -564,6 +572,7 @@ export function ContractModal({
         mode="multiple"
         title="Выбор контрагентов"
         selected={selectedPickerValue}
+        allowedScopes={allowedCounterpartyScopes}
         overlayClassName="z-[1600]"
         onApply={handleApplyCounterparties}
         onClose={() => setPickerOpen(false)}

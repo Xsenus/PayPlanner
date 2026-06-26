@@ -119,6 +119,8 @@ export function Acts({
   const canCreate = actsPermissions.canCreate;
   const canEdit = actsPermissions.canEdit;
   const canDelete = actsPermissions.canDelete;
+  const canViewLinkedAccounts = permissions.accounts.canView;
+  const canViewLinkedClients = permissions.clients.canView;
 
   const { t } = useTranslation();
   const documentStatusSettings = useDocumentStatusSettings();
@@ -466,7 +468,7 @@ export function Acts({
     setLookupsLoading(true);
     try {
       const [clientsResponse, responsibleResponse] = await Promise.all([
-        apiService.getClients(),
+        canViewLinkedClients ? apiService.getClients() : Promise.resolve([]),
         apiService.getActResponsibles(),
       ]);
       setClients(clientsResponse ?? []);
@@ -477,7 +479,7 @@ export function Acts({
     } finally {
       setLookupsLoading(false);
     }
-  }, [clients.length, responsibles.length, modalOpen, lookupsError]);
+  }, [canViewLinkedClients, clients.length, responsibles.length, modalOpen, lookupsError]);
 
   useEffect(() => {
     if (modalOpen) {
@@ -526,7 +528,7 @@ export function Acts({
 
 
   const openInvoiceFromAct = useCallback(async (act: Act) => {
-    if (!onOpenInvoiceEditor) return;
+    if (!canViewLinkedAccounts || !onOpenInvoiceEditor) return;
     if (act.invoiceId) {
       onOpenInvoiceEditor(act.invoiceId);
       return;
@@ -544,7 +546,7 @@ export function Acts({
     } catch (err) {
       toast.error(extractDisplayErrorMessage(err, 'Не удалось открыть счет.'));
     }
-  }, [onOpenInvoiceEditor, toast]);
+  }, [canViewLinkedAccounts, onOpenInvoiceEditor, toast]);
 
   const handleDelete = async (act: Act) => {
     const confirmText = t('actDeleteConfirm') ?? 'Удалить акт?';
@@ -628,7 +630,7 @@ export function Acts({
       case 'invoiceNumber':
         return (
           <td key={key} className="whitespace-nowrap px-4 py-3 text-sm text-slate-600">
-            {act.invoiceNumber ? (
+            {act.invoiceNumber && canViewLinkedAccounts && onOpenInvoiceEditor ? (
               <button
                 type="button"
                 className="text-indigo-600 hover:underline"
@@ -639,7 +641,7 @@ export function Acts({
               >
                 {act.invoiceNumber}
               </button>
-            ) : '—'}
+            ) : (act.invoiceNumber || '—')}
           </td>
         );
       case 'client':
@@ -647,7 +649,7 @@ export function Acts({
           <td key={key} className="px-4 py-3 text-sm text-slate-700">
             <div className="flex flex-col">
               <span className="font-medium text-slate-900">
-                {act.clientId && act.clientName ? (
+                {act.clientId && act.clientName && canViewLinkedClients && onOpenClient ? (
                   <button
                     type="button"
                     className="text-indigo-600 hover:underline"
@@ -1114,6 +1116,7 @@ export function Acts({
         responsibles={responsibles}
         lookupsLoading={lookupsLoading}
         lookupsError={lookupsError}
+        canViewInvoices={canViewLinkedAccounts}
       />
     </div>
   );

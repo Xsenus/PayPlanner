@@ -43,7 +43,7 @@ import { InstallmentPlanner } from './InstallmentPlanner';
 import { cloneInstallmentPlan, deriveInstallmentPlanFromPayments, parseInstallmentPaymentMetadata } from '../../utils/installmentPlan';
 import { getContractBillingModeLabel, getContractEffectiveAmount } from '../../utils/contracts';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
-import { CounterpartyPickerModal, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
+import { CounterpartyPickerModal, type CounterpartyKind, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
 import { useDocumentStatusSettings } from '../../hooks/useDocumentStatusSettings';
 import { getDocumentStatusLabels } from '../../utils/documentStatusSettings';
 import {
@@ -266,6 +266,7 @@ interface InvoiceModalProps {
   errorMessage?: string | null;
   clients: Client[];
   legalEntities?: LegalEntitySummary[];
+  allowedCounterpartyScopes?: CounterpartyKind[];
   legalEntitiesLoading?: boolean;
   legalEntitiesError?: string | null;
   onClientCreated?: (client: Client) => void;
@@ -894,6 +895,7 @@ export function InvoiceModal({
   errorMessage,
   clients,
   legalEntities = [],
+  allowedCounterpartyScopes,
   responsibles = [],
   lookupsLoading,
   lookupsError,
@@ -937,6 +939,7 @@ export function InvoiceModal({
   const [localError, setLocalError] = useState<string | null>(null);
   const [clientPickerOpen, setClientPickerOpen] = useState(false);
   const [clientPickerMode, setClientPickerMode] = useState<InvoiceCounterpartyPickerMode>('main');
+  const canSelectCounterparty = allowedCounterpartyScopes === undefined || allowedCounterpartyScopes.length > 0;
   const [selectedActs, setSelectedActs] = useState<ActOption[]>(() => normalizeInvoiceActs(invoice));
   const [actOptions, setActOptions] = useState<ActOption[]>(() => normalizeInvoiceActs(invoice));
   const [clientCaseOptions, setClientCaseOptions] = useState<ClientCaseOption[]>(() => normalizeInvoiceClientCases(invoice));
@@ -2277,6 +2280,7 @@ export function InvoiceModal({
   };
 
   const openClientPicker = (mode: InvoiceCounterpartyPickerMode = 'main') => {
+    if (!canSelectCounterparty) return;
     setClientPickerMode(mode);
     setClientPickerOpen(true);
   };
@@ -4908,7 +4912,8 @@ export function InvoiceModal({
                                   type="button"
                                   aria-label={`Открыть выбор: ${counterpartyLabel.toLocaleLowerCase('ru')}`}
                                   onClick={() => openClientPicker('main')}
-                                  className="inline-flex items-center rounded-lg border border-slate-200 px-3 py-2 text-slate-700 hover:bg-slate-50"
+                                  disabled={!canSelectCounterparty}
+                                  className="inline-flex items-center rounded-lg border border-slate-200 px-3 py-2 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                                 >
                                   <UserRoundSearch className="h-4 w-4" />
                                 </button>
@@ -4981,7 +4986,7 @@ export function InvoiceModal({
                                     <button
                                       type="button"
                                       onClick={() => openClientPicker('expense')}
-                                      disabled={lookupsLoading}
+                                      disabled={lookupsLoading || !canSelectCounterparty}
                                       className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
                                       aria-label="Открыть выбор контрагента расхода"
                                     >
@@ -5455,6 +5460,7 @@ export function InvoiceModal({
             : (form.legalEntityId ? 'legalEntity' : 'client')
         }
         selected={selectedCounterpartyPickerValue}
+        allowedScopes={allowedCounterpartyScopes}
         counterpartyRole={
           clientPickerMode === 'expense'
             ? 'client'

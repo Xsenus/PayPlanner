@@ -12,6 +12,11 @@ const paymentsResult = {
   refresh: vi.fn(),
 };
 
+const permissionsState = vi.hoisted(() => ({
+  tasksCanView: true,
+  calendarCanViewAnalytics: true,
+}));
+
 function createPersistedTableSettings(
   columns: Array<{ key: string; defaultWidth?: number; defaultVisible?: boolean }>,
   defaultPageSize: number,
@@ -65,7 +70,17 @@ vi.mock('../../hooks/useRolePermissions', () => ({
       canCreate: true,
       canEdit: true,
       canDelete: true,
+      canViewAnalytics: permissionsState.calendarCanViewAnalytics,
+    },
+    tasks: {
+      canView: permissionsState.tasksCanView,
+      canCreate: true,
+      canEdit: true,
+      canDelete: true,
+      canExport: true,
       canViewAnalytics: true,
+      viewScope: 'all',
+      visibleUserIds: [],
     },
   }),
 }));
@@ -139,7 +154,7 @@ vi.mock('../MonthRange/MonthRangePicker', () => ({
 }));
 
 vi.mock('../Statistics/TwoTypeStats', () => ({
-  TwoTypeStats: () => null,
+  TwoTypeStats: () => <div data-testid="calendar-analytics">analytics</div>,
 }));
 
 vi.mock('../ui/TableColumnSettings', () => ({
@@ -159,6 +174,8 @@ vi.mock('../Tasks/TaskJournal', () => ({
 describe('Calendar integration', () => {
   beforeEach(() => {
     paymentsResult.payments = [];
+    permissionsState.tasksCanView = true;
+    permissionsState.calendarCanViewAnalytics = true;
     localStorage.removeItem('pp.calendar_view');
     localStorage.removeItem('pp.calendar_section_mode');
   });
@@ -204,5 +221,30 @@ describe('Calendar integration', () => {
     expect((await screen.findByTestId('crm-task-calendar')).textContent).toContain('timeline');
     expect(screen.queryByTestId('calendar-grid')).toBeNull();
     expect(localStorage.getItem('pp.calendar_section_mode')).toBe('crm');
+  });
+
+  it('does not restore or show the CRM task calendar when task access is closed', async () => {
+    permissionsState.tasksCanView = false;
+    localStorage.setItem('pp.calendar_section_mode', 'crm');
+
+    render(<Calendar />);
+
+    expect(screen.queryByRole('button', { name: 'CRM' })).toBeNull();
+    expect(screen.queryByTestId('crm-task-calendar')).toBeNull();
+    expect(await screen.findByTestId('calendar-grid')).toBeTruthy();
+
+    await waitFor(() => {
+      expect(localStorage.getItem('pp.calendar_section_mode')).toBe('finance');
+    });
+  });
+
+  it('hides calendar analytics when analytics permission is closed', async () => {
+    permissionsState.calendarCanViewAnalytics = false;
+
+    render(<Calendar />);
+
+    expect(screen.queryByTestId('calendar-analytics')).toBeNull();
+    expect(await screen.findByText('Просмотр аналитики недоступен для вашей роли.')).toBeTruthy();
+    expect(screen.getByTestId('calendar-grid')).toBeTruthy();
   });
 });

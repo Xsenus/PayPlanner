@@ -255,6 +255,8 @@ interface PaymentModalProps {
   availableClientBalance?: number;
   onApplyClientBalance?: (amount: number) => Promise<ApplyClientBalanceResult | void>;
   onBalanceApplied?: (paymentId: number) => Promise<unknown> | unknown;
+  canViewLinkedInvoices?: boolean;
+  canCreateLinkedInvoices?: boolean;
 }
 
 export function PaymentModal({
@@ -278,6 +280,8 @@ export function PaymentModal({
   casesPrefetch,
   type,
   linkedInvoice,
+  canViewLinkedInvoices = true,
+  canCreateLinkedInvoices = true,
 }: PaymentModalProps) {
   const formRef = useRef<HTMLFormElement>(null);
   const autoCashOrderDraftRef = useRef<{ number: string; date: string; type: CashOrderType } | null>(null);
@@ -535,7 +539,7 @@ export function PaymentModal({
   }, [defaultClientId, defaultDate, formData.account, formData.accountDate, formData.amount, formData.clientCaseId, formData.contractId, formData.date, formData.description, formData.expenseClientId, formData.expenseLegalEntityId, formData.legalEntityId, formData.paidDate, formData.status, formData.type, formData.clientId, invoiceCreateOpen, invoiceCreateSeedContractId]);
 
   useEffect(() => {
-    if (!isOpen || !invoicePickerOpen || hasLockedInvoice) {
+    if (!isOpen || !invoicePickerOpen || hasLockedInvoice || !canViewLinkedInvoices) {
       setInvoicePickerLoading(false);
       setInvoicePickerError(null);
       return;
@@ -597,6 +601,7 @@ export function PaymentModal({
     formData.legalEntityId,
     formData.invoiceId,
     formData.type,
+    canViewLinkedInvoices,
     hasLockedInvoice,
     invoicePickerOpen,
     invoiceSearch,
@@ -1728,7 +1733,7 @@ export function PaymentModal({
   };
 
   const openInvoicePicker = () => {
-    if (hasLockedInvoice || (!formData.clientId && !formData.legalEntityId)) {
+    if (hasLockedInvoice || !canViewLinkedInvoices || (!formData.clientId && !formData.legalEntityId)) {
       return;
     }
 
@@ -1772,7 +1777,7 @@ export function PaymentModal({
   };
 
   const clearInvoiceSelection = async () => {
-    if (hasLockedInvoice) return;
+    if (hasLockedInvoice || !canViewLinkedInvoices) return;
 
     const approved = await confirm({
       title: 'Убрать связь со счетом',
@@ -1793,7 +1798,7 @@ export function PaymentModal({
   };
 
   const handleCreateInvoiceFromPayment = async () => {
-    if (hasLockedInvoice) return;
+    if (hasLockedInvoice || !canViewLinkedInvoices || !canCreateLinkedInvoices) return;
 
     const clientId = formData.clientId ? parseInt(formData.clientId, 10) : undefined;
     const legalEntityId = formData.legalEntityId ? parseInt(formData.legalEntityId, 10) : undefined;
@@ -3555,7 +3560,7 @@ export function PaymentModal({
                               {'Выберите существующий счёт контрагента или создайте новый счёт из текущего платежа.'}
                             </div>
                           </div>
-                          {!hasLockedInvoice && (
+                          {!hasLockedInvoice && canViewLinkedInvoices && (
                             <div className="flex flex-wrap gap-2">
                               <button
                                 type="button"
@@ -3564,13 +3569,15 @@ export function PaymentModal({
                                 className="rounded-lg border border-blue-200 bg-white px-3 py-1.5 text-xs font-medium text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60">
                                 {selectedInvoiceSummary ? 'Сменить счёт' : 'Выбрать счёт'}
                               </button>
-                              <button
-                                type="button"
-                                onClick={() => void handleCreateInvoiceFromPayment()}
-                                disabled={invoiceCreateSubmitting || (!formData.clientId && !formData.legalEntityId)}
-                                className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60">
-                                {invoiceCreateSubmitting ? '\u041e\u0442\u043a\u0440\u044b\u0432\u0430\u0435\u043c...' : '\u0421\u043e\u0437\u0434\u0430\u0442\u044c \u0441\u0447\u0451\u0442'}
-                              </button>
+                              {canCreateLinkedInvoices ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void handleCreateInvoiceFromPayment()}
+                                  disabled={invoiceCreateSubmitting || (!formData.clientId && !formData.legalEntityId)}
+                                  className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60">
+                                  {invoiceCreateSubmitting ? '\u041e\u0442\u043a\u0440\u044b\u0432\u0430\u0435\u043c...' : '\u0421\u043e\u0437\u0434\u0430\u0442\u044c \u0441\u0447\u0451\u0442'}
+                                </button>
+                              ) : null}
                               {selectedInvoiceSummary && (
                                 <button
                                   type="button"
@@ -3884,7 +3891,7 @@ export function PaymentModal({
               }
             }}
           />
-          {invoicePickerOpen && !hasLockedInvoice && (
+          {invoicePickerOpen && !hasLockedInvoice && canViewLinkedInvoices && (
             <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-900/35 p-4">
               <div className="w-full max-w-3xl rounded-2xl bg-white p-4 shadow-2xl">
                 <div className="mb-3 flex items-center justify-between gap-2">
@@ -3966,6 +3973,7 @@ export function PaymentModal({
                     Закрыть
                   </button>
                   <button
+                    hidden={!canCreateLinkedInvoices}
                     type="button"
                     onClick={() => void handleCreateInvoiceFromPayment()}
                     disabled={invoiceCreateSubmitting || (!formData.clientId && !formData.legalEntityId)}

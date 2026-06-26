@@ -95,21 +95,11 @@ public static class DataVisibilityService
                 permission.ViewScope,
             })
             .FirstOrDefaultAsync(ct);
-        if (permission is null)
+        if (!isAdmin && permission is null)
         {
-            var fallbackSection = RolePermissionCatalog.GetFallbackSection(section);
-            if (!string.IsNullOrWhiteSpace(fallbackSection))
+            if (await db.RolePermissions.AsNoTracking().AnyAsync(item => item.RoleId == user.RoleId, ct))
             {
-                permission = await db.RolePermissions
-                    .AsNoTracking()
-                    .Where(permission => permission.RoleId == user.RoleId && permission.Section == fallbackSection)
-                    .Select(permission => new
-                    {
-                        permission.CanView,
-                        permission.RoleId,
-                        permission.ViewScope,
-                    })
-                    .FirstOrDefaultAsync(ct);
+                return null;
             }
         }
 

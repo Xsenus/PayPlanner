@@ -1,8 +1,16 @@
 using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Abstractions;
+using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
+using PayPlanner.Api.Filters;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
 using Xunit;
@@ -84,6 +92,48 @@ public class BackendPermissionMatrixTests
     }
 
     [Theory]
+    [MemberData(nameof(CriticalSections))]
+    public async Task SectionActionPermissions_DenyMissingSection_ForExistingRegularUser(string section)
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, $"{section}-missing-actions", new RolePermission
+        {
+            Section = RolePermissionCatalog.Notifications,
+            CanView = true,
+            ViewScope = DataVisibilityScope.Own
+        });
+        var principal = CreatePrincipal(user);
+
+        Assert.False(await db.HasUserSectionPermissionAsync(principal, section, static permission => permission.CanView));
+        Assert.False(await db.HasUserSectionPermissionAsync(principal, section, static permission => permission.CanCreate));
+        Assert.False(await db.HasUserSectionPermissionAsync(principal, section, static permission => permission.CanEdit));
+        Assert.False(await db.HasUserSectionPermissionAsync(principal, section, static permission => permission.CanDelete));
+        Assert.False(await db.HasUserSectionPermissionAsync(principal, section, static permission => permission.CanExport));
+    }
+
+    [Fact]
+    public async Task SectionActionPermissions_DoNotOpenCasesFromLegacyClientPermissionFallback()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "legacy-client-only", new RolePermission
+        {
+            Section = RolePermissionCatalog.Clients,
+            CanView = true,
+            CanCreate = true,
+            CanEdit = true,
+            CanDelete = true,
+            CanExport = true,
+            ViewScope = DataVisibilityScope.All
+        });
+        var principal = CreatePrincipal(user);
+
+        var casesPermission = await db.GetUserSectionPermissionAsync(user.Id, RolePermissionCatalog.Cases);
+
+        Assert.Null(casesPermission);
+        Assert.False(await db.HasUserSectionPermissionAsync(principal, RolePermissionCatalog.Cases, static permission => permission.CanView));
+    }
+
+    [Theory]
     [MemberData(nameof(DataScopedSections))]
     public async Task DataVisibility_RestrictsRegularUserToOwnScope_ForDataScopedSections(string section)
     {
@@ -106,6 +156,26 @@ public class BackendPermissionMatrixTests
 
     [Theory]
     [MemberData(nameof(DataScopedSections))]
+    public async Task DataVisibility_FiltersDirectIdQueries_ForOwnScope(string section)
+    {
+        await using var db = await CreateContextAsync();
+        var current = await CreateUserAsync(db, $"{section}-direct-own", new RolePermission
+        {
+            Section = section,
+            CanView = true,
+            ViewScope = DataVisibilityScope.Own
+        });
+        var other = await CreateUserAsync(db, $"{section}-direct-hidden", roleName: $"{section}-direct-hidden-role");
+        var access = await db.ResolveDataVisibilityAsync(CreatePrincipal(current), section);
+        Assert.NotNull(access);
+        var (visibleId, hiddenId) = await SeedDataScopedRecordsAsync(db, section, current.Id, other.Id);
+
+        Assert.True(await IsDataScopedRecordVisibleAsync(db, section, access, visibleId));
+        Assert.False(await IsDataScopedRecordVisibleAsync(db, section, access, hiddenId));
+    }
+
+    [Theory]
+    [MemberData(nameof(DataScopedSections))]
     public async Task DataVisibility_DeniesRegularUserWithoutSectionViewAccess(string section)
     {
         await using var db = await CreateContextAsync();
@@ -114,6 +184,23 @@ public class BackendPermissionMatrixTests
             Section = section,
             CanView = false,
             ViewScope = DataVisibilityScope.All
+        });
+
+        var access = await db.ResolveDataVisibilityAsync(CreatePrincipal(user), section);
+
+        Assert.Null(access);
+    }
+
+    [Theory]
+    [MemberData(nameof(DataScopedSections))]
+    public async Task DataVisibility_DeniesRegularUserWithoutConfiguredSection(string section)
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, $"{section}-missing-visibility", new RolePermission
+        {
+            Section = RolePermissionCatalog.Notifications,
+            CanView = true,
+            ViewScope = DataVisibilityScope.Own
         });
 
         var access = await db.ResolveDataVisibilityAsync(CreatePrincipal(user), section);
@@ -149,6 +236,105 @@ public class BackendPermissionMatrixTests
 
     [Theory]
     [MemberData(nameof(DataScopedSections))]
+    public async Task SectionActionPermissions_DenyActionsWhenViewIsDisabledEvenIfActionsAreEnabled(string section)
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, $"{section}-view-disabled-actions-enabled", new RolePermission
+        {
+            Section = section,
+            CanView = false,
+            CanCreate = true,
+            CanEdit = true,
+            CanDelete = true,
+            CanExport = true,
+            ViewScope = DataVisibilityScope.All
+        });
+        var principal = CreatePrincipal(user);
+
+        Assert.False(await db.HasUserSectionPermissionAsync(principal, section, static permission => permission.CanCreate));
+        Assert.False(await db.HasUserSectionPermissionAsync(principal, section, static permission => permission.CanEdit));
+        Assert.False(await db.HasUserSectionPermissionAsync(principal, section, static permission => permission.CanDelete));
+        Assert.False(await db.HasUserSectionPermissionAsync(principal, section, static permission => permission.CanExport));
+    }
+
+    [Fact]
+    public async Task RequireSectionPermissionFilter_ForbidsClosedSectionBeforeActionRuns()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "filter-payments-denied", new RolePermission
+        {
+            Section = RolePermissionCatalog.Payments,
+            CanView = false,
+            ViewScope = DataVisibilityScope.Own
+        });
+        var filter = new RequireSectionPermissionFilter(
+            RolePermissionCatalog.Payments,
+            RequireSectionPermissionOperations.View,
+            db);
+        var context = CreateActionExecutingContext(CreatePrincipal(user));
+        var nextWasCalled = false;
+
+        await filter.OnActionExecutionAsync(context, () =>
+        {
+            nextWasCalled = true;
+            return Task.FromResult(CreateActionExecutedContext(context));
+        });
+
+        Assert.False(nextWasCalled);
+        Assert.IsType<ForbidResult>(context.Result);
+    }
+
+    [Fact]
+    public async Task RequireSectionPermissionFilter_AllowsOpenSectionToRunAction()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "filter-payments-allowed", new RolePermission
+        {
+            Section = RolePermissionCatalog.Payments,
+            CanView = true,
+            ViewScope = DataVisibilityScope.Own
+        });
+        var filter = new RequireSectionPermissionFilter(
+            RolePermissionCatalog.Payments,
+            RequireSectionPermissionOperations.View,
+            db);
+        var context = CreateActionExecutingContext(CreatePrincipal(user));
+        var nextWasCalled = false;
+
+        await filter.OnActionExecutionAsync(context, () =>
+        {
+            nextWasCalled = true;
+            return Task.FromResult(CreateActionExecutedContext(context));
+        });
+
+        Assert.True(nextWasCalled);
+        Assert.Null(context.Result);
+    }
+
+    [Fact]
+    public async Task RequireSectionPermissionFilter_AllowsDatabaseAdminWithoutConfiguredSection()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateUserAsync(db, "filter-admin-without-section", roleName: "admin");
+        var filter = new RequireSectionPermissionFilter(
+            RolePermissionCatalog.Payments,
+            RequireSectionPermissionOperations.View,
+            db);
+        var context = CreateActionExecutingContext(CreatePrincipal(admin));
+        var nextWasCalled = false;
+
+        await filter.OnActionExecutionAsync(context, () =>
+        {
+            nextWasCalled = true;
+            return Task.FromResult(CreateActionExecutedContext(context));
+        });
+
+        Assert.True(nextWasCalled);
+        Assert.Null(context.Result);
+    }
+
+    [Theory]
+    [MemberData(nameof(DataScopedSections))]
     public async Task DataVisibility_AllowsAdminAcrossDataScopedSections(string section)
     {
         await using var db = await CreateContextAsync();
@@ -165,6 +351,123 @@ public class BackendPermissionMatrixTests
         Assert.True(access.IsAdmin);
         Assert.Equal(DataVisibilityScope.All, access.ViewScope);
         Assert.True(access.CanSeeUser(admin.Id + 1000));
+    }
+
+    [Theory]
+    [MemberData(nameof(DataScopedSections))]
+    public async Task DataVisibility_AllowsAdminWithoutConfiguredSection(string section)
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateUserAsync(db, $"{section}-admin-no-section", roleName: "admin");
+
+        var access = await db.ResolveDataVisibilityAsync(CreatePrincipal(admin), section);
+
+        Assert.NotNull(access);
+        Assert.True(access.IsAdmin);
+        Assert.Equal(DataVisibilityScope.All, access.ViewScope);
+        Assert.True(access.CanSeeUser(admin.Id + 1000));
+    }
+
+    [Fact]
+    public void HealthEndpoint_RemainsAnonymousAndReturnsOk()
+    {
+        var allowAnonymous = typeof(HealthController)
+            .GetMethod(nameof(HealthController.Get))?
+            .GetCustomAttributes(typeof(AllowAnonymousAttribute), inherit: false)
+            .Any() == true;
+        var controller = new HealthController();
+
+        var result = controller.Get();
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        Assert.True(allowAnonymous);
+        Assert.NotNull(ok.Value);
+        var status = ok.Value.GetType().GetProperty("status")?.GetValue(ok.Value);
+        Assert.Equal("ok", status);
+    }
+
+    [Fact]
+    public void LawyerRoleTemplate_OpensOnlyOperationalSections()
+    {
+        var defaults = RolePermissionCatalog.BuildDefaultsForRole("\u042e\u0440\u0438\u0441\u0442", allowRoleManagement: false);
+
+        Assert.True(RolePermissionCatalog.IsLawyerRoleName("\u0421\u0442\u0430\u0440\u0448\u0438\u0439 \u044e\u0440\u0438\u0441\u0442"));
+        Assert.True(RolePermissionCatalog.IsLawyerRoleName("lawyer-template-temp-codex"));
+        Assert.True(defaults[RolePermissionCatalog.Tasks].CanView);
+        Assert.True(defaults[RolePermissionCatalog.Tasks].CanCreate);
+        Assert.True(defaults[RolePermissionCatalog.Calendar].CanView);
+        Assert.False(defaults[RolePermissionCatalog.Clients].CanView);
+        Assert.False(defaults[RolePermissionCatalog.Cases].CanView);
+        Assert.True(defaults[RolePermissionCatalog.Notifications].CanView);
+        Assert.Equal(DataVisibilityScope.Own, defaults[RolePermissionCatalog.Tasks].ViewScope);
+        Assert.Equal(DataVisibilityScope.Own, defaults[RolePermissionCatalog.Clients].ViewScope);
+        Assert.Equal(DataVisibilityScope.Own, defaults[RolePermissionCatalog.Cases].ViewScope);
+
+        foreach (var section in new[]
+        {
+            RolePermissionCatalog.Clients,
+            RolePermissionCatalog.Cases,
+            RolePermissionCatalog.Payments,
+            RolePermissionCatalog.Accounts,
+            RolePermissionCatalog.Acts,
+            RolePermissionCatalog.Contracts,
+            RolePermissionCatalog.Reports,
+            RolePermissionCatalog.Roles,
+            RolePermissionCatalog.Audit,
+            RolePermissionCatalog.Integrations,
+            RolePermissionCatalog.YandexDisk,
+            RolePermissionCatalog.S3Storage,
+        })
+        {
+            Assert.False(defaults[section].CanView);
+            Assert.False(defaults[section].CanCreate);
+            Assert.False(defaults[section].CanEdit);
+            Assert.False(defaults[section].CanDelete);
+            Assert.False(defaults[section].CanExport);
+        }
+    }
+
+    [Fact]
+    public async Task LawyerRoleTemplate_ProtectsClosedApiSections()
+    {
+        await using var db = await CreateContextAsync();
+        var lawyer = await CreateUserWithPermissionsAsync(
+            db,
+            "lawyer-template-api",
+            "\u0421\u0442\u0430\u0440\u0448\u0438\u0439 \u044e\u0440\u0438\u0441\u0442",
+            RolePermissionCatalog.BuildDefaultsForRole(
+                    "\u0421\u0442\u0430\u0440\u0448\u0438\u0439 \u044e\u0440\u0438\u0441\u0442",
+                    allowRoleManagement: false)
+                .Select(pair => ToRolePermission(pair.Key, pair.Value)));
+
+        foreach (var section in new[]
+        {
+            RolePermissionCatalog.Tasks,
+            RolePermissionCatalog.Calendar,
+            RolePermissionCatalog.Notifications,
+        })
+        {
+            await AssertSectionFilterAsync(db, lawyer, section, shouldAllow: true);
+        }
+
+        foreach (var section in new[]
+        {
+            RolePermissionCatalog.Clients,
+            RolePermissionCatalog.Cases,
+            RolePermissionCatalog.Payments,
+            RolePermissionCatalog.Accounts,
+            RolePermissionCatalog.Acts,
+            RolePermissionCatalog.Contracts,
+            RolePermissionCatalog.Reports,
+            RolePermissionCatalog.Roles,
+            RolePermissionCatalog.Audit,
+            RolePermissionCatalog.Integrations,
+            RolePermissionCatalog.YandexDisk,
+            RolePermissionCatalog.S3Storage,
+        })
+        {
+            await AssertSectionFilterAsync(db, lawyer, section, shouldAllow: false);
+        }
     }
 
     [Fact]
@@ -352,6 +655,19 @@ public class BackendPermissionMatrixTests
             ViewScope = DataVisibilityScope.Own,
         };
 
+    private static RolePermission ToRolePermission(string section, RolePermissionValues values)
+        => new()
+        {
+            Section = section,
+            CanView = values.CanView,
+            CanCreate = values.CanCreate,
+            CanEdit = values.CanEdit,
+            CanDelete = values.CanDelete,
+            CanExport = values.CanExport,
+            CanViewAnalytics = values.CanViewAnalytics,
+            ViewScope = values.ViewScope,
+        };
+
     private static async Task AssertSectionAsync(
         PaymentContext db,
         User user,
@@ -385,6 +701,190 @@ public class BackendPermissionMatrixTests
         Assert.False(access.CanSeeUser(user.Id + 10_000));
     }
 
+    private static async Task AssertSectionFilterAsync(PaymentContext db, User user, string section, bool shouldAllow)
+    {
+        var filter = new RequireSectionPermissionFilter(
+            section,
+            RequireSectionPermissionOperations.View,
+            db);
+        var context = CreateActionExecutingContext(CreatePrincipal(user));
+        var nextWasCalled = false;
+
+        await filter.OnActionExecutionAsync(context, () =>
+        {
+            nextWasCalled = true;
+            return Task.FromResult(CreateActionExecutedContext(context));
+        });
+
+        Assert.Equal(shouldAllow, nextWasCalled);
+        if (shouldAllow)
+        {
+            Assert.Null(context.Result);
+        }
+        else
+        {
+            Assert.IsType<ForbidResult>(context.Result);
+        }
+    }
+
+    private static async Task<(int VisibleId, int HiddenId)> SeedDataScopedRecordsAsync(
+        PaymentContext db,
+        string section,
+        int visibleUserId,
+        int hiddenUserId)
+    {
+        switch (section)
+        {
+            case RolePermissionCatalog.Clients:
+            {
+                var visible = new Client { Name = "Visible client", ResponsibleUserId = visibleUserId };
+                var hidden = new Client { Name = "Hidden client", ResponsibleUserId = hiddenUserId };
+                db.Clients.AddRange(visible, hidden);
+                await db.SaveChangesAsync();
+                return (visible.Id, hidden.Id);
+            }
+            case RolePermissionCatalog.LegalEntities:
+            {
+                var visible = new LegalEntity { ShortName = "Visible legal", ResponsibleUserId = visibleUserId };
+                var hidden = new LegalEntity { ShortName = "Hidden legal", ResponsibleUserId = hiddenUserId };
+                db.LegalEntities.AddRange(visible, hidden);
+                await db.SaveChangesAsync();
+                return (visible.Id, hidden.Id);
+            }
+            case RolePermissionCatalog.Cases:
+            {
+                var visibleClient = new Client { Name = "Visible case client", ResponsibleUserId = visibleUserId };
+                var hiddenClient = new Client { Name = "Hidden case client", ResponsibleUserId = hiddenUserId };
+                var visible = new ClientCase { Title = "Visible case", Client = visibleClient, ResponsibleUserId = visibleUserId };
+                var hidden = new ClientCase { Title = "Hidden case", Client = hiddenClient, ResponsibleUserId = hiddenUserId };
+                db.ClientCases.AddRange(visible, hidden);
+                await db.SaveChangesAsync();
+                return (visible.Id, hidden.Id);
+            }
+            case RolePermissionCatalog.Calendar:
+            {
+                var visible = new TaskJournalItem
+                {
+                    Title = "Visible calendar task",
+                    ObjectName = "Visible calendar task",
+                    AssigneeUserId = visibleUserId,
+                    AuthorUserId = hiddenUserId,
+                    DueAt = DateTime.UtcNow.AddDays(1)
+                };
+                var hidden = new TaskJournalItem
+                {
+                    Title = "Hidden calendar task",
+                    ObjectName = "Hidden calendar task",
+                    AssigneeUserId = hiddenUserId,
+                    AuthorUserId = visibleUserId,
+                    DueAt = DateTime.UtcNow.AddDays(1)
+                };
+                db.TaskJournalItems.AddRange(visible, hidden);
+                await db.SaveChangesAsync();
+                return (visible.Id, hidden.Id);
+            }
+            case RolePermissionCatalog.Tasks:
+            {
+                var visible = new TaskJournalItem
+                {
+                    Title = "Visible task",
+                    ObjectName = "Visible task",
+                    AssigneeUserId = hiddenUserId,
+                    AuthorUserId = visibleUserId,
+                    DueAt = DateTime.UtcNow.AddDays(1)
+                };
+                var hidden = new TaskJournalItem
+                {
+                    Title = "Hidden task",
+                    ObjectName = "Hidden task",
+                    AssigneeUserId = hiddenUserId,
+                    AuthorUserId = hiddenUserId,
+                    DueAt = DateTime.UtcNow.AddDays(1)
+                };
+                db.TaskJournalItems.AddRange(visible, hidden);
+                await db.SaveChangesAsync();
+                return (visible.Id, hidden.Id);
+            }
+            case RolePermissionCatalog.Accounts:
+            case RolePermissionCatalog.Payments:
+            {
+                var visibleClient = new Client { Name = $"Visible {section} client", ResponsibleUserId = visibleUserId };
+                var hiddenClient = new Client { Name = $"Hidden {section} client", ResponsibleUserId = hiddenUserId };
+                var visible = new Payment
+                {
+                    Client = visibleClient,
+                    Type = PaymentType.Income,
+                    Status = PaymentStatus.Pending,
+                    DocumentKind = section == RolePermissionCatalog.Accounts ? DocumentKind.Invoice : DocumentKind.Payment,
+                    Amount = 1_000m,
+                    Date = DateTime.UtcNow.Date,
+                    PlannedDate = DateTime.UtcNow.Date
+                };
+                var hidden = new Payment
+                {
+                    Client = hiddenClient,
+                    Type = PaymentType.Income,
+                    Status = PaymentStatus.Pending,
+                    DocumentKind = section == RolePermissionCatalog.Accounts ? DocumentKind.Invoice : DocumentKind.Payment,
+                    Amount = 1_000m,
+                    Date = DateTime.UtcNow.Date,
+                    PlannedDate = DateTime.UtcNow.Date
+                };
+                db.Payments.AddRange(visible, hidden);
+                await db.SaveChangesAsync();
+                return (visible.Id, hidden.Id);
+            }
+            case RolePermissionCatalog.Acts:
+            {
+                var visibleClient = new Client { Name = "Visible act client", ResponsibleUserId = visibleUserId };
+                var hiddenClient = new Client { Name = "Hidden act client", ResponsibleUserId = hiddenUserId };
+                var visible = new Act { Number = "ACT-VISIBLE", Date = DateTime.UtcNow.Date, Amount = 1_000m, Client = visibleClient };
+                var hidden = new Act { Number = "ACT-HIDDEN", Date = DateTime.UtcNow.Date, Amount = 1_000m, Client = hiddenClient };
+                db.Acts.AddRange(visible, hidden);
+                await db.SaveChangesAsync();
+                return (visible.Id, hidden.Id);
+            }
+            case RolePermissionCatalog.Contracts:
+            {
+                var visibleClient = new Client { Name = "Visible contract client", ResponsibleUserId = visibleUserId };
+                var hiddenClient = new Client { Name = "Hidden contract client", ResponsibleUserId = hiddenUserId };
+                var visible = new Contract { Number = "CONTRACT-VISIBLE", Date = DateTime.UtcNow.Date, Status = ContractStatus.Draft };
+                var hidden = new Contract { Number = "CONTRACT-HIDDEN", Date = DateTime.UtcNow.Date, Status = ContractStatus.Draft };
+                visible.ClientContracts.Add(new ClientContract { Client = visibleClient, Contract = visible });
+                hidden.ClientContracts.Add(new ClientContract { Client = hiddenClient, Contract = hidden });
+                db.Contracts.AddRange(visible, hidden);
+                await db.SaveChangesAsync();
+                return (visible.Id, hidden.Id);
+            }
+            default:
+                throw new ArgumentOutOfRangeException(nameof(section), section, "Unsupported data scoped section.");
+        }
+    }
+
+    private static Task<bool> IsDataScopedRecordVisibleAsync(
+        PaymentContext db,
+        string section,
+        DataVisibilityAccess access,
+        int id)
+        => section switch
+        {
+            RolePermissionCatalog.Calendar or RolePermissionCatalog.Tasks =>
+                db.TaskJournalItems.ApplyTaskVisibility(access).AnyAsync(item => item.Id == id),
+            RolePermissionCatalog.LegalEntities =>
+                db.LegalEntities.ApplyLegalEntityVisibility(access).AnyAsync(item => item.Id == id),
+            RolePermissionCatalog.Clients =>
+                db.Clients.ApplyClientVisibility(access).AnyAsync(item => item.Id == id),
+            RolePermissionCatalog.Cases =>
+                db.ClientCases.ApplyClientCaseVisibility(access).AnyAsync(item => item.Id == id),
+            RolePermissionCatalog.Accounts or RolePermissionCatalog.Payments =>
+                db.Payments.ApplyPaymentVisibility(access).AnyAsync(item => item.Id == id),
+            RolePermissionCatalog.Acts =>
+                db.Acts.ApplyActVisibility(access).AnyAsync(item => item.Id == id),
+            RolePermissionCatalog.Contracts =>
+                db.Contracts.ApplyContractVisibility(access).AnyAsync(item => item.Id == id),
+            _ => throw new ArgumentOutOfRangeException(nameof(section), section, "Unsupported data scoped section.")
+        };
+
     private static ClaimsPrincipal CreatePrincipal(User user, bool isAdmin = false)
     {
         var claims = new List<Claim>
@@ -399,6 +899,16 @@ public class BackendPermissionMatrixTests
 
         return new ClaimsPrincipal(new ClaimsIdentity(claims, "test"));
     }
+
+    private static ActionExecutingContext CreateActionExecutingContext(ClaimsPrincipal principal)
+    {
+        var httpContext = new DefaultHttpContext { User = principal };
+        var actionContext = new ActionContext(httpContext, new RouteData(), new ActionDescriptor());
+        return new ActionExecutingContext(actionContext, [], new Dictionary<string, object?>(), controller: new object());
+    }
+
+    private static ActionExecutedContext CreateActionExecutedContext(ActionExecutingContext context)
+        => new(context, [], controller: new object());
 
     private static async Task<User> CreateUserAsync(
         PaymentContext db,

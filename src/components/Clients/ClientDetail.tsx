@@ -93,6 +93,7 @@ import { formatDateTimeInTimeZone } from "../../utils/timeZoneDate";
 import { ActModal } from "../Acts/ActModal";
 import { InvoiceModal } from "../Accounts/InvoiceModal";
 import { ContractModal } from "../Contracts/ContractModal";
+import type { CounterpartyKind } from "../ui/CounterpartyPickerModal";
 import { LegalEntityModal } from "../LegalEntities/LegalEntityModal";
 import { FormPromptModal } from "../ui/FormPromptModal";
 import { LookupSelect } from "../ui/LookupSelect";
@@ -484,7 +485,7 @@ const SECTION_META: Record<
 
 const SECTION_PERMISSION_MAP: Record<ClientDetailSection, MenuSectionKey> = {
   profile: "clients",
-  cases: "clients",
+  cases: "cases",
   tasks: "tasks",
   payments: "payments",
   accounts: "accounts",
@@ -1380,10 +1381,19 @@ export function ClientDetail({
   const permissions = useRolePermissions(user?.role?.id);
   const userIsAdmin = isAdmin();
   const clientPermissions = permissions.clients;
+  const legalEntityPermissions = permissions.legalEntities;
+  const casePermissions = permissions.cases;
   const accountPermissions = permissions.accounts;
   const actPermissions = permissions.acts;
   const paymentPermissions = permissions.payments;
   const contractPermissions = permissions.contracts;
+  const canViewAudit = userIsAdmin || permissions.audit?.canView === true;
+  const allowedContractCounterpartyScopes = useMemo<CounterpartyKind[]>(() => {
+    const scopes: CounterpartyKind[] = [];
+    if (clientPermissions.canView) scopes.push("client");
+    if (legalEntityPermissions.canView) scopes.push("legalEntity");
+    return scopes;
+  }, [clientPermissions.canView, legalEntityPermissions.canView]);
   const sectionPermissions = useCallback(
     (section: ClientDetailSection) =>
       permissions[SECTION_PERMISSION_MAP[section]],
@@ -1409,6 +1419,8 @@ export function ClientDetail({
     ],
   );
   const canViewClientFinancialSummary = paymentPermissions.canView;
+  const canViewClientCaseFinancialSummary =
+    casePermissions.canView && paymentPermissions.canView;
   const clientViewStateKey = useMemo(
     () => `pp.clientDetail.${user?.id ?? "guest"}.${clientId}.viewState.v1`,
     [clientId, user?.id],
@@ -1945,8 +1957,9 @@ export function ClientDetail({
 
   const { cases: serverCases } = useClientCases(clientId, {
     enabled:
-      activeSection === "cases" ||
-      (activeSection === "payments" && isSupplierCard),
+      casePermissions.canView &&
+      (activeSection === "cases" ||
+        (activeSection === "payments" && isSupplierCard)),
   });
   const [casesLocal, setCasesLocal] = useState<ClientCase[] | null>(null);
   useEffect(() => setCasesLocal(serverCases), [serverCases]);
@@ -2105,7 +2118,7 @@ export function ClientDetail({
   } = usePersistedTableSettings<PaymentTableColumnKey>({
     storageKey: `${CLIENT_DETAIL_TABLE_STORAGE_PREFIX}.payments.${user?.id ?? "guest"}.v1`,
     settingsKey: "client_detail_payments_table",
-    enabled: activeSection === "payments",
+    enabled: paymentPermissions.canView && activeSection === "payments",
     columns: PAYMENT_TABLE_COLUMNS.map(({ key, defaultWidth }) => ({
       key,
       defaultWidth,
@@ -2162,7 +2175,7 @@ export function ClientDetail({
   } = usePersistedTableSettings<ActTableColumnKey>({
     storageKey: `${CLIENT_DETAIL_TABLE_STORAGE_PREFIX}.acts.${user?.id ?? "guest"}.v1`,
     settingsKey: "client_detail_acts_table",
-    enabled: activeSection === "acts",
+    enabled: actPermissions.canView && activeSection === "acts",
     columns: ACT_TABLE_COLUMNS.map(({ key, defaultWidth }) => ({
       key,
       defaultWidth,
@@ -2230,7 +2243,7 @@ export function ClientDetail({
   } = usePersistedTableSettings<InvoiceTableColumnKey>({
     storageKey: `${CLIENT_DETAIL_TABLE_STORAGE_PREFIX}.invoices.${user?.id ?? "guest"}.v2`,
     settingsKey: "client_detail_invoices_table",
-    enabled: activeSection === "accounts",
+    enabled: accountPermissions.canView && activeSection === "accounts",
     columns: INVOICE_TABLE_COLUMNS.map(({ key, defaultWidth }) => ({
       key,
       defaultWidth,
@@ -2316,7 +2329,7 @@ export function ClientDetail({
   } = usePersistedTableSettings<ContractTableColumnKey>({
     storageKey: `${CLIENT_DETAIL_TABLE_STORAGE_PREFIX}.contracts.${user?.id ?? "guest"}.v1`,
     settingsKey: "client_detail_contracts_table",
-    enabled: activeSection === "contracts",
+    enabled: contractPermissions.canView && activeSection === "contracts",
     columns: CONTRACT_TABLE_COLUMNS.map(({ key, defaultWidth }) => ({
       key,
       defaultWidth,
@@ -2558,7 +2571,7 @@ export function ClientDetail({
     updateAct,
     deleteAct,
   } = useActs({
-    enabled: activeSection === "acts",
+    enabled: actPermissions.canView && activeSection === "acts",
     from: resolvedActPeriod.from,
     to: resolvedActPeriod.to,
     status: actStatusFilter === "all" ? undefined : actStatusFilter,
@@ -2615,7 +2628,7 @@ export function ClientDetail({
     updateInvoice: updateClientInvoice,
     deleteInvoice: deleteClientInvoice,
   } = useInvoices({
-    enabled: activeSection === "accounts",
+    enabled: accountPermissions.canView && activeSection === "accounts",
     from: resolvedInvoicePeriod.from,
     to: resolvedInvoicePeriod.to,
     status: invoiceStatusFilter === "all" ? undefined : invoiceStatusFilter,
@@ -2708,7 +2721,7 @@ export function ClientDetail({
     updateContract,
     deleteContract,
   } = useContracts({
-    enabled: activeSection === "contracts",
+    enabled: contractPermissions.canView && activeSection === "contracts",
     from: resolvedContractPeriod.from,
     to: resolvedContractPeriod.to,
     search: debouncedContractSearch || undefined,
@@ -3211,7 +3224,7 @@ export function ClientDetail({
   const [statsReloadToken, setStatsReloadToken] = useState(0);
   const bumpStats = () => setStatsReloadToken((x) => x + 1);
   useEffect(() => {
-    if (!canViewClientFinancialSummary) {
+    if (!canViewClientCaseFinancialSummary) {
       setCaseFinanceSummaries({});
       setCaseFinanceLoading(false);
       setCaseFinanceError(null);
@@ -3251,7 +3264,7 @@ export function ClientDetail({
       alive = false;
     };
   }, [
-    canViewClientFinancialSummary,
+    canViewClientCaseFinancialSummary,
     clientId,
     isSupplierCard,
     statsReloadToken,
@@ -3626,7 +3639,7 @@ export function ClientDetail({
     error: paymentsError,
     refresh: refreshPayments,
   } = usePaymentsPaged({
-    enabled: activeSection === "payments",
+    enabled: paymentPermissions.canView && activeSection === "payments",
     from: fromDateStr,
     to: toDateStr,
     clientId,
@@ -5029,7 +5042,7 @@ export function ClientDetail({
   };
 
   const openAddCase = () => {
-    if (!clientPermissions.canCreate) {
+    if (!casePermissions.canView || !casePermissions.canCreate) {
       showPermissionWarning("Недостаточно прав для добавления дел.");
       return;
     }
@@ -5120,11 +5133,11 @@ export function ClientDetail({
 
   const saveCase = async (patch: Partial<ClientCase>): Promise<void> => {
     if (caseMode === "edit" && editingCase) {
-      if (!clientPermissions.canEdit) {
+      if (!casePermissions.canEdit) {
         showPermissionWarning("Недостаточно прав для редактирования дел.");
         return;
       }
-    } else if (!clientPermissions.canCreate) {
+    } else if (!casePermissions.canView || !casePermissions.canCreate) {
       showPermissionWarning("Недостаточно прав для добавления дел.");
       return;
     }
@@ -5190,7 +5203,7 @@ export function ClientDetail({
 
   const deleteCase = async (): Promise<void> => {
     if (!editingCase) return;
-    if (!clientPermissions.canDelete) {
+    if (!casePermissions.canDelete) {
       showPermissionWarning("Недостаточно прав для удаления дел.");
       return;
     }
@@ -6079,15 +6092,17 @@ export function ClientDetail({
                 </span>
               </button>
             ) : null}
-            <button
-              type="button"
-              onClick={() => setClientAuditOpen(true)}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors hover:bg-slate-50"
-              title="История клиента"
-              aria-label="История клиента"
-            >
-              <History className="h-5 w-5" />
-            </button>
+            {canViewAudit ? (
+              <button
+                type="button"
+                onClick={() => setClientAuditOpen(true)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors hover:bg-slate-50"
+                title="История клиента"
+                aria-label="История клиента"
+              >
+                <History className="h-5 w-5" />
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -6113,7 +6128,7 @@ export function ClientDetail({
             })}
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {clientPermissions.canCreate && (
+            {casePermissions.canView && casePermissions.canCreate && (
               <div className="flex flex-col items-center gap-1">
                 <button
                   type="button"
@@ -6145,7 +6160,7 @@ export function ClientDetail({
                 </span>
               </div>
             )}
-            {accountPermissions.canCreate && (
+            {accountPermissions.canView && accountPermissions.canCreate && (
               <div className="flex flex-col items-center gap-1">
                 <button
                   type="button"
@@ -6161,7 +6176,7 @@ export function ClientDetail({
                 </span>
               </div>
             )}
-            {actPermissions.canCreate && (
+            {actPermissions.canView && actPermissions.canCreate && (
               <div className="flex flex-col items-center gap-1">
                 <button
                   type="button"
@@ -6177,7 +6192,7 @@ export function ClientDetail({
                 </span>
               </div>
             )}
-            {contractPermissions.canCreate && (
+            {contractPermissions.canView && contractPermissions.canCreate && (
               <div className="flex flex-col items-center gap-1">
                 <button
                   type="button"
@@ -8148,7 +8163,7 @@ export function ClientDetail({
                           ? "Когда расходный счет или платеж поставщика будет связан с делом клиента, он появится здесь."
                           : "Создайте первое дело, чтобы связывать с ним платежи, счета, акты и договоры клиента."}
                       </p>
-                      {clientPermissions.canCreate && !isSupplierCard ? (
+                      {casePermissions.canView && casePermissions.canCreate && !isSupplierCard ? (
                         <button
                           type="button"
                           onClick={openAddCase}
@@ -10872,6 +10887,7 @@ export function ClientDetail({
           submitting={contractSubmitting}
           errorMessage={contractModalError}
           defaultClients={contractDefaultClients}
+          allowedCounterpartyScopes={allowedContractCounterpartyScopes}
         />
 
         {payModalOpen ? (
@@ -10884,6 +10900,8 @@ export function ClientDetail({
           onTransferRemainder={transferPaymentRemainder}
           onRollbackRemainderTransfer={rollbackPaymentRemainderTransfer}
           onAdjustRemainderTransfer={adjustPaymentRemainderTransfer}
+          canViewLinkedInvoices={accountPermissions.canView}
+          canCreateLinkedInvoices={accountPermissions.canView && accountPermissions.canCreate}
           availableClientBalance={clientBalance?.balance ?? 0}
           onApplyClientBalance={applyClientBalanceToPayment}
           onBalanceApplied={async () => {
@@ -10942,12 +10960,12 @@ export function ClientDetail({
             }
             onSave={saveCase}
             onDelete={
-              caseMode === "edit" && clientPermissions.canDelete
+              caseMode === "edit" && casePermissions.canDelete
                 ? deleteCase
                 : undefined
             }
             responsibles={actResponsibles}
-            allowEdit={caseMode === "edit" ? clientPermissions.canEdit : clientPermissions.canCreate}
+            allowEdit={caseMode === "edit" ? casePermissions.canEdit : casePermissions.canCreate}
             canViewFinance={paymentPermissions.canView}
           />
         )}
@@ -10962,6 +10980,11 @@ export function ClientDetail({
           findById={(payload) => apiService.findLegalEntityById(payload)}
           allowEdit={clientPermissions.canEdit}
           allowDelete={false}
+          canViewCases={casePermissions.canView}
+          canViewAccounts={accountPermissions.canView}
+          canCreateAccounts={accountPermissions.canView && accountPermissions.canCreate}
+          canViewActs={actPermissions.canView}
+          canViewPayments={paymentPermissions.canView}
           titleOverride={
             legalEntityModalInitial
               ? "Реквизиты юридического лица"

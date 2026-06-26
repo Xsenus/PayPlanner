@@ -115,6 +115,10 @@ interface LegalEntityModalProps {
   hideAuditSection?: boolean;
   hideDictionaryButtons?: boolean;
   compactReadOnlyView?: boolean;
+  canViewCases?: boolean;
+  canViewAccounts?: boolean;
+  canCreateAccounts?: boolean;
+  canViewActs?: boolean;
   canViewPayments?: boolean;
 }
 
@@ -739,6 +743,10 @@ export function LegalEntityModal({
   hideAuditSection = false,
   hideDictionaryButtons = false,
   compactReadOnlyView = false,
+  canViewCases = true,
+  canViewAccounts = true,
+  canCreateAccounts = true,
+  canViewActs = true,
   canViewPayments = true,
 }: LegalEntityModalProps) {
   const { t } = useTranslation();
@@ -948,6 +956,8 @@ export function LegalEntityModal({
   const shouldHidePageNavigation = isPageMode && hidePageNavigation;
   const shouldShowFormActions = !hideFormActions;
   const shouldShowDadataSection = !hideDadataSection;
+  const canViewLegalEntityDocuments = canViewAccounts || canViewActs || canViewPayments;
+  const canViewLegalEntityWorkSection = canViewCases || canViewLegalEntityDocuments;
   const resolvedTitle =
     titleOverride ??
     (initial
@@ -986,7 +996,7 @@ export function LegalEntityModal({
     deleteCase: deleteLegalEntityCase,
     setCases: setLegalEntityCases,
   } = useClientCases(undefined, {
-    enabled: isOpen && Boolean(currentLegalEntityId),
+    enabled: canViewCases && isOpen && Boolean(currentLegalEntityId),
     legalEntityId: currentLegalEntityId ?? undefined,
   });
   const legalEntityInvoicesResult = useInvoices({
@@ -996,7 +1006,7 @@ export function LegalEntityModal({
     pageSize: 5,
     sortBy: "date",
     sortDir: "desc",
-    enabled: isOpen && Boolean(currentLegalEntityId),
+    enabled: canViewAccounts && isOpen && Boolean(currentLegalEntityId),
   });
   const legalEntityActsResult = useActs({
     legalEntityId: currentLegalEntityId ?? undefined,
@@ -1005,7 +1015,7 @@ export function LegalEntityModal({
     pageSize: 5,
     sortBy: "date",
     sortDir: "desc",
-    enabled: isOpen && Boolean(currentLegalEntityId),
+    enabled: canViewActs && isOpen && Boolean(currentLegalEntityId),
   });
   const legalEntityPaymentsResult = usePaymentsPaged({
     legalEntityId: currentLegalEntityId ?? undefined,
@@ -2344,21 +2354,21 @@ export function LegalEntityModal({
   };
 
   const openCreateCase = () => {
-    if (!currentLegalEntityId || readOnly) return;
+    if (!canViewCases || !currentLegalEntityId || readOnly) return;
     setCaseMode("create");
     setEditingCase(null);
     setCaseModalOpen(true);
   };
 
   const openEditCase = (clientCase: ClientCase) => {
-    if (readOnly) return;
+    if (!canViewCases || readOnly) return;
     setCaseMode("edit");
     setEditingCase(clientCase);
     setCaseModalOpen(true);
   };
 
   const saveLegalEntityCase = async (patch: Partial<ClientCase>) => {
-    if (!currentLegalEntityId) return;
+    if (!canViewCases || !currentLegalEntityId) return;
 
     const payload: LegalEntityCasePayload = {
       clientId: null,
@@ -2406,7 +2416,7 @@ export function LegalEntityModal({
   };
 
   const removeLegalEntityCase = async () => {
-    if (!editingCase) return;
+    if (!canViewCases || !editingCase) return;
     await deleteLegalEntityCase(editingCase.id);
     if (selectedLegalEntityCaseId === editingCase.id) {
       setSelectedLegalEntityCaseId("all");
@@ -2415,7 +2425,7 @@ export function LegalEntityModal({
   };
 
   const openCreateInvoice = () => {
-    if (!currentLegalEntityId || readOnly) return;
+    if (!canViewAccounts || !currentLegalEntityId || readOnly) return;
     setInvoiceModalMode("create");
     setSelectedInvoice(null);
     setInvoiceModalError(null);
@@ -2423,7 +2433,7 @@ export function LegalEntityModal({
   };
 
   const openEditInvoice = (invoice: Invoice) => {
-    if (readOnly) return;
+    if (!canViewAccounts || readOnly) return;
     setInvoiceModalMode("edit");
     setSelectedInvoice(invoice);
     setInvoiceModalError(null);
@@ -2437,6 +2447,7 @@ export function LegalEntityModal({
   };
 
   const submitInvoice = async (payload: InvoiceInput) => {
+    if (!canViewAccounts) return;
     try {
       setInvoiceSubmitting(true);
       setInvoiceModalError(null);
@@ -2445,8 +2456,8 @@ export function LegalEntityModal({
       } else {
         await legalEntityInvoicesResult.createInvoice(payload);
       }
-      await legalEntityPaymentsResult.refresh();
-      await legalEntityActsResult.refresh();
+      if (canViewPayments) await legalEntityPaymentsResult.refresh();
+      if (canViewActs) await legalEntityActsResult.refresh();
       setCaseFinanceReloadToken((value) => value + 1);
       closeInvoiceModal();
     } catch (err) {
@@ -2459,7 +2470,7 @@ export function LegalEntityModal({
   };
 
   const openCreateAct = () => {
-    if (!currentLegalEntityId || readOnly) return;
+    if (!canViewActs || !currentLegalEntityId || readOnly) return;
     setActModalMode("create");
     setSelectedAct(null);
     setActModalError(null);
@@ -2467,7 +2478,7 @@ export function LegalEntityModal({
   };
 
   const openEditAct = (act: Act) => {
-    if (readOnly) return;
+    if (!canViewActs || readOnly) return;
     setActModalMode("edit");
     setSelectedAct(act);
     setActModalError(null);
@@ -2481,6 +2492,7 @@ export function LegalEntityModal({
   };
 
   const submitAct = async (payload: ActInput) => {
+    if (!canViewActs) return;
     try {
       setActSubmitting(true);
       setActModalError(null);
@@ -2489,7 +2501,7 @@ export function LegalEntityModal({
       } else {
         await legalEntityActsResult.createAct(payload);
       }
-      await legalEntityInvoicesResult.refresh();
+      if (canViewAccounts) await legalEntityInvoicesResult.refresh();
       setCaseFinanceReloadToken((value) => value + 1);
       closeActModal();
     } catch (err) {
@@ -2502,6 +2514,7 @@ export function LegalEntityModal({
   };
 
   const handleInvoiceCaseCreated = (clientCase: ClientCase) => {
+    if (!canViewCases) return;
     if (clientCase.legalEntityId !== currentLegalEntityId) return;
     setLegalEntityCases((prev) =>
       prev.some((item) => item.id === clientCase.id)
@@ -2513,7 +2526,7 @@ export function LegalEntityModal({
   };
 
   const openCreatePayment = (caseId?: number) => {
-    if (!currentLegalEntityId || readOnly) return;
+    if (!canViewPayments || !currentLegalEntityId || readOnly) return;
     if (caseId) {
       setSelectedLegalEntityCaseId(caseId);
     }
@@ -2523,7 +2536,7 @@ export function LegalEntityModal({
   };
 
   const openEditPayment = (payment: Payment) => {
-    if (readOnly) return;
+    if (!canViewPayments || readOnly) return;
     setPaymentModalMode("edit");
     setSelectedPayment(payment);
     setPaymentModalOpen(true);
@@ -2561,9 +2574,9 @@ export function LegalEntityModal({
       } else {
         await apiService.createPayment(normalizeLegalEntityPaymentPayload(payload));
       }
-      await legalEntityPaymentsResult.refresh();
-      await legalEntityInvoicesResult.refresh();
-      await legalEntityActsResult.refresh();
+      if (canViewPayments) await legalEntityPaymentsResult.refresh();
+      if (canViewAccounts) await legalEntityInvoicesResult.refresh();
+      if (canViewActs) await legalEntityActsResult.refresh();
       setCaseFinanceReloadToken((value) => value + 1);
       closePaymentModal();
     } catch (error) {
@@ -2586,9 +2599,9 @@ export function LegalEntityModal({
         normalizeLegalEntityPaymentPayload(rest),
         remainderDate,
       );
-      await legalEntityPaymentsResult.refresh();
-      await legalEntityInvoicesResult.refresh();
-      await legalEntityActsResult.refresh();
+      if (canViewPayments) await legalEntityPaymentsResult.refresh();
+      if (canViewAccounts) await legalEntityInvoicesResult.refresh();
+      if (canViewActs) await legalEntityActsResult.refresh();
       setCaseFinanceReloadToken((value) => value + 1);
       closePaymentModal();
       toast.success("Остаток платежа перенесён.", "Платежи");
@@ -2604,9 +2617,9 @@ export function LegalEntityModal({
   const rollbackPaymentRemainderTransfer = async (paymentId: number) => {
     try {
       await apiService.rollbackPaymentRemainderTransfer(paymentId);
-      await legalEntityPaymentsResult.refresh();
-      await legalEntityInvoicesResult.refresh();
-      await legalEntityActsResult.refresh();
+      if (canViewPayments) await legalEntityPaymentsResult.refresh();
+      if (canViewAccounts) await legalEntityInvoicesResult.refresh();
+      if (canViewActs) await legalEntityActsResult.refresh();
       setCaseFinanceReloadToken((value) => value + 1);
       closePaymentModal();
       toast.success("Перенос остатка отменен.", "Платежи");
@@ -2626,9 +2639,9 @@ export function LegalEntityModal({
   ) => {
     try {
       await apiService.adjustPaymentRemainderTransfer(paymentId, paidAmount, remainderDate);
-      await legalEntityPaymentsResult.refresh();
-      await legalEntityInvoicesResult.refresh();
-      await legalEntityActsResult.refresh();
+      if (canViewPayments) await legalEntityPaymentsResult.refresh();
+      if (canViewAccounts) await legalEntityInvoicesResult.refresh();
+      if (canViewActs) await legalEntityActsResult.refresh();
       setCaseFinanceReloadToken((value) => value + 1);
       closePaymentModal();
       toast.success("Разделение платежа обновлено.", "Платежи");
@@ -3096,7 +3109,7 @@ export function LegalEntityModal({
 
   void legacyLegalEntityWorkSection;
 
-  const legalEntityWorkSection = (
+  const legalEntityWorkSection = canViewLegalEntityWorkSection ? (
     <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 xl:flex-row xl:items-center xl:justify-between">
         <div>
@@ -3104,23 +3117,25 @@ export function LegalEntityModal({
             Дела и документы
           </h3>
           <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
-            <span>Дел: {legalEntityCases.length}</span>
-            <span>Открыто: {caseStatusCounts.open}</span>
+            {canViewCases ? <span>Дел: {legalEntityCases.length}</span> : null}
+            {canViewCases ? <span>Открыто: {caseStatusCounts.open}</span> : null}
             {canViewPayments ? <span>Платежей: {legalEntityPaymentsResult.total}</span> : null}
-            <span>Счетов: {legalEntityInvoicesResult.pagination.total}</span>
-            <span>Актов: {legalEntityActsResult.pagination.total}</span>
+            {canViewAccounts ? <span>Счетов: {legalEntityInvoicesResult.pagination.total}</span> : null}
+            {canViewActs ? <span>Актов: {legalEntityActsResult.pagination.total}</span> : null}
           </div>
         </div>
         {currentLegalEntityId && !readOnly ? (
           <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={openCreateCase}
-              className="inline-flex h-10 items-center gap-2 rounded-lg bg-emerald-600 px-3 text-sm font-medium text-white shadow-sm transition hover:bg-emerald-700"
-            >
-              <Plus className="h-4 w-4" />
-              Дело
-            </button>
+            {canViewCases ? (
+              <button
+                type="button"
+                onClick={openCreateCase}
+                className="inline-flex h-10 items-center gap-2 rounded-lg bg-emerald-600 px-3 text-sm font-medium text-white shadow-sm transition hover:bg-emerald-700"
+              >
+                <Plus className="h-4 w-4" />
+                Дело
+              </button>
+            ) : null}
             {canViewPayments ? (
               <button
                 type="button"
@@ -3131,36 +3146,42 @@ export function LegalEntityModal({
                 Платёж
               </button>
             ) : null}
-            <button
-              type="button"
-              onClick={openCreateInvoice}
-              className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
-            >
-              <FileText className="h-4 w-4" />
-              Счёт
-            </button>
-            <button
-              type="button"
-              onClick={openCreateAct}
-              className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
-            >
-              <FileCheck2 className="h-4 w-4" />
-              Акт
-            </button>
+            {canViewAccounts ? (
+              <button
+                type="button"
+                onClick={openCreateInvoice}
+                className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+              >
+                <FileText className="h-4 w-4" />
+                Счёт
+              </button>
+            ) : null}
+            {canViewActs ? (
+              <button
+                type="button"
+                onClick={openCreateAct}
+                className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+              >
+                <FileCheck2 className="h-4 w-4" />
+                Акт
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>
 
       {!currentLegalEntityId ? (
         <div className="m-5 rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-500">
-          Сохраните карточку, чтобы добавить дела, платежи, счета и акты.
+          Сохраните карточку, чтобы добавить доступные связанные данные.
         </div>
       ) : (
         <div className="space-y-5 p-5">
           <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-5 py-4">
-            <p className="text-sm font-semibold text-emerald-900">
-              Всего дел: {legalEntityCases.length}
-            </p>
+            {canViewCases ? (
+              <p className="text-sm font-semibold text-emerald-900">
+                Всего дел: {legalEntityCases.length}
+              </p>
+            ) : null}
             {canViewPayments ? (
               <p className="mt-1 text-sm text-emerald-700">
                 Доходы {formatCurrencySmart(legalEntityPaymentsResult.summary.income).full}, расходы{" "}
@@ -3175,6 +3196,7 @@ export function LegalEntityModal({
             ) : null}
           </div>
 
+          {canViewCases ? (
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
             <div className="grid gap-3 lg:grid-cols-[minmax(260px,1fr)_220px]">
               <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -3229,7 +3251,10 @@ export function LegalEntityModal({
               </div>
             ) : null}
           </div>
+          ) : null}
 
+          {canViewCases ? (
+          <>
           {legalEntityCasesError ? (
             <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
               {extractErrorMessage(
@@ -3416,21 +3441,24 @@ export function LegalEntityModal({
               })}
             </div>
           )}
+          </>
+          ) : null}
 
           <div className="space-y-3">
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => setSelectedLegalEntityCaseId("all")}
-                className={`rounded-full border px-3 py-1.5 text-sm transition-colors ${
-                  selectedLegalEntityCaseId === "all"
-                    ? "border-slate-800 bg-slate-800 text-white shadow-sm"
-                    : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
-                }`}
-              >
-                Все дела
-              </button>
-              {legalEntityCases.map((clientCase) => (
+            {canViewCases ? (
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSelectedLegalEntityCaseId("all")}
+                  className={`rounded-full border px-3 py-1.5 text-sm transition-colors ${
+                    selectedLegalEntityCaseId === "all"
+                      ? "border-slate-800 bg-slate-800 text-white shadow-sm"
+                      : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
+                  }`}
+                >
+                  Все дела
+                </button>
+                {legalEntityCases.map((clientCase) => (
                 <button
                   key={clientCase.id}
                   type="button"
@@ -3446,9 +3474,11 @@ export function LegalEntityModal({
                     {clientCase.title || "Без названия"}
                   </span>
                 </button>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : null}
 
+            {canViewLegalEntityDocuments ? (
             <div className="grid gap-5 xl:grid-cols-3">
               {canViewPayments ? (
                 <div className="rounded-xl border border-slate-200">
@@ -3507,6 +3537,7 @@ export function LegalEntityModal({
                 </div>
               ) : null}
 
+              {canViewAccounts ? (
               <div className="rounded-xl border border-slate-200">
                 <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
                   <h4 className="text-sm font-semibold text-slate-800">Счета</h4>
@@ -3555,7 +3586,9 @@ export function LegalEntityModal({
                   )}
                 </div>
               </div>
+              ) : null}
 
+              {canViewActs ? (
               <div className="rounded-xl border border-slate-200">
                 <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
                   <h4 className="text-sm font-semibold text-slate-800">Акты</h4>
@@ -3603,12 +3636,14 @@ export function LegalEntityModal({
                   )}
                 </div>
               </div>
+              ) : null}
             </div>
+            ) : null}
           </div>
         </div>
       )}
     </section>
-  );
+  ) : null;
 
   const dadataSection = (
     <div className="rounded-xl border border-dashed border-blue-200 bg-blue-50/50 p-4">
@@ -4946,7 +4981,7 @@ export function LegalEntityModal({
         ) : null}
       </form>
 
-      {caseModalOpen ? (
+      {caseModalOpen && canViewCases ? (
         <CaseModal
           isOpen={caseModalOpen}
           onClose={() => setCaseModalOpen(false)}
@@ -4962,7 +4997,7 @@ export function LegalEntityModal({
         />
       ) : null}
 
-      {invoiceModalOpen ? (
+      {invoiceModalOpen && canViewAccounts ? (
         <InvoiceModal
           mode={invoiceModalMode}
           open={invoiceModalOpen}
@@ -5000,7 +5035,7 @@ export function LegalEntityModal({
         />
       ) : null}
 
-      {actModalOpen ? (
+      {actModalOpen && canViewActs ? (
         <ActModal
           open={actModalOpen}
           mode={actModalMode}
@@ -5026,7 +5061,7 @@ export function LegalEntityModal({
         />
       ) : null}
 
-      {paymentModalOpen ? (
+      {paymentModalOpen && canViewPayments ? (
         <PaymentModal
           key={
             paymentModalMode === "edit" && selectedPayment
@@ -5040,9 +5075,11 @@ export function LegalEntityModal({
           onTransferRemainder={transferPaymentRemainder}
           onRollbackRemainderTransfer={rollbackPaymentRemainderTransfer}
           onAdjustRemainderTransfer={adjustPaymentRemainderTransfer}
+          canViewLinkedInvoices={canViewAccounts}
+          canCreateLinkedInvoices={canViewAccounts && canCreateAccounts && !readOnly}
           defaultLegalEntityId={currentLegalEntityId ?? undefined}
           defaultClientCaseId={selectedCaseId}
-          casesPrefetch={legalEntityCases}
+          casesPrefetch={canViewCases ? legalEntityCases : []}
         />
       ) : null}
 

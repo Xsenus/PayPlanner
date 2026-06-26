@@ -42,6 +42,38 @@ public class ActsControllerTests
     }
 
     [Fact]
+    public async Task Get_ForbidsAuthenticatedUserWithoutActsView()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateActsUserAsync(db, "acts-no-view", canExport: false, canView: false);
+        var controller = CreateControllerForUser(db, user.Id);
+
+        var result = await controller.Get(
+            from: null,
+            to: null,
+            status: null,
+            type: null,
+            clientId: null,
+            contractId: null,
+            clientIds: null,
+            responsibleId: null,
+            search: null,
+            sortBy: null,
+            sortDir: null,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None,
+            includeLineItems: false,
+            workflowStatus: null,
+            legalEntityId: null,
+            caseId: null,
+            invoiceId: null,
+            paymentId: null);
+
+        Assert.IsType<ForbidResult>(result);
+    }
+
+    [Fact]
     public async Task Create_FullAct_WithLongComment_PersistsCommentAndInvoiceLineItems_InLocalSqliteFile()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"payplanner-act-{Guid.NewGuid():N}.db");
@@ -3149,7 +3181,8 @@ public class ActsControllerTests
         string name,
         bool canExport,
         string viewScope = DataVisibilityScope.All,
-        bool canCreateYandexDisk = false)
+        bool canCreateYandexDisk = false,
+        bool canView = true)
     {
         var role = new Role
         {
@@ -3160,10 +3193,10 @@ public class ActsControllerTests
                 new RolePermission
                 {
                     Section = RolePermissionCatalog.Acts,
-                    CanView = true,
-                    CanCreate = true,
-                    CanEdit = true,
-                    CanDelete = true,
+                    CanView = canView,
+                    CanCreate = canView,
+                    CanEdit = canView,
+                    CanDelete = canView,
                     CanExport = canExport,
                     ViewScope = viewScope,
                 },

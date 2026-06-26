@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -70,9 +70,12 @@ const authState = vi.hoisted((): { user: { id: number; fullName: string; email: 
 }));
 
 const permissionsState = vi.hoisted(() => ({
+  taskCanCreate: true,
   taskCanEdit: true,
+  taskCanDelete: true,
   taskCanExport: true,
   caseCanExport: true,
+  yandexDiskCanCreate: true,
   taskViewScope: 'all' as 'own' | 'department' | 'all',
   calendarViewScope: 'all' as 'own' | 'department' | 'all' | 'specific',
   calendarVisibleUserIds: [] as number[],
@@ -138,7 +141,9 @@ vi.mock('../../hooks/useRolePermissions', () => ({
       },
       tasks: {
         ...section,
+        canCreate: permissionsState.taskCanCreate,
         canEdit: permissionsState.taskCanEdit,
+        canDelete: permissionsState.taskCanDelete,
         canExport: permissionsState.taskCanExport,
         viewScope: permissionsState.taskViewScope,
       },
@@ -154,6 +159,7 @@ vi.mock('../../hooks/useRolePermissions', () => ({
       dictionaries: { ...section },
       roles: { ...section },
       audit: { ...section },
+      yandexDisk: { ...section, canCreate: permissionsState.yandexDiskCanCreate },
     };
   },
 }));
@@ -354,9 +360,12 @@ describe('TaskJournal', () => {
     window.localStorage.clear();
     authState.user = { id: 7, fullName: 'Администратор', email: 'admin@example.com' };
     authState.isAdmin = true;
+    permissionsState.taskCanCreate = true;
     permissionsState.taskCanEdit = true;
+    permissionsState.taskCanDelete = true;
     permissionsState.taskCanExport = true;
     permissionsState.caseCanExport = true;
+    permissionsState.yandexDiskCanCreate = true;
     permissionsState.taskViewScope = 'all';
     permissionsState.calendarViewScope = 'all';
     permissionsState.calendarVisibleUserIds = [];
@@ -670,6 +679,45 @@ describe('TaskJournal', () => {
     expect(screen.queryByRole('button', { name: 'PDF' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'HTML' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'ICS' })).toBeNull();
+  });
+
+  it('hides task creation controls when create permission is denied', async () => {
+    authState.isAdmin = false;
+    permissionsState.taskCanCreate = false;
+
+    await renderJournal();
+
+    expect(screen.queryByRole('button', { name: /Добавить задачу/i })).toBeNull();
+
+    cleanup();
+    window.localStorage.clear();
+    await renderJournal(undefined, { initialView: 'calendar' });
+
+    expect(screen.queryByTitle('Создать задачу на дату')).toBeNull();
+    expect(apiMock.createTaskJournalItem).not.toHaveBeenCalled();
+  });
+
+  it('hides task delete controls when delete permission is denied', async () => {
+    authState.isAdmin = false;
+    authState.user = { id: 8, fullName: 'Постановщик', email: 'author@example.com' };
+    permissionsState.taskCanDelete = false;
+
+    await renderJournal([createTask({
+      assigneeUserId: 8,
+      assigneeName: 'Постановщик',
+      authorUserId: 8,
+      authorName: 'Постановщик',
+      title: 'Задача без удаления',
+    })], { waitForTitle: 'Задача без удаления' });
+
+    expect(screen.queryByTitle('Удалить')).toBeNull();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Выбрать задачу Задача без удаления' }));
+
+    expect(screen.getByTestId('task-bulk-actions')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Удалить выбранные' })).toBeNull();
+    expect(apiMock.deleteTaskJournalItem).not.toHaveBeenCalled();
+    expect(apiMock.bulkDeleteTaskJournalItems).not.toHaveBeenCalled();
   });
 
   it('exports client planning report in Word format', async () => {
@@ -2324,7 +2372,32 @@ describe('TaskJournal', () => {
     fireEvent.click(screen.getByTitle('Просмотр'));
     expect(await screen.findByRole('heading', { name: 'Просмотр задачи' })).toBeTruthy();
     expect((screen.getByDisplayValue('Тестовая задача') as HTMLInputElement).disabled).toBe(true);
+    expect(screen.queryByPlaceholderText('Введите комментарий')).toBeNull();
     expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+  });
+
+  it('allows executor to comment on a read-only task', async () => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Исполнитель', email: 'assignee@example.com' };
+    await renderJournal([
+      createTask({
+        assigneeUserId: 7,
+        assigneeName: 'Исполнитель',
+        authorUserId: 8,
+        authorName: 'Постановщик',
+        participants: [
+          { userId: 7, role: 'assignee', displayName: 'Исполнитель', approvalStatus: 'pending' },
+        ],
+      }),
+    ]);
+
+    fireEvent.click(screen.getByTitle('Просмотр'));
+    expect(await screen.findByRole('heading', { name: 'Просмотр задачи' })).toBeTruthy();
+
+    fireEvent.change(screen.getByPlaceholderText('Введите комментарий'), { target: { value: 'Комментарий исполнителя' } });
+    fireEvent.click(screen.getByRole('button', { name: /Добавить комментарий/i }));
+
+    await waitFor(() => expect(apiMock.createTaskJournalComment).toHaveBeenCalledWith(101, 'Комментарий исполнителя'));
   });
 
   it('allows executor to request deadline change without moving task directly', async () => {
@@ -3030,5 +3103,54 @@ describe('TaskJournal', () => {
     });
 
     await waitFor(() => expect(apiMock.uploadTaskJournalFile).toHaveBeenCalledWith(101, expect.any(File), 'doc-1'));
+  });
+
+  it.each([
+    { taskCanExport: false, yandexDiskCanCreate: true, taskCardWindowMode: 'legacy' as const },
+    { taskCanExport: true, yandexDiskCanCreate: false, taskCardWindowMode: 'legacy' as const },
+    { taskCanExport: false, yandexDiskCanCreate: true, taskCardWindowMode: 'modern' as const },
+    { taskCanExport: true, yandexDiskCanCreate: false, taskCardWindowMode: 'modern' as const },
+  ])('hides task file yandex upload action when required permissions are denied %#', async ({
+    taskCanExport,
+    yandexDiskCanCreate,
+    taskCardWindowMode,
+  }) => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Постановщик', email: 'author@example.com' };
+    permissionsState.taskCanExport = taskCanExport;
+    permissionsState.yandexDiskCanCreate = yandexDiskCanCreate;
+    apiMock.getTaskJournalFiles.mockResolvedValueOnce([
+      {
+        id: 600,
+        taskJournalItemId: 101,
+        documentKey: 'doc-1',
+        version: 1,
+        originalFileName: 'document.pdf',
+        contentType: 'application/pdf',
+        sizeBytes: 1024,
+        uploadedByUserId: 7,
+        uploadedByName: 'Постановщик',
+        uploadedAt: todayAt(10),
+        isLatestVersion: true,
+        clientCaseDocumentId: 42,
+      },
+    ]);
+
+    await renderJournal([
+      createTask({
+        authorUserId: 7,
+        authorName: 'Постановщик',
+        assigneeUserId: 7,
+        assigneeName: 'Постановщик',
+      }),
+    ], { settings: { taskCardWindowMode } });
+
+    await openFirstTaskForEdit();
+
+    expect(await screen.findByTestId(`task-${taskCardWindowMode}-card-window`)).toBeTruthy();
+    expect((await screen.findAllByText('document.pdf')).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: 'Скачать файл' }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Отправить файл на Я.Диск' })).toBeNull();
+    expect(apiMock.uploadTaskJournalFileToYandexDisk).not.toHaveBeenCalled();
   });
 });

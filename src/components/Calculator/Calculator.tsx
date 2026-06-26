@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Calculator as CalculatorIcon, Info, X } from 'lucide-react';
 import { useClients } from '../../hooks/useClients';
+import { useAuth } from '../../contexts/AuthContext';
+import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useToast } from '../../hooks/useToast';
 import type { InstallmentPlanInput, PaymentPayload } from '../../types';
 import { apiService } from '../../services/api';
@@ -17,7 +19,22 @@ type DraftState = {
 };
 
 export function Calculator() {
-  const { clients } = useClients();
+  const { user } = useAuth();
+  const permissions = useRolePermissions(user?.role?.id);
+  const canViewClients = permissions.clients.canView;
+  const canViewLegalEntities = permissions.legalEntities.canView;
+  const canViewCases = permissions.cases.canView;
+  const canSavePayments = permissions.payments.canView && permissions.payments.canCreate;
+  const allowedCounterpartyScopes = useMemo(
+    () => [
+      ...(canViewClients ? ['client' as const] : []),
+      ...(canViewLegalEntities ? ['legalEntity' as const] : []),
+    ],
+    [canViewClients, canViewLegalEntities],
+  );
+  const canSelectCounterparty = allowedCounterpartyScopes.length > 0;
+  const clientsOptions = useMemo(() => ({ enabled: canViewClients }), [canViewClients]);
+  const { clients } = useClients(clientsOptions);
   const toast = useToast();
   const [draft, setDraft] = useState<DraftState | null>(null);
 
@@ -100,7 +117,9 @@ export function Calculator() {
             <div>
               <h1 className="text-2xl font-bold text-slate-900">Калькулятор рассрочки</h1>
               <p className="mt-1 text-sm text-slate-500">
-                Рассчитайте график, проверьте платежи и сохраните их в календарь.
+                {canSavePayments
+                  ? 'Рассчитайте график, проверьте платежи и сохраните их в календарь.'
+                  : 'Рассчитайте график и проверьте будущие платежи.'}
               </p>
             </div>
           </div>
@@ -117,7 +136,7 @@ export function Calculator() {
                   <div className="font-medium">Данные подставлены из счета</div>
                   <div className="mt-1">
                     {draft.invoiceNumber ? `Счет №${draft.invoiceNumber}. ` : ''}
-                    {draft.clientName ? `Клиент: ${draft.clientName}. ` : ''}
+                    {canViewClients && draft.clientName ? `Клиент: ${draft.clientName}. ` : ''}
                     При необходимости измените параметры и сохраните график.
                   </div>
                 </div>
@@ -139,9 +158,13 @@ export function Calculator() {
           clients={clients}
           initialTotal={draft?.total}
           initialStartDate={draft?.startDate}
-          initialClientId={draft?.clientId}
-          initialClientName={draft?.clientName}
+          initialClientId={canViewClients ? draft?.clientId : undefined}
+          initialClientName={canViewClients ? draft?.clientName : undefined}
           initialInvoiceNumber={draft?.invoiceNumber}
+          canSelectCounterparty={canSelectCounterparty}
+          allowedCounterpartyScopes={allowedCounterpartyScopes}
+          canSelectCase={canViewCases}
+          canSavePayments={canSavePayments}
           onSavePayments={handleSavePayments}
         />
       </main>

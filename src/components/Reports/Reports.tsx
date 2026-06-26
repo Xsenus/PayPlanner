@@ -79,6 +79,7 @@ import {
   normalizeYmRange,
 } from '../../utils/reportPresentation';
 import type { ActStatusReport, AdvanceReport, BankStatementImportReport, CaseActivityReport, CaseFinanceReport, CaseSuccessReport, CashBookSummary, CashFlowForecastReport, CashFlowReport, CashOrderReport, Client, ClientCase, Contract, ContractStatusReport, CounterpartyReport, CurrencyReport, CurrentCasesReport, DirectionReport, IncomeType, InvoiceStatusReport, JournalStatusReport, LawyerWorkloadReport, LegalWorkReport, MatchStatusReport, MoneyAccount, MoneyCategoryReport, MoneyOperationSource, OverdueProceduralDeadlinesReport, PaidAccountReport, PaidInvoiceReport, PaymentOrderReport, PaymentPurposeReport, PaymentPriorityReport, PlanFactReport, ProjectReport, SalesPointReport, SpreadsheetImportReport, TaskReport, VatReport } from '../../types';
+import { buildVisibleReportGroups, type ReportGroupId, type ReportSectionAccess } from './reportAccess';
 
 const statusMeta: Record<
   'Completed' | 'Pending' | 'Overdue',
@@ -130,8 +131,6 @@ type PieTooltipProps = {
     };
   }>;
 };
-
-type ReportGroupId = 'payments' | 'tasks' | 'legal' | 'analytics';
 
 const reportGroups: Array<{
   id: ReportGroupId;
@@ -1411,13 +1410,15 @@ function StatusPanel({
 function ReportGroupSelector({
   activeGroup,
   onChange,
+  groups = reportGroups,
 }: {
   activeGroup: ReportGroupId;
   onChange: (group: ReportGroupId) => void;
+  groups?: typeof reportGroups;
 }) {
   return (
     <section className="mt-8 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-      {reportGroups.map((group) => {
+      {groups.map((group) => {
         const Icon = group.icon;
         const active = group.id === activeGroup;
         return (
@@ -7312,7 +7313,31 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
   const permissions = useRolePermissions(user?.role?.id);
   const canViewPaymentReports = permissions.payments.canView;
   const canExportPaymentReports = permissions.payments.canExport;
+  const canViewTaskReports = permissions.tasks.canView;
+  const canViewCaseReports = permissions.cases.canView;
+  const canViewAccountReports = permissions.accounts.canView;
+  const canViewActReports = permissions.acts.canView;
+  const canViewContractReports = permissions.contracts.canView;
+  const canViewClientFilters = permissions.clients.canView;
+  const canViewIncomeTypeFilters = permissions.dictionaries.canView;
   const canViewSpreadsheetImportReport = isAdmin();
+  const reportAccess = useMemo<ReportSectionAccess>(
+    () => ({
+      payments: canViewPaymentReports,
+      tasks: canViewTaskReports,
+      cases: canViewCaseReports,
+      accounts: canViewAccountReports,
+      acts: canViewActReports,
+      contracts: canViewContractReports,
+    }),
+    [canViewAccountReports, canViewActReports, canViewCaseReports, canViewContractReports, canViewPaymentReports, canViewTaskReports],
+  );
+  const visibleReportGroupIds = useMemo(() => buildVisibleReportGroups(reportAccess), [reportAccess]);
+  const visibleReportGroups = useMemo(
+    () => reportGroups.filter((group) => visibleReportGroupIds.includes(group.id)),
+    [visibleReportGroupIds],
+  );
+  const hasVisibleReportGroups = visibleReportGroupIds.length > 0;
   const profileTimeZoneId = useUserTimeZone();
   const ymNow = currentReportMonthInTimeZone(profileTimeZoneId);
   const [range, setRange] = useState<MonthRange>({ from: ymNow, to: ymNow });
@@ -7336,12 +7361,17 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
   const [incomeTypes, setIncomeTypes] = useState<IncomeType[]>([]);
   const [incomeTypesError, setIncomeTypesError] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (visibleReportGroupIds.includes(activeGroup)) return;
+    setActiveGroup(visibleReportGroupIds[0] ?? 'payments');
+  }, [activeGroup, visibleReportGroupIds]);
+
   const normalizedRange = useMemo(
     () => normalizeYmRange((range.from ?? ymNow) as `${number}-${string}`, (range.to ?? range.from ?? ymNow) as `${number}-${string}`),
     [range.from, range.to, ymNow],
   );
 
-  const { stats, types, loading, error, refresh } = usePeriodStats(normalizedRange.fromYM, normalizedRange.toYM);
+  const { stats, types, loading, error, refresh } = usePeriodStats(normalizedRange.fromYM, normalizedRange.toYM, { enabled: canViewPaymentReports });
   const cashFlowDates = useMemo(
     () => monthRangeToDates(normalizedRange.fromYM, normalizedRange.toYM),
     [normalizedRange.fromYM, normalizedRange.toYM],
@@ -7349,10 +7379,10 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
   const selectedMoneySource = moneySource === 'all' ? undefined : moneySource;
   const selectedMoneyAccountName = moneyAccountName.trim() || undefined;
   const selectedCounterpartyName = counterpartyName.trim() || undefined;
-  const selectedClientId = clientId ? Number(clientId) : undefined;
-  const selectedCaseId = caseId ? Number(caseId) : undefined;
-  const selectedContractId = contractId ? Number(contractId) : undefined;
-  const selectedIncomeTypeId = incomeTypeId ? Number(incomeTypeId) : undefined;
+  const selectedClientId = canViewClientFilters && clientId ? Number(clientId) : undefined;
+  const selectedCaseId = canViewCaseReports && caseId ? Number(caseId) : undefined;
+  const selectedContractId = canViewContractReports && contractId ? Number(contractId) : undefined;
+  const selectedIncomeTypeId = canViewIncomeTypeFilters && incomeTypeId ? Number(incomeTypeId) : undefined;
   const visibleMoneyAccounts = useMemo(
     () =>
       moneyAccounts
@@ -7486,6 +7516,12 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
   useEffect(() => {
     let cancelled = false;
 
+    if (!canViewPaymentReports) {
+      setMoneyAccounts([]);
+      setMoneyAccountsError(null);
+      return;
+    }
+
     apiService.getMoneyAccounts({ activeOnly: true })
       .then((items) => {
         if (cancelled) return;
@@ -7501,10 +7537,16 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [canViewPaymentReports]);
 
   useEffect(() => {
     let cancelled = false;
+
+    if (!canViewClientFilters) {
+      setClients([]);
+      setClientsError(null);
+      return;
+    }
 
     apiService.getClients()
       .then((items) => {
@@ -7521,10 +7563,16 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [canViewClientFilters]);
 
   useEffect(() => {
     let cancelled = false;
+
+    if (!canViewCaseReports) {
+      setCases([]);
+      setCasesError(null);
+      return;
+    }
 
     apiService.getCases()
       .then((items) => {
@@ -7541,10 +7589,16 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [canViewCaseReports]);
 
   useEffect(() => {
     let cancelled = false;
+
+    if (!canViewContractReports) {
+      setContracts([]);
+      setContractsError(null);
+      return;
+    }
 
     apiService.getContracts({ pageSize: 500, sortBy: 'date', sortDir: 'desc' })
       .then((page) => {
@@ -7561,10 +7615,16 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [canViewContractReports]);
 
   useEffect(() => {
     let cancelled = false;
+
+    if (!canViewIncomeTypeFilters) {
+      setIncomeTypes([]);
+      setIncomeTypesError(null);
+      return;
+    }
 
     apiService.getIncomeTypes(undefined, true)
       .then((items) => {
@@ -7581,7 +7641,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [canViewIncomeTypeFilters]);
 
   useEffect(() => {
     if (!moneyAccountName) return;
@@ -7595,6 +7655,13 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     if (visibleIncomeTypes.some((item) => item.id === numericIncomeTypeId)) return;
     setIncomeTypeId('');
   }, [incomeTypeId, visibleIncomeTypes]);
+
+  useEffect(() => {
+    if (!clientId) return;
+    const numericClientId = Number(clientId);
+    if (visibleClients.some((item) => item.id === numericClientId)) return;
+    setClientId('');
+  }, [clientId, visibleClients]);
 
   useEffect(() => {
     if (!caseId) return;
@@ -7639,6 +7706,9 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     }),
     [bankReportFilters, canExportPaymentReports],
   );
+  const canViewLegalWorkReports = canViewCaseReports && canViewTaskReports && canViewAccountReports;
+  const canViewCaseFinanceReports = canViewCaseReports && canViewAccountReports;
+  const canViewCaseTaskReports = canViewCaseReports && canViewTaskReports;
   const {
     report: bankReport,
     loading: bankReportLoading,
@@ -7668,7 +7738,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     loading: legalWorkReportLoading,
     error: legalWorkReportError,
     reload: reloadLegalWorkReport,
-  } = useLegalWorkReport(cashFlowDates);
+  } = useLegalWorkReport(cashFlowDates, { enabled: canViewLegalWorkReports });
   const {
     report: caseFinanceReport,
     loading: caseFinanceReportLoading,
@@ -7676,7 +7746,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     reload: reloadCaseFinanceReport,
   } = useCaseFinanceReport({
     ...casePeriodReportFilters,
-  });
+  }, { enabled: canViewCaseFinanceReports });
   const {
     report: caseSuccessReport,
     loading: caseSuccessReportLoading,
@@ -7684,7 +7754,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     reload: reloadCaseSuccessReport,
   } = useCaseSuccessReport({
     ...casePeriodReportFilters,
-  });
+  }, { enabled: canViewCaseReports });
   const {
     report: caseActivityReport,
     loading: caseActivityReportLoading,
@@ -7692,7 +7762,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     reload: reloadCaseActivityReport,
   } = useCaseActivityReport({
     ...caseActivityReportFilters,
-  });
+  }, { enabled: canViewCaseTaskReports });
   const {
     report: currentCasesReport,
     loading: currentCasesReportLoading,
@@ -7700,7 +7770,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     reload: reloadCurrentCasesReport,
   } = useCurrentCasesReport({
     ...currentCasesReportFilters,
-  });
+  }, { enabled: canViewCaseTaskReports });
   const {
     report: lawyerWorkloadReport,
     loading: lawyerWorkloadReportLoading,
@@ -7708,7 +7778,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     reload: reloadLawyerWorkloadReport,
   } = useLawyerWorkloadReport({
     ...lawyerWorkloadReportFilters,
-  });
+  }, { enabled: canViewCaseTaskReports });
   const {
     report: overdueDeadlinesReport,
     loading: overdueDeadlinesReportLoading,
@@ -7716,7 +7786,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     reload: reloadOverdueDeadlinesReport,
   } = useOverdueProceduralDeadlinesReport({
     ...overdueDeadlinesReportFilters,
-  });
+  }, { enabled: canViewCaseReports });
   const {
     report: taskReport,
     loading: taskReportLoading,
@@ -7724,7 +7794,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     reload: reloadTaskReport,
   } = useTaskReport({
     ...taskReportFilters,
-  });
+  }, { enabled: canViewTaskReports });
   const {
     report: directionReport,
     loading: directionReportLoading,
@@ -7778,19 +7848,19 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
     loading: invoiceStatusReportLoading,
     error: invoiceStatusReportError,
     reload: reloadInvoiceStatusReport,
-  } = useInvoiceStatusReport(moneyOperationReportFilters);
+  } = useInvoiceStatusReport(moneyOperationReportFilters, { enabled: canViewAccountReports });
   const {
     report: actStatusReport,
     loading: actStatusReportLoading,
     error: actStatusReportError,
     reload: reloadActStatusReport,
-  } = useActStatusReport(moneyOperationReportFilters);
+  } = useActStatusReport(moneyOperationReportFilters, { enabled: canViewActReports });
   const {
     report: contractStatusReport,
     loading: contractStatusReportLoading,
     error: contractStatusReportError,
     reload: reloadContractStatusReport,
-  } = useContractStatusReport(moneyOperationReportFilters);
+  } = useContractStatusReport(moneyOperationReportFilters, { enabled: canViewContractReports });
   const {
     report: paymentOrderReport,
     loading: paymentOrderReportLoading,
@@ -8113,11 +8183,16 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
           </div>
         </section>
 
-        {loading ? (
+        {!hasVisibleReportGroups ? (
+          <div className="mt-8 rounded-[32px] border border-slate-200 bg-white/90 p-8 text-center shadow-[0_18px_45px_-24px_rgba(15,23,42,0.35)]">
+            <div className="text-lg font-semibold text-slate-950">Нет доступных отчетов</div>
+            <div className="mt-2 text-sm text-slate-600">Администратор может открыть нужные разделы в настройках роли.</div>
+          </div>
+        ) : activeGroup === 'payments' && loading ? (
           <div className="mt-8 rounded-[32px] border border-white/70 bg-white/80 p-12 text-center text-slate-500 shadow-[0_18px_45px_-24px_rgba(15,23,42,0.35)] backdrop-blur">
             Загрузка отчётов...
           </div>
-        ) : error || !stats || !types ? (
+        ) : activeGroup === 'payments' && (error || !stats || !types) ? (
           <div className="mt-8 rounded-[32px] border border-rose-100 bg-white/90 p-8 shadow-[0_18px_45px_-24px_rgba(15,23,42,0.35)]">
             <div className="text-lg font-semibold text-slate-950">Не удалось загрузить отчёты</div>
             <div className="mt-2 text-sm text-slate-600">{error ?? 'Нет данных для выбранного периода.'}</div>
@@ -8131,9 +8206,9 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
           </div>
         ) : (
           <>
-            <ReportGroupSelector activeGroup={activeGroup} onChange={setActiveGroup} />
+            <ReportGroupSelector activeGroup={activeGroup} onChange={setActiveGroup} groups={visibleReportGroups} />
 
-            {activeGroup === 'payments' ? (
+            {activeGroup === 'payments' && stats && types ? (
               <>
             <section className="mt-8 grid grid-cols-1 gap-4 xl:grid-cols-4">
               <MetricCard
@@ -8376,6 +8451,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
             {activeGroup === 'legal' ? (
               <>
 
+            {canViewLegalWorkReports ? (
             <LegalWorkReportSection
               report={legalWorkReport}
               loading={legalWorkReportLoading}
@@ -8386,7 +8462,9 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               onOpenCaseSection={onOpenCaseSection}
               profileTimeZoneId={profileTimeZoneId}
             />
+            ) : null}
 
+            {canViewCaseFinanceReports ? (
             <CaseFinanceReportSection
               report={caseFinanceReport}
               loading={caseFinanceReportLoading}
@@ -8396,6 +8474,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               onOpenCase={onOpenCase}
               profileTimeZoneId={profileTimeZoneId}
             />
+            ) : null}
 
             <CaseSuccessReportSection
               report={caseSuccessReport}
@@ -8407,6 +8486,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               profileTimeZoneId={profileTimeZoneId}
             />
 
+            {canViewCaseTaskReports ? (
             <CurrentCasesReportSection
               report={currentCasesReport}
               loading={currentCasesReportLoading}
@@ -8417,7 +8497,9 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               onOpenCaseSection={onOpenCaseSection}
               profileTimeZoneId={profileTimeZoneId}
             />
+            ) : null}
 
+            {canViewCaseTaskReports ? (
             <LawyerWorkloadReportSection
               report={lawyerWorkloadReport}
               loading={lawyerWorkloadReportLoading}
@@ -8426,6 +8508,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               onReload={reloadLawyerWorkloadReport}
               profileTimeZoneId={profileTimeZoneId}
             />
+            ) : null}
 
             <OverdueProceduralDeadlinesReportSection
               report={overdueDeadlinesReport}
@@ -8439,6 +8522,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               profileTimeZoneId={profileTimeZoneId}
             />
 
+            {canViewCaseTaskReports ? (
             <CaseActivityReportSection
               report={caseActivityReport}
               loading={caseActivityReportLoading}
@@ -8449,6 +8533,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               onOpenCaseSection={onOpenCaseSection}
               profileTimeZoneId={profileTimeZoneId}
             />
+            ) : null}
               </>
             ) : null}
 
@@ -8531,6 +8616,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               </>
             ) : null}
 
+            {canViewAccountReports ? (
             <InvoiceStatusReportSection
               report={invoiceStatusReport}
               loading={invoiceStatusReportLoading}
@@ -8539,7 +8625,9 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               filters={moneyOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
+            ) : null}
 
+            {canViewActReports ? (
             <ActStatusReportSection
               report={actStatusReport}
               loading={actStatusReportLoading}
@@ -8548,7 +8636,9 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               filters={moneyOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
+            ) : null}
 
+            {canViewContractReports ? (
             <ContractStatusReportSection
               report={contractStatusReport}
               loading={contractStatusReportLoading}
@@ -8557,6 +8647,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
               filters={moneyOperationReportFilters}
               profileTimeZoneId={profileTimeZoneId}
             />
+            ) : null}
 
             {canViewPaymentReports ? (
               <>

@@ -31,6 +31,7 @@
     "test:legal-roles:assigned": "node scripts/run-legal-readiness-report.mjs --skip-e2e --skip-load --skip-database-summary --require-assigned-expected-roles",
     "test:legal-roles:strict": "node scripts/run-legal-readiness-report.mjs --skip-e2e --skip-load --skip-database-summary --fail-on-broad-scopes --allowed-broad-scope-roles=admin",
     "test:guard": "vitest run src/App.routing.test.ts src/components/Navigation/Navigation.test.tsx",
+    "test:role-permissions-smoke": "node scripts/run-role-permission-smoke.mjs",
     "test:browser-downloads": "node scripts/run-browser-download-smoke.mjs",
     "test:notification-readiness": "node scripts/run-notification-production-readiness.mjs",
     "test:visual-smoke": "node scripts/run-visual-smoke.mjs",

@@ -3,6 +3,11 @@ import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import App from './App';
+import { LAST_TAB_STORAGE_KEY } from './appRouting';
+
+const permissionsState = vi.hoisted(() => ({
+  paymentsCanView: true,
+}));
 
 vi.mock('./contexts/AuthContext', () => ({
   AuthProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -50,11 +55,14 @@ vi.mock('./hooks/useRolePermissions', () => {
       cases: section,
       accounts: section,
       acts: section,
-      payments: section,
+      payments: { ...section, canView: permissionsState.paymentsCanView },
       contracts: section,
       dictionaries: section,
       roles: section,
       audit: section,
+      integrations: section,
+      yandexDisk: section,
+      s3Storage: section,
     }),
   };
 });
@@ -156,6 +164,7 @@ describe('App calendar client navigation', () => {
     window.history.replaceState({}, '', '/?ppTab=calendar');
     window.localStorage.clear();
     window.sessionStorage.clear();
+    permissionsState.paymentsCanView = true;
   });
 
   it('returns to calendar after opening a client from calendar', async () => {
@@ -219,5 +228,20 @@ describe('App calendar client navigation', () => {
       expect(screen.queryByTestId('task-journal')).toBeNull();
       expect(screen.getByTestId('reports-view')).toBeTruthy();
     });
+  });
+
+  it('does not restore a forbidden last tab after role permissions change', async () => {
+    window.history.replaceState({}, '', '/');
+    window.localStorage.setItem(LAST_TAB_STORAGE_KEY, 'payments');
+    permissionsState.paymentsCanView = false;
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('navigation').textContent).toBe('notifications');
+      expect(screen.getByTestId('notification-center')).toBeTruthy();
+    });
+
+    expect(window.localStorage.getItem(LAST_TAB_STORAGE_KEY)).toBe('notifications');
   });
 });

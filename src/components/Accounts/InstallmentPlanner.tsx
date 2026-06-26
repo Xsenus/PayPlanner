@@ -14,7 +14,7 @@ import type {
 import { formatLocalYMD, toDateInputValue } from '../../utils/dateUtils';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { cloneInstallmentPlan, createInstallmentPlanInput } from '../../utils/installmentPlan';
-import { CounterpartyPickerModal, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
+import { CounterpartyPickerModal, type CounterpartyKind, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
 
 type BasePlannerProps = {
   initialPlan?: InstallmentPlanInput | null;
@@ -36,6 +36,10 @@ type InvoicePlannerProps = BasePlannerProps & {
 type CalculatorPlannerProps = BasePlannerProps & {
   mode: 'calculator';
   clients: Client[];
+  canSelectCounterparty?: boolean;
+  allowedCounterpartyScopes?: CounterpartyKind[];
+  canSelectCase?: boolean;
+  canSavePayments?: boolean;
   onSavePayments: (args: {
     plan: InstallmentPlanInput;
     clientId?: number;
@@ -174,6 +178,10 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
   const { confirm } = useDialog();
   const toast = useToast();
   const isInvoiceMode = props.mode === 'invoice';
+  const canSelectCounterparty = props.mode === 'calculator' ? (props.canSelectCounterparty ?? true) : false;
+  const allowedCounterpartyScopes = props.mode === 'calculator' ? (props.allowedCounterpartyScopes ?? ['client', 'legalEntity']) : [];
+  const canSelectCase = props.mode === 'calculator' ? (props.canSelectCase ?? true) : false;
+  const canSavePayments = props.mode === 'calculator' ? (props.canSavePayments ?? true) : true;
   const [requestForm, setRequestForm] = useState<RequestFormState>(() => createFormState(props));
   const [planDraft, setPlanDraft] = useState<InstallmentPlanInput | null>(() => cloneInstallmentPlan(props.initialPlan) ?? null);
   const [calculationDirty, setCalculationDirty] = useState(false);
@@ -192,8 +200,11 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
   );
 
   const { cases, loading: casesLoading } = useClientCases(
-    props.mode === 'calculator' ? selectedClientId : undefined,
-    { legalEntityId: props.mode === 'calculator' ? selectedLegalEntityId : undefined },
+    props.mode === 'calculator' && canSelectCase ? selectedClientId : undefined,
+    {
+      enabled: props.mode === 'calculator' && canSelectCase,
+      legalEntityId: props.mode === 'calculator' && canSelectCase ? selectedLegalEntityId : undefined,
+    },
   );
 
   const clientOptions = useMemo(
@@ -213,6 +224,10 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
   );
   const selectedCaseLabel = useMemo(() => {
     if (props.mode === 'calculator') {
+      if (!canSelectCase) {
+        return null;
+      }
+
       if (!selectedCaseId) {
         return props.initialCaseName ?? null;
       }
@@ -223,7 +238,7 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
     }
 
     return props.initialCaseName ?? null;
-  }, [cases, props.initialCaseName, props.mode, selectedCaseId]);
+  }, [canSelectCase, cases, props.initialCaseName, props.mode, selectedCaseId]);
 
   const currentTotal = parseMoneyInput(requestForm.total);
   const currentDownPayment = parseMoneyInput(requestForm.downPayment);
@@ -239,6 +254,8 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
     || calculating
     || submitting
     || calculationDirty
+    || (!isInvoiceMode && !canSavePayments)
+    || (!isInvoiceMode && !canSelectCounterparty)
     || (!isInvoiceMode && !selectedClientId && !selectedLegalEntityId);
 
   const calculateButtonLabel = planDraft ? 'Пересчитать график' : 'Рассчитать график';
@@ -552,6 +569,11 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
       return;
     }
 
+    if (!isInvoiceMode && !canSavePayments) {
+      showInstallmentError('Сохранение платежей недоступно для вашей роли.');
+      return;
+    }
+
     if (!isInvoiceMode && !selectedClientId && !selectedLegalEntityId) {
       showInstallmentError('Выберите контрагента для сохранения графика.');
       return;
@@ -590,7 +612,7 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
         plan: cloneInstallmentPlan(planDraft)!,
         clientId: selectedClientId,
         legalEntityId: selectedLegalEntityId,
-        clientCaseId: selectedCaseId,
+        clientCaseId: canSelectCase ? selectedCaseId : undefined,
         invoiceNumber: props.initialInvoiceNumber ?? null,
         clientName: selectedClient?.name ?? selectedCounterpartyName ?? props.initialClientName ?? null,
       });
@@ -614,7 +636,9 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
           </h2>
           {!isInvoiceMode ? (
             <p className="mt-0.5 text-sm text-slate-500">
-              Рассчитайте график и создайте будущие платежи по рассрочке.
+              {canSavePayments
+                ? 'Рассчитайте график и создайте будущие платежи по рассрочке.'
+                : 'Рассчитайте график и проверьте будущие платежи по рассрочке.'}
             </p>
           ) : null}
         </div>
@@ -666,29 +690,32 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
                     <button
                       type="button"
                       onClick={() => setCounterpartyPickerOpen(true)}
-                      className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-300 text-slate-700 transition hover:bg-slate-50"
+                      disabled={!canSelectCounterparty}
+                      className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-300 text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
                       aria-label="Выбрать контрагента"
                     >
                       <UserRoundSearch className="h-4 w-4" />
                     </button>
                   </div>
                 </div>
-                <label className="flex flex-col text-sm">
-                  <span className={fieldLabelClass}>Дело</span>
-                  <select
-                    value={selectedCaseId ? String(selectedCaseId) : ''}
-                    onChange={handleCaseChange}
-                    disabled={(!selectedClientId && !selectedLegalEntityId) || casesLoading}
-                    className={`${fieldSelectClass} disabled:bg-slate-100 disabled:text-slate-400`}
-                  >
-                    <option value="">{casesLoading ? 'Загрузка дел...' : 'Без дела'}</option>
-                    {cases.map((clientCase) => (
-                      <option key={clientCase.id} value={clientCase.id}>
-                        {clientCase.title}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                {canSelectCase ? (
+                  <label className="flex flex-col text-sm">
+                    <span className={fieldLabelClass}>Дело</span>
+                    <select
+                      value={selectedCaseId ? String(selectedCaseId) : ''}
+                      onChange={handleCaseChange}
+                      disabled={(!selectedClientId && !selectedLegalEntityId) || casesLoading}
+                      className={`${fieldSelectClass} disabled:bg-slate-100 disabled:text-slate-400`}
+                    >
+                      <option value="">{casesLoading ? 'Загрузка дел...' : 'Без дела'}</option>
+                      {cases.map((clientCase) => (
+                        <option key={clientCase.id} value={clientCase.id}>
+                          {clientCase.title}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
               </>
             ) : null}
 
@@ -895,15 +922,17 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
       </div>
 
       <div className="flex flex-wrap items-center justify-end gap-3">
-        <button
-          type="button"
-          onClick={() => void handleSave()}
-          disabled={saveDisabled}
-          className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-          Сохранить
-        </button>
+        {isInvoiceMode || canSavePayments ? (
+          <button
+            type="button"
+            onClick={() => void handleSave()}
+            disabled={saveDisabled}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            Сохранить
+          </button>
+        ) : null}
 
         {isInvoiceMode ? (
           <button
@@ -916,11 +945,12 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
           </button>
         ) : null}
       </div>
-      {props.mode === 'calculator' ? (
+      {props.mode === 'calculator' && canSelectCounterparty ? (
         <CounterpartyPickerModal
           open={counterpartyPickerOpen}
           title="Выбор контрагента"
           initialScope={selectedLegalEntityId ? 'legalEntity' : 'client'}
+          allowedScopes={allowedCounterpartyScopes}
           onClose={() => setCounterpartyPickerOpen(false)}
           onSelect={handleCounterpartySelect}
         />

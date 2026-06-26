@@ -282,7 +282,7 @@ public class DataVisibilityServiceTests
     }
 
     [Fact]
-    public async Task ResolveDataVisibilityAsync_UsesClientPermissionFallbackForCases()
+    public async Task ResolveDataVisibilityAsync_DoesNotUseClientPermissionFallbackForCases()
     {
         await using var db = await CreateContextAsync();
         var role = new Role { Name = "lawyer", Description = "lawyer" };
@@ -332,13 +332,8 @@ public class DataVisibilityServiceTests
         var access = await db.ResolveDataVisibilityAsync(principal, RolePermissionCatalog.Cases);
         var permission = await db.GetUserSectionPermissionAsync(current.Id, RolePermissionCatalog.Cases);
 
-        Assert.NotNull(access);
-        Assert.Equal(DataVisibilityScope.Department, access!.ViewScope);
-        Assert.Contains(current.Id, access.VisibleUserIds);
-        Assert.Contains(teammate.Id, access.VisibleUserIds);
-        Assert.NotNull(permission);
-        Assert.Equal(RolePermissionCatalog.Clients, permission!.Section);
-        Assert.False(permission.CanEdit);
+        Assert.Null(access);
+        Assert.Null(permission);
     }
 
     [Fact]

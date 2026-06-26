@@ -14,7 +14,12 @@ export interface ContractStatusReportFilters {
   incomeTypeId?: number;
 }
 
-export function useContractStatusReport(filters: ContractStatusReportFilters) {
+export interface ContractStatusReportOptions {
+  enabled?: boolean;
+}
+
+export function useContractStatusReport(filters: ContractStatusReportFilters, options: ContractStatusReportOptions = {}) {
+  const enabled = options.enabled ?? true;
   const [report, setReport] = useState<ContractStatusReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +41,14 @@ export function useContractStatusReport(filters: ContractStatusReportFilters) {
   );
 
   const load = useCallback(async () => {
+    if (!enabled) {
+      requestIdRef.current += 1;
+      setReport(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
     setLoading(true);
@@ -60,7 +73,7 @@ export function useContractStatusReport(filters: ContractStatusReportFilters) {
         setLoading(false);
       }
     }
-  }, [stableFilters]);
+  }, [enabled, stableFilters]);
 
   useEffect(() => {
     void load();

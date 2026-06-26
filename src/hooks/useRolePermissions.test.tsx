@@ -25,18 +25,18 @@ describe('useRolePermissions', () => {
     resetApiServiceMock('getRolePermissions');
   });
 
-  it('returns defaults immediately and refreshes when role permissions load', async () => {
+  it('returns restricted permissions immediately and refreshes when role permissions load', async () => {
     const roleId = 9001;
-    apiServiceMock.getRolePermissions.mockResolvedValue(permissionsWithTaskScope(false, 'own'));
+    apiServiceMock.getRolePermissions.mockResolvedValue(permissionsWithTaskScope(true, 'all'));
 
     const { result } = renderHook(() => useRolePermissions(roleId));
 
-    expect(result.current.tasks.canView).toBe(true);
-    expect(result.current.tasks.viewScope).toBe('all');
+    expect(result.current.tasks.canView).toBe(false);
+    expect(result.current.tasks.viewScope).toBe('own');
 
     await waitFor(() => {
-      expect(result.current.tasks.canView).toBe(false);
-      expect(result.current.tasks.viewScope).toBe('own');
+      expect(result.current.tasks.canView).toBe(true);
+      expect(result.current.tasks.viewScope).toBe('all');
     });
 
     expect(apiServiceMock.getRolePermissions).toHaveBeenCalledWith(roleId);

@@ -72,18 +72,22 @@ export function PaymentCard({
 
       {payment.client && (
         <div className="text-[10px] sm:text-xs text-gray-500 mt-0.5 sm:mt-1 truncate">
-          <button
-            type="button"
-            onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-              e.stopPropagation();
-              onClientClick?.(
-                payment.clientId ?? -1,
-                payment.clientCaseId ? payment.clientCaseId : undefined,
-              );
-            }}
-            className="text-blue-600 hover:underline">
-            {payment.client.name}
-          </button>
+          {onClientClick ? (
+            <button
+              type="button"
+              onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                e.stopPropagation();
+                onClientClick(
+                  payment.clientId ?? -1,
+                  payment.clientCaseId ? payment.clientCaseId : undefined,
+                );
+              }}
+              className="text-blue-600 hover:underline">
+              {payment.client.name}
+            </button>
+          ) : (
+            <span>{payment.client.name}</span>
+          )}
         </div>
       )}
     </div>

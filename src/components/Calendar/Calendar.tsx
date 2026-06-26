@@ -117,6 +117,9 @@ export function Calendar({ onOpenClient }: CalendarProps) {
   const [tableSettingsOpen, setTableSettingsOpen] = useState(false);
   const permissions = useRolePermissions(user?.role?.id);
   const calendarPermissions = permissions.calendar;
+  const canViewTaskCalendar = permissions.tasks?.canView === true;
+  const canOpenLinkedClients = permissions.clients?.canView === true;
+  const canOpenLinkedCases = permissions.cases?.canView === true;
   const [permissionMessage, setPermissionMessage] = useState<string | null>(null);
 
   const [statsReloadKey, setStatsReloadKey] = useState(0);
@@ -175,6 +178,19 @@ export function Calendar({ onOpenClient }: CalendarProps) {
       setTableFilter(null);
     }
   }, [calendarPermissions.canViewAnalytics, tableFilter]);
+
+  useEffect(() => {
+    if (canViewTaskCalendar || sectionMode !== 'crm') {
+      return;
+    }
+
+    setSectionMode('finance');
+    try {
+      localStorage.setItem(SECTION_MODE_STORAGE_KEY, 'finance');
+    } catch {
+      /** */
+    }
+  }, [canViewTaskCalendar, sectionMode]);
 
   const year = currentDate.getFullYear();
   const m0 = currentDate.getMonth();
@@ -471,6 +487,11 @@ export function Calendar({ onOpenClient }: CalendarProps) {
   };
 
   const handleSectionModeChange = (mode: CalendarSectionMode) => {
+    if (mode === 'crm' && !canViewTaskCalendar) {
+      showPermissionNotice('Доступ к рабочему CRM-календарю задач запрещен для вашей роли.');
+      return;
+    }
+
     setSectionMode(mode);
     try {
       localStorage.setItem(SECTION_MODE_STORAGE_KEY, mode);
@@ -535,7 +556,9 @@ export function Calendar({ onOpenClient }: CalendarProps) {
           <div>
             <div className="text-sm font-semibold text-slate-900">Календарь</div>
             <div className="text-xs text-slate-500">
-              Финансы и рабочий CRM-календарь разделены, чтобы платежи не смешивались с задачами и сроками.
+              {canViewTaskCalendar
+                ? 'Финансы и рабочий CRM-календарь разделены, чтобы платежи не смешивались с задачами и сроками.'
+                : 'Финансовый календарь показывает платежи и сроки оплаты по доступным правам.'}
             </div>
           </div>
           <div className="inline-flex rounded-xl bg-slate-100 p-1">
@@ -552,23 +575,25 @@ export function Calendar({ onOpenClient }: CalendarProps) {
             >
               Финансы
             </button>
-            <button
-              type="button"
-              onClick={() => handleSectionModeChange('crm')}
-              aria-pressed={sectionMode === 'crm'}
-              className={[
-                'rounded-lg px-4 py-2 text-sm font-semibold transition',
-                sectionMode === 'crm'
-                  ? 'bg-white text-blue-700 shadow-sm'
-                  : 'text-slate-500 hover:text-slate-800',
-              ].join(' ')}
-            >
-              CRM
-            </button>
+            {canViewTaskCalendar ? (
+              <button
+                type="button"
+                onClick={() => handleSectionModeChange('crm')}
+                aria-pressed={sectionMode === 'crm'}
+                className={[
+                  'rounded-lg px-4 py-2 text-sm font-semibold transition',
+                  sectionMode === 'crm'
+                    ? 'bg-white text-blue-700 shadow-sm'
+                    : 'text-slate-500 hover:text-slate-800',
+                ].join(' ')}
+              >
+                CRM
+              </button>
+            ) : null}
           </div>
         </div>
 
-        {sectionMode === 'crm' ? (
+        {sectionMode === 'crm' && canViewTaskCalendar ? (
           <Suspense
             fallback={
               <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
@@ -830,7 +855,11 @@ export function Calendar({ onOpenClient }: CalendarProps) {
             payments={filteredPayments}
             onEditPayment={handleEditPayment}
             newPaymentIds={newIds}
-            onOpenClient={onOpenClient}
+            onOpenClient={
+              canOpenLinkedClients
+                ? (clientId, caseId) => onOpenClient?.(clientId, canOpenLinkedCases ? caseId : undefined)
+                : undefined
+            }
           />
         ) : (
           <>
@@ -843,6 +872,8 @@ export function Calendar({ onOpenClient }: CalendarProps) {
               canAdd={calendarPermissions.canCreate}
               canEdit={calendarPermissions.canEdit}
               canDelete={calendarPermissions.canDelete}
+              canOpenClients={canOpenLinkedClients}
+              canOpenCases={canOpenLinkedCases}
               canEditPayment={() => true}
               canDeletePayment={(payment) => payment.documentKind !== 'Invoice' && !isTransferredRemainderPayment(payment) && !isPartialRemainderSourcePayment(payment)}
               columns={visiblePaymentColumns}
@@ -878,6 +909,8 @@ export function Calendar({ onOpenClient }: CalendarProps) {
           onTransferRemainder={handleTransferRemainder}
           onRollbackRemainderTransfer={handleRollbackRemainderTransfer}
           onAdjustRemainderTransfer={handleAdjustRemainderTransfer}
+          canViewLinkedInvoices={permissions.accounts?.canView === true}
+          canCreateLinkedInvoices={permissions.accounts?.canView === true && permissions.accounts?.canCreate === true}
           onBalanceApplied={async () => {
             await refreshPayments();
             bumpStats();

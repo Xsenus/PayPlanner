@@ -1,13 +1,10 @@
-using System.Security.Claims;
-using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.Controllers;
-using Microsoft.AspNetCore.Mvc.Filters;
-using Microsoft.AspNetCore.Routing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Filters;
 using PayPlanner.Api.Models;
 using Xunit;
 
@@ -95,41 +92,25 @@ public class DictionariesAdminServiceTests
     }
 
     [Fact]
-    public async Task AdminFilter_ReturnsForbid_ForUserWithoutAdminRoleInDatabase()
+    public void Controller_UsesDictionaryRolePermissionInsteadOfAdminPolicy()
     {
-        await using var db = await CreateContextAsync();
-        var user = await CreateUserAsync(db, "dictionary-user");
-        var controller = new DictionariesAdminController(db);
-        var context = CreateActionExecutingContext(controller, user.Id);
-        var nextCalled = false;
+        var authorize = Assert.Single(typeof(DictionariesAdminController).GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true));
+        Assert.Null(((AuthorizeAttribute)authorize).Policy);
 
-        await controller.OnActionExecutionAsync(context, () =>
-        {
-            nextCalled = true;
-            return Task.FromResult(new ActionExecutedContext(context, [], controller));
-        });
-
-        Assert.False(nextCalled);
-        Assert.IsType<ForbidResult>(context.Result);
+        var section = Assert.Single(typeof(DictionariesAdminController).GetCustomAttributes(typeof(RequireSectionPermissionAttribute), inherit: true));
+        var permission = Assert.IsType<RequireSectionPermissionAttribute>(section);
+        Assert.Equal(RolePermissionCatalog.Dictionaries, permission.Section);
+        Assert.Equal(RequireSectionPermissionOperations.View, permission.Operation);
     }
 
     [Fact]
-    public async Task AdminFilter_AllowsUserWithAdminRoleInDatabase()
+    public void Controller_WriteActionsUseDictionaryOperationPermissions()
     {
-        await using var db = await CreateContextAsync();
-        var user = await CreateUserAsync(db, "admin");
-        var controller = new DictionariesAdminController(db);
-        var context = CreateActionExecutingContext(controller, user.Id);
-        var nextCalled = false;
-
-        await controller.OnActionExecutionAsync(context, () =>
-        {
-            nextCalled = true;
-            return Task.FromResult(new ActionExecutedContext(context, [], controller));
-        });
-
-        Assert.True(nextCalled);
-        Assert.Null(context.Result);
+        AssertMethodPermission(nameof(DictionariesAdminController.CreateDealType), RequireSectionPermissionOperations.Create);
+        AssertMethodPermission(nameof(DictionariesAdminController.UpdateDealType), RequireSectionPermissionOperations.Edit);
+        AssertMethodPermission(nameof(DictionariesAdminController.DeleteDealType), RequireSectionPermissionOperations.Delete);
+        AssertMethodPermission(nameof(DictionariesAdminController.ToggleDealType), RequireSectionPermissionOperations.Edit);
+        AssertMethodPermission(nameof(DictionariesAdminController.MergeSimpleDictionaryDuplicates), RequireSectionPermissionOperations.Edit);
     }
 
     private static PaymentContext CreateContext()
@@ -151,56 +132,14 @@ public class DictionariesAdminServiceTests
         return db;
     }
 
-    private static async Task<User> CreateUserAsync(PaymentContext db, string roleName)
+    private static void AssertMethodPermission(string methodName, string operation)
     {
-        var role = new Role
-        {
-            Name = roleName,
-            Description = roleName,
-            CreatedAt = DateTime.UtcNow,
-            PermissionsUpdatedAt = DateTime.UtcNow,
-        };
-        var user = new User
-        {
-            Email = $"{roleName}-{Guid.NewGuid():N}@example.test",
-            PasswordHash = "hash",
-            FullName = roleName,
-            IsActive = true,
-            IsApproved = true,
-            Role = role,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
-        };
+        var method = typeof(DictionariesAdminController).GetMethod(methodName);
+        Assert.NotNull(method);
 
-        db.Users.Add(user);
-        await db.SaveChangesAsync();
-        return user;
-    }
-
-    private static ActionExecutingContext CreateActionExecutingContext(
-        DictionariesAdminController controller,
-        int userId)
-    {
-        var httpContext = new DefaultHttpContext
-        {
-            User = new ClaimsPrincipal(new ClaimsIdentity(
-                [
-                    new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
-                    new Claim(ClaimTypes.Name, $"User {userId}"),
-                    new Claim(ClaimTypes.Role, "admin"),
-                ],
-                "TestAuth")),
-        };
-        var actionContext = new ActionContext(
-            httpContext,
-            new RouteData(),
-            new ControllerActionDescriptor());
-        controller.ControllerContext = new ControllerContext(actionContext);
-
-        return new ActionExecutingContext(
-            actionContext,
-            [],
-            new Dictionary<string, object?>(),
-            controller);
+        var attribute = Assert.Single(method.GetCustomAttributes(typeof(RequireSectionPermissionAttribute), inherit: true));
+        var permission = Assert.IsType<RequireSectionPermissionAttribute>(attribute);
+        Assert.Equal(RolePermissionCatalog.Dictionaries, permission.Section);
+        Assert.Equal(operation, permission.Operation);
     }
 }

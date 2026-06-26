@@ -1,17 +1,17 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
-using PayPlanner.Api.Extensions;
+using PayPlanner.Api.Filters;
 using PayPlanner.Api.Models;
 
 namespace PayPlanner.Api.Controllers;
 
 [ApiController]
 [Route("api/dictionaries")]
-[Authorize(Policy = "Admin")]
-public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
+[Authorize]
+[RequireSectionPermission(RolePermissionCatalog.Dictionaries)]
+public class DictionariesAdminController : ControllerBase
 {
     private const int ServiceNameMaxLength = 1000;
     private const int ServiceDescriptionMaxLength = 2000;
@@ -20,18 +20,6 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
 
     private readonly PaymentContext _db;
     public DictionariesAdminController(PaymentContext db) => _db = db;
-
-    [NonAction]
-    public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
-    {
-        if (!await _db.IsUserAdminOrLegacyFallbackAsync(context.HttpContext.User, context.HttpContext.RequestAborted))
-        {
-            context.Result = Forbid();
-            return;
-        }
-
-        await next();
-    }
 
     private IActionResult InUseError(string title)
         => BadRequest($"Нельзя удалить элемент справочника \"{title}\", так как он используется в данных.");
@@ -324,6 +312,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
     }
 
     // DealType
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Create)]
     [HttpPost("deal-types")]
     public async Task<IActionResult> CreateDealType([FromBody] DealType m)
     {
@@ -331,6 +320,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return Created($"/api/dictionaries/deal-types/{m.Id}", m);
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPut("deal-types/{id:int}")]
     public async Task<IActionResult> UpdateDealType(int id, [FromBody] DealType m)
     {
@@ -340,6 +330,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return Ok(e);
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Delete)]
     [HttpDelete("deal-types/{id:int}")]
     public async Task<IActionResult> DeleteDealType(int id)
     {
@@ -351,6 +342,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return NoContent();
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPost("deal-types/{id:int}/toggle")]
     public async Task<IActionResult> ToggleDealType(int id)
     {
@@ -362,6 +354,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
     }
 
     // IncomeType
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Create)]
     [HttpPost("income-types")]
     public async Task<IActionResult> CreateIncomeType([FromBody] IncomeType m)
     {
@@ -369,6 +362,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return Created($"/api/dictionaries/income-types/{m.Id}", m);
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPut("income-types/{id:int}")]
     public async Task<IActionResult> UpdateIncomeType(int id, [FromBody] IncomeType m)
     {
@@ -378,6 +372,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return Ok(e);
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Delete)]
     [HttpDelete("income-types/{id:int}")]
     public async Task<IActionResult> DeleteIncomeType(int id)
     {
@@ -389,6 +384,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return NoContent();
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPost("income-types/{id:int}/toggle")]
     public async Task<IActionResult> ToggleIncomeType(int id)
     {
@@ -400,6 +396,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
     }
 
     // PaymentSource
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Create)]
     [HttpPost("payment-sources")]
     public async Task<IActionResult> CreatePaymentSource([FromBody] PaymentSource m)
     {
@@ -407,6 +404,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return Created($"/api/dictionaries/payment-sources/{m.Id}", m);
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPut("payment-sources/{id:int}")]
     public async Task<IActionResult> UpdatePaymentSource(int id, [FromBody] PaymentSource m)
     {
@@ -416,6 +414,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return Ok(e);
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Delete)]
     [HttpDelete("payment-sources/{id:int}")]
     public async Task<IActionResult> DeletePaymentSource(int id)
     {
@@ -427,6 +426,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return NoContent();
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPost("payment-sources/{id:int}/toggle")]
     public async Task<IActionResult> TogglePaymentSource(int id)
     {
@@ -438,6 +438,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
     }
 
     // DepartmentDictionaryItem
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Create)]
     [HttpPost("departments")]
     public async Task<IActionResult> CreateDepartment([FromBody] DepartmentDictionaryItem m)
     {
@@ -467,6 +468,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         return Created($"/api/dictionaries/departments/{m.Id}", m);
     }
 
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPut("departments/{id:int}")]
     public async Task<IActionResult> UpdateDepartment(int id, [FromBody] DepartmentDictionaryItem m)
     {
@@ -496,6 +498,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         return Ok(e);
     }
 
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Delete)]
     [HttpDelete("departments/{id:int}")]
     public async Task<IActionResult> DeleteDepartment(int id)
     {
@@ -509,6 +512,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         return NoContent();
     }
 
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPost("departments/{id:int}/toggle")]
     public async Task<IActionResult> ToggleDepartment(int id)
     {
@@ -520,6 +524,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
     }
 
     // ServiceDictionaryItem
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Create)]
     [HttpPost("services")]
     public async Task<IActionResult> CreateService([FromBody] ServiceDictionaryItem m)
     {
@@ -530,6 +535,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return Created($"/api/dictionaries/services/{m.Id}", m);
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPut("services/{id:int}")]
     public async Task<IActionResult> UpdateService(int id, [FromBody] ServiceDictionaryItem m)
     {
@@ -548,6 +554,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return Ok(e);
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Delete)]
     [HttpDelete("services/{id:int}")]
     public async Task<IActionResult> DeleteService(int id)
     {
@@ -561,6 +568,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return NoContent();
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPost("services/{id:int}/toggle")]
     public async Task<IActionResult> ToggleService(int id)
     {
@@ -572,6 +580,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
     }
 
     // ServiceCategoryDictionaryItem
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Create)]
     [HttpPost("service-categories")]
     public async Task<IActionResult> CreateServiceCategory([FromBody] ServiceCategoryDictionaryItem m)
     {
@@ -579,6 +588,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return Created($"/api/dictionaries/service-categories/{m.Id}", m);
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPut("service-categories/{id:int}")]
     public async Task<IActionResult> UpdateServiceCategory(int id, [FromBody] ServiceCategoryDictionaryItem m)
     {
@@ -588,6 +598,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return Ok(e);
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Delete)]
     [HttpDelete("service-categories/{id:int}")]
     public async Task<IActionResult> DeleteServiceCategory(int id)
     {
@@ -599,6 +610,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return NoContent();
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPost("service-categories/{id:int}/toggle")]
     public async Task<IActionResult> ToggleServiceCategory(int id)
     {
@@ -611,6 +623,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
 
 
     // CountryDictionaryItem
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Create)]
     [HttpPost("countries")]
     public async Task<IActionResult> CreateCountry([FromBody] CountryDictionaryItem m)
     {
@@ -618,6 +631,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return Created($"/api/dictionaries/countries/{m.Id}", m);
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPut("countries/{id:int}")]
     public async Task<IActionResult> UpdateCountry(int id, [FromBody] CountryDictionaryItem m)
     {
@@ -627,6 +641,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return Ok(e);
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Delete)]
     [HttpDelete("countries/{id:int}")]
     public async Task<IActionResult> DeleteCountry(int id)
     {
@@ -638,6 +653,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return NoContent();
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPost("countries/{id:int}/toggle")]
     public async Task<IActionResult> ToggleCountry(int id)
     {
@@ -649,6 +665,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
     }
 
     // BaseCurrencyDictionaryItem
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Create)]
     [HttpPost("base-currencies")]
     public async Task<IActionResult> CreateBaseCurrency([FromBody] BaseCurrencyDictionaryItem m)
     {
@@ -656,6 +673,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return Created($"/api/dictionaries/base-currencies/{m.Id}", m);
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPut("base-currencies/{id:int}")]
     public async Task<IActionResult> UpdateBaseCurrency(int id, [FromBody] BaseCurrencyDictionaryItem m)
     {
@@ -665,6 +683,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return Ok(e);
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Delete)]
     [HttpDelete("base-currencies/{id:int}")]
     public async Task<IActionResult> DeleteBaseCurrency(int id)
     {
@@ -676,6 +695,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return NoContent();
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPost("base-currencies/{id:int}/toggle")]
     public async Task<IActionResult> ToggleBaseCurrency(int id)
     {
@@ -687,6 +707,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
     }
 
     // ServiceLanguageDictionaryItem
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Create)]
     [HttpPost("service-languages")]
     public async Task<IActionResult> CreateServiceLanguage([FromBody] ServiceLanguageDictionaryItem m)
     {
@@ -694,6 +715,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return Created($"/api/dictionaries/service-languages/{m.Id}", m);
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPut("service-languages/{id:int}")]
     public async Task<IActionResult> UpdateServiceLanguage(int id, [FromBody] ServiceLanguageDictionaryItem m)
     {
@@ -703,6 +725,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return Ok(e);
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Delete)]
     [HttpDelete("service-languages/{id:int}")]
     public async Task<IActionResult> DeleteServiceLanguage(int id)
     {
@@ -714,6 +737,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return NoContent();
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPost("service-languages/{id:int}/toggle")]
     public async Task<IActionResult> ToggleServiceLanguage(int id)
     {
@@ -725,6 +749,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
     }
 
     // OrganizationFormDictionaryItem
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Create)]
     [HttpPost("organization-forms")]
     public async Task<IActionResult> CreateOrganizationForm([FromBody] OrganizationFormDictionaryItem m)
     {
@@ -732,6 +757,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return Created($"/api/dictionaries/organization-forms/{m.Id}", m);
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPut("organization-forms/{id:int}")]
     public async Task<IActionResult> UpdateOrganizationForm(int id, [FromBody] OrganizationFormDictionaryItem m)
     {
@@ -741,6 +767,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return Ok(e);
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Delete)]
     [HttpDelete("organization-forms/{id:int}")]
     public async Task<IActionResult> DeleteOrganizationForm(int id)
     {
@@ -752,6 +779,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return NoContent();
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPost("organization-forms/{id:int}/toggle")]
     public async Task<IActionResult> ToggleOrganizationForm(int id)
     {
@@ -763,6 +791,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
     }
 
     // TimezoneDictionaryItem
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Create)]
     [HttpPost("timezones")]
     public async Task<IActionResult> CreateTimezone([FromBody] TimezoneDictionaryItem m)
     {
@@ -770,6 +799,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return Created($"/api/dictionaries/timezones/{m.Id}", m);
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPut("timezones/{id:int}")]
     public async Task<IActionResult> UpdateTimezone(int id, [FromBody] TimezoneDictionaryItem m)
     {
@@ -779,6 +809,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return Ok(e);
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Delete)]
     [HttpDelete("timezones/{id:int}")]
     public async Task<IActionResult> DeleteTimezone(int id)
     {
@@ -790,6 +821,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return NoContent();
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPost("timezones/{id:int}/toggle")]
     public async Task<IActionResult> ToggleTimezone(int id)
     {
@@ -802,6 +834,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
 
 
     // TaxSystemDictionaryItem
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Create)]
     [HttpPost("tax-systems")]
     public async Task<IActionResult> CreateTaxSystem([FromBody] TaxSystemDictionaryItem m)
     {
@@ -809,6 +842,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return Created($"/api/dictionaries/tax-systems/{m.Id}", m);
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPut("tax-systems/{id:int}")]
     public async Task<IActionResult> UpdateTaxSystem(int id, [FromBody] TaxSystemDictionaryItem m)
     {
@@ -818,6 +852,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return Ok(e);
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Delete)]
     [HttpDelete("tax-systems/{id:int}")]
     public async Task<IActionResult> DeleteTaxSystem(int id)
     {
@@ -829,6 +864,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return NoContent();
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPost("tax-systems/{id:int}/toggle")]
     public async Task<IActionResult> ToggleTaxSystem(int id)
     {
@@ -840,6 +876,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
     }
 
     // TaxSystemModeDictionaryItem
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Create)]
     [HttpPost("tax-system-modes")]
     public async Task<IActionResult> CreateTaxSystemMode([FromBody] TaxSystemModeDictionaryItem m)
     {
@@ -847,6 +884,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return Created($"/api/dictionaries/tax-system-modes/{m.Id}", m);
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPut("tax-system-modes/{id:int}")]
     public async Task<IActionResult> UpdateTaxSystemMode(int id, [FromBody] TaxSystemModeDictionaryItem m)
     {
@@ -856,6 +894,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return Ok(e);
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Delete)]
     [HttpDelete("tax-system-modes/{id:int}")]
     public async Task<IActionResult> DeleteTaxSystemMode(int id)
     {
@@ -867,6 +906,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return NoContent();
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPost("tax-system-modes/{id:int}/toggle")]
     public async Task<IActionResult> ToggleTaxSystemMode(int id)
     {
@@ -877,6 +917,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         return Ok(new { e.Id, e.IsActive });
     }
 
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Create)]
     [HttpPost("invoice-units")]
     public async Task<IActionResult> CreateInvoiceUnit([FromBody] InvoiceUnitDictionaryItem m)
     {
@@ -884,6 +925,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return Created($"/api/dictionaries/invoice-units/{m.Id}", m);
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPut("invoice-units/{id:int}")]
     public async Task<IActionResult> UpdateInvoiceUnit(int id, [FromBody] InvoiceUnitDictionaryItem m)
     {
@@ -893,6 +935,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return Ok(e);
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Delete)]
     [HttpDelete("invoice-units/{id:int}")]
     public async Task<IActionResult> DeleteInvoiceUnit(int id)
     {
@@ -902,6 +945,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return NoContent();
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPost("invoice-units/{id:int}/toggle")]
     public async Task<IActionResult> ToggleInvoiceUnit(int id)
     {
@@ -912,6 +956,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         return Ok(new { e.Id, e.IsActive });
     }
 
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Create)]
     [HttpPost("invoice-item-names")]
     public async Task<IActionResult> CreateInvoiceItemName([FromBody] InvoiceItemNameDictionaryItem m)
     {
@@ -921,6 +966,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return Created($"/api/dictionaries/invoice-item-names/{m.Id}", m);
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPut("invoice-item-names/{id:int}")]
     public async Task<IActionResult> UpdateInvoiceItemName(int id, [FromBody] InvoiceItemNameDictionaryItem m)
     {
@@ -935,6 +981,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return Ok(e);
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Delete)]
     [HttpDelete("invoice-item-names/{id:int}")]
     public async Task<IActionResult> DeleteInvoiceItemName(int id)
     {
@@ -944,6 +991,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return NoContent();
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPost("invoice-item-names/{id:int}/toggle")]
     public async Task<IActionResult> ToggleInvoiceItemName(int id)
     {
@@ -955,6 +1003,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
     }
 
     // ClientStatusEntity
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Create)]
     [HttpPost("client-statuses")]
     public async Task<IActionResult> CreateClientStatus([FromBody] ClientStatusEntity m)
     {
@@ -963,6 +1012,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         return Created($"/api/dictionaries/client-statuses/{m.Id}", m);
     }
 
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPut("client-statuses/{id:int}")]
     public async Task<IActionResult> UpdateClientStatus(int id, [FromBody] ClientStatusEntity m)
     {
@@ -973,6 +1023,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         return Ok(e);
     }
 
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Delete)]
     [HttpDelete("client-statuses/{id:int}")]
     public async Task<IActionResult> DeleteClientStatus(int id)
     {
@@ -985,6 +1036,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         return NoContent();
     }
 
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPost("client-statuses/{id:int}/toggle")]
     public async Task<IActionResult> ToggleClientStatus(int id)
     {
@@ -996,6 +1048,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
     }
 
     // PaymentStatusEntity
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Create)]
     [HttpPost("payment-statuses")]
     public async Task<IActionResult> CreatePaymentStatus([FromBody] PaymentStatusEntity m)
     {
@@ -1003,6 +1056,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return Created($"/api/dictionaries/payment-statuses/{m.Id}", m);
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPut("payment-statuses/{id:int}")]
     public async Task<IActionResult> UpdatePaymentStatus(int id, [FromBody] PaymentStatusEntity m)
     {
@@ -1012,6 +1066,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return Ok(e);
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Delete)]
     [HttpDelete("payment-statuses/{id:int}")]
     public async Task<IActionResult> DeletePaymentStatus(int id)
     {
@@ -1023,6 +1078,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         await _db.SaveChangesAsync();
         return NoContent();
     }
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPost("payment-statuses/{id:int}/toggle")]
     public async Task<IActionResult> TogglePaymentStatus(int id)
     {
@@ -1034,6 +1090,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
     }
 
     // DocumentStatusEntity
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Create)]
     [HttpPost("document-statuses")]
     public async Task<IActionResult> CreateDocumentStatus([FromBody] DocumentStatusEntity m)
     {
@@ -1055,6 +1112,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         return Created($"/api/dictionaries/document-statuses/{m.Id}", m);
     }
 
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPut("document-statuses/{id:int}")]
     public async Task<IActionResult> UpdateDocumentStatus(int id, [FromBody] DocumentStatusEntity m)
     {
@@ -1084,6 +1142,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         return Ok(e);
     }
 
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Delete)]
     [HttpDelete("document-statuses/{id:int}")]
     public async Task<IActionResult> DeleteDocumentStatus(int id)
     {
@@ -1099,6 +1158,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         return NoContent();
     }
 
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPost("document-statuses/{id:int}/toggle")]
     public async Task<IActionResult> ToggleDocumentStatus(int id)
     {
@@ -1117,6 +1177,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         return Ok(new { e.Id, e.IsActive });
     }
 
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpGet("simple/{kind}/duplicates")]
     public async Task<ActionResult<IReadOnlyList<SimpleDictionaryDuplicateGroupDto>>> GetSimpleDictionaryDuplicates(string kind)
     {
@@ -1147,6 +1208,7 @@ public class DictionariesAdminController : ControllerBase, IAsyncActionFilter
         return Ok(result);
     }
 
+    [RequireSectionPermission(RolePermissionCatalog.Dictionaries, RequireSectionPermissionOperations.Edit)]
     [HttpPost("simple/{kind}/merge")]
     public async Task<ActionResult<SimpleDictionaryMergeResultDto>> MergeSimpleDictionaryDuplicates(string kind,
         [FromBody] MergeSimpleDictionaryDuplicatesRequest request,

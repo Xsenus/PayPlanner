@@ -87,4 +87,22 @@ describe('CounterpartyPickerModal', () => {
     expect(apiService.getLegalEntitiesPaged).not.toHaveBeenCalled();
     expect(apiService.getLegalEntities).toHaveBeenCalledTimes(1);
   });
+
+  it('does not load clients or legal entities when all scopes are forbidden', async () => {
+    render(
+      <CounterpartyPickerModal
+        open
+        title="Pick no one"
+        allowedScopes={[]}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText('Выбор контрагентов недоступен для вашей роли.')).toBeTruthy();
+    expect(screen.getByText('Нет доступных типов контрагентов')).toBeTruthy();
+    expect(apiService.getClients).not.toHaveBeenCalled();
+    expect(apiService.getLegalEntities).not.toHaveBeenCalled();
+    expect(apiService.getClientsV2).not.toHaveBeenCalled();
+    expect(apiService.getLegalEntitiesPaged).not.toHaveBeenCalled();
+  });
 });

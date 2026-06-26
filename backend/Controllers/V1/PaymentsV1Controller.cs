@@ -19,6 +19,9 @@ public class PaymentsV1Controller : ControllerBase
     private Task<DataVisibilityAccess?> ResolvePaymentsVisibilityAsync(CancellationToken ct)
         => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
 
+    private ActionResult MissingPaymentsVisibilityResult()
+        => User.GetUserId().HasValue ? Forbid() : Unauthorized();
+
     private async Task<IActionResult?> RequirePaymentsPermissionAsync(
         Func<RolePermissionValues, bool> isAllowed,
         CancellationToken ct)
@@ -40,7 +43,7 @@ public class PaymentsV1Controller : ControllerBase
         CancellationToken ct = default)
     {
         var visibility = await ResolvePaymentsVisibilityAsync(ct);
-        if (visibility is null) return Unauthorized();
+        if (visibility is null) return MissingPaymentsVisibilityResult();
 
         var q = _db.Payments.AsQueryable().WithPaymentIncludes()
             .ApplyPaymentVisibility(visibility)
@@ -55,7 +58,7 @@ public class PaymentsV1Controller : ControllerBase
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
     {
         var visibility = await ResolvePaymentsVisibilityAsync(ct);
-        if (visibility is null) return Unauthorized();
+        if (visibility is null) return MissingPaymentsVisibilityResult();
 
         var entity = await _db.Payments
             .WithPaymentIncludes()
@@ -102,7 +105,7 @@ public class PaymentsV1Controller : ControllerBase
         }
 
         var visibility = await ResolvePaymentsVisibilityAsync(ct);
-        if (visibility is null) return Unauthorized();
+        if (visibility is null) return MissingPaymentsVisibilityResult();
         var canAccessPayment = await _db.Payments
             .AsNoTracking()
             .ApplyPaymentVisibility(visibility)
@@ -166,7 +169,7 @@ public class PaymentsV1Controller : ControllerBase
         }
 
         var visibility = await ResolvePaymentsVisibilityAsync(ct);
-        if (visibility is null) return Unauthorized();
+        if (visibility is null) return MissingPaymentsVisibilityResult();
         var canAccessPayment = await _db.Payments
             .AsNoTracking()
             .ApplyPaymentVisibility(visibility)

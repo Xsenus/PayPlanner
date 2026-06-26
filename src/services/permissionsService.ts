@@ -1,6 +1,6 @@
 import { apiService } from './api';
 import {
-  defaultRolePermissions,
+  defaultRestrictedRolePermissions,
   type DataVisibilityScope,
   type MenuSectionPermissions,
   type RolePermissions,
@@ -32,31 +32,32 @@ function normalizeSectionPermissions<T extends MenuSectionPermissions>(
 
 function normalizePermissions(perms?: Partial<RolePermissions> | null): RolePermissions {
   const source = perms ?? {};
-  const calendar = normalizeSectionPermissions(defaultRolePermissions.calendar, source.calendar);
+  const defaults = defaultRestrictedRolePermissions;
+  const calendar = normalizeSectionPermissions(defaults.calendar, source.calendar);
   calendar.visibleUserIds = Array.isArray(source.calendar?.visibleUserIds)
     ? source.calendar.visibleUserIds.filter((id): id is number => Number.isInteger(id) && id > 0)
     : [];
 
   return {
     calendar,
-    tasks: normalizeSectionPermissions(defaultRolePermissions.tasks, source.tasks),
-    notes: normalizeSectionPermissions(defaultRolePermissions.notes, source.notes),
-    reports: normalizeSectionPermissions(defaultRolePermissions.reports, source.reports),
-    calculator: normalizeSectionPermissions(defaultRolePermissions.calculator, source.calculator),
-    legalEntities: normalizeSectionPermissions(defaultRolePermissions.legalEntities, source.legalEntities),
-    clients: normalizeSectionPermissions(defaultRolePermissions.clients, source.clients),
-    cases: normalizeSectionPermissions(defaultRolePermissions.cases, source.cases),
-    accounts: normalizeSectionPermissions(defaultRolePermissions.accounts, source.accounts),
-    acts: normalizeSectionPermissions(defaultRolePermissions.acts, source.acts),
-    payments: normalizeSectionPermissions(defaultRolePermissions.payments, source.payments),
-    contracts: normalizeSectionPermissions(defaultRolePermissions.contracts, source.contracts),
-    dictionaries: normalizeSectionPermissions(defaultRolePermissions.dictionaries, source.dictionaries),
-    notifications: normalizeSectionPermissions(defaultRolePermissions.notifications, source.notifications),
-    roles: normalizeSectionPermissions(defaultRolePermissions.roles, source.roles),
-    audit: normalizeSectionPermissions(defaultRolePermissions.audit, source.audit),
-    integrations: normalizeSectionPermissions(defaultRolePermissions.integrations, source.integrations),
-    yandexDisk: normalizeSectionPermissions(defaultRolePermissions.yandexDisk, source.yandexDisk),
-    s3Storage: normalizeSectionPermissions(defaultRolePermissions.s3Storage, source.s3Storage),
+    tasks: normalizeSectionPermissions(defaults.tasks, source.tasks),
+    notes: normalizeSectionPermissions(defaults.notes, source.notes),
+    reports: normalizeSectionPermissions(defaults.reports, source.reports),
+    calculator: normalizeSectionPermissions(defaults.calculator, source.calculator),
+    legalEntities: normalizeSectionPermissions(defaults.legalEntities, source.legalEntities),
+    clients: normalizeSectionPermissions(defaults.clients, source.clients),
+    cases: normalizeSectionPermissions(defaults.cases, source.cases),
+    accounts: normalizeSectionPermissions(defaults.accounts, source.accounts),
+    acts: normalizeSectionPermissions(defaults.acts, source.acts),
+    payments: normalizeSectionPermissions(defaults.payments, source.payments),
+    contracts: normalizeSectionPermissions(defaults.contracts, source.contracts),
+    dictionaries: normalizeSectionPermissions(defaults.dictionaries, source.dictionaries),
+    notifications: normalizeSectionPermissions(defaults.notifications, source.notifications),
+    roles: normalizeSectionPermissions(defaults.roles, source.roles),
+    audit: normalizeSectionPermissions(defaults.audit, source.audit),
+    integrations: normalizeSectionPermissions(defaults.integrations, source.integrations),
+    yandexDisk: normalizeSectionPermissions(defaults.yandexDisk, source.yandexDisk),
+    s3Storage: normalizeSectionPermissions(defaults.s3Storage, source.s3Storage),
   };
 }
 
@@ -106,7 +107,7 @@ async function fetchRolePermissions(roleId: number): Promise<RolePermissions> {
     .then((response) => normalizePermissions(response))
     .catch((error) => {
       console.warn('Не удалось загрузить права роли', error);
-      return clonePermissions(defaultRolePermissions);
+      return clonePermissions(defaultRestrictedRolePermissions);
     })
     .then((normalized) => {
       cache.set(roleId, normalized);
@@ -123,7 +124,7 @@ async function fetchRolePermissions(roleId: number): Promise<RolePermissions> {
 
 export function getRolePermissions(roleId?: number | null): RolePermissions {
   if (!roleId) {
-    return clonePermissions(defaultRolePermissions);
+    return clonePermissions(defaultRestrictedRolePermissions);
   }
 
   const cached = cache.get(roleId);
@@ -132,7 +133,7 @@ export function getRolePermissions(roleId?: number | null): RolePermissions {
   }
 
   void fetchRolePermissions(roleId);
-  return clonePermissions(defaultRolePermissions);
+  return clonePermissions(defaultRestrictedRolePermissions);
 }
 
 export async function refreshRolePermissions(roleId: number) {

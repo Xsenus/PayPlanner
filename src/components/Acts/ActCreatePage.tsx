@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
+import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { apiService } from '../../services/api';
 import type { Act, ActInput, ActResponsible, Client, Invoice, PaymentKind } from '../../types';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
@@ -24,6 +26,10 @@ export function ActCreatePage({
   defaultResponsibleId,
   onOpenInvoice,
 }: ActCreatePageProps) {
+  const { user } = useAuth();
+  const permissions = useRolePermissions(user?.role?.id);
+  const canViewLinkedAccounts = permissions.accounts.canView;
+  const canViewLinkedClients = permissions.clients.canView;
   const [clients, setClients] = useState<Client[]>([]);
   const [responsibles, setResponsibles] = useState<ActResponsible[]>([]);
   const [lookupsLoading, setLookupsLoading] = useState(true);
@@ -39,7 +45,7 @@ export function ActCreatePage({
       setLookupsError(null);
       try {
         const [clientsResponse, responsiblesResponse] = await Promise.all([
-          apiService.getClients(),
+          canViewLinkedClients ? apiService.getClients() : Promise.resolve([]),
           apiService.getActResponsibles(),
         ]);
 
@@ -67,7 +73,7 @@ export function ActCreatePage({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [canViewLinkedClients]);
 
   const handleSubmit = useCallback(async (payload: ActInput) => {
     setSubmitting(true);
@@ -107,7 +113,8 @@ export function ActCreatePage({
       initialValues={initialValues}
       invoiceSeed={invoiceSeed}
       presentation="page"
-      onOpenInvoice={onOpenInvoice}
+      onOpenInvoice={canViewLinkedAccounts ? onOpenInvoice : undefined}
+      canViewInvoices={canViewLinkedAccounts}
     />
   );
 }

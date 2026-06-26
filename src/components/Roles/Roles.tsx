@@ -86,6 +86,7 @@ export const Roles = () => {
   const canCreateRoles = isAdmin() || currentRolePermissions.roles.canCreate;
   const canEditRoles = isAdmin() || currentRolePermissions.roles.canEdit;
   const canDeleteRoles = isAdmin() || currentRolePermissions.roles.canDelete;
+  const canViewAudit = isAdmin() || currentRolePermissions.audit.canView;
 
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
@@ -359,7 +360,7 @@ export const Roles = () => {
           </div>
         </div>
 
-        <RolePermissionAuditPanel />
+        {canViewAudit ? <RolePermissionAuditPanel /> : null}
 
         {settingsOpen ? (
           <div className="mb-6">
@@ -634,7 +635,7 @@ export const Roles = () => {
               ) : null}
             </div>
 
-            {selectedRole ? (
+            {selectedRole && canViewAudit ? (
               <ObjectAuditLauncher
                 objectType="role"
                 objectId={selectedRole.id}

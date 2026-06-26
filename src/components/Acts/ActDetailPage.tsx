@@ -167,6 +167,8 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
   const permissions = useRolePermissions(user?.role?.id);
   const canEdit = permissions.acts.canEdit;
   const canDelete = permissions.acts.canDelete;
+  const canViewLinkedAccounts = permissions.accounts.canView;
+  const canViewLinkedClients = permissions.clients.canView;
   const requiresFinancialActionReason = Boolean(user?.requiresFinancialActionReason);
   const documentStatusSettings = useDocumentStatusSettings();
 
@@ -197,7 +199,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
     try {
       const [targetResponse, clientsData, responsiblesData] = await Promise.all([
         apiService.getAct(actId),
-        apiService.getClients(),
+        canViewLinkedClients ? apiService.getClients() : Promise.resolve([]),
         apiService.getActResponsibles(),
       ]);
 
@@ -217,7 +219,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
     } finally {
       setLoading(false);
     }
-  }, [actId]);
+  }, [actId, canViewLinkedClients]);
 
   useEffect(() => {
     void loadActBundle();
@@ -761,7 +763,8 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
           responsibles={responsibles}
           lookupsLoading={loading}
           presentation="page"
-          onOpenInvoice={onOpenInvoice}
+          onOpenInvoice={canViewLinkedAccounts ? onOpenInvoice : undefined}
+          canViewInvoices={canViewLinkedAccounts}
         />
       </div>
     );
@@ -904,7 +907,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
                 <div className="space-y-3">
                   <div>
                     <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Счет</div>
-                    {act.invoiceId && act.invoiceNumber && onOpenInvoice ? (
+                    {act.invoiceId && act.invoiceNumber && canViewLinkedAccounts && onOpenInvoice ? (
                       <button
                         type="button"
                         onClick={() => onOpenInvoice(act.invoiceId as number, act.type ?? undefined)}
@@ -915,6 +918,10 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
                         </div>
                         <div className="mt-1 text-xs text-slate-500">Открыть связанный счет</div>
                       </button>
+                    ) : act.invoiceNumber ? (
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700">
+                        Счет №{act.invoiceNumber}
+                      </div>
                     ) : (
                       <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-slate-500">
                         Связанный счет не указан.
@@ -966,7 +973,7 @@ export function ActDetailPage({ actId, onBack, onOpenClient, onOpenInvoice }: Ac
                 </div>
                 <p>
                   <span className="text-slate-500">{counterpartyLabel}:</span>{' '}
-                  {selectedClient && onOpenClient ? (
+                  {selectedClient && canViewLinkedClients && onOpenClient ? (
                     <button
                       type="button"
                       onClick={() => onOpenClient(selectedClient.id)}

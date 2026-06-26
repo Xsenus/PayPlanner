@@ -370,6 +370,10 @@ export function Payments({
   const toast = useToast();
   const permissions = useRolePermissions(user?.role?.id);
   const paymentsPermissions = permissions.payments;
+  const canOpenLinkedClients = permissions.clients?.canView === true;
+  const canOpenLinkedCases = permissions.cases?.canView === true;
+  const canViewLinkedInvoices = permissions.accounts?.canView === true;
+  const canCreateLinkedInvoices = canViewLinkedInvoices && permissions.accounts?.canCreate === true;
   const { t, formatDate } = useTranslation();
   const { clients } = useClients();
   const { dealTypes, incomeTypes, paymentSources } = useDictionaries();
@@ -2539,6 +2543,8 @@ export function Payments({
                 canAdd={paymentsPermissions.canCreate}
                 canEdit={paymentsPermissions.canEdit}
                 canDelete={paymentsPermissions.canDelete}
+                canOpenClients={canOpenLinkedClients}
+                canOpenCases={canOpenLinkedCases}
                 canEditPayment={() => true}
                 canDeletePayment={(payment) => payment.documentKind !== 'Invoice' && !isTransferredRemainderPayment(payment) && !isPartialRemainderSourcePayment(payment)}
                 columns={visiblePaymentColumns}
@@ -2969,6 +2975,8 @@ export function Payments({
         onTransferRemainder={handleTransferRemainder}
         onRollbackRemainderTransfer={handleRollbackRemainderTransfer}
         onAdjustRemainderTransfer={handleAdjustRemainderTransfer}
+        canViewLinkedInvoices={canViewLinkedInvoices}
+        canCreateLinkedInvoices={canCreateLinkedInvoices}
         onBalanceApplied={async () => {
           await refresh();
         }}

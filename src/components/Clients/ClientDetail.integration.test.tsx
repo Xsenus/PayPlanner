@@ -102,11 +102,14 @@ const {
 function createPermissions() {
   return {
     clients: { canView: true, canCreate: false, canEdit: true, canDelete: false },
+    legalEntities: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+    cases: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     accounts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     acts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     contracts: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     payments: { canView: true, canCreate: false, canEdit: false, canDelete: false },
     tasks: { canView: true, canCreate: false, canEdit: false, canDelete: false, canExport: false },
+    audit: { canView: false, canCreate: false, canEdit: false, canDelete: false, canExport: false },
   };
 }
 
@@ -552,11 +555,13 @@ vi.mock('./ClientStatusBadge', () => ({
 describe('ClientDetail integration', () => {
   beforeEach(() => {
     Object.assign(permissionsResult.clients, createPermissions().clients);
+    Object.assign(permissionsResult.cases, createPermissions().cases);
     Object.assign(permissionsResult.accounts, createPermissions().accounts);
     Object.assign(permissionsResult.acts, createPermissions().acts);
     Object.assign(permissionsResult.contracts, createPermissions().contracts);
     Object.assign(permissionsResult.payments, createPermissions().payments);
     Object.assign(permissionsResult.tasks, createPermissions().tasks);
+    Object.assign(permissionsResult.audit, createPermissions().audit);
     confirmMock.mockReset();
     confirmMock.mockResolvedValue(true);
     toastInfoMock.mockReset();
@@ -697,6 +702,7 @@ describe('ClientDetail integration', () => {
 
   it('shows compact labels under client quick action buttons', async () => {
     Object.assign(permissionsResult.clients, { canCreate: true });
+    Object.assign(permissionsResult.cases, { canCreate: true });
     Object.assign(permissionsResult.accounts, { canCreate: true });
     Object.assign(permissionsResult.acts, { canCreate: true });
     Object.assign(permissionsResult.contracts, { canCreate: true });
@@ -732,8 +738,44 @@ describe('ClientDetail integration', () => {
     expect(apiService.getPaymentsV2).not.toHaveBeenCalled();
   });
 
+  it('hides client case actions and keeps the case section disabled without case rights', async () => {
+    Object.assign(permissionsResult.clients, { canView: true, canCreate: true });
+    Object.assign(permissionsResult.cases, {
+      canView: false,
+      canCreate: true,
+      canEdit: true,
+      canDelete: true,
+    });
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="cases" />);
+
+    await screen.findByRole('heading', { name: 'Иванов Иван Иванович' });
+
+    expect(screen.queryByRole('button', { name: 'Добавить дело' })).toBeNull();
+    await waitFor(() => {
+      expect(useClientCasesMock).toHaveBeenCalledWith(1, expect.objectContaining({ enabled: false }));
+    });
+    expect(apiService.getClientCaseFinanceSummaries).not.toHaveBeenCalled();
+  });
+
+  it('hides client finance create shortcuts when create is allowed but view is closed', async () => {
+    Object.assign(permissionsResult.clients, { canCreate: true });
+    Object.assign(permissionsResult.accounts, { canView: false, canCreate: true });
+    Object.assign(permissionsResult.acts, { canView: false, canCreate: true });
+    Object.assign(permissionsResult.contracts, { canView: false, canCreate: true });
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="profile" />);
+
+    await screen.findByRole('button', { name: /Карточка клиента/ });
+
+    expect(screen.queryByRole('button', { name: /Добавить сч/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Добавить акт/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Добавить договор/ })).toBeNull();
+  });
+
   it('opens balance journal and audit from compact header actions', async () => {
     const user = userEvent.setup();
+    permissionsResult.audit.canView = true;
     vi.mocked(apiService.getClientBalance).mockResolvedValue({ clientId: 1, balance: 750 });
     vi.mocked(apiService.getClientCaseFinanceSummaries).mockResolvedValue([
       {

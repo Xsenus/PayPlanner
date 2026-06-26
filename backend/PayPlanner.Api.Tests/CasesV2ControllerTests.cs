@@ -967,6 +967,7 @@ public class CasesV2ControllerTests
     {
         await using var db = await CreateContextAsync();
         var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Payments, viewScope: DataVisibilityScope.All);
         var client = new Client
         {
             Name = "Земцов Виктор Александрович",
@@ -1092,6 +1093,7 @@ public class CasesV2ControllerTests
     {
         await using var db = await CreateContextAsync();
         var owner = await CreateUserAsync(db, "owner@example.com", "Owner");
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Payments, viewScope: DataVisibilityScope.All);
         var client = new Client
         {
             Name = "Client One",
@@ -1196,6 +1198,7 @@ public class CasesV2ControllerTests
     {
         await using var db = await CreateContextAsync();
         var owner = await CreateUserAsync(db, "owner@example.com", "Owner", DataVisibilityScope.All);
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Payments, viewScope: DataVisibilityScope.All);
         var client = new Client
         {
             Name = "Земцов Виктор Александрович",
@@ -1487,6 +1490,7 @@ public class CasesV2ControllerTests
     {
         await using var db = await CreateContextAsync();
         var owner = await CreateUserAsync(db, "finance-timezone@example.com", "Finance Owner", DataVisibilityScope.All);
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Payments, viewScope: DataVisibilityScope.All);
         var nowUtc = DateTime.UtcNow;
         var utcToday = nowUtc.Date;
         var selectedZone = TimeZoneInfo.GetSystemTimeZones()
@@ -1555,6 +1559,7 @@ public class CasesV2ControllerTests
     {
         await using var db = await CreateContextAsync();
         var owner = await CreateUserAsync(db, "finance-expense-timezone@example.com", "Finance Expense Owner", DataVisibilityScope.All);
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Payments, viewScope: DataVisibilityScope.All);
         var (timeZoneId, profileToday) = ResolveTimeZoneWithDifferentLocalDate();
 
         db.UserSettings.Add(new UserSetting
@@ -1682,6 +1687,7 @@ public class CasesV2ControllerTests
     {
         await using var db = await CreateContextAsync();
         var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Payments, viewScope: DataVisibilityScope.All);
         var client = new Client
         {
             Name = "Земцов Виктор Александрович",
@@ -7376,6 +7382,8 @@ public class CasesV2ControllerTests
     {
         await using var db = await CreateContextAsync();
         var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Accounts);
+        await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Acts);
         var client = new Client
         {
             Name = "Клиент согласования заказ-наряда",

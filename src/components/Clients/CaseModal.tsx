@@ -19,6 +19,8 @@ interface CaseModalProps {
   overlayClassName?: string;
   allowEdit?: boolean;
   canViewFinance?: boolean;
+  canUseContactRelatedParties?: boolean;
+  canUseLegalEntityRelatedParties?: boolean;
 }
 
 type StatusValue = 'Open' | 'OnHold' | 'Closed' | 'Lost';
@@ -242,7 +244,19 @@ function getContactOptionKey(item: ContactDirectoryItemDto) {
   return `${item.sourceType}:${item.sourceId}`;
 }
 
-export function CaseModal({ isOpen, onClose, caseData, onSave, onDelete, responsibles = [], overlayClassName, allowEdit = true, canViewFinance = true }: CaseModalProps) {
+export function CaseModal({
+  isOpen,
+  onClose,
+  caseData,
+  onSave,
+  onDelete,
+  responsibles = [],
+  overlayClassName,
+  allowEdit = true,
+  canViewFinance = true,
+  canUseContactRelatedParties = true,
+  canUseLegalEntityRelatedParties = true,
+}: CaseModalProps) {
   const { confirm } = useDialog();
   const [timeZoneId, setTimeZoneId] = useState(() => normalizeUserTimeZoneId());
   const [title, setTitle] = useState(caseData.title ?? '');
@@ -317,6 +331,23 @@ export function CaseModal({ isOpen, onClose, caseData, onSave, onDelete, respons
   const [relatedPartySourceKey, setRelatedPartySourceKey] = useState('');
   const [relatedPartyLegalEntityId, setRelatedPartyLegalEntityId] = useState('');
   const [relatedPartyRole, setRelatedPartyRole] = useState('Участник');
+
+  useEffect(() => {
+    if (relatedPartyMode === 'contact' && !canUseContactRelatedParties && canUseLegalEntityRelatedParties) {
+      setRelatedPartyMode('legalEntity');
+      return;
+    }
+
+    if (relatedPartyMode === 'legalEntity' && !canUseLegalEntityRelatedParties && canUseContactRelatedParties) {
+      setRelatedPartyMode('contact');
+      return;
+    }
+
+    if (!canUseContactRelatedParties && !canUseLegalEntityRelatedParties) {
+      setRelatedPartySourceKey('');
+      setRelatedPartyLegalEntityId('');
+    }
+  }, [canUseContactRelatedParties, canUseLegalEntityRelatedParties, relatedPartyMode]);
 
   useEffect(() => {
     setActiveCaseModalTimeZoneId(timeZoneId);
@@ -566,8 +597,8 @@ export function CaseModal({ isOpen, onClose, caseData, onSave, onDelete, respons
 
     let cancelled = false;
     Promise.all([
-      apiService.getContacts({ scope: 'all' }),
-      apiService.getLegalEntitiesPaged({ page: 1, pageSize: 100 }),
+      canUseContactRelatedParties ? apiService.getContacts({ scope: 'all' }) : Promise.resolve([]),
+      canUseLegalEntityRelatedParties ? apiService.getLegalEntitiesPaged({ page: 1, pageSize: 100 }) : Promise.resolve({ items: [] }),
     ])
       .then(([contacts, legalEntities]) => {
         if (cancelled) return;
@@ -583,7 +614,7 @@ export function CaseModal({ isOpen, onClose, caseData, onSave, onDelete, respons
     return () => {
       cancelled = true;
     };
-  }, [caseData.id, isOpen]);
+  }, [canUseContactRelatedParties, canUseLegalEntityRelatedParties, caseData.id, isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -844,6 +875,21 @@ export function CaseModal({ isOpen, onClose, caseData, onSave, onDelete, respons
   const handleAddRelatedParty = async () => {
     if (!allowEdit) {
       setRelatedPartiesError('Недостаточно прав для изменения связей дела.');
+      return;
+    }
+
+    if (!canUseContactRelatedParties && !canUseLegalEntityRelatedParties) {
+      setRelatedPartiesError('У роли нет доступа к справочникам клиентов и организаций.');
+      return;
+    }
+
+    if (relatedPartyMode === 'contact' && !canUseContactRelatedParties) {
+      setRelatedPartiesError('У роли нет доступа к справочнику клиентов и контактов.');
+      return;
+    }
+
+    if (relatedPartyMode === 'legalEntity' && !canUseLegalEntityRelatedParties) {
+      setRelatedPartiesError('У роли нет доступа к справочнику юридических лиц.');
       return;
     }
 
@@ -1264,18 +1310,22 @@ export function CaseModal({ isOpen, onClose, caseData, onSave, onDelete, respons
                     setRelatedPartySourceKey('');
                     setRelatedPartyLegalEntityId('');
                   }}
-                  disabled={relatedPartiesSaving || saving || !allowEdit}>
-                  <option value="contact">Лицо/контакт</option>
-                  <option value="legalEntity">Организация</option>
+                  disabled={relatedPartiesSaving || saving || !allowEdit || (!canUseContactRelatedParties && !canUseLegalEntityRelatedParties)}>
+                  {canUseContactRelatedParties ? <option value="contact">Лицо/контакт</option> : null}
+                  {canUseLegalEntityRelatedParties ? <option value="legalEntity">Организация</option> : null}
                 </select>
 
-                {relatedPartyMode === 'legalEntity' ? (
+                {!canUseContactRelatedParties && !canUseLegalEntityRelatedParties ? (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                    Справочники клиентов и организаций закрыты для вашей роли.
+                  </div>
+                ) : relatedPartyMode === 'legalEntity' ? (
                   <select
                     aria-label="Связанная организация"
                     className="rounded-lg border px-3 py-2 text-sm bg-white"
                     value={relatedPartyLegalEntityId}
                     onChange={(e) => setRelatedPartyLegalEntityId(e.target.value)}
-                    disabled={relatedPartiesSaving || saving || !allowEdit}>
+                    disabled={relatedPartiesSaving || saving || !allowEdit || !canUseLegalEntityRelatedParties}>
                     <option value="">Выберите организацию</option>
                     {legalEntityOptions.map((item) => (
                       <option key={item.id} value={item.id}>
@@ -1289,7 +1339,7 @@ export function CaseModal({ isOpen, onClose, caseData, onSave, onDelete, respons
                     className="rounded-lg border px-3 py-2 text-sm bg-white"
                     value={relatedPartySourceKey}
                     onChange={(e) => setRelatedPartySourceKey(e.target.value)}
-                    disabled={relatedPartiesSaving || saving || !allowEdit}>
+                    disabled={relatedPartiesSaving || saving || !allowEdit || !canUseContactRelatedParties}>
                     <option value="">Выберите лицо или контакт</option>
                     {contactOptions.map((item) => (
                       <option key={getContactOptionKey(item)} value={getContactOptionKey(item)}>
@@ -1305,13 +1355,13 @@ export function CaseModal({ isOpen, onClose, caseData, onSave, onDelete, respons
                   value={relatedPartyRole}
                   onChange={(e) => setRelatedPartyRole(e.target.value)}
                   placeholder="Роль"
-                  disabled={relatedPartiesSaving || saving || !allowEdit}
+                  disabled={relatedPartiesSaving || saving || !allowEdit || (!canUseContactRelatedParties && !canUseLegalEntityRelatedParties)}
                 />
                 <button
                   type="button"
                   className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
                   onClick={() => void handleAddRelatedParty()}
-                  disabled={relatedPartiesSaving || saving || !allowEdit}>
+                  disabled={relatedPartiesSaving || saving || !allowEdit || (!canUseContactRelatedParties && !canUseLegalEntityRelatedParties)}>
                   <Plus size={15} /> Добавить
                 </button>
               </div>

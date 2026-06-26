@@ -15,6 +15,7 @@ const {
   sendActByEmailMock,
   dialogConfirmMock,
   dialogPromptMock,
+  rolePermissionsMock,
 } = vi.hoisted(() => ({
   actModalSpy: vi.fn(),
   getActMock: vi.fn(),
@@ -27,6 +28,18 @@ const {
   sendActByEmailMock: vi.fn(),
   dialogConfirmMock: vi.fn(),
   dialogPromptMock: vi.fn(),
+  rolePermissionsMock: {
+    acts: {
+      canEdit: true,
+      canDelete: true,
+    },
+    accounts: {
+      canView: true,
+    },
+    clients: {
+      canView: true,
+    },
+  },
 }));
 
 vi.mock('../../contexts/AuthContext', () => ({
@@ -36,12 +49,7 @@ vi.mock('../../contexts/AuthContext', () => ({
 }));
 
 vi.mock('../../hooks/useRolePermissions', () => ({
-  useRolePermissions: () => ({
-    acts: {
-      canEdit: true,
-      canDelete: true,
-    },
-  }),
+  useRolePermissions: () => rolePermissionsMock,
 }));
 
 vi.mock('../../hooks/useTranslation', () => ({
@@ -97,6 +105,10 @@ describe('ActDetailPage', () => {
     vi.clearAllMocks();
     dialogConfirmMock.mockResolvedValue(true);
     dialogPromptMock.mockResolvedValue('Уточнение суммы');
+    rolePermissionsMock.acts.canEdit = true;
+    rolePermissionsMock.acts.canDelete = true;
+    rolePermissionsMock.accounts.canView = true;
+    rolePermissionsMock.clients.canView = true;
     getDocumentStatusesMock.mockResolvedValue([]);
     createActCorrectionMock.mockResolvedValue({
       id: 40,
@@ -114,6 +126,50 @@ describe('ActDetailPage', () => {
       fileName: 'act-31.doc',
       format: 'word',
     });
+  });
+
+  it('does not open linked client or invoice when related sections are hidden by role', async () => {
+    rolePermissionsMock.accounts.canView = false;
+    rolePermissionsMock.clients.canView = false;
+
+    getActMock.mockResolvedValue({
+      id: 35,
+      number: '35',
+      date: '2026-04-14',
+      amount: 11_000,
+      status: 'Created',
+      type: 'Income',
+      clientId: 7,
+      clientName: 'Клиент без доступа',
+      invoiceId: 618,
+      invoiceNumber: 'INV-618',
+      lineItems: [],
+    });
+    getClientsMock.mockResolvedValue({ items: [] });
+    getActResponsiblesMock.mockResolvedValue({ items: [] });
+
+    const onOpenClient = vi.fn();
+    const onOpenInvoice = vi.fn();
+
+    render(
+      <ActDetailPage
+        actId={35}
+        onBack={vi.fn()}
+        onOpenClient={onOpenClient}
+        onOpenInvoice={onOpenInvoice}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Клиент без доступа')).toBeTruthy();
+    });
+
+    expect(getClientsMock).not.toHaveBeenCalled();
+    expect(screen.getByText('Счет №INV-618')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Счет №INV-618/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Клиент без доступа' })).toBeNull();
+    expect(onOpenClient).not.toHaveBeenCalled();
+    expect(onOpenInvoice).not.toHaveBeenCalled();
   });
 
   it('renders act preview in page layout and keeps old act data stable', async () => {

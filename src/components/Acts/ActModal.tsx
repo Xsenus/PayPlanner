@@ -47,6 +47,7 @@ interface ActModalProps {
   presentation?: 'modal' | 'page';
   onBack?: () => void;
   onOpenInvoice?: (invoiceId: number, type?: PaymentKind) => void;
+  canViewInvoices?: boolean;
 }
 
 type FormState = {
@@ -486,6 +487,7 @@ export function ActModal({
   presentation = 'modal',
   onBack,
   onOpenInvoice,
+  canViewInvoices = true,
 }: ActModalProps) {
   const { t } = useTranslation();
   const { isRequired } = useFormRequirements('acts', open);
@@ -551,7 +553,7 @@ export function ActModal({
   }, [defaultDate, isEdit, open]);
 
   useEffect(() => {
-    if (!open) {
+    if (!open || !canViewInvoices) {
       setInvoiceOptions([]);
       setInvoiceOptionsLoading(false);
       setInvoiceOptionsError(null);
@@ -611,10 +613,10 @@ export function ActModal({
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [canViewInvoices, open]);
 
   useEffect(() => {
-    if (!open || !linkedInvoiceId) {
+    if (!open || !linkedInvoiceId || !canViewInvoices) {
       setInvoiceDetails(null);
       setInvoiceError(null);
       setInvoiceLoading(false);
@@ -651,7 +653,7 @@ export function ActModal({
     return () => {
       cancelled = true;
     };
-  }, [open, linkedInvoiceId]);
+  }, [canViewInvoices, open, linkedInvoiceId]);
 
   useEffect(() => {
     if (!open || !isEdit || !act?.id) {

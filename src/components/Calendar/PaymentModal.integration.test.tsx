@@ -1077,6 +1077,87 @@ describe('PaymentModal integration', () => {
     expect(submitPayload.accountDate).toBeUndefined();
   });
 
+  it('hides linked invoice actions when the user cannot view accounts', () => {
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        canViewLinkedInvoices={false}
+        canCreateLinkedInvoices={false}
+        payment={{
+          id: 530,
+          date: '2026-04-03',
+          plannedDate: '2026-04-03',
+          amount: 5_000,
+          paidAmount: 0,
+          outstandingAmount: 5_000,
+          hasPartialPayment: false,
+          status: 'Pending',
+          description: 'Payment without account permissions',
+          isPaid: false,
+          paidDate: '',
+          lastPaymentDate: null,
+          notes: '',
+          clientId: 69,
+          type: 'Income',
+          account: '',
+          accountDate: '',
+          documentKind: 'Payment',
+          createdAt: '2026-04-03T00:00:00Z',
+          updatedAt: null,
+          systemNotes: '',
+          rescheduleCount: 0,
+        }}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: /Выбрать сч[её]т/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Создать сч[её]т/i })).toBeNull();
+    expect(getInvoicesMock).not.toHaveBeenCalled();
+    expect(createInvoiceMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps invoice selection but hides invoice creation without the create account permission', () => {
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        canViewLinkedInvoices
+        canCreateLinkedInvoices={false}
+        payment={{
+          id: 531,
+          date: '2026-04-03',
+          plannedDate: '2026-04-03',
+          amount: 5_000,
+          paidAmount: 0,
+          outstandingAmount: 5_000,
+          hasPartialPayment: false,
+          status: 'Pending',
+          description: 'Payment with view-only account permissions',
+          isPaid: false,
+          paidDate: '',
+          lastPaymentDate: null,
+          notes: '',
+          clientId: 69,
+          type: 'Income',
+          account: '',
+          accountDate: '',
+          documentKind: 'Payment',
+          createdAt: '2026-04-03T00:00:00Z',
+          updatedAt: null,
+          systemNotes: '',
+          rescheduleCount: 0,
+        }}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: /Выбрать сч[её]т/i })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Создать сч[её]т/i })).toBeNull();
+    expect(createInvoiceMock).not.toHaveBeenCalled();
+  });
+
   it('selects a legal entity for an income payment and submits legalEntityId instead of clientId', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
 

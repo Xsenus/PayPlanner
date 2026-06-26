@@ -5,12 +5,18 @@ import Navigation from './Navigation';
 import { getTabHref } from '../../appRouting';
 import { ALL_TABS, type Tab } from '../../types/tabs';
 import { apiService } from '../../services/api';
-import { defaultRolePermissions } from '../../types/permissions';
+import { defaultRestrictedRolePermissions, defaultRolePermissions, type RolePermissions } from '../../types/permissions';
+
+const authState = vi.hoisted(() => ({
+  isAdmin: true,
+  roleId: 1,
+  roleName: 'admin',
+}));
 
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({
-    user: { id: 1, role: { id: 1, name: 'admin' } },
-    isAdmin: () => true,
+    user: { id: 1, role: { id: authState.roleId, name: authState.roleName } },
+    isAdmin: () => authState.isAdmin,
   }),
 }));
 
@@ -47,6 +53,33 @@ const HIDDEN_NAVIGATION_TABS = [
   's3Storage',
 ] as const satisfies readonly Tab[];
 
+const lawyerWorkSection = {
+  canView: true,
+  canCreate: true,
+  canEdit: true,
+  canDelete: false,
+  canExport: false,
+  viewScope: 'own',
+} as const;
+
+function createLawyerTemplatePermissions(): RolePermissions {
+  return {
+    ...defaultRestrictedRolePermissions,
+    calendar: { ...lawyerWorkSection, canViewAnalytics: false, visibleUserIds: [] },
+    tasks: { ...lawyerWorkSection },
+    clients: { ...lawyerWorkSection },
+    cases: { ...lawyerWorkSection },
+    notifications: {
+      canView: true,
+      canCreate: false,
+      canEdit: true,
+      canDelete: false,
+      canExport: false,
+      viewScope: 'all',
+    },
+  };
+}
+
 function renderNavigation(onTabChange = vi.fn()) {
   window.localStorage.setItem('pp.sidebar_expanded', JSON.stringify(expandedSections));
   render(<Navigation activeTab="calendar" onTabChange={onTabChange} />);
@@ -60,10 +93,20 @@ function findLinkByHref(tabHref: string) {
     .find((link) => link.getAttribute('href') === tabHref || (link as HTMLAnchorElement).href === normalizedHref);
 }
 
+async function waitForNavigationPermissions() {
+  await waitFor(() => {
+    expect(findLinkByHref(getTabHref('calendar'))).toBeTruthy();
+  });
+}
+
 describe('Navigation links', () => {
   beforeEach(() => {
     window.history.replaceState({}, '', '/');
     window.localStorage.clear();
+    vi.clearAllMocks();
+    authState.isAdmin = true;
+    authState.roleId = 1;
+    authState.roleName = 'admin';
     apiMock.getRolePermissions.mockResolvedValue(defaultRolePermissions);
     apiMock.getPaymentsV2.mockResolvedValue({
       items: [],
@@ -81,8 +124,9 @@ describe('Navigation links', () => {
     });
   });
 
-  it('renders navigation destinations as real links', () => {
+  it('renders navigation destinations as real links', async () => {
     renderNavigation();
+    await waitForNavigationPermissions();
 
     expect(screen.getByRole('complementary', { name: 'Навигация' })).toBeTruthy();
     expect(screen.getByRole('navigation', { name: 'Навигация' })).toBeTruthy();
@@ -98,8 +142,94 @@ describe('Navigation links', () => {
     expect(findLinkByHref(getTabHref('s3Storage'))).toBeFalsy();
   });
 
-  it('keeps every tab either visible in navigation or explicitly whitelisted as hidden', () => {
+  it('shows settings for a non-admin role that can view integrations only', async () => {
+    authState.isAdmin = false;
+    authState.roleId = 99;
+    authState.roleName = 'lawyer';
+    apiMock.getRolePermissions.mockResolvedValueOnce({
+      ...defaultRolePermissions,
+      integrations: { ...defaultRolePermissions.integrations, canView: true },
+    });
+
     renderNavigation();
+
+    await waitFor(() => {
+      expect(findLinkByHref(getTabHref('settings'))).toBeTruthy();
+    });
+    expect(findLinkByHref(getTabHref('roles'))).toBeFalsy();
+    expect(findLinkByHref(getTabHref('audit'))).toBeFalsy();
+    expect(findLinkByHref(getTabHref('yandexDisk'))).toBeFalsy();
+    expect(findLinkByHref(getTabHref('s3Storage'))).toBeFalsy();
+  });
+
+  it('shows only safe lawyer template sections in the left menu', async () => {
+    authState.isAdmin = false;
+    authState.roleId = 100;
+    authState.roleName = 'Юрист';
+    apiMock.getRolePermissions.mockResolvedValueOnce(createLawyerTemplatePermissions());
+
+    renderNavigation();
+
+    await waitForNavigationPermissions();
+
+    const visibleTabs: Tab[] = [
+      'calendar',
+      'notifications',
+      'tasks',
+      'tasksControl',
+      'tasksApprovals',
+      'tasksCalendar',
+      'clients',
+      'cases',
+      'contacts',
+      'contactsClients',
+      'settings',
+    ];
+    const hiddenTabs: Tab[] = [
+      'notes',
+      'reports',
+      'calculator',
+      'legalEntities',
+      'contactsLegal',
+      'accounts',
+      'accountsIncome',
+      'accountsExpense',
+      'installments',
+      'moneyBank',
+      'moneyCash',
+      'moneyCards',
+      'moneyEMoney',
+      'moneyTotal',
+      'payments',
+      'paymentsIncome',
+      'paymentsExpense',
+      'acts',
+      'actsIncome',
+      'actsExpense',
+      'contracts',
+      'dictionaries',
+      'roles',
+      'audit',
+      'users',
+      'userActivity',
+      'yandexDisk',
+      's3Storage',
+    ];
+
+    for (const tab of visibleTabs) {
+      expect(findLinkByHref(getTabHref(tab)), `lawyer menu should show ${tab}`).toBeTruthy();
+    }
+
+    for (const tab of hiddenTabs) {
+      expect(findLinkByHref(getTabHref(tab)), `lawyer menu should hide ${tab}`).toBeFalsy();
+    }
+
+    expect(apiMock.getPaymentsV2).not.toHaveBeenCalled();
+  });
+
+  it('keeps every tab either visible in navigation or explicitly whitelisted as hidden', async () => {
+    renderNavigation();
+    await waitForNavigationPermissions();
 
     const hiddenTabs = new Set<Tab>(HIDDEN_NAVIGATION_TABS);
     const visibleTabs = ALL_TABS.filter((tab) => !hiddenTabs.has(tab));
@@ -110,8 +240,9 @@ describe('Navigation links', () => {
     expect(renderedTabs.sort()).toEqual(visibleTabs.sort());
   });
 
-  it('opens the task calendar submenu inside the single page app', () => {
+  it('opens the task calendar submenu inside the single page app', async () => {
     const onTabChange = renderNavigation();
+    await waitForNavigationPermissions();
     const link = findLinkByHref(getTabHref('tasksCalendar'));
 
     expect(link).toBeTruthy();
@@ -123,6 +254,7 @@ describe('Navigation links', () => {
   it('supports keyboard access for navigation links', async () => {
     const user = userEvent.setup();
     const onTabChange = renderNavigation();
+    await waitForNavigationPermissions();
     const clientsLink = screen.getByRole('link', { name: /Клиенты/i });
 
     clientsLink.focus();
@@ -133,8 +265,9 @@ describe('Navigation links', () => {
     expect(onTabChange).toHaveBeenCalledWith('clients');
   });
 
-  it('opens the approvals submenu inside the single page app', () => {
+  it('opens the approvals submenu inside the single page app', async () => {
     const onTabChange = renderNavigation();
+    await waitForNavigationPermissions();
     const link = findLinkByHref(getTabHref('tasksApprovals'));
 
     expect(link).toBeTruthy();
@@ -143,8 +276,9 @@ describe('Navigation links', () => {
     expect(onTabChange).toHaveBeenCalledWith('tasksApprovals');
   });
 
-  it('keeps normal left clicks inside the single page app', () => {
+  it('keeps normal left clicks inside the single page app', async () => {
     const onTabChange = renderNavigation();
+    await waitForNavigationPermissions();
     const link = screen.getByRole('link', { name: /Клиенты/i });
 
     const clickEvent = new MouseEvent('click', {
@@ -159,8 +293,9 @@ describe('Navigation links', () => {
     expect(onTabChange).toHaveBeenCalledWith('clients');
   });
 
-  it('allows browser tab gestures on navigation links', () => {
+  it('allows browser tab gestures on navigation links', async () => {
     const onTabChange = renderNavigation();
+    await waitForNavigationPermissions();
     const link = findLinkByHref(getTabHref('moneyEMoney'));
 
     expect(link).toBeTruthy();

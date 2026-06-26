@@ -28,9 +28,10 @@ import {
   isTasksApprovalsPath,
   isTasksCalendarPath,
   isTasksListPath,
+  TAB_ACCESS_RULES,
 } from './appRouting';
-import { defaultRolePermissions, type RolePermissions } from './types/permissions';
-import type { Tab } from './types/tabs';
+import { defaultRestrictedRolePermissions, defaultRolePermissions, type RolePermissions } from './types/permissions';
+import { ALL_TABS, type Tab } from './types/tabs';
 
 function createPermissions(overrides: Partial<RolePermissions> = {}): RolePermissions {
   return {
@@ -85,6 +86,10 @@ const readOnlySection = {
 } as const;
 
 function createOperationalRolePermissions(role: 'secretary' | 'lawyer' | 'accountant'): RolePermissions {
+  if (role === 'lawyer') {
+    return createLawyerTemplatePermissions();
+  }
+
   const permissions = createPermissions({
     calendar: { ...workLimitedSection, canViewAnalytics: false },
     tasks: role === 'accountant' ? deniedSection : workLimitedSection,
@@ -107,6 +112,15 @@ function createOperationalRolePermissions(role: 'secretary' | 'lawyer' | 'accoun
   });
 
   return permissions;
+}
+
+function createLawyerTemplatePermissions(): RolePermissions {
+  return {
+    ...defaultRestrictedRolePermissions,
+    calendar: { ...workLimitedSection, canViewAnalytics: false, visibleUserIds: [] },
+    tasks: { ...workLimitedSection },
+    notifications: { ...readOnlySection, canEdit: true },
+  };
 }
 
 describe('App payment routing helpers', () => {
@@ -380,6 +394,27 @@ describe('App negative deep-link guards', () => {
     expect(getInitialTab()).toBe(expectedTab);
     expect(canAccessTab(expectedTab, permissions)).toBe(false);
   });
+
+  it('keeps tab access rules exhaustive for every declared tab', () => {
+    expect(Object.keys(TAB_ACCESS_RULES).sort()).toEqual([...ALL_TABS].sort());
+  });
+
+  it.each([
+    {
+      tab: 'actCreate' as Tab,
+      permissions: createPermissions({
+        acts: { ...defaultRolePermissions.acts, canView: false, canCreate: true },
+      }),
+    },
+    {
+      tab: 'contractCreate' as Tab,
+      permissions: createPermissions({
+        contracts: { ...defaultRolePermissions.contracts, canView: false, canCreate: true },
+      }),
+    },
+  ])('denies $tab when create is enabled but the parent section is closed', ({ tab, permissions }) => {
+    expect(canAccessTab(tab, permissions)).toBe(false);
+  });
 });
 
 describe('App real role route access matrix', () => {
@@ -387,17 +422,17 @@ describe('App real role route access matrix', () => {
     {
       role: 'secretary' as const,
       allowedTabs: ['calendar', 'tasks', 'tasksCalendar', 'clients', 'cases', 'notifications', 'settings'] as Tab[],
-      deniedTabs: ['accounts', 'acts', 'payments', 'contracts', 'reports', 'roles', 'audit', 'yandexDisk', 's3Storage'] as Tab[],
+      deniedTabs: ['accounts', 'acts', 'payments', 'contracts', 'reports', 'roles', 'audit', 'yandexDisk', 's3Storage', 'companyProfile', 'users', 'userDetail', 'userActivity'] as Tab[],
     },
     {
       role: 'lawyer' as const,
-      allowedTabs: ['calendar', 'tasks', 'tasksCalendar', 'clients', 'cases', 'notifications', 'settings'] as Tab[],
-      deniedTabs: ['accounts', 'acts', 'payments', 'contracts', 'reports', 'roles', 'audit', 'yandexDisk', 's3Storage'] as Tab[],
+      allowedTabs: ['calendar', 'tasks', 'tasksCalendar', 'notifications', 'settings'] as Tab[],
+      deniedTabs: ['clients', 'clientDetail', 'contacts', 'contactsClients', 'contactsExternal', 'cases', 'caseDetail', 'accounts', 'acts', 'payments', 'contracts', 'reports', 'roles', 'audit', 'yandexDisk', 's3Storage', 'companyProfile', 'users', 'userDetail', 'userActivity'] as Tab[],
     },
     {
       role: 'accountant' as const,
       allowedTabs: ['calendar', 'clients', 'cases', 'accounts', 'acts', 'payments', 'contracts', 'notifications', 'settings'] as Tab[],
-      deniedTabs: ['tasks', 'tasksControl', 'tasksApprovals', 'tasksCalendar', 'reports', 'roles', 'audit', 'yandexDisk', 's3Storage'] as Tab[],
+      deniedTabs: ['tasks', 'tasksControl', 'tasksApprovals', 'tasksCalendar', 'reports', 'roles', 'audit', 'yandexDisk', 's3Storage', 'companyProfile', 'users', 'userDetail', 'userActivity'] as Tab[],
     },
   ])('applies expected menu access for $role', ({ role, allowedTabs, deniedTabs }) => {
     const permissions = createOperationalRolePermissions(role);
@@ -415,6 +450,32 @@ describe('App real role route access matrix', () => {
 
     for (const tab of deniedTabs) {
       expect(canAccessTab(tab, permissions, options), `${role} should not access ${tab}`).toBe(false);
+    }
+  });
+
+  it('keeps lawyer template direct tab access explicit for every app tab', () => {
+    const permissions = createLawyerTemplatePermissions();
+    const options = {
+      canManageRoles: permissions.roles.canView,
+      canViewAudit: permissions.audit.canView,
+      canViewSettings: permissions.notifications.canView || permissions.integrations.canView || permissions.yandexDisk.canView || permissions.s3Storage.canView,
+      canViewYandexDisk: permissions.yandexDisk.canView,
+      canViewS3Storage: permissions.s3Storage.canView,
+    };
+
+    const allowedTabs = new Set<Tab>([
+      'notifications',
+      'profile',
+      'calendar',
+      'tasks',
+      'tasksControl',
+      'tasksApprovals',
+      'tasksCalendar',
+      'settings',
+    ]);
+
+    for (const tab of ALL_TABS) {
+      expect(canAccessTab(tab, permissions, options), `lawyer direct tab access mismatch for ${tab}`).toBe(allowedTabs.has(tab));
     }
   });
 });

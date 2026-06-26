@@ -67,7 +67,7 @@ import { ActModal } from '../Acts/ActModal';
 import { ClientStatusBadge } from '../Clients/ClientStatusBadge';
 import { DatePeriodPicker } from '../DateRange/DatePeriodPicker';
 import { FormPromptModal } from '../ui/FormPromptModal';
-import { CounterpartyPickerModal, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
+import { CounterpartyPickerModal, type CounterpartyKind, type CounterpartySelection } from '../ui/CounterpartyPickerModal';
 import { TableContextMenu, type TableContextMenuAction } from '../ui/TableContextMenu';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
 import { TablePagination } from '../ui/TablePagination';
@@ -554,6 +554,23 @@ export function Accounts({
   const canCreate = permissions.accounts.canCreate;
   const canEdit = permissions.accounts.canEdit;
   const canDelete = permissions.accounts.canDelete;
+  const canViewPayments = permissions.payments.canView;
+  const canCreatePayment = canViewPayments && permissions.payments.canCreate;
+  const canEditPayment = canViewPayments && permissions.payments.canEdit;
+  const canDeletePayment = canViewPayments && permissions.payments.canDelete;
+  const canViewActs = permissions.acts.canView;
+  const canCreateAct = canViewActs && permissions.acts.canCreate;
+  const canEditAct = canViewActs && permissions.acts.canEdit;
+  const canViewClients = permissions.clients.canView;
+  const canViewLegalEntities = permissions.legalEntities.canView;
+  const canViewContracts = permissions.contracts.canView;
+  const allowedCounterpartyScopes = useMemo<CounterpartyKind[]>(() => {
+    const scopes: CounterpartyKind[] = [];
+    if (canViewClients) scopes.push('client');
+    if (canViewLegalEntities) scopes.push('legalEntity');
+    return scopes;
+  }, [canViewClients, canViewLegalEntities]);
+  const canSelectCounterpartyFilter = allowedCounterpartyScopes.length > 0;
 
   const defaultPeriod = useMemo<PeriodFilter>(() => ({ mode: 'preset', preset: 'year_to_date' }), []);
   const storagePrefix = useMemo(() => `pp.accounts.${user?.id ?? 'guest'}`, [user?.id]);
@@ -601,6 +618,7 @@ export function Accounts({
   const [actInitialValues, setActInitialValues] = useState<Partial<ActInput> & { amount?: number | null } | null>(null);
   const [actClients, setActClients] = useState<Client[]>([]);
   const [actResponsibles, setActResponsibles] = useState<ActResponsible[]>([]);
+  const [actLookupsLoaded, setActLookupsLoaded] = useState(false);
   const [actLookupsLoading, setActLookupsLoading] = useState(false);
   const [actLookupsError, setActLookupsError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -624,8 +642,12 @@ export function Accounts({
   const [statusChangeSubmitting, setStatusChangeSubmitting] = useState(false);
   const [statusChangeError, setStatusChangeError] = useState<string | null>(null);
   const baseTypeFilter = useMemo<FilterType>(() => (lockType ? (defaultType ?? 'All') : 'All'), [defaultType, lockType]);
-  const selectedClientIdNumber = selectedCounterparty?.kind === 'client' ? selectedCounterparty.id : undefined;
-  const selectedLegalEntityIdNumber = selectedCounterparty?.kind === 'legalEntity' ? selectedCounterparty.id : undefined;
+  const effectiveSelectedCounterparty = selectedCounterparty && allowedCounterpartyScopes.includes(selectedCounterparty.kind)
+    ? selectedCounterparty
+    : null;
+  const selectedClientIdNumber = effectiveSelectedCounterparty?.kind === 'client' ? effectiveSelectedCounterparty.id : undefined;
+  const selectedLegalEntityIdNumber = effectiveSelectedCounterparty?.kind === 'legalEntity' ? effectiveSelectedCounterparty.id : undefined;
+  const effectiveSelectedContractId = canViewContracts ? selectedContractId : null;
 
   const {
     columnOrder,
@@ -674,7 +696,7 @@ export function Accounts({
     type: typeFilter,
     clientId: selectedClientIdNumber,
     legalEntityId: selectedLegalEntityIdNumber,
-    contractId: selectedContractId ?? undefined,
+    contractId: effectiveSelectedContractId ?? undefined,
     clientRole: clientRoleFilter === 'all' ? undefined : clientRoleFilter,
     payablesOnly,
     sortBy: sortState.key,
@@ -699,6 +721,12 @@ export function Accounts({
   });
 
   useEffect(() => {
+    if (!canViewContracts) {
+      setContracts([]);
+      setContractsLoading(false);
+      return;
+    }
+
     let active = true;
     const ownerParams = {
       ...(selectedClientIdNumber ? { clientId: selectedClientIdNumber } : {}),
@@ -727,13 +755,17 @@ export function Accounts({
     return () => {
       active = false;
     };
-  }, [selectedClientIdNumber, selectedLegalEntityIdNumber]);
+  }, [canViewContracts, selectedClientIdNumber, selectedLegalEntityIdNumber]);
 
   useEffect(() => {
     if (!selectedContractId || contractsLoading) return;
+    if (!canViewContracts) {
+      setSelectedContractId(null);
+      return;
+    }
     if (contracts.some((contract) => contract.id === selectedContractId)) return;
     setSelectedContractId(null);
-  }, [contracts, contractsLoading, selectedContractId]);
+  }, [canViewContracts, contracts, contractsLoading, selectedContractId]);
 
   const payablesOverdueCount = useMemo(
     () => payablesDashboard?.dueBuckets.find((bucket) => bucket.key === 'overdue')?.count ?? 0,
@@ -802,12 +834,12 @@ export function Accounts({
   }, [period, storagePrefix]);
 
   useEffect(() => {
-    const counterparty = selectedCounterparty
+    const counterparty = effectiveSelectedCounterparty
       ? {
-        kind: selectedCounterparty.kind,
-        id: selectedCounterparty.id,
-        name: selectedCounterparty.name,
-        subtitle: selectedCounterparty.subtitle ?? null,
+        kind: effectiveSelectedCounterparty.kind,
+        id: effectiveSelectedCounterparty.id,
+        name: effectiveSelectedCounterparty.name,
+        subtitle: effectiveSelectedCounterparty.subtitle ?? null,
       }
       : null;
 
@@ -815,7 +847,7 @@ export function Accounts({
       statusFilter,
       typeFilter,
       selectedCounterparty: counterparty,
-      contractId: selectedContractId,
+      contractId: effectiveSelectedContractId,
       clientRoleFilter,
       payablesOnly,
       search,
@@ -829,8 +861,8 @@ export function Accounts({
     page,
     payablesOnly,
     search,
-    selectedCounterparty,
-    selectedContractId,
+    effectiveSelectedCounterparty,
+    effectiveSelectedContractId,
     sortState,
     statusFilter,
     typeFilter,
@@ -1057,7 +1089,7 @@ export function Accounts({
     Expense: 'bg-rose-100 text-rose-700 border border-rose-200',
   };
 
-  const canOpenClientFromAccounts = useMemo(() => typeof onOpenClient === 'function', [onOpenClient]);
+  const canOpenClientFromAccounts = useMemo(() => canViewClients && typeof onOpenClient === 'function', [canViewClients, onOpenClient]);
 
   const headingTitle =
     payablesOnly
@@ -1089,8 +1121,8 @@ export function Accounts({
   const hasCustomStatusFilter = statusFilter !== 'all';
   const hasCustomSearch = search.trim().length > 0;
   const hasCustomTypeFilter = typeFilter !== baseTypeFilter;
-  const hasCustomClientFilter = Boolean(selectedCounterparty);
-  const hasCustomContractFilter = selectedContractId !== null;
+  const hasCustomClientFilter = Boolean(effectiveSelectedCounterparty);
+  const hasCustomContractFilter = effectiveSelectedContractId !== null;
   const hasCustomClientRoleFilter = clientRoleFilter !== 'all';
   const selectedContract = useMemo(
     () => contracts.find((contract) => contract.id === selectedContractId) ?? null,
@@ -1136,8 +1168,8 @@ export function Accounts({
       badges.push(`Тип: ${typeFilterLabels[typeFilter]}`);
     }
     if (hasCustomClientFilter) {
-      const prefix = selectedCounterparty?.kind === 'legalEntity' ? 'Юрлицо' : 'Клиент';
-      badges.push(`${prefix}: ${selectedCounterparty?.name ?? 'контрагент'}`);
+      const prefix = effectiveSelectedCounterparty?.kind === 'legalEntity' ? 'Юрлицо' : 'Клиент';
+      badges.push(`${prefix}: ${effectiveSelectedCounterparty?.name ?? 'контрагент'}`);
     }
     if (hasCustomContractFilter) {
       badges.push(`Договор: ${selectedContractLabel}`);
@@ -1167,7 +1199,7 @@ export function Accounts({
     accountStatusLabels,
     clientRoleFilter,
     payablesOnly,
-    selectedCounterparty,
+    effectiveSelectedCounterparty,
     selectedContractLabel,
     statusFilter,
     search,
@@ -1186,25 +1218,31 @@ export function Accounts({
   };
 
   const [clients, setClients] = useState<Client[]>([]);
+  const [clientsLoaded, setClientsLoaded] = useState(false);
   const [legalEntities, setLegalEntities] = useState<LegalEntitySummary[]>([]);
   const [legalEntitiesLoaded, setLegalEntitiesLoaded] = useState(false);
+  const [actResponsiblesLoaded, setActResponsiblesLoaded] = useState(false);
   const [lookupsLoading, setLookupsLoading] = useState(false);
   const [lookupsError, setLookupsError] = useState<string | null>(null);
 
   const ensureInvoiceLookups = useCallback(async () => {
     if (!modalOpen && !pageEditingInvoiceId) return;
-    if (clients.length > 0 && actResponsibles.length > 0 && legalEntitiesLoaded && !lookupsError) return;
+    const clientsReady = !canViewClients || clientsLoaded || clients.length > 0;
+    const legalEntitiesReady = !canViewLegalEntities || legalEntitiesLoaded;
+    if (clientsReady && actResponsiblesLoaded && legalEntitiesReady && !lookupsError) return;
     setLookupsLoading(true);
     try {
       const [clientsResponse, responsiblesResponse, legalEntitiesResponse] = await Promise.all([
-        clients.length > 0 ? Promise.resolve(clients) : apiService.getClients(),
-        apiService.getActResponsibles(),
-        legalEntitiesLoaded ? Promise.resolve(legalEntities) : apiService.getLegalEntities(),
+        !canViewClients || clientsLoaded || clients.length > 0 ? Promise.resolve(clients) : apiService.getClients(),
+        actResponsiblesLoaded ? Promise.resolve(actResponsibles) : apiService.getActResponsibles(),
+        !canViewLegalEntities ? Promise.resolve([]) : legalEntitiesLoaded ? Promise.resolve(legalEntities) : apiService.getLegalEntities(),
       ]);
-      if (!clients.length) {
+      if (!clientsLoaded && canViewClients && !clients.length) {
         setClients(clientsResponse ?? []);
       }
+      setClientsLoaded(true);
       setActResponsibles(responsiblesResponse ?? []);
+      setActResponsiblesLoaded(true);
       if (!legalEntitiesLoaded) {
         setLegalEntities(legalEntitiesResponse ?? []);
         setLegalEntitiesLoaded(true);
@@ -1215,7 +1253,7 @@ export function Accounts({
     } finally {
       setLookupsLoading(false);
     }
-  }, [modalOpen, pageEditingInvoiceId, clients, actResponsibles.length, legalEntities, legalEntitiesLoaded, lookupsError]);
+  }, [modalOpen, pageEditingInvoiceId, actResponsibles, actResponsiblesLoaded, canViewClients, canViewLegalEntities, clients, clientsLoaded, legalEntities, legalEntitiesLoaded, lookupsError]);
 
   const handleInvoiceClientCreated = useCallback((client: Client) => {
     setClients((prev) => {
@@ -1224,15 +1262,16 @@ export function Accounts({
         ? prev.map((item) => (item.id === client.id ? client : item))
         : [client, ...prev];
     });
+    setClientsLoaded(true);
   }, []);
 
   const ensureActLookups = useCallback(async () => {
     if (!actModalOpen) return;
-    if (clients.length > 0 && actResponsibles.length > 0 && !actLookupsError && actClients.length > 0) return;
+    if (actLookupsLoaded && !actLookupsError) return;
     setActLookupsLoading(true);
     try {
       const [clientsResponse, responsibleResponse] = await Promise.all([
-        clients.length > 0 ? Promise.resolve(clients) : apiService.getClients(),
+        !canViewClients ? Promise.resolve([]) : clients.length > 0 ? Promise.resolve(clients) : apiService.getClients(),
         apiService.getActResponsibles(),
       ]);
       if (!clients.length && clientsResponse) {
@@ -1240,13 +1279,14 @@ export function Accounts({
       }
       setActClients(clientsResponse ?? clients);
       setActResponsibles(responsibleResponse ?? []);
+      setActLookupsLoaded(true);
       setActLookupsError(null);
     } catch (err) {
       setActLookupsError(err instanceof Error ? err.message : 'Не удалось загрузить справочники');
     } finally {
       setActLookupsLoading(false);
     }
-  }, [actClients.length, actLookupsError, actModalOpen, actResponsibles.length, clients]);
+  }, [actLookupsError, actLookupsLoaded, actModalOpen, canViewClients, clients]);
 
   useEffect(() => {
     if (modalOpen || pageEditingInvoiceId) {
@@ -2106,6 +2146,7 @@ export function Accounts({
   );
 
   const openPaymentCreateModal = (invoice: Invoice | null | undefined) => {
+    if (!canCreatePayment) return;
     const context = buildPaymentModalInvoiceContext(invoice);
     if (!context) {
       toast.error('Сначала сохраните счет, затем можно добавлять связанные платежи.', 'Платежи счета');
@@ -2119,6 +2160,7 @@ export function Accounts({
   };
 
   const openLinkedPaymentEditModal = (payment: Payment, invoice?: Invoice | null) => {
+    if (!canEditPayment) return;
     setEditingPayment(payment);
     setPaymentModalInvoiceContext(buildPaymentModalInvoiceContext(invoice));
     setPaymentModalType(payment.type ?? 'Income');
@@ -2133,6 +2175,9 @@ export function Accounts({
 
   const handleSubmitPayment = async (payload: PaymentPayload | ({ id: number } & PaymentPayload)) => {
     const isUpdate = 'id' in payload;
+    if ((isUpdate && !canEditPayment) || (!isUpdate && !canCreatePayment)) {
+      return;
+    }
     const invoiceManagedEditingPayment =
       isUpdate
       && editingPayment
@@ -2245,7 +2290,7 @@ export function Accounts({
       );
       return;
     }
-    if (!canDelete) return;
+    if (!canDeletePayment) return;
     const approved = await confirm({
       title: 'Удаление платежа',
       description: 'Удалить связанный платеж?',
@@ -2261,6 +2306,7 @@ export function Accounts({
   };
 
   const openActCreateModal = (row: AccountRow) => {
+    if (!canCreateAct) return;
     setExpandedActListKey(null);
     const normalizedDate =
       toDateInputValue(row.invoice?.date ?? row.dueDate) || formatLocalYMD(new Date());
@@ -2295,6 +2341,7 @@ export function Accounts({
   };
 
   const openActEditModal = (act: Act, row: AccountRow) => {
+    if (!canEditAct) return;
     setExpandedActListKey(null);
     if (onOpenActPage) {
       onOpenActPage(act.id, {
@@ -2334,6 +2381,9 @@ export function Accounts({
   };
 
   const handleSubmitAct = async (payload: ActInput) => {
+    if ((actModalMode === 'edit' && !canEditAct) || (actModalMode !== 'edit' && !canCreateAct)) {
+      return;
+    }
     setActModalSubmitting(true);
     setActModalError(null);
     try {
@@ -2455,12 +2505,14 @@ export function Accounts({
 
   const paymentModalElement = (
     <PaymentModal
-      isOpen={paymentModalOpen}
+      isOpen={paymentModalOpen && canViewPayments}
       onClose={handleClosePaymentModal}
       onSubmit={handleSubmitPayment}
       onTransferRemainder={handleTransferPaymentRemainder}
       onRollbackRemainderTransfer={handleRollbackPaymentRemainderTransfer}
       onAdjustRemainderTransfer={handleAdjustPaymentRemainderTransfer}
+      canViewLinkedInvoices={permissions.accounts.canView}
+      canCreateLinkedInvoices={permissions.accounts.canView && permissions.accounts.canCreate}
       payment={editingPayment ?? undefined}
       type={paymentModalType}
       linkedInvoice={paymentModalInvoiceContext}
@@ -2468,7 +2520,7 @@ export function Accounts({
         await refreshAccounts();
       }}
       onDelete={
-        canDelete
+        canDeletePayment
         && (!editingPayment || (editingPayment.documentKind !== 'Invoice' && !isTransferredRemainderPayment(editingPayment) && !isPartialRemainderSourcePayment(editingPayment)))
           ? async (id) => {
               await apiService.deletePayment(id);
@@ -2479,7 +2531,7 @@ export function Accounts({
           : undefined
       }
       onCreateRemainder={
-        !editingPayment || !isInvoiceManagedPayment(editingPayment)
+        canCreatePayment && (!editingPayment || !isInvoiceManagedPayment(editingPayment))
           ? async (payload) => {
               const created = await apiService.createPayment(payload);
               await refreshAccounts();
@@ -2515,15 +2567,16 @@ export function Accounts({
           resumeDraft={resumeInvoiceDraft}
           onClose={() => closeEditPage()}
           onBack={() => closeEditPage({ restoreClientContext: true })}
-          onOpenClient={openClientFromEditor}
-          onOpenContract={onOpenContract}
-          onOpenActPage={onOpenActPage}
-          onOpenPayment={onOpenPayment}
+          onOpenClient={canViewClients ? openClientFromEditor : undefined}
+          onOpenContract={canViewContracts ? onOpenContract : undefined}
+          onOpenActPage={canViewActs ? onOpenActPage : undefined}
+          onOpenPayment={canViewPayments ? onOpenPayment : undefined}
           onSubmit={submitInvoice}
           submitting={submitting}
           errorMessage={modalError}
           clients={clients}
           legalEntities={legalEntities}
+          allowedCounterpartyScopes={allowedCounterpartyScopes}
           legalEntitiesLoading={lookupsLoading && !legalEntitiesLoaded}
           legalEntitiesError={lookupsError}
           onClientCreated={handleInvoiceClientCreated}
@@ -2534,14 +2587,14 @@ export function Accounts({
           defaultResponsibleId={user?.id}
           defaultType={typeFilter === 'All' ? undefined : typeFilter}
           lockType={lockType}
-          relatedPayments={currentPageAccountRow?.payments ?? []}
-          paymentsLoading={isLoading || isRefreshing}
+          relatedPayments={canViewPayments ? currentPageAccountRow?.payments ?? [] : []}
+          paymentsLoading={canViewPayments && (isLoading || isRefreshing)}
           onRefreshRequested={refreshAccounts}
-          onAddRelatedPayment={canEdit ? () => openPaymentCreateModal(currentPageInvoice) : undefined}
-          onEditRelatedPayment={canEdit ? (payment) => openLinkedPaymentEditModal(payment, currentPageInvoice) : undefined}
-          onDeleteRelatedPayment={canDelete ? handleDeletePayment : undefined}
+          onAddRelatedPayment={canCreatePayment ? () => openPaymentCreateModal(currentPageInvoice) : undefined}
+          onEditRelatedPayment={canEditPayment ? (payment) => openLinkedPaymentEditModal(payment, currentPageInvoice) : undefined}
+          onDeleteRelatedPayment={canDeletePayment ? handleDeletePayment : undefined}
           onCreateActPage={
-            onCreateActPage
+            canCreateAct && onCreateActPage
               ? (initialValues, options) => onCreateActPage(initialValues, {
                 invoiceId: options?.invoiceId ?? currentPageInvoice.id,
                 invoiceSeed: options?.invoiceSeed ?? currentPageInvoice,
@@ -2665,14 +2718,25 @@ export function Accounts({
                     <span className="flex min-h-7 items-center font-medium text-gray-700">Клиент / поставщик</span>
                     <button
                       type="button"
-                      onClick={() => setCounterpartyPickerOpen(true)}
-                      className="flex min-h-[42px] w-full items-center justify-between gap-3 rounded-lg border border-gray-300 bg-white px-3 py-2 text-left text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                      onClick={() => {
+                        if (canSelectCounterpartyFilter) {
+                          setCounterpartyPickerOpen(true);
+                        }
+                      }}
+                      disabled={!canSelectCounterpartyFilter}
+                      className="flex min-h-[42px] w-full items-center justify-between gap-3 rounded-lg border border-gray-300 bg-white px-3 py-2 text-left text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      <span className={selectedCounterparty ? 'truncate text-slate-900' : 'truncate text-slate-500'}>
-                        {selectedCounterparty?.name ?? 'Все контрагенты'}
+                      <span className={effectiveSelectedCounterparty ? 'truncate text-slate-900' : 'truncate text-slate-500'}>
+                        {effectiveSelectedCounterparty?.name ?? 'Все контрагенты'}
                       </span>
                       <span className="shrink-0 text-xs text-slate-500">
-                        {selectedCounterparty?.kind === 'legalEntity' ? 'Юрлицо' : selectedCounterparty ? 'Физлицо' : 'Выбрать'}
+                        {effectiveSelectedCounterparty?.kind === 'legalEntity'
+                          ? 'Юрлицо'
+                          : effectiveSelectedCounterparty
+                            ? 'Физлицо'
+                            : canSelectCounterpartyFilter
+                              ? 'Выбрать'
+                              : 'Недоступно'}
                       </span>
                     </button>
                   </div>
@@ -2692,7 +2756,7 @@ export function Accounts({
                 <div className="sm:col-span-2 lg:col-span-3">
                   <LookupSelect
                     label="Договор"
-                    value={selectedContractId ? String(selectedContractId) : ''}
+                    value={effectiveSelectedContractId ? String(effectiveSelectedContractId) : ''}
                     options={contractLookupOptions}
                     onChange={(value) => {
                       const nextId = Number(value);
@@ -2704,7 +2768,8 @@ export function Accounts({
                     searchPlaceholder="Номер, название или клиент"
                     emptyOptionLabel="Все договоры"
                     emptyOptionDescription="Очистить фильтр по договору"
-                    helperText={contractsLoading ? 'Загрузка договоров...' : undefined}
+                    helperText={contractsLoading ? 'Загрузка договоров...' : !canViewContracts ? 'Раздел договоров закрыт для вашей роли' : undefined}
+                    disabled={!canViewContracts}
                     noOptionsText="Договоры не найдены"
                   />
                 </div>
@@ -3282,12 +3347,19 @@ export function Accounts({
                               case 'paidDate':
                                 return <td key={column.key} className="px-4 py-3 text-center align-middle">{formatDate(row.paidDate)}</td>;
                               case 'act':
+                                if (!canViewActs) {
+                                  return (
+                                    <td key={column.key} className="px-4 py-3 text-center align-middle">
+                                      <span className="text-slate-400">—</span>
+                                    </td>
+                                  );
+                                }
                                 return (
                                   <td key={column.key} className="px-4 py-3 text-center align-middle">
                                     <div className="relative flex items-center justify-center gap-1.5">
                                       {primaryAct ? (
                                         <>
-                                          {canCreate && (
+                                          {canCreateAct && (
                                             <button
                                               type="button"
                                               onClick={(event) => { event.stopPropagation(); openActCreateModal(row); }}
@@ -3374,7 +3446,7 @@ export function Accounts({
                                           )}
                                         </>
                                       ) : (
-                                        canCreate ? (
+                                        canCreateAct ? (
                                           <button
                                             type="button"
                                             onClick={(event) => { event.stopPropagation(); openActCreateModal(row); }}
@@ -3472,7 +3544,7 @@ export function Accounts({
                             </td>
                           )}
                         </tr>
-                        {isExpanded && (row.payments.length > 0 || canEdit) && (
+                        {isExpanded && canViewPayments && (row.payments.length > 0 || canCreatePayment) && (
                           <tr>
                             <td colSpan={colSpan} className="bg-gray-50 px-4 py-3">
                               <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
@@ -3481,7 +3553,7 @@ export function Accounts({
                                     {t('paymentOperations') ?? 'Операции по счёту'}
                                   </div>
                                   <div className="flex items-center gap-2">
-                                    {canEdit && invoice && (
+                                    {canCreatePayment && invoice && (
                                       <button
                                         type="button"
                                         onClick={() => openPaymentCreateModal(invoice)}
@@ -3496,11 +3568,11 @@ export function Accounts({
                                 <div className="overflow-x-auto">
                                   <table className="min-w-full table-fixed divide-y divide-gray-100 text-sm">
                                     <colgroup>
-                                      <col style={{ width: canEdit || canDelete ? '18%' : '22%' }} />
+                                      <col style={{ width: canEditPayment || canDeletePayment ? '18%' : '22%' }} />
                                       <col style={{ width: '18%' }} />
                                       <col style={{ width: '18%' }} />
-                                      <col style={{ width: canEdit || canDelete ? '30%' : '42%' }} />
-                                      {(canEdit || canDelete) ? <col style={{ width: '16%' }} /> : null}
+                                      <col style={{ width: canEditPayment || canDeletePayment ? '30%' : '42%' }} />
+                                      {(canEditPayment || canDeletePayment) ? <col style={{ width: '16%' }} /> : null}
                                     </colgroup>
                                     <thead className="bg-gray-50 text-left text-xs font-medium uppercase text-gray-500">
                                       <tr>
@@ -3508,7 +3580,7 @@ export function Accounts({
                                         <th className="px-4 py-2">{t('amount') ?? 'Сумма'}</th>
                                         <th className="px-4 py-2">{t('status') ?? 'Статус'}</th>
                                         <th className="px-4 py-2">{t('description') ?? 'Описание'}</th>
-                                        {(canEdit || canDelete) && (
+                                        {(canEditPayment || canDeletePayment) && (
                                           <th className="px-4 py-2 text-right">{t('actions') ?? 'Действия'}</th>
                                         )}
                                       </tr>
@@ -3517,8 +3589,8 @@ export function Accounts({
                                       {row.payments.map((payment) => (
                                         <tr
                                           key={payment.id}
-                                          className={canEdit ? 'cursor-pointer hover:bg-gray-50/80' : undefined}
-                                          onClick={canEdit ? () => openLinkedPaymentEditModal(payment, invoice) : undefined}
+                                          className={canEditPayment ? 'cursor-pointer hover:bg-gray-50/80' : undefined}
+                                          onClick={canEditPayment ? () => openLinkedPaymentEditModal(payment, invoice) : undefined}
                                         >
                                           <td className="px-4 py-2">{formatDate(resolvePaymentOperationDate(payment))}</td>
                                           <td className="px-4 py-2 font-semibold text-gray-900">
@@ -3542,10 +3614,10 @@ export function Accounts({
                                               <span>{payment.description || '—'}</span>
                                             </div>
                                           </td>
-                                          {(canEdit || canDelete) && (
+                                          {(canEditPayment || canDeletePayment) && (
                                             <td className="px-4 py-2">
                                               <div className="flex items-center justify-end gap-2">
-                                                {canEdit && (
+                                                {canEditPayment && (
                                                   <button
                                                     type="button"
                                                     onClick={(event) => {
@@ -3559,7 +3631,7 @@ export function Accounts({
                                                     <Pencil className="h-4 w-4" />
                                                   </button>
                                                 )}
-                                                {canDelete && payment.documentKind !== 'Invoice' && !isTransferredRemainderPayment(payment) && !isPartialRemainderSourcePayment(payment) && (
+                                                {canDeletePayment && payment.documentKind !== 'Invoice' && !isTransferredRemainderPayment(payment) && !isPartialRemainderSourcePayment(payment) && (
                                                   <button
                                                     type="button"
                                                     onClick={(event) => {
@@ -3697,8 +3769,9 @@ export function Accounts({
         <CounterpartyPickerModal
           open={counterpartyPickerOpen}
           title="Выбор клиента / поставщика"
-          selected={selectedCounterparty ? [selectedCounterparty] : []}
-          initialScope={selectedCounterparty?.kind ?? 'client'}
+          selected={effectiveSelectedCounterparty ? [effectiveSelectedCounterparty] : []}
+          initialScope={effectiveSelectedCounterparty?.kind ?? 'client'}
+          allowedScopes={allowedCounterpartyScopes}
           allowEmpty
           emptyLabel="Все контрагенты"
           overlayClassName="z-[1600]"
@@ -3715,13 +3788,15 @@ export function Accounts({
           invoice={selectedInvoice}
           resumeDraft={resumeInvoiceDraft}
           onClose={closeModal}
-          onOpenClient={openClientFromEditor}
-          onOpenActPage={onOpenActPage}
+          onOpenClient={canViewClients ? openClientFromEditor : undefined}
+          onOpenContract={canViewContracts ? onOpenContract : undefined}
+          onOpenActPage={canViewActs ? onOpenActPage : undefined}
           onSubmit={submitInvoice}
           submitting={submitting}
           errorMessage={modalError}
           clients={clients}
           legalEntities={legalEntities}
+          allowedCounterpartyScopes={allowedCounterpartyScopes}
           legalEntitiesLoading={lookupsLoading && !legalEntitiesLoaded}
           legalEntitiesError={lookupsError}
           onClientCreated={handleInvoiceClientCreated}
@@ -3734,7 +3809,7 @@ export function Accounts({
           lockType={lockType}
           onRefreshRequested={refreshAccounts}
           onCreateActPage={
-            onCreateActPage
+            canCreateAct && onCreateActPage
               ? (initialValues, options) => onCreateActPage(initialValues, {
                 invoiceId: options?.invoiceId ?? selectedInvoice?.id ?? null,
                 invoiceSeed: options?.invoiceSeed ?? selectedInvoice ?? null,
@@ -3744,7 +3819,7 @@ export function Accounts({
         />
 
         <ActModal
-          open={actModalOpen}
+          open={actModalOpen && canViewActs}
           mode={actModalMode}
           act={activeAct}
           onClose={closeActModal}

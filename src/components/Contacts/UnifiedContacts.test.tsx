@@ -23,6 +23,27 @@ const legalEntityModalMock = vi.hoisted(() => vi.fn((props: LegalEntityModalMock
   return null;
 }));
 const toastSuccessMock = vi.hoisted(() => vi.fn());
+const permissionsMock = vi.hoisted(() => {
+  const section = {
+    canView: true,
+    canCreate: true,
+    canEdit: true,
+    canDelete: true,
+    canExport: true,
+  };
+
+  return {
+    value: {
+      legalEntities: section,
+      cases: section,
+      accounts: section,
+      acts: section,
+      payments: section,
+      contracts: section,
+    },
+    section,
+  };
+});
 
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({
@@ -31,23 +52,7 @@ vi.mock('../../contexts/AuthContext', () => ({
 }));
 
 vi.mock('../../hooks/useRolePermissions', () => ({
-  useRolePermissions: () => {
-    const section = {
-      canView: true,
-      canCreate: true,
-      canEdit: true,
-      canDelete: true,
-      canExport: true,
-    };
-
-    return {
-      legalEntities: section,
-      accounts: section,
-      acts: section,
-      payments: section,
-      contracts: section,
-    };
-  },
+  useRolePermissions: () => permissionsMock.value,
 }));
 
 vi.mock('../../hooks/useToast', () => ({
@@ -220,6 +225,14 @@ describe('UnifiedContacts', () => {
     vi.useRealTimers();
     localStorage.clear();
     vi.clearAllMocks();
+    permissionsMock.value = {
+      legalEntities: permissionsMock.section,
+      cases: permissionsMock.section,
+      accounts: permissionsMock.section,
+      acts: permissionsMock.section,
+      payments: permissionsMock.section,
+      contracts: permissionsMock.section,
+    };
     mockApiData();
     mockUserSettings();
   });
@@ -323,6 +336,58 @@ describe('UnifiedContacts', () => {
     expect(within(clientRow as HTMLElement).getByRole('button', { name: '№I-1' })).toBeTruthy();
     expect(within(clientRow as HTMLElement).getByRole('button', { name: '№A-1' })).toBeTruthy();
     expect(within(clientRow as HTMLElement).getByRole('button', { name: '№P-1' })).toBeTruthy();
+  });
+
+  it('does not restore linked section columns from saved settings without permissions', async () => {
+    const deniedSection = { ...permissionsMock.section, canView: false };
+    permissionsMock.value = {
+      legalEntities: deniedSection,
+      cases: deniedSection,
+      accounts: deniedSection,
+      acts: deniedSection,
+      payments: deniedSection,
+      contracts: deniedSection,
+    };
+    mockUserSettings({
+      contacts_client_view_mode: 'table',
+      contacts_client_table_settings: JSON.stringify({
+        visibleColumns: ['contact', 'legalShortName', 'legalInn', 'cases', 'contracts', 'invoices', 'acts', 'payments'],
+        columnOrder: ['contact', 'legalShortName', 'legalInn', 'cases', 'contracts', 'invoices', 'acts', 'payments'],
+        columnWidths: {},
+        pageSize: 24,
+      }),
+    });
+
+    render(<UnifiedContacts initialKind="client" lockKind canViewLegalEntities={false} />);
+
+    expect(await screen.findByRole('columnheader', { name: /Физическое лицо/ })).toBeTruthy();
+    expect(screen.queryByRole('columnheader', { name: /Юрлицо/ })).toBeNull();
+    expect(screen.queryByRole('columnheader', { name: /ИНН юрлица/ })).toBeNull();
+    expect(screen.queryByRole('columnheader', { name: /Дела/ })).toBeNull();
+    expect(screen.queryByRole('columnheader', { name: /Договоры/ })).toBeNull();
+    expect(screen.queryByRole('columnheader', { name: /Счета/ })).toBeNull();
+    expect(screen.queryByRole('columnheader', { name: /Акты/ })).toBeNull();
+    expect(screen.queryByRole('columnheader', { name: /Платежи/ })).toBeNull();
+  });
+
+  it('hides legal clients counters and unavailable related counters in contact cards', async () => {
+    const deniedSection = { ...permissionsMock.section, canView: false };
+    permissionsMock.value = {
+      legalEntities: permissionsMock.section,
+      cases: deniedSection,
+      accounts: deniedSection,
+      acts: deniedSection,
+      payments: deniedSection,
+      contracts: deniedSection,
+    };
+
+    render(<UnifiedContacts initialKind="legal" lockKind canViewClients={false} />);
+
+    const legalTitle = await screen.findByText('ООО Ромашка');
+    const legalCard = legalTitle.closest('button');
+    expect(legalCard).not.toBeNull();
+    expect(within(legalCard as HTMLElement).queryByText('1 клиент(ов)')).toBeNull();
+    expect(within(legalCard as HTMLElement).getAllByText('—').length).toBeGreaterThanOrEqual(3);
   });
 
   it('renders selected hidden legal columns after they are enabled through persisted table settings', async () => {
