@@ -104,6 +104,7 @@ type ModalState = {
   defaults?: Partial<TaskJournalUpsertPayload>;
 } | null;
 type TaskJournalMode = 'journal' | 'approvals';
+type TaskApprovalFinalAction = 'complete' | 'returnToAssignee';
 type TaskJournalProps = {
   initialView?: ViewMode;
   mode?: TaskJournalMode;
@@ -151,6 +152,7 @@ const DEFAULT_TASK_JOURNAL_SETTINGS: TaskJournalSettingsDto = {
   restrictExecutorEditing: true,
   allowExecutorDeadlineChangeRequests: true,
   requireCompletionResult: true,
+  allowAdminCompleteAnyTask: true,
   taskCardWindowMode: 'legacy',
   caseInactivityAutomationEnabled: true,
   caseInactivityDays: 14,
@@ -2823,19 +2825,21 @@ export function TaskJournal({
   };
 
   const setTaskStatus = async (task: TaskJournalItem, status: TaskJournalStatus) => {
-    if (status === 'done' && hasPendingApprovers(task)) {
-      toast.error('Задачу нельзя завершить, пока все согласующие не согласовали её.', 'Журнал задач');
-      openTaskEditor({ ...task, status: 'onApproval' }, { syncRoute: true });
-      return;
-    }
+    const shouldSendToApproval = status === 'done'
+      && hasPendingApprovers(task)
+      && !(isAdminUser && taskSettings.allowAdminCompleteAnyTask);
+    const nextStatus = shouldSendToApproval ? 'onApproval' : status;
 
-    if (status === 'done' && requireCompletionResult && !task.result.trim()) {
+    if (nextStatus === 'done' && requireCompletionResult && !task.result.trim()) {
       openCompletionPrompt(task);
       return;
     }
 
     try {
-      await apiService.updateTaskJournalStatus(task.id, status, undefined);
+      await apiService.updateTaskJournalStatus(task.id, nextStatus, undefined);
+      if (shouldSendToApproval) {
+        toast.success('Задача отправлена на согласование.', 'Журнал задач');
+      }
       await refreshTasks();
       emitTaskChange();
     } catch (error) {
@@ -2859,10 +2863,16 @@ export function TaskJournal({
     decision: 'approved' | 'revisionRequested',
     resolution?: string,
     participantId?: number,
+    finalAction?: TaskApprovalFinalAction,
   ) => {
     try {
-      await apiService.updateTaskJournalApproval(taskId, decision, resolution, participantId);
-      toast.success(decision === 'approved' ? 'Решение по согласованию сохранено.' : 'Задача отправлена на доработку.', 'Журнал задач');
+      await apiService.updateTaskJournalApproval(taskId, decision, resolution, participantId, finalAction);
+      const successMessage = finalAction === 'complete'
+        ? 'Задача согласована и завершена.'
+        : decision === 'approved'
+          ? 'Решение по согласованию сохранено.'
+          : 'Задача отправлена на доработку.';
+      toast.success(successMessage, 'Журнал задач');
       closeTaskModal();
       await refreshTasks();
       emitTaskChange();
@@ -5751,6 +5761,7 @@ type TaskModalProps = {
     decision: 'approved' | 'revisionRequested',
     resolution?: string,
     participantId?: number,
+    finalAction?: TaskApprovalFinalAction,
   ) => void | Promise<void>;
   onDelete: (task: TaskJournalItem) => boolean | Promise<boolean>;
   onDuplicate: (task: TaskJournalItem) => boolean | Promise<boolean>;
@@ -5864,6 +5875,11 @@ function TaskModal({
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [quickPanel, setQuickPanel] = useState<'assignee' | 'observer' | null>(null);
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [approvalChoice, setApprovalChoice] = useState<{
+    taskId: number;
+    participantId?: number;
+    resolution?: string;
+  } | null>(null);
   const selectedClient = useMemo(
     () => clients.find((client) => client.id === form.clientId) ?? null,
     [clients, form.clientId],
@@ -5889,6 +5905,12 @@ function TaskModal({
   const currentApprovalParticipant = useMemo(
     () => orderedApproverParticipants.find((participant) => participant.approvalStatus !== 'approved') ?? null,
     [orderedApproverParticipants],
+  );
+  const isCurrentApprovalFinal = useMemo(
+    () => Boolean(currentApprovalParticipant)
+      && orderedApproverParticipants.every((participant) =>
+        participant === currentApprovalParticipant || participant.approvalStatus === 'approved'),
+    [currentApprovalParticipant, orderedApproverParticipants],
   );
   const isImplicitPrimaryAssigneeParticipant = useCallback((participant: TaskJournalParticipant) => {
     if (participant.role !== 'assignee') return false;
@@ -6142,6 +6164,31 @@ function TaskModal({
     await saveWithStatus(nextStatus);
   };
 
+  const handleApproveParticipant = (participant: TaskJournalParticipant) => {
+    const task = state?.task;
+    if (!task) return;
+
+    const resolution = form.result.trim();
+    if (participant === currentApprovalParticipant && isCurrentApprovalFinal) {
+      setApprovalChoice({
+        taskId: task.id,
+        participantId: participant.id,
+        resolution,
+      });
+      return;
+    }
+
+    void onApprovalDecision(task.id, 'approved', resolution, participant.id);
+  };
+
+  const confirmApprovalChoice = async (finalAction: TaskApprovalFinalAction) => {
+    const choice = approvalChoice;
+    if (!choice) return;
+
+    setApprovalChoice(null);
+    await onApprovalDecision(choice.taskId, 'approved', choice.resolution, choice.participantId, finalAction);
+  };
+
   const handleDeleteTask = async () => {
     const task = state?.task;
     if (!task || isReadOnly || !canDeleteTask) return;
@@ -6370,6 +6417,50 @@ function TaskModal({
   const selectedCaseTitle = selectableClientCases.find((item) => item.id === form.clientCaseId)?.title ?? state?.task?.clientCaseTitle ?? '';
   const visibleObservers = getVisibleParticipantsByRole('observer');
   const visibleApprovers = getVisibleParticipantsByRole('approver');
+  const canShowApprovalActions = Boolean(
+    state?.task
+    && (form.status === 'onApproval' || form.status === 'overdueApproval')
+    && currentApprovalParticipant
+    && currentApprovalParticipant.userId === currentUserId
+    && currentApprovalParticipant.approvalStatus !== 'approved',
+  );
+  const approvalChoiceDialog = approvalChoice ? (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/35 px-4 py-6">
+      <div className="w-full max-w-xl rounded-2xl bg-white p-4 shadow-2xl">
+        <div className="text-base font-semibold text-slate-900">Завершить согласование</div>
+        <p className="mt-1 text-sm text-slate-500">
+          Вы последний согласующий по задаче. Выберите, что сделать после согласования.
+        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => void confirmApprovalChoice('complete')}
+            className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-left text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100"
+          >
+            Согласовать и завершить задачу
+            <span className="mt-1 block text-xs font-normal text-emerald-700">Задача сразу перейдет в статус «Готово».</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => void confirmApprovalChoice('returnToAssignee')}
+            className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-left text-sm font-semibold text-blue-800 transition hover:bg-blue-100"
+          >
+            Согласовать и отправить исполнителю
+            <span className="mt-1 block text-xs font-normal text-blue-700">Исполнитель получит уведомление, задача останется согласованной.</span>
+          </button>
+        </div>
+        <div className="mt-4 flex justify-end">
+          <button
+            type="button"
+            onClick={() => setApprovalChoice(null)}
+            className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
+          >
+            Отмена
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
 
   if (isModernChrome) {
     const TypeIcon = typeOption.icon;
@@ -6781,6 +6872,31 @@ function TaskModal({
                 ) : null}
               </section>
 
+              {canShowApprovalActions ? (
+                <section className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                  <div className="text-sm font-semibold text-emerald-900">Согласование</div>
+                  <div className="mt-1 text-xs text-emerald-700">
+                    Сейчас решение ожидается от вас.
+                  </div>
+                  <div className="mt-3 grid gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleApproveParticipant(currentApprovalParticipant!)}
+                      className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700"
+                    >
+                      Согласовать
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => state?.task && void onApprovalDecision(state.task.id, 'revisionRequested', form.result.trim(), currentApprovalParticipant?.id)}
+                      className="rounded-lg border border-orange-200 bg-white px-3 py-2 text-sm font-semibold text-orange-700 transition hover:bg-orange-50"
+                    >
+                      На доработку
+                    </button>
+                  </div>
+                </section>
+              ) : null}
+
               <section className="rounded-xl border border-slate-200 bg-white p-3">
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <span className="text-sm font-semibold text-slate-700">Метки</span>
@@ -6849,6 +6965,7 @@ function TaskModal({
             </div>
           </div>
         </div>
+        {approvalChoiceDialog}
       </div>
     );
   }
@@ -7360,11 +7477,11 @@ function TaskModal({
                             <div className="mt-0.5 text-xs text-slate-400">{statusLabel}</div>
                             {participant.resolution ? <div className="mt-1 text-xs text-slate-500">{participant.resolution}</div> : null}
                           </div>
-                          {!isReadOnly && isCurrentApprover && participant.approvalStatus !== 'approved' ? (
+                          {isCurrentApprover && participant.approvalStatus !== 'approved' ? (
                             <div className="flex shrink-0 gap-2">
                               <button
                                 type="button"
-                                onClick={() => onApprovalDecision(state.task!.id, 'approved', form.result.trim(), participant.id)}
+                                onClick={() => handleApproveParticipant(participant)}
                                 className="rounded-lg border border-emerald-200 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-50"
                               >
                                 Согласовать
@@ -7742,6 +7859,7 @@ function TaskModal({
           )}
         </div>
       </div>
+      {approvalChoiceDialog}
       <style>{`
         .form-input {
           height: 44px;

@@ -9,6 +9,7 @@ const DEFAULT_SETTINGS: TaskJournalSettingsDto = {
   restrictExecutorEditing: true,
   allowExecutorDeadlineChangeRequests: true,
   requireCompletionResult: true,
+  allowAdminCompleteAnyTask: true,
   taskCardWindowMode: 'legacy',
   caseInactivityAutomationEnabled: true,
   caseInactivityDays: 14,
@@ -184,6 +185,20 @@ export function TaskJournalSettings() {
           <span>
             <span className="block font-semibold text-gray-900">Требовать результат при завершении задачи</span>
             <span className="mt-1 block text-gray-500">Если выключено, задачу можно закрыть без описания результата. Право закрытия по ролям сохраняется без изменений.</span>
+          </span>
+        </label>
+
+        <label className="flex items-start gap-3 rounded-2xl border border-gray-200 bg-white p-4 text-sm text-gray-700">
+          <input
+            type="checkbox"
+            checked={settings.allowAdminCompleteAnyTask}
+            onChange={(event) => setSettings((prev) => ({ ...prev, allowAdminCompleteAnyTask: event.target.checked }))}
+            disabled={loading || saving}
+            className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+          />
+          <span>
+            <span className="block font-semibold text-gray-900">Администратор может завершать задачи в любом состоянии</span>
+            <span className="mt-1 block text-gray-500">Если включено, администратор может закрыть задачу даже до окончания согласования. Для сотрудников порядок согласования не меняется.</span>
           </span>
         </label>
       </div>

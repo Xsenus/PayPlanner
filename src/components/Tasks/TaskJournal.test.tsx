@@ -280,6 +280,7 @@ async function renderJournal(
     restrictExecutorEditing: true,
     allowExecutorDeadlineChangeRequests: true,
     requireCompletionResult: true,
+    allowAdminCompleteAnyTask: true,
     taskCardWindowMode: 'legacy',
     caseInactivityAutomationEnabled: true,
     caseInactivityDays: 14,
@@ -1178,6 +1179,64 @@ describe('TaskJournal', () => {
 
     expect(screen.queryByRole('button', { name: 'Согласовать' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'На доработку' })).toBeNull();
+  });
+
+  it('lets the current final approver choose whether to complete the task from view mode', async () => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Согласующий', email: 'approver@example.com' };
+    permissionsState.taskCanEdit = false;
+    await renderJournal([
+      createTask({
+        status: 'onApproval',
+        participants: [
+          { id: 77, userId: 7, role: 'approver', displayName: 'Согласующий', sortOrder: 0, approvalStatus: 'pending' },
+        ],
+      }),
+    ]);
+
+    fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+    expect(await screen.findByRole('heading', { name: 'Просмотр задачи' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Согласовать' }));
+    expect(screen.getByText('Завершить согласование')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /Согласовать и завершить задачу/ }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalApproval).toHaveBeenCalledWith(
+      101,
+      'approved',
+      '',
+      77,
+      'complete',
+    ));
+  });
+
+  it('lets the current final approver approve and return the task to the assignee', async () => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Согласующий', email: 'approver@example.com' };
+    permissionsState.taskCanEdit = false;
+    await renderJournal([
+      createTask({
+        status: 'onApproval',
+        participants: [
+          { id: 77, userId: 7, role: 'approver', displayName: 'Согласующий', sortOrder: 0, approvalStatus: 'pending' },
+        ],
+      }),
+    ]);
+
+    fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+    expect(await screen.findByRole('heading', { name: 'Просмотр задачи' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Согласовать' }));
+    fireEvent.click(screen.getByRole('button', { name: /Согласовать и отправить исполнителю/ }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalApproval).toHaveBeenCalledWith(
+      101,
+      'approved',
+      '',
+      77,
+      'returnToAssignee',
+    ));
   });
 
   it('shows agreed tasks as approved for the executor after approval', async () => {
@@ -2116,6 +2175,29 @@ describe('TaskJournal', () => {
     await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledTimes(1));
     expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(101, 'done', undefined);
     expect(toastMock.error).not.toHaveBeenCalledWith('Добавьте результат по задаче перед завершением.', 'Журнал задач');
+  });
+
+  it('sends a task with pending approvers to approval from the quick completion action', async () => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Исполнитель', email: 'assignee@example.com' };
+    await renderJournal([
+      createTask({
+        assigneeUserId: 7,
+        assigneeName: 'Исполнитель',
+        participants: [
+          { userId: 7, role: 'assignee', displayName: 'Исполнитель', approvalStatus: 'pending' },
+          { userId: 8, role: 'approver', displayName: 'Согласующий', approvalStatus: 'pending' },
+        ],
+      }),
+    ]);
+
+    fireEvent.click(screen.getAllByTitle('Завершить')[0]);
+
+    await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(101, 'onApproval', undefined));
+    expect(toastMock.error).not.toHaveBeenCalledWith(
+      'Задачу нельзя завершить, пока все согласующие не согласовали её.',
+      'Журнал задач',
+    );
   });
 
   it('sends an edited task to approval when approvers are configured', async () => {

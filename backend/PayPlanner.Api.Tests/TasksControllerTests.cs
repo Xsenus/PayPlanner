@@ -277,6 +277,7 @@ public class TasksControllerTests
             RestrictExecutorEditing = false,
             AllowExecutorDeadlineChangeRequests = false,
             RequireCompletionResult = false,
+            AllowAdminCompleteAnyTask = true,
             TaskCardWindowMode = "modern",
             CaseInactivityAutomationEnabled = false,
             CaseInactivityDays = 400,
@@ -292,6 +293,7 @@ public class TasksControllerTests
         Assert.False(dto.RestrictExecutorEditing);
         Assert.False(dto.AllowExecutorDeadlineChangeRequests);
         Assert.False(dto.RequireCompletionResult);
+        Assert.True(dto.AllowAdminCompleteAnyTask);
         Assert.Equal("modern", dto.TaskCardWindowMode);
         Assert.False(dto.CaseInactivityAutomationEnabled);
         Assert.Equal(365, dto.CaseInactivityDays);
@@ -3256,7 +3258,7 @@ public class TasksControllerTests
     public async Task UpdateStatus_DoneRequiresApprovedApprovers()
     {
         await using var db = await CreateContextAsync();
-        var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
+        var author = await CreateTaskUserAsync(db, "author@example.com", "Автор", canEdit: false);
         var approver = await CreateAdminUserAsync(db, "approver@example.com", "Согласующий");
         var client = await CreateClientAsync(db, "Иванов Иван Иванович");
         var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id, result: null);
@@ -3278,6 +3280,39 @@ public class TasksControllerTests
         }, CancellationToken.None);
 
         Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task UpdateStatus_AdminCanCompleteTaskWithPendingApproversWhenSettingEnabled()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateAdminUserAsync(db, "admin-force-complete@example.com", "Администратор");
+        var approver = await CreateAdminUserAsync(db, "approver-force-complete@example.com", "Согласующий");
+        var client = await CreateClientAsync(db, "Иванов Иван Иванович");
+        var task = await CreateTaskAsync(db, admin.Id, client.Id, admin.Id, result: null);
+        task.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = approver.Id,
+            Role = "approver",
+            DisplayName = approver.FullName,
+            Email = approver.Email,
+            ApprovalStatus = "pending",
+        });
+        await db.SaveChangesAsync();
+        var notifications = new RecordingNotificationService();
+        var controller = CreateController(db, notifications, admin);
+
+        var result = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "done",
+            Result = "Проверено администратором",
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(ok.Value);
+        Assert.Equal("done", dto.Status);
+        Assert.Equal("Проверено администратором", dto.Result);
+        Assert.Contains(task.Id, notifications.CompletedTaskIds);
     }
 
     [Fact]
@@ -3373,6 +3408,83 @@ public class TasksControllerTests
         Assert.Equal("revisionRequested", metadata.RootElement.GetProperty("decision").GetString());
         Assert.Equal("revision", metadata.RootElement.GetProperty("resultingStatus").GetString());
         Assert.Equal(approver.Id, metadata.RootElement.GetProperty("approverUserId").GetInt32());
+    }
+
+    [Fact]
+    public async Task UpdateApproval_FinalApproverCanApproveAndCompleteTask()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author-approval-complete@example.com", "Автор");
+        var approver = await CreateAdminUserAsync(db, "approver-approval-complete@example.com", "Согласующий");
+        var client = await CreateClientAsync(db, "Клиент финального согласования");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id, result: null);
+        task.Status = "onApproval";
+        task.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = approver.Id,
+            Role = "approver",
+            DisplayName = approver.FullName,
+            Email = approver.Email,
+            ApprovalStatus = "pending",
+        });
+        await db.SaveChangesAsync();
+        var notifications = new RecordingNotificationService();
+        var controller = CreateController(db, notifications, approver);
+
+        var result = await controller.UpdateApproval(task.Id, new UpdateTaskJournalApprovalRequest
+        {
+            Decision = "approved",
+            FinalAction = "complete",
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(ok.Value);
+        Assert.Equal("done", dto.Status);
+        Assert.Equal("Задача выполнена.", dto.Result);
+        Assert.Contains(dto.Participants, item =>
+            item.Role == "approver"
+            && item.UserId == approver.Id
+            && item.ApprovalStatus == "approved");
+        Assert.Contains(task.Id, notifications.CompletedTaskIds);
+    }
+
+    [Fact]
+    public async Task UpdateApproval_FinalApproverCanApproveAndReturnTaskToAssignee()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author-approval-return@example.com", "Автор");
+        var approver = await CreateAdminUserAsync(db, "approver-approval-return@example.com", "Согласующий");
+        var client = await CreateClientAsync(db, "Клиент возврата исполнителю");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id, result: null);
+        task.Status = "onApproval";
+        task.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = approver.Id,
+            Role = "approver",
+            DisplayName = approver.FullName,
+            Email = approver.Email,
+            ApprovalStatus = "pending",
+        });
+        await db.SaveChangesAsync();
+        var notifications = new RecordingNotificationService();
+        var controller = CreateController(db, notifications, approver);
+
+        var result = await controller.UpdateApproval(task.Id, new UpdateTaskJournalApprovalRequest
+        {
+            Decision = "approved",
+            FinalAction = "returnToAssignee",
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(ok.Value);
+        Assert.Equal("approved", dto.Status);
+        Assert.Equal(string.Empty, dto.Result);
+        Assert.Contains(dto.Participants, item =>
+            item.Role == "approver"
+            && item.UserId == approver.Id
+            && item.ApprovalStatus == "approved");
+        Assert.Empty(notifications.CompletedTaskIds);
+        Assert.Contains(notifications.ApprovalDecisionTaskIds, item => item.TaskId == task.Id && item.Decision == "approved");
     }
 
     [Fact]

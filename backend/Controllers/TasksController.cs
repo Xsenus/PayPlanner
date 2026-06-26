@@ -70,6 +70,7 @@ public class TasksController : ControllerBase
     private const string RestrictExecutorEditingSettingKey = "tasks.restrictExecutorEditing";
     private const string AllowExecutorDeadlineChangeRequestsSettingKey = "tasks.allowExecutorDeadlineChangeRequests";
     private const string RequireCompletionResultSettingKey = "tasks.requireCompletionResult";
+    private const string AllowAdminCompleteAnyTaskSettingKey = "tasks.allowAdminCompleteAnyTask";
     private const string TaskCardWindowModeSettingKey = "tasks.taskCardWindowMode";
     private const string TaskCardWindowModeLegacy = "legacy";
     private const string TaskCardWindowModeModern = "modern";
@@ -337,6 +338,7 @@ public class TasksController : ControllerBase
         await UpsertSystemSettingAsync(RestrictExecutorEditingSettingKey, request.RestrictExecutorEditing ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(AllowExecutorDeadlineChangeRequestsSettingKey, request.AllowExecutorDeadlineChangeRequests ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(RequireCompletionResultSettingKey, request.RequireCompletionResult ? "true" : "false", now, ct);
+        await UpsertSystemSettingAsync(AllowAdminCompleteAnyTaskSettingKey, request.AllowAdminCompleteAnyTask ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(TaskCardWindowModeSettingKey, taskCardWindowMode, now, ct);
         await UpsertSystemSettingAsync(CaseInactivityAutomationEnabledSettingKey, request.CaseInactivityAutomationEnabled ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(CaseInactivityAutomationDaysSettingKey, inactivityDays.ToString(), now, ct);
@@ -1490,7 +1492,8 @@ public class TasksController : ControllerBase
         var nextStatus = NormalizeEnumValue(request.Status, AllowedStatuses, "new");
         var nextResult = NormalizeCompletionResult(nextStatus, request.Result);
         var settings = await GetTaskJournalSettingsAsync(ct);
-        var statusValidation = ValidateStatusRules(nextStatus, nextResult, participants.Items, settings.RequireCompletionResult);
+        var createAllowAdminForceCompletion = CanAdminForceCompleteTask(access, settings, nextStatus);
+        var statusValidation = ValidateStatusRules(nextStatus, nextResult, participants.Items, settings.RequireCompletionResult, createAllowAdminForceCompletion);
         if (statusValidation is not null)
         {
             return BadRequest(new { message = statusValidation });
@@ -1597,7 +1600,8 @@ public class TasksController : ControllerBase
         var approvalQueueRestarted = ShouldRestartApprovalQueue(previousStatus, nextStatus);
         participants = ResetApprovalQueueIfStartingApproval(previousStatus, nextStatus, participants);
         var nextResult = NormalizeCompletionResult(nextStatus, request.Result);
-        var statusValidation = ValidateStatusRules(nextStatus, nextResult, participants.Items, settings.RequireCompletionResult);
+        var updateAllowAdminForceCompletion = CanAdminForceCompleteTask(access, settings, nextStatus);
+        var statusValidation = ValidateStatusRules(nextStatus, nextResult, participants.Items, settings.RequireCompletionResult, updateAllowAdminForceCompletion);
         if (statusValidation is not null)
         {
             return BadRequest(new { message = statusValidation });
@@ -1730,7 +1734,8 @@ public class TasksController : ControllerBase
         var requestedResult = NormalizeOptional(request.Result);
         var nextResult = NormalizeCompletionResult(nextStatus, requestedResult ?? entity.Result);
 
-        var statusValidation = ValidateStatusRules(nextStatus, nextResult, entity.Participants, settings.RequireCompletionResult);
+        var allowAdminForceCompletion = CanAdminForceCompleteTask(access, settings, nextStatus);
+        var statusValidation = ValidateStatusRules(nextStatus, nextResult, entity.Participants, settings.RequireCompletionResult, allowAdminForceCompletion);
         if (statusValidation is not null)
         {
             return BadRequest(new { message = statusValidation });
@@ -1986,7 +1991,8 @@ public class TasksController : ControllerBase
                 var oldResult = entity.Result;
                 var requestedResult = NormalizeOptional(request.Result);
                 var nextResult = NormalizeCompletionResult(nextStatus, requestedResult ?? entity.Result);
-                var statusValidation = ValidateStatusRules(nextStatus, nextResult, entity.Participants, settings.RequireCompletionResult);
+                var bulkAllowAdminForceCompletion = CanAdminForceCompleteTask(access, settings, nextStatus);
+                var statusValidation = ValidateStatusRules(nextStatus, nextResult, entity.Participants, settings.RequireCompletionResult, bulkAllowAdminForceCompletion);
                 if (statusValidation is not null)
                 {
                     continue;
@@ -2232,7 +2238,13 @@ public class TasksController : ControllerBase
             return BadRequest(new { message = "Сначала решение должен принять предыдущий согласующий." });
         }
 
+        var oldStatus = entity.Status;
         var resolution = NormalizeOptional(request.Resolution);
+        var finalAction = NormalizeApprovalFinalAction(request.FinalAction);
+        var completesTaskAfterApproval = string.Equals(finalAction, "complete", StringComparison.OrdinalIgnoreCase);
+        var isFinalApprovalDecision = string.Equals(decision, "approved", StringComparison.OrdinalIgnoreCase)
+            && approvers.All(item => ReferenceEquals(item, participant)
+                || string.Equals(item.ApprovalStatus, "approved", StringComparison.OrdinalIgnoreCase));
         participant.ApprovalStatus = decision;
         participant.Resolution = resolution;
         participant.RespondedAt = DateTime.UtcNow;
@@ -2244,7 +2256,12 @@ public class TasksController : ControllerBase
         }
         else if (approvers.All(item => string.Equals(item.ApprovalStatus, "approved", StringComparison.OrdinalIgnoreCase)))
         {
-            entity.Status = "approved";
+            entity.Status = isFinalApprovalDecision && completesTaskAfterApproval ? "done" : "approved";
+            if (string.Equals(entity.Status, "done", StringComparison.OrdinalIgnoreCase)
+                && string.IsNullOrWhiteSpace(entity.Result))
+            {
+                entity.Result = "Задача выполнена.";
+            }
         }
         else if (!string.Equals(entity.Status, "overdueApproval", StringComparison.OrdinalIgnoreCase))
         {
@@ -2265,9 +2282,11 @@ public class TasksController : ControllerBase
                 decision,
                 resolution,
                 resultingStatus = entity.Status,
+                finalAction,
                 approvalDueAt = entity.ApprovalDueAt,
                 respondedAt = participant.RespondedAt
             });
+        await SyncContractorPaymentAsync(entity, await ResolveContractorPaymentResultBaseDateAsync(oldStatus, entity.Status, entity.UpdatedAt, ct), ct);
         await _db.SaveChangesAsync(ct);
         await _notificationService.NotifyTaskApprovalDecisionAsync(
             entity,
@@ -2277,6 +2296,10 @@ public class TasksController : ControllerBase
             access.UserId,
             resolution,
             ct);
+        if (string.Equals(entity.Status, "done", StringComparison.OrdinalIgnoreCase))
+        {
+            await _notificationService.NotifyTaskCompletedAsync(entity, ct);
+        }
         await SafeSyncExternalCalendarTaskAsync(entity.Id, ct);
         return Ok(Map(entity));
     }
@@ -2835,6 +2858,7 @@ public class TasksController : ControllerBase
                 item.Key == RestrictExecutorEditingSettingKey ||
                 item.Key == AllowExecutorDeadlineChangeRequestsSettingKey ||
                 item.Key == RequireCompletionResultSettingKey ||
+                item.Key == AllowAdminCompleteAnyTaskSettingKey ||
                 item.Key == TaskCardWindowModeSettingKey ||
                 item.Key == CaseInactivityAutomationEnabledSettingKey ||
                 item.Key == CaseInactivityAutomationDaysSettingKey ||
@@ -2852,6 +2876,7 @@ public class TasksController : ControllerBase
             RestrictExecutorEditing = ParseBoolSetting(settings.GetValueOrDefault(RestrictExecutorEditingSettingKey), true),
             AllowExecutorDeadlineChangeRequests = ParseBoolSetting(settings.GetValueOrDefault(AllowExecutorDeadlineChangeRequestsSettingKey), true),
             RequireCompletionResult = ParseBoolSetting(settings.GetValueOrDefault(RequireCompletionResultSettingKey), true),
+            AllowAdminCompleteAnyTask = ParseBoolSetting(settings.GetValueOrDefault(AllowAdminCompleteAnyTaskSettingKey), true),
             TaskCardWindowMode = NormalizeTaskCardWindowMode(settings.GetValueOrDefault(TaskCardWindowModeSettingKey)),
             CaseInactivityAutomationEnabled = ParseBoolSetting(settings.GetValueOrDefault(CaseInactivityAutomationEnabledSettingKey), true),
             CaseInactivityDays = inactivityDays,
@@ -2867,6 +2892,21 @@ public class TasksController : ControllerBase
         return string.Equals(value, TaskCardWindowModeModern, StringComparison.OrdinalIgnoreCase)
             ? TaskCardWindowModeModern
             : TaskCardWindowModeLegacy;
+    }
+
+    private static string NormalizeApprovalFinalAction(string? value)
+    {
+        if (string.Equals(value, "complete", StringComparison.OrdinalIgnoreCase))
+        {
+            return "complete";
+        }
+
+        if (string.Equals(value, "returnToAssignee", StringComparison.OrdinalIgnoreCase))
+        {
+            return "returnToAssignee";
+        }
+
+        return string.Empty;
     }
 
     private async Task UpsertSystemSettingAsync(string key, string value, DateTime nowUtc, CancellationToken ct)
@@ -3982,7 +4022,8 @@ public class TasksController : ControllerBase
         string status,
         string? result,
         IEnumerable<TaskParticipantDraft> participants,
-        bool requireCompletionResult)
+        bool requireCompletionResult,
+        bool allowPendingApproverCompletion = false)
     {
         var approvers = participants
             .Where(participant => string.Equals(participant.Role, "approver", StringComparison.OrdinalIgnoreCase))
@@ -3994,7 +4035,8 @@ public class TasksController : ControllerBase
             approvers.Count,
             approvers.Count == 0 || approvers.All(participant =>
             string.Equals(participant.ApprovalStatus, "approved", StringComparison.OrdinalIgnoreCase)),
-            requireCompletionResult);
+            requireCompletionResult,
+            allowPendingApproverCompletion);
     }
 
     private static TaskParticipantsResolution ResetApprovalQueueIfStartingApproval(
@@ -4061,7 +4103,8 @@ public class TasksController : ControllerBase
         string status,
         string? result,
         IEnumerable<TaskJournalParticipant> participants,
-        bool requireCompletionResult)
+        bool requireCompletionResult,
+        bool allowPendingApproverCompletion = false)
     {
         var approvers = participants
             .Where(participant => string.Equals(participant.Role, "approver", StringComparison.OrdinalIgnoreCase))
@@ -4073,10 +4116,17 @@ public class TasksController : ControllerBase
             approvers.Count,
             approvers.Count == 0 || approvers.All(participant =>
                 string.Equals(participant.ApprovalStatus, "approved", StringComparison.OrdinalIgnoreCase)),
-            requireCompletionResult);
+            requireCompletionResult,
+            allowPendingApproverCompletion);
     }
 
-    private static string? ValidateStatusRules(string status, string? result, int approverCount, bool allApproversApproved, bool requireCompletionResult)
+    private static string? ValidateStatusRules(
+        string status,
+        string? result,
+        int approverCount,
+        bool allApproversApproved,
+        bool requireCompletionResult,
+        bool allowPendingApproverCompletion = false)
     {
         if (string.Equals(status, "done", StringComparison.OrdinalIgnoreCase)
             && requireCompletionResult
@@ -4087,7 +4137,8 @@ public class TasksController : ControllerBase
 
         if (string.Equals(status, "done", StringComparison.OrdinalIgnoreCase)
             && approverCount > 0
-            && !allApproversApproved)
+            && !allApproversApproved
+            && !allowPendingApproverCompletion)
         {
             return "Нельзя завершить задачу, пока все согласующие не согласовали задачу.";
         }
@@ -4401,6 +4452,14 @@ public class TasksController : ControllerBase
         => access.IsAdmin
             || CanFullyModifyTask(entity, access, access.Permission?.CanEdit == true, settings)
             || CanPostTaskComment(entity, access);
+
+    private static bool CanAdminForceCompleteTask(
+        TaskAccess access,
+        TaskJournalSettingsDto settings,
+        string? nextStatus)
+        => access.IsAdmin
+           && settings.AllowAdminCompleteAnyTask
+           && string.Equals(nextStatus, "done", StringComparison.OrdinalIgnoreCase);
 
     private static bool CanPostTaskComment(TaskJournalItem entity, TaskAccess access)
     {

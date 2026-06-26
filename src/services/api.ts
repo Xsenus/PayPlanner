@@ -1598,6 +1598,7 @@ export interface TaskJournalSettingsDto {
   restrictExecutorEditing: boolean;
   allowExecutorDeadlineChangeRequests: boolean;
   requireCompletionResult: boolean;
+  allowAdminCompleteAnyTask: boolean;
   taskCardWindowMode: 'legacy' | 'modern';
   caseInactivityAutomationEnabled: boolean;
   caseInactivityDays: number;
@@ -1627,6 +1628,7 @@ export interface UpdateTaskJournalSettingsRequest {
   restrictExecutorEditing: boolean;
   allowExecutorDeadlineChangeRequests: boolean;
   requireCompletionResult: boolean;
+  allowAdminCompleteAnyTask: boolean;
   taskCardWindowMode: 'legacy' | 'modern';
   caseInactivityAutomationEnabled: boolean;
   caseInactivityDays: number;
@@ -4064,10 +4066,16 @@ export class ApiService {
     });
   }
 
-  async updateTaskJournalApproval(id: number, decision: 'approved' | 'revisionRequested', resolution?: string, participantId?: number) {
+  async updateTaskJournalApproval(
+    id: number,
+    decision: 'approved' | 'revisionRequested',
+    resolution?: string,
+    participantId?: number,
+    finalAction?: 'complete' | 'returnToAssignee',
+  ) {
     return this.request<TaskJournalItem>(`/tasks/${id}/approval`, {
       method: 'PATCH',
-      body: JSON.stringify({ decision, resolution, participantId }),
+      body: JSON.stringify({ decision, resolution, participantId, finalAction }),
     });
   }
 
