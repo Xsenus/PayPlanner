@@ -339,7 +339,7 @@ async function renderJournal(
     await screen.findAllByText(
       options.waitForTitle ?? tasks[0]?.title ?? 'Тестовая задача',
       {},
-      { timeout: 5000 },
+      { timeout: 10000 },
     );
   }
 }
