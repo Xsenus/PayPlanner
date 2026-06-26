@@ -32,6 +32,9 @@ public class PaymentsV2Controller : ControllerBase
     private Task<DataVisibilityAccess?> ResolvePaymentsVisibilityAsync(CancellationToken ct)
         => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
 
+    private ActionResult MissingPaymentsVisibilityResult()
+        => User.GetUserId().HasValue ? Forbid() : Unauthorized();
+
     private Task<TimeZoneInfo> ResolvePaymentTimeZoneAsync(CancellationToken ct)
         => CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
 
@@ -89,7 +92,7 @@ public class PaymentsV2Controller : ControllerBase
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 500);
         var visibility = await ResolvePaymentsVisibilityAsync(ct);
-        if (visibility is null) return Unauthorized();
+        if (visibility is null) return MissingPaymentsVisibilityResult();
 
         var query = BuildPaymentsQuery(
             visibility,
@@ -173,7 +176,7 @@ public class PaymentsV2Controller : ControllerBase
         CancellationToken ct = default)
     {
         var visibility = await ResolvePaymentsVisibilityAsync(ct);
-        if (visibility is null) return Unauthorized();
+        if (visibility is null) return MissingPaymentsVisibilityResult();
         if (!await CanExportPaymentsAsync(ct)) return Forbid();
 
         var timeZone = await ResolvePaymentTimeZoneAsync(ct);
@@ -235,7 +238,7 @@ public class PaymentsV2Controller : ControllerBase
         CancellationToken ct = default)
     {
         var visibility = await ResolvePaymentsVisibilityAsync(ct);
-        if (visibility is null) return Unauthorized();
+        if (visibility is null) return MissingPaymentsVisibilityResult();
         if (!await CanExportPaymentsAsync(ct)) return Forbid();
 
         var timeZone = await ResolvePaymentTimeZoneAsync(ct);
@@ -275,7 +278,7 @@ public class PaymentsV2Controller : ControllerBase
     public async Task<IActionResult> GetById(int id, CancellationToken ct)
     {
         var visibility = await ResolvePaymentsVisibilityAsync(ct);
-        if (visibility is null) return Unauthorized();
+        if (visibility is null) return MissingPaymentsVisibilityResult();
 
         var entity = await _db.Payments
             .WithPaymentIncludes()
@@ -338,7 +341,7 @@ public class PaymentsV2Controller : ControllerBase
         }
 
         var visibility = await ResolvePaymentsVisibilityAsync(ct);
-        if (visibility is null) return Unauthorized();
+        if (visibility is null) return MissingPaymentsVisibilityResult();
         var canAccessPayment = await _db.Payments
             .AsNoTracking()
             .ApplyPaymentVisibility(visibility)
@@ -506,7 +509,7 @@ public class PaymentsV2Controller : ControllerBase
         }
 
         var visibility = await ResolvePaymentsVisibilityAsync(ct);
-        if (visibility is null) return Unauthorized();
+        if (visibility is null) return MissingPaymentsVisibilityResult();
         var canAccessPayment = await _db.Payments
             .AsNoTracking()
             .ApplyPaymentVisibility(visibility)

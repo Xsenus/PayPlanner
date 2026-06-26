@@ -63,6 +63,9 @@ public class ContractsController : ControllerBase
     private Task<DataVisibilityAccess?> ResolveContractsVisibilityAsync(CancellationToken ct)
         => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Contracts, ct);
 
+    private ActionResult MissingContractsVisibilityResult()
+        => User.GetUserId().HasValue ? Forbid() : Unauthorized();
+
     private async Task<bool> IsDatabaseAdminAsync(CancellationToken ct)
         => await _db.IsUserAdminOrLegacyFallbackAsync(User, ct);
 
@@ -342,7 +345,7 @@ public class ContractsController : ControllerBase
         var visibility = await ResolveContractsVisibilityAsync(ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return MissingContractsVisibilityResult();
         }
 
         var normalizedStatus = NormalizeContractStatusOrNull(status);
@@ -367,7 +370,7 @@ public class ContractsController : ControllerBase
         var visibility = await ResolveContractsVisibilityAsync(ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return MissingContractsVisibilityResult();
         }
 
         var contract = await BuildContractDetailQuery(visibility).FirstOrDefaultAsync(c => c.Id == id, ct);
@@ -1112,7 +1115,7 @@ public class ContractsController : ControllerBase
         var visibility = await ResolveContractsVisibilityAsync(ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return MissingContractsVisibilityResult();
         }
         if (await RequireSectionPermissionAsync(RolePermissionCatalog.Contracts, permission => permission.CanEdit, ct) is { } forbidden)
         {

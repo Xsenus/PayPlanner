@@ -78,6 +78,9 @@ public class InvoicesController : ControllerBase
             ? null
             : Forbid();
 
+    private ActionResult MissingAccountsVisibilityResult()
+        => User.GetUserId().HasValue ? Forbid() : Unauthorized();
+
     private async Task<bool> IsCurrentUserAdminAsync(CancellationToken ct)
         => await _db.IsUserAdminOrLegacyFallbackAsync(User, ct);
 
@@ -259,7 +262,7 @@ public class InvoicesController : ControllerBase
         var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return MissingAccountsVisibilityResult();
         }
         var effectiveResponsibleId = ResolveVisibleResponsibleId(responsibleId, visibility);
 
@@ -374,7 +377,7 @@ public class InvoicesController : ControllerBase
         var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return MissingAccountsVisibilityResult();
         }
         var effectiveResponsibleId = ResolveVisibleResponsibleId(responsibleId, visibility);
 
@@ -497,7 +500,7 @@ public class InvoicesController : ControllerBase
         var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return MissingAccountsVisibilityResult();
         }
 
         var raw = await BuildInvoiceQuery(visibility)
@@ -686,7 +689,7 @@ public class InvoicesController : ControllerBase
         var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return MissingAccountsVisibilityResult();
         }
         if (await RequireAccountsPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
         {
@@ -716,7 +719,7 @@ public class InvoicesController : ControllerBase
         var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return MissingAccountsVisibilityResult();
         }
         if (await RequireAccountsPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
         {
@@ -745,7 +748,7 @@ public class InvoicesController : ControllerBase
         var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return MissingAccountsVisibilityResult();
         }
         if (await RequireAccountsPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
         {
@@ -774,7 +777,7 @@ public class InvoicesController : ControllerBase
         var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return MissingAccountsVisibilityResult();
         }
         if (await RequireAccountsPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
         {
@@ -877,7 +880,7 @@ public class InvoicesController : ControllerBase
         var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return MissingAccountsVisibilityResult();
         }
         if (await RequireAccountsPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
         {
@@ -1329,7 +1332,7 @@ public class InvoicesController : ControllerBase
         var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return MissingAccountsVisibilityResult();
         }
         if (await RequireAccountsPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
         {
@@ -2394,7 +2397,7 @@ public class InvoicesController : ControllerBase
         var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return MissingAccountsVisibilityResult();
         }
         if (await RequireAccountsPermissionAsync(permission => permission.CanDelete, ct) is { } forbidden)
         {
@@ -2446,7 +2449,7 @@ public class InvoicesController : ControllerBase
         var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return MissingAccountsVisibilityResult();
         }
         if (await RequireAccountsPermissionAsync(permission => permission.CanDelete, ct) is { } forbidden)
         {
@@ -2627,7 +2630,7 @@ public class InvoicesController : ControllerBase
         var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return MissingAccountsVisibilityResult();
         }
         var paymentsQuery = BuildEditableInvoicePaymentsQuery(visibility);
 

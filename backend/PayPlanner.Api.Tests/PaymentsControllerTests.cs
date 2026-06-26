@@ -839,6 +839,26 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task PaymentsV1AndV2_List_ForbidAuthenticatedUserWithoutPaymentsView()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreatePaymentsUserAsync(db, canExport: false, canView: false);
+        var v1 = CreatePaymentsV1Controller(db, user.Id);
+        var v2 = CreatePaymentsV2Controller(db, user.Id);
+
+        var v1Result = await v1.Get(null, null, null, null, ct: CancellationToken.None);
+        var v2Result = await v2.Get(
+            from: null,
+            to: null,
+            clientId: null,
+            caseId: null,
+            ct: CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(v1Result);
+        Assert.IsType<ForbidResult>(v2Result.Result);
+    }
+
+    [Fact]
     public async Task PaymentsV2_FiltersByLegalEntityAndRole()
     {
         await using var db = await CreateContextAsync();
@@ -6127,7 +6147,8 @@ public class PaymentsControllerTests
         PaymentContext db,
         bool canExport,
         bool canEdit = true,
-        string viewScope = DataVisibilityScope.All)
+        string viewScope = DataVisibilityScope.All,
+        bool canView = true)
     {
         var role = new Role
         {
@@ -6141,7 +6162,7 @@ public class PaymentsControllerTests
         {
             RoleId = role.Id,
             Section = RolePermissionCatalog.Payments,
-            CanView = true,
+            CanView = canView,
             CanCreate = true,
             CanEdit = canEdit,
             CanDelete = true,

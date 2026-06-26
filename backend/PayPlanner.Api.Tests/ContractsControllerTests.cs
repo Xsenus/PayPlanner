@@ -23,6 +23,38 @@ namespace PayPlanner.Api.Tests;
 public class ContractsControllerTests
 {
     [Fact]
+    public async Task Get_ForbidsAuthenticatedUserWithoutContractsView()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateContractUserAsync(
+            db,
+            "contracts-no-view",
+            canCreate: false,
+            canEdit: false,
+            canDelete: false,
+            canView: false);
+        var controller = CreateControllerForUser(db, user.Id);
+
+        var result = await controller.Get(
+            from: null,
+            to: null,
+            clientId: null,
+            search: null,
+            sortBy: null,
+            sortDir: null,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None,
+            status: null,
+            invoiceId: null,
+            actId: null,
+            paymentId: null,
+            legalEntityId: null);
+
+        Assert.IsType<ForbidResult>(result);
+    }
+
+    [Fact]
     public async Task Create_RequiresAmount_WhenBillingModeIsFixed()
     {
         await using var db = await CreateContextAsync();
