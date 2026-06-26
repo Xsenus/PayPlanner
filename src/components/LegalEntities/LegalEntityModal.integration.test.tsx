@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LegalEntityModal } from './LegalEntityModal';
 import { apiService } from '../../services/api';
 import type {
+  ActsSummary,
+  InvoiceSummary,
   LegalEntityDadataDetails,
   LegalEntityDetail,
   LegalEntitySuggestion,
@@ -12,11 +14,27 @@ import type {
 
 const {
   confirmMock,
+  emptyActsSummary,
+  emptyInvoiceSummary,
   toastErrorMock,
   toastInfoMock,
   toastSuccessMock,
 } = vi.hoisted(() => ({
   confirmMock: vi.fn(),
+  emptyActsSummary: {
+    created: { amount: 0, count: 0 },
+    transferred: { amount: 0, count: 0 },
+    signed: { amount: 0, count: 0 },
+    terminated: { amount: 0, count: 0 },
+    totalAmount: 0,
+    totalCount: 0,
+  } satisfies ActsSummary,
+  emptyInvoiceSummary: {
+    total: { amount: 0, count: 0 },
+    pending: { amount: 0, count: 0 },
+    paid: { amount: 0, count: 0 },
+    overdue: { amount: 0, count: 0 },
+  } satisfies InvoiceSummary,
   toastErrorMock: vi.fn(),
   toastInfoMock: vi.fn(),
   toastSuccessMock: vi.fn(),
@@ -60,11 +78,11 @@ vi.mock('../../services/api', () => ({
   apiService: {
     getActResponsibles: vi.fn().mockResolvedValue([]),
     getActs: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 5 }),
-    getActsSummary: vi.fn().mockResolvedValue(null),
+    getActsSummary: vi.fn().mockResolvedValue(emptyActsSummary),
     getCasesV1: vi.fn().mockResolvedValue([]),
     getClientsV2: vi.fn().mockResolvedValue({ items: [], total: 0 }),
     getInvoices: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 5 }),
-    getInvoicesSummary: vi.fn().mockResolvedValue(null),
+    getInvoicesSummary: vi.fn().mockResolvedValue(emptyInvoiceSummary),
     getLegalEntityCaseFinanceSummaries: vi.fn().mockResolvedValue([]),
     getLegalEntities: vi.fn().mockResolvedValue([]),
     getMainCompanySettings: vi.fn().mockResolvedValue({
@@ -146,9 +164,9 @@ describe('LegalEntityModal integration', () => {
     });
     vi.mocked(apiService.getCasesV1).mockResolvedValue([]);
     vi.mocked(apiService.getInvoices).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 5 });
-    vi.mocked(apiService.getInvoicesSummary).mockResolvedValue(null);
+    vi.mocked(apiService.getInvoicesSummary).mockResolvedValue(emptyInvoiceSummary);
     vi.mocked(apiService.getActs).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 5 });
-    vi.mocked(apiService.getActsSummary).mockResolvedValue(null);
+    vi.mocked(apiService.getActsSummary).mockResolvedValue(emptyActsSummary);
     vi.mocked(apiService.getPaymentsV2).mockResolvedValue({
       items: [],
       total: 0,

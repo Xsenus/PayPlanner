@@ -204,6 +204,9 @@ export function PaymentsTable({
                   className="block w-full text-left text-blue-600 hover:underline"
                   onClick={(event) => {
                     event.stopPropagation();
+                    if (!onOpenClient || !payment.clientId) {
+                      return;
+                    }
                     onOpenClient(payment.clientId as number, canOpenCases ? payment.clientCaseId ?? undefined : undefined);
                   }}>
                   <span className="block font-medium">
