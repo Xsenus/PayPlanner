@@ -109,6 +109,8 @@ jobs:
           port: ${{ secrets.VPS_PORT || 22 }}
           source: "${{ env.TAR_NAME }}"
           target: "/tmp"
+          timeout: 180s
+          command_timeout: 15m
 
       - name: Deploy on VPS
         uses: appleboy/ssh-action@v1.2.0
@@ -122,6 +124,8 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
+          timeout: 180s
+          command_timeout: 20m
           envs: PAYPLANNER_WEBPUSH_ENABLED,PAYPLANNER_WEBPUSH_PUBLIC_KEY,PAYPLANNER_WEBPUSH_PRIVATE_KEY,PAYPLANNER_WEBPUSH_SUBJECT
           script: |
             set -euo pipefail
