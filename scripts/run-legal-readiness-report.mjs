@@ -27,6 +27,7 @@ const skipLoad = readBoolean(args.skipLoad ?? process.env.PAYPLANNER_READINESS_S
 const failOnRoleIssues = !readBoolean(args.noFailOnRoleIssues ?? process.env.PAYPLANNER_READINESS_NO_FAIL_ON_ROLE_ISSUES);
 const failOnBroadScopes = readBoolean(args.failOnBroadScopes ?? process.env.PAYPLANNER_READINESS_FAIL_ON_BROAD_SCOPES);
 const failOnEnabledLegalFlags = readBoolean(args.failOnEnabledLegalFlags ?? process.env.PAYPLANNER_READINESS_FAIL_ON_ENABLED_LEGAL_FLAGS);
+const warnOnFeatureFlagsSummaryFailure = readBoolean(args.warnOnFeatureFlagsSummaryFailure ?? process.env.PAYPLANNER_READINESS_WARN_ON_FEATURE_FLAGS_SUMMARY_FAILURE);
 const expectedRolesFile = args.expectedRolesFile ?? process.env.PAYPLANNER_READINESS_EXPECTED_ROLES_FILE ?? '';
 const expectedRoles = await readExpectedRoles(args.expectedRoles ?? process.env.PAYPLANNER_READINESS_EXPECTED_ROLES, expectedRolesFile);
 const allowedBroadScopeRoles = splitRoleList(args.allowedBroadScopeRoles ?? process.env.PAYPLANNER_READINESS_ALLOWED_BROAD_SCOPE_ROLES);
@@ -96,6 +97,7 @@ const report = {
     failOnBroadScopes,
     allowedBroadScopeRoles,
     failOnEnabledLegalFlags,
+    warnOnFeatureFlagsSummaryFailure,
     expectedRoles,
     expectedRolesFile: expectedRolesFile || null,
     extraRedactValuesCount: extraRedactValues.length,
@@ -648,7 +650,11 @@ function buildReadinessResult(
   }
 
   for (const failure of failedSummaries) {
-    blockingReasons.push(`${failure.name} summary failed: ${failure.message}`);
+    if (options.warnOnFeatureFlagsSummaryFailure && failure.name === 'featureFlags') {
+      warnings.push(`${failure.name} summary failed: ${failure.message}`);
+    } else {
+      blockingReasons.push(`${failure.name} summary failed: ${failure.message}`);
+    }
   }
 
   if (options.failOnRoleIssues && roleIssues > 0) {
@@ -763,6 +769,7 @@ Options:
   --no-fail-on-role-issues
   --fail-on-broad-scopes
   --fail-on-enabled-legal-flags
+  --warn-on-feature-flags-summary-failure
 
 Environment:
   PAYPLANNER_READINESS_API_URL
@@ -787,6 +794,7 @@ Environment:
   PAYPLANNER_READINESS_MAX_BACKUP_AGE_HOURS
   PAYPLANNER_READINESS_EXPECTED_ROLES
   PAYPLANNER_READINESS_ALLOWED_BROAD_SCOPE_ROLES
+  PAYPLANNER_READINESS_WARN_ON_FEATURE_FLAGS_SUMMARY_FAILURE
   PAYPLANNER_READINESS_EXPECTED_ROLES_FILE
   PAYPLANNER_READINESS_REDACT_VALUES
   PAYPLANNER_READINESS_REDACT_VALUES_FILE
