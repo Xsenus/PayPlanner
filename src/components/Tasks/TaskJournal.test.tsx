@@ -289,9 +289,10 @@ async function renderJournal(
     caseInactivityEscalationUserId: null,
     ...options.settings,
   });
+  const currentUserId = authState.user.id;
   const filterStorageKey = options.mode === 'approvals'
-    ? 'pp.task_journal.filters.v1.approvals.user:7'
-    : 'pp.task_journal.filters.v1.user:7';
+    ? `pp.task_journal.filters.v1.approvals.user:${currentUserId}`
+    : `pp.task_journal.filters.v1.user:${currentUserId}`;
   if (!window.localStorage.getItem(filterStorageKey)) {
     window.localStorage.setItem(filterStorageKey, JSON.stringify({
       quickFilter: 'all',
