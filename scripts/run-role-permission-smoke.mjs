@@ -96,8 +96,6 @@ async function checkAllowedEndpoints() {
     ['/auth/me', 'profile'],
     ['/tasks?page=1&pageSize=1', 'tasks list'],
     ['/tasks/settings', 'task settings'],
-    ['/v2/clients?page=1&pageSize=1', 'clients list'],
-    ['/v2/cases?page=1&pageSize=1&scope=active&activity=all&inactiveDays=14&sortBy=lastViewedAt&sortDir=desc', 'cases list'],
   ];
 
   for (const [path, label] of allowed) {
@@ -112,6 +110,8 @@ async function checkAllowedEndpoints() {
 
 async function checkForbiddenEndpoints() {
   const forbidden = [
+    ['/v2/clients?page=1&pageSize=1', 'clients list'],
+    ['/v2/cases?page=1&pageSize=1&scope=active&activity=all&inactiveDays=14&sortBy=lastViewedAt&sortDir=desc', 'cases list'],
     ['/v2/payments?page=1&pageSize=1', 'payments list'],
     ['/invoices?page=1&pageSize=1', 'accounts list'],
     ['/acts?page=1&pageSize=1', 'acts list'],
@@ -136,12 +136,12 @@ async function checkForbiddenEndpoints() {
 function assertLawyerTemplate(permissions) {
   assertSectionOpen(permissions.tasks, 'tasks', 'own');
   assertSectionOpen(permissions.calendar, 'calendar', 'own');
-  assertSectionOpen(permissions.clients, 'clients', 'own');
-  assertSectionOpen(permissions.cases, 'cases', 'own');
   assertSectionOpen(permissions.notifications, 'notifications');
 
   for (const [section, key] of [
     ['legalEntities', 'legalEntities'],
+    ['clients', 'clients'],
+    ['cases', 'cases'],
     ['accounts', 'accounts'],
     ['acts', 'acts'],
     ['payments', 'payments'],

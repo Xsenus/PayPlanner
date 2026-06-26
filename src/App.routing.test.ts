@@ -119,8 +119,6 @@ function createLawyerTemplatePermissions(): RolePermissions {
     ...defaultRestrictedRolePermissions,
     calendar: { ...workLimitedSection, canViewAnalytics: false, visibleUserIds: [] },
     tasks: { ...workLimitedSection },
-    clients: { ...workLimitedSection },
-    cases: { ...workLimitedSection },
     notifications: { ...readOnlySection, canEdit: true },
   };
 }
@@ -428,8 +426,8 @@ describe('App real role route access matrix', () => {
     },
     {
       role: 'lawyer' as const,
-      allowedTabs: ['calendar', 'tasks', 'tasksCalendar', 'clients', 'cases', 'notifications', 'settings'] as Tab[],
-      deniedTabs: ['accounts', 'acts', 'payments', 'contracts', 'reports', 'roles', 'audit', 'yandexDisk', 's3Storage', 'companyProfile', 'users', 'userDetail', 'userActivity'] as Tab[],
+      allowedTabs: ['calendar', 'tasks', 'tasksCalendar', 'notifications', 'settings'] as Tab[],
+      deniedTabs: ['clients', 'clientDetail', 'contacts', 'contactsClients', 'contactsExternal', 'cases', 'caseDetail', 'accounts', 'acts', 'payments', 'contracts', 'reports', 'roles', 'audit', 'yandexDisk', 's3Storage', 'companyProfile', 'users', 'userDetail', 'userActivity'] as Tab[],
     },
     {
       role: 'accountant' as const,
@@ -473,13 +471,6 @@ describe('App real role route access matrix', () => {
       'tasksControl',
       'tasksApprovals',
       'tasksCalendar',
-      'cases',
-      'caseDetail',
-      'clients',
-      'contacts',
-      'contactsClients',
-      'contactsExternal',
-      'clientDetail',
       'settings',
     ]);
 

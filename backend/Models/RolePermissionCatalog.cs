@@ -249,8 +249,6 @@ public static class RolePermissionCatalog
 
         defaults[Calendar] = WorkLimited(Calendar);
         defaults[Tasks] = WorkLimited(Tasks);
-        defaults[Clients] = WorkLimited(Clients);
-        defaults[Cases] = WorkLimited(Cases);
         defaults[Notifications] = new(
             CanView: true,
             CanCreate: false,

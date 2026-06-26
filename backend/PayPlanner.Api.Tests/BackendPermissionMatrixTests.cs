@@ -396,8 +396,8 @@ public class BackendPermissionMatrixTests
         Assert.True(defaults[RolePermissionCatalog.Tasks].CanView);
         Assert.True(defaults[RolePermissionCatalog.Tasks].CanCreate);
         Assert.True(defaults[RolePermissionCatalog.Calendar].CanView);
-        Assert.True(defaults[RolePermissionCatalog.Clients].CanView);
-        Assert.True(defaults[RolePermissionCatalog.Cases].CanView);
+        Assert.False(defaults[RolePermissionCatalog.Clients].CanView);
+        Assert.False(defaults[RolePermissionCatalog.Cases].CanView);
         Assert.True(defaults[RolePermissionCatalog.Notifications].CanView);
         Assert.Equal(DataVisibilityScope.Own, defaults[RolePermissionCatalog.Tasks].ViewScope);
         Assert.Equal(DataVisibilityScope.Own, defaults[RolePermissionCatalog.Clients].ViewScope);
@@ -405,6 +405,8 @@ public class BackendPermissionMatrixTests
 
         foreach (var section in new[]
         {
+            RolePermissionCatalog.Clients,
+            RolePermissionCatalog.Cases,
             RolePermissionCatalog.Payments,
             RolePermissionCatalog.Accounts,
             RolePermissionCatalog.Acts,
@@ -442,8 +444,6 @@ public class BackendPermissionMatrixTests
         {
             RolePermissionCatalog.Tasks,
             RolePermissionCatalog.Calendar,
-            RolePermissionCatalog.Clients,
-            RolePermissionCatalog.Cases,
             RolePermissionCatalog.Notifications,
         })
         {
@@ -452,6 +452,8 @@ public class BackendPermissionMatrixTests
 
         foreach (var section in new[]
         {
+            RolePermissionCatalog.Clients,
+            RolePermissionCatalog.Cases,
             RolePermissionCatalog.Payments,
             RolePermissionCatalog.Accounts,
             RolePermissionCatalog.Acts,

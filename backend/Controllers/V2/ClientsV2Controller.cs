@@ -22,6 +22,9 @@ public class ClientsV2Controller : ControllerBase
     private Task<DataVisibilityAccess?> GetCurrentAccessAsync(CancellationToken ct)
         => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Clients, ct);
 
+    private ActionResult MissingClientsVisibilityResult()
+        => User.GetUserId().HasValue ? Forbid() : Unauthorized();
+
     private async Task<IActionResult?> RequireClientsPermissionAsync(
         Func<RolePermissionValues, bool> isAllowed,
         CancellationToken ct)
@@ -107,7 +110,7 @@ public class ClientsV2Controller : ControllerBase
         var access = await GetCurrentAccessAsync(ct);
         if (access is null)
         {
-            return Unauthorized();
+            return MissingClientsVisibilityResult();
         }
 
         var q = BuildVisibleClientsQuery(access)

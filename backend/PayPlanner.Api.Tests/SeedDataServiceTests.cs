@@ -63,8 +63,8 @@ public class SeedDataServiceTests
         Assert.True(permissions[RolePermissionCatalog.Tasks].CanView);
         Assert.True(permissions[RolePermissionCatalog.Tasks].CanCreate);
         Assert.True(permissions[RolePermissionCatalog.Calendar].CanView);
-        Assert.True(permissions[RolePermissionCatalog.Clients].CanView);
-        Assert.True(permissions[RolePermissionCatalog.Cases].CanView);
+        Assert.False(permissions[RolePermissionCatalog.Clients].CanView);
+        Assert.False(permissions[RolePermissionCatalog.Cases].CanView);
         Assert.True(permissions[RolePermissionCatalog.Notifications].CanView);
         Assert.Equal(DataVisibilityScope.Own, permissions[RolePermissionCatalog.Tasks].ViewScope);
         Assert.Equal(DataVisibilityScope.Own, permissions[RolePermissionCatalog.Clients].ViewScope);
