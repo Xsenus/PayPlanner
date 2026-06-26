@@ -86,7 +86,7 @@
 
 ## Матрица разделов для проверки
 
-- [~] Календарь: меню, страница, события, таблица платежей в календаре, аналитика календаря, Google/Yandex calendar panels; таблица и карточки платежей в календаре уже не открывают клиентов/дела без прав `clients/cases`, встроенный CRM-календарь задач открывается только при `tasks.canView`, а сводная аналитика календаря скрыта и заменяется сообщением без `calendar.canViewAnalytics`.
+- [x] Календарь: меню, страница, события, таблица платежей в календаре, аналитика календаря, Google/Yandex calendar panels; таблица и карточки платежей в календаре уже не открывают клиентов/дела без прав `clients/cases`, встроенный CRM-календарь задач открывается только при `tasks.canView`, сводная аналитика календаря скрыта и заменяется сообщением без `calendar.canViewAnalytics`, личные панели подключения Google/Яндекс календарей в профиле скрыты без `calendar.canView`, а backend endpoints Google/Yandex calendar закрыты `RequireSectionPermission(Calendar)`.
 - [~] Задачи: журнал задач, контроль, согласования, календарь задач, карточка задачи, старая и новая форма, комментарии, файлы, подзадачи; журнал задач уже скрывает создание, календарное создание, автосоздание контрольных задач, дублирование, удаление и массовое удаление по правам `tasks.canCreate/tasks.canDelete`, включая старую и новую карточку задачи; поле комментария в карточке задачи показывается только пользователям, которым разрешено комментировать эту задачу; отправка файлов задачи на Я.Диск показывается только при правах `tasks.canExport` и `yandexDisk.canCreate`.
 - [x] Заметки: список досок, карточки заметок, совместный доступ, SignalR hub, inbox и уведомления проверяют `notes.canView/canCreate/canEdit/canDelete`; toast по заметке без доступа к разделу больше не предлагает открыть доску.
 - [x] Отчеты: группы отчетов, финансовые сводки, фильтры, статусные отчеты по счетам/актам/договорам и переходы в задачи/дела показываются и загружаются только при правах на соответствующие разделы.
@@ -107,7 +107,7 @@
 - [x] Интеграции: DaData, календарные провайдеры, импорт, внешние настройки; пункт «Настройки» появляется при `integrations.canView`, а restricted-role regression подтверждает, что роль без `integrations` не видит ключи интеграций и не попадает туда через deep link.
 - [x] Яндекс.Диск: раздел и вложенные настройки синхронизации закрыты отдельным `yandexDisk`; direct tab guard, backend controller tests и restricted settings regression подтверждают запрет без права просмотра.
 - [x] S3: раздел и вложенные настройки закрыты отдельным `s3Storage`; direct tab guard, backend controller tests и restricted settings regression подтверждают запрет без права просмотра.
-- [x] Профиль: личный профиль остается доступным самому пользователю; вкладка аудита профиля скрывается без `audit.canView`, а `GET/PUT /api/profile`, смена пароля, фото, внешние входы и баланс исполнителя работают только с текущим пользователем.
+- [x] Профиль: личный профиль остается доступным самому пользователю; вкладка аудита профиля скрывается без `audit.canView`, вкладка подключения Google/Яндекс календарей скрывается без `calendar.canView`, а `GET/PUT /api/profile`, смена пароля, фото, внешние входы и баланс исполнителя работают только с текущим пользователем.
 
 ## План реализации
 
@@ -486,9 +486,12 @@ npm run test:unit
 - [x] `npm exec vitest run src/App.routing.test.ts --reporter dot` — пройдено 44 теста, включая прямые tab-ключи закрытых разделов для safe-шаблона юриста.
 - [x] `npm exec vitest run src/components/Navigation/Navigation.test.tsx src/App.routing.test.ts --reporter dot` — пройдено 54 теста, включая реальные ссылки левого меню для safe-шаблона юриста.
 - [x] `npm exec vitest run src/components/Tasks/TaskJournal.test.tsx -- --runInBand` — пройдено 107 тестов, включая legacy/modern карточки задачи для файловых действий по правам.
+- [x] `npm exec vitest run src/components/Profile/ProfilePage.test.tsx --reporter dot` — пройдено 3 теста, включая скрытие вкладки Google/Яндекс календарей в профиле без `calendar.canView`.
+- [x] `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~BackendPermissionMatrixTests|FullyQualifiedName~AppRelease"` — успешно завершено после обновления release note и проверки backend-прав календарных endpoint'ов.
 - [x] `npm run lint` — ошибок нет, остались существующие предупреждения по React hooks / fast refresh.
 - [x] `npm run build` — сборка успешна, остались существующие предупреждения Vite/Rolldown по стороннему `@microsoft/signalr` и размеру chunk.
 - [x] `git diff --check` — замечаний нет.
 - [x] Проверка UTF-8/JSON измененных файлов — `releases.json` валиден, символов замены в измененных файлах нет.
+- [x] Локальная БД — backend запущен на локальном PostgreSQL через собранный `PayPlanner.Api.dll` с временным `Jwt__Secret`, `/api/health` вернул `200 {"status":"ok"}`, stderr пустой, критичных строк `fail/crit/Unhandled/Exception/error` в stdout не найдено.
 - [x] Локальная БД — backend запущен на локальном PostgreSQL с временным `Jwt__Secret`, миграции и seed прошли, `/api/health` вернул `200`, в логах запуска нет `fail`, `crit` и `Unhandled exception`.
 - [x] Локальная БД — временная роль `lawyer-template-temp-codex` получила безопасный шаблон: 19 строк прав, `tasks/calendar/clients/cases` открыты в `own`, `notifications` открыты, финансовые и административные разделы закрыты; временная роль и права удалены после проверки.

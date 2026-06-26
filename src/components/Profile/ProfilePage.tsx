@@ -248,9 +248,14 @@ export function ProfilePage() {
   const [profilePhotoFailed, setProfilePhotoFailed] = useState(false);
   const [activeSectionTab, setActiveSectionTab] = useState<ProfileSectionTab>('profile');
   const canViewProfileAudit = profile?.role?.name === 'admin' || permissions.audit?.canView === true;
+  const canViewProfileCalendars = profile?.role?.name === 'admin' || permissions.calendar?.canView === true;
   const visibleProfileSectionTabs = useMemo(
-    () => PROFILE_SECTION_TABS.filter((tab) => tab.id !== 'audit' || canViewProfileAudit),
-    [canViewProfileAudit],
+    () => PROFILE_SECTION_TABS.filter((tab) => {
+      if (tab.id === 'audit') return canViewProfileAudit;
+      if (tab.id === 'calendars') return canViewProfileCalendars;
+      return true;
+    }),
+    [canViewProfileAudit, canViewProfileCalendars],
   );
   const canUseEmployeeCalendarMode = profile?.role?.name === 'admin'
     || permissions.calendar.viewScope === 'all'
@@ -329,7 +334,10 @@ export function ProfilePage() {
     if (activeSectionTab === 'audit' && !canViewProfileAudit) {
       setActiveSectionTab('profile');
     }
-  }, [activeSectionTab, canViewProfileAudit]);
+    if (activeSectionTab === 'calendars' && !canViewProfileCalendars) {
+      setActiveSectionTab('profile');
+    }
+  }, [activeSectionTab, canViewProfileAudit, canViewProfileCalendars]);
 
   const closePopup = useCallback(() => {
     if (popupRef.current && !popupRef.current.closed) {
@@ -911,7 +919,7 @@ export function ProfilePage() {
           </div>
         ) : null}
 
-        {activeSectionTab === 'calendars' ? (
+        {activeSectionTab === 'calendars' && canViewProfileCalendars ? (
           <div className="grid gap-6 xl:grid-cols-2" role="tabpanel" aria-label="Календари профиля">
             <GoogleCalendarPanel canUseEmployeeCalendarMode={canUseEmployeeCalendarMode} />
             <YandexCalendarPanel canUseEmployeeCalendarMode={canUseEmployeeCalendarMode} />

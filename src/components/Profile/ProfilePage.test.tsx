@@ -20,7 +20,7 @@ const apiMock = vi.hoisted(() => ({
 
 const permissionsState = vi.hoisted(() => ({
   permissions: {
-    calendar: { viewScope: 'own' },
+    calendar: { canView: true, viewScope: 'own' },
     audit: { canView: true },
   },
 }));
@@ -116,7 +116,7 @@ describe('ProfilePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     permissionsState.permissions = {
-      calendar: { viewScope: 'own' },
+      calendar: { canView: true, viewScope: 'own' },
       audit: { canView: true },
     };
     authMock.getProfile.mockResolvedValue(createProfile());
@@ -167,7 +167,7 @@ describe('ProfilePage', () => {
 
   it('hides the profile audit tab for a non-admin role without audit permission', async () => {
     permissionsState.permissions = {
-      calendar: { viewScope: 'own' },
+      calendar: { canView: true, viewScope: 'own' },
       audit: { canView: false },
     };
     authMock.getProfile.mockResolvedValueOnce(createProfile({ roleName: 'lawyer' }));
@@ -178,5 +178,20 @@ describe('ProfilePage', () => {
     expect(screen.queryByRole('tab', { name: /Аудит/i })).toBeNull();
     expect(screen.queryByText('Аудит профиля')).toBeNull();
     expect(screen.getByRole('tab', { name: /Профиль/i })).toBeTruthy();
+  });
+
+  it('hides calendar connection panels when the role cannot view the calendar section', async () => {
+    permissionsState.permissions = {
+      calendar: { canView: false, viewScope: 'own' },
+      audit: { canView: true },
+    };
+    authMock.getProfile.mockResolvedValueOnce(createProfile({ roleName: 'lawyer' }));
+
+    render(<ProfilePage />);
+
+    expect(await screen.findByText('Контактные данные')).toBeTruthy();
+    expect(screen.queryByRole('tab', { name: /Календари/i })).toBeNull();
+    expect(screen.queryByText('Google Calendar mock')).toBeNull();
+    expect(screen.queryByText('Яндекс.Календарь mock')).toBeNull();
   });
 });
