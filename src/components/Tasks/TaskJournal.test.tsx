@@ -532,6 +532,32 @@ describe('TaskJournal', () => {
     });
   });
 
+  it('passes selected table sorting to the backend task journal endpoint', async () => {
+    await renderJournal([
+      createTask({ id: 101, title: 'Первая задача', assigneeName: 'Анна' }),
+      createTask({ id: 102, title: 'Вторая задача', assigneeName: 'Сергей' }),
+    ]);
+
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenCalledWith(expect.objectContaining({
+      sortBy: 'dueAt',
+      sortDir: 'asc',
+    })));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Сортировать по колонке Исполнитель' }));
+
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenLastCalledWith(expect.objectContaining({
+      sortBy: 'assignee',
+      sortDir: 'asc',
+    })));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Сортировать по колонке Исполнитель' }));
+
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenLastCalledWith(expect.objectContaining({
+      sortBy: 'assignee',
+      sortDir: 'desc',
+    })));
+  });
+
   it('marks a task for manual control from the row actions', async () => {
     await renderJournal([createTask({ isUnderControl: false })]);
 

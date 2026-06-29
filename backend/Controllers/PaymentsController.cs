@@ -425,6 +425,8 @@ public class PaymentsController : ControllerBase
         [FromQuery] int? legalEntityId = null,
         [FromQuery] bool excludeInstallmentParents = true,
         [FromQuery] string? clientRole = null,
+        [FromQuery] string? sortBy = null,
+        [FromQuery] string? sortDir = null,
         CancellationToken ct = default)
     {
         var visibility = await ResolvePaymentsVisibilityAsync(ct);
@@ -437,10 +439,10 @@ public class PaymentsController : ControllerBase
             .AsQueryable()
             .ApplyPaymentVisibility(visibility)
             .ExcludeInstallmentParentInvoices(_db, excludeInstallmentParents)
-            .ApplyPaymentFilters(from, to, clientId, caseId, null, clientRole, legalEntityId);
+            .ApplyPaymentFilters(from, to, clientId, caseId, null, clientRole, legalEntityId)
+            .ApplyPaymentSort(sortBy, sortDir);
 
         var list = await ProjectPaymentsForRead(q)
-            .OrderBy(p => p.Date)
             .ToListAsync(ct);
         return Ok(list);
     }

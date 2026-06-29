@@ -123,6 +123,8 @@ public class TasksController : ControllerBase
         [FromQuery] bool calendarView = false,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
+        [FromQuery] string? sortBy = null,
+        [FromQuery] string? sortDir = null,
         CancellationToken ct = default)
     {
         var access = await GetTaskAccessAsync(ct, calendarView ? RolePermissionCatalog.Calendar : RolePermissionCatalog.Tasks);
@@ -154,9 +156,7 @@ public class TasksController : ControllerBase
         pageSize = Math.Clamp(pageSize, 1, 200);
 
         var total = await query.CountAsync(ct);
-        var items = await query
-            .OrderBy(task => task.DueAt)
-            .ThenBy(task => task.Id)
+        var items = await ApplyTaskJournalSort(query, sortBy, sortDir)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(ct);
@@ -2596,6 +2596,54 @@ public class TasksController : ControllerBase
         }
 
         return query;
+    }
+
+    private static IQueryable<TaskJournalItem> ApplyTaskJournalSort(
+        IQueryable<TaskJournalItem> query,
+        string? sortBy,
+        string? sortDir)
+    {
+        var desc = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase);
+        return (sortBy?.Trim().ToLowerInvariant()) switch
+        {
+            "counterparty" or "client" => desc
+                ? query.OrderByDescending(task =>
+                        (task.Client != null ? task.Client.Name : null) ??
+                        (task.LegalEntity != null ? task.LegalEntity.ShortName ?? task.LegalEntity.FullName : null) ??
+                        task.ObjectName)
+                    .ThenBy(task => task.ClientCase != null ? task.ClientCase.Title : string.Empty)
+                    .ThenBy(task => task.Id)
+                : query.OrderBy(task =>
+                        (task.Client != null ? task.Client.Name : null) ??
+                        (task.LegalEntity != null ? task.LegalEntity.ShortName ?? task.LegalEntity.FullName : null) ??
+                        task.ObjectName)
+                    .ThenBy(task => task.ClientCase != null ? task.ClientCase.Title : string.Empty)
+                    .ThenBy(task => task.Id),
+            "title" => desc
+                ? query.OrderByDescending(task => task.Title).ThenBy(task => task.Id)
+                : query.OrderBy(task => task.Title).ThenBy(task => task.Id),
+            "assignee" => desc
+                ? query.OrderByDescending(task => task.AssigneeName).ThenBy(task => task.Id)
+                : query.OrderBy(task => task.AssigneeName).ThenBy(task => task.Id),
+            "author" => desc
+                ? query.OrderByDescending(task => task.AuthorName).ThenBy(task => task.Id)
+                : query.OrderBy(task => task.AuthorName).ThenBy(task => task.Id),
+            "type" => desc
+                ? query.OrderByDescending(task => task.Type).ThenBy(task => task.Id)
+                : query.OrderBy(task => task.Type).ThenBy(task => task.Id),
+            "result" => desc
+                ? query.OrderByDescending(task => task.Result ?? string.Empty).ThenBy(task => task.Id)
+                : query.OrderBy(task => task.Result ?? string.Empty).ThenBy(task => task.Id),
+            "status" => desc
+                ? query.OrderByDescending(task => task.Status).ThenBy(task => task.Id)
+                : query.OrderBy(task => task.Status).ThenBy(task => task.Id),
+            "dueat" or "duedate" or "date" => desc
+                ? query.OrderByDescending(task => task.DueAt).ThenBy(task => task.Id)
+                : query.OrderBy(task => task.DueAt).ThenBy(task => task.Id),
+            _ => desc
+                ? query.OrderByDescending(task => task.DueAt).ThenBy(task => task.Id)
+                : query.OrderBy(task => task.DueAt).ThenBy(task => task.Id),
+        };
     }
 
     private static string? NormalizePlanningReportFormat(string? format)

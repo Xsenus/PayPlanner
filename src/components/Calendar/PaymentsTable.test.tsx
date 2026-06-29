@@ -149,6 +149,27 @@ describe('PaymentsTable', () => {
     expect(screen.getByText('Дело расхода: ВИНОКУРОВА - РАЗДЕЛ ИМУЩЕСТВА')).toBeTruthy();
   });
 
+  it('calls sort handler when a sortable column header is clicked', () => {
+    const onSortChange = vi.fn();
+
+    render(
+      <PaymentsTable
+        payments={[createPayment()]}
+        onEditPayment={vi.fn()}
+        canAdd={false}
+        canEdit
+        canDelete={false}
+        sortBy="date"
+        sortDir="asc"
+        onSortChange={onSortChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Сортировать по колонке Сумма' }));
+
+    expect(onSortChange).toHaveBeenCalledWith('amount');
+  });
+
   it('does not pass case id when cases section is hidden', () => {
     const payment = createPayment({
       clientId: 12,

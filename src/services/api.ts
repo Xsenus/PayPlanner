@@ -1893,6 +1893,26 @@ export interface SimpleDictionaryMergeResult {
 }
 
 type SortDir = 'asc' | 'desc';
+type PaymentSortKey =
+  | 'date'
+  | 'plannedDate'
+  | 'client'
+  | 'description'
+  | 'type'
+  | 'status'
+  | 'category'
+  | 'amount'
+  | 'paidDate'
+  | 'createdAt';
+type TaskJournalSortKey =
+  | 'counterparty'
+  | 'title'
+  | 'assignee'
+  | 'author'
+  | 'dueAt'
+  | 'type'
+  | 'result'
+  | 'status';
 type PaymentsExportParams = {
   from?: string;
   to?: string;
@@ -1912,7 +1932,7 @@ type PaymentsExportParams = {
   minAmount?: number;
   maxAmount?: number;
   search?: string;
-  sortBy?: 'date' | 'amount' | 'createdAt';
+  sortBy?: PaymentSortKey;
   sortDir?: SortDir;
 };
 type CasesRegistryExportParams = {
@@ -3761,6 +3781,8 @@ export class ApiService {
     calendarView?: boolean;
     page?: number;
     pageSize?: number;
+    sortBy?: TaskJournalSortKey;
+    sortDir?: SortDir;
   }) {
     const q = buildQuery({
       search: params?.search,
@@ -3777,6 +3799,8 @@ export class ApiService {
       calendarView: params?.calendarView,
       page: params?.page ?? 1,
       pageSize: params?.pageSize ?? 100,
+      sortBy: params?.sortBy,
+      sortDir: params?.sortDir,
     });
     return this.request<PagedResult<TaskJournalItem>>(`/tasks${q}`);
   }
@@ -4153,9 +4177,21 @@ export class ApiService {
     caseId?: number;
     clientRole?: ClientRole;
     excludeInstallmentParents?: boolean;
+    sortBy?: PaymentSortKey;
+    sortDir?: SortDir;
   }): Promise<Payment[]>;
   async getPayments(
-    a?: string | { from?: string; to?: string; clientId?: number; legalEntityId?: number; caseId?: number; clientRole?: ClientRole; excludeInstallmentParents?: boolean },
+    a?: string | {
+      from?: string;
+      to?: string;
+      clientId?: number;
+      legalEntityId?: number;
+      caseId?: number;
+      clientRole?: ClientRole;
+      excludeInstallmentParents?: boolean;
+      sortBy?: PaymentSortKey;
+      sortDir?: SortDir;
+    },
     b?: string,
     c?: number,
   ): Promise<Payment[]> {
@@ -4169,6 +4205,8 @@ export class ApiService {
         caseId: a?.caseId,
         clientRole: a?.clientRole,
         excludeInstallmentParents: a?.excludeInstallmentParents,
+        sortBy: a?.sortBy,
+        sortDir: a?.sortDir,
       });
     } else {
       // старый сигнатурный стиль: (from?, to?, clientId?)

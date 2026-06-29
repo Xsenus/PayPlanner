@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, EyeOff, GripVertical, RotateCcw, SplitSquareHorizontal } from 'lucide-react';
+import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, EyeOff, GripVertical, RotateCcw, SplitSquareHorizontal } from 'lucide-react';
 import {
   useCallback,
   useEffect,
@@ -58,6 +58,9 @@ interface PaymentsTableProps {
   onResizeStart?: (key: PaymentTableColumnKey, event: ReactMouseEvent<HTMLDivElement>) => void;
   getColumnWidth?: (key: PaymentTableColumnKey) => number;
   getTableWidth?: (extraWidth?: number, minimumWidth?: number) => number;
+  sortBy?: PaymentTableColumnKey;
+  sortDir?: 'asc' | 'desc';
+  onSortChange?: (key: PaymentTableColumnKey) => void;
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -97,6 +100,9 @@ export function PaymentsTable({
   onResizeStart,
   getColumnWidth,
   getTableWidth,
+  sortBy,
+  sortDir = 'asc',
+  onSortChange,
 }: PaymentsTableProps) {
   const { t, formatDate } = useTranslation();
   const [menuState, setMenuState] = useState<MenuState>(null);
@@ -131,6 +137,23 @@ export function PaymentsTable({
   );
 
   const closeMenu = useCallback(() => setMenuState(null), []);
+
+  const renderSortIcon = useCallback(
+    (columnKey: PaymentTableColumnKey) => {
+      if (!onSortChange) {
+        return null;
+      }
+
+      if (sortBy !== columnKey) {
+        return <ArrowUpDown className="h-3.5 w-3.5 text-slate-400" />;
+      }
+
+      return sortDir === 'desc'
+        ? <ArrowDown className="h-3.5 w-3.5 text-blue-600" />
+        : <ArrowUp className="h-3.5 w-3.5 text-blue-600" />;
+    },
+    [onSortChange, sortBy, sortDir],
+  );
 
   useEffect(() => {
     if (!menuState) return;
@@ -478,10 +501,40 @@ export function PaymentsTable({
                         onDragEnd={onColumnDragEnd}
                         title="Перетащите, чтобы изменить порядок">
                         <GripVertical className="h-4 w-4 text-slate-400" />
-                        <span className="truncate">{column.label}</span>
+                        {onSortChange ? (
+                          <button
+                            type="button"
+                            onClick={() => onSortChange(column.key)}
+                            className={`inline-flex min-w-0 items-center gap-1 rounded px-1 py-0.5 text-left transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 ${
+                              sortBy === column.key ? 'text-blue-700' : 'text-gray-500'
+                            }`}
+                            aria-label={`Сортировать по колонке ${column.label}`}
+                            aria-sort={sortBy === column.key ? (sortDir === 'desc' ? 'descending' : 'ascending') : 'none'}
+                          >
+                            <span className="truncate">{column.label}</span>
+                            {renderSortIcon(column.key)}
+                          </button>
+                        ) : (
+                          <span className="truncate">{column.label}</span>
+                        )}
                       </div>
                     ) : (
-                      <span className="truncate">{column.label}</span>
+                      onSortChange ? (
+                        <button
+                          type="button"
+                          onClick={() => onSortChange(column.key)}
+                          className={`inline-flex min-w-0 items-center gap-1 rounded px-1 py-0.5 text-left transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 ${
+                            sortBy === column.key ? 'text-blue-700' : 'text-gray-500'
+                          }`}
+                          aria-label={`Сортировать по колонке ${column.label}`}
+                          aria-sort={sortBy === column.key ? (sortDir === 'desc' ? 'descending' : 'ascending') : 'none'}
+                        >
+                          <span className="truncate">{column.label}</span>
+                          {renderSortIcon(column.key)}
+                        </button>
+                      ) : (
+                        <span className="truncate">{column.label}</span>
+                      )
                     )}
                   </div>
                   {onResizeStart ? (

@@ -7,6 +7,8 @@ type UsePaymentsOptions = {
   clientId?: number;
   caseId?: number;
   excludeInstallmentParents?: boolean;
+  sortBy?: 'date' | 'plannedDate' | 'client' | 'description' | 'type' | 'status' | 'category' | 'amount' | 'paidDate' | 'createdAt';
+  sortDir?: 'asc' | 'desc';
 };
 
 type Mode = 'initial' | 'background';
@@ -40,6 +42,8 @@ export function usePayments(from?: string, to?: string, opts?: UsePaymentsOption
     clientId: opts?.clientId ?? null,
     caseId: opts?.caseId ?? null,
     excludeInstallmentParents: opts?.excludeInstallmentParents ?? false,
+    sortBy: opts?.sortBy ?? 'date',
+    sortDir: opts?.sortDir ?? 'asc',
   });
 
   const fetchOnce = useCallback(
@@ -73,6 +77,8 @@ export function usePayments(from?: string, to?: string, opts?: UsePaymentsOption
           clientId: opts?.clientId,
           caseId: opts?.caseId,
           excludeInstallmentParents: opts?.excludeInstallmentParents,
+          sortBy: opts?.sortBy,
+          sortDir: opts?.sortDir,
         });
 
         if (!ac.signal.aborted) {
@@ -99,7 +105,7 @@ export function usePayments(from?: string, to?: string, opts?: UsePaymentsOption
         }
       }
     },
-    [from, to, opts?.clientId, opts?.caseId, opts?.excludeInstallmentParents],
+    [from, to, opts?.clientId, opts?.caseId, opts?.excludeInstallmentParents, opts?.sortBy, opts?.sortDir],
   );
 
   useEffect(() => {

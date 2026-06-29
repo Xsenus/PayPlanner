@@ -233,9 +233,50 @@ namespace PayPlanner.Api.Extensions
             bool desc = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase);
             return (sortBy?.ToLowerInvariant()) switch
             {
-                "amount" => desc ? q.OrderByDescending(p => p.Amount) : q.OrderBy(p => p.Amount),
-                "createdat" => desc ? q.OrderByDescending(p => p.CreatedAt) : q.OrderBy(p => p.CreatedAt),
-                _ => desc ? q.OrderByDescending(p => p.Date) : q.OrderBy(p => p.Date), // date по умолчанию
+                "planneddate" => desc
+                    ? q.OrderByDescending(p => p.PlannedDate).ThenBy(p => p.Id)
+                    : q.OrderBy(p => p.PlannedDate).ThenBy(p => p.Id),
+                "client" or "counterparty" => desc
+                    ? q.OrderByDescending(p =>
+                            p.Client != null ? p.Client.Name :
+                            p.CounterpartyName ??
+                            (p.LegalEntity != null ? p.LegalEntity.ShortName ?? p.LegalEntity.FullName : null) ??
+                            (p.ExpenseClient != null ? p.ExpenseClient.Name : null) ??
+                            (p.ExpenseLegalEntity != null ? p.ExpenseLegalEntity.ShortName ?? p.ExpenseLegalEntity.FullName : null) ??
+                            string.Empty)
+                        .ThenBy(p => p.Id)
+                    : q.OrderBy(p =>
+                            p.Client != null ? p.Client.Name :
+                            p.CounterpartyName ??
+                            (p.LegalEntity != null ? p.LegalEntity.ShortName ?? p.LegalEntity.FullName : null) ??
+                            (p.ExpenseClient != null ? p.ExpenseClient.Name : null) ??
+                            (p.ExpenseLegalEntity != null ? p.ExpenseLegalEntity.ShortName ?? p.ExpenseLegalEntity.FullName : null) ??
+                            string.Empty)
+                        .ThenBy(p => p.Id),
+                "description" => desc
+                    ? q.OrderByDescending(p => p.Description ?? string.Empty).ThenBy(p => p.Id)
+                    : q.OrderBy(p => p.Description ?? string.Empty).ThenBy(p => p.Id),
+                "type" => desc ? q.OrderByDescending(p => p.Type).ThenBy(p => p.Id) : q.OrderBy(p => p.Type).ThenBy(p => p.Id),
+                "status" => desc ? q.OrderByDescending(p => p.Status).ThenBy(p => p.Id) : q.OrderBy(p => p.Status).ThenBy(p => p.Id),
+                "category" => desc
+                    ? q.OrderByDescending(p =>
+                            (p.DealType != null ? p.DealType.Name : null) ??
+                            (p.IncomeType != null ? p.IncomeType.Name : null) ??
+                            (p.PaymentSource != null ? p.PaymentSource.Name : null) ??
+                            string.Empty)
+                        .ThenBy(p => p.Id)
+                    : q.OrderBy(p =>
+                            (p.DealType != null ? p.DealType.Name : null) ??
+                            (p.IncomeType != null ? p.IncomeType.Name : null) ??
+                            (p.PaymentSource != null ? p.PaymentSource.Name : null) ??
+                            string.Empty)
+                        .ThenBy(p => p.Id),
+                "amount" => desc ? q.OrderByDescending(p => p.Amount).ThenBy(p => p.Id) : q.OrderBy(p => p.Amount).ThenBy(p => p.Id),
+                "paiddate" => desc
+                    ? q.OrderByDescending(p => p.PaidDate ?? p.LastPaymentDate).ThenBy(p => p.Id)
+                    : q.OrderBy(p => p.PaidDate ?? p.LastPaymentDate).ThenBy(p => p.Id),
+                "createdat" => desc ? q.OrderByDescending(p => p.CreatedAt).ThenBy(p => p.Id) : q.OrderBy(p => p.CreatedAt).ThenBy(p => p.Id),
+                _ => desc ? q.OrderByDescending(p => p.Date).ThenBy(p => p.Id) : q.OrderBy(p => p.Date).ThenBy(p => p.Id), // date по умолчанию
             };
         }
 

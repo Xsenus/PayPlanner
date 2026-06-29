@@ -430,6 +430,58 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task GetTasks_SortsByAssigneeOnServer()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "sort-author@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Клиент сортировки");
+        db.TaskJournalItems.AddRange(
+            new TaskJournalItem
+            {
+                ClientId = client.Id,
+                ObjectName = client.Name,
+                Title = "Задача Анны",
+                AssigneeName = "Анна",
+                AuthorUserId = author.Id,
+                AuthorName = author.FullName,
+                DueAt = DateTime.UtcNow.AddDays(2),
+                Status = "new",
+                Type = "task",
+                Priority = "normal",
+            },
+            new TaskJournalItem
+            {
+                ClientId = client.Id,
+                ObjectName = client.Name,
+                Title = "Задача Сергея",
+                AssigneeName = "Сергей",
+                AuthorUserId = author.Id,
+                AuthorName = author.FullName,
+                DueAt = DateTime.UtcNow.AddDays(1),
+                Status = "new",
+                Type = "task",
+                Priority = "normal",
+            });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.GetTasks(
+            search: null,
+            status: "all",
+            type: null,
+            assigneeUserId: null,
+            from: null,
+            to: null,
+            sortBy: "assignee",
+            sortDir: "desc",
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var page = Assert.IsType<PagedResponse<TaskJournalItemDto>>(ok.Value);
+        Assert.Equal(["Сергей", "Анна"], page.Items.Select(item => item.AssigneeName).ToArray());
+    }
+
+    [Fact]
     public async Task CreateTask_BindsClientAndClientCase()
     {
         await using var db = await CreateContextAsync();

@@ -114,6 +114,8 @@ export function Calendar({ onOpenClient }: CalendarProps) {
   });
   const [tableFilter, setTableFilter] = useState<TableFilter | null>(null);
   const [tablePage, setTablePage] = useState(1);
+  const [tableSortBy, setTableSortBy] = useState<PaymentTableColumnKey>('date');
+  const [tableSortDir, setTableSortDir] = useState<'asc' | 'desc'>('asc');
   const [tableSettingsOpen, setTableSettingsOpen] = useState(false);
   const permissions = useRolePermissions(user?.role?.id);
   const calendarPermissions = permissions.calendar;
@@ -226,7 +228,12 @@ export function Calendar({ onOpenClient }: CalendarProps) {
     updatePayment,
     deletePayment,
     refresh: refreshPayments,
-  } = usePayments(fromDateStr, toDateStr, { pollInterval, excludeInstallmentParents: true });
+  } = usePayments(fromDateStr, toDateStr, {
+    pollInterval,
+    excludeInstallmentParents: true,
+    sortBy: tableSortBy,
+    sortDir: tableSortDir,
+  });
 
   const [newIds, setNewIds] = useState<Set<number>>(new Set());
 
@@ -501,6 +508,17 @@ export function Calendar({ onOpenClient }: CalendarProps) {
   };
 
   const handleClearTableFilter = () => setTableFilter(null);
+
+  const handleTableSortChange = (columnKey: PaymentTableColumnKey) => {
+    setTablePage(1);
+    if (tableSortBy === columnKey) {
+      setTableSortDir((current) => (current === 'asc' ? 'desc' : 'asc'));
+      return;
+    }
+
+    setTableSortBy(columnKey);
+    setTableSortDir(columnKey === 'date' || columnKey === 'plannedDate' || columnKey === 'paidDate' || columnKey === 'createdAt' ? 'desc' : 'asc');
+  };
 
   const handleStatCardSelect = ({
     kind,
@@ -885,6 +903,9 @@ export function Calendar({ onOpenClient }: CalendarProps) {
               onResizeStart={handleResizeStart}
               getColumnWidth={getColumnWidth}
               getTableWidth={getTableWidth}
+              sortBy={tableSortBy}
+              sortDir={tableSortDir}
+              onSortChange={handleTableSortChange}
             />
             {tableFilteredPayments.length > 0 ? (
               <TablePagination

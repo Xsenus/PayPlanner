@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   AlarmClock,
+  ArrowDown,
   ArrowLeft,
+  ArrowUp,
+  ArrowUpDown,
   Bell,
   Bookmark,
   CalendarDays,
@@ -91,6 +94,7 @@ type TaskCalendarConflictPolicy = 'warn' | 'block';
 type TaskCalendarLoadWarningMode = 'strict' | 'standard' | 'relaxed';
 type IcsReminderPreset = 'default' | 'hour' | 'twoHours' | 'day';
 type TaskPlanningReportFormat = 'html' | 'word' | 'pdf';
+type TaskJournalSortKey = 'counterparty' | 'title' | 'assignee' | 'author' | 'dueAt' | 'type' | 'result' | 'status';
 type TaskJournalContextFilter = {
   clientId?: number | null;
   legalEntityId?: number | null;
@@ -140,6 +144,8 @@ type TaskJournalFilterPreferences = {
   typeFilter: TaskJournalType | 'all';
   priorityFilter: TaskJournalPriority | 'all';
   periodMode: PeriodMode;
+  sortBy: TaskJournalSortKey;
+  sortDir: 'asc' | 'desc';
 };
 type TaskJournalSavedView = {
   id: string;
@@ -288,6 +294,8 @@ function createDefaultFilterPreferences(userId: number | null, mode: TaskJournal
     typeFilter: 'all',
     priorityFilter: 'all',
     periodMode: 'day',
+    sortBy: 'dueAt',
+    sortDir: 'asc',
   };
 }
 
@@ -333,6 +341,17 @@ function isPriorityFilter(value: unknown): value is TaskJournalPriority | 'all' 
 
 function isPeriodMode(value: unknown): value is PeriodMode {
   return value === 'day' || value === 'week' || value === 'month' || value === 'all';
+}
+
+function isTaskJournalSortKey(value: unknown): value is TaskJournalSortKey {
+  return value === 'counterparty'
+    || value === 'title'
+    || value === 'assignee'
+    || value === 'author'
+    || value === 'dueAt'
+    || value === 'type'
+    || value === 'result'
+    || value === 'status';
 }
 
 function isDateFilterValue(value: unknown): value is string {
@@ -401,6 +420,8 @@ function normalizeTaskJournalFilterPreferences(
     typeFilter: isTypeFilter(parsed?.typeFilter) ? parsed.typeFilter : defaults.typeFilter,
     priorityFilter: isPriorityFilter(parsed?.priorityFilter) ? parsed.priorityFilter : defaults.priorityFilter,
     periodMode: isPeriodMode(parsed?.periodMode) ? parsed.periodMode : defaults.periodMode,
+    sortBy: isTaskJournalSortKey(parsed?.sortBy) ? parsed.sortBy : defaults.sortBy,
+    sortDir: parsed?.sortDir === 'desc' ? 'desc' : defaults.sortDir,
   };
 }
 
@@ -645,6 +666,8 @@ async function loadAllTaskJournalItems(
   contextFilter?: TaskJournalContextFilter,
   underControlOnly = false,
   calendarView = false,
+  sortBy: TaskJournalSortKey = 'dueAt',
+  sortDir: 'asc' | 'desc' = 'asc',
 ) {
   const pageSize = 200;
   let page = 1;
@@ -659,6 +682,8 @@ async function loadAllTaskJournalItems(
       clientId: contextFilter?.clientId ?? undefined,
       legalEntityId: contextFilter?.legalEntityId ?? undefined,
       calendarView,
+      sortBy,
+      sortDir,
     });
     items.push(...response.items);
     total = response.total;
@@ -1747,6 +1772,8 @@ export function TaskJournal({
   const [assigneeFilter, setAssigneeFilter] = useState(initialPreferences.assigneeFilter);
   const [typeFilter, setTypeFilter] = useState<TaskJournalType | 'all'>(initialPreferences.typeFilter);
   const [priorityFilter, setPriorityFilter] = useState<TaskJournalPriority | 'all'>(initialPreferences.priorityFilter);
+  const [sortBy, setSortBy] = useState<TaskJournalSortKey>(initialPreferences.sortBy);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(initialPreferences.sortDir);
   const [savedViews, setSavedViews] = useState<TaskJournalSavedView[]>(() => readTaskJournalSavedViews(currentUserId, mode, initialPreferences.viewMode));
   const [selectedSavedViewId, setSelectedSavedViewId] = useState('');
   const [modal, setModal] = useState<ModalState>(null);
@@ -1809,6 +1836,8 @@ export function TaskJournal({
     setTypeFilter(nextPreferences.typeFilter);
     setPriorityFilter(nextPreferences.priorityFilter);
     setPeriodMode(nextPreferences.periodMode);
+    setSortBy(nextPreferences.sortBy);
+    setSortDir(nextPreferences.sortDir);
   }, [currentUserId, filterOwnerKey, initialView, mode]);
 
   useEffect(() => {
@@ -1844,8 +1873,10 @@ export function TaskJournal({
       typeFilter,
       priorityFilter,
       periodMode,
+      sortBy,
+      sortDir,
     }, mode);
-  }, [assigneeFilter, calendarColorMode, calendarConflictPolicy, calendarLoadWarningMode, currentUserId, dateFromFilter, dateToFilter, icsReminderPreset, metricFilter, mode, periodMode, priorityFilter, quickFilter, search, statusFilter, typeFilter, viewMode]);
+  }, [assigneeFilter, calendarColorMode, calendarConflictPolicy, calendarLoadWarningMode, currentUserId, dateFromFilter, dateToFilter, icsReminderPreset, metricFilter, mode, periodMode, priorityFilter, quickFilter, search, sortBy, sortDir, statusFilter, typeFilter, viewMode]);
 
   const captureSavedViewFilters = (): TaskJournalFilterPreferences => ({
     viewMode,
@@ -1863,6 +1894,8 @@ export function TaskJournal({
     typeFilter,
     priorityFilter,
     periodMode,
+    sortBy,
+    sortDir,
   });
 
   const applySavedViewFilters = (filters: TaskJournalFilterPreferences) => {
@@ -1881,6 +1914,8 @@ export function TaskJournal({
     setTypeFilter(filters.typeFilter);
     setPriorityFilter(filters.priorityFilter);
     setPeriodMode(filters.periodMode);
+    setSortBy(filters.sortBy);
+    setSortDir(filters.sortDir);
   };
 
   const handleSavedViewSelect = (viewId: string) => {
@@ -2009,7 +2044,7 @@ export function TaskJournal({
       const settingsPromise = apiService.getTaskJournalSettings();
       const automationPromise = settingsPromise.then((settingsResponse) => loadAutomationCandidates(settingsResponse, searchRef.current));
       const [taskItems, assigneeResponse, settingsResponse, notificationDefaultsResponse, timeZoneResponse, calendarSyncSettingsResponse, automationResponse] = await Promise.all([
-        loadAllTaskJournalItems(contextFilter, underControlOnly, shouldUseCalendarVisibility),
+        loadAllTaskJournalItems(contextFilter, underControlOnly, shouldUseCalendarVisibility, sortBy, sortDir),
         apiService.getTaskJournalAssignees({ calendarView: shouldUseCalendarVisibility }),
         settingsPromise,
         apiService.getUserSetting(TASK_NOTIFICATION_DEFAULTS_SETTING_KEY).catch(() => null),
@@ -2029,7 +2064,7 @@ export function TaskJournal({
     } finally {
       setLoading(false);
     }
-  }, [contextFilter, loadAutomationCandidates, shouldUseCalendarVisibility, toast, underControlOnly]);
+  }, [contextFilter, loadAutomationCandidates, shouldUseCalendarVisibility, sortBy, sortDir, toast, underControlOnly]);
 
   useEffect(() => {
     void refreshTasks();
@@ -2345,7 +2380,7 @@ export function TaskJournal({
     const hasManualDateRange = Boolean(dateFromFilter || dateToFilter);
     const shouldApplyPeriodFilter = metricFilter === 'none' && !hasManualDateRange && periodMode !== 'all';
 
-    return scopeFilteredTasks
+    const nextTasks = scopeFilteredTasks
       .filter((task) => {
         const due = new Date(task.dueAt);
         const statusOk = matchesStatusFilter(task, statusFilter);
@@ -2358,8 +2393,11 @@ export function TaskJournal({
               : true;
 
         return statusOk && periodOk;
-      })
-      .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime());
+      });
+
+    return viewMode === 'list'
+      ? nextTasks
+      : nextTasks.sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime());
   }, [effectiveTaskJournalTimeZoneId, dateFromFilter, dateToFilter, metricFilter, periodMode, scopeFilteredTasks, statusFilter, viewMode]);
 
   const filteredTasks = useMemo(() => {
@@ -2480,6 +2518,16 @@ export function TaskJournal({
     if (nextFilter === 'assignedToMe') {
       setAssigneeFilter('all');
     }
+  };
+
+  const handleSortChange = (nextSortBy: TaskJournalSortKey) => {
+    if (sortBy === nextSortBy) {
+      setSortDir((current) => (current === 'asc' ? 'desc' : 'asc'));
+      return;
+    }
+
+    setSortBy(nextSortBy);
+    setSortDir('asc');
   };
 
   const handleMetricFilterClick = (nextFilter: MetricFilter) => {
@@ -3646,6 +3694,9 @@ export function TaskJournal({
             onStatusChange={setTaskStatus}
             onToggleControl={toggleTaskControl}
             onDone={(task) => setTaskStatus(task, 'done')}
+            sortBy={sortBy}
+            sortDir={sortDir}
+            onSortChange={handleSortChange}
           />
           )
         ) : viewMode === 'board' ? (
@@ -4143,6 +4194,9 @@ function TaskTable({
   onStatusChange,
   onToggleControl,
   onDone,
+  sortBy,
+  sortDir,
+  onSortChange,
 }: {
   tasks: TaskJournalItem[];
   highlightedTaskId: number | null;
@@ -4164,7 +4218,37 @@ function TaskTable({
   onStatusChange: (task: TaskJournalItem, status: TaskJournalStatus) => void;
   onToggleControl: (task: TaskJournalItem) => void;
   onDone: (task: TaskJournalItem) => void;
+  sortBy: TaskJournalSortKey;
+  sortDir: 'asc' | 'desc';
+  onSortChange: (sortBy: TaskJournalSortKey) => void;
 }) {
+  const renderSortIcon = (columnKey: TaskJournalSortKey) => {
+    if (sortBy !== columnKey) {
+      return <ArrowUpDown className="h-3.5 w-3.5 text-slate-400" />;
+    }
+
+    return sortDir === 'desc'
+      ? <ArrowDown className="h-3.5 w-3.5 text-blue-600" />
+      : <ArrowUp className="h-3.5 w-3.5 text-blue-600" />;
+  };
+
+  const renderSortHeader = (columnKey: TaskJournalSortKey, label: string, className = '') => (
+    <th className={`px-4 py-4 ${className}`}>
+      <button
+        type="button"
+        onClick={() => onSortChange(columnKey)}
+        className={`inline-flex min-w-0 items-center gap-1 rounded px-1 py-0.5 text-left uppercase tracking-[0.16em] transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 ${
+          sortBy === columnKey ? 'text-blue-700' : 'text-slate-500'
+        }`}
+        aria-label={`Сортировать по колонке ${label}`}
+        aria-sort={sortBy === columnKey ? (sortDir === 'desc' ? 'descending' : 'ascending') : 'none'}
+      >
+        <span>{label}</span>
+        {renderSortIcon(columnKey)}
+      </button>
+    </th>
+  );
+
   return (
     <div data-testid="task-table-card" className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div data-testid="task-table-scroll" className="max-w-full overflow-x-auto overscroll-x-contain">
@@ -4181,14 +4265,14 @@ function TaskTable({
                   className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                 />
               </th>
-              <th className="px-4 py-4">Контрагент / дело</th>
-              <th className="px-4 py-4">Наименование задачи</th>
-              <th className="px-4 py-4">Исполнитель</th>
-              <th className="px-4 py-4">Поручил</th>
-              <th className="px-4 py-4">Дата исполнения</th>
-              <th className="px-4 py-4">Тип</th>
-              <th className="px-4 py-4">Результат</th>
-              <th className="px-4 py-4">Статус</th>
+              {renderSortHeader('counterparty', 'Контрагент / дело')}
+              {renderSortHeader('title', 'Наименование задачи')}
+              {renderSortHeader('assignee', 'Исполнитель')}
+              {renderSortHeader('author', 'Поручил')}
+              {renderSortHeader('dueAt', 'Дата исполнения')}
+              {renderSortHeader('type', 'Тип')}
+              {renderSortHeader('result', 'Результат')}
+              {renderSortHeader('status', 'Статус')}
               <th className="px-4 py-4 text-right">Действия</th>
             </tr>
           </thead>
