@@ -144,7 +144,7 @@ describe('PaymentsTable', () => {
       />,
     );
 
-    expect(screen.getByText('Получатель: Гордик Сергей')).toBeTruthy();
+    expect(screen.getByText('Поставщик: Гордик Сергей')).toBeTruthy();
     expect(screen.getByText('Клиент расхода: Винокурова Нина Тариеловна')).toBeTruthy();
     expect(screen.getByText('Дело расхода: ВИНОКУРОВА - РАЗДЕЛ ИМУЩЕСТВА')).toBeTruthy();
   });

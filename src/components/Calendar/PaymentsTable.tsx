@@ -258,7 +258,7 @@ export function PaymentsTable({
           ) : counterpartyName ? (
             <div className="leading-tight">
               <span className="block font-medium text-slate-900">
-                {payment.type === 'Expense' ? `Получатель: ${counterpartyName}` : counterpartyName}
+                {payment.type === 'Expense' ? `Поставщик: ${counterpartyName}` : counterpartyName}
               </span>
               {payment.type === 'Expense' && payment.expenseClient?.name ? (
                 <span className="mt-0.5 block truncate text-xs leading-tight text-gray-500">
