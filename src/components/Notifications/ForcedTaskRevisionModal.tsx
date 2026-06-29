@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, CheckCircle2, ExternalLink, Loader2 } from 'lucide-react';
+import { CheckCircle2, ExternalLink, Loader2 } from 'lucide-react';
 import { apiService, type UserNotificationDto } from '../../services/api';
 import { emitUserNotificationsChanged, USER_NOTIFICATIONS_EVENT } from '../../utils/userNotifications';
 import { parseUserNotificationMetadata } from '../../utils/userNotificationMetadata';
@@ -165,55 +165,50 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
     ? 'Дополнительных действий по задаче не требуется. Сообщение закроется после подтверждения.'
     : 'Уже согласовавшие участники повторно в маршруте не участвуют. Исправьте замечания и отправьте задачу на согласование еще раз.';
   const primaryButtonText = isCompletedApproval ? 'Ознакомлен' : 'Информация прочитана';
-  const iconClassName = isCompletedApproval
-    ? 'inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-700'
-    : 'inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-orange-100 text-orange-700';
-  const detailsTitleClassName = isCompletedApproval
-    ? 'mt-4 text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700'
-    : 'mt-4 text-xs font-semibold uppercase tracking-[0.14em] text-orange-700';
+  const modalEyebrow = isCompletedApproval ? 'Согласование завершено' : 'Задача на доработку';
+  const modalEyebrowClassName = isCompletedApproval
+    ? 'text-xs font-semibold uppercase tracking-[0.16em] text-emerald-600'
+    : 'text-xs font-semibold uppercase tracking-[0.16em] text-orange-600';
   const infoClassName = isCompletedApproval
-    ? 'mt-4 rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm leading-6 text-emerald-800'
-    : 'mt-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-800';
+    ? 'mt-2 text-sm leading-6 text-emerald-700'
+    : 'mt-2 text-sm leading-6 text-slate-500';
   const buttonClassName = isCompletedApproval
-    ? 'inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60'
-    : 'inline-flex items-center justify-center gap-2 rounded-xl bg-orange-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-60';
-  const Icon = isCompletedApproval ? CheckCircle2 : AlertTriangle;
+    ? 'w-full rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto'
+    : 'w-full rounded-xl bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto';
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="forced-task-revision-title">
-      <div className="w-full max-w-3xl rounded-2xl bg-white p-5 shadow-2xl sm:p-6">
-        <div className="flex items-start gap-4">
-          <span className={iconClassName}>
-            <Icon className="h-7 w-7" />
-          </span>
+    <div className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto bg-slate-900/45 px-3 py-4 backdrop-blur-sm sm:items-center sm:px-4 sm:py-6" role="dialog" aria-modal="true" aria-labelledby="forced-task-revision-title">
+      <div className="max-h-[calc(100vh-2rem)] w-full max-w-[min(42rem,calc(100vw-1.5rem))] overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl sm:p-6">
+        <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <div id="forced-task-revision-title" className="text-xl font-semibold text-slate-950">
+            <p className={modalEyebrowClassName}>{modalEyebrow}</p>
+            <h2 id="forced-task-revision-title" className="mt-2 text-xl font-semibold text-slate-900">
               {modalTitle}
-            </div>
-            <p className="mt-1 text-sm leading-6 text-slate-600">
+            </h2>
+            <p className="mt-2 line-clamp-2 text-sm text-slate-500">{getTaskTitle(current)}</p>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
               {modalDescription}
             </p>
           </div>
         </div>
 
-        <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-          <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Задача</div>
-          <div className="mt-1 text-lg font-semibold text-slate-950">{getTaskTitle(current)}</div>
-          <div className={detailsTitleClassName}>{detailsTitle}</div>
-          <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{decisionText}</p>
+        <div className="mt-5 block text-sm font-semibold text-slate-700">
+          {detailsTitle}
         </div>
-
-        <div className={infoClassName}>
+        <div className="mt-2 max-h-[40vh] min-h-[120px] overflow-y-auto whitespace-pre-wrap rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm leading-6 text-slate-700 shadow-sm sm:min-h-[150px]" data-testid="forced-task-message-box">
+          {decisionText}
+        </div>
+        <p className={infoClassName}>
           {infoText}
-        </div>
+        </p>
 
-        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
+        <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-end">
           {current.taskId && onOpenTask ? (
             <button
               type="button"
               onClick={() => void acknowledge(true)}
               disabled={acknowledgingId === current.id}
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60 sm:w-auto"
             >
               <ExternalLink className="h-4 w-4" />
               Открыть задачу
@@ -225,7 +220,7 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
             disabled={acknowledgingId === current.id}
             className={buttonClassName}
           >
-            {acknowledgingId === current.id || loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+            {acknowledgingId === current.id || loading ? <Loader2 className="mr-2 inline h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 inline h-4 w-4" />}
             {primaryButtonText}
           </button>
         </div>

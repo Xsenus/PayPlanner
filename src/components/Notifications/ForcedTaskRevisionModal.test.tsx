@@ -85,9 +85,11 @@ describe('ForcedTaskRevisionModal', () => {
     render(<ForcedTaskRevisionModal />);
 
     expect(await screen.findByRole('dialog')).toBeTruthy();
+    expect(screen.getByText('Задача на доработку')).toBeTruthy();
     expect(screen.getByText('Задача вернулась на доработку')).toBeTruthy();
     expect(screen.getByText('Подготовить иск')).toBeTruthy();
     expect(screen.getByText('Уточнить дату заседания.')).toBeTruthy();
+    expect(screen.getByTestId('forced-task-message-box').className).toContain('min-h-[120px]');
 
     fireEvent.click(screen.getByRole('button', { name: 'Информация прочитана' }));
 
@@ -113,6 +115,7 @@ describe('ForcedTaskRevisionModal', () => {
     render(<ForcedTaskRevisionModal />);
 
     expect(await screen.findByRole('dialog')).toBeTruthy();
+    expect(screen.getByText('Согласование завершено')).toBeTruthy();
     expect(screen.getByText('Задача согласована и завершена')).toBeTruthy();
     expect(screen.getByText('Проверить договор')).toBeTruthy();
     expect(screen.getByText('Согласующий согласовал и завершил задачу.')).toBeTruthy();
