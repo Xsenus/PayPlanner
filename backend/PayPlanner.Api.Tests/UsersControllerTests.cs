@@ -13,6 +13,7 @@ using Microsoft.Extensions.FileProviders;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using Xunit;
 
@@ -58,6 +59,79 @@ public class UsersControllerTests
         Assert.Null(context.Result);
     }
 
+    [Fact]
+    public async Task GetUserContractorBalance_ReturnsSelectedExecutorPaymentsWithClientContext()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateUserAsync(db, "admin@example.test", "Администратор", "admin");
+        var contractor = await CreateUserAsync(db, "contractor@example.test", "Исполнитель", "lawyer", isExternalContractor: true);
+        var otherContractor = await CreateUserAsync(db, "other@example.test", "Другой исполнитель", "lawyer", isExternalContractor: true);
+        var client = new Client { Name = "Клиент расчета", IsActive = true };
+        var clientCase = new ClientCase { Client = client, Title = "Дело расчета" };
+        var payment = new Payment
+        {
+            Amount = 5_000m,
+            PaidAmount = 1_500m,
+            Status = PaymentStatus.Processing,
+            Type = PaymentType.Expense,
+            Date = new DateTime(2026, 6, 15),
+            PlannedDate = new DateTime(2026, 6, 15),
+        };
+        db.TaskJournalItems.AddRange(
+            new TaskJournalItem
+            {
+                Title = "Подготовить документы",
+                ObjectName = "Тестовый объект",
+                Status = "done",
+                AssigneeUserId = contractor.Id,
+                AssigneeName = contractor.FullName,
+                AuthorUserId = admin.Id,
+                AuthorName = admin.FullName,
+                Client = client,
+                ClientCase = clientCase,
+                ContractorPaymentEnabled = true,
+                ContractorPaymentAmount = 5_000m,
+                ContractorPaymentDueDate = new DateTime(2026, 6, 20),
+                ContractorPayment = payment,
+                DueAt = new DateTime(2026, 6, 20),
+            },
+            new TaskJournalItem
+            {
+                Title = "Чужая задача",
+                ObjectName = "Другой объект",
+                Status = "done",
+                AssigneeUserId = otherContractor.Id,
+                AssigneeName = otherContractor.FullName,
+                AuthorUserId = admin.Id,
+                AuthorName = admin.FullName,
+                ContractorPaymentEnabled = true,
+                ContractorPaymentAmount = 9_000m,
+                ContractorPaymentDueDate = new DateTime(2026, 6, 22),
+                DueAt = new DateTime(2026, 6, 22),
+            });
+        await db.SaveChangesAsync();
+
+        var result = await CreateController(db).GetUserContractorBalance(contractor.Id, CancellationToken.None);
+
+        var balance = AssertBalance(result);
+        Assert.Equal(3_500m, balance.OwedToMe);
+        Assert.Equal(0m, balance.OwedByMe);
+        Assert.Equal(1_500m, balance.PaidToMe);
+        Assert.Equal(0m, balance.PaidByMe);
+        var queued = Assert.Single(balance.Queue);
+        Assert.Equal("Клиент расчета", queued.ClientName);
+        Assert.Equal("Дело расчета", queued.ClientCaseTitle);
+        Assert.Equal(3_500m, queued.OutstandingAmount);
+        var paid = Assert.Single(balance.Paid);
+        Assert.Equal(1_500m, paid.PaidAmount);
+    }
+
+    private static ContractorBalanceDto AssertBalance(ActionResult<ContractorBalanceDto> result)
+    {
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        return Assert.IsType<ContractorBalanceDto>(ok.Value);
+    }
+
     private static UsersController CreateController(PaymentContext db)
         => new(CreateAuthService(db), db);
 
@@ -89,26 +163,34 @@ public class UsersControllerTests
         return db;
     }
 
-    private static async Task<User> CreateUserAsync(PaymentContext db, string roleName)
+    private static Task<User> CreateUserAsync(PaymentContext db, string roleName)
+        => CreateUserAsync(
+            db,
+            $"{roleName}-{Guid.NewGuid():N}@example.test",
+            roleName,
+            roleName);
+
+    private static async Task<User> CreateUserAsync(
+        PaymentContext db,
+        string email,
+        string fullName,
+        string roleName,
+        bool isExternalContractor = false)
     {
-        var role = new Role
-        {
-            Name = roleName,
-            Description = roleName,
-            CreatedAt = DateTime.UtcNow,
-        };
+        var role = await db.Roles.FirstOrDefaultAsync(item => item.Name == roleName)
+            ?? new Role { Name = roleName, Description = roleName, CreatedAt = DateTime.UtcNow };
         var user = new User
         {
-            Email = $"{roleName}-{Guid.NewGuid():N}@example.test",
+            Email = email,
             PasswordHash = "hash",
-            FullName = roleName,
+            FullName = fullName,
             IsActive = true,
             IsApproved = true,
+            IsExternalContractor = isExternalContractor,
             Role = role,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         };
-
         db.Users.Add(user);
         await db.SaveChangesAsync();
         return user;

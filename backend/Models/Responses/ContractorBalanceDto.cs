@@ -18,6 +18,12 @@ public sealed class ContractorBalanceItemDto
     public string Direction { get; set; } = "toMe";
     public string AssigneeName { get; set; } = string.Empty;
     public string AuthorName { get; set; } = string.Empty;
+    public int? ClientId { get; set; }
+    public string? ClientName { get; set; }
+    public int? LegalEntityId { get; set; }
+    public string? LegalEntityName { get; set; }
+    public int? ClientCaseId { get; set; }
+    public string? ClientCaseTitle { get; set; }
     public decimal Amount { get; set; }
     public decimal PaidAmount { get; set; }
     public decimal OutstandingAmount { get; set; }

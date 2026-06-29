@@ -57,6 +57,9 @@ public class ProfileController : ControllerBase
         var tasks = await _db.TaskJournalItems
             .AsNoTracking()
             .Include(task => task.ContractorPayment)
+            .Include(task => task.Client)
+            .Include(task => task.LegalEntity)
+            .Include(task => task.ClientCase)
             .Where(task => task.ContractorPaymentEnabled)
             .Where(task => task.AssigneeUserId == userId.Value)
             .OrderByDescending(task => task.ContractorPaymentDueDate ?? task.UpdatedAt ?? task.CreatedAt)
@@ -305,6 +308,12 @@ public class ProfileController : ControllerBase
             Direction = task.AssigneeUserId == currentUserId ? "toMe" : "byMe",
             AssigneeName = task.AssigneeName,
             AuthorName = task.AuthorName,
+            ClientId = task.ClientId,
+            ClientName = !string.IsNullOrWhiteSpace(task.Client?.Name) ? task.Client.Name : task.LegalEntity is null ? task.ObjectName : null,
+            LegalEntityId = task.LegalEntityId,
+            LegalEntityName = !string.IsNullOrWhiteSpace(task.LegalEntity?.ShortName) ? task.LegalEntity.ShortName : task.LegalEntity?.FullName,
+            ClientCaseId = task.ClientCaseId,
+            ClientCaseTitle = task.ClientCase?.Title,
             Amount = amount,
             PaidAmount = paidAmount,
             OutstandingAmount = outstandingAmount,

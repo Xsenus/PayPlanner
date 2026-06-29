@@ -2,9 +2,12 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
+using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
+using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 
 namespace PayPlanner.Api.Controllers;
@@ -113,6 +116,53 @@ public class UsersController : ControllerBase, IAsyncActionFilter
     public async Task<IActionResult> GetUser(int id)
         => (await _svc.GetUserByIdAsync(id)) is { } u ? Ok(u) : NotFound();
 
+    [HttpGet("{id:int}/contractor-balance")]
+    public async Task<ActionResult<ContractorBalanceDto>> GetUserContractorBalance(int id, CancellationToken cancellationToken)
+    {
+        var userExists = await _db.Users
+            .AsNoTracking()
+            .AnyAsync(user => user.Id == id, cancellationToken);
+
+        if (!userExists)
+        {
+            return NotFound();
+        }
+
+        var tasks = await _db.TaskJournalItems
+            .AsNoTracking()
+            .Include(task => task.ContractorPayment)
+            .Include(task => task.Client)
+            .Include(task => task.LegalEntity)
+            .Include(task => task.ClientCase)
+            .Where(task => task.ContractorPaymentEnabled)
+            .Where(task => task.AssigneeUserId == id)
+            .OrderByDescending(task => task.ContractorPaymentDueDate ?? task.UpdatedAt ?? task.CreatedAt)
+            .Take(200)
+            .ToListAsync(cancellationToken);
+
+        var items = tasks
+            .Select(MapContractorBalanceItem)
+            .Where(item => item is not null)
+            .Cast<ContractorBalanceItemDto>()
+            .ToList();
+
+        return Ok(new ContractorBalanceDto
+        {
+            OwedToMe = items.Sum(item => item.OutstandingAmount),
+            OwedByMe = 0m,
+            PaidToMe = items.Sum(item => item.PaidAmount),
+            PaidByMe = 0m,
+            Queue = items
+                .Where(item => item.OutstandingAmount > 0m && item.PaymentStatus != PaymentStatus.Cancelled.ToString())
+                .OrderBy(item => item.PaymentDueDate ?? string.Empty)
+                .ToList(),
+            Paid = items
+                .Where(item => item.PaidAmount > 0m || item.PaymentStatus == PaymentStatus.Completed.ToString())
+                .OrderByDescending(item => item.PaidDate ?? item.PaymentDueDate ?? string.Empty)
+                .ToList(),
+        });
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetUsers([FromQuery] string? status)
         => Ok(await _svc.GetAllUsersAsync(status));
@@ -217,5 +267,48 @@ public class UsersController : ControllerBase, IAsyncActionFilter
         {
             return BadRequest(new { message = "Одна из выбранных компаний не найдена." });
         }
+    }
+
+    private static ContractorBalanceItemDto? MapContractorBalanceItem(TaskJournalItem task)
+    {
+        if (!task.AssigneeUserId.HasValue || !task.ContractorPaymentAmount.HasValue)
+        {
+            return null;
+        }
+
+        var payment = task.ContractorPayment;
+        var amount = Math.Round(task.ContractorPaymentAmount.Value, 2);
+        var paidAmount = payment is null
+            ? 0m
+            : payment.Status == PaymentStatus.Completed && payment.PaidAmount <= 0m
+                ? amount
+                : Math.Min(Math.Round(payment.PaidAmount, 2), amount);
+        var status = payment?.Status.ToString() ?? (task.ContractorPaymentOnResult && task.Status != "done" ? "WaitingForResult" : PaymentStatus.Pending.ToString());
+        var outstandingAmount = status == PaymentStatus.Cancelled.ToString()
+            ? 0m
+            : Math.Max(amount - paidAmount, 0m);
+
+        return new ContractorBalanceItemDto
+        {
+            TaskId = task.Id,
+            TaskTitle = task.Title,
+            PaymentId = payment?.Id,
+            Direction = "toMe",
+            AssigneeName = task.AssigneeName,
+            AuthorName = task.AuthorName,
+            ClientId = task.ClientId,
+            ClientName = !string.IsNullOrWhiteSpace(task.Client?.Name) ? task.Client.Name : task.LegalEntity is null ? task.ObjectName : null,
+            LegalEntityId = task.LegalEntityId,
+            LegalEntityName = !string.IsNullOrWhiteSpace(task.LegalEntity?.ShortName) ? task.LegalEntity.ShortName : task.LegalEntity?.FullName,
+            ClientCaseId = task.ClientCaseId,
+            ClientCaseTitle = task.ClientCase?.Title,
+            Amount = amount,
+            PaidAmount = paidAmount,
+            OutstandingAmount = outstandingAmount,
+            PaymentStatus = status,
+            TaskStatus = task.Status,
+            PaymentDueDate = task.ContractorPaymentDueDate?.ToString("O"),
+            PaidDate = payment?.PaidDate?.ToString("O"),
+        };
     }
 }
