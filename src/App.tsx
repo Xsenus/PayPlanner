@@ -284,8 +284,8 @@ function AppContent() {
   const accessibleMenuTabs = useMemo(
     () =>
       [
-        { tab: 'notifications' as Tab, allowed: true },
         { tab: 'calendar' as Tab, allowed: permissions.calendar.canView },
+        { tab: 'notifications' as Tab, allowed: true },
         { tab: 'tasks' as Tab, allowed: permissions.tasks.canView },
         { tab: 'tasksControl' as Tab, allowed: permissions.tasks.canView },
         { tab: 'tasksApprovals' as Tab, allowed: permissions.tasks.canView },
@@ -731,6 +731,10 @@ function AppContent() {
       return;
     }
 
+    if (loading || !user) {
+      return;
+    }
+
     const url = new URL(window.location.href);
     if (activeTab === 'clients') {
       url.pathname = '/clients';
@@ -819,6 +823,7 @@ function AppContent() {
     activeTab,
     actReturnTab,
     contractReturnTab,
+    loading,
     selectedActId,
     selectedCaseId,
     selectedClientId,
@@ -827,17 +832,26 @@ function AppContent() {
     selectedPaymentId,
     selectedTaskId,
     selectedUserId,
+    user,
   ]);
 
   useEffect(() => {
+    if (loading || !user) {
+      return;
+    }
+
     try {
       localStorage.setItem(LAST_TAB_STORAGE_KEY, activeTab);
     } catch {
       // ignore storage issues
     }
-  }, [activeTab]);
+  }, [activeTab, loading, user]);
 
   useEffect(() => {
+    if (loading || !user) {
+      return;
+    }
+
     if (activeTab === 'clientDetail' && !selectedClientId) {
       setActiveTab('clients');
       return;
@@ -862,7 +876,7 @@ function AppContent() {
 
     const fallback = accessibleMenuTabs[0] ?? 'profile';
     setActiveTab(fallback);
-  }, [activeTab, accessibleMenuTabs, canViewTab, selectedCaseId, selectedClientId]);
+  }, [activeTab, accessibleMenuTabs, canViewTab, loading, selectedCaseId, selectedClientId, user]);
 
   useEffect(() => {
     if (!user) {

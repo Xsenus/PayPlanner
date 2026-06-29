@@ -9,10 +9,14 @@ const permissionsState = vi.hoisted(() => ({
   paymentsCanView: true,
 }));
 
+const authState = vi.hoisted(() => ({
+  loading: false,
+}));
+
 vi.mock('./contexts/AuthContext', () => ({
   AuthProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
   useAuth: () => ({
-    user: {
+    user: authState.loading ? null : {
       id: 1,
       email: 'admin@example.test',
       fullName: 'Admin',
@@ -22,7 +26,7 @@ vi.mock('./contexts/AuthContext', () => ({
       isEmployee: true,
       createdAt: '2026-05-07T00:00:00Z',
     },
-    loading: false,
+    loading: authState.loading,
     signOut: vi.fn(),
     isAdmin: () => true,
     isManager: () => true,
@@ -159,12 +163,19 @@ vi.mock('./components/Clients/Clients', () => ({
   Clients: () => <section data-testid="clients-view">clients list</section>,
 }));
 
+vi.mock('./components/Users/UserDetailPage', () => ({
+  UserDetailPage: ({ userId }: { userId: number | null }) => (
+    <section data-testid="user-detail">user {userId}</section>
+  ),
+}));
+
 describe('App calendar client navigation', () => {
   beforeEach(() => {
     window.history.replaceState({}, '', '/?ppTab=calendar');
     window.localStorage.clear();
     window.sessionStorage.clear();
     permissionsState.paymentsCanView = true;
+    authState.loading = false;
   });
 
   it('returns to calendar after opening a client from calendar', async () => {
@@ -230,6 +241,30 @@ describe('App calendar client navigation', () => {
     });
   });
 
+  it('does not overwrite a deep-linked user page with notifications while auth is loading', async () => {
+    window.history.replaceState({}, '', '/?ppTab=userDetail&userId=10');
+    window.localStorage.setItem(LAST_TAB_STORAGE_KEY, 'notifications');
+    authState.loading = true;
+
+    const rendered = render(<App />);
+
+    await waitFor(() => {
+      expect(`${window.location.pathname}${window.location.search}`).toBe('/?ppTab=userDetail&userId=10');
+      expect(window.localStorage.getItem(LAST_TAB_STORAGE_KEY)).toBe('notifications');
+    });
+
+    authState.loading = false;
+    rendered.rerender(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('navigation').textContent).toBe('userDetail');
+      expect(screen.getByTestId('user-detail').textContent).toBe('user 10');
+      expect(`${window.location.pathname}${window.location.search}`).toBe('/?ppTab=userDetail&userId=10');
+    });
+
+    expect(window.localStorage.getItem(LAST_TAB_STORAGE_KEY)).toBe('userDetail');
+  });
+
   it('does not restore a forbidden last tab after role permissions change', async () => {
     window.history.replaceState({}, '', '/');
     window.localStorage.setItem(LAST_TAB_STORAGE_KEY, 'payments');
@@ -238,10 +273,10 @@ describe('App calendar client navigation', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByTestId('navigation').textContent).toBe('notifications');
-      expect(screen.getByTestId('notification-center')).toBeTruthy();
+      expect(screen.getByTestId('navigation').textContent).toBe('calendar');
+      expect(screen.getByTestId('calendar-view')).toBeTruthy();
     });
 
-    expect(window.localStorage.getItem(LAST_TAB_STORAGE_KEY)).toBe('notifications');
+    expect(window.localStorage.getItem(LAST_TAB_STORAGE_KEY)).toBe('calendar');
   });
 });
