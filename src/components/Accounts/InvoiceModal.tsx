@@ -25,7 +25,7 @@ import type {
 import { fromInputToApiDate, todayYMDInTimeZone, toDateInputValue } from '../../utils/dateUtils';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAuth } from '../../contexts/AuthContext';
-import { useDictionaries } from '../../hooks/useDictionaries';
+import { useInvoiceReferenceDictionaries } from '../../hooks/useInvoiceReferenceDictionaries';
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { apiService } from '../../services/api';
 import { formatCurrencySmart } from '../../utils/formatters';
@@ -1033,7 +1033,7 @@ export function InvoiceModal({
     [],
   );
 
-  const { invoiceUnits, services, serviceCategories } = useDictionaries();
+  const { invoiceUnits, services, serviceCategories } = useInvoiceReferenceDictionaries();
   const documentStatusSettings = useDocumentStatusSettings();
   const invoiceWorkflowStatusLabels = useMemo(
     () => getDocumentStatusLabels(documentStatusSettings, 'invoice', DEFAULT_INVOICE_WORKFLOW_STATUS_LABELS),

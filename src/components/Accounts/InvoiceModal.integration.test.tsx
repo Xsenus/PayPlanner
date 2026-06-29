@@ -94,11 +94,14 @@ vi.mock('../../contexts/AuthContext', () => ({
   }),
 }));
 
-vi.mock('../../hooks/useDictionaries', () => ({
-  useDictionaries: () => ({
+vi.mock('../../hooks/useInvoiceReferenceDictionaries', () => ({
+  useInvoiceReferenceDictionaries: () => ({
     invoiceUnits: invoiceUnitsMock,
     services: servicesMock,
     serviceCategories: serviceCategoriesMock,
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
   }),
 }));
 

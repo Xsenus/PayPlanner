@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
+using PayPlanner.Api.Filters;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
@@ -60,6 +61,35 @@ public class InvoicesController : ControllerBase
         _invoiceDocumentPdfService = invoiceDocumentPdfService;
         _yandexDiskService = yandexDiskService;
         _notificationService = notificationService;
+    }
+
+    [HttpGet("reference-dictionaries")]
+    [RequireSectionPermission(RolePermissionCatalog.Accounts)]
+    public async Task<ActionResult<InvoiceReferenceDictionariesDto>> GetReferenceDictionaries(CancellationToken ct)
+    {
+        var invoiceUnits = await _db.InvoiceUnits
+            .AsNoTracking()
+            .Where(item => item.IsActive)
+            .OrderBy(item => item.Name)
+            .ToListAsync(ct);
+        var services = await _db.Services
+            .AsNoTracking()
+            .Include(item => item.Category)
+            .Where(item => item.IsActive)
+            .OrderBy(item => item.Name)
+            .ToListAsync(ct);
+        var serviceCategories = await _db.ServiceCategories
+            .AsNoTracking()
+            .Where(item => item.IsActive)
+            .OrderBy(item => item.Name)
+            .ToListAsync(ct);
+
+        return Ok(new InvoiceReferenceDictionariesDto
+        {
+            InvoiceUnits = invoiceUnits,
+            Services = services,
+            ServiceCategories = serviceCategories,
+        });
     }
 
     private Task<TimeZoneInfo> ResolveInvoiceTimeZoneAsync(CancellationToken ct)

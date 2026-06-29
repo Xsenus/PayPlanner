@@ -91,6 +91,12 @@ export interface PagedResult<T> {
   pageSize: number;
 }
 
+export interface InvoiceReferenceDictionaries {
+  invoiceUnits: BaseDictItem[];
+  services: ServiceDictionaryItem[];
+  serviceCategories: ServiceCategoryDictionaryItem[];
+}
+
 export interface UserSettingDto {
   key: string;
   value: string;
@@ -5609,6 +5615,9 @@ export class ApiService {
   }
   async getServices() {
     return this.getDict('services');
+  }
+  async getInvoiceReferenceDictionaries() {
+    return this.request<InvoiceReferenceDictionaries>('/invoices/reference-dictionaries');
   }
   async getClientStatuses() {
     return this.getDict('client-statuses');

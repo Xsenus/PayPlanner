@@ -6,6 +6,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
+using PayPlanner.Api.Filters;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
@@ -19,6 +20,58 @@ public class InvoicesControllerCrudTests
     private const string InvoiceMaxClientCasesSettingKey = "invoices.rules.maxClientCasesPerInvoice";
     private const string InvoiceMaxActsSettingKey = "invoices.rules.maxActsPerInvoice";
     private const string InstallmentPaymentMarker = "[pp:installment-payment]";
+
+    [Fact]
+    public async Task GetReferenceDictionaries_UsesAccountsPermissionAndReturnsInvoiceLookups()
+    {
+        await using var db = await CreateContextAsync();
+        var actorUserId = await CreateUserAsync(db, "Invoice User");
+        var category = new ServiceCategoryDictionaryItem
+        {
+            Name = "Legal services",
+            Description = string.Empty,
+            ColorHex = "#111827",
+            IsActive = true,
+        };
+        db.ServiceCategories.Add(category);
+        db.InvoiceUnits.Add(new InvoiceUnitDictionaryItem
+        {
+            Name = "service",
+            Description = string.Empty,
+            ColorHex = "#475569",
+            IsActive = true,
+        });
+        await db.SaveChangesAsync();
+        db.Services.Add(new ServiceDictionaryItem
+        {
+            Name = "Claim drafting",
+            Description = string.Empty,
+            Unit = "service",
+            DefaultPrice = 15_000m,
+            ColorHex = "#111827",
+            CategoryId = category.Id,
+            IsActive = true,
+        });
+        await db.SaveChangesAsync();
+
+        var method = typeof(InvoicesController).GetMethod(nameof(InvoicesController.GetReferenceDictionaries));
+        Assert.NotNull(method);
+        var permission = Assert.Single(method.GetCustomAttributes(typeof(RequireSectionPermissionAttribute), inherit: true));
+        var sectionPermission = Assert.IsType<RequireSectionPermissionAttribute>(permission);
+        Assert.Equal(RolePermissionCatalog.Accounts, sectionPermission.Section);
+        Assert.Equal(RequireSectionPermissionOperations.View, sectionPermission.Operation);
+
+        var controller = CreateController(db, isAdmin: false, userId: actorUserId);
+        var action = await controller.GetReferenceDictionaries(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(action.Result);
+        var dto = Assert.IsType<InvoiceReferenceDictionariesDto>(ok.Value);
+        Assert.Single(dto.InvoiceUnits);
+        Assert.Single(dto.Services);
+        Assert.Single(dto.ServiceCategories);
+        Assert.Equal("Claim drafting", dto.Services.Single().Name);
+        Assert.Equal(category.Id, dto.Services.Single().CategoryId);
+    }
 
     [Fact]
     public async Task Create_PersistsFullInvoiceAggregate_WithRelationsAndInstallments()
