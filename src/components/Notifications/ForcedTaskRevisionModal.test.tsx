@@ -46,6 +46,32 @@ function createPage(items: UserNotificationDto[]): PagedResult<UserNotificationD
   };
 }
 
+function createCompletedApprovalNotification(overrides: Partial<UserNotificationDto> = {}): UserNotificationDto {
+  return createNotification({
+    id: 41,
+    type: 'taskApproved',
+    typeLabel: 'Задача согласована',
+    eventKey: 'task:202:approval-decision',
+    title: 'Задача согласована и завершена: Проверить договор',
+    bodyPreview: 'Согласующий согласовал и завершил задачу.',
+    tone: 'emerald',
+    objectId: 202,
+    taskId: 202,
+    metadataJson: '{"decision":"approved","resultingStatus":"done","completed":true}',
+    ...overrides,
+  });
+}
+
+function mockNotificationPages(revisions: UserNotificationDto[] = [], approvals: UserNotificationDto[] = []) {
+  apiMock.getUserNotifications.mockImplementation(async (params?: { type?: string }) => {
+    if (params?.type === 'taskApproved') {
+      return createPage(approvals);
+    }
+
+    return createPage(revisions);
+  });
+}
+
 describe('ForcedTaskRevisionModal', () => {
   beforeEach(() => {
     apiMock.getUserNotifications.mockReset();
@@ -54,7 +80,7 @@ describe('ForcedTaskRevisionModal', () => {
   });
 
   it('shows unread revision requests as a mandatory modal and acknowledges them', async () => {
-    apiMock.getUserNotifications.mockResolvedValue(createPage([createNotification()]));
+    mockNotificationPages([createNotification()]);
 
     render(<ForcedTaskRevisionModal />);
 
@@ -71,7 +97,7 @@ describe('ForcedTaskRevisionModal', () => {
 
   it('marks the message read before opening the task', async () => {
     const onOpenTask = vi.fn();
-    apiMock.getUserNotifications.mockResolvedValue(createPage([createNotification()]));
+    mockNotificationPages([createNotification()]);
 
     render(<ForcedTaskRevisionModal onOpenTask={onOpenTask} />);
 
@@ -79,5 +105,21 @@ describe('ForcedTaskRevisionModal', () => {
 
     await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(31));
     expect(onOpenTask).toHaveBeenCalledWith(101);
+  });
+
+  it('shows completed approvals as a mandatory read confirmation', async () => {
+    mockNotificationPages([], [createCompletedApprovalNotification()]);
+
+    render(<ForcedTaskRevisionModal />);
+
+    expect(await screen.findByRole('dialog')).toBeTruthy();
+    expect(screen.getByText('Задача согласована и завершена')).toBeTruthy();
+    expect(screen.getByText('Проверить договор')).toBeTruthy();
+    expect(screen.getByText('Согласующий согласовал и завершил задачу.')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ознакомлен' }));
+
+    await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(41));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 });

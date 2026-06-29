@@ -13,7 +13,7 @@ import {
 import type { ToastDomain } from '../../contexts/toastContextCore';
 import { emitUserNotificationsChanged } from '../../utils/userNotifications';
 import { updateRealtimeNotificationDiagnostics } from '../../utils/realtimeNotificationDiagnostics';
-import { getClientCaseDocumentIdFromNotification } from '../../utils/userNotificationMetadata';
+import { getClientCaseDocumentIdFromNotification, parseUserNotificationMetadata } from '../../utils/userNotificationMetadata';
 
 const FALLBACK_POLL_INTERVAL_MS = 30_000;
 const FALLBACK_PAGE_SIZE = 15;
@@ -117,9 +117,28 @@ const HIGH_PRIORITY_TYPES = new Set([
 ]);
 
 function shouldShowRealtimeToast(notification: RealtimeUserNotification): boolean {
+  if (isForcedTaskDecisionNotification(notification)) {
+    return false;
+  }
+
   return REALTIME_TOAST_TYPES.has(notification.type)
     || isCalendarNotification(notification)
     || isNoteNotification(notification);
+}
+
+function isForcedTaskDecisionNotification(notification: RealtimeUserNotification): boolean {
+  if (notification.type === 'taskRevisionRequested') {
+    return true;
+  }
+
+  if (notification.type !== 'taskApproved') {
+    return false;
+  }
+
+  const metadata = parseUserNotificationMetadata(notification.metadataJson);
+  const resultingStatus = typeof metadata.resultingStatus === 'string' ? metadata.resultingStatus : '';
+  const status = typeof metadata.status === 'string' ? metadata.status : '';
+  return metadata.completed === true || resultingStatus === 'done' || status === 'done';
 }
 
 function resolveToastVariant(notification: RealtimeUserNotification): 'info' | 'success' | 'error' {

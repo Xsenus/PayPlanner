@@ -2369,10 +2369,13 @@ public sealed class NotificationService : INotificationService
         }
 
         var isRevision = string.Equals(decision, "revisionRequested", StringComparison.OrdinalIgnoreCase);
+        var isCompletedApproval = !isRevision && string.Equals(task.Status, "done", StringComparison.OrdinalIgnoreCase);
         var type = isRevision ? UserNotificationTypes.TaskRevisionRequested : UserNotificationTypes.TaskApproved;
         var tone = isRevision ? "orange" : "emerald";
         var subject = isRevision
             ? $"Задача возвращена на доработку: {task.Title}"
+            : isCompletedApproval
+                ? $"Задача согласована и завершена: {task.Title}"
             : $"Задача согласована: {task.Title}";
         var recipients = ResolveApprovalDecisionRecipientUserIds(task, actorUserId);
         if (recipients.Count == 0)
@@ -2407,7 +2410,16 @@ public sealed class NotificationService : INotificationService
                     message.Body,
                     tone,
                     task,
-                    new { actorUserId, actorName, approverId = approver.Id, decision, resolution },
+                    new
+                    {
+                        actorUserId,
+                        actorName,
+                        approverId = approver.Id,
+                        decision,
+                        resolution,
+                        resultingStatus = task.Status,
+                        completed = isCompletedApproval
+                    },
                     cancellationToken);
             }
 
@@ -4261,7 +4273,12 @@ public sealed class NotificationService : INotificationService
     {
         var dueText = FormatTaskDueAt(task.DueAt, timeZone);
         var isRevision = string.Equals(decision, "revisionRequested", StringComparison.OrdinalIgnoreCase);
-        var actionText = isRevision ? "вернул(а) задачу на доработку" : "согласовал(а) задачу";
+        var isCompletedApproval = !isRevision && string.Equals(task.Status, "done", StringComparison.OrdinalIgnoreCase);
+        var actionText = isRevision
+            ? "вернул(а) задачу на доработку"
+            : isCompletedApproval
+                ? "согласовал(а) и завершил(а) задачу"
+                : "согласовал(а) задачу";
         var lines = new List<string>
         {
             $"{actorName} {actionText}.",

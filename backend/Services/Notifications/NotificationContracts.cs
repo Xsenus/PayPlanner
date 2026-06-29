@@ -271,6 +271,7 @@ public static class UserNotificationTypes
         TaskCancelled,
         TaskScheduleConflict,
         TaskApprovalRequested,
+        TaskApproved,
         TaskRevisionRequested,
         TaskApprovalOverdue,
         CalendarAccessChanged,
