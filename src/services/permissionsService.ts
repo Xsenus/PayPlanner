@@ -136,6 +136,10 @@ export function getRolePermissions(roleId?: number | null): RolePermissions {
   return clonePermissions(defaultRestrictedRolePermissions);
 }
 
+export function hasLoadedRolePermissions(roleId?: number | null): boolean {
+  return !roleId || cache.has(roleId);
+}
+
 export async function refreshRolePermissions(roleId: number) {
   await fetchRolePermissions(roleId);
 }

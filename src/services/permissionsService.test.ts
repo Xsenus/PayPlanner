@@ -12,13 +12,14 @@ describe('permissionsService', () => {
   it('keeps permissions restricted when role id is not available yet', async () => {
     vi.resetModules();
     const { apiService } = await import('./api');
-    const { getRolePermissions } = await import('./permissionsService');
+    const { getRolePermissions, hasLoadedRolePermissions } = await import('./permissionsService');
 
     const permissions = getRolePermissions(undefined);
 
     expect(permissions.tasks.canView).toBe(false);
     expect(permissions.clients.canView).toBe(false);
     expect(permissions.payments.canView).toBe(false);
+    expect(hasLoadedRolePermissions(undefined)).toBe(true);
     expect(apiService.getRolePermissions).not.toHaveBeenCalled();
   });
 
@@ -36,12 +37,17 @@ describe('permissionsService', () => {
       },
     } as never);
 
-    const { getRolePermissions, refreshRolePermissions } = await import('./permissionsService');
+    const {
+      getRolePermissions,
+      hasLoadedRolePermissions,
+      refreshRolePermissions,
+    } = await import('./permissionsService');
 
     const initial = getRolePermissions(42);
 
     expect(initial.tasks.canView).toBe(false);
     expect(initial.payments.canView).toBe(false);
+    expect(hasLoadedRolePermissions(42)).toBe(false);
     expect(apiService.getRolePermissions).toHaveBeenCalledWith(42);
 
     await refreshRolePermissions(42);
@@ -49,6 +55,7 @@ describe('permissionsService', () => {
 
     expect(loaded.tasks.canView).toBe(true);
     expect(loaded.payments.canView).toBe(false);
+    expect(hasLoadedRolePermissions(42)).toBe(true);
   });
 
   it('does not open missing sections when the server returns a partial permissions dto', async () => {

@@ -10,7 +10,7 @@ import { DoubleHorizontalScrollbars } from './components/ui/DoubleHorizontalScro
 import type { Act, ActInput, ClientCase, Invoice, Payment, PaymentKind } from './types';
 import type { Tab } from './types/tabs';
 import { useAuth } from './contexts/AuthContext';
-import { useRolePermissions } from './hooks/useRolePermissions';
+import { useRolePermissions, useRolePermissionsLoaded } from './hooks/useRolePermissions';
 import { TabProvider } from './contexts/TabContext';
 import { useActivityLogger } from './hooks/useActivityLogger';
 import { useToast } from './hooks/useToast';
@@ -176,6 +176,7 @@ function ActiveTabContent({ render }: { render: () => ReactNode }) {
 function AppContent() {
   const { user, loading, signOut } = useAuth();
   const permissions = useRolePermissions(user?.role?.id);
+  const permissionsLoaded = useRolePermissionsLoaded(user?.role?.id);
   const logActivity = useActivityLogger();
   const toast = useToast();
   const isAdminRole = (user?.role?.name ?? '').toLowerCase() === 'admin';
@@ -732,7 +733,7 @@ function AppContent() {
       return;
     }
 
-    if (loading || !user) {
+    if (loading || !user || !permissionsLoaded) {
       return;
     }
 
@@ -825,6 +826,7 @@ function AppContent() {
     actReturnTab,
     contractReturnTab,
     loading,
+    permissionsLoaded,
     selectedActId,
     selectedCaseId,
     selectedClientId,
@@ -837,7 +839,7 @@ function AppContent() {
   ]);
 
   useEffect(() => {
-    if (loading || !user) {
+    if (loading || !user || !permissionsLoaded) {
       return;
     }
 
@@ -846,10 +848,10 @@ function AppContent() {
     } catch {
       // ignore storage issues
     }
-  }, [activeTab, loading, user]);
+  }, [activeTab, loading, permissionsLoaded, user]);
 
   useEffect(() => {
-    if (loading || !user) {
+    if (loading || !user || !permissionsLoaded) {
       return;
     }
 
@@ -877,7 +879,7 @@ function AppContent() {
 
     const fallback = accessibleMenuTabs[0] ?? 'profile';
     setActiveTab(fallback);
-  }, [activeTab, accessibleMenuTabs, canViewTab, loading, selectedCaseId, selectedClientId, user]);
+  }, [activeTab, accessibleMenuTabs, canViewTab, loading, permissionsLoaded, selectedCaseId, selectedClientId, user]);
 
   useEffect(() => {
     if (!user) {

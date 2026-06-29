@@ -7,6 +7,7 @@ import { LAST_TAB_STORAGE_KEY } from './appRouting';
 
 const permissionsState = vi.hoisted(() => ({
   paymentsCanView: true,
+  loaded: true,
 }));
 
 const authState = vi.hoisted(() => ({
@@ -48,26 +49,37 @@ vi.mock('./hooks/useRolePermissions', () => {
   };
 
   return {
-    useRolePermissions: () => ({
-      calendar: { ...section, canViewAnalytics: true },
-      tasks: section,
-      notes: section,
-      reports: section,
-      calculator: section,
-      legalEntities: section,
-      clients: section,
-      cases: section,
-      accounts: section,
-      acts: section,
-      payments: { ...section, canView: permissionsState.paymentsCanView },
-      contracts: section,
-      dictionaries: section,
-      roles: section,
-      audit: section,
-      integrations: section,
-      yandexDisk: section,
-      s3Storage: section,
-    }),
+    useRolePermissions: () => {
+      const blocked = {
+        canView: false,
+        canCreate: false,
+        canEdit: false,
+        canDelete: false,
+        canExport: false,
+      };
+      const currentSection = permissionsState.loaded ? section : blocked;
+      return {
+        calendar: { ...currentSection, canViewAnalytics: permissionsState.loaded },
+        tasks: currentSection,
+        notes: currentSection,
+        reports: currentSection,
+        calculator: currentSection,
+        legalEntities: currentSection,
+        clients: currentSection,
+        cases: currentSection,
+        accounts: currentSection,
+        acts: currentSection,
+        payments: { ...currentSection, canView: permissionsState.loaded && permissionsState.paymentsCanView },
+        contracts: currentSection,
+        dictionaries: currentSection,
+        roles: currentSection,
+        audit: currentSection,
+        integrations: currentSection,
+        yandexDisk: currentSection,
+        s3Storage: currentSection,
+      };
+    },
+    useRolePermissionsLoaded: () => permissionsState.loaded,
   };
 });
 
@@ -149,9 +161,20 @@ vi.mock('./components/Cases/CaseDetailPage', () => ({
 }));
 
 vi.mock('./components/Clients/ClientDetail', () => ({
-  ClientDetail: ({ clientId, onBack }: { clientId: number; onBack: () => void }) => (
+  ClientDetail: ({
+    clientId,
+    onBack,
+    onOpenInvoicePage,
+  }: {
+    clientId: number;
+    onBack: () => void;
+    onOpenInvoicePage?: (invoiceId: number) => void;
+  }) => (
     <section data-testid="client-detail">
       <span>client {clientId}</span>
+      <button type="button" onClick={() => onOpenInvoicePage?.(528)}>
+        open client invoice
+      </button>
       <button type="button" onClick={onBack}>
         back from client
       </button>
@@ -161,6 +184,12 @@ vi.mock('./components/Clients/ClientDetail', () => ({
 
 vi.mock('./components/Clients/Clients', () => ({
   Clients: () => <section data-testid="clients-view">clients list</section>,
+}));
+
+vi.mock('./components/Accounts/Accounts', () => ({
+  Accounts: ({ routeInvoiceId }: { routeInvoiceId?: number | null }) => (
+    <section data-testid="accounts-view">invoice {routeInvoiceId ?? 'none'}</section>
+  ),
 }));
 
 vi.mock('./components/Users/UserDetailPage', () => ({
@@ -175,6 +204,7 @@ describe('App calendar client navigation', () => {
     window.localStorage.clear();
     window.sessionStorage.clear();
     permissionsState.paymentsCanView = true;
+    permissionsState.loaded = true;
     authState.loading = false;
   });
 
@@ -210,6 +240,48 @@ describe('App calendar client navigation', () => {
     await waitFor(() => {
       expect(screen.queryByTestId('task-journal')).toBeNull();
       expect(screen.getByTestId('notification-center')).toBeTruthy();
+    });
+  });
+
+  it('opens an invoice from the client card even when notifications were the last saved tab', async () => {
+    window.history.replaceState({}, '', '/clients/42');
+    window.localStorage.setItem(LAST_TAB_STORAGE_KEY, 'notifications');
+
+    render(<App />);
+
+    expect(await screen.findByTestId('client-detail')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'open client invoice' }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('notification-center')).toBeNull();
+      expect(screen.getByTestId('accounts-view').textContent).toBe('invoice 528');
+      expect(`${window.location.pathname}${window.location.search}`).toBe('/invoices/528');
+      expect(window.localStorage.getItem(LAST_TAB_STORAGE_KEY)).toBe('accounts');
+    });
+  });
+
+  it('keeps a routed invoice page while role permissions are loading', async () => {
+    window.history.replaceState({}, '', '/invoices/528');
+    window.localStorage.setItem(LAST_TAB_STORAGE_KEY, 'notifications');
+    permissionsState.loaded = false;
+
+    const rendered = render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('navigation').textContent).toBe('accounts');
+      expect(`${window.location.pathname}${window.location.search}`).toBe('/invoices/528');
+      expect(window.localStorage.getItem(LAST_TAB_STORAGE_KEY)).toBe('notifications');
+    });
+
+    permissionsState.loaded = true;
+    rendered.rerender(<App />);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('notification-center')).toBeNull();
+      expect(screen.getByTestId('accounts-view').textContent).toBe('invoice 528');
+      expect(`${window.location.pathname}${window.location.search}`).toBe('/invoices/528');
+      expect(window.localStorage.getItem(LAST_TAB_STORAGE_KEY)).toBe('accounts');
     });
   });
 
