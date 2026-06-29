@@ -109,4 +109,49 @@ describe('UserDetailPage', () => {
 
     await waitFor(() => expect(onOpenPayment).toHaveBeenCalledWith(2069));
   });
+
+  it('explains why a contractor payment is absent from the calendar before task completion', async () => {
+    vi.mocked(authService.getUserContractorBalance).mockResolvedValue({
+      owedToMe: 3500,
+      owedByMe: 0,
+      paidToMe: 0,
+      paidByMe: 0,
+      queue: [
+        {
+          taskId: 78,
+          taskTitle: 'МЕРКУЛОВ - ПОДГОТОВКА ИСКА О РАЗДЕЛЕ КВАРТИРЫ',
+          paymentId: null,
+          direction: 'toMe',
+          assigneeName: 'Гордик Сергей',
+          authorName: 'Администратор',
+          clientId: 72,
+          clientName: 'Меркулов Матвей Сергеевич',
+          clientCaseId: 502,
+          clientCaseTitle: 'МЕРКУЛОВ - РАЗДЕЛ КВАРТИРА КАЛИНИНГРАД',
+          amount: 3500,
+          paidAmount: 0,
+          outstandingAmount: 3500,
+          paymentStatus: 'WaitingForResult',
+          taskStatus: 'inProgress',
+          paymentDueDate: null,
+          paidDate: null,
+        },
+      ],
+      paid: [],
+    });
+
+    render(
+      <UserDetailPage
+        userId={10}
+        onBack={vi.fn()}
+        onSaved={vi.fn()}
+        onOpenPayment={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(await screen.findByText('Расчеты'));
+
+    expect(await screen.findByText('Платеж появится в календаре после завершения задачи')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Платеж #/ })).toBeNull();
+  });
 });

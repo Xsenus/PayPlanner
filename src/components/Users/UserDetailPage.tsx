@@ -171,6 +171,12 @@ function formatOptionalDate(value?: string | null) {
   return new Intl.DateTimeFormat('ru-RU').format(date);
 }
 
+function formatMissingContractorPaymentHint(status?: string | null) {
+  return status === 'WaitingForResult'
+    ? 'Платеж появится в календаре после завершения задачи'
+    : 'Платеж еще не создан';
+}
+
 function buildCompanyOption(company: MainCompanySettingsDto['companies'][number]): LookupSelectOption {
   const description = [company.fullName?.trim() || null, company.inn ? `ИНН ${company.inn}` : null, company.kpp ? `КПП ${company.kpp}` : null]
     .filter(Boolean)
@@ -815,6 +821,11 @@ export function UserDetailPage({ userId, onBack, onSaved, onOpenPayment }: UserD
                                       Платеж #{item.paymentId}
                                     </a>
                                   )
+                                ) : null}
+                                {!item.paymentId ? (
+                                  <span className="max-w-[260px] text-right text-xs font-medium leading-5 text-slate-500">
+                                    {formatMissingContractorPaymentHint(item.paymentStatus)}
+                                  </span>
                                 ) : null}
                                 <div className="font-semibold text-slate-900">{formatCurrencySmart(item.amount).full}</div>
                               </div>
