@@ -3185,7 +3185,7 @@ export function TaskJournal({
 
   return (
     <div className={embedded ? 'bg-transparent' : 'min-h-screen bg-slate-50'}>
-      <div className={embedded ? 'mx-auto max-w-[1720px]' : 'mx-auto max-w-[1720px] p-4 sm:p-6 lg:p-8'}>
+      <div className={embedded ? 'mx-auto w-full min-w-0 max-w-[1720px]' : 'mx-auto w-full min-w-0 max-w-[1720px] p-4 sm:p-6 lg:p-8'}>
         <section className="mb-6">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
             <div>
@@ -3305,7 +3305,7 @@ export function TaskJournal({
           />
         </section>
 
-        <section className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <section className="mb-4 flex min-w-0 max-w-full flex-wrap items-center justify-between gap-3">
           <div className="flex max-w-full flex-wrap overflow-x-auto rounded-xl bg-slate-100 p-1" data-testid="task-quick-filter-row">
             {QUICK_FILTER_OPTIONS.map(({ value, label, icon: Icon }) => (
               <button
@@ -3374,7 +3374,7 @@ export function TaskJournal({
           </div>
         </section>
 
-        <section className="mb-6 space-y-3" data-testid="task-filters-panel">
+        <section className="mb-6 min-w-0 max-w-full space-y-3" data-testid="task-filters-panel">
           <div
             className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(260px,1fr)_repeat(4,minmax(150px,200px))]"
             data-testid="task-main-filter-row"
@@ -4166,9 +4166,9 @@ function TaskTable({
   onDone: (task: TaskJournalItem) => void;
 }) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="overflow-x-auto">
-        <table data-testid="task-table" className="min-w-[1280px] w-full">
+    <div data-testid="task-table-card" className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div data-testid="task-table-scroll" className="max-w-full overflow-x-auto overscroll-x-contain">
+        <table data-testid="task-table" className="w-full min-w-[1180px]">
           <thead className="border-b border-slate-200 bg-slate-50">
             <tr className="text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
               <th className="w-12 px-4 py-4">

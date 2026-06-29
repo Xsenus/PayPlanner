@@ -1614,6 +1614,12 @@ describe('TaskJournal', () => {
     expect(screen.getByTestId('task-view-controls').className).toContain('max-w-full');
     expect(screen.getByTestId('task-period-control').className).toContain('overflow-x-auto');
     expect(screen.getByTestId('task-view-mode-control').className).toContain('overflow-x-auto');
+    expect(screen.getByTestId('task-table-card').className).toContain('min-w-0');
+    expect(screen.getByTestId('task-table-card').className).toContain('max-w-full');
+    expect(screen.getByTestId('task-table-scroll').className).toContain('overflow-x-auto');
+    expect(screen.getByTestId('task-table-scroll').className).toContain('overscroll-x-contain');
+    expect(screen.getByTestId('task-table').className).toContain('min-w-[1180px]');
+    expect(screen.getByTestId('task-table').className).not.toContain('min-w-[1280px]');
   });
 
   it('restores the saved journal presentation mode for the current user', async () => {
