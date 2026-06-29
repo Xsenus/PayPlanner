@@ -126,6 +126,29 @@ describe('PaymentsTable', () => {
     expect(onEditPayment).toHaveBeenCalledWith(payment);
   });
 
+  it('renders expense counterparty as payment recipient when supplier client is not linked', () => {
+    const payment = createPayment({
+      type: 'Expense',
+      counterpartyName: 'Гордик Сергей',
+      expenseClient: { id: 71, name: 'Винокурова Нина Тариеловна' },
+      clientCase: { id: 501, title: 'ВИНОКУРОВА - РАЗДЕЛ ИМУЩЕСТВА' },
+    } as Partial<Payment>);
+
+    render(
+      <PaymentsTable
+        payments={[payment]}
+        onEditPayment={vi.fn()}
+        canAdd={false}
+        canEdit
+        canDelete={false}
+      />,
+    );
+
+    expect(screen.getByText('Получатель: Гордик Сергей')).toBeTruthy();
+    expect(screen.getByText('Клиент расхода: Винокурова Нина Тариеловна')).toBeTruthy();
+    expect(screen.getByText('Дело расхода: ВИНОКУРОВА - РАЗДЕЛ ИМУЩЕСТВА')).toBeTruthy();
+  });
+
   it('does not pass case id when cases section is hidden', () => {
     const payment = createPayment({
       clientId: 12,

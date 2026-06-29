@@ -188,6 +188,7 @@ export function PaymentsTable({
         : payment.invoiceId
         ? `Счет ID ${payment.invoiceId}`
         : null;
+      const counterpartyName = payment.counterpartyName?.trim() ?? '';
       const canOpenPaymentClient = Boolean(canOpenClients && onOpenClient && payment.clientId);
 
       switch (columnKey) {
@@ -218,6 +219,24 @@ export function PaymentsTable({
                   {payment.type === 'Expense' ? `Поставщик: ${payment.client.name}` : payment.client.name}
                 </span>
               )}
+              {payment.type === 'Expense' && payment.expenseClient?.name ? (
+                <span className="mt-0.5 block truncate text-xs leading-tight text-gray-500">
+                  {`Клиент расхода: ${payment.expenseClient.name}`}
+                </span>
+              ) : null}
+              {payment.clientCase?.title ? (
+                <span className="mt-0.5 block truncate text-xs leading-tight text-gray-500">
+                  {payment.type === 'Expense'
+                    ? `Дело расхода: ${payment.clientCase.title}`
+                    : payment.clientCase.title}
+                </span>
+              ) : null}
+            </div>
+          ) : counterpartyName ? (
+            <div className="leading-tight">
+              <span className="block font-medium text-slate-900">
+                {payment.type === 'Expense' ? `Получатель: ${counterpartyName}` : counterpartyName}
+              </span>
               {payment.type === 'Expense' && payment.expenseClient?.name ? (
                 <span className="mt-0.5 block truncate text-xs leading-tight text-gray-500">
                   {`Клиент расхода: ${payment.expenseClient.name}`}

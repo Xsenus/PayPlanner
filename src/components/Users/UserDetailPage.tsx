@@ -26,6 +26,7 @@ type UserDetailPageProps = {
   userId: number | null;
   onBack: () => void;
   onSaved: (user: User) => void;
+  onOpenPayment?: (paymentId: number) => void;
 };
 
 type FormState = {
@@ -264,7 +265,7 @@ function TextField(props: {
   );
 }
 
-export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps) {
+export function UserDetailPage({ userId, onBack, onSaved, onOpenPayment }: UserDetailPageProps) {
   const { user: currentUser } = useAuth();
   const toast = useToast();
   const isCreateMode = userId == null;
@@ -801,9 +802,19 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
                               </div>
                               <div className="flex shrink-0 flex-wrap items-center gap-3 lg:justify-end">
                                 {item.paymentId ? (
-                                  <a href={`/payments/${item.paymentId}`} className="text-xs font-semibold text-slate-500 hover:text-blue-700 hover:underline">
-                                    Платеж #{item.paymentId}
-                                  </a>
+                                  onOpenPayment ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => onOpenPayment(item.paymentId as number)}
+                                      className="text-xs font-semibold text-slate-500 hover:text-blue-700 hover:underline"
+                                    >
+                                      Платеж #{item.paymentId}
+                                    </button>
+                                  ) : (
+                                    <a href={`/payments/${item.paymentId}`} className="text-xs font-semibold text-slate-500 hover:text-blue-700 hover:underline">
+                                      Платеж #{item.paymentId}
+                                    </a>
+                                  )
                                 ) : null}
                                 <div className="font-semibold text-slate-900">{formatCurrencySmart(item.amount).full}</div>
                               </div>

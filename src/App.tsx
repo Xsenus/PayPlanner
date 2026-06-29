@@ -1725,6 +1725,7 @@ function AppContent() {
                 userId={selectedUserId}
                 onBack={handleBackToUsers}
                 onSaved={handleUserSaved}
+                onOpenPayment={permissions.payments.canView ? openPaymentPage : undefined}
               />
             )
           : renderNoAccess('Нужны права администратора.');
