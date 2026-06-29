@@ -198,6 +198,10 @@ vi.mock('./components/Users/UserDetailPage', () => ({
   ),
 }));
 
+vi.mock('./components/Profile/ProfilePage', () => ({
+  ProfilePage: () => <section data-testid="profile-page">profile</section>,
+}));
+
 describe('App calendar client navigation', () => {
   beforeEach(() => {
     window.history.replaceState({}, '', '/?ppTab=calendar');
@@ -335,6 +339,21 @@ describe('App calendar client navigation', () => {
     });
 
     expect(window.localStorage.getItem(LAST_TAB_STORAGE_KEY)).toBe('userDetail');
+  });
+
+  it('clears stale settings section when opening the profile page', async () => {
+    window.history.replaceState({}, '', '/?settingsSection=notifications&ppTab=profile');
+    window.localStorage.setItem(LAST_TAB_STORAGE_KEY, 'notifications');
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('navigation').textContent).toBe('profile');
+      expect(screen.getByTestId('profile-page')).toBeTruthy();
+      expect(`${window.location.pathname}${window.location.search}`).toBe('/?ppTab=profile');
+    });
+
+    expect(window.localStorage.getItem(LAST_TAB_STORAGE_KEY)).toBe('profile');
   });
 
   it('does not restore a forbidden last tab after role permissions change', async () => {

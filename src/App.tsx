@@ -819,6 +819,9 @@ function AppContent() {
       url.searchParams.delete('userId');
     }
     url.searchParams.delete('ppCaseTab');
+    if (activeTab !== 'settings') {
+      url.searchParams.delete('settingsSection');
+    }
 
     window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
   }, [

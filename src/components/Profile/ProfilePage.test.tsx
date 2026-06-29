@@ -22,6 +22,7 @@ const permissionsState = vi.hoisted(() => ({
   permissions: {
     calendar: { canView: true, viewScope: 'own' },
     audit: { canView: true },
+    payments: { canView: true },
   },
 }));
 
@@ -79,7 +80,7 @@ vi.mock('../ui/ObjectAuditModal', () => ({
   ObjectAuditLauncher: ({ triggerTitle }: { triggerTitle: string }) => <div>{triggerTitle}</div>,
 }));
 
-function createProfile(options?: { roleName?: string }) {
+function createProfile(options?: { roleName?: string; isExternalContractor?: boolean }) {
   return {
     id: 7,
     email: 'user@example.com',
@@ -96,7 +97,7 @@ function createProfile(options?: { roleName?: string }) {
     viber: '',
     photoUrl: null,
     role: { id: 7, name: options?.roleName ?? 'admin' },
-    isExternalContractor: false,
+    isExternalContractor: options?.isExternalContractor ?? false,
     externalIdentities: [
       {
         provider: 'google',
@@ -118,6 +119,7 @@ describe('ProfilePage', () => {
     permissionsState.permissions = {
       calendar: { canView: true, viewScope: 'own' },
       audit: { canView: true },
+      payments: { canView: true },
     };
     authMock.getProfile.mockResolvedValue(createProfile());
     authMock.getAuthProviders.mockResolvedValue({
@@ -169,6 +171,7 @@ describe('ProfilePage', () => {
     permissionsState.permissions = {
       calendar: { canView: true, viewScope: 'own' },
       audit: { canView: false },
+      payments: { canView: true },
     };
     authMock.getProfile.mockResolvedValueOnce(createProfile({ roleName: 'lawyer' }));
 
@@ -184,6 +187,7 @@ describe('ProfilePage', () => {
     permissionsState.permissions = {
       calendar: { canView: false, viewScope: 'own' },
       audit: { canView: true },
+      payments: { canView: true },
     };
     authMock.getProfile.mockResolvedValueOnce(createProfile({ roleName: 'lawyer' }));
 
@@ -193,5 +197,117 @@ describe('ProfilePage', () => {
     expect(screen.queryByRole('tab', { name: /Календари/i })).toBeNull();
     expect(screen.queryByText('Google Calendar mock')).toBeNull();
     expect(screen.queryByText('Яндекс.Календарь mock')).toBeNull();
+  });
+
+  it('shows all contractor task payments in the personal profile', async () => {
+    authMock.getProfile.mockResolvedValueOnce(createProfile({ roleName: 'lawyer', isExternalContractor: true }));
+    authMock.getContractorBalance.mockResolvedValueOnce({
+      owedToMe: 7000,
+      owedByMe: 0,
+      paidToMe: 4500,
+      paidByMe: 0,
+      queue: [
+        {
+          taskId: 101,
+          taskTitle: 'Waiting contractor task',
+          paymentId: 1001,
+          direction: 'toMe',
+          assigneeName: 'Sergey',
+          authorName: 'Anna',
+          clientId: 1,
+          clientName: 'Client One',
+          legalEntityId: null,
+          legalEntityName: null,
+          clientCaseId: 11,
+          clientCaseTitle: 'Case One',
+          amount: 2500,
+          paidAmount: 0,
+          outstandingAmount: 2500,
+          paymentStatus: 'Pending',
+          taskStatus: 'Done',
+          paymentDueDate: '2026-06-30T00:00:00Z',
+          paidDate: null,
+        },
+        {
+          taskId: 102,
+          taskTitle: 'Result contractor task',
+          paymentId: null,
+          direction: 'toMe',
+          assigneeName: 'Sergey',
+          authorName: 'Anna',
+          clientId: 2,
+          clientName: 'Client Two',
+          legalEntityId: null,
+          legalEntityName: null,
+          clientCaseId: 22,
+          clientCaseTitle: 'Case Two',
+          amount: 3500,
+          paidAmount: 0,
+          outstandingAmount: 3500,
+          paymentStatus: 'WaitingForResult',
+          taskStatus: 'InProgress',
+          paymentDueDate: null,
+          paidDate: null,
+        },
+        {
+          taskId: 103,
+          taskTitle: 'Sixth visible task',
+          paymentId: 1003,
+          direction: 'toMe',
+          assigneeName: 'Sergey',
+          authorName: 'Anna',
+          clientId: 3,
+          clientName: 'Client Three',
+          legalEntityId: null,
+          legalEntityName: null,
+          clientCaseId: 33,
+          clientCaseTitle: 'Case Three',
+          amount: 1000,
+          paidAmount: 0,
+          outstandingAmount: 1000,
+          paymentStatus: 'Overdue',
+          taskStatus: 'Done',
+          paymentDueDate: '2026-06-01T00:00:00Z',
+          paidDate: null,
+        },
+      ],
+      paid: [
+        {
+          taskId: 104,
+          taskTitle: 'Paid contractor task',
+          paymentId: 1004,
+          direction: 'toMe',
+          assigneeName: 'Sergey',
+          authorName: 'Anna',
+          clientId: 4,
+          clientName: 'Client Four',
+          legalEntityId: null,
+          legalEntityName: null,
+          clientCaseId: 44,
+          clientCaseTitle: 'Case Four',
+          amount: 4500,
+          paidAmount: 4500,
+          outstandingAmount: 0,
+          paymentStatus: 'Completed',
+          taskStatus: 'Done',
+          paymentDueDate: '2026-06-10T00:00:00Z',
+          paidDate: '2026-06-11T00:00:00Z',
+        },
+      ],
+    });
+
+    render(<ProfilePage />);
+
+    await waitFor(() => expect(screen.getAllByRole('tab').length).toBeGreaterThan(1));
+    fireEvent.click(screen.getAllByRole('tab')[1]);
+
+    expect(await screen.findByText('Waiting contractor task')).toBeTruthy();
+    expect(screen.getByText('Result contractor task')).toBeTruthy();
+    expect(screen.getByText('Sixth visible task')).toBeTruthy();
+    expect(screen.getByText('Paid contractor task')).toBeTruthy();
+    expect(screen.getByText('Client One')).toBeTruthy();
+    expect(screen.getByText('Case One')).toBeTruthy();
+    expect(screen.getByText(/#1001/)).toBeTruthy();
+    expect(screen.getByText(/#1004/)).toBeTruthy();
   });
 });

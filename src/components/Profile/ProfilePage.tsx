@@ -4,6 +4,7 @@ import {
   authService,
   type AuthProviderPublicSettings,
   type ContractorBalance,
+  type ContractorBalanceItem,
   type ExternalIdentity,
   type UpdateProfileDto,
   type User,
@@ -60,6 +61,16 @@ type PendingPhotoCropState = {
 };
 
 type ProfileSectionTab = 'profile' | 'tasks' | 'calendars' | 'security' | 'audit';
+
+type ContractorBalanceGroup = {
+  key: string;
+  clientLabel: string;
+  caseLabel: string;
+  outstandingAmount: number;
+  paidAmount: number;
+  amount: number;
+  items: ContractorBalanceItem[];
+};
 
 type TimeZoneSettingLoadResult = {
   value?: string | null;
@@ -194,6 +205,53 @@ function getInitials(value?: string | null) {
     .toUpperCase();
 }
 
+function formatContractorPaymentStatus(status?: string | null) {
+  switch (status) {
+    case 'Completed':
+      return 'Оплачено';
+    case 'Pending':
+      return 'Ожидает оплаты';
+    case 'Overdue':
+      return 'Просрочено';
+    case 'Processing':
+      return 'В работе';
+    case 'Cancelled':
+      return 'Отменено';
+    case 'WaitingForResult':
+      return 'После завершения задачи';
+    default:
+      return status || 'Без статуса';
+  }
+}
+
+function contractorPaymentStatusClassName(status?: string | null) {
+  switch (status) {
+    case 'Completed':
+      return 'bg-emerald-100 text-emerald-700';
+    case 'Cancelled':
+      return 'bg-slate-200 text-slate-700';
+    case 'Overdue':
+      return 'bg-rose-100 text-rose-700';
+    case 'WaitingForResult':
+      return 'bg-violet-100 text-violet-700';
+    default:
+      return 'bg-amber-100 text-amber-700';
+  }
+}
+
+function formatOptionalDate(value?: string | null) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('ru-RU').format(date);
+}
+
+function formatMissingContractorPaymentHint(status?: string | null) {
+  return status === 'WaitingForResult'
+    ? 'Платеж появится в календаре после завершения задачи'
+    : 'Платеж еще не создан';
+}
+
 function clearExternalAuthQueryParams() {
   const url = new URL(window.location.href);
   url.searchParams.delete('externalAuthState');
@@ -261,6 +319,46 @@ export function ProfilePage() {
     || permissions.calendar.viewScope === 'all'
     || permissions.calendar.viewScope === 'department'
     || permissions.calendar.viewScope === 'specific';
+  const canOpenContractorPayments = permissions.payments?.canView === true;
+
+  const contractorBalanceItems = useMemo(
+    () => {
+      const items = new Map<string, ContractorBalanceItem>();
+      [...contractorBalance.queue, ...contractorBalance.paid].forEach((item) => {
+        items.set(`${item.taskId}:${item.paymentId ?? 'planned'}`, item);
+      });
+      return Array.from(items.values());
+    },
+    [contractorBalance.paid, contractorBalance.queue],
+  );
+
+  const contractorBalanceGroups = useMemo<ContractorBalanceGroup[]>(() => {
+    const groups = new Map<string, ContractorBalanceGroup>();
+
+    contractorBalanceItems.forEach((item) => {
+      const clientLabel = item.clientName?.trim() || item.legalEntityName?.trim() || 'Без клиента';
+      const caseLabel = item.clientCaseTitle?.trim() || 'Без дела';
+      const key = `${item.clientId ?? 'c0'}:${item.legalEntityId ?? 'l0'}:${item.clientCaseId ?? 'case0'}:${clientLabel}:${caseLabel}`;
+      const group = groups.get(key) ?? {
+        key,
+        clientLabel,
+        caseLabel,
+        outstandingAmount: 0,
+        paidAmount: 0,
+        amount: 0,
+        items: [],
+      };
+
+      group.outstandingAmount += item.outstandingAmount;
+      group.paidAmount += item.paidAmount;
+      group.amount += item.amount;
+      group.items.push(item);
+      groups.set(key, group);
+    });
+
+    return Array.from(groups.values())
+      .sort((left, right) => right.outstandingAmount - left.outstandingAmount || right.amount - left.amount || left.clientLabel.localeCompare(right.clientLabel, 'ru'));
+  }, [contractorBalanceItems]);
 
   const popupRef = useRef<Window | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -606,7 +704,7 @@ export function ProfilePage() {
     );
   }
 
-  const showContractorBalance = Boolean(profile?.isExternalContractor || contractorBalance.queue.length > 0 || contractorBalance.paid.length > 0);
+  const showContractorBalance = Boolean(profile?.isExternalContractor || contractorBalanceItems.length > 0);
 
   return (
     <div className="p-6 lg:p-8">
@@ -660,7 +758,7 @@ export function ProfilePage() {
                 <div className="text-lg font-semibold text-slate-900">Расчеты по задачам</div>
                 <div className="mt-1 text-sm text-slate-500">Выплаты организации вам как привлеченному исполнителю по выполненным и ожидающим задачам.</div>
               </div>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-3">
                 <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3">
                   <div className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">К выплате мне</div>
                   <div className="mt-1 text-2xl font-semibold text-emerald-900">{formatCurrencySmart(contractorBalance.owedToMe).full}</div>
@@ -669,21 +767,80 @@ export function ProfilePage() {
                   <div className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-700">Выплачено мне</div>
                   <div className="mt-1 text-2xl font-semibold text-sky-900">{formatCurrencySmart(contractorBalance.paidToMe).full}</div>
                 </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Задач</div>
+                  <div className="mt-1 text-2xl font-semibold text-slate-900">{contractorBalanceItems.length}</div>
+                </div>
               </div>
             </div>
-            {contractorBalance.queue.length > 0 ? (
-              <div className="mt-5 space-y-2">
-                {contractorBalance.queue.slice(0, 5).map((item) => (
-                  <div key={`${item.direction}-${item.taskId}-${item.paymentId ?? 'planned'}`} className="flex flex-col gap-2 rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
-                    <div className="min-w-0">
-                      <div className="truncate font-semibold text-slate-800">{item.taskTitle}</div>
-                      <div className="mt-1 text-xs text-slate-500">Постановщик: {item.authorName || '—'}</div>
+            {contractorBalanceGroups.length === 0 ? (
+              <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+                По вашим задачам пока нет выплат через блок «Оплата исполнителю».
+              </div>
+            ) : (
+              <div className="mt-5 space-y-3">
+                {contractorBalanceGroups.map((group) => (
+                  <div key={group.key} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold text-slate-900">{group.clientLabel}</div>
+                        <div className="mt-1 truncate text-xs text-slate-500">{group.caseLabel}</div>
+                      </div>
+                      <div className="grid gap-2 text-sm sm:grid-cols-3 lg:min-w-[420px]">
+                        <div className="rounded-xl bg-white px-3 py-2">
+                          <div className="text-xs text-slate-500">К выплате</div>
+                          <div className="font-semibold text-emerald-700">{formatCurrencySmart(group.outstandingAmount).full}</div>
+                        </div>
+                        <div className="rounded-xl bg-white px-3 py-2">
+                          <div className="text-xs text-slate-500">Выплачено</div>
+                          <div className="font-semibold text-sky-700">{formatCurrencySmart(group.paidAmount).full}</div>
+                        </div>
+                        <div className="rounded-xl bg-white px-3 py-2">
+                          <div className="text-xs text-slate-500">Начислено</div>
+                          <div className="font-semibold text-slate-900">{formatCurrencySmart(group.amount).full}</div>
+                        </div>
+                      </div>
                     </div>
-                    <div className="font-semibold text-slate-900">{formatCurrencySmart(item.outstandingAmount).full}</div>
+                    <div className="mt-3 space-y-2">
+                      {group.items.map((item) => (
+                        <div key={`${item.taskId}-${item.paymentId ?? 'planned'}`} className="flex flex-col gap-2 rounded-xl bg-white px-3 py-2 text-sm lg:flex-row lg:items-center lg:justify-between">
+                          <div className="min-w-0">
+                            <a href={`/tasks/${item.taskId}`} className="block truncate font-medium text-blue-700 hover:text-blue-900 hover:underline">
+                              {item.taskTitle}
+                            </a>
+                            <div className="mt-1 text-xs text-slate-500">Постановщик: {item.authorName || '—'}</div>
+                            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                              <span className={`rounded-full px-2 py-1 font-semibold ${contractorPaymentStatusClassName(item.paymentStatus)}`}>
+                                {formatContractorPaymentStatus(item.paymentStatus)}
+                              </span>
+                              {item.paymentDueDate ? <span>срок {formatOptionalDate(item.paymentDueDate)}</span> : null}
+                              {item.paidDate ? <span>оплачено {formatOptionalDate(item.paidDate)}</span> : null}
+                              <span>остаток {formatCurrencySmart(item.outstandingAmount).full}</span>
+                            </div>
+                          </div>
+                          <div className="flex shrink-0 flex-wrap items-center gap-3 lg:justify-end">
+                            {item.paymentId ? (
+                              canOpenContractorPayments ? (
+                                <a href={`/payments/${item.paymentId}`} className="text-xs font-semibold text-slate-500 hover:text-blue-700 hover:underline">
+                                  Платеж #{item.paymentId}
+                                </a>
+                              ) : (
+                                <span className="text-xs font-semibold text-slate-500">Платеж #{item.paymentId}</span>
+                              )
+                            ) : (
+                              <span className="max-w-[260px] text-right text-xs font-medium leading-5 text-slate-500">
+                                {formatMissingContractorPaymentHint(item.paymentStatus)}
+                              </span>
+                            )}
+                            <div className="font-semibold text-slate-900">{formatCurrencySmart(item.amount).full}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ))}
               </div>
-            ) : null}
+            )}
           </div>
         ) : null}
 
