@@ -129,7 +129,7 @@ public class NotificationServiceTests
             [UserNotificationTypes.TaskCancelled] = (NotificationPriorities.High, true, true, true),
             [UserNotificationTypes.TaskScheduleConflict] = (NotificationPriorities.High, true, true, true),
             [UserNotificationTypes.TaskApprovalRequested] = (NotificationPriorities.High, true, true, true),
-            [UserNotificationTypes.TaskApproved] = (NotificationPriorities.Normal, false, true, true),
+            [UserNotificationTypes.TaskApproved] = (NotificationPriorities.Normal, true, true, true),
             [UserNotificationTypes.TaskRevisionRequested] = (NotificationPriorities.High, true, true, true),
             [UserNotificationTypes.TaskApprovalOverdue] = (NotificationPriorities.Critical, true, true, true),
         };
