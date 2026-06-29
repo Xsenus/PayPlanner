@@ -5974,6 +5974,14 @@ function TaskModal({
     participantId?: number;
     resolution?: string;
   } | null>(null);
+  const [revisionReview, setRevisionReview] = useState<{
+    taskId: number;
+    participantId?: number;
+    approverName: string;
+  } | null>(null);
+  const [revisionReviewText, setRevisionReviewText] = useState('');
+  const [revisionReviewError, setRevisionReviewError] = useState<string | null>(null);
+  const [revisionReviewSaving, setRevisionReviewSaving] = useState(false);
   const selectedClient = useMemo(
     () => clients.find((client) => client.id === form.clientId) ?? null,
     [clients, form.clientId],
@@ -6283,6 +6291,40 @@ function TaskModal({
     await onApprovalDecision(choice.taskId, 'approved', choice.resolution, choice.participantId, finalAction);
   };
 
+  const openRevisionReviewDialog = (participant?: TaskJournalParticipant | null) => {
+    const task = state?.task;
+    if (!task) return;
+
+    setRevisionReview({
+      taskId: task.id,
+      participantId: participant?.id,
+      approverName: participant ? getParticipantDisplayName(participant) : currentUserName,
+    });
+    setRevisionReviewText('');
+    setRevisionReviewError(null);
+  };
+
+  const submitRevisionReview = async () => {
+    const review = revisionReview;
+    if (!review) return;
+
+    const text = revisionReviewText.trim();
+    if (!text) {
+      setRevisionReviewError('Напишите рецензию: что именно нужно исправить перед повторным согласованием.');
+      return;
+    }
+
+    setRevisionReviewSaving(true);
+    setRevisionReviewError(null);
+    try {
+      await onApprovalDecision(review.taskId, 'revisionRequested', text, review.participantId);
+      setRevisionReview(null);
+      setRevisionReviewText('');
+    } finally {
+      setRevisionReviewSaving(false);
+    }
+  };
+
   const handleDeleteTask = async () => {
     const task = state?.task;
     if (!task || isReadOnly || !canDeleteTask) return;
@@ -6550,6 +6592,77 @@ function TaskModal({
             className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
           >
             Отмена
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+  const revisionReviewDialog = revisionReview ? (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/45 px-4 py-6 backdrop-blur-sm">
+      <div className="w-full max-w-2xl rounded-2xl bg-white p-5 shadow-2xl">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-lg font-semibold text-slate-950">Рецензия на доработку</div>
+            <p className="mt-1 text-sm leading-6 text-slate-600">
+              Укажите, почему задача возвращается исполнителю и какие поправки нужно внести перед повторным согласованием.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              if (revisionReviewSaving) return;
+              setRevisionReview(null);
+              setRevisionReviewError(null);
+            }}
+            className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+            aria-label="Закрыть рецензию"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="mt-4 rounded-xl border border-orange-100 bg-orange-50 px-3 py-2 text-sm text-orange-800">
+          Согласующий: {revisionReview.approverName}. После отправки задача перейдет в статус «На доработке», а исполнитель увидит обязательное сообщение с этой рецензией.
+        </div>
+        <label className="mt-4 block text-sm font-semibold text-slate-700">
+          Комментарий для исполнителя
+          <textarea
+            value={revisionReviewText}
+            onChange={(event) => {
+              setRevisionReviewText(event.target.value);
+              if (revisionReviewError) setRevisionReviewError(null);
+            }}
+            className="mt-2 min-h-[160px] w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm leading-6 outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+            maxLength={4000}
+            autoFocus
+            placeholder="Например: исправить дату, приложить документ, уточнить формулировку..."
+          />
+        </label>
+        <div className="mt-2 flex items-center justify-between gap-3 text-xs">
+          <span className={revisionReviewError ? 'font-semibold text-rose-600' : 'text-slate-400'}>
+            {revisionReviewError ?? 'Рецензия сохранится в истории задачи и будет показана исполнителю.'}
+          </span>
+          <span className="shrink-0 text-slate-400">{revisionReviewText.trim().length}/4000</span>
+        </div>
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={() => {
+              if (revisionReviewSaving) return;
+              setRevisionReview(null);
+              setRevisionReviewError(null);
+            }}
+            className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-60"
+            disabled={revisionReviewSaving}
+          >
+            Отмена
+          </button>
+          <button
+            type="button"
+            onClick={() => void submitRevisionReview()}
+            className="rounded-xl bg-orange-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={revisionReviewSaving}
+          >
+            {revisionReviewSaving ? 'Отправляем...' : 'Отправить на доработку с поправками'}
           </button>
         </div>
       </div>
@@ -6982,7 +7095,7 @@ function TaskModal({
                     </button>
                     <button
                       type="button"
-                      onClick={() => state?.task && void onApprovalDecision(state.task.id, 'revisionRequested', form.result.trim(), currentApprovalParticipant?.id)}
+                      onClick={() => openRevisionReviewDialog(currentApprovalParticipant)}
                       className="rounded-lg border border-orange-200 bg-white px-3 py-2 text-sm font-semibold text-orange-700 transition hover:bg-orange-50"
                     >
                       На доработку
@@ -7060,6 +7173,7 @@ function TaskModal({
           </div>
         </div>
         {approvalChoiceDialog}
+        {revisionReviewDialog}
       </div>
     );
   }
@@ -7582,7 +7696,7 @@ function TaskModal({
                               </button>
                               <button
                                 type="button"
-                                onClick={() => onApprovalDecision(state.task!.id, 'revisionRequested', form.result.trim(), participant.id)}
+                                onClick={() => openRevisionReviewDialog(participant)}
                                 className="rounded-lg border border-orange-200 px-3 py-1.5 text-xs font-semibold text-orange-700 transition hover:bg-orange-50"
                               >
                                 На доработку
@@ -7954,6 +8068,7 @@ function TaskModal({
         </div>
       </div>
       {approvalChoiceDialog}
+      {revisionReviewDialog}
       <style>{`
         .form-input {
           height: 44px;

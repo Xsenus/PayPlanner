@@ -1,0 +1,83 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { ForcedTaskRevisionModal } from './ForcedTaskRevisionModal';
+import type { PagedResult, UserNotificationDto } from '../../services/api';
+
+const apiMock = vi.hoisted(() => ({
+  getUserNotifications: vi.fn(),
+  markUserNotificationRead: vi.fn(),
+}));
+
+vi.mock('../../services/api', () => ({
+  apiService: apiMock,
+}));
+
+function createNotification(overrides: Partial<UserNotificationDto> = {}): UserNotificationDto {
+  return {
+    id: 31,
+    type: 'taskRevisionRequested',
+    typeLabel: 'Возврат на доработку',
+    eventKey: 'task:101:approval-decision',
+    title: 'Задача возвращена на доработку: Подготовить иск',
+    bodyPreview: 'Исправить дату и приложить документ.',
+    tone: 'orange',
+    toastEnabled: false,
+    objectType: 'task',
+    objectId: 101,
+    taskId: 101,
+    metadataJson: '{"resolution":"Уточнить дату заседания."}',
+    requiresAction: true,
+    isRead: false,
+    readAt: null,
+    isArchived: false,
+    archivedAt: null,
+    createdAt: '2026-06-29T12:00:00Z',
+    ...overrides,
+  };
+}
+
+function createPage(items: UserNotificationDto[]): PagedResult<UserNotificationDto> {
+  return {
+    items,
+    total: items.length,
+    page: 1,
+    pageSize: 10,
+  };
+}
+
+describe('ForcedTaskRevisionModal', () => {
+  beforeEach(() => {
+    apiMock.getUserNotifications.mockReset();
+    apiMock.markUserNotificationRead.mockReset();
+    apiMock.markUserNotificationRead.mockImplementation(async (id: number) => createNotification({ id, isRead: true }));
+  });
+
+  it('shows unread revision requests as a mandatory modal and acknowledges them', async () => {
+    apiMock.getUserNotifications.mockResolvedValue(createPage([createNotification()]));
+
+    render(<ForcedTaskRevisionModal />);
+
+    expect(await screen.findByRole('dialog')).toBeTruthy();
+    expect(screen.getByText('Задача вернулась на доработку')).toBeTruthy();
+    expect(screen.getByText('Подготовить иск')).toBeTruthy();
+    expect(screen.getByText('Уточнить дату заседания.')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Информация прочитана' }));
+
+    await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(31));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('marks the message read before opening the task', async () => {
+    const onOpenTask = vi.fn();
+    apiMock.getUserNotifications.mockResolvedValue(createPage([createNotification()]));
+
+    render(<ForcedTaskRevisionModal onOpenTask={onOpenTask} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Открыть задачу' }));
+
+    await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(31));
+    expect(onOpenTask).toHaveBeenCalledWith(101);
+  });
+});

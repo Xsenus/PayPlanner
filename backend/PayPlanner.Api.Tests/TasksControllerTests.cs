@@ -3463,6 +3463,46 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task UpdateApproval_RevisionRequiresReviewText()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author-revision-review@example.com", "Автор");
+        var approver = await CreateAdminUserAsync(db, "approver-revision-review@example.com", "Согласующий");
+        var client = await CreateClientAsync(db, "Клиент рецензии");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id, result: null);
+        task.Status = "onApproval";
+        task.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = approver.Id,
+            Role = "approver",
+            DisplayName = approver.FullName,
+            Email = approver.Email,
+            ApprovalStatus = "pending",
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), approver);
+
+        var result = await controller.UpdateApproval(task.Id, new UpdateTaskJournalApprovalRequest
+        {
+            Decision = "revisionRequested",
+            Resolution = "   ",
+        }, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.Contains("рецензию", badRequest.Value?.ToString(), StringComparison.OrdinalIgnoreCase);
+
+        var stored = await db.TaskJournalItems
+            .Include(item => item.Participants)
+            .SingleAsync(item => item.Id == task.Id);
+        Assert.Equal("onApproval", stored.Status);
+        Assert.Contains(stored.Participants, item =>
+            item.UserId == approver.Id
+            && item.ApprovalStatus == "pending"
+            && item.RespondedAt == null);
+        Assert.False(await db.TaskJournalComments.AnyAsync(item => item.TaskJournalItemId == task.Id));
+    }
+
+    [Fact]
     public async Task UpdateApproval_FinalApproverCanApproveAndCompleteTask()
     {
         await using var db = await CreateContextAsync();
@@ -4022,12 +4062,17 @@ public class TasksControllerTests
         var dto = Assert.IsType<TaskJournalItemDto>(ok.Value);
 
         Assert.Equal("onApproval", dto.Status);
-        Assert.All(dto.Participants.Where(item => item.Role == "approver"), participant =>
-        {
-            Assert.Equal("pending", participant.ApprovalStatus);
-            Assert.Empty(participant.Resolution);
-            Assert.Null(participant.RespondedAt);
-        });
+        Assert.Contains(dto.Participants, participant =>
+            participant.Role == "approver"
+            && participant.UserId == firstApprover.Id
+            && participant.ApprovalStatus == "approved"
+            && participant.Resolution == "Первый шаг согласован.");
+        Assert.Contains(dto.Participants, participant =>
+            participant.Role == "approver"
+            && participant.UserId == secondApprover.Id
+            && participant.ApprovalStatus == "pending"
+            && string.IsNullOrEmpty(participant.Resolution)
+            && participant.RespondedAt == null);
     }
 
     [Fact]

@@ -18,6 +18,7 @@ import { DialogProvider } from './contexts/DialogContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { AppVersionGate } from './components/AppVersion/AppVersionGate';
 import { RealtimeNotificationToasts } from './components/Notifications/RealtimeNotificationToasts';
+import { ForcedTaskRevisionModal } from './components/Notifications/ForcedTaskRevisionModal';
 import type { User as AppUser } from './services/authService';
 import { apiService, type ContactScope } from './services/api';
 import { extractDisplayErrorMessage } from './utils/errorUtils';
@@ -1801,6 +1802,9 @@ function AppContent() {
           onOpenCalendar={permissions.calendar.canView ? () => handleTabChange('calendar') : handleOpenNotifications}
           onOpenNotes={permissions.notes.canView ? () => handleTabChange('notes') : undefined}
           onOpenNotifications={handleOpenNotifications}
+        />
+        <ForcedTaskRevisionModal
+          onOpenTask={permissions.tasks.canView ? (taskId) => openTaskDetail(taskId, { returnTo: activeTab }) : undefined}
         />
         <DoubleHorizontalScrollbars />
         <Navigation activeTab={activeTab} onTabChange={handleTabChange} />

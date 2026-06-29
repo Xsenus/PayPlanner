@@ -1075,6 +1075,7 @@ export interface UserNotificationDto {
   objectId?: number | null;
   taskId?: number | null;
   metadataJson?: string | null;
+  requiresAction?: boolean;
   isRead: boolean;
   readAt?: string | null;
   isArchived: boolean;

@@ -4280,7 +4280,14 @@ public sealed class NotificationService : INotificationService
         if (!string.IsNullOrWhiteSpace(resolution))
         {
             lines.Add(string.Empty);
-            lines.Add($"Резолюция: {resolution.Trim()}");
+            lines.Add(isRevision ? $"Рецензия: {resolution.Trim()}" : $"Резолюция: {resolution.Trim()}");
+        }
+
+        if (isRevision)
+        {
+            lines.Add(string.Empty);
+            lines.Add("После исправления внесите правки и повторно направьте задачу на согласование.");
+            lines.Add("Согласующие, которые уже согласовали задачу, повторно в маршруте не участвуют.");
         }
 
         return string.Join('\n', lines);

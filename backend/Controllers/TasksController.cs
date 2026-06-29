@@ -2240,6 +2240,12 @@ public class TasksController : ControllerBase
 
         var oldStatus = entity.Status;
         var resolution = NormalizeOptional(request.Resolution);
+        if (string.Equals(decision, "revisionRequested", StringComparison.OrdinalIgnoreCase)
+            && string.IsNullOrWhiteSpace(resolution))
+        {
+            return BadRequest(new { message = "Укажите рецензию: почему задача возвращается на доработку и какие поправки нужно внести." });
+        }
+
         var finalAction = NormalizeApprovalFinalAction(request.FinalAction);
         var completesTaskAfterApproval = string.Equals(finalAction, "complete", StringComparison.OrdinalIgnoreCase);
         var isFinalApprovalDecision = string.Equals(decision, "approved", StringComparison.OrdinalIgnoreCase)
@@ -4099,6 +4105,7 @@ public class TasksController : ControllerBase
 
         var resetItems = participants.Items
             .Select(participant => string.Equals(participant.Role, "approver", StringComparison.OrdinalIgnoreCase)
+                                   && !string.Equals(participant.ApprovalStatus, "approved", StringComparison.OrdinalIgnoreCase)
                 ? participant with { ApprovalStatus = "pending", Resolution = null }
                 : participant)
             .ToList();
@@ -4123,6 +4130,11 @@ public class TasksController : ControllerBase
         var now = DateTime.UtcNow;
         foreach (var participant in participants.Where(item => string.Equals(item.Role, "approver", StringComparison.OrdinalIgnoreCase)))
         {
+            if (string.Equals(participant.ApprovalStatus, "approved", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             if (!string.Equals(participant.ApprovalStatus, "pending", StringComparison.OrdinalIgnoreCase)
                 || participant.Resolution is not null
                 || participant.RespondedAt is not null)
@@ -4788,7 +4800,9 @@ public class TasksController : ControllerBase
 
         return string.IsNullOrWhiteSpace(resolution)
             ? text
-            : $"{text} Резолюция: {resolution}";
+            : string.Equals(decision, "revisionRequested", StringComparison.OrdinalIgnoreCase)
+                ? $"{text} Рецензия: {resolution}"
+                : $"{text} Резолюция: {resolution}";
     }
 
     private static string BuildDeadlineChangeRequestText(

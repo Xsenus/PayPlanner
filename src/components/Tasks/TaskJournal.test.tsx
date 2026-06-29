@@ -1280,6 +1280,43 @@ describe('TaskJournal', () => {
     ));
   });
 
+  it('requires a review before returning an approval task to revision', async () => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Согласующий', email: 'approver@example.com' };
+    permissionsState.taskCanEdit = false;
+    await renderJournal([
+      createTask({
+        status: 'onApproval',
+        participants: [
+          { id: 77, userId: 7, role: 'approver', displayName: 'Согласующий', sortOrder: 0, approvalStatus: 'pending' },
+        ],
+      }),
+    ]);
+
+    fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+    expect(await screen.findByRole('heading', { name: 'Просмотр задачи' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'На доработку' }));
+    expect(screen.getByText('Рецензия на доработку')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить на доработку с поправками' }));
+    expect(screen.getByText('Напишите рецензию: что именно нужно исправить перед повторным согласованием.')).toBeTruthy();
+    expect(apiMock.updateTaskJournalApproval).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText('Комментарий для исполнителя'), {
+      target: { value: 'Исправить дату и приложить документ.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить на доработку с поправками' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalApproval).toHaveBeenCalledWith(
+      101,
+      'revisionRequested',
+      'Исправить дату и приложить документ.',
+      77,
+      undefined,
+    ));
+  });
+
   it('shows agreed tasks as approved for the executor after approval', async () => {
     await renderJournal([
       createTask({
