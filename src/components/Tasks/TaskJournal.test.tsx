@@ -486,6 +486,21 @@ describe('TaskJournal', () => {
     expect(screen.getByText('БАНКРОТСТВО')).toBeTruthy();
   });
 
+  it('opens a task from the list title and exposes full hover text for clipped fields', async () => {
+    const taskTitle = 'ИГНАТЬЕВ - ДОВЕРЕННОСТЬ';
+    const taskDescription = 'Проект доверенности, отправить нотариусу, договориться с клиентом о подписании.';
+    await renderJournal([createTask({ title: taskTitle, description: taskDescription })]);
+
+    const titleLink = screen.getByTestId('task-title-link-101');
+    expect(titleLink.getAttribute('title')).toBe(taskTitle);
+    expect(titleLink.getAttribute('aria-label')).toBe(`Открыть задачу ${taskTitle}`);
+    expect(screen.getByText(taskDescription).getAttribute('title')).toBe(taskDescription);
+
+    fireEvent.click(titleLink);
+
+    expect(await screen.findByRole('heading', { name: 'Просмотр задачи' })).toBeTruthy();
+  });
+
   it('loads the manual control section with the under-control filter', async () => {
     await renderJournal([createTask({ isUnderControl: true })], { underControlOnly: true });
 

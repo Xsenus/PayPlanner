@@ -4209,6 +4209,7 @@ function TaskTable({
               const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
               const counterpartyName = getTaskClientName(task);
               const caseTitle = getTaskCaseTitle(task);
+              const taskDescription = task.description || 'Описание не заполнено';
               const canSelectTask = selectableTaskIds.has(task.id);
               const canOpenCounterparty = Boolean(
                 (task.clientId && onOpenClient) || (task.legalEntityId && onOpenLegalEntity),
@@ -4287,8 +4288,17 @@ function TaskTable({
                     </div>
                   </td>
                   <td className="max-w-[360px] px-4 py-4">
-                    <div className="font-medium text-slate-900">{task.title}</div>
-                    <div className="mt-1 line-clamp-2 text-sm text-slate-500">{task.description || 'Описание не заполнено'}</div>
+                    <button
+                      type="button"
+                      onClick={() => onEdit(task)}
+                      title={task.title}
+                      aria-label={`Открыть задачу ${task.title}`}
+                      data-testid={`task-title-link-${task.id}`}
+                      className="block max-w-full text-left font-semibold text-blue-700 underline-offset-2 transition hover:text-blue-800 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                    >
+                      {task.title}
+                    </button>
+                    <div className="mt-1 line-clamp-2 text-sm text-slate-500" title={taskDescription}>{taskDescription}</div>
                     <span className={`mt-3 inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${priorityClass(task.priority)}`}>
                       {getPriorityLabel(task.priority)}
                     </span>
