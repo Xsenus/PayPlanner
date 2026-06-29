@@ -2682,12 +2682,13 @@ export function InvoiceModal({
     planOverride?: InstallmentPlanInput | null;
     dueDateOverride?: string | null;
     replaceInstallmentPlan?: boolean;
+    includeActLinks?: boolean;
   };
 
   const buildInvoicePayload = useCallback((
     options: BuildInvoicePayloadOptions = {},
   ): InvoiceInput => {
-    const { statusOverride, planOverride, dueDateOverride, replaceInstallmentPlan } = options;
+    const { statusOverride, planOverride, dueDateOverride, replaceInstallmentPlan, includeActLinks = true } = options;
     const safeAmount = parseMoneyInput(form.amount);
     const clientCaseIds = filterClientCaseIdsForOwner(
       selectedClientCaseIds,
@@ -2696,7 +2697,9 @@ export function InvoiceModal({
       caseOwnerLegalEntityIdNumber,
       clientCasesLoadedOwnerKey === caseOwnerKey,
     );
-    const actIds = selectedActs.map((item) => item.id).filter((id) => Number.isFinite(id) && id > 0);
+    const actIds = includeActLinks
+      ? selectedActs.map((item) => item.id).filter((id) => Number.isFinite(id) && id > 0)
+      : [];
     const effectiveInstallmentPlan = planOverride === undefined ? installmentPlan : planOverride;
     const effectiveDueDate = dueDateOverride === undefined ? form.dueDate : (dueDateOverride ?? '');
     const shouldReplaceInstallmentPlan =
@@ -3433,6 +3436,7 @@ export function InvoiceModal({
       if (action === 'copy') {
         const payload = buildInvoicePayload({
           replaceInstallmentPlan: Boolean(installmentPlan ?? relatedInstallmentPlan),
+          includeActLinks: false,
         });
         payload.number = `${form.number || 'Счёт'} (копия)`;
         await apiService.createInvoice(payload);

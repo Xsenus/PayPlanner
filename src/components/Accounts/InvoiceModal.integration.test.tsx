@@ -349,6 +349,7 @@ describe('InvoiceModal integration', () => {
     vi.mocked(apiService.getMoneyOperationsPaged).mockReset();
     vi.mocked(apiService.getMoneyOperationsPaged).mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 20, summary: createEmptyMoneyOperationsSummary() });
     vi.mocked(apiService.updateInvoice).mockClear();
+    vi.mocked(apiService.createInvoice).mockReset();
     vi.mocked(apiService.cancelInvoice).mockReset();
     vi.mocked(apiService.createClient).mockReset();
   });
@@ -2316,6 +2317,67 @@ describe('InvoiceModal integration', () => {
     fireEvent.click(await screen.findByTestId('invoice-related-act-link-34'));
 
     expect(onOpenActPage).toHaveBeenCalledWith(34, { invoiceId: 562 });
+  });
+
+  it('creates an invoice copy without reusing linked acts from the source invoice', async () => {
+    const sourceAct = {
+      id: 1176,
+      number: '1176',
+      title: null,
+      date: '2026-04-24',
+      amount: 35000,
+      status: 'Created',
+      clientId: 1,
+      clientName: 'Лущенко Сергей Валерьевич',
+    } as unknown as Act;
+    const invoice = {
+      id: 250,
+      invoiceEntityId: 250,
+      number: '250',
+      date: '2025-12-29',
+      dueDate: '2026-04-01',
+      amount: 35000,
+      type: 'Income',
+      status: 'Pending',
+      workflowStatus: 'Draft',
+      clientId: 1,
+      acts: [sourceAct],
+      lineItems: [{ name: 'Юридические услуги', quantity: 1, unit: 'шт', price: 35000 }],
+    } as unknown as Invoice;
+    vi.mocked(apiService.createInvoice).mockResolvedValue({ ...invoice, id: 251, acts: [] } as unknown as Invoice);
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        presentation="page"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[createTestClient(1, 'Лущенко Сергей Валерьевич')]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[]}
+        onRefreshRequested={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Копировать' }));
+
+    await waitFor(() => {
+      expect(apiService.createInvoice).toHaveBeenCalledTimes(1);
+    });
+    const [payload] = vi.mocked(apiService.createInvoice).mock.calls[0];
+    expect(payload).toMatchObject({
+      number: '250 (копия)',
+      amount: 35000,
+      actId: null,
+      actIds: [],
+    });
+    expect(payload.lineItems).toEqual([
+      expect.objectContaining({ name: 'Юридические услуги', quantity: 1, unit: 'шт', price: 35000 }),
+    ]);
   });
 
   it('creates a linked act from a saved invoice and reuses its line items', async () => {
