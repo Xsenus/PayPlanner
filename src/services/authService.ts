@@ -270,6 +270,12 @@ export interface ContractorBalanceItem {
   direction: 'toMe' | 'byMe';
   assigneeName: string;
   authorName: string;
+  clientId?: number | null;
+  clientName?: string | null;
+  legalEntityId?: number | null;
+  legalEntityName?: string | null;
+  clientCaseId?: number | null;
+  clientCaseTitle?: string | null;
   amount: number;
   paidAmount: number;
   outstandingAmount: number;
@@ -555,6 +561,10 @@ class AuthApiService {
 
   public async getUser(id: number) {
     return this.request<User>(`/users/${id}`);
+  }
+
+  public async getUserContractorBalance(id: number) {
+    return this.request<ContractorBalance>(`/users/${id}/contractor-balance`);
   }
 
   public async createUser(data: CreateUserDto) {

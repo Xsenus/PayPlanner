@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Building2, Loader2, Plus, Save, ShieldCheck, Trash2, UserRound } from 'lucide-react';
 
-import { authService, type Role, type UpdateUserDto, type User } from '../../services/authService';
+import { authService, type ContractorBalance, type ContractorBalanceItem, type Role, type UpdateUserDto, type User } from '../../services/authService';
 import { apiService, type MainCompanySettingsDto } from '../../services/api';
 import type { BaseDictItem } from '../../types/dictionaries';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { formatCurrencySmart } from '../../utils/formatters';
 import { ObjectAuditLauncher } from '../ui/ObjectAuditModal';
 import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
 import {
@@ -19,7 +20,7 @@ import {
 import { normalizeUserTimeZoneId, USER_TIME_ZONE_OPTIONS, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
 import { TaskNotificationDefaultsPanel } from '../Tasks/TaskNotificationDefaultsPanel';
 
-type UserDetailSection = 'main' | 'contacts' | 'employment' | 'notifications' | 'access';
+type UserDetailSection = 'main' | 'contacts' | 'employment' | 'contractorBalance' | 'notifications' | 'access';
 
 type UserDetailPageProps = {
   userId: number | null;
@@ -53,6 +54,16 @@ type FormState = {
   companyIds: number[];
 };
 
+type ContractorBalanceGroup = {
+  key: string;
+  clientLabel: string;
+  caseLabel: string;
+  outstandingAmount: number;
+  paidAmount: number;
+  amount: number;
+  items: ContractorBalanceItem[];
+};
+
 const EMPTY_FORM: FormState = {
   email: '',
   password: '',
@@ -79,10 +90,20 @@ const EMPTY_FORM: FormState = {
   companyIds: [],
 };
 
+const EMPTY_CONTRACTOR_BALANCE: ContractorBalance = {
+  owedToMe: 0,
+  owedByMe: 0,
+  paidToMe: 0,
+  paidByMe: 0,
+  queue: [],
+  paid: [],
+};
+
 const SECTION_LABELS: Array<{ id: UserDetailSection; label: string; description: string }> = [
   { id: 'main', label: 'Основное', description: 'Имя, email и базовая информация профиля.' },
   { id: 'contacts', label: 'Контакты', description: 'Телефон, мессенджеры и внешние ссылки.' },
   { id: 'employment', label: 'Работа в системе', description: 'Роль, активность и доступ к компаниям.' },
+  { id: 'contractorBalance', label: 'Расчеты', description: 'Задолженность и выплаты привлеченному исполнителю.' },
   { id: 'notifications', label: 'Напоминания задач', description: 'Значения по умолчанию для новых задач пользователя.' },
   { id: 'access', label: 'Способы входа', description: 'Привязанные внешние способы авторизации.' },
 ];
@@ -106,6 +127,47 @@ function providerLabel(provider?: string | null) {
   if (provider === 'yandex') return 'Яндекс ID';
   if (provider === 'telegram') return 'Telegram';
   return 'Google';
+}
+
+function formatContractorPaymentStatus(status?: string | null) {
+  switch (status) {
+    case 'Completed':
+      return 'Оплачено';
+    case 'Pending':
+      return 'Ожидает оплаты';
+    case 'Overdue':
+      return 'Просрочено';
+    case 'Processing':
+      return 'В работе';
+    case 'Cancelled':
+      return 'Отменено';
+    case 'WaitingForResult':
+      return 'После завершения задачи';
+    default:
+      return status || 'Без статуса';
+  }
+}
+
+function contractorPaymentStatusClassName(status?: string | null) {
+  switch (status) {
+    case 'Completed':
+      return 'bg-emerald-100 text-emerald-700';
+    case 'Cancelled':
+      return 'bg-slate-200 text-slate-700';
+    case 'Overdue':
+      return 'bg-rose-100 text-rose-700';
+    case 'WaitingForResult':
+      return 'bg-violet-100 text-violet-700';
+    default:
+      return 'bg-amber-100 text-amber-700';
+  }
+}
+
+function formatOptionalDate(value?: string | null) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('ru-RU').format(date);
 }
 
 function buildCompanyOption(company: MainCompanySettingsDto['companies'][number]): LookupSelectOption {
@@ -211,6 +273,8 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [roles, setRoles] = useState<Role[]>([]);
   const [user, setUser] = useState<User | null>(null);
+  const [contractorBalance, setContractorBalance] = useState<ContractorBalance>(EMPTY_CONTRACTOR_BALANCE);
+  const [contractorBalanceError, setContractorBalanceError] = useState<string | null>(null);
   const [mainCompanySettings, setMainCompanySettings] = useState<MainCompanySettingsDto | null>(null);
   const [departments, setDepartments] = useState<BaseDictItem[]>([]);
   const [timeZoneId, setTimeZoneId] = useState(() => normalizeUserTimeZoneId());
@@ -222,9 +286,20 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
 
   const loadData = useCallback(async () => {
-    const [nextRoles, nextUser, nextMainCompanySettings, nextDepartments, nextTaskNotificationDefaults, nextTimeZone] = await Promise.all([
+    const [nextRoles, nextUser, nextContractorBalance, nextMainCompanySettings, nextDepartments, nextTaskNotificationDefaults, nextTimeZone] = await Promise.all([
       authService.getRoles(),
       isCreateMode ? Promise.resolve<User | null>(null) : authService.getUser(userId),
+      isCreateMode
+        ? Promise.resolve(EMPTY_CONTRACTOR_BALANCE)
+        : authService.getUserContractorBalance(userId)
+            .then((balance) => {
+              setContractorBalanceError(null);
+              return balance;
+            })
+            .catch((error) => {
+              setContractorBalanceError(extractDisplayErrorMessage(error, 'Не удалось загрузить расчеты с исполнителем.'));
+              return EMPTY_CONTRACTOR_BALANCE;
+            }),
       apiService.getMainCompanySettings(),
       apiService.getDict('departments'),
       isCreateMode ? Promise.resolve(null) : apiService.getUserSettingForUser(userId, TASK_NOTIFICATION_DEFAULTS_SETTING_KEY).catch(() => null),
@@ -233,6 +308,7 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
 
     setRoles(nextRoles);
     setUser(nextUser);
+    setContractorBalance(nextContractorBalance);
     setMainCompanySettings(nextMainCompanySettings);
     setDepartments(nextDepartments);
     setTaskNotificationDefaults(parseTaskNotificationDefaults(nextTaskNotificationDefaults?.value));
@@ -289,6 +365,45 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
       })),
     [departments, form.departmentId],
   );
+
+  const contractorBalanceItems = useMemo(
+    () => {
+      const items = new Map<string, ContractorBalanceItem>();
+      [...contractorBalance.queue, ...contractorBalance.paid].forEach((item) => {
+        items.set(`${item.taskId}:${item.paymentId ?? 'planned'}`, item);
+      });
+      return Array.from(items.values());
+    },
+    [contractorBalance.paid, contractorBalance.queue],
+  );
+
+  const contractorBalanceGroups = useMemo<ContractorBalanceGroup[]>(() => {
+    const groups = new Map<string, ContractorBalanceGroup>();
+
+    contractorBalanceItems.forEach((item) => {
+      const clientLabel = item.clientName?.trim() || item.legalEntityName?.trim() || 'Без клиента';
+      const caseLabel = item.clientCaseTitle?.trim() || 'Без дела';
+      const key = `${item.clientId ?? 'c0'}:${item.legalEntityId ?? 'l0'}:${item.clientCaseId ?? 'case0'}:${clientLabel}:${caseLabel}`;
+      const group = groups.get(key) ?? {
+        key,
+        clientLabel,
+        caseLabel,
+        outstandingAmount: 0,
+        paidAmount: 0,
+        amount: 0,
+        items: [],
+      };
+
+      group.outstandingAmount += item.outstandingAmount;
+      group.paidAmount += item.paidAmount;
+      group.amount += item.amount;
+      group.items.push(item);
+      groups.set(key, group);
+    });
+
+    return Array.from(groups.values())
+      .sort((left, right) => right.outstandingAmount - left.outstandingAmount || right.amount - left.amount || left.clientLabel.localeCompare(right.clientLabel, 'ru'));
+  }, [contractorBalanceItems]);
 
   const summaryCards = useMemo(
     () => [
@@ -600,6 +715,108 @@ export function UserDetailPage({ userId, onBack, onSaved }: UserDetailPageProps)
                     </div>
                   )}
                 </div>
+              </div>
+            ) : null}
+
+            {activeSection === 'contractorBalance' ? (
+              <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-900">Расчеты с исполнителем</div>
+                    <div className="mt-1 text-sm leading-6 text-slate-600">
+                      Сводка по задачам, где этот пользователь назначен привлеченным исполнителем.
+                    </div>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+                      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">К выплате</div>
+                      <div className="mt-1 text-lg font-semibold text-emerald-900">{formatCurrencySmart(contractorBalance.owedToMe).full}</div>
+                    </div>
+                    <div className="rounded-2xl border border-sky-100 bg-sky-50 px-4 py-3">
+                      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-sky-700">Выплачено</div>
+                      <div className="mt-1 text-lg font-semibold text-sky-900">{formatCurrencySmart(contractorBalance.paidToMe).full}</div>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Задач</div>
+                      <div className="mt-1 text-lg font-semibold text-slate-900">{contractorBalanceItems.length}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {!form.isExternalContractor ? (
+                  <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-800">
+                    У пользователя не включен признак «Привлеченный исполнитель». Баланс ниже показывает только уже найденные выплаты по задачам.
+                  </div>
+                ) : null}
+
+                {contractorBalanceError ? (
+                  <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
+                    {contractorBalanceError}
+                  </div>
+                ) : null}
+
+                {contractorBalanceGroups.length === 0 ? (
+                  <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+                    По этому пользователю пока нет задач с блоком «Оплата исполнителю».
+                  </div>
+                ) : (
+                  <div className="mt-5 space-y-3">
+                    {contractorBalanceGroups.map((group) => (
+                      <div key={group.key} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-semibold text-slate-900">{group.clientLabel}</div>
+                            <div className="mt-1 truncate text-xs text-slate-500">{group.caseLabel}</div>
+                          </div>
+                          <div className="grid gap-2 text-sm sm:grid-cols-3 lg:min-w-[420px]">
+                            <div className="rounded-xl bg-white px-3 py-2">
+                              <div className="text-xs text-slate-500">К выплате</div>
+                              <div className="font-semibold text-emerald-700">{formatCurrencySmart(group.outstandingAmount).full}</div>
+                            </div>
+                            <div className="rounded-xl bg-white px-3 py-2">
+                              <div className="text-xs text-slate-500">Выплачено</div>
+                              <div className="font-semibold text-sky-700">{formatCurrencySmart(group.paidAmount).full}</div>
+                            </div>
+                            <div className="rounded-xl bg-white px-3 py-2">
+                              <div className="text-xs text-slate-500">Начислено</div>
+                              <div className="font-semibold text-slate-900">{formatCurrencySmart(group.amount).full}</div>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mt-3 space-y-2">
+                          {group.items.slice(0, 6).map((item) => (
+                            <div key={`${item.taskId}-${item.paymentId ?? 'planned'}`} className="flex flex-col gap-2 rounded-xl bg-white px-3 py-2 text-sm lg:flex-row lg:items-center lg:justify-between">
+                              <div className="min-w-0">
+                                <a href={`/tasks/${item.taskId}`} className="block truncate font-medium text-blue-700 hover:text-blue-900 hover:underline">
+                                  {item.taskTitle}
+                                </a>
+                                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                                  <span className={`rounded-full px-2 py-1 font-semibold ${contractorPaymentStatusClassName(item.paymentStatus)}`}>
+                                    {formatContractorPaymentStatus(item.paymentStatus)}
+                                  </span>
+                                  {item.paymentDueDate ? <span>срок {formatOptionalDate(item.paymentDueDate)}</span> : null}
+                                  {item.paidDate ? <span>оплачено {formatOptionalDate(item.paidDate)}</span> : null}
+                                  <span>остаток {formatCurrencySmart(item.outstandingAmount).full}</span>
+                                </div>
+                              </div>
+                              <div className="flex shrink-0 flex-wrap items-center gap-3 lg:justify-end">
+                                {item.paymentId ? (
+                                  <a href={`/payments/${item.paymentId}`} className="text-xs font-semibold text-slate-500 hover:text-blue-700 hover:underline">
+                                    Платеж #{item.paymentId}
+                                  </a>
+                                ) : null}
+                                <div className="font-semibold text-slate-900">{formatCurrencySmart(item.amount).full}</div>
+                              </div>
+                            </div>
+                          ))}
+                          {group.items.length > 6 ? (
+                            <div className="px-3 pt-1 text-xs text-slate-500">Еще задач: {group.items.length - 6}</div>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ) : null}
 
