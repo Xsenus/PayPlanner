@@ -188,6 +188,12 @@ namespace PayPlanner.Api.Models
         /// </summary>
         public string? CounterpartyName { get; set; }
 
+        [NotMapped]
+        public int? ContractorUserId { get; set; }
+
+        [NotMapped]
+        public string? ContractorUserName { get; set; }
+
         /// <summary>
         /// Уникальный идентификатор платежа.
         /// </summary>

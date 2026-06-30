@@ -56,6 +56,7 @@ const CALENDAR_PAYMENT_COLUMN_CONFIGS = [
 
 type CalendarProps = {
   onOpenClient?: (clientId: number, caseId?: number) => void;
+  onOpenUser?: (userId: number) => void;
 };
 
 function makeStatsSignature(payments: Payment[]): string {
@@ -77,7 +78,7 @@ function ymEnd(ym: string): string {
   return formatLocalYMD(new Date(y, m ?? 1, 0));
 }
 
-export function Calendar({ onOpenClient }: CalendarProps) {
+export function Calendar({ onOpenClient, onOpenUser }: CalendarProps) {
   const { user } = useAuth();
   const { confirm } = useDialog();
   const toast = useToast();
@@ -878,6 +879,7 @@ export function Calendar({ onOpenClient }: CalendarProps) {
                 ? (clientId, caseId) => onOpenClient?.(clientId, canOpenLinkedCases ? caseId : undefined)
                 : undefined
             }
+            onOpenUser={onOpenUser}
           />
         ) : (
           <>
@@ -885,6 +887,7 @@ export function Calendar({ onOpenClient }: CalendarProps) {
               payments={pagedTablePayments}
               onEditPayment={handleEditPayment}
               onOpenClient={onOpenClient}
+              onOpenUser={onOpenUser}
               onAddPayment={handleAddPayment}
               onDeletePayment={handleDeletePayment}
               canAdd={calendarPermissions.canCreate}
@@ -892,6 +895,7 @@ export function Calendar({ onOpenClient }: CalendarProps) {
               canDelete={calendarPermissions.canDelete}
               canOpenClients={canOpenLinkedClients}
               canOpenCases={canOpenLinkedCases}
+              canOpenUsers={Boolean(onOpenUser)}
               canEditPayment={() => true}
               canDeletePayment={(payment) => payment.documentKind !== 'Invoice' && !isTransferredRemainderPayment(payment) && !isPartialRemainderSourcePayment(payment)}
               columns={visiblePaymentColumns}

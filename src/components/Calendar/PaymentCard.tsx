@@ -7,6 +7,7 @@ interface PaymentCardProps {
   payment: Payment;
   onClick?: () => void;
   onClientClick?: (clientId: number, clientCaseId?: number) => void;
+  onUserClick?: (userId: number) => void;
   neutral?: boolean;
   className?: string;
 }
@@ -15,6 +16,7 @@ export function PaymentCard({
   payment,
   onClick,
   onClientClick,
+  onUserClick,
   neutral = false,
   className = '',
 }: PaymentCardProps) {
@@ -22,6 +24,8 @@ export function PaymentCard({
   const isIncome = payment.type === 'Income';
   const hasRemainder = payment.hasPartialPayment && payment.outstandingAmount > 0;
   const amountToShow = hasRemainder ? payment.outstandingAmount : payment.amount;
+  const counterpartyName = payment.counterpartyName?.trim() ?? '';
+  const canOpenContractorUser = Boolean(onUserClick && payment.type === 'Expense' && payment.contractorUserId);
 
   const formatMoney = (v: number) => new Intl.NumberFormat('ru-RU').format(v);
 
@@ -90,6 +94,25 @@ export function PaymentCard({
           )}
         </div>
       )}
+      {!payment.client && counterpartyName ? (
+        <div className="text-[10px] sm:text-xs text-gray-500 mt-0.5 sm:mt-1 truncate">
+          {canOpenContractorUser ? (
+            <button
+              type="button"
+              onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                e.stopPropagation();
+                if (payment.contractorUserId) {
+                  onUserClick?.(payment.contractorUserId);
+                }
+              }}
+              className="text-blue-600 hover:underline">
+              {payment.type === 'Expense' ? `Поставщик: ${counterpartyName}` : counterpartyName}
+            </button>
+          ) : (
+            <span>{payment.type === 'Expense' ? `Поставщик: ${counterpartyName}` : counterpartyName}</span>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }

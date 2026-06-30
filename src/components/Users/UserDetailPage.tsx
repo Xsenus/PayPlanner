@@ -791,7 +791,7 @@ export function UserDetailPage({ userId, onBack, onSaved, onOpenPayment }: UserD
                           </div>
                         </div>
                         <div className="mt-3 space-y-2">
-                          {group.items.slice(0, 6).map((item) => (
+                          {group.items.map((item) => (
                             <div key={`${item.taskId}-${item.paymentId ?? 'planned'}`} className="flex flex-col gap-2 rounded-xl bg-white px-3 py-2 text-sm lg:flex-row lg:items-center lg:justify-between">
                               <div className="min-w-0">
                                 <a href={`/tasks/${item.taskId}`} className="block truncate font-medium text-blue-700 hover:text-blue-900 hover:underline">
@@ -831,9 +831,6 @@ export function UserDetailPage({ userId, onBack, onSaved, onOpenPayment }: UserD
                               </div>
                             </div>
                           ))}
-                          {group.items.length > 6 ? (
-                            <div className="px-3 pt-1 text-xs text-slate-500">Еще задач: {group.items.length - 6}</div>
-                          ) : null}
                         </div>
                       </div>
                     ))}

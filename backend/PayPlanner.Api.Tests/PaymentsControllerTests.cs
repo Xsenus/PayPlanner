@@ -322,6 +322,62 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task Get_AttachesContractorUserFromTaskPayment()
+    {
+        await using var db = await CreateContextAsync();
+
+        var role = new Role { Name = "contractor" };
+        var contractor = new User
+        {
+            Email = "gordik@example.test",
+            FullName = "Гордик Сергей",
+            IsExternalContractor = true,
+            IsApproved = true,
+            Role = role,
+        };
+        var payment = CreatePayment(new DateTime(2026, 6, 29), 2_000m, "Оплата исполнителю");
+        payment.Type = PaymentType.Expense;
+        payment.CounterpartyName = contractor.FullName;
+
+        db.Users.Add(contractor);
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+
+        db.TaskJournalItems.Add(new TaskJournalItem
+        {
+            Title = "Артамонов - подготовка решения суда",
+            ObjectName = "Артамонов",
+            AssigneeUserId = contractor.Id,
+            AssigneeName = contractor.FullName,
+            AuthorName = "Администратор",
+            DueAt = new DateTime(2026, 6, 29, 10, 0, 0, DateTimeKind.Utc),
+            ContractorPaymentEnabled = true,
+            ContractorPaymentAmount = payment.Amount,
+            ContractorPaymentId = payment.Id,
+        });
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+
+        var actionResult = await controller.Get(
+            from: new DateTime(2026, 6, 1),
+            to: new DateTime(2026, 6, 30),
+            clientId: null,
+            caseId: null,
+            excludeInstallmentParents: false,
+            sortBy: "date",
+            sortDir: "asc",
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult);
+        var payments = Assert.IsAssignableFrom<List<Payment>>(ok.Value);
+        var item = Assert.Single(payments);
+
+        Assert.Equal(contractor.Id, item.ContractorUserId);
+        Assert.Equal(contractor.FullName, item.ContractorUserName);
+    }
+
+    [Fact]
     public async Task PaymentsV2_FiltersByContractId_UsingCanonicalAndLegacyLinks_AndExcludesInvoiceDocuments()
     {
         await using var db = await CreateContextAsync();

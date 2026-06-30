@@ -193,8 +193,13 @@ vi.mock('./components/Accounts/Accounts', () => ({
 }));
 
 vi.mock('./components/Users/UserDetailPage', () => ({
-  UserDetailPage: ({ userId }: { userId: number | null }) => (
-    <section data-testid="user-detail">user {userId}</section>
+  UserDetailPage: ({ userId, onOpenPayment }: { userId: number | null; onOpenPayment?: (paymentId: number) => void }) => (
+    <section data-testid="user-detail">
+      user {userId}
+      <button type="button" onClick={() => onOpenPayment?.(2069)}>
+        open user payment
+      </button>
+    </section>
   ),
 }));
 
@@ -334,11 +339,41 @@ describe('App calendar client navigation', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('navigation').textContent).toBe('userDetail');
-      expect(screen.getByTestId('user-detail').textContent).toBe('user 10');
+      expect(screen.getByTestId('user-detail').textContent).toContain('user 10');
       expect(`${window.location.pathname}${window.location.search}`).toBe('/?ppTab=userDetail&userId=10');
     });
 
     expect(window.localStorage.getItem(LAST_TAB_STORAGE_KEY)).toBe('userDetail');
+  });
+
+  it('does not restore notifications as the last working tab on plain refresh', async () => {
+    window.history.replaceState({}, '', '/');
+    window.localStorage.setItem(LAST_TAB_STORAGE_KEY, 'notifications');
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('navigation').textContent).toBe('calendar');
+      expect(screen.getByTestId('calendar-view')).toBeTruthy();
+    });
+
+    expect(window.localStorage.getItem(LAST_TAB_STORAGE_KEY)).toBe('calendar');
+  });
+
+  it('opens payment from user card separately and keeps the user card active', async () => {
+    window.history.replaceState({}, '', '/?ppTab=userDetail&userId=10');
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+
+    render(<App />);
+
+    expect(await screen.findByTestId('user-detail')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'open user payment' }));
+
+    expect(openSpy).toHaveBeenCalledWith('/payments/2069', '_blank', 'noopener,noreferrer');
+    expect(screen.getByTestId('navigation').textContent).toBe('userDetail');
+    expect(`${window.location.pathname}${window.location.search}`).toBe('/?ppTab=userDetail&userId=10');
+
+    openSpy.mockRestore();
   });
 
   it('clears stale settings section when opening the profile page', async () => {

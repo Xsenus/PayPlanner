@@ -444,6 +444,7 @@ public class PaymentsController : ControllerBase
 
         var list = await ProjectPaymentsForRead(q)
             .ToListAsync(ct);
+        await AttachContractorRecipientsAsync(list, ct);
         return Ok(list);
     }
 
@@ -465,6 +466,7 @@ public class PaymentsController : ControllerBase
             return NotFound();
         }
 
+        await AttachContractorRecipientsAsync(new[] { item }, ct);
         return Ok(item);
     }
 
@@ -4219,6 +4221,52 @@ public class PaymentsController : ControllerBase
         payment.AuditDeletedAt = entry.Property<DateTime?>("DeletedAt").CurrentValue;
         payment.AuditDeletedByUserId = entry.Property<int?>("DeletedByUserId").CurrentValue;
         payment.AuditDeletedByUserName = entry.Property<string?>("DeletedByUserName").CurrentValue;
+    }
+
+    private async Task AttachContractorRecipientsAsync(IReadOnlyCollection<Payment> payments, CancellationToken ct)
+    {
+        if (payments.Count == 0)
+        {
+            return;
+        }
+
+        var paymentIds = payments
+            .Select(payment => payment.Id)
+            .Where(id => id > 0)
+            .Distinct()
+            .ToArray();
+        if (paymentIds.Length == 0)
+        {
+            return;
+        }
+
+        var contractorLinks = await _db.TaskJournalItems
+            .AsNoTracking()
+            .Where(task => task.ContractorPaymentId.HasValue && paymentIds.Contains(task.ContractorPaymentId.Value))
+            .Select(task => new
+            {
+                PaymentId = task.ContractorPaymentId!.Value,
+                UserId = task.AssigneeUserId,
+                UserName = task.AssigneeName,
+            })
+            .ToListAsync(ct);
+
+        var linksByPaymentId = contractorLinks
+            .GroupBy(link => link.PaymentId)
+            .ToDictionary(
+                group => group.Key,
+                group => group.FirstOrDefault(link => link.UserId.HasValue) ?? group.First());
+
+        foreach (var payment in payments)
+        {
+            if (!linksByPaymentId.TryGetValue(payment.Id, out var link))
+            {
+                continue;
+            }
+
+            payment.ContractorUserId = link.UserId;
+            payment.ContractorUserName = string.IsNullOrWhiteSpace(link.UserName) ? payment.CounterpartyName : link.UserName.Trim();
+        }
     }
 
     private static IQueryable<Payment> ProjectPaymentsForRead(IQueryable<Payment> query)

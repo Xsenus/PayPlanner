@@ -287,12 +287,12 @@ function AppContent() {
     () =>
       [
         { tab: 'calendar' as Tab, allowed: permissions.calendar.canView },
-        { tab: 'notifications' as Tab, allowed: true },
         { tab: 'tasks' as Tab, allowed: permissions.tasks.canView },
         { tab: 'tasksControl' as Tab, allowed: permissions.tasks.canView },
         { tab: 'tasksApprovals' as Tab, allowed: permissions.tasks.canView },
         { tab: 'tasksCalendar' as Tab, allowed: permissions.tasks.canView },
         { tab: 'notes' as Tab, allowed: permissions.notes.canView },
+        { tab: 'notifications' as Tab, allowed: true },
         { tab: 'reports' as Tab, allowed: permissions.reports.canView },
         { tab: 'calculator' as Tab, allowed: permissions.calculator.canView },
         { tab: 'legalEntities' as Tab, allowed: permissions.legalEntities.canView },
@@ -518,6 +518,17 @@ function AppContent() {
 
       setSelectedPaymentId(paymentId);
       setActiveTab(type === 'Expense' ? 'paymentsExpense' : type === 'Income' ? 'paymentsIncome' : 'payments');
+    },
+    [permissions.payments.canView],
+  );
+
+  const openPaymentInNewWindow = useCallback(
+    (paymentId: number) => {
+      if (!permissions.payments.canView || !(paymentId > 0)) {
+        return;
+      }
+
+      window.open(`/payments/${paymentId}`, '_blank', 'noopener,noreferrer');
     },
     [permissions.payments.canView],
   );
@@ -847,7 +858,9 @@ function AppContent() {
     }
 
     try {
-      localStorage.setItem(LAST_TAB_STORAGE_KEY, activeTab);
+      if (activeTab !== 'notifications') {
+        localStorage.setItem(LAST_TAB_STORAGE_KEY, activeTab);
+      }
     } catch {
       // ignore storage issues
     }
@@ -1009,7 +1022,7 @@ function AppContent() {
     switch (activeTab) {
       case 'calendar':
         return permissions.calendar.canView
-          ? <Calendar onOpenClient={handleOpenCalendarClient} />
+          ? <Calendar onOpenClient={handleOpenCalendarClient} onOpenUser={isAdminRole ? handleEditUser : undefined} />
           : renderNoAccess('Раздел календаря недоступен для вашей роли.');
 
       case 'notifications':
@@ -1745,7 +1758,7 @@ function AppContent() {
                 userId={selectedUserId}
                 onBack={handleBackToUsers}
                 onSaved={handleUserSaved}
-                onOpenPayment={permissions.payments.canView ? openPaymentPage : undefined}
+                onOpenPayment={permissions.payments.canView ? openPaymentInNewWindow : undefined}
               />
             )
           : renderNoAccess('Нужны права администратора.');
@@ -1787,7 +1800,7 @@ function AppContent() {
 
       default:
         return permissions.calendar.canView
-          ? <Calendar onOpenClient={handleOpenCalendarClient} />
+          ? <Calendar onOpenClient={handleOpenCalendarClient} onOpenUser={isAdminRole ? handleEditUser : undefined} />
           : renderNoAccess('Раздел календаря недоступен для вашей роли.');
     }
   };

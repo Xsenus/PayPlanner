@@ -3179,6 +3179,8 @@ export interface Payment {
   clientCaseTitle?: string | null;
   clientCaseReference?: string | null;
   counterpartyName?: string | null;
+  contractorUserId?: number | null;
+  contractorUserName?: string | null;
   dealTypeId?: number | null;
   incomeTypeId?: number | null;
   serviceId?: number | null;

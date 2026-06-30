@@ -411,7 +411,7 @@ export function getInitialTab(): Tab {
 
   try {
     const stored = localStorage.getItem(LAST_TAB_STORAGE_KEY);
-    if (isValidTab(stored)) {
+    if (isValidTab(stored) && stored !== 'notifications') {
       if (stored === 'clientDetail') {
         return 'clients';
       }

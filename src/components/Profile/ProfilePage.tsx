@@ -821,7 +821,12 @@ export function ProfilePage() {
                           <div className="flex shrink-0 flex-wrap items-center gap-3 lg:justify-end">
                             {item.paymentId ? (
                               canOpenContractorPayments ? (
-                                <a href={`/payments/${item.paymentId}`} className="text-xs font-semibold text-slate-500 hover:text-blue-700 hover:underline">
+                                <a
+                                  href={`/payments/${item.paymentId}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-xs font-semibold text-slate-500 hover:text-blue-700 hover:underline"
+                                >
                                   Платеж #{item.paymentId}
                                 </a>
                               ) : (

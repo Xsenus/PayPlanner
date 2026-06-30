@@ -35,6 +35,7 @@ interface PaymentsTableProps {
   payments: Payment[];
   onEditPayment: (payment: Payment) => void;
   onOpenClient?: (clientId: number, caseId?: number) => void;
+  onOpenUser?: (userId: number) => void;
   onAddPayment?: (type: Payment['type'], payment?: Payment) => void;
   onDeletePayment?: (payment: Payment) => void | Promise<void>;
   onStatusChange?: (payment: Payment) => void;
@@ -47,6 +48,7 @@ interface PaymentsTableProps {
   canDelete: boolean;
   canOpenClients?: boolean;
   canOpenCases?: boolean;
+  canOpenUsers?: boolean;
   canEditPayment?: (payment: Payment) => boolean;
   canDeletePayment?: (payment: Payment) => boolean;
   columns?: PaymentTableColumnDefinition[];
@@ -77,6 +79,7 @@ export function PaymentsTable({
   payments,
   onEditPayment,
   onOpenClient,
+  onOpenUser,
   onAddPayment,
   onDeletePayment,
   onStatusChange,
@@ -89,6 +92,7 @@ export function PaymentsTable({
   canDelete,
   canOpenClients = true,
   canOpenCases = true,
+  canOpenUsers = true,
   canEditPayment,
   canDeletePayment,
   columns,
@@ -213,6 +217,10 @@ export function PaymentsTable({
         : null;
       const counterpartyName = payment.counterpartyName?.trim() ?? '';
       const canOpenPaymentClient = Boolean(canOpenClients && onOpenClient && payment.clientId);
+      const contractorUserId = payment.contractorUserId ?? null;
+      const canOpenContractorUser = Boolean(
+        canOpenUsers && onOpenUser && contractorUserId && payment.type === 'Expense',
+      );
 
       switch (columnKey) {
         case 'date':
@@ -257,9 +265,26 @@ export function PaymentsTable({
             </div>
           ) : counterpartyName ? (
             <div className="leading-tight">
-              <span className="block font-medium text-slate-900">
-                {payment.type === 'Expense' ? `Поставщик: ${counterpartyName}` : counterpartyName}
-              </span>
+              {canOpenContractorUser ? (
+                <button
+                  type="button"
+                  className="block w-full text-left text-blue-600 hover:underline"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (!onOpenUser || !contractorUserId) {
+                      return;
+                    }
+                    onOpenUser(contractorUserId);
+                  }}>
+                  <span className="block font-medium">
+                    {payment.type === 'Expense' ? `Поставщик: ${counterpartyName}` : counterpartyName}
+                  </span>
+                </button>
+              ) : (
+                <span className="block font-medium text-slate-900">
+                  {payment.type === 'Expense' ? `Поставщик: ${counterpartyName}` : counterpartyName}
+                </span>
+              )}
               {payment.type === 'Expense' && payment.expenseClient?.name ? (
                 <span className="mt-0.5 block truncate text-xs leading-tight text-gray-500">
                   {`Клиент расхода: ${payment.expenseClient.name}`}
@@ -428,7 +453,7 @@ export function PaymentsTable({
           return '—';
       }
     },
-    [canEdit, canOpenCases, canOpenClients, formatDate, onAcceptAdvance, onAllocateAdvance, onIgnoreAdvance, onOpenClient, onRefundAdvance, onStatusChange, statusLabels, t],
+    [canEdit, canOpenCases, canOpenClients, canOpenUsers, formatDate, onAcceptAdvance, onAllocateAdvance, onIgnoreAdvance, onOpenClient, onOpenUser, onRefundAdvance, onStatusChange, statusLabels, t],
   );
 
   const isEditAllowed = useCallback(

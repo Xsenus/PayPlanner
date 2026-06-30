@@ -12,6 +12,7 @@ interface CalendarGridProps {
   onEditPayment: (payment: Payment) => void;
   newPaymentIds?: Set<number>;
   onOpenClient?: (clientId: number, clientCaseId?: number) => void;
+  onOpenUser?: (userId: number) => void;
 }
 
 type NormalizedStatus = 'completed' | 'pending' | 'overdue';
@@ -73,6 +74,7 @@ export function CalendarGrid({
   onEditPayment,
   newPaymentIds,
   onOpenClient,
+  onOpenUser,
 }: CalendarGridProps) {
   const { t } = useTranslation();
   const year = currentDate.getFullYear();
@@ -289,6 +291,7 @@ export function CalendarGrid({
                                   payment={payment}
                                   onClick={() => onEditPayment(payment)}
                                   onClientClick={onOpenClient}
+                                  onUserClick={onOpenUser}
                                   neutral
                                 />
                               </motion.div>

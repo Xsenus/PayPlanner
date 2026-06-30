@@ -149,6 +149,33 @@ describe('PaymentsTable', () => {
     expect(screen.getByText('Дело расхода: ВИНОКУРОВА - РАЗДЕЛ ИМУЩЕСТВА')).toBeTruthy();
   });
 
+  it('opens contractor user link without opening the payment row', () => {
+    const payment = createPayment({
+      type: 'Expense',
+      counterpartyName: 'Gordik Sergey',
+      contractorUserId: 10,
+      contractorUserName: 'Gordik Sergey',
+    } as Partial<Payment>);
+    const onEditPayment = vi.fn();
+    const onOpenUser = vi.fn();
+
+    render(
+      <PaymentsTable
+        payments={[payment]}
+        onEditPayment={onEditPayment}
+        onOpenUser={onOpenUser}
+        canAdd={false}
+        canEdit
+        canDelete={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Gordik Sergey/ }));
+
+    expect(onOpenUser).toHaveBeenCalledWith(10);
+    expect(onEditPayment).not.toHaveBeenCalled();
+  });
+
   it('calls sort handler when a sortable column header is clicked', () => {
     const onSortChange = vi.fn();
 
