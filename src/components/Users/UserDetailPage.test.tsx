@@ -81,7 +81,13 @@ describe('UserDetailPage', () => {
           paymentStatus: 'Pending',
           taskStatus: 'done',
           paymentDueDate: '2026-06-30',
+          paymentDate: '2026-06-29',
           paidDate: null,
+          paymentSourceName: 'Юридические услуги',
+          paymentAccount: 'Б/Н',
+          paymentAccountDate: '2026-06-29',
+          paymentOrderNumber: '2069-А',
+          paymentDocumentDate: '2026-06-29',
         },
       ],
       paid: [],
@@ -118,6 +124,10 @@ describe('UserDetailPage', () => {
     expect(caseLink.getAttribute('target')).toBe('_blank');
     expect(paymentLink.getAttribute('href')).toBe('/payments/2069');
     expect(paymentLink.getAttribute('target')).toBe('_blank');
+    expect(screen.getByText('дата платежа 29.06.2026')).toBeTruthy();
+    expect(screen.getByText('источник Юридические услуги')).toBeTruthy();
+    expect(screen.getByText('счет Б/Н от 29.06.2026')).toBeTruthy();
+    expect(screen.getByText('документ 2069-А от 29.06.2026')).toBeTruthy();
   });
 
   it('explains why a contractor payment is absent from the calendar before task completion', async () => {

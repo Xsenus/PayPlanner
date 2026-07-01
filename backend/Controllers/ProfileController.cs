@@ -57,6 +57,7 @@ public class ProfileController : ControllerBase
         var tasks = await _db.TaskJournalItems
             .AsNoTracking()
             .Include(task => task.ContractorPayment)
+                .ThenInclude(payment => payment!.PaymentSource)
             .Include(task => task.Client)
             .Include(task => task.LegalEntity)
             .Include(task => task.ClientCase)
@@ -320,7 +321,13 @@ public class ProfileController : ControllerBase
             PaymentStatus = status,
             TaskStatus = task.Status,
             PaymentDueDate = task.ContractorPaymentDueDate?.ToString("O"),
+            PaymentDate = payment?.Date.ToString("O"),
             PaidDate = payment?.PaidDate?.ToString("O"),
+            PaymentSourceName = payment?.PaymentSource?.Name,
+            PaymentAccount = payment?.Account,
+            PaymentAccountDate = payment?.AccountDate?.ToString("O"),
+            PaymentOrderNumber = payment?.PaymentOrderNumber,
+            PaymentDocumentDate = payment?.PaymentDocumentDate?.ToString("O"),
         };
     }
 

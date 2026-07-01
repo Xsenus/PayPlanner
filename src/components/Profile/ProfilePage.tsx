@@ -257,6 +257,35 @@ function formatMissingContractorPaymentHint(status?: string | null) {
     : 'Платеж еще не создан';
 }
 
+function formatContractorPaymentDetails(item: ContractorBalanceItem) {
+  const details: string[] = [];
+  const paymentDate = formatOptionalDate(item.paymentDate);
+  const accountDate = formatOptionalDate(item.paymentAccountDate);
+  const documentDate = formatOptionalDate(item.paymentDocumentDate);
+
+  if (paymentDate) {
+    details.push(`дата платежа ${paymentDate}`);
+  }
+
+  if (item.paymentSourceName?.trim()) {
+    details.push(`источник ${item.paymentSourceName.trim()}`);
+  }
+
+  if (item.paymentAccount?.trim()) {
+    details.push(`счет ${item.paymentAccount.trim()}${accountDate ? ` от ${accountDate}` : ''}`);
+  } else if (accountDate) {
+    details.push(`дата счета ${accountDate}`);
+  }
+
+  if (item.paymentOrderNumber?.trim()) {
+    details.push(`документ ${item.paymentOrderNumber.trim()}${documentDate ? ` от ${documentDate}` : ''}`);
+  } else if (documentDate) {
+    details.push(`дата документа ${documentDate}`);
+  }
+
+  return details;
+}
+
 function clearExternalAuthQueryParams() {
   const url = new URL(window.location.href);
   url.searchParams.delete('externalAuthState');
@@ -834,6 +863,9 @@ export function ProfilePage() {
                               </span>
                               {item.paymentDueDate ? <span>срок {formatOptionalDate(item.paymentDueDate)}</span> : null}
                               {item.paidDate ? <span>оплачено {formatOptionalDate(item.paidDate)}</span> : null}
+                              {formatContractorPaymentDetails(item).map((detail) => (
+                                <span key={detail}>{detail}</span>
+                              ))}
                               <span>остаток {formatCurrencySmart(item.outstandingAmount).full}</span>
                             </div>
                           </div>

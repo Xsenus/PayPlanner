@@ -226,7 +226,13 @@ describe('ProfilePage', () => {
           paymentStatus: 'Pending',
           taskStatus: 'Done',
           paymentDueDate: '2026-06-30T00:00:00Z',
+          paymentDate: '2026-06-29T00:00:00Z',
           paidDate: null,
+          paymentSourceName: 'Юридические услуги',
+          paymentAccount: 'Б/Н',
+          paymentAccountDate: '2026-06-29T00:00:00Z',
+          paymentOrderNumber: '1001-А',
+          paymentDocumentDate: '2026-06-29T00:00:00Z',
         },
         {
           taskId: 102,
@@ -314,6 +320,10 @@ describe('ProfilePage', () => {
     expect(caseLink.getAttribute('target')).toBe('_blank');
     expect(paymentLink.getAttribute('href')).toBe('/payments/1001');
     expect(paymentLink.getAttribute('target')).toBe('_blank');
+    expect(screen.getByText('дата платежа 29.06.2026')).toBeTruthy();
+    expect(screen.getByText('источник Юридические услуги')).toBeTruthy();
+    expect(screen.getByText('счет Б/Н от 29.06.2026')).toBeTruthy();
+    expect(screen.getByText('документ 1001-А от 29.06.2026')).toBeTruthy();
     expect(screen.getByText('Result contractor task')).toBeTruthy();
     expect(screen.getByText('Sixth visible task')).toBeTruthy();
     expect(screen.getByText('Paid contractor task')).toBeTruthy();

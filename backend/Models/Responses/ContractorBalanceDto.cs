@@ -30,5 +30,11 @@ public sealed class ContractorBalanceItemDto
     public string PaymentStatus { get; set; } = string.Empty;
     public string TaskStatus { get; set; } = string.Empty;
     public string? PaymentDueDate { get; set; }
+    public string? PaymentDate { get; set; }
     public string? PaidDate { get; set; }
+    public string? PaymentSourceName { get; set; }
+    public string? PaymentAccount { get; set; }
+    public string? PaymentAccountDate { get; set; }
+    public string? PaymentOrderNumber { get; set; }
+    public string? PaymentDocumentDate { get; set; }
 }

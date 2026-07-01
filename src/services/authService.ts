@@ -282,7 +282,13 @@ export interface ContractorBalanceItem {
   paymentStatus: string;
   taskStatus: string;
   paymentDueDate?: string | null;
+  paymentDate?: string | null;
   paidDate?: string | null;
+  paymentSourceName?: string | null;
+  paymentAccount?: string | null;
+  paymentAccountDate?: string | null;
+  paymentOrderNumber?: string | null;
+  paymentDocumentDate?: string | null;
 }
 
 export interface ContractorBalance {
