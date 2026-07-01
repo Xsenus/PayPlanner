@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.Data.Sqlite;
@@ -34,7 +35,17 @@ builder.Services.AddControllers(options =>
     options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
 });
 builder.Services.AddSignalR();
-builder.Services.AddDataProtection();
+var dataProtectionBuilder = builder.Services
+    .AddDataProtection()
+    .SetApplicationName(builder.Configuration["DataProtection:ApplicationName"] ?? "PayPlanner");
+
+var dataProtectionKeysPath = builder.Configuration["DataProtection:KeysPath"]
+    ?? builder.Configuration["DataProtection:KeysDirectory"];
+if (!string.IsNullOrWhiteSpace(dataProtectionKeysPath))
+{
+    Directory.CreateDirectory(dataProtectionKeysPath);
+    dataProtectionBuilder.PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath));
+}
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
