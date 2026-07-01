@@ -15,6 +15,71 @@ namespace PayPlanner.Api.Tests;
 public class AccountsControllerTests
 {
     [Fact]
+    public async Task GetRegistry_ReturnsForbidden_ForAuthenticatedUserWithoutAccountsAccess()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserWithoutAccountsAccessAsync(db);
+        var controller = new AccountsController(db);
+        SetControllerUser(controller, user);
+
+        var result = await controller.GetRegistry(
+            from: null,
+            to: null,
+            status: null,
+            search: null,
+            type: null,
+            sortBy: null,
+            sortDir: null,
+            page: 1,
+            pageSize: 20,
+            ct: CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task GetPayablesDashboard_ReturnsForbidden_ForAuthenticatedUserWithoutAccountsAccess()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserWithoutAccountsAccessAsync(db);
+        var controller = new AccountsController(db);
+        SetControllerUser(controller, user);
+
+        var result = await controller.GetPayablesDashboard(
+            from: null,
+            to: null,
+            search: null,
+            clientId: null,
+            legalEntityId: null,
+            clientIds: null,
+            clientRole: null,
+            ct: CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task GetSuggestions_ReturnsForbidden_ForAuthenticatedUserWithoutAccountsAccess()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserWithoutAccountsAccessAsync(db);
+        var controller = new AccountsController(db);
+        SetControllerUser(controller, user);
+
+        var result = await controller.Get(
+            clientId: null,
+            caseId: null,
+            clientRole: null,
+            q: null,
+            withDate: false,
+            dedupe: false,
+            take: 50,
+            ct: CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result);
+    }
+
+    [Fact]
     public async Task GetRegistry_ReturnsPartialStatus_WhenInvoiceHasPartialPaidAmount()
     {
         await using var db = await CreateContextAsync();
@@ -1217,6 +1282,54 @@ public class AccountsControllerTests
         payment.AccountDate = invoice.Date;
         payment.Status = status;
         return payment;
+    }
+
+    private static async Task<User> CreateUserWithoutAccountsAccessAsync(PaymentContext db)
+    {
+        var role = new Role
+        {
+            Name = "No accounts",
+            Description = "No accounts access",
+            Permissions =
+            {
+                new RolePermission
+                {
+                    Section = RolePermissionCatalog.Notifications,
+                    CanView = true,
+                    ViewScope = DataVisibilityScope.Own,
+                },
+            },
+        };
+        var user = new User
+        {
+            Email = "no-accounts@example.test",
+            FullName = "No Accounts User",
+            PasswordHash = "hash",
+            IsActive = true,
+            IsApproved = true,
+            Role = role,
+        };
+
+        db.Roles.Add(role);
+        db.Users.Add(user);
+        await db.SaveChangesAsync();
+        return user;
+    }
+
+    private static void SetControllerUser(ControllerBase controller, User user)
+    {
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                    [
+                        new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                        new Claim(ClaimTypes.Name, user.FullName),
+                    ],
+                    "TestAuth")),
+            },
+        };
     }
 
     private static Payment CreatePayment(DateTime date, decimal amount, string description)

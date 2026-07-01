@@ -26,6 +26,9 @@ public class AccountsController : ControllerBase
         return CalendarTimeZoneHelper.ToUserLocal(DateTime.UtcNow, timeZone).Date;
     }
 
+    private ActionResult MissingAccountsVisibilityResult()
+        => User.GetUserId().HasValue ? Forbid() : Unauthorized();
+
     [HttpGet("registry")]
     public async Task<ActionResult<AccountsPageResponse>> GetRegistry(
         [FromQuery] DateTime? from,
@@ -50,7 +53,7 @@ public class AccountsController : ControllerBase
         var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return MissingAccountsVisibilityResult();
         }
 
         if (payablesOnly)
@@ -503,7 +506,7 @@ public class AccountsController : ControllerBase
         var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return MissingAccountsVisibilityResult();
         }
 
         var query = _db.Payments
@@ -646,7 +649,7 @@ public class AccountsController : ControllerBase
         var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return MissingAccountsVisibilityResult();
         }
 
         var query = _db.Payments.AsNoTracking()
