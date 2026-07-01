@@ -318,7 +318,7 @@ describe('ProfilePage', () => {
     expect(clientLink.getAttribute('target')).toBe('_blank');
     expect(caseLink.getAttribute('href')).toBe('/cases/11');
     expect(caseLink.getAttribute('target')).toBe('_blank');
-    expect(paymentLink.getAttribute('href')).toBe('/payments/1001');
+    expect(paymentLink.getAttribute('href')).toBe('/payments/1001?ppTab=paymentsExpense');
     expect(paymentLink.getAttribute('target')).toBe('_blank');
     expect(screen.getByText('дата платежа 29.06.2026')).toBeTruthy();
     expect(screen.getByText('источник Юридические услуги')).toBeTruthy();

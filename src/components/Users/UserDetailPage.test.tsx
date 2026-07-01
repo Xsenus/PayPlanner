@@ -122,12 +122,32 @@ describe('UserDetailPage', () => {
     expect(clientLink.getAttribute('target')).toBe('_blank');
     expect(caseLink.getAttribute('href')).toBe('/cases/501');
     expect(caseLink.getAttribute('target')).toBe('_blank');
-    expect(paymentLink.getAttribute('href')).toBe('/payments/2069');
+    expect(paymentLink.getAttribute('href')).toBe('/payments/2069?ppTab=paymentsExpense');
     expect(paymentLink.getAttribute('target')).toBe('_blank');
     expect(screen.getByText('дата платежа 29.06.2026')).toBeTruthy();
     expect(screen.getByText('источник Юридические услуги')).toBeTruthy();
     expect(screen.getByText('счет Б/Н от 29.06.2026')).toBeTruthy();
     expect(screen.getByText('документ 2069-А от 29.06.2026')).toBeTruthy();
+  });
+
+  it('opens contractor payment through the app handler from admin user profile', async () => {
+    const openContractorPayment = vi.fn();
+
+    render(
+      <UserDetailPage
+        userId={10}
+        onBack={vi.fn()}
+        onSaved={vi.fn()}
+        canOpenContractorPaymentLinks
+        onOpenContractorPayment={openContractorPayment}
+      />,
+    );
+
+    fireEvent.click(await screen.findByText('Расчеты'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Платеж #2069' }));
+
+    expect(openContractorPayment).toHaveBeenCalledWith(2069);
+    expect(screen.queryByRole('link', { name: 'Платеж #2069' })).toBeNull();
   });
 
   it('explains why a contractor payment is absent from the calendar before task completion', async () => {

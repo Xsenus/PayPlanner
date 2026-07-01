@@ -27,6 +27,7 @@ type UserDetailPageProps = {
   onBack: () => void;
   onSaved: (user: User) => void;
   canOpenContractorPaymentLinks?: boolean;
+  onOpenContractorPayment?: (paymentId: number) => void;
 };
 
 type FormState = {
@@ -305,7 +306,7 @@ function TextField(props: {
   );
 }
 
-export function UserDetailPage({ userId, onBack, onSaved, canOpenContractorPaymentLinks = false }: UserDetailPageProps) {
+export function UserDetailPage({ userId, onBack, onSaved, canOpenContractorPaymentLinks = false, onOpenContractorPayment }: UserDetailPageProps) {
   const { user: currentUser } = useAuth();
   const toast = useToast();
   const isCreateMode = userId == null;
@@ -860,13 +861,23 @@ export function UserDetailPage({ userId, onBack, onSaved, canOpenContractorPayme
                               <div className="flex shrink-0 flex-wrap items-center gap-3 lg:justify-end">
                                 {item.paymentId ? (
                                   canOpenContractorPaymentLinks ? (
-                                    <a
-                                      href={`/payments/${item.paymentId}`}
-                                      {...RELATED_LINK_PROPS}
-                                      className="text-xs font-semibold text-slate-500 hover:text-blue-700 hover:underline"
-                                    >
-                                      Платеж #{item.paymentId}
-                                    </a>
+                                    onOpenContractorPayment ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => onOpenContractorPayment(item.paymentId as number)}
+                                        className="appearance-none border-0 bg-transparent p-0 text-left text-xs font-semibold text-slate-500 hover:text-blue-700 hover:underline"
+                                      >
+                                        Платеж #{item.paymentId}
+                                      </button>
+                                    ) : (
+                                      <a
+                                        href={`/payments/${item.paymentId}?ppTab=paymentsExpense`}
+                                        {...RELATED_LINK_PROPS}
+                                        className="text-xs font-semibold text-slate-500 hover:text-blue-700 hover:underline"
+                                      >
+                                        Платеж #{item.paymentId}
+                                      </a>
+                                    )
                                   ) : (
                                     <span className="text-xs font-semibold text-slate-500">Платеж #{item.paymentId}</span>
                                   )

@@ -873,7 +873,7 @@ export function ProfilePage() {
                             {item.paymentId ? (
                               canOpenContractorPayments ? (
                                 <a
-                                  href={`/payments/${item.paymentId}`}
+                                  href={`/payments/${item.paymentId}?ppTab=paymentsExpense`}
                                   target="_blank"
                                   rel="noreferrer"
                                   className="text-xs font-semibold text-slate-500 hover:text-blue-700 hover:underline"

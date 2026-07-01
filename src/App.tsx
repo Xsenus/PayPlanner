@@ -1785,6 +1785,7 @@ function AppContent() {
                 onBack={handleBackToUsers}
                 onSaved={handleUserSaved}
                 canOpenContractorPaymentLinks={permissions.payments.canView}
+                onOpenContractorPayment={(paymentId) => openPaymentPage(paymentId, 'Expense')}
               />
             )
           : renderNoAccess('Нужны права администратора.');
