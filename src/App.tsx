@@ -523,17 +523,6 @@ function AppContent() {
     [permissions.payments.canView],
   );
 
-  const openPaymentInNewWindow = useCallback(
-    (paymentId: number) => {
-      if (!permissions.payments.canView || !(paymentId > 0)) {
-        return;
-      }
-
-      window.open(`/payments/${paymentId}`, '_blank', 'noopener,noreferrer');
-    },
-    [permissions.payments.canView],
-  );
-
   const openRelatedCase = useCallback(
     (caseId: number, clientId?: number | null) => {
       if (caseId > 0 && permissions.cases.canView) {
@@ -1767,7 +1756,7 @@ function AppContent() {
                 userId={selectedUserId}
                 onBack={handleBackToUsers}
                 onSaved={handleUserSaved}
-                onOpenPayment={permissions.payments.canView ? openPaymentInNewWindow : undefined}
+                canOpenContractorPaymentLinks={permissions.payments.canView}
               />
             )
           : renderNoAccess('Нужны права администратора.');

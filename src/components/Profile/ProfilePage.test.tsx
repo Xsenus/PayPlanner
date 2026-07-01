@@ -301,12 +301,22 @@ describe('ProfilePage', () => {
     await waitFor(() => expect(screen.getAllByRole('tab').length).toBeGreaterThan(1));
     fireEvent.click(screen.getAllByRole('tab')[1]);
 
-    expect(await screen.findByText('Waiting contractor task')).toBeTruthy();
+    const taskLink = await screen.findByRole('link', { name: 'Waiting contractor task' });
+    const clientLink = screen.getByRole('link', { name: 'Client One' });
+    const caseLink = screen.getByRole('link', { name: 'Case One' });
+    const paymentLink = screen.getByRole('link', { name: /#1001/ });
+
+    expect(taskLink.getAttribute('href')).toBe('/tasks/101');
+    expect(taskLink.getAttribute('target')).toBe('_blank');
+    expect(clientLink.getAttribute('href')).toBe('/clients/1');
+    expect(clientLink.getAttribute('target')).toBe('_blank');
+    expect(caseLink.getAttribute('href')).toBe('/cases/11');
+    expect(caseLink.getAttribute('target')).toBe('_blank');
+    expect(paymentLink.getAttribute('href')).toBe('/payments/1001');
+    expect(paymentLink.getAttribute('target')).toBe('_blank');
     expect(screen.getByText('Result contractor task')).toBeTruthy();
     expect(screen.getByText('Sixth visible task')).toBeTruthy();
     expect(screen.getByText('Paid contractor task')).toBeTruthy();
-    expect(screen.getByText('Client One')).toBeTruthy();
-    expect(screen.getByText('Case One')).toBeTruthy();
     expect(screen.getByText(/#1001/)).toBeTruthy();
     expect(screen.getByText(/#1004/)).toBeTruthy();
   });

@@ -91,23 +91,33 @@ describe('UserDetailPage', () => {
     vi.mocked(apiService.getUserSettingForUser).mockResolvedValue(null);
   });
 
-  it('opens contractor payment through the provided payment handler', async () => {
-    const onOpenPayment = vi.fn();
-
+  it('shows contractor task, client, case and payment as regular links', async () => {
     render(
       <UserDetailPage
         userId={10}
         onBack={vi.fn()}
         onSaved={vi.fn()}
-        onOpenPayment={onOpenPayment}
+        canOpenContractorPaymentLinks
       />,
     );
 
     fireEvent.click(await screen.findByText('Расчеты'));
-    const paymentButton = await screen.findByRole('button', { name: 'Платеж #2069' });
-    fireEvent.click(paymentButton);
 
-    await waitFor(() => expect(onOpenPayment).toHaveBeenCalledWith(2069));
+    const taskLink = await screen.findByRole('link', {
+      name: 'ВИНОКУРОВА - ПОДГОТОВКА УТОЧНЕННОГО ИСКОВОГО ЗАЯВЛЕНИЯ',
+    });
+    const clientLink = screen.getByRole('link', { name: 'Винокурова Нина Тариеловна' });
+    const caseLink = screen.getByRole('link', { name: 'ВИНОКУРОВА - РАЗДЕЛ ИМУЩЕСТВА' });
+    const paymentLink = screen.getByRole('link', { name: 'Платеж #2069' });
+
+    expect(taskLink.getAttribute('href')).toBe('/tasks/77');
+    expect(taskLink.getAttribute('target')).toBe('_blank');
+    expect(clientLink.getAttribute('href')).toBe('/clients/71');
+    expect(clientLink.getAttribute('target')).toBe('_blank');
+    expect(caseLink.getAttribute('href')).toBe('/cases/501');
+    expect(caseLink.getAttribute('target')).toBe('_blank');
+    expect(paymentLink.getAttribute('href')).toBe('/payments/2069');
+    expect(paymentLink.getAttribute('target')).toBe('_blank');
   });
 
   it('explains why a contractor payment is absent from the calendar before task completion', async () => {
@@ -145,13 +155,13 @@ describe('UserDetailPage', () => {
         userId={10}
         onBack={vi.fn()}
         onSaved={vi.fn()}
-        onOpenPayment={vi.fn()}
+        canOpenContractorPaymentLinks
       />,
     );
 
     fireEvent.click(await screen.findByText('Расчеты'));
 
     expect(await screen.findByText('Платеж появится в календаре после завершения задачи')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /Платеж #/ })).toBeNull();
+    expect(screen.queryByRole('link', { name: /Платеж #/ })).toBeNull();
   });
 });

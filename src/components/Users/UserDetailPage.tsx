@@ -26,7 +26,7 @@ type UserDetailPageProps = {
   userId: number | null;
   onBack: () => void;
   onSaved: (user: User) => void;
-  onOpenPayment?: (paymentId: number) => void;
+  canOpenContractorPaymentLinks?: boolean;
 };
 
 type FormState = {
@@ -59,6 +59,8 @@ type ContractorBalanceGroup = {
   key: string;
   clientLabel: string;
   caseLabel: string;
+  clientId?: number | null;
+  clientCaseId?: number | null;
   outstandingAmount: number;
   paidAmount: number;
   amount: number;
@@ -177,6 +179,9 @@ function formatMissingContractorPaymentHint(status?: string | null) {
     : 'Платеж еще не создан';
 }
 
+const RELATED_LINK_CLASS = 'truncate font-semibold text-blue-700 hover:text-blue-900 hover:underline';
+const RELATED_LINK_PROPS = { target: '_blank', rel: 'noreferrer' } as const;
+
 function buildCompanyOption(company: MainCompanySettingsDto['companies'][number]): LookupSelectOption {
   const description = [company.fullName?.trim() || null, company.inn ? `ИНН ${company.inn}` : null, company.kpp ? `КПП ${company.kpp}` : null]
     .filter(Boolean)
@@ -271,7 +276,7 @@ function TextField(props: {
   );
 }
 
-export function UserDetailPage({ userId, onBack, onSaved, onOpenPayment }: UserDetailPageProps) {
+export function UserDetailPage({ userId, onBack, onSaved, canOpenContractorPaymentLinks = false }: UserDetailPageProps) {
   const { user: currentUser } = useAuth();
   const toast = useToast();
   const isCreateMode = userId == null;
@@ -395,6 +400,8 @@ export function UserDetailPage({ userId, onBack, onSaved, onOpenPayment }: UserD
         key,
         clientLabel,
         caseLabel,
+        clientId: item.clientId,
+        clientCaseId: item.clientCaseId,
         outstandingAmount: 0,
         paidAmount: 0,
         amount: 0,
@@ -772,8 +779,20 @@ export function UserDetailPage({ userId, onBack, onSaved, onOpenPayment }: UserD
                       <div key={group.key} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                           <div className="min-w-0">
-                            <div className="truncate text-sm font-semibold text-slate-900">{group.clientLabel}</div>
-                            <div className="mt-1 truncate text-xs text-slate-500">{group.caseLabel}</div>
+                            {group.clientId ? (
+                              <a href={`/clients/${group.clientId}`} {...RELATED_LINK_PROPS} className={`block text-sm ${RELATED_LINK_CLASS}`}>
+                                {group.clientLabel}
+                              </a>
+                            ) : (
+                              <div className="truncate text-sm font-semibold text-slate-900">{group.clientLabel}</div>
+                            )}
+                            {group.clientCaseId ? (
+                              <a href={`/cases/${group.clientCaseId}`} {...RELATED_LINK_PROPS} className={`mt-1 block text-xs ${RELATED_LINK_CLASS}`}>
+                                {group.caseLabel}
+                              </a>
+                            ) : (
+                              <div className="mt-1 truncate text-xs text-slate-500">{group.caseLabel}</div>
+                            )}
                           </div>
                           <div className="grid gap-2 text-sm sm:grid-cols-3 lg:min-w-[420px]">
                             <div className="rounded-xl bg-white px-3 py-2">
@@ -794,7 +813,7 @@ export function UserDetailPage({ userId, onBack, onSaved, onOpenPayment }: UserD
                           {group.items.map((item) => (
                             <div key={`${item.taskId}-${item.paymentId ?? 'planned'}`} className="flex flex-col gap-2 rounded-xl bg-white px-3 py-2 text-sm lg:flex-row lg:items-center lg:justify-between">
                               <div className="min-w-0">
-                                <a href={`/tasks/${item.taskId}`} className="block truncate font-medium text-blue-700 hover:text-blue-900 hover:underline">
+                                <a href={`/tasks/${item.taskId}`} {...RELATED_LINK_PROPS} className="block truncate font-medium text-blue-700 hover:text-blue-900 hover:underline">
                                   {item.taskTitle}
                                 </a>
                                 <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
@@ -808,18 +827,16 @@ export function UserDetailPage({ userId, onBack, onSaved, onOpenPayment }: UserD
                               </div>
                               <div className="flex shrink-0 flex-wrap items-center gap-3 lg:justify-end">
                                 {item.paymentId ? (
-                                  onOpenPayment ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => onOpenPayment(item.paymentId as number)}
+                                  canOpenContractorPaymentLinks ? (
+                                    <a
+                                      href={`/payments/${item.paymentId}`}
+                                      {...RELATED_LINK_PROPS}
                                       className="text-xs font-semibold text-slate-500 hover:text-blue-700 hover:underline"
                                     >
                                       Платеж #{item.paymentId}
-                                    </button>
-                                  ) : (
-                                    <a href={`/payments/${item.paymentId}`} className="text-xs font-semibold text-slate-500 hover:text-blue-700 hover:underline">
-                                      Платеж #{item.paymentId}
                                     </a>
+                                  ) : (
+                                    <span className="text-xs font-semibold text-slate-500">Платеж #{item.paymentId}</span>
                                   )
                                 ) : null}
                                 {!item.paymentId ? (

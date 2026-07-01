@@ -64,6 +64,8 @@ type ProfileSectionTab = 'profile' | 'tasks' | 'calendars' | 'security' | 'audit
 
 type ContractorBalanceGroup = {
   key: string;
+  clientId?: number | null;
+  clientCaseId?: number | null;
   clientLabel: string;
   caseLabel: string;
   outstandingAmount: number;
@@ -115,6 +117,9 @@ const EMPTY_CONTRACTOR_BALANCE: ContractorBalance = {
   queue: [],
   paid: [],
 };
+
+const RELATED_LINK_CLASS = 'truncate font-semibold text-blue-700 hover:text-blue-900 hover:underline';
+const RELATED_LINK_PROPS = { target: '_blank', rel: 'noreferrer' } as const;
 
 const PROFILE_SECTION_TABS: Array<{ id: ProfileSectionTab; label: string; description: string }> = [
   {
@@ -341,6 +346,8 @@ export function ProfilePage() {
       const key = `${item.clientId ?? 'c0'}:${item.legalEntityId ?? 'l0'}:${item.clientCaseId ?? 'case0'}:${clientLabel}:${caseLabel}`;
       const group = groups.get(key) ?? {
         key,
+        clientId: item.clientId,
+        clientCaseId: item.clientCaseId,
         clientLabel,
         caseLabel,
         outstandingAmount: 0,
@@ -783,8 +790,20 @@ export function ProfilePage() {
                   <div key={group.key} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                       <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold text-slate-900">{group.clientLabel}</div>
-                        <div className="mt-1 truncate text-xs text-slate-500">{group.caseLabel}</div>
+                        {group.clientId ? (
+                          <a href={`/clients/${group.clientId}`} {...RELATED_LINK_PROPS} className={`block text-sm ${RELATED_LINK_CLASS}`}>
+                            {group.clientLabel}
+                          </a>
+                        ) : (
+                          <div className="truncate text-sm font-semibold text-slate-900">{group.clientLabel}</div>
+                        )}
+                        {group.clientCaseId ? (
+                          <a href={`/cases/${group.clientCaseId}`} {...RELATED_LINK_PROPS} className={`mt-1 block text-xs ${RELATED_LINK_CLASS}`}>
+                            {group.caseLabel}
+                          </a>
+                        ) : (
+                          <div className="mt-1 truncate text-xs text-slate-500">{group.caseLabel}</div>
+                        )}
                       </div>
                       <div className="grid gap-2 text-sm sm:grid-cols-3 lg:min-w-[420px]">
                         <div className="rounded-xl bg-white px-3 py-2">
@@ -805,7 +824,7 @@ export function ProfilePage() {
                       {group.items.map((item) => (
                         <div key={`${item.taskId}-${item.paymentId ?? 'planned'}`} className="flex flex-col gap-2 rounded-xl bg-white px-3 py-2 text-sm lg:flex-row lg:items-center lg:justify-between">
                           <div className="min-w-0">
-                            <a href={`/tasks/${item.taskId}`} className="block truncate font-medium text-blue-700 hover:text-blue-900 hover:underline">
+                            <a href={`/tasks/${item.taskId}`} {...RELATED_LINK_PROPS} className="block truncate font-medium text-blue-700 hover:text-blue-900 hover:underline">
                               {item.taskTitle}
                             </a>
                             <div className="mt-1 text-xs text-slate-500">Постановщик: {item.authorName || '—'}</div>

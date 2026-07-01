@@ -193,12 +193,16 @@ vi.mock('./components/Accounts/Accounts', () => ({
 }));
 
 vi.mock('./components/Users/UserDetailPage', () => ({
-  UserDetailPage: ({ userId, onOpenPayment }: { userId: number | null; onOpenPayment?: (paymentId: number) => void }) => (
+  UserDetailPage: ({
+    userId,
+    canOpenContractorPaymentLinks,
+  }: {
+    userId: number | null;
+    canOpenContractorPaymentLinks?: boolean;
+  }) => (
     <section data-testid="user-detail">
       user {userId}
-      <button type="button" onClick={() => onOpenPayment?.(2069)}>
-        open user payment
-      </button>
+      <span data-testid="user-payment-link-access">{String(canOpenContractorPaymentLinks)}</span>
     </section>
   ),
 }));
@@ -360,20 +364,15 @@ describe('App calendar client navigation', () => {
     expect(window.localStorage.getItem(LAST_TAB_STORAGE_KEY)).toBe('calendar');
   });
 
-  it('opens payment from user card separately and keeps the user card active', async () => {
+  it('allows the user card to render contractor payment links without leaving the card', async () => {
     window.history.replaceState({}, '', '/?ppTab=userDetail&userId=10');
-    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
 
     render(<App />);
 
     expect(await screen.findByTestId('user-detail')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'open user payment' }));
-
-    expect(openSpy).toHaveBeenCalledWith('/payments/2069', '_blank', 'noopener,noreferrer');
+    expect(screen.getByTestId('user-payment-link-access').textContent).toBe('true');
     expect(screen.getByTestId('navigation').textContent).toBe('userDetail');
     expect(`${window.location.pathname}${window.location.search}`).toBe('/?ppTab=userDetail&userId=10');
-
-    openSpy.mockRestore();
   });
 
   it('clears stale settings section when opening the profile page', async () => {
