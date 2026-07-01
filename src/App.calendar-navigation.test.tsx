@@ -364,6 +364,28 @@ describe('App calendar client navigation', () => {
     expect(window.localStorage.getItem(LAST_TAB_STORAGE_KEY)).toBe('calendar');
   });
 
+  it('keeps calendar in the route so F5 returns to calendar without stored state', async () => {
+    window.history.replaceState({}, '', '/');
+
+    const rendered = render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('navigation').textContent).toBe('calendar');
+      expect(screen.getByTestId('calendar-view')).toBeTruthy();
+      expect(`${window.location.pathname}${window.location.search}`).toBe('/?ppTab=calendar');
+    });
+
+    rendered.unmount();
+    window.localStorage.clear();
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('navigation').textContent).toBe('calendar');
+      expect(screen.getByTestId('calendar-view')).toBeTruthy();
+      expect(`${window.location.pathname}${window.location.search}`).toBe('/?ppTab=calendar');
+    });
+  });
+
   it('allows the user card to render contractor payment links without leaving the card', async () => {
     window.history.replaceState({}, '', '/?ppTab=userDetail&userId=10');
 

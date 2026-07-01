@@ -68,6 +68,41 @@ type CasePaymentCreateDraft = {
   casesPrefetch: ClientCase[];
 };
 
+const TABS_WITH_QUERY_ROUTE = new Set<Tab>([
+  'calendar',
+  'accountsIncome',
+  'accountsExpense',
+  'actsIncome',
+  'actsExpense',
+  'paymentsIncome',
+  'paymentsExpense',
+  'reports',
+  'calculator',
+  'legalEntities',
+  'contacts',
+  'contactsClients',
+  'contactsLegal',
+  'contactsExternal',
+  'installments',
+  'moneyBank',
+  'moneyCash',
+  'moneyCards',
+  'moneyEMoney',
+  'moneyTotal',
+  'contractCreate',
+  'companyProfile',
+  'profile',
+  'users',
+  'userDetail',
+  'roles',
+  'audit',
+  'userActivity',
+  'yandexDisk',
+  's3Storage',
+  'dictionaries',
+  'settings',
+]);
+
 function todayInputDate(): string {
   const now = new Date();
   const year = now.getFullYear();
@@ -795,14 +830,7 @@ function AppContent() {
       url.pathname = '/';
     }
 
-    if (
-      activeTab === 'profile'
-      || activeTab === 'userDetail'
-      || activeTab === 'paymentsIncome'
-      || activeTab === 'paymentsExpense'
-      || activeTab === 'actsIncome'
-      || activeTab === 'actsExpense'
-    ) {
+    if (TABS_WITH_QUERY_ROUTE.has(activeTab)) {
       url.searchParams.set('ppTab', activeTab);
     } else {
       url.searchParams.delete('ppTab');
