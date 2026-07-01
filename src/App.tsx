@@ -749,7 +749,9 @@ function AppContent() {
     }
 
     const url = new URL(window.location.href);
-    if (activeTab === 'clients') {
+    if (activeTab === 'profile' || activeTab === 'userDetail') {
+      url.pathname = '/';
+    } else if (activeTab === 'clients') {
       url.pathname = '/clients';
     } else if (activeTab === 'cases') {
       url.pathname = '/cases';

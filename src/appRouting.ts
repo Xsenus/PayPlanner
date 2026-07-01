@@ -332,6 +332,8 @@ export function getInitialTab(): Tab {
 
   const params = new URLSearchParams(window.location.search);
   const urlTab = params.get('ppTab');
+  const hasNotificationsPath = isNotificationsPath();
+  const hasStaleNotificationsPath = hasNotificationsPath && isValidTab(urlTab) && urlTab !== 'notifications';
 
   if (getPathClientId()) {
     return 'clientDetail';
@@ -349,7 +351,7 @@ export function getInitialTab(): Tab {
     return 'cases';
   }
 
-  if (isNotificationsPath()) {
+  if (hasNotificationsPath && !hasStaleNotificationsPath) {
     return 'notifications';
   }
 

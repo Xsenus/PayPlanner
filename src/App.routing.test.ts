@@ -10,6 +10,7 @@ import {
   getInitialPaymentId,
   getInitialTab,
   getInitialTaskId,
+  getInitialUserId,
   getTabHref,
   getPathActId,
   getPathCaseId,
@@ -326,6 +327,21 @@ describe('App sidebar routing helpers', () => {
 
     expect(isNotificationsPath()).toBe(true);
     expect(getInitialTab()).toBe('notifications');
+  });
+
+  it('keeps an explicit working tab when a stale notifications path is present', () => {
+    window.history.replaceState({}, '', '/notifications?ppTab=profile');
+
+    expect(isNotificationsPath()).toBe(true);
+    expect(getInitialTab()).toBe('profile');
+  });
+
+  it('keeps an explicit user detail tab when a stale notifications path is present', () => {
+    window.history.replaceState({}, '', '/notifications?ppTab=userDetail&userId=17');
+
+    expect(isNotificationsPath()).toBe(true);
+    expect(getInitialTab()).toBe('userDetail');
+    expect(getInitialUserId()).toBe(17);
   });
 
   it('detects the notes pathname', () => {
