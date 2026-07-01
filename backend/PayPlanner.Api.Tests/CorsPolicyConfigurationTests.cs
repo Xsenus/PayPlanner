@@ -83,6 +83,8 @@ public class CorsPolicyConfigurationTests
             .ToArray();
 
         Assert.Contains("https://crm.elitpravo.com", origins);
+        Assert.Contains("http://185.46.10.202", origins);
+        Assert.Contains("https://185.46.10.202", origins);
     }
 
     private static CorsPolicy GetDefaultPolicy(CorsOptions options)
