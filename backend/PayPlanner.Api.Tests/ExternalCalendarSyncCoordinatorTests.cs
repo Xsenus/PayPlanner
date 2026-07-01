@@ -184,6 +184,68 @@ public sealed class ExternalCalendarSyncCoordinatorTests
         Assert.Contains(await db.YandexCalendarSyncLogs.ToListAsync(), item => item.Operation == "disable-sync" && item.Status == "success");
     }
 
+    [Fact]
+    public async Task HandleUserAccessRevokedAsync_WhenCleanupFails_DisablesSyncAndDoesNotThrow()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "user", Description = "User" };
+        var user = new User
+        {
+            Email = "calendar-cleanup-failure@example.com",
+            FullName = "Calendar Cleanup Failure",
+            PasswordHash = "hash",
+            Role = role,
+            IsActive = true,
+            IsApproved = true,
+        };
+        db.Users.Add(user);
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "calendarSync.settings",
+            Value = JsonSerializer.Serialize(new CalendarSyncSettingsDto
+            {
+                SyncMode = "hybrid",
+                ConflictResolutionMode = "latestWins",
+                UserControlMode = "adminManaged",
+                InactiveUserAction = "cleanupExternalData",
+            }),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        db.GoogleCalendarConnections.Add(new GoogleCalendarConnection
+        {
+            UserId = user.Id,
+            GoogleUserId = "google-user",
+            GoogleEmail = "calendar-cleanup-failure@gmail.com",
+            IsEnabled = true,
+            SyncEnabled = true,
+        });
+        db.YandexCalendarConnections.Add(new YandexCalendarConnection
+        {
+            UserId = user.Id,
+            YandexUserId = "yandex-user",
+            YandexEmail = "calendar-cleanup-failure@yandex.ru",
+            IsEnabled = true,
+            SyncEnabled = true,
+        });
+        await db.SaveChangesAsync();
+        var google = new FakeGoogleCalendarSyncService { FailCleanup = true };
+        var yandex = new FakeYandexCalendarSyncService { FailCleanup = true };
+        var coordinator = CreateCoordinator(google, yandex, db);
+
+        await coordinator.HandleUserAccessRevokedAsync(user.Id, actorUserId: 100);
+
+        Assert.Equal([user.Id], google.CleanedUserIds);
+        Assert.Equal([user.Id], yandex.CleanedUserIds);
+        var googleConnection = await db.GoogleCalendarConnections.SingleAsync();
+        var yandexConnection = await db.YandexCalendarConnections.SingleAsync();
+        Assert.False(googleConnection.IsEnabled);
+        Assert.False(googleConnection.SyncEnabled);
+        Assert.False(yandexConnection.IsEnabled);
+        Assert.False(yandexConnection.SyncEnabled);
+    }
+
     private static ExternalCalendarSyncCoordinator CreateCoordinator(
         IGoogleCalendarSyncService google,
         IYandexCalendarSyncService yandex,
@@ -240,8 +302,10 @@ public sealed class ExternalCalendarSyncCoordinatorTests
     {
         public List<int> SyncedTaskIds { get; } = [];
         public List<int> DeletedTaskIds { get; } = [];
+        public List<int> CleanedUserIds { get; } = [];
         public bool FailSync { get; set; }
         public bool FailDelete { get; set; }
+        public bool FailCleanup { get; set; }
 
         public Task<GoogleCalendarStatusDto> GetStatusAsync(int userId, HttpRequest request, CancellationToken cancellationToken = default)
             => Task.FromResult(new GoogleCalendarStatusDto());
@@ -290,7 +354,15 @@ public sealed class ExternalCalendarSyncCoordinatorTests
         }
 
         public Task CleanupDeletedUserAsync(int userId, int actorUserId, CancellationToken cancellationToken = default)
-            => Task.CompletedTask;
+        {
+            CleanedUserIds.Add(userId);
+            if (FailCleanup)
+            {
+                throw new InvalidOperationException("GoogleCalendarCleanupFailed");
+            }
+
+            return Task.CompletedTask;
+        }
 
         public Task HandleWebhookAsync(HttpRequest request, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
@@ -300,8 +372,10 @@ public sealed class ExternalCalendarSyncCoordinatorTests
     {
         public List<int> SyncedTaskIds { get; } = [];
         public List<int> DeletedTaskIds { get; } = [];
+        public List<int> CleanedUserIds { get; } = [];
         public bool FailSync { get; set; }
         public bool FailDelete { get; set; }
+        public bool FailCleanup { get; set; }
 
         public Task<YandexCalendarStatusDto> GetStatusAsync(int userId, HttpRequest request, CancellationToken cancellationToken = default)
             => Task.FromResult(new YandexCalendarStatusDto());
@@ -350,7 +424,15 @@ public sealed class ExternalCalendarSyncCoordinatorTests
         }
 
         public Task CleanupDeletedUserAsync(int userId, int actorUserId, CancellationToken cancellationToken = default)
-            => Task.CompletedTask;
+        {
+            CleanedUserIds.Add(userId);
+            if (FailCleanup)
+            {
+                throw new InvalidOperationException("YandexCalendarCleanupFailed");
+            }
+
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class RecordingRealtimeNotificationPublisher : IRealtimeNotificationPublisher

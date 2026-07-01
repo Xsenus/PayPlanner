@@ -156,7 +156,18 @@ public sealed class ExternalCalendarSyncCoordinator : IExternalCalendarSyncCoord
         switch (settings.InactiveUserAction)
         {
             case "cleanupExternalData":
-                await CleanupDeletedUserAsync(userId, actorUserId, cancellationToken);
+                try
+                {
+                    await CleanupDeletedUserAsync(userId, actorUserId, cancellationToken);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "External calendar cleanup failed after access revocation for user {UserId}. Sync will be disabled instead.",
+                        userId);
+                    await DisableUserSyncAsync(userId, cancellationToken);
+                }
                 break;
             case "disableSyncOnly":
                 await DisableUserSyncAsync(userId, cancellationToken);
