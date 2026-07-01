@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebPushDevicePanel } from './WebPushDevicePanel';
 import type { WebPushStatus } from '../../services/webPushNotifications';
@@ -46,6 +46,7 @@ function createStatus(overrides: Partial<WebPushStatus> = {}): WebPushStatus {
 
 describe('WebPushDevicePanel', () => {
   beforeEach(() => {
+    vi.useRealTimers();
     Object.values(webPushMock).forEach((mock) => mock.mockReset());
     apiMock.revokeUserPushSubscription.mockReset();
     toastMock.error.mockReset();
@@ -97,6 +98,25 @@ describe('WebPushDevicePanel', () => {
     expect(await screen.findByText('Web Push: Network error')).toBeTruthy();
     expect(screen.getByText('1 активных из 2')).toBeTruthy();
     expect(screen.getByText(/ещё не проверено/)).toBeTruthy();
+  });
+
+  it('unlocks the check button when device status check times out', async () => {
+    vi.useFakeTimers();
+    webPushMock.getWebPushStatus.mockReturnValueOnce(new Promise(() => {}));
+
+    render(<WebPushDevicePanel />);
+
+    const checkButton = screen.getByRole('button', { name: 'Проверить' });
+    expect((checkButton as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => {
+      vi.advanceTimersByTime(12_000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(toastMock.error).toHaveBeenCalledWith('Проверка push-уведомлений заняла слишком много времени. Обновите страницу и попробуйте снова.');
+    expect((checkButton as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('keeps disable action available for the current device when server diagnostics require setup', async () => {

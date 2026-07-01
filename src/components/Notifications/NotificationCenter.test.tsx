@@ -305,6 +305,26 @@ describe('NotificationCenter', () => {
     expect(handlers[handlerName]).toHaveBeenCalledWith(777);
   });
 
+  it('opens linked task notification from the inbox action', async () => {
+    const onOpenTask = vi.fn();
+    const item = createNotification({
+      id: 88,
+      title: 'Новая задача: проверить документы',
+      objectType: 'task',
+      objectId: 479,
+      taskId: 479,
+    });
+    apiMock.getUserNotifications.mockResolvedValue(createPage([item]));
+
+    render(<NotificationCenter onOpenTask={onOpenTask} />);
+
+    expect(await screen.findByText('Новая задача: проверить документы')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'К задаче' }));
+
+    await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(88));
+    expect(onOpenTask).toHaveBeenCalledWith(479);
+  });
+
   it.each([
     ['payment', 'Рљ РїР»Р°С‚РµР¶Сѓ'],
     ['invoice', 'Рљ СЃС‡РµС‚Сѓ'],

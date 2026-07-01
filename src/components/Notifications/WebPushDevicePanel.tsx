@@ -24,6 +24,18 @@ type WebPushDevicePanelProps = {
   className?: string;
 };
 
+const WEB_PUSH_STATUS_TIMEOUT_MS = 12_000;
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+
+    promise
+      .then(resolve, reject)
+      .finally(() => window.clearTimeout(timeoutId));
+  });
+}
+
 function formatDateTime(value?: string | null) {
   if (!value) {
     return '—';
@@ -94,8 +106,16 @@ export function WebPushDevicePanel({
     try {
       setWebPushLoading(true);
       const [nextStatus, diagnosticsResult] = await Promise.allSettled([
-        getWebPushStatus(),
-        apiService.getWebPushDiagnostics(),
+        withTimeout(
+          getWebPushStatus(),
+          WEB_PUSH_STATUS_TIMEOUT_MS,
+          'Проверка push-уведомлений заняла слишком много времени. Обновите страницу и попробуйте снова.',
+        ),
+        withTimeout(
+          apiService.getWebPushDiagnostics(),
+          WEB_PUSH_STATUS_TIMEOUT_MS,
+          'Серверная диагностика push-уведомлений не ответила вовремя.',
+        ),
       ]);
       if (nextStatus.status === 'fulfilled') {
         setWebPushStatus(nextStatus.value);
