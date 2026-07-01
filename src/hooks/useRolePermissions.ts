@@ -29,6 +29,7 @@ export function useRolePermissions(roleId?: number | null) {
 
 export function useRolePermissionsLoaded(roleId?: number | null) {
   const [loaded, setLoaded] = useState(() => hasLoadedRolePermissions(roleId));
+  const loadedForCurrentRole = hasLoadedRolePermissions(roleId);
 
   useEffect(() => {
     setLoaded(hasLoadedRolePermissions(roleId));
@@ -43,5 +44,5 @@ export function useRolePermissionsLoaded(roleId?: number | null) {
     return unsubscribe;
   }, [roleId]);
 
-  return loaded;
+  return loaded && loadedForCurrentRole;
 }

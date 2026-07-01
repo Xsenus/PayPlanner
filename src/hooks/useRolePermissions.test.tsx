@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { apiServiceMock, resetApiServiceMock } from '../test/apiMock';
 import { defaultRolePermissions, type RolePermissions } from '../types/permissions';
-import { useRolePermissions } from './useRolePermissions';
+import { useRolePermissions, useRolePermissionsLoaded } from './useRolePermissions';
 
 vi.mock('../services/api', async () => ({
   apiService: (await import('../test/apiMock')).apiServiceMock,
@@ -69,5 +69,37 @@ describe('useRolePermissions', () => {
 
     expect(apiServiceMock.getRolePermissions).toHaveBeenCalledWith(firstRoleId);
     expect(apiServiceMock.getRolePermissions).toHaveBeenCalledWith(secondRoleId);
+  });
+
+  it('does not report permissions as loaded for a newly assigned role before its request finishes', async () => {
+    const roleId = 9010;
+    let resolvePermissions!: (permissions: RolePermissions) => void;
+    apiServiceMock.getRolePermissions.mockReturnValue(
+      new Promise<RolePermissions>((resolve) => {
+        resolvePermissions = resolve;
+      }),
+    );
+
+    const { result, rerender } = renderHook(
+      ({ nextRoleId }) => {
+        useRolePermissions(nextRoleId);
+        return useRolePermissionsLoaded(nextRoleId);
+      },
+      { initialProps: { nextRoleId: undefined as number | undefined } },
+    );
+
+    expect(result.current).toBe(true);
+
+    rerender({ nextRoleId: roleId });
+
+    expect(result.current).toBe(false);
+
+    resolvePermissions(permissionsWithTaskScope(true, 'all'));
+
+    await waitFor(() => {
+      expect(result.current).toBe(true);
+    });
+
+    expect(apiServiceMock.getRolePermissions).toHaveBeenCalledWith(roleId);
   });
 });
