@@ -112,7 +112,7 @@ export function WebPushDevicePanel({
           'Проверка push-уведомлений заняла слишком много времени. Обновите страницу и попробуйте снова.',
         ),
         withTimeout(
-          apiService.getWebPushDiagnostics(),
+          apiService.getWebPushDiagnostics({ suppressAuthSessionExpired: true }),
           WEB_PUSH_STATUS_TIMEOUT_MS,
           'Серверная диагностика push-уведомлений не ответила вовремя.',
         ),

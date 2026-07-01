@@ -1297,6 +1297,18 @@ describe('apiService auth handling', () => {
     expect(listener).toHaveBeenCalledTimes(1);
     window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, listener);
   });
+
+  it('does not emit a session-expired event for optional web push diagnostics', async () => {
+    const listener = vi.fn();
+    window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, listener);
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response('', { status: 401, statusText: 'Unauthorized' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(apiService.getWebPushDiagnostics({ suppressAuthSessionExpired: true })).rejects.toThrow('HTTP 401 Unauthorized');
+
+    expect(listener).not.toHaveBeenCalled();
+    window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, listener);
+  });
 });
 
 describe('apiService case calendar', () => {

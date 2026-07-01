@@ -321,8 +321,30 @@ describe('NotificationCenter', () => {
     expect(await screen.findByText('Новая задача: проверить документы')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'К задаче' }));
 
-    await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(88));
+    await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(88, { suppressAuthSessionExpired: true }));
     expect(onOpenTask).toHaveBeenCalledWith(479);
+  });
+
+  it('opens linked task even when marking the notification as read fails', async () => {
+    const onOpenTask = vi.fn();
+    const item = createNotification({
+      id: 89,
+      title: 'Новая задача: проверить уведомления',
+      objectType: 'task',
+      objectId: 480,
+      taskId: 480,
+    });
+    apiMock.getUserNotifications.mockResolvedValue(createPage([item]));
+    apiMock.markUserNotificationRead.mockRejectedValueOnce(new Error('HTTP 401 Unauthorized'));
+
+    render(<NotificationCenter onOpenTask={onOpenTask} />);
+
+    expect(await screen.findByText('Новая задача: проверить уведомления')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'К задаче' }));
+
+    expect(onOpenTask).toHaveBeenCalledWith(480);
+    await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(89, { suppressAuthSessionExpired: true }));
+    expect(toastMock.error).toHaveBeenCalledWith('HTTP 401 Unauthorized');
   });
 
   it.each([

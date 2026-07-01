@@ -505,19 +505,19 @@ export function NotificationCenter({
     return updated;
   };
 
-  const handleOpenTask = async (item: UserNotificationDto) => {
+  const handleOpenTask = (item: UserNotificationDto) => {
     if (!item.taskId || !onOpenTask) {
       return;
     }
 
-    try {
-      setBusyId(item.id);
-      await markRead(item);
-      onOpenTask(item.taskId);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Не удалось открыть задачу.');
-    } finally {
-      setBusyId(null);
+    onOpenTask(item.taskId);
+
+    if (!item.isRead) {
+      apiService
+        .markUserNotificationRead(item.id, { suppressAuthSessionExpired: true })
+        .catch((error) => {
+          toast.error(error instanceof Error ? error.message : 'Не удалось отметить уведомление прочитанным.');
+        });
     }
   };
 

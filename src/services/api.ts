@@ -4,6 +4,10 @@ export const AUTH_SESSION_EXPIRED_EVENT = 'payplanner:auth-session-expired';
 const AUTH_SESSION_EXPIRED_MESSAGE = 'Сессия истекла. Войдите снова.';
 const AUTH_TOKEN_STORAGE_KEYS = ['pp_token', 'auth_token', 'pp.jwt'];
 
+type ApiRequestOptions = RequestInit & {
+  suppressAuthSessionExpired?: boolean;
+};
+
 export function getApiBaseUrl(): string {
   return API_BASE_URL;
 }
@@ -2079,23 +2083,24 @@ export async function extractResponseErrorMessage(response: Response): Promise<s
 }
 
 export class ApiService {
-  private async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
+  private async request<T>(endpoint: string, options?: ApiRequestOptions): Promise<T> {
+    const { suppressAuthSessionExpired = false, ...fetchOptions } = options ?? {};
     const url = `${API_BASE_URL}${endpoint}`;
     const token = getAuthToken();
-    const isFormData = typeof FormData !== 'undefined' && options?.body instanceof FormData;
+    const isFormData = typeof FormData !== 'undefined' && fetchOptions.body instanceof FormData;
     const headers: Record<string, string> = {
-      ...(!isFormData && options?.body ? { 'Content-Type': 'application/json' } : {}),
-      ...(options?.headers as Record<string, string> | undefined),
+      ...(!isFormData && fetchOptions.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(fetchOptions.headers as Record<string, string> | undefined),
     };
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
     const response = await fetch(url, {
-      ...options,
+      ...fetchOptions,
       headers,
     });
 
     if (!response.ok) {
-      if (response.status === 401) {
+      if (response.status === 401 && !suppressAuthSessionExpired) {
         notifyAuthSessionExpired();
         throw new Error(`HTTP 401 Unauthorized at ${url} - ${AUTH_SESSION_EXPIRED_MESSAGE}`);
       }
@@ -3963,9 +3968,10 @@ export class ApiService {
     return this.request<number>('/notifications/inbox/unread-count');
   }
 
-  async markUserNotificationRead(id: number) {
+  async markUserNotificationRead(id: number, options?: { suppressAuthSessionExpired?: boolean }) {
     return this.request<UserNotificationDto>(`/notifications/inbox/${id}/read`, {
       method: 'PATCH',
+      suppressAuthSessionExpired: options?.suppressAuthSessionExpired,
     });
   }
 
@@ -4027,8 +4033,10 @@ export class ApiService {
     return this.request<UserPushSubscriptionDto[]>('/notifications/inbox/push/subscriptions');
   }
 
-  async getWebPushDiagnostics() {
-    return this.request<WebPushDiagnosticsDto>('/notifications/inbox/push/diagnostics');
+  async getWebPushDiagnostics(options?: { suppressAuthSessionExpired?: boolean }) {
+    return this.request<WebPushDiagnosticsDto>('/notifications/inbox/push/diagnostics', {
+      suppressAuthSessionExpired: options?.suppressAuthSessionExpired,
+    });
   }
 
   async upsertUserPushSubscription(payload: UpsertPushSubscriptionRequest) {
