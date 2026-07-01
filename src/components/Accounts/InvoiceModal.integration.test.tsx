@@ -323,6 +323,8 @@ describe('InvoiceModal integration', () => {
           close: vi.fn(),
         },
         close: vi.fn(),
+        focus: vi.fn(),
+        print: vi.fn(),
       })),
     });
     Object.defineProperty(URL, 'createObjectURL', {
@@ -2966,7 +2968,7 @@ describe('InvoiceModal integration', () => {
     });
   });
 
-  it('opens print window before requesting printable pdf document', async () => {
+  it('prints invoice through html document without requesting server pdf rendering', async () => {
     const downloadMock = vi.mocked(apiService.downloadInvoiceDocument);
     downloadMock.mockClear();
     const openMock = vi.mocked(window.open);
@@ -3003,7 +3005,14 @@ describe('InvoiceModal integration', () => {
 
     expect(openMock).toHaveBeenCalled();
     await waitFor(() => {
-      expect(downloadMock).toHaveBeenCalledWith(552, 'pdf', { includeSignatureAndSeal: false });
+      expect(downloadMock).toHaveBeenCalledWith(552, 'html', { includeSignatureAndSeal: false });
+    });
+
+    const printWindow = openMock.mock.results[0]?.value as Window & {
+      document: { write: ReturnType<typeof vi.fn> };
+    };
+    await waitFor(() => {
+      expect(printWindow.document.write).toHaveBeenCalledWith(expect.stringContaining('<body>preview</body>'));
     });
   });
 });

@@ -3088,7 +3088,7 @@ export function InvoiceModal({
       <html lang="ru">
         <head>
           <meta charset="utf-8" />
-          <title>Подготавливаем PDF…</title>
+          <title>Подготавливаем документ…</title>
           <style>
             body {
               margin: 0;
@@ -3111,7 +3111,7 @@ export function InvoiceModal({
           </style>
         </head>
         <body>
-          <div class="box">Подготавливаем PDF-документ…</div>
+          <div class="box">Подготавливаем печатную форму…</div>
         </body>
       </html>
     `);
@@ -3131,48 +3131,19 @@ export function InvoiceModal({
     previewWindow.document.write(buildAutoPrintHtml(html));
     previewWindow.document.close();
   };
-  void openHtmlInWindow;
 
-  const openBlobInWindow = (
-    blob: Blob,
-    previewWindow?: Window | null,
-    options?: { autoPrint?: boolean },
-  ) => {
-    if (typeof window === 'undefined') return;
-    const href = URL.createObjectURL(blob);
-    let targetWindow = previewWindow && !previewWindow.closed
-      ? previewWindow
-      : null;
+  const printHtmlInWindow = (html: string, previewWindow?: Window | null) => {
+    openHtmlInWindow(html, previewWindow);
+    if (!previewWindow || previewWindow.closed) return;
 
-    if (!targetWindow) {
-      const nextWindow = window.open('', '_blank', 'width=1180,height=900');
-      if (!nextWindow) {
-        URL.revokeObjectURL(href);
-        throw new Error('Браузер заблокировал окно PDF. Разрешите всплывающие окна и повторите.');
+    window.setTimeout(() => {
+      try {
+        previewWindow.focus();
+        previewWindow.print();
+      } catch (error) {
+        console.error('html print failed', error);
       }
-
-      targetWindow = nextWindow;
-    }
-
-    if (options?.autoPrint) {
-      targetWindow.onload = () => {
-        window.setTimeout(() => {
-          try {
-            targetWindow?.focus();
-            targetWindow?.print();
-          } catch (error) {
-            console.error('pdf print failed', error);
-          } finally {
-            if (targetWindow) {
-              targetWindow.onload = null;
-            }
-          }
-        }, 250);
-      };
-    }
-
-    targetWindow.location.href = href;
-    window.setTimeout(() => URL.revokeObjectURL(href), 60_000);
+    }, 250);
   };
 
   const deferClose = useCallback((callback: () => void) => {
@@ -3211,17 +3182,17 @@ export function InvoiceModal({
       previewWindow = openPendingDocumentWindow();
       const blob = await apiService.downloadInvoiceDocument(
         invoice.id,
-        'pdf',
+        'html',
         templateKey
           ? { includeSignatureAndSeal: false, templateKey }
           : { includeSignatureAndSeal: false },
       );
-      openBlobInWindow(blob, previewWindow, { autoPrint: true });
+      printHtmlInWindow(await blob.text(), previewWindow);
     } catch (err) {
       if (previewWindow && !previewWindow.closed) {
         previewWindow.close();
       }
-      toast.error(getDocumentActionErrorMessage(err, 'Не удалось сформировать PDF документа.'));
+      toast.error(getDocumentActionErrorMessage(err, 'Не удалось открыть печатную форму документа.'));
     }
   };
 
