@@ -26,6 +26,7 @@ import {
   isNotificationsPath,
   isNotesPath,
   isPaymentsListPath,
+  selectAccessibleFallbackTab,
   isTasksApprovalsPath,
   isTasksCalendarPath,
   isTasksListPath,
@@ -430,6 +431,15 @@ describe('App negative deep-link guards', () => {
     },
   ])('denies $tab when create is enabled but the parent section is closed', ({ tab, permissions }) => {
     expect(canAccessTab(tab, permissions)).toBe(false);
+  });
+
+  it('prefers notifications when a denied route needs a safe fallback', () => {
+    expect(selectAccessibleFallbackTab(['calendar', 'tasks', 'notifications'])).toBe('notifications');
+  });
+
+  it('falls back to profile when notifications are not available', () => {
+    expect(selectAccessibleFallbackTab(['calendar', 'profile'])).toBe('profile');
+    expect(selectAccessibleFallbackTab([])).toBe('profile');
   });
 });
 

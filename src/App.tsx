@@ -38,6 +38,7 @@ import {
   getInitialTaskId,
   getInitialUserId,
   LAST_TAB_STORAGE_KEY,
+  selectAccessibleFallbackTab,
 } from './appRouting';
 
 type AuthView = 'login' | 'register' | 'awaiting';
@@ -860,13 +861,13 @@ function AppContent() {
     }
 
     try {
-      if (activeTab !== 'notifications') {
+      if (activeTab !== 'notifications' && canViewTab(activeTab)) {
         localStorage.setItem(LAST_TAB_STORAGE_KEY, activeTab);
       }
     } catch {
       // ignore storage issues
     }
-  }, [activeTab, loading, permissionsLoaded, user]);
+  }, [activeTab, canViewTab, loading, permissionsLoaded, user]);
 
   useEffect(() => {
     if (loading || !user || !permissionsLoaded) {
@@ -874,12 +875,12 @@ function AppContent() {
     }
 
     if (activeTab === 'clientDetail' && !selectedClientId) {
-      setActiveTab('clients');
+      setActiveTab(canViewTab('clients') ? 'clients' : selectAccessibleFallbackTab(accessibleMenuTabs));
       return;
     }
 
     if (activeTab === 'caseDetail' && !selectedCaseId) {
-      setActiveTab('cases');
+      setActiveTab(canViewTab('cases') ? 'cases' : selectAccessibleFallbackTab(accessibleMenuTabs));
       return;
     }
 
@@ -895,7 +896,13 @@ function AppContent() {
       setSelectedUserId(null);
     }
 
-    const fallback = accessibleMenuTabs[0] ?? 'profile';
+    try {
+      localStorage.removeItem(LAST_TAB_STORAGE_KEY);
+    } catch {
+      // ignore storage issues
+    }
+
+    const fallback = selectAccessibleFallbackTab(accessibleMenuTabs);
     setActiveTab(fallback);
   }, [activeTab, accessibleMenuTabs, canViewTab, loading, permissionsLoaded, selectedCaseId, selectedClientId, user]);
 

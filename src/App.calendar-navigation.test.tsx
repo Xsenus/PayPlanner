@@ -391,7 +391,7 @@ describe('App calendar client navigation', () => {
     expect(window.localStorage.getItem(LAST_TAB_STORAGE_KEY)).toBe('profile');
   });
 
-  it('does not restore a forbidden last tab after role permissions change', async () => {
+  it('opens notifications and clears a forbidden last tab after role permissions change', async () => {
     window.history.replaceState({}, '', '/');
     window.localStorage.setItem(LAST_TAB_STORAGE_KEY, 'payments');
     permissionsState.paymentsCanView = false;
@@ -399,10 +399,11 @@ describe('App calendar client navigation', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByTestId('navigation').textContent).toBe('calendar');
-      expect(screen.getByTestId('calendar-view')).toBeTruthy();
+      expect(screen.getByTestId('navigation').textContent).toBe('notifications');
+      expect(screen.getByTestId('notification-center')).toBeTruthy();
+      expect(`${window.location.pathname}${window.location.search}`).toBe('/notifications');
     });
 
-    expect(window.localStorage.getItem(LAST_TAB_STORAGE_KEY)).toBe('calendar');
+    expect(window.localStorage.getItem(LAST_TAB_STORAGE_KEY)).toBeNull();
   });
 });

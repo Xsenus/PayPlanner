@@ -89,6 +89,18 @@ export function canAccessTab(tab: Tab, permissions: RolePermissions, options: Ta
   return TAB_ACCESS_RULES[tab](permissions, options);
 }
 
+export function selectAccessibleFallbackTab(accessibleTabs: readonly Tab[]): Tab {
+  if (accessibleTabs.includes('notifications')) {
+    return 'notifications';
+  }
+
+  if (accessibleTabs.includes('profile')) {
+    return 'profile';
+  }
+
+  return accessibleTabs[0] ?? 'profile';
+}
+
 export function getPathInvoiceId(): number | null {
   if (typeof window === 'undefined') {
     return null;
