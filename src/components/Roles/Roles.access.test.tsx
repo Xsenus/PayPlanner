@@ -155,6 +155,6 @@ describe('Roles access boundaries', () => {
 
     expect(await screen.findByText('Юрист')).toBeTruthy();
     expect(screen.getByText('Аудит готовности ролей')).toBeTruthy();
-    expect(screen.getByText('Аудит роли')).toBeTruthy();
+    expect(await screen.findByText('Аудит роли')).toBeTruthy();
   });
 });
