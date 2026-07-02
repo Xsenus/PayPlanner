@@ -4,11 +4,15 @@ type EnhancedScroll = {
   topScroll: HTMLDivElement;
   spacer: HTMLDivElement;
   cleanup: () => void;
-  update: () => void;
+  update: (resetStaleScroll?: boolean) => void;
 };
 
 const TOP_SCROLL_ATTR = 'data-pp-top-scrollbar';
 const ENHANCED_ATTR = 'data-pp-double-scroll-enhanced';
+
+function getViewportWidth() {
+  return window.visualViewport?.width ?? window.innerWidth;
+}
 
 function shouldEnhance(element: HTMLElement) {
   if (element.dataset.ppDoubleScrollEnhanced === '1') return false;
@@ -23,6 +27,8 @@ function createTopScroll(scrollElement: HTMLElement): EnhancedScroll {
   const topScroll = document.createElement('div');
   const spacer = document.createElement('div');
   let syncing = false;
+  let lastViewportWidth = getViewportWidth();
+  let lastClientWidth = scrollElement.clientWidth;
 
   topScroll.setAttribute(TOP_SCROLL_ATTR, '1');
   topScroll.setAttribute('aria-label', 'Горизонтальная прокрутка таблицы');
@@ -44,7 +50,22 @@ function createTopScroll(scrollElement: HTMLElement): EnhancedScroll {
   spacer.style.pointerEvents = 'none';
   topScroll.appendChild(spacer);
 
-  const update = () => {
+  const update = (resetStaleScroll = false) => {
+    const viewportWidth = getViewportWidth();
+    const clientWidth = scrollElement.clientWidth;
+    const viewportChanged = Math.abs(viewportWidth - lastViewportWidth) > 0.5;
+    const clientWidthChanged = Math.abs(clientWidth - lastClientWidth) > 0.5;
+    const maxScrollLeft = Math.max(0, scrollElement.scrollWidth - clientWidth);
+
+    if (resetStaleScroll && (viewportChanged || clientWidthChanged)) {
+      scrollElement.scrollLeft = 0;
+    } else if (scrollElement.scrollLeft > maxScrollLeft) {
+      scrollElement.scrollLeft = maxScrollLeft;
+    }
+
+    lastViewportWidth = viewportWidth;
+    lastClientWidth = clientWidth;
+
     const hasOverflow = scrollElement.scrollWidth > scrollElement.clientWidth + 1;
     const rect = scrollElement.getBoundingClientRect();
     const stickyTop = 66;
@@ -57,6 +78,9 @@ function createTopScroll(scrollElement: HTMLElement): EnhancedScroll {
     spacer.style.width = `${scrollElement.scrollWidth}px`;
     topScroll.scrollLeft = scrollElement.scrollLeft;
   };
+
+  const handleViewportResize = () => update(true);
+  const handleWindowScroll = () => update(false);
 
   const syncFromTop = () => {
     if (syncing) return;
@@ -79,14 +103,15 @@ function createTopScroll(scrollElement: HTMLElement): EnhancedScroll {
   topScroll.addEventListener('scroll', syncFromTop, { passive: true });
   scrollElement.addEventListener('scroll', syncFromBottom, { passive: true });
 
-  const resizeObserver = new ResizeObserver(update);
+  const resizeObserver = new ResizeObserver(() => update(true));
   resizeObserver.observe(scrollElement);
   const table = scrollElement.querySelector('table');
   if (table) {
     resizeObserver.observe(table);
   }
-  window.addEventListener('resize', update);
-  window.addEventListener('scroll', update, { passive: true });
+  window.addEventListener('resize', handleViewportResize);
+  window.addEventListener('scroll', handleWindowScroll, { passive: true });
+  window.visualViewport?.addEventListener('resize', handleViewportResize);
 
   document.body.appendChild(topScroll);
   scrollElement.setAttribute(ENHANCED_ATTR, '1');
@@ -99,8 +124,9 @@ function createTopScroll(scrollElement: HTMLElement): EnhancedScroll {
     cleanup: () => {
       topScroll.removeEventListener('scroll', syncFromTop);
       scrollElement.removeEventListener('scroll', syncFromBottom);
-      window.removeEventListener('resize', update);
-      window.removeEventListener('scroll', update);
+      window.removeEventListener('resize', handleViewportResize);
+      window.removeEventListener('scroll', handleWindowScroll);
+      window.visualViewport?.removeEventListener('resize', handleViewportResize);
       resizeObserver.disconnect();
       scrollElement.removeAttribute(ENHANCED_ATTR);
       topScroll.remove();
