@@ -11,10 +11,7 @@ const originalInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth')
 const originalResizeObserver = window.ResizeObserver;
 
 class MockResizeObserver implements ResizeObserver {
-  private readonly callback: ResizeObserverCallback;
-
   constructor(callback: ResizeObserverCallback) {
-    this.callback = callback;
     resizeObserverCallbacks.push(callback);
   }
 
