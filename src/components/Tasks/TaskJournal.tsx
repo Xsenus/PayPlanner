@@ -25,6 +25,7 @@ import {
   MessageSquare,
   MoreHorizontal,
   Palette,
+  Pencil,
   Phone,
   Play,
   Plus,
@@ -6708,9 +6709,21 @@ function TaskModal({
                   Запустить
                 </button>
               ) : null}
-              <button type="button" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100" title="Просмотр" aria-label="Просмотр">
-                <Eye className="h-4 w-4" />
-              </button>
+              {isLockedViewWithEditAccess ? (
+                <button
+                  type="button"
+                  onClick={onEnableEdit}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+                  title="Редактировать задачу"
+                  aria-label="Редактировать задачу"
+                >
+                  <Pencil className="h-4 w-4" />
+                </button>
+              ) : (
+                <button type="button" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100" title="Просмотр" aria-label="Просмотр">
+                  <Eye className="h-4 w-4" />
+                </button>
+              )}
               <button type="button" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-amber-600 transition hover:bg-amber-50" title="Напоминание" aria-label="Напоминание">
                 <Bell className="h-4 w-4" />
               </button>
@@ -6989,6 +7002,108 @@ function TaskModal({
                     {PRIORITY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                   </select>
                   <div className="mt-1 text-xs text-slate-500">{priorityOption.label}</div>
+                </ModernTaskQuickField>
+                <ModernTaskQuickField icon={<WalletCards className="h-4 w-4" />} label="Оплата исполнителю">
+                  <label className="flex items-start gap-2 rounded-lg border border-emerald-100 bg-emerald-50/70 px-2 py-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(form.contractorPaymentEnabled)}
+                      disabled={isReadOnly || !canUseContractorPayment}
+                      onChange={(event) => update('contractorPaymentEnabled', event.target.checked)}
+                      data-testid="task-contractor-payment-checkbox"
+                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 disabled:opacity-50"
+                    />
+                    <span className="min-w-0">
+                      <span className="block font-medium text-slate-800">
+                        {form.contractorPaymentEnabled ? 'Оплата включена' : 'Указать оплату'}
+                      </span>
+                      <span className="mt-1 block text-xs leading-5 text-slate-500">
+                        {canUseContractorPayment
+                          ? 'После сохранения будет подготовлен расходный платеж.'
+                          : 'Доступно для исполнителя с признаком привлеченного.'}
+                      </span>
+                    </span>
+                  </label>
+                  {form.contractorPaymentEnabled ? (
+                    <div className="mt-2 space-y-2">
+                      <label className="block text-xs font-medium text-slate-600">
+                        Сумма
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={form.contractorPaymentAmount ?? ''}
+                          onChange={(event) => update('contractorPaymentAmount', event.target.value ? Number(event.target.value) : null)}
+                          disabled={isReadOnly}
+                          data-testid="task-contractor-payment-amount"
+                          className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-50"
+                        />
+                      </label>
+                      <label className="block text-xs font-medium text-slate-600">
+                        Точная дата оплаты
+                        <input
+                          type="date"
+                          value={form.contractorPaymentDueDate ? String(form.contractorPaymentDueDate).split('T')[0] : ''}
+                          onChange={(event) => update('contractorPaymentDueDate', event.target.value || null)}
+                          disabled={isReadOnly}
+                          data-testid="task-contractor-payment-date"
+                          className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-50"
+                        />
+                      </label>
+                      <label className="flex items-center gap-2 rounded-lg border border-emerald-100 bg-white px-2 py-2 text-xs font-medium text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={Boolean(form.contractorPaymentOnResult)}
+                          onChange={(event) => {
+                            const checked = event.target.checked;
+                            setForm((prev) => ({
+                              ...prev,
+                              contractorPaymentOnResult: checked,
+                              contractorPaymentResultDelayDays: checked
+                                ? prev.contractorPaymentResultDelayDays ?? 5
+                                : null,
+                            }));
+                          }}
+                          disabled={isReadOnly}
+                          data-testid="task-contractor-payment-on-result"
+                          className="h-4 w-4 rounded border-slate-300 text-emerald-600"
+                        />
+                        Оплата по результату
+                      </label>
+                      {form.contractorPaymentOnResult ? (
+                        <label className="block text-xs font-medium text-slate-600">
+                          Через дней после результата
+                          <input
+                            type="number"
+                            min="0"
+                            max="365"
+                            step="1"
+                            value={form.contractorPaymentResultDelayDays ?? ''}
+                            onChange={(event) => update('contractorPaymentResultDelayDays', event.target.value === '' ? null : Number(event.target.value))}
+                            disabled={isReadOnly}
+                            data-testid="task-contractor-payment-result-delay-days"
+                            className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100 disabled:bg-slate-50"
+                          />
+                        </label>
+                      ) : null}
+                      {form.contractorPaymentOnResult && form.contractorPaymentDueDate ? (
+                        <div className="rounded-lg border border-rose-200 bg-rose-50 px-2 py-2 text-xs leading-5 text-rose-700">
+                          Заполните только один вариант: точную дату оплаты или оплату по результату.
+                        </div>
+                      ) : form.contractorPaymentOnResult ? (
+                        <div className="rounded-lg border border-emerald-100 bg-white px-2 py-2 text-xs leading-5 text-slate-600">
+                          Платеж появится после принятия работы и завершения задачи.
+                        </div>
+                      ) : null}
+                      {form.contractorPaymentId ? (
+                        <div className="rounded-lg border border-emerald-100 bg-white px-2 py-2 text-xs leading-5 text-slate-600">
+                          Платеж #{form.contractorPaymentId}
+                          {form.contractorPaymentStatus ? ` · ${form.contractorPaymentStatus}` : ''}
+                          {form.contractorPaymentAmount ? ` · ${formatCurrencySmart(Number(form.contractorPaymentAmount)).full}` : ''}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </ModernTaskQuickField>
                 <ModernTaskQuickField icon={<FileText className="h-4 w-4" />} label="Файлы">
                   <button

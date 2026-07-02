@@ -604,6 +604,58 @@ describe('TaskJournal', () => {
     expect(resultInput.disabled).toBe(false);
   });
 
+  it('shows contractor payment controls in the modern task card for an external assignee', async () => {
+    await renderJournal([createTask()], {
+      waitForTitle: null,
+      settings: { taskCardWindowMode: 'modern' },
+      assignees: [
+        { id: 7, name: 'Администратор', email: 'admin@example.com' },
+        { id: 9, name: 'Привлеченный исполнитель', email: 'contractor@example.com', isExternalContractor: true },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
+    await screen.findByRole('heading', { name: 'Новая задача' });
+
+    fireEvent.change(screen.getByTestId('task-assignee-select'), { target: { value: '9' } });
+    const contractorPaymentCheckbox = screen.getByTestId('task-contractor-payment-checkbox') as HTMLInputElement;
+
+    expect(contractorPaymentCheckbox.disabled).toBe(false);
+    fireEvent.click(contractorPaymentCheckbox);
+    expect(screen.getByTestId('task-contractor-payment-amount')).toBeTruthy();
+    expect(screen.getByTestId('task-contractor-payment-date')).toBeTruthy();
+  });
+
+  it('shows contractor payment controls in an existing modern task card and enables them after edit mode', async () => {
+    await renderJournal([
+      createTask({
+        assigneeUserId: 9,
+        assigneeName: 'Привлеченный исполнитель',
+      }),
+    ], {
+      settings: { taskCardWindowMode: 'modern' },
+      assignees: [
+        { id: 7, name: 'Администратор', email: 'admin@example.com' },
+        { id: 9, name: 'Привлеченный исполнитель', email: 'contractor@example.com', isExternalContractor: true },
+      ],
+    });
+
+    fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+    await screen.findByRole('heading', { name: 'Просмотр задачи' });
+
+    const readonlyContractorPaymentCheckbox = screen.getByTestId('task-contractor-payment-checkbox') as HTMLInputElement;
+    expect(readonlyContractorPaymentCheckbox.disabled).toBe(true);
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Редактировать задачу' })[0]);
+    await screen.findByRole('heading', { name: 'Редактировать задачу' });
+
+    const contractorPaymentCheckbox = screen.getByTestId('task-contractor-payment-checkbox') as HTMLInputElement;
+    expect(contractorPaymentCheckbox.disabled).toBe(false);
+    fireEvent.click(contractorPaymentCheckbox);
+    expect(screen.getByTestId('task-contractor-payment-amount')).toBeTruthy();
+    expect(screen.getByTestId('task-contractor-payment-date')).toBeTruthy();
+  });
+
   it('loads and creates tasks inside a client context', async () => {
     await renderJournal([createTask({ clientId: 10, clientCaseId: null })], {
       embedded: true,
