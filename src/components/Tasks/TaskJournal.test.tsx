@@ -1696,7 +1696,9 @@ describe('TaskJournal', () => {
     expect(screen.getByTestId('task-table-card').className).toContain('max-w-full');
     expect(screen.getByTestId('task-table-scroll').className).toContain('overflow-x-auto');
     expect(screen.getByTestId('task-table-scroll').className).toContain('overscroll-x-contain');
-    expect(screen.getByTestId('task-table').className).toContain('min-w-[1180px]');
+    expect(screen.getByTestId('task-table').className).toContain('pp-task-journal-table');
+    expect(screen.getByTestId('task-table').className).toContain('min-w-[940px]');
+    expect(screen.getByTestId('task-table').className).toContain('2xl:min-w-[1180px]');
     expect(screen.getByTestId('task-table').className).not.toContain('min-w-[1280px]');
   });
 

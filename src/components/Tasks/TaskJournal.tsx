@@ -4232,8 +4232,11 @@ function TaskTable({
       : <ArrowUp className="h-3.5 w-3.5 text-blue-600" />;
   };
 
-  const renderSortHeader = (columnKey: TaskJournalSortKey, label: string, className = '') => (
-    <th className={`px-4 py-4 ${className}`}>
+  const renderSortHeader = (columnKey: TaskJournalSortKey, label: string, className = '') => {
+    const compactColumnClass = columnKey === 'author' || columnKey === 'result' ? 'hidden 2xl:table-cell' : '';
+
+    return (
+      <th className={`px-2 py-4 sm:px-3 xl:px-4 ${compactColumnClass} ${className}`}>
       <button
         type="button"
         onClick={() => onSortChange(columnKey)}
@@ -4246,16 +4249,17 @@ function TaskTable({
         <span>{label}</span>
         {renderSortIcon(columnKey)}
       </button>
-    </th>
-  );
+      </th>
+    );
+  };
 
   return (
     <div data-testid="task-table-card" className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div data-testid="task-table-scroll" className="max-w-full overflow-x-auto overscroll-x-contain">
-        <table data-testid="task-table" className="w-full min-w-[1180px]">
+        <table data-testid="task-table" className="pp-task-journal-table w-full min-w-[940px] 2xl:min-w-[1180px]">
           <thead className="border-b border-slate-200 bg-slate-50">
             <tr className="text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
-              <th className="w-12 px-4 py-4">
+              <th className="w-10 px-2 py-4 sm:px-3 xl:w-12 xl:px-4">
                 <input
                   type="checkbox"
                   checked={allVisibleSelected}
@@ -4322,7 +4326,7 @@ function TaskTable({
                     isHighlighted ? 'bg-blue-50/70 ring-1 ring-inset ring-blue-200' : 'hover:bg-slate-50'
                   }`}
                 >
-                  <td className="px-4 py-4">
+                  <td className="px-2 py-4 sm:px-3 xl:px-4">
                     <input
                       type="checkbox"
                       checked={selectedTaskIds.has(task.id)}
@@ -4332,7 +4336,7 @@ function TaskTable({
                       className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
                     />
                   </td>
-                  <td className="max-w-[280px] px-4 py-4">
+                  <td className="max-w-[220px] px-2 py-4 sm:px-3 xl:max-w-[280px] xl:px-4">
                     {canOpenCounterparty ? (
                       <button
                         type="button"
@@ -4371,7 +4375,7 @@ function TaskTable({
                       ))}
                     </div>
                   </td>
-                  <td className="max-w-[360px] px-4 py-4">
+                  <td className="max-w-[280px] px-2 py-4 sm:px-3 xl:max-w-[360px] xl:px-4">
                     <button
                       type="button"
                       onClick={() => onEdit(task)}
@@ -4387,7 +4391,7 @@ function TaskTable({
                       {getPriorityLabel(task.priority)}
                     </span>
                   </td>
-                  <td className="px-4 py-4 text-sm text-slate-600">
+                  <td className="px-2 py-4 text-sm text-slate-600 sm:px-3 xl:px-4">
                     <div className="font-semibold text-slate-700">
                       {taskAssignees.map(getParticipantDisplayName).filter(Boolean).join(', ') || task.assigneeName}
                     </div>
@@ -4402,22 +4406,22 @@ function TaskTable({
                       </div>
                     ) : null}
                   </td>
-                  <td className="px-4 py-4 text-sm text-slate-600">
+                  <td className="hidden px-2 py-4 text-sm text-slate-600 sm:px-3 xl:px-4 2xl:table-cell">
                     <div className="font-semibold text-slate-700">{getTaskAuthorName(task)}</div>
                   </td>
-                  <td className="px-4 py-4">
+                  <td className="px-2 py-4 sm:px-3 xl:px-4">
                     <div className={isOverdue ? 'font-semibold text-rose-600' : 'font-medium text-slate-800'}>{formatDateTime(task.dueAt)}</div>
                     <div className="mt-1 text-xs text-slate-500">{formatRelative(task.dueAt)}</div>
                     <div className="mt-1 text-xs font-semibold text-slate-500">Длительность: {formatDuration(task.plannedDurationMinutes)}</div>
                   </td>
-                  <td className="px-4 py-4">
+                  <td className="px-2 py-4 sm:px-3 xl:px-4">
                     <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
                       <TypeIcon className="h-3.5 w-3.5" />
                       {getTypeMeta(task.type).label}
                     </span>
                   </td>
                   <td className="max-w-[260px] px-4 py-4 text-sm text-slate-600">{task.result || '—'}</td>
-                  <td className="px-4 py-4">
+                  <td className="px-2 py-4 sm:px-3 xl:px-4">
                     {isReadOnly ? (
                       <div>
                         <span className={`inline-flex rounded-xl px-3 py-2 text-sm font-semibold ${statusClass(task.status)}`}>
@@ -4440,7 +4444,7 @@ function TaskTable({
                       </div>
                     )}
                   </td>
-                  <td className="px-4 py-4">
+                  <td className="px-2 py-4 sm:px-3 xl:px-4">
                     <div className="flex justify-end gap-2">
                       {isTaskJournalActive(task.status) && task.status !== 'inProgress' ? (
                         <button type="button" onClick={() => onStatusChange(task, 'inProgress')} className="rounded-xl p-2 text-blue-600 transition hover:bg-blue-50 hover:text-blue-700" title="Принять в работу">

@@ -32,3 +32,12 @@
   cursor: pointer;
   opacity: 0.7;
 }
+
+@media (max-width: 1535.98px) {
+  .pp-task-journal-table th:nth-child(5),
+  .pp-task-journal-table td:nth-child(5),
+  .pp-task-journal-table th:nth-child(8),
+  .pp-task-journal-table td:nth-child(8) {
+    display: none;
+  }
+}
