@@ -1692,13 +1692,20 @@ describe('TaskJournal', () => {
     expect(screen.getByTestId('task-view-controls').className).toContain('max-w-full');
     expect(screen.getByTestId('task-period-control').className).toContain('overflow-x-auto');
     expect(screen.getByTestId('task-view-mode-control').className).toContain('overflow-x-auto');
+    expect(screen.getByTestId('task-journal-shell').className).toContain('w-full');
+    expect(screen.getByTestId('task-journal-shell').className).toContain('min-w-0');
+    expect(screen.getByTestId('task-journal-shell').className).not.toContain('max-w-[');
+    expect(screen.getByTestId('task-journal-shell').className).not.toContain('mx-auto');
     expect(screen.getByTestId('task-table-card').className).toContain('min-w-0');
     expect(screen.getByTestId('task-table-card').className).toContain('max-w-full');
     expect(screen.getByTestId('task-table-scroll').className).toContain('overflow-x-auto');
     expect(screen.getByTestId('task-table-scroll').className).toContain('overscroll-x-contain');
     expect(screen.getByTestId('task-table').className).toContain('pp-task-journal-table');
-    expect(screen.getByTestId('task-table').className).toContain('min-w-[940px]');
-    expect(screen.getByTestId('task-table').className).toContain('2xl:min-w-[1180px]');
+    expect(screen.getByTestId('task-table').className).toContain('min-w-full');
+    expect(screen.getByTestId('task-table').className).toContain('lg:min-w-[1040px]');
+    expect(screen.getByTestId('task-table').className).toContain('xl:min-w-[1180px]');
+    expect(screen.getByTestId('task-table').className).toContain('2xl:min-w-[1320px]');
+    expect(screen.getByTestId('task-table').className).not.toContain('min-w-[940px]');
     expect(screen.getByTestId('task-table').className).not.toContain('min-w-[1280px]');
   });
 

@@ -3233,7 +3233,7 @@ export function TaskJournal({
 
   return (
     <div className={embedded ? 'bg-transparent' : 'min-h-screen bg-slate-50'}>
-      <div className={embedded ? 'mx-auto w-full min-w-0 max-w-[1720px]' : 'mx-auto w-full min-w-0 max-w-[1720px] p-4 sm:p-6 lg:p-8'}>
+      <div data-testid="task-journal-shell" className={embedded ? 'w-full min-w-0' : 'w-full min-w-0 p-3 sm:p-4 lg:p-4'}>
         <section className="mb-6">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
             <div>
@@ -4233,7 +4233,7 @@ function TaskTable({
   };
 
   const renderSortHeader = (columnKey: TaskJournalSortKey, label: string, className = '') => {
-    const compactColumnClass = columnKey === 'author' || columnKey === 'result' ? 'hidden 2xl:table-cell' : '';
+    const compactColumnClass = columnKey === 'author' || columnKey === 'result' ? 'hidden xl:table-cell' : '';
 
     return (
       <th className={`px-2 py-4 sm:px-3 xl:px-4 ${compactColumnClass} ${className}`}>
@@ -4256,7 +4256,7 @@ function TaskTable({
   return (
     <div data-testid="task-table-card" className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div data-testid="task-table-scroll" className="max-w-full overflow-x-auto overscroll-x-contain">
-        <table data-testid="task-table" className="pp-task-journal-table w-full min-w-[940px] 2xl:min-w-[1180px]">
+        <table data-testid="task-table" className="pp-task-journal-table w-full min-w-full lg:min-w-[1040px] xl:min-w-[1180px] 2xl:min-w-[1320px]">
           <thead className="border-b border-slate-200 bg-slate-50">
             <tr className="text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
               <th className="w-10 px-2 py-4 sm:px-3 xl:w-12 xl:px-4">
@@ -4406,7 +4406,7 @@ function TaskTable({
                       </div>
                     ) : null}
                   </td>
-                  <td className="hidden px-2 py-4 text-sm text-slate-600 sm:px-3 xl:px-4 2xl:table-cell">
+                  <td className="hidden px-2 py-4 text-sm text-slate-600 sm:px-3 xl:table-cell xl:px-4">
                     <div className="font-semibold text-slate-700">{getTaskAuthorName(task)}</div>
                   </td>
                   <td className="px-2 py-4 sm:px-3 xl:px-4">
@@ -4420,7 +4420,7 @@ function TaskTable({
                       {getTypeMeta(task.type).label}
                     </span>
                   </td>
-                  <td className="max-w-[260px] px-4 py-4 text-sm text-slate-600">{task.result || '—'}</td>
+                  <td className="hidden max-w-[260px] px-4 py-4 text-sm text-slate-600 xl:table-cell 2xl:max-w-[320px]">{task.result || '—'}</td>
                   <td className="px-2 py-4 sm:px-3 xl:px-4">
                     {isReadOnly ? (
                       <div>
@@ -6531,8 +6531,8 @@ function TaskModal({
 
   const shellClassName = isPage
     ? isModernChrome
-      ? 'mx-auto max-w-[1320px] p-3 sm:p-4 lg:p-5'
-      : 'mx-auto max-w-[1320px] p-4 sm:p-6 lg:p-8'
+      ? 'w-full max-w-none p-3 sm:p-4 lg:p-5'
+      : 'w-full max-w-none p-4 sm:p-6 lg:p-8'
     : isModernChrome
       ? 'fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-3 backdrop-blur-sm sm:p-4'
       : 'fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm';
