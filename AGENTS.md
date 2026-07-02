@@ -29,6 +29,12 @@ Keep changes scoped to the requested behavior. Do not rewrite unrelated release 
 
 When the legacy task card and the new task card window both exist, any change to task business logic, saving rules, permissions, statuses, result handling, deadlines, reminders, files, comments, subtasks, labels, priorities, CRM links, or related API behavior must be applied to both forms unless the task explicitly says otherwise. Verify both the old and the new task card before considering the change complete, including the administrator setting that switches which card is shown to all users.
 
+## Commits
+
+Use short, meaningful Russian commit messages that describe the user-visible or technical result of the change. Avoid generic messages such as `fix`, `update`, `changes`, or English placeholders when a clear Russian summary is possible.
+
+Do not rewrite commits that have already been pushed only to change their message, unless the user explicitly asks for history rewriting or force-push. If a pushed commit message is not ideal, keep history intact and use a clear Russian message for the next follow-up commit.
+
 ## Deployment Verification
 
 After pushing changes to a branch that triggers deployment, verify that GitHub Actions started, completed successfully, and deployed the expected revision without errors. If a workflow fails, a deployment does not start, or the deployed revision does not match the pushed commit, inspect the workflow logs and fix the problem before considering the deployment complete.
