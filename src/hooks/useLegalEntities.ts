@@ -11,12 +11,20 @@ function mapDetailToSummary(detail: LegalEntityDetail): LegalEntitySummary {
   return { ...detail };
 }
 
-export function useLegalEntities() {
+export function useLegalEntities(options?: { enabled?: boolean }) {
+  const enabled = options?.enabled ?? true;
   const [legalEntities, setLegalEntities] = useState<LegalEntitySummary[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState<string | null>(null);
 
   const fetchAll = useCallback(async (search?: string) => {
+    if (!enabled) {
+      setLegalEntities([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     try {
       setLoading(true);
       setError(null);
@@ -27,7 +35,7 @@ export function useLegalEntities() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [enabled]);
 
   useEffect(() => {
     void fetchAll();

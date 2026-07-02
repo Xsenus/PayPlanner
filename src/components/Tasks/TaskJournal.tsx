@@ -90,6 +90,7 @@ type ViewMode = 'list' | 'board' | 'calendar' | 'timeline';
 type PeriodMode = 'day' | 'week' | 'month' | 'all';
 type QuickFilter = 'all' | 'assignedToMe' | 'authoredByMe';
 type MetricFilter = 'none' | 'active' | 'overdue' | 'today' | 'highPriority';
+type TaskStatusFilter = TaskJournalStatus | 'active' | 'all' | 'overdue';
 type TaskCalendarColorMode = 'smart' | 'priority' | 'status';
 type TaskCalendarConflictPolicy = 'warn' | 'block';
 type TaskCalendarLoadWarningMode = 'strict' | 'standard' | 'relaxed';
@@ -140,7 +141,7 @@ type TaskJournalFilterPreferences = {
   search: string;
   dateFrom: string;
   dateTo: string;
-  statusFilter: TaskJournalStatus | 'active' | 'all';
+  statusFilter: TaskStatusFilter;
   assigneeFilter: string;
   typeFilter: TaskJournalType | 'all';
   priorityFilter: TaskJournalPriority | 'all';
@@ -328,8 +329,8 @@ function isMetricFilter(value: unknown): value is MetricFilter {
   return value === 'none' || value === 'active' || value === 'overdue' || value === 'today' || value === 'highPriority';
 }
 
-function isStatusFilter(value: unknown): value is TaskJournalStatus | 'active' | 'all' {
-  return value === 'active' || value === 'all' || STATUS_OPTIONS.some((option) => option.value === value);
+function isStatusFilter(value: unknown): value is TaskStatusFilter {
+  return value === 'active' || value === 'all' || value === 'overdue' || STATUS_OPTIONS.some((option) => option.value === value);
 }
 
 function isTypeFilter(value: unknown): value is TaskJournalType | 'all' {
@@ -1097,13 +1098,17 @@ function matchesMetricFilter(task: TaskJournalItem, metricFilter: MetricFilter, 
   }
 }
 
-function matchesStatusFilter(task: TaskJournalItem, statusFilter: TaskJournalStatus | 'active' | 'all') {
+function matchesStatusFilter(task: TaskJournalItem, statusFilter: TaskStatusFilter) {
   if (statusFilter === 'all') {
     return true;
   }
 
   if (statusFilter === 'active') {
     return isTaskJournalActive(task.status);
+  }
+
+  if (statusFilter === 'overdue') {
+    return isTaskOverdue(task);
   }
 
   return task.status === statusFilter;
@@ -1694,13 +1699,16 @@ export function TaskJournal({
   const { user, isAdmin } = useAuth();
   const toast = useToast();
   const { confirm, prompt } = useDialog();
-  const { clients } = useClients();
-  const { legalEntities } = useLegalEntities();
   const currentUserName = user?.fullName || user?.email || 'Текущий пользователь';
   const currentUserId = user?.id ?? null;
   const [currentTimeZoneId, setCurrentTimeZoneId] = useState(() => normalizeUserTimeZoneId());
   const isAdminUser = isAdmin();
   const permissions = useRolePermissions(user?.role?.id);
+  const canViewClients = isAdminUser || permissions.clients.canView;
+  const canViewLegalEntities = isAdminUser || permissions.legalEntities.canView;
+  const canViewCases = isAdminUser || permissions.cases.canView;
+  const { clients } = useClients({ enabled: canViewClients });
+  const { legalEntities } = useLegalEntities({ enabled: canViewLegalEntities });
   const canCreateTasks = isAdminUser || permissions.tasks.canCreate;
   const canDeleteTasks = isAdminUser || permissions.tasks.canDelete;
   const canExportTasks = isAdminUser || permissions.tasks.canExport;
@@ -1769,7 +1777,7 @@ export function TaskJournal({
   const [calendarLoadWarningMode, setCalendarLoadWarningMode] = useState<TaskCalendarLoadWarningMode>(initialPreferences.calendarLoadWarningMode);
   const [icsReminderPreset, setIcsReminderPreset] = useState<IcsReminderPreset>(initialPreferences.icsReminderPreset);
   const [periodMode, setPeriodMode] = useState<PeriodMode>(initialPreferences.periodMode);
-  const [statusFilter, setStatusFilter] = useState<TaskJournalStatus | 'active' | 'all'>(initialPreferences.statusFilter);
+  const [statusFilter, setStatusFilter] = useState<TaskStatusFilter>(initialPreferences.statusFilter);
   const [assigneeFilter, setAssigneeFilter] = useState(initialPreferences.assigneeFilter);
   const [typeFilter, setTypeFilter] = useState<TaskJournalType | 'all'>(initialPreferences.typeFilter);
   const [priorityFilter, setPriorityFilter] = useState<TaskJournalPriority | 'all'>(initialPreferences.priorityFilter);
@@ -2027,7 +2035,7 @@ export function TaskJournal({
     settings: TaskJournalSettingsDto,
     searchValue: string,
   ) => {
-    if (embedded || underControlOnly || isApprovalsMode || !canCreateTasks || !settings.caseInactivityAutomationEnabled) {
+    if (embedded || underControlOnly || isApprovalsMode || !canCreateTasks || !canViewCases || !settings.caseInactivityAutomationEnabled) {
       return [];
     }
 
@@ -2037,7 +2045,7 @@ export function TaskJournal({
       escalationDays: settings.caseInactivityEscalationDays,
       search: searchValue.trim() || undefined,
     });
-  }, [canCreateTasks, embedded, isApprovalsMode, underControlOnly]);
+  }, [canCreateTasks, canViewCases, embedded, isApprovalsMode, underControlOnly]);
 
   const refreshTasks = useCallback(async () => {
     setLoading(true);
@@ -2173,6 +2181,13 @@ export function TaskJournal({
       return;
     }
 
+    if (!canViewCases) {
+      setCaseCalendarEvents([]);
+      setCaseCalendarSummary(null);
+      setCaseCalendarLoading(false);
+      return;
+    }
+
     const range = getCaseCalendarRange(calendarAnchorDate, viewMode === 'timeline' ? 'week' : periodMode);
     const responsibleUserId = calendarResponsibleUserId ?? undefined;
     const params = {
@@ -2196,7 +2211,7 @@ export function TaskJournal({
     } finally {
       setCaseCalendarLoading(false);
     }
-  }, [calendarAnchorDate, calendarResponsibleUserId, effectiveTaskJournalTimeZoneId, periodMode, toast, viewMode]);
+  }, [calendarAnchorDate, calendarResponsibleUserId, canViewCases, effectiveTaskJournalTimeZoneId, periodMode, toast, viewMode]);
 
   const buildCaseCalendarParams = useCallback(() => {
     const range = getCaseCalendarRange(calendarAnchorDate, viewMode === 'timeline' ? 'week' : periodMode);
@@ -3098,6 +3113,11 @@ export function TaskJournal({
       return;
     }
 
+    if (!canViewCases) {
+      toast.error('У роли нет доступа к календарю дел.', 'Календарь дел');
+      return;
+    }
+
     setCaseCalendarExporting(true);
     try {
       const response = await apiService.downloadCaseCalendarIcs({
@@ -3117,13 +3137,19 @@ export function TaskJournal({
     const nowDate = getCurrentCalendarDate();
     let from = dateRangeBounds.from?.toISOString();
     let to = dateRangeBounds.to?.toISOString();
-    let reportStatus: TaskJournalStatus | 'active' | undefined = statusFilter === 'all' ? undefined : statusFilter;
+    let reportStatus: TaskJournalStatus | 'active' | undefined =
+      statusFilter === 'all' || statusFilter === 'overdue' ? undefined : statusFilter;
     let reportPriority: TaskJournalPriority | 'highPriority' | undefined = priorityFilter === 'all' ? undefined : priorityFilter;
 
     if (!from && !to && metricFilter === 'none' && periodMode !== 'all' && (viewMode === 'list' || viewMode === 'board')) {
       const { periodStart, periodEnd } = getTaskPeriodBounds(nowDate, periodMode);
       from = periodStart.toISOString();
       to = periodEnd.toISOString();
+    }
+
+    if (statusFilter === 'overdue') {
+      reportStatus = 'active';
+      to = nowDate.toISOString();
     }
 
     if (metricFilter === 'active') {
@@ -3440,12 +3466,13 @@ export function TaskJournal({
 
             <select
               value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value as TaskJournalStatus | 'active' | 'all')}
+              onChange={(event) => setStatusFilter(event.target.value as TaskStatusFilter)}
               className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
               aria-label="Статус"
             >
               <option value="active">Активные без закрытых</option>
               <option value="all">Все статусы</option>
+              <option value="overdue">Просроченные</option>
               {STATUS_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
@@ -4257,7 +4284,7 @@ function TaskTable({
   return (
     <div data-testid="task-table-card" className="min-w-0 max-w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
       <div data-testid="task-table-scroll" className="max-w-full overflow-x-auto overscroll-x-contain">
-        <table data-testid="task-table" className="pp-task-journal-table w-full min-w-full lg:min-w-[1040px] xl:min-w-[1180px] 2xl:min-w-[1320px]">
+        <table data-testid="task-table" className="pp-task-journal-table w-full min-w-[920px] lg:min-w-[980px] xl:min-w-[1040px] 2xl:min-w-[1120px]">
           <thead className="border-b border-slate-200 bg-slate-50">
             <tr className="text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
               <th className="w-10 px-2 py-4 sm:px-3 xl:w-12 xl:px-4">
@@ -4275,10 +4302,10 @@ function TaskTable({
               {renderSortHeader('assignee', 'Исполнитель')}
               {renderSortHeader('author', 'Поручил')}
               {renderSortHeader('dueAt', 'Дата исполнения')}
-              {renderSortHeader('type', 'Тип')}
+              {renderSortHeader('type', 'Тип', 'hidden xl:table-cell')}
               {renderSortHeader('result', 'Результат')}
               {renderSortHeader('status', 'Статус')}
-              <th className="px-4 py-4 text-right">Действия</th>
+              <th className="sticky right-0 z-20 bg-slate-50 px-3 py-4 text-right shadow-[-10px_0_18px_-18px_rgba(15,23,42,0.55)] xl:px-4">Действия</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -4323,7 +4350,7 @@ function TaskTable({
               return (
                 <tr
                   key={task.id}
-                  className={`align-top transition ${
+                  className={`group align-top transition ${
                     isHighlighted ? 'bg-blue-50/70 ring-1 ring-inset ring-blue-200' : 'hover:bg-slate-50'
                   }`}
                 >
@@ -4337,7 +4364,7 @@ function TaskTable({
                       className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-40"
                     />
                   </td>
-                  <td className="max-w-[220px] px-2 py-4 sm:px-3 xl:max-w-[280px] xl:px-4">
+                  <td className="max-w-[190px] px-2 py-4 sm:px-3 xl:max-w-[240px] xl:px-4">
                     {canOpenCounterparty ? (
                       <button
                         type="button"
@@ -4376,7 +4403,7 @@ function TaskTable({
                       ))}
                     </div>
                   </td>
-                  <td className="max-w-[280px] px-2 py-4 sm:px-3 xl:max-w-[360px] xl:px-4">
+                  <td className="max-w-[250px] px-2 py-4 sm:px-3 xl:max-w-[320px] xl:px-4">
                     <button
                       type="button"
                       onClick={() => onEdit(task)}
@@ -4415,7 +4442,7 @@ function TaskTable({
                     <div className="mt-1 text-xs text-slate-500">{formatRelative(task.dueAt)}</div>
                     <div className="mt-1 text-xs font-semibold text-slate-500">Длительность: {formatDuration(task.plannedDurationMinutes)}</div>
                   </td>
-                  <td className="px-2 py-4 sm:px-3 xl:px-4">
+                  <td className="hidden px-2 py-4 sm:px-3 xl:table-cell xl:px-4">
                     <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
                       <TypeIcon className="h-3.5 w-3.5" />
                       {getTypeMeta(task.type).label}
@@ -4445,7 +4472,7 @@ function TaskTable({
                       </div>
                     )}
                   </td>
-                  <td className="px-2 py-4 sm:px-3 xl:px-4">
+                  <td className={`sticky right-0 z-10 px-2 py-4 shadow-[-10px_0_18px_-18px_rgba(15,23,42,0.55)] sm:px-3 xl:px-4 ${isHighlighted ? 'bg-blue-50' : 'bg-white group-hover:bg-slate-50'}`}>
                     <div className="flex justify-end gap-2">
                       {isTaskJournalActive(task.status) && task.status !== 'inProgress' ? (
                         <button type="button" onClick={() => onStatusChange(task, 'inProgress')} className="rounded-xl p-2 text-blue-600 transition hover:bg-blue-50 hover:text-blue-700" title="Принять в работу">

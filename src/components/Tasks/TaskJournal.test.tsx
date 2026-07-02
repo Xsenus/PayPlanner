@@ -75,6 +75,9 @@ const permissionsState = vi.hoisted(() => ({
   taskCanDelete: true,
   taskCanExport: true,
   caseCanExport: true,
+  clientCanView: true,
+  caseCanView: true,
+  legalEntityCanView: true,
   yandexDiskCanCreate: true,
   taskViewScope: 'all' as 'own' | 'department' | 'all',
   calendarViewScope: 'all' as 'own' | 'department' | 'all' | 'specific',
@@ -94,8 +97,8 @@ vi.mock('../../hooks/useDialog', () => ({
 }));
 
 vi.mock('../../hooks/useClients', () => ({
-  useClients: () => ({
-    clients: clientsState.clients,
+  useClients: (options?: { enabled?: boolean }) => ({
+    clients: options?.enabled === false ? [] : clientsState.clients,
     loading: false,
   }),
 }));
@@ -108,8 +111,8 @@ vi.mock('../../hooks/useClientCases', () => ({
 }));
 
 vi.mock('../../hooks/useLegalEntities', () => ({
-  useLegalEntities: () => ({
-    legalEntities: legalEntitiesState.legalEntities,
+  useLegalEntities: (options?: { enabled?: boolean }) => ({
+    legalEntities: options?.enabled === false ? [] : legalEntitiesState.legalEntities,
     loading: false,
   }),
 }));
@@ -149,9 +152,9 @@ vi.mock('../../hooks/useRolePermissions', () => ({
       },
       reports: { ...section },
       calculator: { ...section },
-      legalEntities: { ...section },
-      clients: { ...section },
-      cases: { ...section, canExport: permissionsState.caseCanExport },
+      legalEntities: { ...section, canView: permissionsState.legalEntityCanView },
+      clients: { ...section, canView: permissionsState.clientCanView },
+      cases: { ...section, canView: permissionsState.caseCanView, canExport: permissionsState.caseCanExport },
       accounts: { ...section },
       acts: { ...section },
       payments: { ...section },
@@ -367,6 +370,9 @@ describe('TaskJournal', () => {
     permissionsState.taskCanDelete = true;
     permissionsState.taskCanExport = true;
     permissionsState.caseCanExport = true;
+    permissionsState.clientCanView = true;
+    permissionsState.caseCanView = true;
+    permissionsState.legalEntityCanView = true;
     permissionsState.yandexDiskCanCreate = true;
     permissionsState.taskViewScope = 'all';
     permissionsState.calendarViewScope = 'all';
@@ -530,6 +536,50 @@ describe('TaskJournal', () => {
       }));
       expect(apiMock.getTaskJournalAssignees).toHaveBeenCalledWith({ calendarView: true });
     });
+  });
+
+  it('does not request case-only task extras when the role cannot view cases', async () => {
+    authState.isAdmin = false;
+    permissionsState.taskCanCreate = true;
+    permissionsState.caseCanView = false;
+    permissionsState.caseCanExport = false;
+
+    await renderJournal([createTask()], { initialView: 'calendar' });
+
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenCalled());
+    expect(apiMock.getTaskJournalCaseAutomationCandidates).not.toHaveBeenCalled();
+    expect(apiMock.getCaseCalendarEvents).not.toHaveBeenCalled();
+    expect(apiMock.getCaseCalendarSummary).not.toHaveBeenCalled();
+  });
+
+  it('filters active overdue tasks from the status selector', async () => {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    await renderJournal([
+      createTask({ id: 101, title: 'Просроченная задача', status: 'new', dueAt: dateAt(yesterday, 10) }),
+      createTask({ id: 102, title: 'Будущая задача', status: 'new', dueAt: dateAt(tomorrow, 10) }),
+      createTask({ id: 103, title: 'Закрытая просроченная задача', status: 'done', dueAt: dateAt(yesterday, 10) }),
+    ]);
+
+    const statusSelect = screen.getByLabelText('Статус');
+    expect(within(statusSelect).getByRole('option', { name: 'Просроченные' })).toBeTruthy();
+
+    fireEvent.change(statusSelect, { target: { value: 'overdue' } });
+
+    expect(await screen.findByText('Просроченная задача')).toBeTruthy();
+    expect(screen.queryByText('Будущая задача')).toBeNull();
+    expect(screen.queryByText('Закрытая просроченная задача')).toBeNull();
+  });
+
+  it('keeps the task table compact and row actions pinned on smaller workspaces', async () => {
+    await renderJournal([createTask()]);
+
+    expect(screen.getByTestId('task-table').className).toContain('min-w-[920px]');
+    expect(screen.getByText('Действия').closest('th')?.className).toContain('sticky');
+    expect(screen.getByTitle('Просмотр').closest('td')?.className).toContain('sticky');
   });
 
   it('passes selected table sorting to the backend task journal endpoint', async () => {
@@ -1753,12 +1803,15 @@ describe('TaskJournal', () => {
     expect(screen.getByTestId('task-table-scroll').className).toContain('overflow-x-auto');
     expect(screen.getByTestId('task-table-scroll').className).toContain('overscroll-x-contain');
     expect(screen.getByTestId('task-table').className).toContain('pp-task-journal-table');
-    expect(screen.getByTestId('task-table').className).toContain('min-w-full');
-    expect(screen.getByTestId('task-table').className).toContain('lg:min-w-[1040px]');
-    expect(screen.getByTestId('task-table').className).toContain('xl:min-w-[1180px]');
-    expect(screen.getByTestId('task-table').className).toContain('2xl:min-w-[1320px]');
+    expect(screen.getByTestId('task-table').className).toContain('min-w-[920px]');
+    expect(screen.getByTestId('task-table').className).toContain('lg:min-w-[980px]');
+    expect(screen.getByTestId('task-table').className).toContain('xl:min-w-[1040px]');
+    expect(screen.getByTestId('task-table').className).toContain('2xl:min-w-[1120px]');
+    expect(screen.getByText('Действия').closest('th')?.className).toContain('sticky');
+    expect(screen.getByTitle('Просмотр').closest('td')?.className).toContain('sticky');
     expect(screen.getByTestId('task-table').className).not.toContain('min-w-[940px]');
     expect(screen.getByTestId('task-table').className).not.toContain('min-w-[1280px]');
+    expect(screen.getByTestId('task-table').className).not.toContain('2xl:min-w-[1320px]');
   });
 
   it('restores the saved journal presentation mode for the current user', async () => {
