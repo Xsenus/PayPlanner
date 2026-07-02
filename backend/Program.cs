@@ -35,9 +35,12 @@ builder.Services.AddControllers(options =>
     options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
 });
 builder.Services.AddSignalR();
-var dataProtectionBuilder = builder.Services
-    .AddDataProtection()
-    .SetApplicationName(builder.Configuration["DataProtection:ApplicationName"] ?? "PayPlanner");
+var dataProtectionBuilder = builder.Services.AddDataProtection();
+var dataProtectionApplicationName = builder.Configuration["DataProtection:ApplicationName"];
+if (!string.IsNullOrWhiteSpace(dataProtectionApplicationName))
+{
+    dataProtectionBuilder.SetApplicationName(dataProtectionApplicationName);
+}
 
 var dataProtectionKeysPath = builder.Configuration["DataProtection:KeysPath"]
     ?? builder.Configuration["DataProtection:KeysDirectory"];
