@@ -51,7 +51,9 @@ public class PaymentsV1Controller : ControllerBase
             .ApplyPaymentFilters(from, to, clientId, caseId, search, clientRole)
             .ApplyPaymentSort(sortBy, sortDir);
 
-        return Ok(await q.AsNoTracking().ToListAsync(ct));
+        var items = await q.AsNoTracking().ToListAsync(ct);
+        PaymentDisplayNameService.FillCounterpartyNames(items);
+        return Ok(items);
     }
 
     [HttpGet("{id:int}")]
@@ -65,7 +67,13 @@ public class PaymentsV1Controller : ControllerBase
             .ApplyPaymentVisibility(visibility)
             .AsNoTracking()
             .FirstOrDefaultAsync(p => p.Id == id, ct);
-        return entity is not null ? Ok(entity) : NotFound();
+        if (entity is null)
+        {
+            return NotFound();
+        }
+
+        PaymentDisplayNameService.FillCounterpartyNames([entity]);
+        return Ok(entity);
     }
 
     [HttpPost]

@@ -2,6 +2,7 @@ import { TrendingUp, TrendingDown } from 'lucide-react';
 import { useTranslation } from '../../hooks/useTranslation';
 import type { Payment } from '../../types';
 import type React from 'react';
+import { getPaymentCounterpartyName } from '../../utils/paymentDisplay';
 
 interface PaymentCardProps {
   payment: Payment;
@@ -24,7 +25,7 @@ export function PaymentCard({
   const isIncome = payment.type === 'Income';
   const hasRemainder = payment.hasPartialPayment && payment.outstandingAmount > 0;
   const amountToShow = hasRemainder ? payment.outstandingAmount : payment.amount;
-  const counterpartyName = payment.counterpartyName?.trim() ?? '';
+  const counterpartyName = getPaymentCounterpartyName(payment);
   const canOpenContractorUser = Boolean(onUserClick && payment.type === 'Expense' && payment.contractorUserId);
 
   const formatMoney = (v: number) => new Intl.NumberFormat('ru-RU').format(v);

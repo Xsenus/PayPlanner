@@ -444,6 +444,7 @@ public class PaymentsController : ControllerBase
 
         var list = await ProjectPaymentsForRead(q)
             .ToListAsync(ct);
+        PaymentDisplayNameService.FillCounterpartyNames(list);
         await AttachContractorRecipientsAsync(list, ct);
         return Ok(list);
     }
@@ -466,6 +467,7 @@ public class PaymentsController : ControllerBase
             return NotFound();
         }
 
+        PaymentDisplayNameService.FillCounterpartyNames([item]);
         await AttachContractorRecipientsAsync(new[] { item }, ct);
         return Ok(item);
     }

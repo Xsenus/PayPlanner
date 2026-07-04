@@ -149,6 +149,26 @@ describe('PaymentsTable', () => {
     expect(screen.getByText('Дело расхода: ВИНОКУРОВА - РАЗДЕЛ ИМУЩЕСТВА')).toBeTruthy();
   });
 
+  it('renders legal entity as counterparty when client and stored counterparty are empty', () => {
+    const payment = createPayment({
+      legalEntityId: 3,
+      legalEntityName: 'ООО "ЛАДА - ЛЮКС"',
+      counterpartyName: '',
+    } as Partial<Payment>);
+
+    render(
+      <PaymentsTable
+        payments={[payment]}
+        onEditPayment={vi.fn()}
+        canAdd={false}
+        canEdit
+        canDelete={false}
+      />,
+    );
+
+    expect(screen.getByText('ООО "ЛАДА - ЛЮКС"')).toBeTruthy();
+  });
+
   it('opens contractor user link without opening the payment row', () => {
     const payment = createPayment({
       type: 'Expense',

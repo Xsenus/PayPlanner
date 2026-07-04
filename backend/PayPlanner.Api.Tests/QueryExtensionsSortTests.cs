@@ -33,6 +33,29 @@ public class QueryExtensionsSortTests
     }
 
     [Fact]
+    public void ApplyPaymentSort_UsesLegalEntityWhenStoredCounterpartyIsEmpty()
+    {
+        var payments = new[]
+        {
+            new Payment
+            {
+                Id = 1,
+                CounterpartyName = string.Empty,
+                LegalEntity = new LegalEntity { ShortName = "ООО Лада" },
+            },
+            new Payment
+            {
+                Id = 2,
+                CounterpartyName = "Аванс",
+            },
+        };
+
+        var sorted = payments.AsQueryable().ApplyPaymentSort("client", "asc").ToList();
+
+        Assert.Equal([2, 1], sorted.Select(payment => payment.Id).ToArray());
+    }
+
+    [Fact]
     public void ApplyPaymentSort_SortsByPaidDate()
     {
         var payments = new[]

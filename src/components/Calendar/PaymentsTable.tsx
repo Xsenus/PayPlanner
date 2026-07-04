@@ -13,6 +13,7 @@ import { useTranslation } from '../../hooks/useTranslation';
 import { formatCurrencySmart } from '../../utils/formatters';
 import { getVisibleNotes } from '../../utils/systemNotes';
 import { needsPartialRemainderTransfer } from '../../utils/invoicePayments';
+import { getPaymentCounterpartyName } from '../../utils/paymentDisplay';
 
 export type PaymentTableColumnKey =
   | 'date'
@@ -215,7 +216,7 @@ export function PaymentsTable({
         : payment.invoiceId
         ? `Счет ID ${payment.invoiceId}`
         : null;
-      const counterpartyName = payment.counterpartyName?.trim() ?? '';
+      const counterpartyName = getPaymentCounterpartyName(payment);
       const canOpenPaymentClient = Boolean(canOpenClients && onOpenClient && payment.clientId);
       const contractorUserId = payment.contractorUserId ?? null;
       const canOpenContractorUser = Boolean(

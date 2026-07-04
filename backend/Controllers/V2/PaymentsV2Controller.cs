@@ -124,6 +124,7 @@ public class PaymentsV2Controller : ControllerBase
             .Take(pageSize)
             .AsNoTracking()
             .ToListAsync(ct);
+        PaymentDisplayNameService.FillCounterpartyNames(items);
         await AttachContractorRecipientsAsync(items, ct);
 
         var summary = await query
@@ -333,7 +334,13 @@ public class PaymentsV2Controller : ControllerBase
             .AsNoTracking()
             .FirstOrDefaultAsync(payment => payment.Id == id, ct);
 
-        return entity is not null ? Ok(entity) : NotFound();
+        if (entity is null)
+        {
+            return NotFound();
+        }
+
+        PaymentDisplayNameService.FillCounterpartyNames([entity]);
+        return Ok(entity);
     }
 
     [HttpPost]

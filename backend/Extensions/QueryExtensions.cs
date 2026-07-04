@@ -239,7 +239,7 @@ namespace PayPlanner.Api.Extensions
                 "client" or "counterparty" => desc
                     ? q.OrderByDescending(p =>
                             p.Client != null ? p.Client.Name :
-                            p.CounterpartyName ??
+                            (p.CounterpartyName != null && p.CounterpartyName != string.Empty ? p.CounterpartyName : null) ??
                             (p.LegalEntity != null ? p.LegalEntity.ShortName ?? p.LegalEntity.FullName : null) ??
                             (p.ExpenseClient != null ? p.ExpenseClient.Name : null) ??
                             (p.ExpenseLegalEntity != null ? p.ExpenseLegalEntity.ShortName ?? p.ExpenseLegalEntity.FullName : null) ??
@@ -247,7 +247,7 @@ namespace PayPlanner.Api.Extensions
                         .ThenBy(p => p.Id)
                     : q.OrderBy(p =>
                             p.Client != null ? p.Client.Name :
-                            p.CounterpartyName ??
+                            (p.CounterpartyName != null && p.CounterpartyName != string.Empty ? p.CounterpartyName : null) ??
                             (p.LegalEntity != null ? p.LegalEntity.ShortName ?? p.LegalEntity.FullName : null) ??
                             (p.ExpenseClient != null ? p.ExpenseClient.Name : null) ??
                             (p.ExpenseLegalEntity != null ? p.ExpenseLegalEntity.ShortName ?? p.ExpenseLegalEntity.FullName : null) ??

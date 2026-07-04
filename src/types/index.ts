@@ -3167,10 +3167,12 @@ export interface Payment {
   legalEntityId?: number | null;
   legalEntityName?: string | null;
   legalEntityInn?: string | null;
+  legalEntity?: LegalEntitySummary | null;
   expenseClientId?: number | null;
   expenseLegalEntityId?: number | null;
   expenseLegalEntityName?: string | null;
   expenseLegalEntityInn?: string | null;
+  expenseLegalEntity?: LegalEntitySummary | null;
   contractId?: number | null;
   documentKind?: DocumentKind;
   paymentOrderNumber?: string | null;
