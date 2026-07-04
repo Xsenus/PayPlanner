@@ -405,6 +405,57 @@ describe('PaymentModal integration', () => {
     );
   });
 
+  it('submits edited description for an invoice-linked payment document', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        payment={{
+          id: 2082,
+          date: '2026-07-02',
+          plannedDate: '2026-07-02',
+          amount: 10_000,
+          paidAmount: 10_000,
+          outstandingAmount: 0,
+          hasPartialPayment: false,
+          status: 'Completed',
+          description: '',
+          isPaid: true,
+          paidDate: '2026-07-02',
+          lastPaymentDate: '2026-07-03',
+          notes: '',
+          clientId: 69,
+          clientCaseId: 501,
+          type: 'Income',
+          invoiceId: 94,
+          account: '94',
+          accountDate: '2026-07-02',
+          documentKind: 'Invoice',
+          createdAt: '2026-07-02T00:00:00Z',
+          systemNotes: '',
+          rescheduleCount: 0,
+        }}
+      />,
+    );
+
+    fireEvent.change(document.querySelector<HTMLTextAreaElement>('textarea[name="description"]')!, {
+      target: { value: 'Описание платежа по счету №94' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 2082,
+        description: 'Описание платежа по счету №94',
+        invoiceId: 94,
+      }),
+    );
+  });
+
   it('warns and marks a paid income payment without documents as an advance', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
 

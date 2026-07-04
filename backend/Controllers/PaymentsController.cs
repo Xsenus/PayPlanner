@@ -1413,7 +1413,6 @@ public class PaymentsController : ControllerBase
         var originalStatus = e.Status;
         var originalRescheduleCount = Math.Max(0, e.RescheduleCount);
         var originalSystemNotes = e.SystemNotes ?? string.Empty;
-        var originalDescription = e.Description;
         var originalNotes = e.Notes;
 
         if (e.PlannedDate == default)
@@ -1478,7 +1477,6 @@ public class PaymentsController : ControllerBase
         e.Type = immutableType;
         if (e.DocumentKind == DocumentKind.Invoice)
         {
-            e.Description = originalDescription;
             e.Notes = originalNotes;
         }
 
