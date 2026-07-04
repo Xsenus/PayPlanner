@@ -2,6 +2,7 @@ import { apiService, type UpsertPushSubscriptionRequest, type UserPushSubscripti
 
 export const PAYPLANNER_PUSH_WORKER_PATH = '/payplanner-push-worker.js';
 export const PAYPLANNER_PUSH_WORKER_SCOPE = '/';
+const PAYPLANNER_PUSH_WORKER_READY_TIMEOUT_MS = 4_000;
 
 export type WebPushDeviceStatus =
   | 'unsupported'
@@ -159,10 +160,7 @@ export async function subscribeCurrentDeviceToWebPush() {
 
   const registration = await registerPayPlannerPushWorker();
   const existing = await registration.pushManager.getSubscription();
-  const subscription = existing ?? await registration.pushManager.subscribe({
-    userVisibleOnly: true,
-    applicationServerKey: urlBase64ToUint8Array(publicKey.publicKey),
-  });
+  const subscription = existing ?? await createBrowserPushSubscription(registration, publicKey.publicKey);
   const payload = buildSubscriptionPayload(subscription);
   return apiService.upsertUserPushSubscription(payload);
 }
@@ -191,7 +189,13 @@ export async function registerPayPlannerPushWorker() {
     throw new Error('Push-уведомления работают только на защищённом HTTPS-адресе CRM.');
   }
 
-  return navigator.serviceWorker.register(PAYPLANNER_PUSH_WORKER_PATH, { scope: PAYPLANNER_PUSH_WORKER_SCOPE });
+  const registration = await navigator.serviceWorker.register(PAYPLANNER_PUSH_WORKER_PATH, { scope: PAYPLANNER_PUSH_WORKER_SCOPE });
+  if (registration.active) {
+    return registration;
+  }
+
+  const readyRegistration = await waitForReadyPayPlannerPushWorker(registration);
+  return readyRegistration ?? registration;
 }
 
 export function urlBase64ToUint8Array(value: string) {
@@ -229,6 +233,60 @@ function buildSubscriptionPayload(subscription: PushSubscription): UpsertPushSub
     deviceName: [browser, platform].filter(Boolean).join(' / '),
     userAgent: navigator.userAgent,
   };
+}
+
+async function createBrowserPushSubscription(registration: ServiceWorkerRegistration, publicKey: string) {
+  try {
+    return await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(publicKey),
+    });
+  } catch (error) {
+    if (isBrowserPushPermissionError(error)) {
+      throw new Error(buildWebPushPermissionHelpMessage());
+    }
+
+    throw error;
+  }
+}
+
+async function waitForReadyPayPlannerPushWorker(registration: ServiceWorkerRegistration) {
+  const ready = navigator.serviceWorker.ready;
+  if (!ready || typeof ready.then !== 'function') {
+    return null;
+  }
+
+  try {
+    return await Promise.race([
+      ready.then((readyRegistration) => (
+        readyRegistration.scope === registration.scope ? readyRegistration : registration
+      )),
+      new Promise<ServiceWorkerRegistration | null>((resolve) => {
+        window.setTimeout(() => resolve(null), PAYPLANNER_PUSH_WORKER_READY_TIMEOUT_MS);
+      }),
+    ]);
+  } catch {
+    return null;
+  }
+}
+
+function buildWebPushPermissionHelpMessage() {
+  const host = window.location.hostname || 'CRM';
+  return [
+    'Браузер не дал CRM создать Push-подписку.',
+    `Проверьте разрешение уведомлений для ${host} и убедитесь,`,
+    'что уведомления для этого браузера не отключены в Windows,',
+    'затем обновите страницу и включите устройство заново.',
+  ].join(' ');
+}
+
+function isBrowserPushPermissionError(error: unknown) {
+  const name = error instanceof DOMException ? error.name : '';
+  const message = error instanceof Error ? error.message : String(error ?? '');
+
+  return name === 'NotAllowedError'
+    || /permission\s+denied/i.test(message)
+    || /not\s+allowed/i.test(message);
 }
 
 function detectBrowser(userAgent: string) {

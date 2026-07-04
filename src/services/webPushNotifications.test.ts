@@ -168,6 +168,67 @@ describe('webPushNotifications', () => {
     });
   });
 
+  it('explains browser-level push permission failures without saving an empty subscription', async () => {
+    const originalServiceWorker = navigator.serviceWorker;
+    const originalPushManager = window.PushManager;
+    const originalNotification = window.Notification;
+    const originalIsSecureContext = window.isSecureContext;
+    const requestPermission = vi.fn().mockResolvedValue('granted');
+    const subscribe = vi.fn().mockRejectedValue(new Error('Registration failed - permission denied'));
+    const register = vi.fn().mockResolvedValue({
+      active: {},
+      pushManager: {
+        getSubscription: vi.fn().mockResolvedValue(null),
+        subscribe,
+      },
+    });
+
+    Object.defineProperty(navigator, 'serviceWorker', {
+      configurable: true,
+      value: { register },
+    });
+    Object.defineProperty(window, 'PushManager', {
+      configurable: true,
+      value: vi.fn(),
+    });
+    Object.defineProperty(window, 'Notification', {
+      configurable: true,
+      value: { permission: 'granted', requestPermission },
+    });
+    Object.defineProperty(window, 'isSecureContext', {
+      configurable: true,
+      value: true,
+    });
+    apiMock.getWebPushPublicKey.mockResolvedValue({
+      enabled: true,
+      ready: true,
+      publicKey: 'SGVsbG8td29ybGQ',
+    });
+
+    await expect(subscribeCurrentDeviceToWebPush()).rejects.toThrow(
+      'Браузер не дал CRM создать Push-подписку.',
+    );
+    expect(subscribe).toHaveBeenCalledTimes(1);
+    expect(apiMock.upsertUserPushSubscription).not.toHaveBeenCalled();
+
+    Object.defineProperty(navigator, 'serviceWorker', {
+      configurable: true,
+      value: originalServiceWorker,
+    });
+    Object.defineProperty(window, 'PushManager', {
+      configurable: true,
+      value: originalPushManager,
+    });
+    Object.defineProperty(window, 'Notification', {
+      configurable: true,
+      value: originalNotification,
+    });
+    Object.defineProperty(window, 'isSecureContext', {
+      configurable: true,
+      value: originalIsSecureContext,
+    });
+  });
+
   it('keeps current active subscription enabled when server keys are temporarily not ready', async () => {
     const originalServiceWorker = navigator.serviceWorker;
     const originalPushManager = window.PushManager;
