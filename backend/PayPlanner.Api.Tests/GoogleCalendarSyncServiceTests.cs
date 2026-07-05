@@ -267,12 +267,19 @@ public class GoogleCalendarSyncServiceTests
         await SetUserTimeZoneAsync(db, admin.Id, "Europe/Moscow");
         await SetUserTimeZoneAsync(db, assignee.Id, "Asia/Kamchatka");
         await CreateConnectionAsync(db, admin.Id, calendarMode: "adminByAssignee");
+        var assigneeTimeZone = CalendarTimeZoneHelper.ResolveTimeZone("Asia/Kamchatka");
+        var localStart = CalendarTimeZoneHelper
+            .ToUserLocal(DateTime.UtcNow.AddDays(1), assigneeTimeZone)
+            .Date
+            .AddHours(23)
+            .AddMinutes(30);
+        var dueAt = CalendarTimeZoneHelper.FromUserLocalToUtc(localStart, assigneeTimeZone);
         await CreateTaskAsync(
             db,
             assignee.Id,
             "Near midnight in assignee timezone",
             assignee.FullName,
-            dueAt: new DateTime(2026, 6, 4, 11, 30, 0, DateTimeKind.Utc));
+            dueAt: dueAt);
         var handler = new RecordingGoogleHandler();
         var service = CreateService(db, new FakeHttpClientFactory(handler));
 
@@ -292,9 +299,9 @@ public class GoogleCalendarSyncServiceTests
             request.RequestUri!.AbsolutePath.Contains("/events", StringComparison.Ordinal));
         var body = await createEventRequest.Content!.ReadAsStringAsync();
         using var document = JsonDocument.Parse(body);
-        Assert.Equal("2026-06-04T23:30:00+12:00", document.RootElement.GetProperty("start").GetProperty("dateTime").GetString());
+        Assert.Equal(CalendarTimeZoneHelper.FormatOffsetDateTime(dueAt, assigneeTimeZone), document.RootElement.GetProperty("start").GetProperty("dateTime").GetString());
         Assert.Equal("Asia/Kamchatka", document.RootElement.GetProperty("start").GetProperty("timeZone").GetString());
-        Assert.Equal("2026-06-05T00:30:00+12:00", document.RootElement.GetProperty("end").GetProperty("dateTime").GetString());
+        Assert.Equal(CalendarTimeZoneHelper.FormatOffsetDateTime(dueAt.AddHours(1), assigneeTimeZone), document.RootElement.GetProperty("end").GetProperty("dateTime").GetString());
         Assert.Equal("Asia/Kamchatka", document.RootElement.GetProperty("end").GetProperty("timeZone").GetString());
         Assert.Equal(
             "Asia/Kamchatka",
@@ -314,11 +321,12 @@ public class GoogleCalendarSyncServiceTests
         await SetUserTimeZoneAsync(db, user.Id, "Asia/Krasnoyarsk");
         var connection = await CreateConnectionAsync(db, user.Id);
         await CreateCalendarAsync(db, connection.Id, "google-existing-timezone-calendar", "PayPlanner tasks");
+        var dueAt = DateTime.SpecifyKind(DateTime.UtcNow.Date.AddDays(1).AddHours(8).AddMinutes(30), DateTimeKind.Utc);
         await CreateTaskAsync(
             db,
             user.Id,
             "Existing calendar should receive profile timezone",
-            dueAt: new DateTime(2026, 6, 4, 8, 30, 0, DateTimeKind.Utc));
+            dueAt: dueAt);
         var handler = new RecordingGoogleHandler();
         var service = CreateService(db, new FakeHttpClientFactory(handler));
 

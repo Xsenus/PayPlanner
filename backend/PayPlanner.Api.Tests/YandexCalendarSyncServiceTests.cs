@@ -297,11 +297,18 @@ public class YandexCalendarSyncServiceTests
         await SetUserTimeZoneAsync(db, admin.Id, "Europe/Moscow");
         await SetUserTimeZoneAsync(db, assignee.Id, "Asia/Kamchatka");
         var connection = await CreateConnectionAsync(db, admin.Id, calendarMode: "adminByAssignee");
+        var assigneeTimeZone = CalendarTimeZoneHelper.ResolveTimeZone("Asia/Kamchatka");
+        var localStart = CalendarTimeZoneHelper
+            .ToUserLocal(DateTime.UtcNow.AddDays(1), assigneeTimeZone)
+            .Date
+            .AddHours(23)
+            .AddMinutes(30);
+        var dueAt = CalendarTimeZoneHelper.FromUserLocalToUtc(localStart, assigneeTimeZone);
         var task = await CreateTaskAsync(
             db,
             assignee.Id,
             "Near midnight in assignee timezone",
-            new DateTime(2026, 6, 4, 11, 30, 0, DateTimeKind.Utc));
+            dueAt);
         var handler = new RecordingYandexHandler();
         var service = CreateService(db, new FakeHttpClientFactory(handler));
 
@@ -318,8 +325,8 @@ public class YandexCalendarSyncServiceTests
         Assert.Contains("TZID:Asia/Kamchatka", WebUtility.HtmlDecode(createCalendarBody));
         var putRequest = handler.Requests.Single(request => request.Method == HttpMethod.Put);
         var body = await putRequest.Content!.ReadAsStringAsync();
-        Assert.Contains("DTSTART:20260604T113000Z", body);
-        Assert.Contains("DTEND:20260604T123000Z", body);
+        Assert.Contains($"DTSTART:{CalendarTimeZoneHelper.FormatUtcIcsDateTime(dueAt, assigneeTimeZone)}", body);
+        Assert.Contains($"DTEND:{CalendarTimeZoneHelper.FormatUtcIcsDateTime(dueAt.AddHours(1), assigneeTimeZone)}", body);
         Assert.Contains("X-PAYPLANNER-TIMEZONE:Asia/Kamchatka", body);
     }
 
