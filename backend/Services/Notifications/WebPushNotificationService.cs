@@ -462,11 +462,24 @@ public class WebPushNotificationService : IWebPushNotificationService
         subscription.LastError = error;
         subscription.UpdatedAt = DateTime.UtcNow;
 
-        if (statusCode is HttpStatusCode.NotFound or HttpStatusCode.Gone)
+        if (statusCode is HttpStatusCode.NotFound or HttpStatusCode.Gone
+            || IsInvalidWebPushSubscriptionError(error, statusCode))
         {
             subscription.IsActive = false;
             subscription.RevokedAt = DateTime.UtcNow;
         }
+    }
+
+    private static bool IsInvalidWebPushSubscriptionError(string? error, HttpStatusCode? statusCode)
+    {
+        if (string.IsNullOrWhiteSpace(error))
+        {
+            return false;
+        }
+
+        return statusCode == HttpStatusCode.Forbidden
+            && error.Contains("VAPID credentials", StringComparison.OrdinalIgnoreCase)
+            && error.Contains("do not correspond", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string TruncateError(string? value)

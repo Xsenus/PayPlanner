@@ -74,7 +74,11 @@ export async function getWebPushStatus(): Promise<WebPushStatus> {
   const permission = Notification.permission;
   const hasCurrentActiveSubscription = Boolean(
     browserSubscription
-      && subscriptions.some((item) => item.isActive && item.endpoint === browserSubscription.endpoint),
+      && subscriptions.some((item) => (
+        item.isActive
+        && item.endpoint === browserSubscription.endpoint
+        && !hasInvalidWebPushSubscriptionError(item)
+      )),
   );
 
   if (hasCurrentActiveSubscription && permission !== 'denied') {
@@ -160,7 +164,12 @@ export async function subscribeCurrentDeviceToWebPush() {
 
   const registration = await registerPayPlannerPushWorker();
   const existing = await registration.pushManager.getSubscription();
-  const subscription = existing ?? await createBrowserPushSubscription(registration, publicKey.publicKey);
+  if (existing && !doesSubscriptionUseApplicationServerKey(existing, publicKey.publicKey)) {
+    await existing.unsubscribe();
+  }
+
+  const current = await registration.pushManager.getSubscription();
+  const subscription = current ?? await createBrowserPushSubscription(registration, publicKey.publicKey);
   const payload = buildSubscriptionPayload(subscription);
   return apiService.upsertUserPushSubscription(payload);
 }
@@ -233,6 +242,39 @@ function buildSubscriptionPayload(subscription: PushSubscription): UpsertPushSub
     deviceName: [browser, platform].filter(Boolean).join(' / '),
     userAgent: navigator.userAgent,
   };
+}
+
+function hasInvalidWebPushSubscriptionError(subscription: UserPushSubscriptionDto) {
+  const error = subscription.lastError ?? '';
+  return /VAPID credentials/i.test(error)
+    || /push subscription has unsubscribed or expired/i.test(error)
+    || /subscription no longer valid/i.test(error);
+}
+
+function doesSubscriptionUseApplicationServerKey(subscription: PushSubscription, publicKey: string) {
+  const actualKey = subscription.options?.applicationServerKey;
+  if (!actualKey) {
+    return true;
+  }
+
+  return areByteArraysEqual(
+    new Uint8Array(actualKey),
+    urlBase64ToUint8Array(publicKey),
+  );
+}
+
+function areByteArraysEqual(left: Uint8Array, right: Uint8Array) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 async function createBrowserPushSubscription(registration: ServiceWorkerRegistration, publicKey: string) {

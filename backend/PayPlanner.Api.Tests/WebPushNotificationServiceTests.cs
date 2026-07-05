@@ -215,6 +215,42 @@ public class WebPushNotificationServiceTests
     }
 
     [Fact]
+    public async Task SendUserNotificationAsync_DeactivatesSubscriptionWhenVapidCredentialsDoNotMatch()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserWithSubscriptionAsync(db, "vapid-mismatch-push@example.com");
+        var subscription = await db.UserPushSubscriptions.SingleAsync(item => item.UserId == user.Id);
+        var notification = CreateNotification(user.Id, new UserNotification
+        {
+            Type = UserNotificationTypes.TaskReminder,
+            EventKey = "task:90:reminder",
+            Title = "Просроченная задача",
+            BodyPreview = "Проверьте задачу.",
+            Tone = "red",
+            ObjectType = "task",
+            ObjectId = 90,
+        });
+        db.UserNotifications.Add(notification);
+        await db.SaveChangesAsync();
+
+        var service = new DeadSubscriptionWebPushNotificationService(
+            db,
+            HttpStatusCode.Forbidden,
+            "Received unexpected response code: 403. Details: the VAPID credentials in the authorization header do not correspond to the credentials used to create the subscriptions.");
+
+        await service.SendUserNotificationAsync(notification);
+
+        var delivery = await db.NotificationDeliveries.SingleAsync();
+        Assert.Equal(NotificationDeliveryStatus.Failed, delivery.Status);
+        Assert.Contains("VAPID credentials", delivery.Error, StringComparison.Ordinal);
+        await db.Entry(subscription).ReloadAsync();
+        Assert.False(subscription.IsActive);
+        Assert.NotNull(subscription.RevokedAt);
+        Assert.NotNull(subscription.LastErrorAt);
+        Assert.Contains("VAPID credentials", subscription.LastError, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task RetryDeliveryAsync_CreatesPendingOutboxBeforeCallingPushProvider()
     {
         await using var db = await CreateContextAsync();
@@ -480,8 +516,12 @@ public class WebPushNotificationServiceTests
     private sealed class DeadSubscriptionWebPushNotificationService : WebPushNotificationService
     {
         private readonly HttpStatusCode _statusCode;
+        private readonly string _errorMessage;
 
-        public DeadSubscriptionWebPushNotificationService(PaymentContext db, HttpStatusCode statusCode)
+        public DeadSubscriptionWebPushNotificationService(
+            PaymentContext db,
+            HttpStatusCode statusCode,
+            string errorMessage = "Push subscription is gone")
             : base(
                 db,
                 new ConfigurationBuilder()
@@ -496,6 +536,7 @@ public class WebPushNotificationServiceTests
                 NullLogger<WebPushNotificationService>.Instance)
         {
             _statusCode = statusCode;
+            _errorMessage = errorMessage;
         }
 
         protected override Task SendSubscriptionAsync(
@@ -508,7 +549,7 @@ public class WebPushNotificationServiceTests
         {
             var pushSubscription = new WebPush.PushSubscription(subscription.Endpoint, subscription.P256dh, subscription.Auth);
             var response = new HttpResponseMessage(_statusCode);
-            throw new WebPush.WebPushException("Push subscription is gone", pushSubscription, response);
+            throw new WebPush.WebPushException(_errorMessage, pushSubscription, response);
         }
     }
 }
