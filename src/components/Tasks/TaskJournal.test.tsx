@@ -1432,9 +1432,37 @@ describe('TaskJournal', () => {
       target: { value: '' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Отправить на доработку с поправками' }));
-    expect(screen.getByText('Укажите новый срок доработки.')).toBeTruthy();
-    expect(apiMock.updateTaskJournalApproval).not.toHaveBeenCalled();
 
+    await waitFor(() => expect(apiMock.updateTaskJournalApproval).toHaveBeenCalledWith(
+      101,
+      'revisionRequested',
+      'Исправить дату и приложить документ.',
+      77,
+      undefined,
+      undefined,
+    ));
+  });
+
+  it('passes a revision due date when the approver fills it in', async () => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Согласующий', email: 'approver@example.com' };
+    permissionsState.taskCanEdit = false;
+    await renderJournal([
+      createTask({
+        status: 'onApproval',
+        participants: [
+          { id: 77, userId: 7, role: 'approver', displayName: 'Согласующий', sortOrder: 0, approvalStatus: 'pending' },
+        ],
+      }),
+    ]);
+
+    fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
+    expect(await screen.findByRole('heading', { name: 'Просмотр задачи' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'На доработку' }));
+    fireEvent.change(screen.getByLabelText('Комментарий для исполнителя'), {
+      target: { value: 'Исправить дату.' },
+    });
     fireEvent.change(screen.getByTestId('task-revision-due-at-input'), {
       target: { value: '2099-01-10T10:30' },
     });
@@ -1443,7 +1471,7 @@ describe('TaskJournal', () => {
     await waitFor(() => expect(apiMock.updateTaskJournalApproval).toHaveBeenCalledWith(
       101,
       'revisionRequested',
-      'Исправить дату и приложить документ.',
+      'Исправить дату.',
       77,
       undefined,
       expect.any(String),

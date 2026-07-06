@@ -3532,7 +3532,7 @@ public class TasksControllerTests
     }
 
     [Fact]
-    public async Task UpdateApproval_RevisionRequiresDueAt()
+    public async Task UpdateApproval_RevisionKeepsDueAtWhenDueAtIsEmpty()
     {
         await using var db = await CreateContextAsync();
         var author = await CreateAdminUserAsync(db, "author-revision-due@example.com", "Автор");
@@ -3558,19 +3558,20 @@ public class TasksControllerTests
             Resolution = "Нужно доработать документы.",
         }, CancellationToken.None);
 
-        var badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
-        Assert.Contains("срок", badRequest.Value?.ToString(), StringComparison.OrdinalIgnoreCase);
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(ok.Value);
+        Assert.Equal("revision", dto.Status);
 
         var stored = await db.TaskJournalItems
             .Include(item => item.Participants)
             .SingleAsync(item => item.Id == task.Id);
-        Assert.Equal("onApproval", stored.Status);
+        Assert.Equal("revision", stored.Status);
         Assert.Equal(originalDueAt, stored.DueAt);
         Assert.Contains(stored.Participants, item =>
             item.UserId == approver.Id
-            && item.ApprovalStatus == "pending"
-            && item.RespondedAt == null);
-        Assert.False(await db.TaskJournalComments.AnyAsync(item => item.TaskJournalItemId == task.Id));
+            && item.ApprovalStatus == "revisionRequested"
+            && item.RespondedAt != null);
+        Assert.True(await db.TaskJournalComments.AnyAsync(item => item.TaskJournalItemId == task.Id));
     }
 
     [Fact]

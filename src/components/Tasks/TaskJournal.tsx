@@ -6369,7 +6369,7 @@ function TaskModal({
       approverName: participant ? getParticipantDisplayName(participant) : currentUserName,
     });
     setRevisionReviewText('');
-    setRevisionReviewDueAt(getDefaultRevisionDueAtInput(task));
+    setRevisionReviewDueAt('');
     setRevisionReviewError(null);
   };
 
@@ -6383,16 +6383,7 @@ function TaskModal({
       return;
     }
 
-    if (!revisionReviewDueAt) {
-      setRevisionReviewError('Укажите новый срок доработки.');
-      return;
-    }
-
-    const nextDueAt = fromLocalInputValue(revisionReviewDueAt);
-    if (new Date(nextDueAt).getTime() <= Date.now()) {
-      setRevisionReviewError('Новый срок доработки должен быть позже текущего времени.');
-      return;
-    }
+    const nextDueAt = revisionReviewDueAt ? fromLocalInputValue(revisionReviewDueAt) : null;
 
     setRevisionReviewSaving(true);
     setRevisionReviewError(null);
@@ -6706,7 +6697,7 @@ function TaskModal({
           Согласующий: {revisionReview.approverName}. После отправки задача перейдет в статус «На доработке», а исполнитель увидит обязательное сообщение с этой рецензией.
         </div>
         <label className="mt-4 block text-sm font-semibold text-slate-700">
-          Новый срок доработки
+          Срок доработки
           <div className="mt-2 flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 focus-within:border-orange-400 focus-within:ring-2 focus-within:ring-orange-100">
             <CalendarClock className="h-4 w-4 text-slate-400" />
             <input
@@ -6721,7 +6712,7 @@ function TaskModal({
             />
           </div>
           <span className="mt-1 block text-xs font-normal text-slate-500">
-            После возврата этот срок станет основным сроком задачи и будет использоваться в журнале, календаре и напоминаниях.
+            Если указать дату, она станет новым сроком задачи в журнале, календаре и напоминаниях. Если оставить поле пустым, срок задачи не изменится.
           </span>
         </label>
         <label className="mt-4 block text-sm font-semibold text-slate-700">

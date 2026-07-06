@@ -2285,18 +2285,9 @@ public class TasksController : ControllerBase
         }
 
         DateTime? revisionDueAt = null;
-        if (isRevisionRequested)
+        if (isRevisionRequested && request.RevisionDueAt.HasValue && request.RevisionDueAt.Value != default)
         {
-            if (!request.RevisionDueAt.HasValue || request.RevisionDueAt.Value == default)
-            {
-                return BadRequest(new { message = "Укажите новый срок доработки." });
-            }
-
             revisionDueAt = NormalizeUtcInstant(request.RevisionDueAt.Value);
-            if (revisionDueAt.Value <= DateTime.UtcNow)
-            {
-                return BadRequest(new { message = "Новый срок доработки должен быть позже текущего времени." });
-            }
         }
 
         var finalAction = NormalizeApprovalFinalAction(request.FinalAction);
@@ -2312,7 +2303,10 @@ public class TasksController : ControllerBase
         if (isRevisionRequested)
         {
             entity.Status = "revision";
-            entity.DueAt = revisionDueAt!.Value;
+            if (revisionDueAt.HasValue)
+            {
+                entity.DueAt = revisionDueAt.Value;
+            }
         }
         else if (approvers.All(item => string.Equals(item.ApprovalStatus, "approved", StringComparison.OrdinalIgnoreCase)))
         {
