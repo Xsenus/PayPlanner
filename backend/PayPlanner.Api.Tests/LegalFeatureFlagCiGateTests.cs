@@ -143,6 +143,38 @@ public sealed class LegalFeatureFlagCiGateTests
             ]);
     }
 
+    [Fact]
+    public void DeployWorkflow_RestartsBackendOnlyOnceAfterFilesAreSynced()
+    {
+        var root = FindRepositoryRoot();
+        var workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "deploy.yml"));
+
+        Assert.DoesNotContain("sudo systemctl stop payplanner.service", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("sudo systemctl enable --now payplanner.service", workflow, StringComparison.Ordinal);
+        AssertInOrder(
+            workflow,
+            [
+                "sudo rsync -a --delete \"$STAGE/be/\" \"$BE_DIR/\"",
+                "sudo rsync -a \"$STAGE/fe/\" \"$FE_APP_DIR/\"",
+                "sudo systemctl enable payplanner.service",
+                "sudo systemctl restart payplanner.service",
+                "curl -fsS \"$PRIMARY_HEALTH_URL\"",
+            ]);
+    }
+
+    [Fact]
+    public void BackendConfiguration_UsesStableEfQueryWarningsPolicy()
+    {
+        var root = FindRepositoryRoot();
+        var program = File.ReadAllText(Path.Combine(root, "backend", "Program.cs"));
+
+        Assert.Contains("UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery)", program, StringComparison.Ordinal);
+        Assert.Contains("warnings.Ignore(RelationalEventId.MultipleCollectionIncludeWarning)", program, StringComparison.Ordinal);
+        Assert.Contains("warnings.Ignore(CoreEventId.FirstWithoutOrderByAndFilterWarning)", program, StringComparison.Ordinal);
+        Assert.Contains("warnings.Throw(RelationalEventId.MultipleCollectionIncludeWarning)", program, StringComparison.Ordinal);
+        Assert.Contains("warnings.Throw(CoreEventId.FirstWithoutOrderByAndFilterWarning)", program, StringComparison.Ordinal);
+    }
+
     private static string FindRepositoryRoot()
     {
         var current = new DirectoryInfo(AppContext.BaseDirectory);

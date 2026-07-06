@@ -244,57 +244,54 @@ jobs:
 
             trap cleanup EXIT
 
-            echo "[1/13] Preflight disk check"
+            echo "[1/12] Preflight disk check"
             check_space "/" "$MIN_FREE_KB"
 
-            echo "[2/13] Prepare staging"
+            echo "[2/12] Prepare staging"
             resolve_package
             rm -rf "$STAGE"
             mkdir -p "$STAGE"
             tar -xzf "$TAR" -C "$STAGE"
 
-            echo "[3/13] Ensure target dirs"
+            echo "[3/12] Ensure target dirs"
             sudo mkdir -p "$BE_DIR" "$FE_APP_DIR" "$FE_PUBLIC_DIR" "$BACKUP_ROOT" /opt/payplanner/shared/backups
 
-            echo "[4/13] Configure runtime environment"
+            echo "[4/12] Configure runtime environment"
             configure_runtime_env
 
-            echo "[5/13] Backup current release"
+            echo "[5/12] Backup current release"
             sudo mkdir -p "$BACKUP_DIR"
             if [ -d "$BE_DIR" ]; then sudo cp -a "$BE_DIR" "$BACKUP_DIR/backend.previous"; fi
             if [ -d "$FE_APP_DIR" ]; then sudo cp -a "$FE_APP_DIR" "$BACKUP_DIR/frontend.previous"; fi
             if [ -f "$APP_DIR/REVISION" ]; then sudo cp -a "$APP_DIR/REVISION" "$BACKUP_DIR/REVISION.previous"; fi
             if [ -f "$APP_DIR/.deploy-revision" ]; then sudo cp -a "$APP_DIR/.deploy-revision" "$BACKUP_DIR/.deploy-revision.previous"; fi
 
-            echo "[6/13] Stop service"
-            sudo systemctl stop payplanner.service || true
-
-            echo "[7/13] Rsync backend"
+            echo "[6/12] Rsync backend"
             sudo rsync -a --delete "$STAGE/be/" "$BE_DIR/"
 
-            echo "[8/13] Rsync frontend"
+            echo "[7/12] Rsync frontend"
             # Keep previous hashed chunks so already-open browser tabs can switch lazy-loaded sections after a deploy.
             sudo rsync -a "$STAGE/fe/" "$FE_APP_DIR/"
             sudo rsync -a "$STAGE/fe/" "$FE_PUBLIC_DIR/"
 
-            echo "[9/13] Write revision marker"
+            echo "[8/12] Write revision marker"
             printf '%s\n' "${{ github.sha }}" | sudo tee "$APP_DIR/REVISION" >/dev/null
             printf '%s\n' "${{ github.sha }}" | sudo tee "$APP_DIR/.deploy-revision" >/dev/null
 
-            echo "[10/13] Cleanup temp artifacts"
+            echo "[9/12] Cleanup temp artifacts"
             cleanup
 
-            echo "[11/13] Permissions"
+            echo "[10/12] Permissions"
             sudo chown -R payplanner:payplanner /opt/payplanner
             sudo chown -R www-data:www-data "$FE_PUBLIC_DIR"
 
-            echo "[12/13] Restart service"
+            echo "[11/12] Restart service"
             check_space "/" "$MIN_FREE_KB"
             sudo systemctl daemon-reload || true
-            sudo systemctl enable --now payplanner.service
+            sudo systemctl enable payplanner.service
             sudo systemctl restart payplanner.service
 
-            echo "[13/13] Wait for health"
+            echo "[12/12] Wait for health"
             ok=0
             for i in $(seq 1 30); do
               if curl -fsS "$PRIMARY_HEALTH_URL" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"'; then

@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
@@ -25,6 +26,7 @@ public interface IWebPushNotificationService
 public class WebPushNotificationService : IWebPushNotificationService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private const int MaxPayloadBytes = 3800;
     private const string FinancialPushTitle = "Финансовое уведомление PayPlanner";
     private const string FinancialPushBody = "Откройте CRM, чтобы посмотреть детали финансового события после проверки прав доступа.";
 
@@ -327,6 +329,34 @@ public class WebPushNotificationService : IWebPushNotificationService
     }
 
     private static string BuildPayload(UserNotification notification, string title, string bodyPreview)
+    {
+        var payload = SerializePayload(notification, title, bodyPreview);
+        if (Encoding.UTF8.GetByteCount(payload) <= MaxPayloadBytes)
+        {
+            return payload;
+        }
+
+        var safeTitle = TrimToUtf8ByteLimit(title, 180);
+        var safeBody = bodyPreview;
+        for (var limit = Math.Min(1800, Encoding.UTF8.GetByteCount(bodyPreview)); limit >= 120; limit -= 120)
+        {
+            safeBody = TrimToUtf8ByteLimit(bodyPreview, limit);
+            payload = SerializePayload(notification, safeTitle, safeBody);
+            if (Encoding.UTF8.GetByteCount(payload) <= MaxPayloadBytes)
+            {
+                return payload;
+            }
+        }
+
+        safeTitle = TrimToUtf8ByteLimit(title, 80);
+        safeBody = TrimToUtf8ByteLimit(bodyPreview, 240);
+        payload = SerializePayload(notification, safeTitle, safeBody);
+        return Encoding.UTF8.GetByteCount(payload) <= MaxPayloadBytes
+            ? payload
+            : SerializeMinimalPayload(notification);
+    }
+
+    private static string SerializePayload(UserNotification notification, string title, string bodyPreview)
         => JsonSerializer.Serialize(new
         {
             title,
@@ -342,6 +372,41 @@ public class WebPushNotificationService : IWebPushNotificationService
             url = ResolveNotificationUrl(notification),
             createdAt = notification.CreatedAt,
         }, JsonOptions);
+
+    private static string SerializeMinimalPayload(UserNotification notification)
+        => JsonSerializer.Serialize(new
+        {
+            title = "PayPlanner",
+            body = "Откройте CRM, чтобы посмотреть уведомление.",
+            notificationId = notification.Id,
+            url = ResolveNotificationUrl(notification),
+            createdAt = notification.CreatedAt,
+        }, JsonOptions);
+
+    private static string TrimToUtf8ByteLimit(string value, int maxBytes)
+    {
+        if (string.IsNullOrEmpty(value) || Encoding.UTF8.GetByteCount(value) <= maxBytes)
+        {
+            return value;
+        }
+
+        var builder = new StringBuilder(value.Length);
+        var byteCount = 0;
+        var suffixBytes = Encoding.UTF8.GetByteCount("...");
+        foreach (var rune in value.EnumerateRunes())
+        {
+            var runeBytes = rune.Utf8SequenceLength;
+            if (byteCount + runeBytes + suffixBytes > maxBytes)
+            {
+                break;
+            }
+
+            builder.Append(rune.ToString());
+            byteCount += runeBytes;
+        }
+
+        return builder.Length == 0 ? string.Empty : $"{builder}...";
+    }
 
     private static string ResolveNotificationUrl(UserNotification notification)
     {

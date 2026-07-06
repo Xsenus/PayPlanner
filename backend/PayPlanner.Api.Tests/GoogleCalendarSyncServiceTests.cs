@@ -682,6 +682,26 @@ public class GoogleCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncNowAsync_RetriesGoogleTemporaryUnavailableWhenListingEvents()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-google-temporary-unavailable@example.com", "user");
+        await EnableGoogleSettingsAsync(db);
+        var connection = await CreateConnectionAsync(db, user.Id);
+        await CreateCalendarAsync(db, connection.Id, "calendar-temporary-unavailable", "PayPlanner Р·Р°РґР°С‡Рё");
+        var handler = new RecordingGoogleHandler(eventListTransientFailureCount: 1);
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        var result = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+
+        Assert.Equal(0, result.ErrorCount);
+        Assert.Equal(2, handler.Requests.Count(request =>
+            request.Method == HttpMethod.Get &&
+            request.RequestUri!.AbsolutePath.Contains("/events", StringComparison.Ordinal)));
+        Assert.DoesNotContain(await db.GoogleCalendarSyncLogs.ToListAsync(), log => log.Status == "error");
+    }
+
+    [Fact]
     public async Task SyncNowAsync_AdminConnectionCreatesCalendarByAssignee()
     {
         await using var db = await CreateContextAsync();
@@ -1421,15 +1441,18 @@ public class GoogleCalendarSyncServiceTests
         private readonly HttpStatusCode _deleteStatusCode;
         private readonly object[] _eventItems;
         private int _eventListRateLimitCount;
+        private int _eventListTransientFailureCount;
 
         public RecordingGoogleHandler(
             HttpStatusCode deleteStatusCode = HttpStatusCode.NoContent,
             object[]? eventItems = null,
-            int eventListRateLimitCount = 0)
+            int eventListRateLimitCount = 0,
+            int eventListTransientFailureCount = 0)
         {
             _deleteStatusCode = deleteStatusCode;
             _eventItems = eventItems ?? [];
             _eventListRateLimitCount = eventListRateLimitCount;
+            _eventListTransientFailureCount = eventListTransientFailureCount;
         }
 
         public List<HttpRequestMessage> Requests { get; } = [];
@@ -1468,6 +1491,18 @@ public class GoogleCalendarSyncServiceTests
                     };
                     response.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.Zero);
                     return Task.FromResult(response);
+                }
+
+                if (_eventListTransientFailureCount > 0)
+                {
+                    _eventListTransientFailureCount--;
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+                    {
+                        Content = new StringContent(
+                            "{\"error\":{\"message\":\"The service is currently unavailable.\"}}",
+                            Encoding.UTF8,
+                            "application/json"),
+                    });
                 }
 
                 return Task.FromResult(Json(new { items = _eventItems, nextSyncToken = "sync-token" }));

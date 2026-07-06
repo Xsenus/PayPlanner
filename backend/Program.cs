@@ -54,7 +54,9 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 void ConfigureSqlite(DbContextOptionsBuilder options) => options
-    .UseSqlite(databaseProvider.ConnectionString)
+    .UseSqlite(
+        databaseProvider.ConnectionString,
+        sqlite => sqlite.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery))
     .UsePayPlannerSqliteMigrations()
     .ConfigureWarnings(warnings =>
     {
@@ -62,7 +64,9 @@ void ConfigureSqlite(DbContextOptionsBuilder options) => options
         ConfigureEfDiagnostics(warnings);
     });
 void ConfigurePostgreSql(DbContextOptionsBuilder options) => options
-    .UseNpgsql(databaseProvider.ConnectionString)
+    .UseNpgsql(
+        databaseProvider.ConnectionString,
+        npgsql => npgsql.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery))
     .ConfigureWarnings(warnings =>
     {
         warnings.Ignore(RelationalEventId.PendingModelChangesWarning);
@@ -73,6 +77,8 @@ void ConfigureEfDiagnostics(WarningsConfigurationBuilder warnings)
 {
     if (!builder.Configuration.GetValue<bool>("Diagnostics:ThrowEfRuntimeWarnings"))
     {
+        warnings.Ignore(RelationalEventId.MultipleCollectionIncludeWarning);
+        warnings.Ignore(CoreEventId.FirstWithoutOrderByAndFilterWarning);
         return;
     }
 

@@ -215,6 +215,11 @@ public sealed class NotificationRetrySchedulerService : BackgroundService
         NotificationDelivery delivery,
         CancellationToken cancellationToken)
     {
+        if (WebPushSubscriptionHealth.IsNonRetryableDeliveryError(delivery.Error))
+        {
+            return false;
+        }
+
         if (!delivery.RecipientUserId.HasValue || string.IsNullOrWhiteSpace(delivery.RecipientAddress))
         {
             return false;

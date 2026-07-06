@@ -1968,7 +1968,7 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             using var response = await client.SendAsync(retryRequest, cancellationToken);
             var payload = await response.Content.ReadAsStringAsync(cancellationToken);
             var result = new GoogleHttpResponse(response.StatusCode, response.ReasonPhrase, payload);
-            if (!IsGoogleRateLimitResponse(result) || attempt == GoogleRateLimitRetryCount)
+            if (!IsGoogleRetryableResponse(result) || attempt == GoogleRateLimitRetryCount)
             {
                 return result;
             }
@@ -2090,9 +2090,14 @@ public sealed class GoogleCalendarSyncService : IGoogleCalendarSyncService
             ? EnsureUtc(lastFullSyncAt.Value).AddMinutes(Math.Max(0, cooldownMinutes))
             : null;
 
-    private static bool IsGoogleRateLimitResponse(GoogleHttpResponse response)
+    private static bool IsGoogleRetryableResponse(GoogleHttpResponse response)
     {
-        if (response.StatusCode == HttpStatusCode.TooManyRequests)
+        if (response.StatusCode is HttpStatusCode.TooManyRequests
+            or HttpStatusCode.RequestTimeout
+            or HttpStatusCode.InternalServerError
+            or HttpStatusCode.BadGateway
+            or HttpStatusCode.ServiceUnavailable
+            or HttpStatusCode.GatewayTimeout)
         {
             return true;
         }

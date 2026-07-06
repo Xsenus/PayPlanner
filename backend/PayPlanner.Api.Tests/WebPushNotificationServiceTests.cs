@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Net;
+using System.Text;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -137,6 +138,33 @@ public class WebPushNotificationServiceTests
         var delivery = await db.NotificationDeliveries.SingleAsync();
         Assert.Equal(NotificationDeliveryStatus.Failed, delivery.Status);
         Assert.Contains("Simulated push provider failure", delivery.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SendUserNotificationAsync_TruncatesLargePayloadBeforeCallingPushProvider()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserWithSubscriptionAsync(db, "large-payload-push@example.com");
+        var notification = CreateNotification(user.Id, new UserNotification
+        {
+            Type = UserNotificationTypes.TaskChanged,
+            EventKey = "task:91:large-payload",
+            Title = new string('Т', 600),
+            BodyPreview = new string('Д', 6000),
+            Tone = "amber",
+            ObjectType = "task",
+            ObjectId = 91,
+        });
+        db.UserNotifications.Add(notification);
+        await db.SaveChangesAsync();
+
+        var service = new FailingWebPushNotificationService(db, notification.EventKey);
+
+        await service.SendUserNotificationAsync(notification);
+
+        Assert.True(Encoding.UTF8.GetByteCount(service.CapturedPayload) <= 3800);
+        using var payload = JsonDocument.Parse(service.CapturedPayload);
+        Assert.EndsWith("...", payload.RootElement.GetProperty("body").GetString(), StringComparison.Ordinal);
     }
 
     [Theory]
