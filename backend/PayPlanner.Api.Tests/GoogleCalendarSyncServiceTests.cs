@@ -236,11 +236,13 @@ public class GoogleCalendarSyncServiceTests
         await EnableGoogleSettingsAsync(db);
         await SetUserTimeZoneAsync(db, user.Id, "Europe/Samara");
         await CreateConnectionAsync(db, user.Id);
+        var userTimeZone = CalendarTimeZoneHelper.ResolveTimeZone("Europe/Samara");
+        var dueAt = DateTime.SpecifyKind(DateTime.UtcNow.Date.AddDays(7).AddHours(9), DateTimeKind.Unspecified);
         await CreateTaskAsync(
             db,
             user.Id,
             "Дата без Kind не должна сдвигаться",
-            dueAt: new DateTime(2026, 6, 5, 9, 0, 0, DateTimeKind.Unspecified));
+            dueAt: dueAt);
         var handler = new RecordingGoogleHandler();
         var service = CreateService(db, new FakeHttpClientFactory(handler));
 
@@ -253,8 +255,9 @@ public class GoogleCalendarSyncServiceTests
             request.RequestUri!.AbsolutePath.Contains("/events", StringComparison.Ordinal));
         var body = await createEventRequest.Content!.ReadAsStringAsync();
         using var document = JsonDocument.Parse(body);
-        Assert.Equal("2026-06-05T13:00:00+04:00", document.RootElement.GetProperty("start").GetProperty("dateTime").GetString());
-        Assert.Equal("2026-06-05T14:00:00+04:00", document.RootElement.GetProperty("end").GetProperty("dateTime").GetString());
+        var expectedStart = DateTime.SpecifyKind(dueAt, DateTimeKind.Utc);
+        Assert.Equal(CalendarTimeZoneHelper.FormatOffsetDateTime(expectedStart, userTimeZone), document.RootElement.GetProperty("start").GetProperty("dateTime").GetString());
+        Assert.Equal(CalendarTimeZoneHelper.FormatOffsetDateTime(expectedStart.AddHours(1), userTimeZone), document.RootElement.GetProperty("end").GetProperty("dateTime").GetString());
     }
 
     [Fact]
@@ -349,7 +352,7 @@ public class GoogleCalendarSyncServiceTests
         var user = await CreateUserAsync(db, "executor-completed-color-google@example.com", "user");
         await EnableGoogleSettingsAsync(db);
         await CreateConnectionAsync(db, user.Id);
-        var task = await CreateTaskAsync(db, user.Id, "Р“РѕС‚РѕРІР°СЏ Р·Р°РґР°С‡Р°", dueAt: new DateTime(2026, 6, 5, 9, 0, 0));
+        var task = await CreateTaskAsync(db, user.Id, "Р“РѕС‚РѕРІР°СЏ Р·Р°РґР°С‡Р°", dueAt: DateTime.UtcNow.Date.AddDays(7).AddHours(9));
         task.Status = "done";
         await db.SaveChangesAsync();
         var handler = new RecordingGoogleHandler();
