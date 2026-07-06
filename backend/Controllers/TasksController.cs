@@ -2240,10 +2240,25 @@ public class TasksController : ControllerBase
 
         var oldStatus = entity.Status;
         var resolution = NormalizeOptional(request.Resolution);
-        if (string.Equals(decision, "revisionRequested", StringComparison.OrdinalIgnoreCase)
-            && string.IsNullOrWhiteSpace(resolution))
+        var isRevisionRequested = string.Equals(decision, "revisionRequested", StringComparison.OrdinalIgnoreCase);
+        if (isRevisionRequested && string.IsNullOrWhiteSpace(resolution))
         {
             return BadRequest(new { message = "Укажите рецензию: почему задача возвращается на доработку и какие поправки нужно внести." });
+        }
+
+        DateTime? revisionDueAt = null;
+        if (isRevisionRequested)
+        {
+            if (!request.RevisionDueAt.HasValue || request.RevisionDueAt.Value == default)
+            {
+                return BadRequest(new { message = "Укажите новый срок доработки." });
+            }
+
+            revisionDueAt = NormalizeUtcInstant(request.RevisionDueAt.Value);
+            if (revisionDueAt.Value <= DateTime.UtcNow)
+            {
+                return BadRequest(new { message = "Новый срок доработки должен быть позже текущего времени." });
+            }
         }
 
         var finalAction = NormalizeApprovalFinalAction(request.FinalAction);
@@ -2256,9 +2271,10 @@ public class TasksController : ControllerBase
         participant.RespondedAt = DateTime.UtcNow;
         participant.UpdatedAt = DateTime.UtcNow;
 
-        if (string.Equals(decision, "revisionRequested", StringComparison.OrdinalIgnoreCase))
+        if (isRevisionRequested)
         {
             entity.Status = "revision";
+            entity.DueAt = revisionDueAt!.Value;
         }
         else if (approvers.All(item => string.Equals(item.ApprovalStatus, "approved", StringComparison.OrdinalIgnoreCase)))
         {
@@ -2289,6 +2305,7 @@ public class TasksController : ControllerBase
                 resolution,
                 resultingStatus = entity.Status,
                 finalAction,
+                revisionDueAt,
                 approvalDueAt = entity.ApprovalDueAt,
                 respondedAt = participant.RespondedAt
             });

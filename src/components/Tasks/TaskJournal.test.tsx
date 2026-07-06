@@ -1408,6 +1408,16 @@ describe('TaskJournal', () => {
     fireEvent.change(screen.getByLabelText('Комментарий для исполнителя'), {
       target: { value: 'Исправить дату и приложить документ.' },
     });
+    fireEvent.change(screen.getByTestId('task-revision-due-at-input'), {
+      target: { value: '' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить на доработку с поправками' }));
+    expect(screen.getByText('Укажите новый срок доработки.')).toBeTruthy();
+    expect(apiMock.updateTaskJournalApproval).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByTestId('task-revision-due-at-input'), {
+      target: { value: '2099-01-10T10:30' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Отправить на доработку с поправками' }));
 
     await waitFor(() => expect(apiMock.updateTaskJournalApproval).toHaveBeenCalledWith(
@@ -1416,6 +1426,7 @@ describe('TaskJournal', () => {
       'Исправить дату и приложить документ.',
       77,
       undefined,
+      expect.any(String),
     ));
   });
 

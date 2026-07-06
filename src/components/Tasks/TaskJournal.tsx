@@ -574,6 +574,19 @@ function fromLocalInputValue(value: string) {
   return value ? fromTimeZoneDateTimeInput(value, activeTaskJournalTimeZoneId) : new Date().toISOString();
 }
 
+function getDefaultRevisionDueAtInput(task: TaskJournalItem) {
+  const currentDueAt = new Date(task.dueAt);
+  const now = new Date();
+  if (!Number.isNaN(currentDueAt.getTime()) && currentDueAt.getTime() > now.getTime()) {
+    return toLocalInputValue(currentDueAt.toISOString());
+  }
+
+  const nextDueAt = new Date(now);
+  nextDueAt.setDate(nextDueAt.getDate() + 1);
+  nextDueAt.setMinutes(0, 0, 0);
+  return toLocalInputValue(nextDueAt.toISOString());
+}
+
 function fromLocalDateInputValue(value: string) {
   return fromTimeZoneDateTimeInput(`${value}T00:00`, activeTaskJournalTimeZoneId);
 }
@@ -2928,9 +2941,14 @@ export function TaskJournal({
     resolution?: string,
     participantId?: number,
     finalAction?: TaskApprovalFinalAction,
+    revisionDueAt?: string | null,
   ) => {
     try {
-      await apiService.updateTaskJournalApproval(taskId, decision, resolution, participantId, finalAction);
+      if (decision === 'revisionRequested') {
+        await apiService.updateTaskJournalApproval(taskId, decision, resolution, participantId, finalAction, revisionDueAt ?? undefined);
+      } else {
+        await apiService.updateTaskJournalApproval(taskId, decision, resolution, participantId, finalAction);
+      }
       const successMessage = finalAction === 'complete'
         ? 'Задача согласована и завершена.'
         : decision === 'approved'
@@ -5888,6 +5906,7 @@ type TaskModalProps = {
     resolution?: string,
     participantId?: number,
     finalAction?: TaskApprovalFinalAction,
+    revisionDueAt?: string | null,
   ) => void | Promise<void>;
   onDelete: (task: TaskJournalItem) => boolean | Promise<boolean>;
   onDuplicate: (task: TaskJournalItem) => boolean | Promise<boolean>;
@@ -6012,6 +6031,7 @@ function TaskModal({
     approverName: string;
   } | null>(null);
   const [revisionReviewText, setRevisionReviewText] = useState('');
+  const [revisionReviewDueAt, setRevisionReviewDueAt] = useState('');
   const [revisionReviewError, setRevisionReviewError] = useState<string | null>(null);
   const [revisionReviewSaving, setRevisionReviewSaving] = useState(false);
   const selectedClient = useMemo(
@@ -6333,6 +6353,7 @@ function TaskModal({
       approverName: participant ? getParticipantDisplayName(participant) : currentUserName,
     });
     setRevisionReviewText('');
+    setRevisionReviewDueAt(getDefaultRevisionDueAtInput(task));
     setRevisionReviewError(null);
   };
 
@@ -6346,12 +6367,24 @@ function TaskModal({
       return;
     }
 
+    if (!revisionReviewDueAt) {
+      setRevisionReviewError('Укажите новый срок доработки.');
+      return;
+    }
+
+    const nextDueAt = fromLocalInputValue(revisionReviewDueAt);
+    if (new Date(nextDueAt).getTime() <= Date.now()) {
+      setRevisionReviewError('Новый срок доработки должен быть позже текущего времени.');
+      return;
+    }
+
     setRevisionReviewSaving(true);
     setRevisionReviewError(null);
     try {
-      await onApprovalDecision(review.taskId, 'revisionRequested', text, review.participantId);
+      await onApprovalDecision(review.taskId, 'revisionRequested', text, review.participantId, undefined, nextDueAt);
       setRevisionReview(null);
       setRevisionReviewText('');
+      setRevisionReviewDueAt('');
     } finally {
       setRevisionReviewSaving(false);
     }
@@ -6645,6 +6678,7 @@ function TaskModal({
               if (revisionReviewSaving) return;
               setRevisionReview(null);
               setRevisionReviewError(null);
+              setRevisionReviewDueAt('');
             }}
             className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
             aria-label="Закрыть рецензию"
@@ -6655,6 +6689,25 @@ function TaskModal({
         <div className="mt-4 rounded-xl border border-orange-100 bg-orange-50 px-3 py-2 text-sm text-orange-800">
           Согласующий: {revisionReview.approverName}. После отправки задача перейдет в статус «На доработке», а исполнитель увидит обязательное сообщение с этой рецензией.
         </div>
+        <label className="mt-4 block text-sm font-semibold text-slate-700">
+          Новый срок доработки
+          <div className="mt-2 flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 focus-within:border-orange-400 focus-within:ring-2 focus-within:ring-orange-100">
+            <CalendarClock className="h-4 w-4 text-slate-400" />
+            <input
+              type="datetime-local"
+              value={revisionReviewDueAt}
+              onChange={(event) => {
+                setRevisionReviewDueAt(event.target.value);
+                if (revisionReviewError) setRevisionReviewError(null);
+              }}
+              className="min-w-0 flex-1 bg-transparent text-sm text-slate-900 outline-none"
+              data-testid="task-revision-due-at-input"
+            />
+          </div>
+          <span className="mt-1 block text-xs font-normal text-slate-500">
+            После возврата этот срок станет основным сроком задачи и будет использоваться в журнале, календаре и напоминаниях.
+          </span>
+        </label>
         <label className="mt-4 block text-sm font-semibold text-slate-700">
           Комментарий для исполнителя
           <textarea
@@ -6682,6 +6735,7 @@ function TaskModal({
               if (revisionReviewSaving) return;
               setRevisionReview(null);
               setRevisionReviewError(null);
+              setRevisionReviewDueAt('');
             }}
             className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-60"
             disabled={revisionReviewSaving}

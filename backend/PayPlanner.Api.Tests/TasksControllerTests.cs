@@ -3434,17 +3434,21 @@ public class TasksControllerTests
         });
         await db.SaveChangesAsync();
         var controller = CreateController(db, new RecordingNotificationService(), approver);
+        var revisionDueAt = DateTime.SpecifyKind(DateTime.UtcNow.Date.AddDays(2).AddHours(10), DateTimeKind.Utc);
 
         var result = await controller.UpdateApproval(task.Id, new UpdateTaskJournalApprovalRequest
         {
             Decision = "revisionRequested",
             Resolution = "Нужно исправить дату.",
+            RevisionDueAt = revisionDueAt,
         }, CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var dto = Assert.IsType<TaskJournalItemDto>(ok.Value);
 
         Assert.Equal("revision", dto.Status);
+        var storedTask = await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id);
+        Assert.Equal(revisionDueAt, storedTask.DueAt);
         Assert.Contains(dto.Participants, item =>
             item.Role == "approver"
             && item.UserId == approver.Id
@@ -3459,6 +3463,7 @@ public class TasksControllerTests
         Assert.Equal("approvalDecision", metadata.RootElement.GetProperty("kind").GetString());
         Assert.Equal("revisionRequested", metadata.RootElement.GetProperty("decision").GetString());
         Assert.Equal("revision", metadata.RootElement.GetProperty("resultingStatus").GetString());
+        Assert.Equal(revisionDueAt, metadata.RootElement.GetProperty("revisionDueAt").GetDateTime());
         Assert.Equal(approver.Id, metadata.RootElement.GetProperty("approverUserId").GetInt32());
     }
 
@@ -3495,6 +3500,48 @@ public class TasksControllerTests
             .Include(item => item.Participants)
             .SingleAsync(item => item.Id == task.Id);
         Assert.Equal("onApproval", stored.Status);
+        Assert.Contains(stored.Participants, item =>
+            item.UserId == approver.Id
+            && item.ApprovalStatus == "pending"
+            && item.RespondedAt == null);
+        Assert.False(await db.TaskJournalComments.AnyAsync(item => item.TaskJournalItemId == task.Id));
+    }
+
+    [Fact]
+    public async Task UpdateApproval_RevisionRequiresDueAt()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author-revision-due@example.com", "Автор");
+        var approver = await CreateAdminUserAsync(db, "approver-revision-due@example.com", "Согласующий");
+        var client = await CreateClientAsync(db, "Клиент срока доработки");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id, result: null);
+        var originalDueAt = task.DueAt;
+        task.Status = "onApproval";
+        task.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = approver.Id,
+            Role = "approver",
+            DisplayName = approver.FullName,
+            Email = approver.Email,
+            ApprovalStatus = "pending",
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), approver);
+
+        var result = await controller.UpdateApproval(task.Id, new UpdateTaskJournalApprovalRequest
+        {
+            Decision = "revisionRequested",
+            Resolution = "Нужно доработать документы.",
+        }, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.Contains("срок", badRequest.Value?.ToString(), StringComparison.OrdinalIgnoreCase);
+
+        var stored = await db.TaskJournalItems
+            .Include(item => item.Participants)
+            .SingleAsync(item => item.Id == task.Id);
+        Assert.Equal("onApproval", stored.Status);
+        Assert.Equal(originalDueAt, stored.DueAt);
         Assert.Contains(stored.Participants, item =>
             item.UserId == approver.Id
             && item.ApprovalStatus == "pending"

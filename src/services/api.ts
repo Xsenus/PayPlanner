@@ -4111,10 +4111,11 @@ export class ApiService {
     resolution?: string,
     participantId?: number,
     finalAction?: 'complete' | 'returnToAssignee',
+    revisionDueAt?: string,
   ) {
     return this.request<TaskJournalItem>(`/tasks/${id}/approval`, {
       method: 'PATCH',
-      body: JSON.stringify({ decision, resolution, participantId, finalAction }),
+      body: JSON.stringify({ decision, resolution, participantId, finalAction, revisionDueAt }),
     });
   }
 
