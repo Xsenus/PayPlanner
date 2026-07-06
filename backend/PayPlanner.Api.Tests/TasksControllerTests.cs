@@ -647,6 +647,30 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task UpdateStatus_RevisionRequiresFutureDueAt()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author-revision-status@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Клиент статуса доработки");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, result: null);
+        task.DueAt = DateTime.UtcNow.AddDays(-1);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "revision",
+        }, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.Contains("срок", badRequest.Value?.ToString(), StringComparison.OrdinalIgnoreCase);
+
+        var stored = await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id);
+        Assert.Equal("new", stored.Status);
+        Assert.True(stored.DueAt < DateTime.UtcNow);
+    }
+
+    [Fact]
     public async Task UpdateStatus_ReturnsNotFoundForHiddenTask()
     {
         await using var db = await CreateContextAsync();

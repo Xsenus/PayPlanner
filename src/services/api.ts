@@ -4077,10 +4077,10 @@ export class ApiService {
     });
   }
 
-  async updateTaskJournalStatus(id: number, status: TaskJournalStatus, result?: string) {
+  async updateTaskJournalStatus(id: number, status: TaskJournalStatus, result?: string, dueAt?: string) {
     return this.request<TaskJournalItem>(`/tasks/${id}/status`, {
       method: 'PATCH',
-      body: JSON.stringify({ status, result }),
+      body: JSON.stringify({ status, result, dueAt }),
     });
   }
 

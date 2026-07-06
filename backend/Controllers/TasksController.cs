@@ -1499,6 +1499,13 @@ public class TasksController : ControllerBase
             return BadRequest(new { message = statusValidation });
         }
 
+        var normalizedDueAt = NormalizeUtcInstant(request.DueAt);
+        var revisionDueAtValidation = ValidateRevisionDueAt(nextStatus, normalizedDueAt, DateTime.UtcNow);
+        if (revisionDueAtValidation is not null)
+        {
+            return BadRequest(new { message = revisionDueAtValidation });
+        }
+
         var entity = new TaskJournalItem
         {
             ClientId = binding.ClientId,
@@ -1511,7 +1518,7 @@ public class TasksController : ControllerBase
             AssigneeName = participants.PrimaryAssigneeName,
             AuthorUserId = access.UserId,
             AuthorName = access.DisplayName,
-            DueAt = NormalizeUtcInstant(request.DueAt),
+            DueAt = normalizedDueAt,
             ApprovalDueAt = NormalizeApprovalDueAt(request.ApprovalDueAt),
             PlannedDurationMinutes = NormalizeTaskDuration(request.PlannedDurationMinutes),
             ContractorPaymentEnabled = request.ContractorPaymentEnabled,
@@ -1612,6 +1619,12 @@ public class TasksController : ControllerBase
         var becameCancelled = !string.Equals(entity.Status, "cancelled", StringComparison.OrdinalIgnoreCase)
             && string.Equals(nextStatus, "cancelled", StringComparison.OrdinalIgnoreCase);
         var requestDueAt = NormalizeUtcInstant(request.DueAt);
+        var revisionDueAtValidation = ValidateRevisionDueAt(nextStatus, requestDueAt, DateTime.UtcNow);
+        if (revisionDueAtValidation is not null)
+        {
+            return BadRequest(new { message = revisionDueAtValidation });
+        }
+
         var previousAssigneeUserId = entity.AssigneeUserId;
         var previousAssigneeName = entity.AssigneeName;
         var changeLabels = BuildTaskChangeLabels(entity, request, binding, participants, nextStatus);
@@ -1748,8 +1761,16 @@ public class TasksController : ControllerBase
             && string.Equals(nextStatus, "cancelled", StringComparison.OrdinalIgnoreCase);
         var oldStatus = entity.Status;
         var oldResult = entity.Result;
+        var oldDueAt = entity.DueAt;
+        var requestedDueAt = request.DueAt.HasValue ? NormalizeUtcInstant(request.DueAt.Value) : entity.DueAt;
+        var revisionDueAtValidation = ValidateRevisionDueAt(nextStatus, requestedDueAt, DateTime.UtcNow);
+        if (revisionDueAtValidation is not null)
+        {
+            return BadRequest(new { message = revisionDueAtValidation });
+        }
 
         entity.Status = nextStatus;
+        entity.DueAt = requestedDueAt;
         if (requestedResult is not null
             || (string.Equals(nextStatus, "done", StringComparison.OrdinalIgnoreCase)
                 && string.IsNullOrWhiteSpace(entity.Result)))
@@ -1760,7 +1781,8 @@ public class TasksController : ControllerBase
 
         var statusChanged = !string.Equals(oldStatus, entity.Status, StringComparison.OrdinalIgnoreCase);
         var resultChanged = !string.Equals(NormalizeOptional(oldResult), NormalizeOptional(entity.Result), StringComparison.Ordinal);
-        if (statusChanged || resultChanged)
+        var dueAtChanged = oldDueAt != entity.DueAt;
+        if (statusChanged || resultChanged || dueAtChanged)
         {
             var parts = new List<string>();
             if (statusChanged)
@@ -1773,6 +1795,11 @@ public class TasksController : ControllerBase
                 parts.Add("результат обновлён");
             }
 
+            if (dueAtChanged)
+            {
+                parts.Add($"срок: {FormatHistoryDateTime(oldDueAt)} → {FormatHistoryDateTime(entity.DueAt)}");
+            }
+
             if (approvalQueueRestarted)
             {
                 parts.Add("очередь согласования запущена заново");
@@ -1783,7 +1810,7 @@ public class TasksController : ControllerBase
 
         await SyncContractorPaymentAsync(entity, await ResolveContractorPaymentResultBaseDateAsync(oldStatus, entity.Status, entity.UpdatedAt, ct), ct);
         await _db.SaveChangesAsync(ct);
-        if (statusChanged || resultChanged)
+        if (statusChanged || resultChanged || dueAtChanged)
         {
             var changeLabels = new List<string>();
             if (statusChanged)
@@ -1794,6 +1821,11 @@ public class TasksController : ControllerBase
             if (resultChanged)
             {
                 changeLabels.Add("Результат");
+            }
+
+            if (dueAtChanged)
+            {
+                changeLabels.Add("Срок");
             }
 
             if (approvalQueueRestarted || (!IsApprovalActiveStatus(oldStatus) && IsApprovalActiveStatus(entity.Status)))
@@ -1991,6 +2023,12 @@ public class TasksController : ControllerBase
                 var oldResult = entity.Result;
                 var requestedResult = NormalizeOptional(request.Result);
                 var nextResult = NormalizeCompletionResult(nextStatus, requestedResult ?? entity.Result);
+                var effectiveDueAt = requestDueAt ?? entity.DueAt;
+                if (ValidateRevisionDueAt(nextStatus, effectiveDueAt, now) is not null)
+                {
+                    continue;
+                }
+
                 var bulkAllowAdminForceCompletion = CanAdminForceCompleteTask(access, settings, nextStatus);
                 var statusValidation = ValidateStatusRules(nextStatus, nextResult, entity.Participants, settings.RequireCompletionResult, bulkAllowAdminForceCompletion);
                 if (statusValidation is not null)
@@ -3484,6 +3522,11 @@ public class TasksController : ControllerBase
 
     private static DateTime? NormalizeApprovalDueAt(DateTime? value)
         => value.HasValue && value.Value != default ? NormalizeUtcInstant(value.Value) : null;
+
+    private static string? ValidateRevisionDueAt(string? status, DateTime dueAt, DateTime nowUtc)
+        => string.Equals(status, "revision", StringComparison.OrdinalIgnoreCase) && dueAt <= nowUtc
+            ? "Укажите новый срок доработки позже текущего времени."
+            : null;
 
     private static decimal? NormalizeMoneyAmount(decimal? value)
     {

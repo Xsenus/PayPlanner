@@ -4,4 +4,5 @@ public class UpdateTaskJournalStatusRequest
 {
     public string Status { get; set; } = "new";
     public string? Result { get; set; }
+    public DateTime? DueAt { get; set; }
 }

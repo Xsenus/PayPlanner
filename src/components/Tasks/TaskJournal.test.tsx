@@ -629,6 +629,26 @@ describe('TaskJournal', () => {
     });
   });
 
+  it('sets a new due date when a stale row is returned to revision', async () => {
+    await renderJournal([createTask({
+      status: 'new',
+      dueAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+    })]);
+
+    const statusSelect = screen.getAllByRole('combobox')
+      .find((element) => (element as HTMLSelectElement).value === 'new') as HTMLSelectElement | undefined;
+    expect(statusSelect).toBeTruthy();
+
+    fireEvent.change(statusSelect!, { target: { value: 'revision' } });
+
+    await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(
+      101,
+      'revision',
+      undefined,
+      expect.any(String),
+    ));
+  });
+
   it('opens the modern task card when the global setting is enabled', async () => {
     await renderJournal([createTask()], {
       settings: { taskCardWindowMode: 'modern' },

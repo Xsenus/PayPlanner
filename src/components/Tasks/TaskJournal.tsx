@@ -587,6 +587,10 @@ function getDefaultRevisionDueAtInput(task: TaskJournalItem) {
   return toLocalInputValue(nextDueAt.toISOString());
 }
 
+function isFutureDateTime(value: string) {
+  return new Date(value).getTime() > Date.now();
+}
+
 function fromLocalDateInputValue(value: string) {
   return fromTimeZoneDateTimeInput(`${value}T00:00`, activeTaskJournalTimeZoneId);
 }
@@ -2760,6 +2764,11 @@ export function TaskJournal({
       participants: normalizeParticipants(form, assignees),
     };
 
+    if (normalized.status === 'revision' && !isFutureDateTime(normalized.dueAt)) {
+      toast.error('Для статуса «На доработке» укажите новый срок позже текущего времени.', 'Журнал задач');
+      return;
+    }
+
     try {
       if (taskId) {
         const updated = await apiService.updateTaskJournalItem(taskId, normalized);
@@ -2913,7 +2922,14 @@ export function TaskJournal({
     }
 
     try {
-      await apiService.updateTaskJournalStatus(task.id, nextStatus, undefined);
+      const revisionDueAt = nextStatus === 'revision' && !isFutureDateTime(task.dueAt)
+        ? fromLocalInputValue(getDefaultRevisionDueAtInput(task))
+        : undefined;
+      if (revisionDueAt) {
+        await apiService.updateTaskJournalStatus(task.id, nextStatus, undefined, revisionDueAt);
+      } else {
+        await apiService.updateTaskJournalStatus(task.id, nextStatus, undefined);
+      }
       if (shouldSendToApproval) {
         toast.success('Задача отправлена на согласование.', 'Журнал задач');
       }
