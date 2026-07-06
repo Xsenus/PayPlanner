@@ -143,6 +143,51 @@ function parseOptionalId(value: string | null | undefined): number | undefined {
   return Number.isFinite(id) && id > 0 ? id : undefined;
 }
 
+function normalizeInvoiceNumber(value: string | null | undefined): string {
+  return (value ?? '')
+    .trim()
+    .replace(/^№\s*/i, '')
+    .replace(/\s+/g, '')
+    .toLowerCase();
+}
+
+function matchesInvoiceReference(
+  invoice: Pick<Invoice, 'number' | 'date'>,
+  account: string,
+  accountDate: string,
+): boolean {
+  if (normalizeInvoiceNumber(invoice.number) !== normalizeInvoiceNumber(account)) {
+    return false;
+  }
+
+  const normalizedAccountDate = toDateInputValue(accountDate);
+  if (!normalizedAccountDate) {
+    return true;
+  }
+
+  return toDateInputValue(invoice.date) === normalizedAccountDate;
+}
+
+function paymentMatchesInvoiceReference(
+  payment: Pick<Payment, 'account' | 'accountDate'>,
+  account: string,
+  accountDate: string,
+): boolean {
+  const normalizedAccount = normalizeInvoiceNumber(account);
+  if (!normalizedAccount) {
+    return true;
+  }
+
+  const paymentAccount = normalizeInvoiceNumber(payment.account);
+  if (paymentAccount && paymentAccount !== normalizedAccount) {
+    return false;
+  }
+
+  const normalizedAccountDate = toDateInputValue(accountDate);
+  const paymentAccountDate = toDateInputValue(payment.accountDate);
+  return !normalizedAccountDate || !paymentAccountDate || paymentAccountDate === normalizedAccountDate;
+}
+
 function formatMoneyDisplayValue(value: number | string | null | undefined): string {
   const num =
     typeof value === 'number'
@@ -1055,16 +1100,84 @@ export function PaymentModal({
     }
 
     let cancelled = false;
+    const account = formData.account.trim();
+    const accountDate = formData.accountDate;
+    const clientId = formData.clientId ? parseInt(formData.clientId, 10) : undefined;
+    const legalEntityId = formData.legalEntityId ? parseInt(formData.legalEntityId, 10) : undefined;
+    const caseId = formData.clientCaseId ? parseInt(formData.clientCaseId, 10) : undefined;
     setInstallmentPaymentsLoading(true);
     setInstallmentPaymentsError(null);
 
-    apiService
-      .getPaymentsV2({ invoiceId, type: 'Income', pageSize: 100, sortBy: 'date', sortDir: 'asc' })
+    const resolveInstallmentInvoiceId = async () => {
+      if (!account || (!clientId && !legalEntityId)) {
+        return invoiceId;
+      }
+
+      try {
+        const response = await apiService.getInvoices({
+          clientId,
+          legalEntityId,
+          caseId,
+          type: formData.type,
+          search: account,
+          page: 1,
+          pageSize: 20,
+        });
+        if (cancelled) {
+          return invoiceId;
+        }
+
+        const match = (response.items ?? [])
+          .filter((item) => typeof item.invoiceEntityId === 'number' && item.invoiceEntityId > 0)
+          .find((item) => matchesInvoiceReference(item, account, accountDate));
+        const canonicalId = match?.invoiceEntityId;
+        if (!match || !canonicalId || canonicalId <= 0) {
+          return invoiceId;
+        }
+
+        setInvoiceOptions((prev) => {
+          if (prev.some((item) => item.invoiceEntityId === canonicalId)) {
+            return prev;
+          }
+
+          return [match, ...prev];
+        });
+
+        if (canonicalId !== invoiceId) {
+          setFormData((prev) => {
+            if (prev.invoiceId !== String(invoiceId)) {
+              return prev;
+            }
+
+            if (!matchesInvoiceReference({ number: account, date: accountDate }, prev.account, prev.accountDate)) {
+              return prev;
+            }
+
+            return {
+              ...prev,
+              invoiceId: String(canonicalId),
+              account: match.number,
+              accountDate: toDateInputValue(match.date) || prev.accountDate,
+            };
+          });
+        }
+
+        return canonicalId;
+      } catch {
+        return invoiceId;
+      }
+    };
+
+    resolveInstallmentInvoiceId()
+      .then((resolvedInvoiceId) =>
+        apiService.getPaymentsV2({ invoiceId: resolvedInvoiceId, type: 'Income', pageSize: 100, sortBy: 'date', sortDir: 'asc' }),
+      )
       .then((result) => {
         if (cancelled) return;
 
         const activeItems = (result.items ?? []).filter((item) => item.status !== 'Cancelled');
         const items = activeItems
+          .filter((item) => paymentMatchesInvoiceReference(item, account, accountDate))
           .filter((item) => isInstallmentPaymentCandidate(item, activeItems))
           .filter((item) => resolvePaymentOutstandingAmount(item) > 0.005)
           .sort((a, b) => {
@@ -1095,7 +1208,7 @@ export function PaymentModal({
     return () => {
       cancelled = true;
     };
-  }, [formData.invoiceId, isOpen, payment?.id]);
+  }, [formData.account, formData.accountDate, formData.clientCaseId, formData.clientId, formData.invoiceId, formData.legalEntityId, formData.type, isOpen, payment?.id]);
 
   useEffect(() => {
     if (!isOpen) return;

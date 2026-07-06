@@ -1819,6 +1819,183 @@ describe('PaymentModal integration', () => {
     );
   });
 
+  it('resolves visible account before loading overpayment installment targets', async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    getInvoicesMock.mockResolvedValue({
+      items: [
+        {
+          id: 3003,
+          invoiceEntityId: 3,
+          number: '3',
+          date: '2026-01-19',
+          dueDate: '2026-01-19',
+          amount: 90_000,
+          type: 'Income',
+          status: 'Pending',
+          isPaid: false,
+          clientId: 69,
+          createdAt: '2026-01-19T00:00:00Z',
+        },
+        {
+          id: 3129,
+          invoiceEntityId: 129,
+          number: '129',
+          date: '2025-08-07',
+          dueDate: '2025-08-07',
+          amount: 90_000,
+          type: 'Income',
+          status: 'Pending',
+          isPaid: false,
+          clientId: 69,
+          createdAt: '2025-08-07T00:00:00Z',
+        },
+      ],
+      total: 2,
+      page: 1,
+      pageSize: 20,
+    });
+    getPaymentsV2Mock.mockImplementation(async (params?: { invoiceId?: number }) => ({
+      items: params?.invoiceId === 3
+        ? [
+            {
+              id: 80,
+              date: '2026-07-15',
+              plannedDate: '2026-07-15',
+              amount: 15_000,
+              paidAmount: 0,
+              outstandingAmount: 15_000,
+              hasPartialPayment: false,
+              status: 'Pending',
+              description: 'Installment for account 3',
+              isPaid: false,
+              notes: '',
+              type: 'Income',
+              invoiceId: 3,
+              account: '3',
+              accountDate: '2026-01-19',
+              documentKind: 'Payment',
+              createdAt: '2026-07-15T00:00:00Z',
+              systemNotes: '[pp:installment-payment] {"sequence":2,"months":6}',
+              rescheduleCount: 0,
+            },
+            {
+              id: 81,
+              date: '2026-08-15',
+              plannedDate: '2026-08-15',
+              amount: 15_000,
+              paidAmount: 0,
+              outstandingAmount: 15_000,
+              hasPartialPayment: false,
+              status: 'Pending',
+              description: 'Installment for account 3',
+              isPaid: false,
+              notes: '',
+              type: 'Income',
+              invoiceId: 3,
+              account: '3',
+              accountDate: '2026-01-19',
+              documentKind: 'Payment',
+              createdAt: '2026-08-15T00:00:00Z',
+              systemNotes: '[pp:installment-payment] {"sequence":3,"months":6}',
+              rescheduleCount: 0,
+            },
+          ]
+        : [
+            {
+              id: 179,
+              date: '2026-07-30',
+              plannedDate: '2026-07-30',
+              amount: 15_000,
+              paidAmount: 0,
+              outstandingAmount: 15_000,
+              hasPartialPayment: false,
+              status: 'Pending',
+              description: 'Installment for account 129',
+              isPaid: false,
+              notes: '',
+              type: 'Income',
+              invoiceId: 129,
+              account: '129',
+              accountDate: '2025-08-07',
+              documentKind: 'Payment',
+              createdAt: '2026-07-30T00:00:00Z',
+              systemNotes: '[pp:installment-payment] {"sequence":2,"months":6}',
+              rescheduleCount: 0,
+            },
+          ],
+      total: 2,
+      page: 1,
+      pageSize: 100,
+      summary: {},
+    }));
+
+    render(
+      <PaymentModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        payment={{
+          id: 79,
+          date: '2026-06-30',
+          plannedDate: '2026-06-30',
+          amount: 15_000,
+          paidAmount: 0,
+          outstandingAmount: 15_000,
+          hasPartialPayment: false,
+          status: 'Pending',
+          description: 'Current installment with stale invoice link',
+          isPaid: false,
+          paidDate: '',
+          lastPaymentDate: null,
+          notes: '',
+          clientId: 69,
+          clientCaseId: 501,
+          type: 'Income',
+          invoiceId: 129,
+          account: '3',
+          accountDate: '2026-01-19',
+          documentKind: 'Payment',
+          createdAt: '2026-06-30T00:00:00Z',
+          systemNotes: '[pp:installment-payment] {"sequence":1,"months":6}',
+          rescheduleCount: 0,
+        }}
+        casesPrefetch={[{ id: 501, title: 'Case 501', status: 'Open', clientId: 69, createdAt: '2026-03-01T00:00:00Z' }]}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(getPaymentsV2Mock).toHaveBeenCalledWith(expect.objectContaining({ invoiceId: 3 })),
+    );
+    expect(getPaymentsV2Mock).not.toHaveBeenCalledWith(expect.objectContaining({ invoiceId: 129 }));
+
+    const paidAmountInput = document.body.querySelector('input[name="paidAmount"]') as HTMLInputElement | null;
+    expect(paidAmountInput).not.toBeNull();
+    fireEvent.change(paidAmountInput!, { target: { value: '17000' } });
+    fireEvent.blur(paidAmountInput!);
+
+    const nextInstallmentRadio = document.body.querySelector('input[value="NextInstallment"]') as HTMLInputElement | null;
+    expect(nextInstallmentRadio).not.toBeNull();
+    fireEvent.click(nextInstallmentRadio!);
+
+    expect(await screen.findByText('#81')).toBeTruthy();
+    expect(screen.queryByText('#179')).toBeNull();
+    fireEvent.click(screen.getByText('#81'));
+    const selectButtons = screen.getAllByRole('button', { name: /Выбрать/i });
+    fireEvent.click(selectButtons[selectButtons.length - 1]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 79,
+        invoiceId: 3,
+        overpaymentHandling: 'NextInstallment',
+        overpaymentTargetPaymentId: 81,
+      }),
+    );
+  });
+
   it('transfers an existing partial payment remainder through the atomic handler', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     const onCreateRemainder = vi.fn().mockResolvedValue(undefined);
