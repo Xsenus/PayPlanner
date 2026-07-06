@@ -48,11 +48,15 @@ public sealed class PushSubscriptionsController : ControllerBase
         }
 
         var subscriptions = await _context.UserPushSubscriptions
-            .AsNoTracking()
             .Where(item => item.UserId == userId.Value)
             .OrderByDescending(item => item.IsActive)
             .ThenByDescending(item => item.LastSeenAt ?? item.UpdatedAt)
             .ToListAsync(ct);
+
+        if (RevokeInvalidStoredSubscriptions(subscriptions))
+        {
+            await _context.SaveChangesAsync(ct);
+        }
 
         return Ok(subscriptions.Select(Map).ToList());
     }
@@ -64,6 +68,8 @@ public sealed class PushSubscriptionsController : ControllerBase
         {
             return Forbid();
         }
+
+        await RevokeInvalidStoredSubscriptionsAsync(ct);
 
         var status = _webPushNotificationService.GetPublicKeyStatus();
         var totalSubscriptionsCount = await _context.UserPushSubscriptions.AsNoTracking().CountAsync(ct);
@@ -223,6 +229,30 @@ public sealed class PushSubscriptionsController : ControllerBase
         subscription.IsActive = false;
         subscription.UpdatedAt = now;
         subscription.RevokedAt ??= now;
+    }
+
+    private async Task RevokeInvalidStoredSubscriptionsAsync(CancellationToken ct)
+    {
+        var subscriptions = await _context.UserPushSubscriptions
+            .Where(item => item.IsActive && item.RevokedAt == null && item.LastErrorAt != null)
+            .ToListAsync(ct);
+
+        if (RevokeInvalidStoredSubscriptions(subscriptions))
+        {
+            await _context.SaveChangesAsync(ct);
+        }
+    }
+
+    private static bool RevokeInvalidStoredSubscriptions(IReadOnlyCollection<UserPushSubscription> subscriptions)
+    {
+        var now = DateTime.UtcNow;
+        var changed = false;
+        foreach (var subscription in subscriptions)
+        {
+            changed |= WebPushSubscriptionHealth.TryRevokeInvalidSubscription(subscription, now);
+        }
+
+        return changed;
     }
 
     private static UserPushSubscriptionDto Map(UserPushSubscription item)

@@ -136,6 +136,74 @@ public class PushSubscriptionsControllerTests
     }
 
     [Fact]
+    public async Task GetSubscriptions_DeactivatesStoredVapidMismatchSubscription()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "push-stale@example.com", "user");
+        var now = DateTime.UtcNow;
+        db.UserPushSubscriptions.Add(new UserPushSubscription
+        {
+            UserId = user.Id,
+            Endpoint = "https://push.example/stale-vapid",
+            P256dh = "p256dh",
+            Auth = "auth",
+            Browser = "Chrome",
+            Platform = "Windows",
+            IsActive = true,
+            CreatedAt = now.AddDays(-2),
+            UpdatedAt = now.AddDays(-1),
+            LastSeenAt = now.AddDays(-1),
+            LastErrorAt = now.AddHours(-2),
+            LastError = "Received unexpected response code: 403. Details: the VAPID credentials in the authorization header do not correspond to the credentials used to create the subscriptions.",
+        });
+        await db.SaveChangesAsync();
+
+        var subscriptions = AssertOk<IReadOnlyList<UserPushSubscriptionDto>>(
+            await CreateController(db, user.Id).GetSubscriptions(CancellationToken.None));
+
+        var listed = Assert.Single(subscriptions);
+        Assert.False(listed.IsActive);
+        Assert.NotNull(listed.RevokedAt);
+
+        var stored = await db.UserPushSubscriptions.SingleAsync();
+        Assert.False(stored.IsActive);
+        Assert.NotNull(stored.RevokedAt);
+    }
+
+    [Fact]
+    public async Task GetDiagnostics_DeactivatesStoredExpiredSubscriptionBeforeCounting()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateUserAsync(db, "push-admin@example.com", "admin");
+        var user = await CreateUserAsync(db, "push-expired@example.com", "user");
+        var now = DateTime.UtcNow;
+        db.UserPushSubscriptions.Add(new UserPushSubscription
+        {
+            UserId = user.Id,
+            Endpoint = "https://push.example/expired",
+            P256dh = "p256dh",
+            Auth = "auth",
+            IsActive = true,
+            CreatedAt = now.AddDays(-2),
+            UpdatedAt = now.AddDays(-1),
+            LastErrorAt = now.AddHours(-2),
+            LastError = "Subscription no longer valid: push subscription has unsubscribed or expired.",
+        });
+        await db.SaveChangesAsync();
+
+        var diagnostics = AssertOk<WebPushDiagnosticsDto>(
+            await CreateController(db, admin.Id).GetDiagnostics(CancellationToken.None));
+
+        Assert.Equal(1, diagnostics.TotalSubscriptionsCount);
+        Assert.Equal(0, diagnostics.ActiveSubscriptionsCount);
+        Assert.Equal(1, diagnostics.RevokedSubscriptionsCount);
+
+        var stored = await db.UserPushSubscriptions.SingleAsync();
+        Assert.False(stored.IsActive);
+        Assert.NotNull(stored.RevokedAt);
+    }
+
+    [Fact]
     public async Task GetDiagnostics_UsesNotificationViewPermission()
     {
         await using var db = await CreateContextAsync();
