@@ -204,6 +204,54 @@ public class PushSubscriptionsControllerTests
     }
 
     [Fact]
+    public async Task GetDiagnostics_HidesStaleInvalidDeliveryErrorAfterRevokingSubscription()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateUserAsync(db, "push-admin-stale-delivery@example.com", "admin");
+        var user = await CreateUserAsync(db, "push-user-stale-delivery@example.com", "user");
+        var now = DateTime.UtcNow;
+        db.UserPushSubscriptions.Add(new UserPushSubscription
+        {
+            UserId = user.Id,
+            Endpoint = "https://push.example/stale-delivery",
+            P256dh = "p256dh",
+            Auth = "auth",
+            IsActive = true,
+            CreatedAt = now.AddDays(-2),
+            UpdatedAt = now.AddHours(-3),
+            LastSeenAt = now.AddHours(-3),
+        });
+        db.NotificationDeliveries.Add(new NotificationDelivery
+        {
+            EventKey = "push:stale-vapid",
+            Channel = NotificationChannels.WebPush,
+            SenderName = "Web Push",
+            RecipientUserId = user.Id,
+            RecipientAddress = "https://push.example/stale-delivery",
+            Subject = "Failed",
+            Status = NotificationDeliveryStatus.Failed,
+            Error = "Received unexpected response code: 403. Details: the VAPID credentials in the authorization header do not correspond to the credentials used to create the subscriptions.",
+            CreatedAt = now.AddMinutes(-5),
+        });
+        await db.SaveChangesAsync();
+
+        var diagnostics = AssertOk<WebPushDiagnosticsDto>(
+            await CreateController(db, admin.Id).GetDiagnostics(CancellationToken.None));
+
+        Assert.Equal(1, diagnostics.TotalSubscriptionsCount);
+        Assert.Equal(0, diagnostics.ActiveSubscriptionsCount);
+        Assert.Equal(1, diagnostics.RevokedSubscriptionsCount);
+        Assert.Null(diagnostics.LastFailedDeliveryAt);
+        Assert.Null(diagnostics.LastDeliveryError);
+
+        var stored = await db.UserPushSubscriptions.SingleAsync();
+        Assert.False(stored.IsActive);
+        Assert.NotNull(stored.RevokedAt);
+        Assert.NotNull(stored.LastErrorAt);
+        Assert.Contains("VAPID credentials", stored.LastError, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task GetDiagnostics_UsesNotificationViewPermission()
     {
         await using var db = await CreateContextAsync();

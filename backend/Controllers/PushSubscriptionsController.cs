@@ -95,12 +95,20 @@ public sealed class PushSubscriptionsController : ControllerBase
             .Select(item => (DateTime?)(item.SentAt ?? item.CreatedAt))
             .FirstOrDefaultAsync(ct);
 
-        var lastFailedDelivery = await _context.NotificationDeliveries
+        var recentFailedDeliveries = await _context.NotificationDeliveries
             .AsNoTracking()
             .Where(item => item.Channel == NotificationChannels.WebPush && item.Status == NotificationDeliveryStatus.Failed)
             .OrderByDescending(item => item.CreatedAt)
-            .Select(item => new { item.CreatedAt, item.Error })
-            .FirstOrDefaultAsync(ct);
+            .Select(item => new { item.CreatedAt, item.RecipientAddress, item.Error })
+            .Take(50)
+            .ToListAsync(ct);
+        var activeEndpoints = await activeSubscriptionsQuery
+            .Select(item => item.Endpoint)
+            .ToListAsync(ct);
+        var activeEndpointSet = activeEndpoints.ToHashSet(StringComparer.Ordinal);
+        var lastFailedDelivery = recentFailedDeliveries.FirstOrDefault(item =>
+            !WebPushSubscriptionHealth.IsInvalidSubscriptionError(item.Error)
+            || activeEndpointSet.Contains(item.RecipientAddress));
 
         return Ok(new WebPushDiagnosticsDto
         {
@@ -237,7 +245,43 @@ public sealed class PushSubscriptionsController : ControllerBase
             .Where(item => item.IsActive && item.RevokedAt == null && item.LastErrorAt != null)
             .ToListAsync(ct);
 
-        if (RevokeInvalidStoredSubscriptions(subscriptions))
+        var changed = RevokeInvalidStoredSubscriptions(subscriptions);
+
+        var failedDeliveries = await _context.NotificationDeliveries
+            .AsNoTracking()
+            .Where(item => item.Channel == NotificationChannels.WebPush
+                && item.Status == NotificationDeliveryStatus.Failed
+                && item.RecipientAddress != string.Empty)
+            .OrderByDescending(item => item.CreatedAt)
+            .Select(item => new { item.RecipientAddress, item.Error })
+            .Take(500)
+            .ToListAsync(ct);
+        var invalidEndpointErrors = failedDeliveries
+            .Where(item => WebPushSubscriptionHealth.IsInvalidSubscriptionError(item.Error))
+            .GroupBy(item => item.RecipientAddress, StringComparer.Ordinal)
+            .ToDictionary(item => item.Key, item => item.First().Error, StringComparer.Ordinal);
+        if (invalidEndpointErrors.Count > 0)
+        {
+            var invalidEndpoints = invalidEndpointErrors.Keys.ToList();
+            var subscriptionsWithFailedDeliveries = await _context.UserPushSubscriptions
+                .Where(item => item.IsActive && item.RevokedAt == null && invalidEndpoints.Contains(item.Endpoint))
+                .ToListAsync(ct);
+            var now = DateTime.UtcNow;
+            foreach (var subscription in subscriptionsWithFailedDeliveries)
+            {
+                if (!invalidEndpointErrors.TryGetValue(subscription.Endpoint, out var error)
+                    || !WebPushSubscriptionHealth.TryRevokeInvalidSubscription(subscription, now, error))
+                {
+                    continue;
+                }
+
+                subscription.LastErrorAt ??= now;
+                subscription.LastError ??= error;
+                changed = true;
+            }
+        }
+
+        if (changed)
         {
             await _context.SaveChangesAsync(ct);
         }
