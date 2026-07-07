@@ -789,7 +789,7 @@ public class SystemJobsControllerTests
     }
 
     [Fact]
-    public async Task NotificationRetrySchedulerService_RetriesFailedWebPushDeliveries()
+    public async Task NotificationRetrySchedulerService_RetriesOversizedWebPushDeliveries()
     {
         await using var scope = await CreateDbScopeAsync();
         var now = DateTime.UtcNow;
@@ -822,7 +822,7 @@ public class SystemJobsControllerTests
             Subject = "Retry Web Push",
             BodyPreview = "Retry delivery",
             Status = NotificationDeliveryStatus.Failed,
-            Error = "Temporary push failure",
+            Error = "Bad Request. Details: binary data passed in the request must be less than 4096 bytes.",
             CreatedAt = now.AddMinutes(-30),
         });
         scope.Db.UserPushSubscriptions.Add(new UserPushSubscription

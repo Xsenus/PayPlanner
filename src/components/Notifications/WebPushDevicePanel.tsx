@@ -54,6 +54,24 @@ function formatDateTime(value?: string | null) {
   }
 }
 
+function isLastWebPushDeliveryFailed(diagnostics?: WebPushDiagnosticsDto | null) {
+  if (!diagnostics?.lastFailedDeliveryAt) {
+    return false;
+  }
+
+  if (!diagnostics.lastSuccessfulDeliveryAt) {
+    return true;
+  }
+
+  const failedAt = Date.parse(diagnostics.lastFailedDeliveryAt);
+  const successfulAt = Date.parse(diagnostics.lastSuccessfulDeliveryAt);
+  if (Number.isNaN(failedAt) || Number.isNaN(successfulAt)) {
+    return true;
+  }
+
+  return failedAt > successfulAt;
+}
+
 function formatRealtimeStatus(status: RealtimeNotificationConnectionStatus) {
   switch (status) {
     case 'connected':
@@ -96,6 +114,7 @@ export function WebPushDevicePanel({
     () => webPushStatus?.subscriptions.slice(0, 6) ?? [],
     [webPushStatus],
   );
+  const lastWebPushDeliveryFailed = isLastWebPushDeliveryFailed(webPushDiagnostics);
   const canEnable = webPushStatus?.status !== 'unsupported'
     && webPushStatus?.status !== 'insecure-context'
     && webPushStatus?.status !== 'server-disabled'
@@ -255,7 +274,7 @@ export function WebPushDevicePanel({
             <div className="rounded-lg border border-white bg-white p-2">
               <div className="font-medium text-slate-700">Последняя доставка</div>
               <div className="mt-1 text-slate-500">
-                {webPushDiagnostics?.lastFailedDeliveryAt
+                {lastWebPushDeliveryFailed && webPushDiagnostics?.lastFailedDeliveryAt
                   ? `ошибка: ${formatDateTime(webPushDiagnostics.lastFailedDeliveryAt)}`
                   : formatDateTime(webPushDiagnostics?.lastSuccessfulDeliveryAt)}
               </div>
@@ -264,7 +283,7 @@ export function WebPushDevicePanel({
           {realtimeDiagnostics.lastError ? (
             <p className="mt-2 text-xs text-amber-700">Realtime: {realtimeDiagnostics.lastError}</p>
           ) : null}
-          {webPushDiagnostics?.lastDeliveryError ? (
+          {lastWebPushDeliveryFailed && webPushDiagnostics?.lastDeliveryError ? (
             <p className="mt-1 text-xs text-red-600">Web Push: {webPushDiagnostics.lastDeliveryError}</p>
           ) : null}
           <UserPushHelp />

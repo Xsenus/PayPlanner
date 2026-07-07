@@ -26,7 +26,7 @@ public interface IWebPushNotificationService
 public class WebPushNotificationService : IWebPushNotificationService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-    private const int MaxPayloadBytes = 3800;
+    private const int MaxPayloadBytes = 3000;
     private const string FinancialPushTitle = "Финансовое уведомление PayPlanner";
     private const string FinancialPushBody = "Откройте CRM, чтобы посмотреть детали финансового события после проверки прав доступа.";
 

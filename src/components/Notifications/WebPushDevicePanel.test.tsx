@@ -100,6 +100,29 @@ describe('WebPushDevicePanel', () => {
     expect(screen.getByText(/ещё не проверено/)).toBeTruthy();
   });
 
+  it('hides stale web push error when delivery recovered later', async () => {
+    apiMock.getWebPushDiagnostics.mockResolvedValueOnce({
+      enabled: true,
+      ready: true,
+      publicKeyConfigured: true,
+      privateKeyConfigured: true,
+      subjectConfigured: true,
+      totalSubscriptionsCount: 2,
+      activeSubscriptionsCount: 1,
+      revokedSubscriptionsCount: 1,
+      failedSubscriptionsCount: 1,
+      usersWithActiveSubscriptionsCount: 1,
+      lastSuccessfulDeliveryAt: '2026-06-18T08:10:00Z',
+      lastFailedDeliveryAt: '2026-06-18T08:00:00Z',
+      lastDeliveryError: 'Old network error',
+    });
+
+    render(<WebPushDevicePanel />);
+
+    await screen.findByText('1 активных из 2');
+    expect(screen.queryByText('Web Push: Old network error')).toBeNull();
+  });
+
   it('unlocks the check button when device status check times out', async () => {
     vi.useFakeTimers();
     webPushMock.getWebPushStatus.mockReturnValueOnce(new Promise(() => {}));

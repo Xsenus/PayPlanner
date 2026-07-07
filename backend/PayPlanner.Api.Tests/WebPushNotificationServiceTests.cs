@@ -162,7 +162,7 @@ public class WebPushNotificationServiceTests
 
         await service.SendUserNotificationAsync(notification);
 
-        Assert.True(Encoding.UTF8.GetByteCount(service.CapturedPayload) <= 3800);
+        Assert.True(Encoding.UTF8.GetByteCount(service.CapturedPayload) <= 3000);
         using var payload = JsonDocument.Parse(service.CapturedPayload);
         Assert.EndsWith("...", payload.RootElement.GetProperty("body").GetString(), StringComparison.Ordinal);
     }
