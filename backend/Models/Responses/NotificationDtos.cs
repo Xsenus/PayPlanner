@@ -5,6 +5,7 @@ public class NotificationSettingsDto
     public EmailNotificationSettingsDto Email { get; set; } = new();
     public TelegramNotificationSettingsDto Telegram { get; set; } = new();
     public SmsNotificationSettingsDto Sms { get; set; } = new();
+    public MaxNotificationDiagnosticsDto Max { get; set; } = new();
     public IReadOnlyList<NotificationSenderDto> Senders { get; set; } = Array.Empty<NotificationSenderDto>();
     public IReadOnlyList<NotificationPurposeDto> Purposes { get; set; } = Array.Empty<NotificationPurposeDto>();
     public IReadOnlyList<NotificationTemplateDto> Templates { get; set; } = Array.Empty<NotificationTemplateDto>();
@@ -59,6 +60,20 @@ public class SmsNotificationSettingsDto
     public int DailyLimit { get; set; }
     public int MaxMessageLength { get; set; }
     public string Notes { get; set; } = string.Empty;
+    public string StatusText { get; set; } = string.Empty;
+}
+
+public class MaxNotificationDiagnosticsDto
+{
+    public bool Enabled { get; set; }
+    public bool Ready { get; set; }
+    public bool ApiConfirmed { get; set; }
+    public bool BotConfigured { get; set; }
+    public bool ScenariosConfirmed { get; set; }
+    public IReadOnlyList<string> AllowedEventTypes { get; set; } = Array.Empty<string>();
+    public DateTime? LastSuccessfulDeliveryAt { get; set; }
+    public DateTime? LastFailedDeliveryAt { get; set; }
+    public string? LastDeliveryError { get; set; }
     public string StatusText { get; set; } = string.Empty;
 }
 

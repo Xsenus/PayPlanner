@@ -40,6 +40,52 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task GetSettingsAsync_ReturnsMaxDiagnosticsWithoutEnablingFutureChannel()
+    {
+        await using var db = await CreateContextAsync();
+        db.NotificationDeliveries.AddRange(
+            new NotificationDelivery
+            {
+                EventKey = "max:test:sent",
+                Channel = NotificationChannels.Max,
+                SenderName = "MAX",
+                RecipientAddress = "max-user",
+                Subject = "MAX тест",
+                BodyPreview = "Успешная доставка MAX",
+                Status = NotificationDeliveryStatus.Sent,
+                CreatedAt = new DateTime(2026, 7, 8, 8, 0, 0, DateTimeKind.Utc),
+                SentAt = new DateTime(2026, 7, 8, 8, 1, 0, DateTimeKind.Utc)
+            },
+            new NotificationDelivery
+            {
+                EventKey = "max:test:failed",
+                Channel = NotificationChannels.Max,
+                SenderName = "MAX",
+                RecipientAddress = "max-user",
+                Subject = "MAX тест",
+                BodyPreview = "Ошибка доставки MAX",
+                Status = NotificationDeliveryStatus.Failed,
+                Error = "MAX API не настроен",
+                CreatedAt = new DateTime(2026, 7, 8, 9, 0, 0, DateTimeKind.Utc)
+            });
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+
+        var settings = await service.GetSettingsAsync();
+
+        Assert.False(settings.Max.Enabled);
+        Assert.False(settings.Max.Ready);
+        Assert.False(settings.Max.ApiConfirmed);
+        Assert.False(settings.Max.BotConfigured);
+        Assert.False(settings.Max.ScenariosConfirmed);
+        Assert.Empty(settings.Max.AllowedEventTypes);
+        Assert.Equal(new DateTime(2026, 7, 8, 8, 1, 0, DateTimeKind.Utc), settings.Max.LastSuccessfulDeliveryAt);
+        Assert.Equal(new DateTime(2026, 7, 8, 9, 0, 0, DateTimeKind.Utc), settings.Max.LastFailedDeliveryAt);
+        Assert.Equal("MAX API не настроен", settings.Max.LastDeliveryError);
+        Assert.Contains("не подтверждены", settings.Max.StatusText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task SmsChannel_IsSkippedAndLoggedWhenProviderIsDisabled()
     {
         await using var db = await CreateContextAsync();

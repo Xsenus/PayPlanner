@@ -138,6 +138,7 @@ public sealed class NotificationService : INotificationService
                     StatusText = "SMS-уведомления отключены: SMS-сервис не подключен."
                 }
                 : await _smsService.GetSettingsAsync(cancellationToken),
+            Max = await BuildMaxDiagnosticsAsync(cancellationToken),
             Senders = senders.Select(sender => MapSender(sender, subscriptionCounts.GetValueOrDefault(sender.Id))).ToList(),
             Purposes = PurposeDefinitions.Select(item => new NotificationPurposeDto
             {
@@ -146,6 +147,36 @@ public sealed class NotificationService : INotificationService
                 Description = item.Description
             }).ToList(),
             Templates = await GetTemplatesAsync(cancellationToken)
+        };
+    }
+
+    private async Task<MaxNotificationDiagnosticsDto> BuildMaxDiagnosticsAsync(CancellationToken cancellationToken)
+    {
+        var lastSuccessfulDeliveryAt = await _context.NotificationDeliveries
+            .AsNoTracking()
+            .Where(item => item.Channel == NotificationChannels.Max && item.Status == NotificationDeliveryStatus.Sent)
+            .OrderByDescending(item => item.SentAt ?? item.CreatedAt)
+            .Select(item => item.SentAt ?? item.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+        var lastFailedDelivery = await _context.NotificationDeliveries
+            .AsNoTracking()
+            .Where(item => item.Channel == NotificationChannels.Max && item.Status == NotificationDeliveryStatus.Failed)
+            .OrderByDescending(item => item.CreatedAt)
+            .Select(item => new { item.CreatedAt, item.Error })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return new MaxNotificationDiagnosticsDto
+        {
+            Enabled = false,
+            Ready = false,
+            ApiConfirmed = false,
+            BotConfigured = false,
+            ScenariosConfirmed = false,
+            AllowedEventTypes = Array.Empty<string>(),
+            LastSuccessfulDeliveryAt = lastSuccessfulDeliveryAt == default ? null : lastSuccessfulDeliveryAt,
+            LastFailedDeliveryAt = lastFailedDelivery?.CreatedAt,
+            LastDeliveryError = lastFailedDelivery?.Error,
+            StatusText = "MAX-уведомления не включены: API, бот и сценарии использования еще не подтверждены заказчиком."
         };
     }
 

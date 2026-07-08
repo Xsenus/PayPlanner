@@ -956,6 +956,19 @@ export interface SmsNotificationSettingsDto {
   statusText: string;
 }
 
+export interface MaxNotificationDiagnosticsDto {
+  enabled: boolean;
+  ready: boolean;
+  apiConfirmed: boolean;
+  botConfigured: boolean;
+  scenariosConfirmed: boolean;
+  allowedEventTypes: string[];
+  lastSuccessfulDeliveryAt?: string | null;
+  lastFailedDeliveryAt?: string | null;
+  lastDeliveryError?: string | null;
+  statusText: string;
+}
+
 export interface WebPushPublicKeyDto {
   enabled: boolean;
   ready: boolean;
@@ -1063,6 +1076,7 @@ export interface NotificationSettingsDto {
   email: EmailNotificationSettingsDto;
   telegram: TelegramNotificationSettingsDto;
   sms: SmsNotificationSettingsDto;
+  max: MaxNotificationDiagnosticsDto;
   senders: NotificationSenderDto[];
   purposes: NotificationPurposeDto[];
   templates: NotificationTemplateDto[];

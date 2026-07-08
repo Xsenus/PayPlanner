@@ -1111,6 +1111,8 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
             onSave={saveSmsSettings}
           />
 
+          <MaxDiagnosticsPanel settings={settings} />
+
           <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
@@ -1817,6 +1819,79 @@ function SmsSettingsPanel({
           <Save className={`h-4 w-4 ${saving ? 'animate-pulse' : ''}`} />
           Сохранить SMS
         </button>
+      </div>
+    </div>
+  );
+}
+
+function MaxDiagnosticsPanel({ settings }: { settings: NotificationSettingsDto | null }) {
+  const max = settings?.max;
+  const pendingItems = [
+    { label: 'API MAX', ready: Boolean(max?.apiConfirmed) },
+    { label: 'Бот', ready: Boolean(max?.botConfigured) },
+    { label: 'Сценарии', ready: Boolean(max?.scenariosConfirmed) },
+  ];
+
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <Bot className="h-5 w-5 text-violet-600" />
+            <h4 className="text-base font-semibold text-gray-900">MAX messenger</h4>
+          </div>
+          <p className="mt-1 max-w-3xl text-sm text-gray-500">
+            Диагностика будущего канала MAX. Пока API и сценарии не подтверждены, CRM не отправляет сообщения в MAX.
+          </p>
+        </div>
+        <span className={'rounded-full border px-3 py-1 text-xs font-semibold ' + statusClass(Boolean(max?.ready), Boolean(max?.enabled))}>
+          {max?.ready ? 'Готово' : max?.enabled ? 'Требуется настройка' : 'Запланирован'}
+        </span>
+      </div>
+
+      {max?.statusText ? (
+        <div className="mt-4 rounded-xl border border-violet-100 bg-violet-50 px-3 py-2 text-sm text-violet-800">
+          {max.statusText}
+        </div>
+      ) : null}
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+          <div className="text-xs font-semibold uppercase text-gray-500">Готовность</div>
+          <div className="mt-2 space-y-1 text-sm text-gray-700">
+            {pendingItems.map((item) => (
+              <div key={item.label} className="flex items-center justify-between gap-2">
+                <span>{item.label}</span>
+                <span className={item.ready ? 'font-semibold text-emerald-700' : 'font-semibold text-amber-700'}>
+                  {item.ready ? 'готово' : 'ждет решения'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+          <div className="text-xs font-semibold uppercase text-gray-500">События</div>
+          <div className="mt-2 text-sm text-gray-700">
+            {max?.allowedEventTypes?.length ? String(max.allowedEventTypes.length) + ' разрешено' : 'пока не выбраны'}
+          </div>
+          <div className="mt-1 text-xs text-gray-500">доступные типы определятся после согласования сценариев</div>
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+          <div className="text-xs font-semibold uppercase text-gray-500">Успешная доставка</div>
+          <div className="mt-2 text-sm text-gray-700">{formatDateTime(max?.lastSuccessfulDeliveryAt)}</div>
+          <div className="mt-1 text-xs text-gray-500">после подключения будет видна последняя доставка</div>
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+          <div className="text-xs font-semibold uppercase text-gray-500">Ошибки</div>
+          <div className="mt-2 text-sm text-gray-700">{formatDateTime(max?.lastFailedDeliveryAt)}</div>
+          {max?.lastDeliveryError ? (
+            <div className="mt-1 truncate text-xs text-red-600" title={max.lastDeliveryError}>
+              {max.lastDeliveryError}
+            </div>
+          ) : (
+            <div className="mt-1 text-xs text-gray-500">ошибок доставки пока нет</div>
+          )}
+        </div>
       </div>
     </div>
   );
