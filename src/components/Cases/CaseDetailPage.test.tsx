@@ -2038,6 +2038,21 @@ describe('CaseDetailPage', () => {
     });
   });
 
+  it('shows an error when a court source check fails from the court tab', async () => {
+    vi.mocked(apiService.runCaseCourtSync).mockRejectedValueOnce(new Error('Судебный источник временно недоступен.'));
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Проверить источник/u }));
+
+    await waitFor(() => {
+      expect(apiService.runCaseCourtSync).toHaveBeenCalledWith(15);
+      expect(screen.getByText('Судебный источник временно недоступен.')).toBeTruthy();
+    });
+  });
+
   it('searches and binds an external court card from the court tab', async () => {
     vi.mocked(apiService.searchCaseCourtSyncCases).mockResolvedValueOnce([
       {
