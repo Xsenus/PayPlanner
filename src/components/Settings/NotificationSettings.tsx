@@ -61,6 +61,17 @@ type SenderForm = {
   profileCommandsText: string;
 };
 
+type SmsSettingsForm = {
+  enabled: boolean;
+  providerKey: string;
+  senderName: string;
+  apiToken: string;
+  keepExistingApiToken: boolean;
+  dailyLimit: number;
+  maxMessageLength: number;
+  notes: string;
+};
+
 const DEFAULT_PURPOSES = ['manualTest'];
 const ROLE_CHANNEL_OPTIONS: Array<{ value: UserNotificationPreferenceChannel; label: string; Icon: typeof Monitor }> = [
   { value: 'inApp', label: 'Центр', Icon: Monitor },
@@ -217,6 +228,19 @@ function createBlankForm(channel: NotificationChannel = 'email', nextOrder = 10)
   };
 }
 
+function smsFormFromSettings(settings?: NotificationSettingsDto | null): SmsSettingsForm {
+  return {
+    enabled: settings?.sms.enabled ?? false,
+    providerKey: settings?.sms.providerKey ?? '',
+    senderName: settings?.sms.senderName ?? '',
+    apiToken: '',
+    keepExistingApiToken: true,
+    dailyLimit: settings?.sms.dailyLimit ?? 100,
+    maxMessageLength: settings?.sms.maxMessageLength ?? 480,
+    notes: settings?.sms.notes ?? '',
+  };
+}
+
 function formFromSender(sender: NotificationSenderDto): SenderForm {
   return {
     id: sender.id,
@@ -251,7 +275,9 @@ function formFromSender(sender: NotificationSenderDto): SenderForm {
 }
 
 function channelLabel(channel: NotificationChannel) {
-  return channel === 'telegram' ? 'Telegram' : 'Email';
+  if (channel === 'telegram') return 'Telegram';
+  if (channel === 'sms') return 'SMS';
+  return 'Email';
 }
 
 function channelCatalogIcon(key: string): typeof Monitor {
@@ -291,10 +317,12 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
   const [settings, setSettings] = useState<NotificationSettingsDto | null>(null);
   const [channelCatalog, setChannelCatalog] = useState<NotificationChannelDto[]>([]);
   const [webPushDiagnostics, setWebPushDiagnostics] = useState<WebPushDiagnosticsDto | null>(null);
+  const [smsForm, setSmsForm] = useState<SmsSettingsForm>(() => smsFormFromSettings(null));
   const [form, setForm] = useState<SenderForm>(() => createBlankForm());
   const [route, setRoute] = useState<SenderRoute>(() => readNotificationRoute());
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [smsSaving, setSmsSaving] = useState(false);
   const [emailPolicySaving, setEmailPolicySaving] = useState(false);
   const [templateSaving, setTemplateSaving] = useState(false);
   const [selectedTemplateKey, setSelectedTemplateKey] = useState('');
@@ -325,6 +353,7 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
         apiService.getWebPushDiagnostics().catch(() => null),
       ]);
       setSettings(next);
+      setSmsForm(smsFormFromSettings(next));
       setChannelCatalog(channels);
       setWebPushDiagnostics(pushDiagnostics);
     } catch (error) {
@@ -536,6 +565,32 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
       toast.error(text, 'Уведомления');
     } finally {
       setEmailPolicySaving(false);
+    }
+  };
+
+  const saveSmsSettings = async () => {
+    if (!settings || !canEdit) return;
+
+    setSmsSaving(true);
+    try {
+      const next = await apiService.updateSmsNotificationSettings({
+        enabled: smsForm.enabled,
+        providerKey: smsForm.providerKey.trim(),
+        senderName: smsForm.senderName.trim(),
+        apiToken: smsForm.apiToken,
+        keepExistingApiToken: smsForm.keepExistingApiToken,
+        dailyLimit: smsForm.dailyLimit,
+        maxMessageLength: smsForm.maxMessageLength,
+        notes: smsForm.notes.trim(),
+      });
+      setSettings(next);
+      setSmsForm(smsFormFromSettings(next));
+      toast.success('Настройки SMS-уведомлений сохранены.', 'Уведомления');
+    } catch (error) {
+      const text = extractDisplayErrorMessage(error, 'Не удалось сохранить настройки SMS-уведомлений.');
+      toast.error(text, 'Уведомления');
+    } finally {
+      setSmsSaving(false);
     }
   };
 
@@ -1045,6 +1100,15 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
             )}
             <AdminWebPushGuide />
           </div>
+
+          <SmsSettingsPanel
+            settings={settings}
+            form={smsForm}
+            saving={smsSaving}
+            canEdit={canEdit}
+            setForm={setSmsForm}
+            onSave={saveSmsSettings}
+          />
 
           <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-4">
@@ -1586,6 +1650,173 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function SmsSettingsPanel({
+  settings,
+  form,
+  saving,
+  canEdit,
+  setForm,
+  onSave,
+}: {
+  settings: NotificationSettingsDto | null;
+  form: SmsSettingsForm;
+  saving: boolean;
+  canEdit: boolean;
+  setForm: Dispatch<SetStateAction<SmsSettingsForm>>;
+  onSave: () => void | Promise<void>;
+}) {
+  const sms = settings?.sms;
+
+  return (
+    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <Smartphone className="h-5 w-5 text-blue-600" />
+            <h4 className="text-base font-semibold text-gray-900">SMS-уведомления</h4>
+          </div>
+          <p className="mt-1 max-w-3xl text-sm text-gray-500">
+            Настройки будущего SMS-канала и диагностика готовности. Пока адаптер провайдера не подключен, сообщения не отправляются.
+          </p>
+        </div>
+        <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${statusClass(Boolean(sms?.ready), Boolean(sms?.enabled))}`}>
+          {sms?.ready ? 'Готово' : sms?.enabled ? 'Требуется настройка' : 'Отключено'}
+        </span>
+      </div>
+
+      {sms?.statusText ? (
+        <div className="mt-4 rounded-xl border border-amber-100 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          {sms.statusText}
+        </div>
+      ) : null}
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+          <div className="text-xs font-semibold uppercase text-gray-500">Провайдер</div>
+          <div className="mt-2 text-sm text-gray-700">{sms?.providerKey || 'не выбран'}</div>
+          <div className="mt-1 text-xs text-gray-500">
+            {sms?.providerConfigured ? 'доступы заполнены' : 'нужны провайдер и токен'}
+          </div>
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+          <div className="text-xs font-semibold uppercase text-gray-500">Отправитель</div>
+          <div className="mt-2 text-sm text-gray-700">{sms?.senderName || 'не указан'}</div>
+          <div className="mt-1 text-xs text-gray-500">имя, которое увидит получатель</div>
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+          <div className="text-xs font-semibold uppercase text-gray-500">Лимиты</div>
+          <div className="mt-2 text-sm text-gray-700">{sms?.dailyLimit ?? form.dailyLimit} в день</div>
+          <div className="mt-1 text-xs text-gray-500">до {sms?.maxMessageLength ?? form.maxMessageLength} символов</div>
+        </div>
+        <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+          <div className="text-xs font-semibold uppercase text-gray-500">Адаптер</div>
+          <div className="mt-2 text-sm text-gray-700">{sms?.adapterConfigured ? 'подключен' : 'не подключен'}</div>
+          <div className="mt-1 text-xs text-gray-500">токен: {sms?.apiTokenSet ? 'сохранен' : 'не указан'}</div>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-4 md:grid-cols-2">
+        <label className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700">
+          <input
+            type="checkbox"
+            checked={form.enabled}
+            disabled={!canEdit || saving}
+            onChange={(event) => setForm((prev) => ({ ...prev, enabled: event.target.checked }))}
+            className="h-4 w-4 rounded border-gray-300 text-blue-600"
+          />
+          Включить SMS-канал после готовности провайдера
+        </label>
+        <label className="text-sm font-medium text-gray-700">
+          Провайдер
+          <select
+            value={form.providerKey}
+            disabled={!canEdit || saving}
+            onChange={(event) => setForm((prev) => ({ ...prev, providerKey: event.target.value }))}
+            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+          >
+            <option value="">Не выбран</option>
+            <option value="sms-ru">SMS.RU</option>
+            <option value="sms-aero">SMS Aero</option>
+            <option value="custom">Другой провайдер</option>
+          </select>
+        </label>
+        <label className="text-sm font-medium text-gray-700">
+          Имя отправителя
+          <input
+            value={form.senderName}
+            disabled={!canEdit || saving}
+            onChange={(event) => setForm((prev) => ({ ...prev, senderName: event.target.value }))}
+            placeholder="PayPlanner"
+            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+          />
+        </label>
+        <label className="text-sm font-medium text-gray-700">
+          API-токен
+          <input
+            type="password"
+            value={form.apiToken}
+            disabled={!canEdit || saving}
+            onChange={(event) => setForm((prev) => ({
+              ...prev,
+              apiToken: event.target.value,
+              keepExistingApiToken: event.target.value.length === 0 ? prev.keepExistingApiToken : false,
+            }))}
+            placeholder={sms?.apiTokenSet ? 'Токен сохранен, оставьте пустым без изменений' : 'Токен провайдера'}
+            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+          />
+        </label>
+        <label className="text-sm font-medium text-gray-700">
+          Дневной лимит
+          <input
+            type="number"
+            min={1}
+            max={100000}
+            value={form.dailyLimit}
+            disabled={!canEdit || saving}
+            onChange={(event) => setForm((prev) => ({ ...prev, dailyLimit: Number(event.target.value) || 100 }))}
+            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+          />
+        </label>
+        <label className="text-sm font-medium text-gray-700">
+          Максимальная длина сообщения
+          <input
+            type="number"
+            min={70}
+            max={1000}
+            value={form.maxMessageLength}
+            disabled={!canEdit || saving}
+            onChange={(event) => setForm((prev) => ({ ...prev, maxMessageLength: Number(event.target.value) || 480 }))}
+            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+          />
+        </label>
+        <label className="text-sm font-medium text-gray-700 md:col-span-2">
+          Заметка администратора
+          <textarea
+            value={form.notes}
+            disabled={!canEdit || saving}
+            onChange={(event) => setForm((prev) => ({ ...prev, notes: event.target.value }))}
+            rows={3}
+            maxLength={500}
+            className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+          />
+        </label>
+      </div>
+
+      <div className="mt-4 flex justify-end">
+        <button
+          type="button"
+          onClick={() => void onSave()}
+          disabled={!canEdit || saving}
+          className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+        >
+          <Save className={`h-4 w-4 ${saving ? 'animate-pulse' : ''}`} />
+          Сохранить SMS
+        </button>
+      </div>
     </div>
   );
 }

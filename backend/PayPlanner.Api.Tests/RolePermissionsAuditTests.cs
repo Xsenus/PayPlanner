@@ -552,6 +552,9 @@ public class RolePermissionsAuditTests
         public Task<NotificationSettingsDto> UpdateTelegramSettingsAsync(PayPlanner.Api.Models.Requests.UpdateTelegramNotificationSettingsRequest request, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
 
+        public Task<NotificationSettingsDto> UpdateSmsSettingsAsync(PayPlanner.Api.Models.Requests.UpdateSmsNotificationSettingsRequest request, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
         public Task<IReadOnlyList<NotificationTemplateDto>> GetTemplatesAsync(CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<NotificationTemplateDto>>(Array.Empty<NotificationTemplateDto>());
 

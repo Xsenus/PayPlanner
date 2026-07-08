@@ -946,8 +946,13 @@ export interface SmsNotificationSettingsDto {
   enabled: boolean;
   ready: boolean;
   providerConfigured: boolean;
+  adapterConfigured: boolean;
+  apiTokenSet: boolean;
   providerKey: string;
   senderName: string;
+  dailyLimit: number;
+  maxMessageLength: number;
+  notes: string;
   statusText: string;
 }
 
@@ -1074,6 +1079,17 @@ export interface UpdateEmailNotificationSettingsRequest {
   fromEmail?: string | null;
   fromName?: string | null;
   enableSsl: boolean;
+}
+
+export interface UpdateSmsNotificationSettingsRequest {
+  enabled: boolean;
+  providerKey?: string | null;
+  senderName?: string | null;
+  apiToken?: string | null;
+  keepExistingApiToken?: boolean;
+  dailyLimit?: number | null;
+  maxMessageLength?: number | null;
+  notes?: string | null;
 }
 
 export interface UpdateNotificationTemplateRequest {
@@ -2935,6 +2951,13 @@ export class ApiService {
 
   async updateEmailNotificationSettings(payload: UpdateEmailNotificationSettingsRequest) {
     return this.request<NotificationSettingsDto>('/notifications/settings/email', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateSmsNotificationSettings(payload: UpdateSmsNotificationSettingsRequest) {
+    return this.request<NotificationSettingsDto>('/notifications/settings/sms', {
       method: 'PUT',
       body: JSON.stringify(payload),
     });

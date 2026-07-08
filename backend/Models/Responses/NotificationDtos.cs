@@ -52,8 +52,13 @@ public class SmsNotificationSettingsDto
     public bool Enabled { get; set; }
     public bool Ready { get; set; }
     public bool ProviderConfigured { get; set; }
+    public bool AdapterConfigured { get; set; }
+    public bool ApiTokenSet { get; set; }
     public string ProviderKey { get; set; } = string.Empty;
     public string SenderName { get; set; } = string.Empty;
+    public int DailyLimit { get; set; }
+    public int MaxMessageLength { get; set; }
+    public string Notes { get; set; } = string.Empty;
     public string StatusText { get; set; } = string.Empty;
 }
 

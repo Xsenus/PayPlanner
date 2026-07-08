@@ -70,6 +70,15 @@ public class NotificationsController : ControllerBase
         return Ok(await _notificationService.UpdateTelegramSettingsAsync(request, ct));
     }
 
+    [HttpPut("settings/sms")]
+    public async Task<ActionResult<NotificationSettingsDto>> UpdateSmsSettings(
+        [FromBody] UpdateSmsNotificationSettingsRequest request,
+        CancellationToken ct)
+    {
+        if (!await CanEditNotificationSettingsAsync(ct)) return Forbid();
+        return Ok(await _notificationService.UpdateSmsSettingsAsync(request, ct));
+    }
+
     [HttpGet("templates")]
     public async Task<ActionResult<IReadOnlyList<NotificationTemplateDto>>> GetTemplates(CancellationToken ct)
     {

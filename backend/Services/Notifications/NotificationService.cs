@@ -133,6 +133,8 @@ public sealed class NotificationService : INotificationService
                     Enabled = false,
                     Ready = false,
                     ProviderConfigured = false,
+                    AdapterConfigured = false,
+                    ApiTokenSet = false,
                     StatusText = "SMS-уведомления отключены: SMS-сервис не подключен."
                 }
                 : await _smsService.GetSettingsAsync(cancellationToken),
@@ -204,6 +206,19 @@ public sealed class NotificationService : INotificationService
         }
 
         await _context.SaveChangesAsync(cancellationToken);
+        return await GetSettingsAsync(cancellationToken);
+    }
+
+    public async Task<NotificationSettingsDto> UpdateSmsSettingsAsync(
+        UpdateSmsNotificationSettingsRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (_smsService is null)
+        {
+            throw new InvalidOperationException("SmsNotificationServiceMissing");
+        }
+
+        await _smsService.UpdateSettingsAsync(request, cancellationToken);
         return await GetSettingsAsync(cancellationToken);
     }
 
@@ -3413,6 +3428,8 @@ public sealed class NotificationService : INotificationService
                     Enabled = false,
                     Ready = false,
                     ProviderConfigured = false,
+                    AdapterConfigured = false,
+                    ApiTokenSet = false,
                     StatusText = "SMS-уведомления отключены: SMS-сервис не подключен."
                 }
                 : await _smsService.GetSettingsAsync(cancellationToken);

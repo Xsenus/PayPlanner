@@ -924,6 +924,9 @@ public sealed record SmsSendResult(
 public interface ISmsNotificationService
 {
     Task<SmsNotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default);
+    Task<SmsNotificationSettingsDto> UpdateSettingsAsync(
+        PayPlanner.Api.Models.Requests.UpdateSmsNotificationSettingsRequest request,
+        CancellationToken cancellationToken = default);
     Task<SmsSendResult> SendMessageAsync(string phoneNumber, string text, CancellationToken cancellationToken = default);
 }
 
@@ -991,6 +994,9 @@ public interface INotificationService
         CancellationToken cancellationToken = default);
     Task<NotificationSettingsDto> UpdateTelegramSettingsAsync(
         PayPlanner.Api.Models.Requests.UpdateTelegramNotificationSettingsRequest request,
+        CancellationToken cancellationToken = default);
+    Task<NotificationSettingsDto> UpdateSmsSettingsAsync(
+        PayPlanner.Api.Models.Requests.UpdateSmsNotificationSettingsRequest request,
         CancellationToken cancellationToken = default);
     Task<IReadOnlyList<NotificationTemplateDto>> GetTemplatesAsync(CancellationToken cancellationToken = default);
     Task<NotificationTemplateDto> UpdateTemplateAsync(

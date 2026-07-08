@@ -4527,6 +4527,9 @@ public class TasksControllerTests
         public Task<NotificationSettingsDto> UpdateTelegramSettingsAsync(UpdateTelegramNotificationSettingsRequest request, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
 
+        public Task<NotificationSettingsDto> UpdateSmsSettingsAsync(UpdateSmsNotificationSettingsRequest request, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
         public Task<IReadOnlyList<NotificationTemplateDto>> GetTemplatesAsync(CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<NotificationTemplateDto>>(Array.Empty<NotificationTemplateDto>());
 

@@ -10,6 +10,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
 using PayPlanner.Api.Services.Notifications;
@@ -69,6 +70,67 @@ public class NotificationServiceTests
         var savedDelivery = await db.NotificationDeliveries.SingleAsync();
         Assert.Equal(delivery.Id, savedDelivery.Id);
         Assert.Equal(NotificationDeliveryStatus.Skipped, savedDelivery.Status);
+    }
+
+    [Fact]
+    public async Task SmsSettings_AreSavedAndKeepDeliveryDisabledUntilProviderAdapterExists()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "sms-configured@example.com", phoneNumber: "+7 (999) 222-33-44");
+        var emailService = new RecordingEmailService();
+        var telegramService = new RecordingTelegramService();
+        var smsService = new SystemSmsNotificationService(db);
+        var service = CreateService(db, emailService, telegramService, smsNotificationService: smsService);
+
+        var settings = await service.UpdateSmsSettingsAsync(new UpdateSmsNotificationSettingsRequest
+        {
+            Enabled = true,
+            ProviderKey = "sms-ru",
+            SenderName = "PayPlanner",
+            ApiToken = "sms-secret-token",
+            KeepExistingApiToken = false,
+            DailyLimit = 250,
+            MaxMessageLength = 320,
+            Notes = "Тестовые настройки SMS"
+        });
+
+        Assert.True(settings.Sms.Enabled);
+        Assert.True(settings.Sms.ProviderConfigured);
+        Assert.True(settings.Sms.ApiTokenSet);
+        Assert.False(settings.Sms.AdapterConfigured);
+        Assert.False(settings.Sms.Ready);
+        Assert.Equal("sms-ru", settings.Sms.ProviderKey);
+        Assert.Equal("PayPlanner", settings.Sms.SenderName);
+        Assert.Equal(250, settings.Sms.DailyLimit);
+        Assert.Equal(320, settings.Sms.MaxMessageLength);
+        Assert.Contains("адаптер", settings.Sms.StatusText, StringComparison.OrdinalIgnoreCase);
+
+        var updated = await service.UpdateSmsSettingsAsync(new UpdateSmsNotificationSettingsRequest
+        {
+            Enabled = true,
+            ProviderKey = "custom",
+            SenderName = "PayPlanner CRM",
+            ApiToken = string.Empty,
+            KeepExistingApiToken = true,
+            DailyLimit = 10,
+            MaxMessageLength = 120
+        });
+
+        Assert.True(updated.Sms.ApiTokenSet);
+        Assert.Equal("custom", updated.Sms.ProviderKey);
+        Assert.Equal("PayPlanner CRM", updated.Sms.SenderName);
+
+        var deliveries = await service.SendToUserAsync(
+            user.Id,
+            new NotificationMessage("SMS тест", "Проверка сохраненных SMS-настроек"),
+            [NotificationChannels.Sms],
+            "sms:test:configured");
+
+        var delivery = Assert.Single(deliveries);
+        Assert.Equal(NotificationChannels.Sms, delivery.Channel);
+        Assert.Equal(NotificationDeliveryStatus.Skipped, delivery.Status);
+        Assert.Equal("+79992223344", delivery.RecipientAddress);
+        Assert.Contains("адаптер", delivery.Error, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

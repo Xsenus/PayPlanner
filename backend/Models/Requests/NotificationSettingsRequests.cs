@@ -21,6 +21,18 @@ public class UpdateTelegramNotificationSettingsRequest
     public bool KeepExistingToken { get; set; } = true;
 }
 
+public class UpdateSmsNotificationSettingsRequest
+{
+    public bool Enabled { get; set; }
+    public string? ProviderKey { get; set; }
+    public string? SenderName { get; set; }
+    public string? ApiToken { get; set; }
+    public bool KeepExistingApiToken { get; set; } = true;
+    public int? DailyLimit { get; set; }
+    public int? MaxMessageLength { get; set; }
+    public string? Notes { get; set; }
+}
+
 public class UpdateNotificationTemplateRequest
 {
     public bool IsEnabled { get; set; } = true;
