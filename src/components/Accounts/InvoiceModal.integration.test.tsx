@@ -1298,6 +1298,188 @@ describe('InvoiceModal integration', () => {
     });
   });
 
+  it('ignores stale reallocation data after switching the cancellation wizard back to unpaid installments only', async () => {
+    const invoice = {
+      id: 1904,
+      invoiceEntityId: 80,
+      number: '80',
+      date: '2026-05-04',
+      dueDate: '2026-07-04',
+      amount: 20000,
+      paidAmount: 10000,
+      outstandingAmount: 10000,
+      type: 'Income',
+      status: 'Processing',
+      workflowStatus: 'PartiallyPaid',
+      clientId: 1,
+      createdAt: '2026-05-04T00:00:00Z',
+      lineItems: [{ name: 'Рассрочка', quantity: 1, unit: 'шт', price: 20000 }],
+    } as unknown as Invoice;
+
+    const paidInstallment = {
+      id: 801,
+      invoiceId: 80,
+      amount: 10000,
+      paidAmount: 10000,
+      outstandingAmount: 0,
+      date: '2026-06-04',
+      plannedDate: '2026-06-04',
+      paidDate: '2026-06-04',
+      type: 'Income',
+      status: 'Completed',
+      isPaid: true,
+      description: 'Рассрочка по счету №80 · платеж 1/2',
+      account: '80',
+      accountDate: '2026-05-04',
+      systemNotes: '[pp:installment-payment] {"sequence":1,"total":20000,"item":{"sequence":1}}',
+    } as unknown as Payment;
+
+    const unpaidInstallment = {
+      id: 802,
+      invoiceId: 80,
+      amount: 10000,
+      paidAmount: 0,
+      outstandingAmount: 10000,
+      date: '2026-07-04',
+      plannedDate: '2026-07-04',
+      type: 'Income',
+      status: 'Pending',
+      isPaid: false,
+      description: 'Рассрочка по счету №80 · платеж 2/2',
+      account: '80',
+      accountDate: '2026-05-04',
+      systemNotes: '[pp:installment-payment] {"sequence":2,"total":20000,"item":{"sequence":2}}',
+    } as unknown as Payment;
+
+    vi.mocked(apiService.cancelInvoice).mockResolvedValue({
+      ...invoice,
+      status: 'Processing',
+      workflowStatus: 'PartiallyPaid',
+      paidAmount: 10000,
+      outstandingAmount: 0,
+    } as Invoice);
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        presentation="page"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[createTestClient(1, 'Клиент с частичной оплатой')]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[paidInstallment, unpaidInstallment]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Отмен[её]н/i }));
+    expect(await screen.findByTestId('invoice-cancel-dialog')).toBeTruthy();
+
+    fireEvent.change(screen.getByTestId('invoice-cancel-reason'), {
+      target: { value: 'Отменяем только остаток рассрочки' },
+    });
+    fireEvent.click(screen.getByLabelText(/Весь счёт и все платежи/i));
+    fireEvent.click(screen.getByTestId('invoice-cancel-money-reallocate'));
+    fireEvent.change(screen.getByTestId('invoice-cancel-target-payment-id'), {
+      target: { value: '2010' },
+    });
+    fireEvent.click(screen.getByLabelText(/Только неоплаченные платежи графика/i));
+
+    expect(screen.queryByText('Что сделать с полученной оплатой')).toBeNull();
+    fireEvent.click(screen.getByTestId('invoice-cancel-submit'));
+
+    await waitFor(() => {
+      expect(apiService.cancelInvoice).toHaveBeenCalledWith(
+        1904,
+        'Отменяем только остаток рассрочки',
+        'Reject',
+        null,
+        null,
+        null,
+        'UnpaidInstallmentsOnly',
+      );
+    });
+  });
+
+  it('does not send a reallocation target after switching the paid invoice cancellation to refund', async () => {
+    const invoice = {
+      id: 1905,
+      invoiceEntityId: 81,
+      number: '81',
+      date: '2026-05-05',
+      dueDate: '2026-05-05',
+      amount: 22000,
+      paidAmount: 22000,
+      outstandingAmount: 0,
+      type: 'Income',
+      status: 'Completed',
+      workflowStatus: 'Paid',
+      clientId: 1,
+      createdAt: '2026-05-05T00:00:00Z',
+      lineItems: [{ name: 'Юридические услуги', quantity: 1, unit: 'шт', price: 22000 }],
+    } as unknown as Invoice;
+
+    vi.mocked(apiService.cancelInvoice).mockResolvedValue({
+      ...invoice,
+      status: 'Cancelled',
+      workflowStatus: 'Cancelled',
+      paidAmount: 0,
+      outstandingAmount: 0,
+    } as Invoice);
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        presentation="page"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[createTestClient(1, 'Клиент со сменой возврата')]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Отмен[её]н/i }));
+    expect(await screen.findByTestId('invoice-cancel-dialog')).toBeTruthy();
+
+    fireEvent.change(screen.getByTestId('invoice-cancel-reason'), {
+      target: { value: 'Меняем зачет на возврат' },
+    });
+    fireEvent.click(screen.getByTestId('invoice-cancel-money-reallocate'));
+    fireEvent.change(screen.getByTestId('invoice-cancel-target-payment-id'), {
+      target: { value: '2020' },
+    });
+    fireEvent.click(screen.getByTestId('invoice-cancel-money-refund'));
+    fireEvent.change(screen.getByTestId('invoice-cancel-refund-source'), {
+      target: { value: 'Card' },
+    });
+    fireEvent.change(screen.getByTestId('invoice-cancel-refund-date'), {
+      target: { value: '2026-05-12' },
+    });
+
+    expect(screen.queryByTestId('invoice-cancel-target-payment-id')).toBeNull();
+    fireEvent.click(screen.getByTestId('invoice-cancel-submit'));
+
+    await waitFor(() => {
+      expect(apiService.cancelInvoice).toHaveBeenCalledWith(
+        1905,
+        'Меняем зачет на возврат',
+        'Refund',
+        null,
+        'Card',
+        '2026-05-12',
+        'All',
+      );
+    });
+  });
+
   it('prompts to align due date with the last installment payment before saving the invoice', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     const invoice = {
