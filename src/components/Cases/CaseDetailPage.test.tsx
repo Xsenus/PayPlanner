@@ -1608,6 +1608,38 @@ describe('CaseDetailPage', () => {
     expect(screen.getByRole('button', { name: /Скачать вложение scan.pdf/u })).toBeTruthy();
   });
 
+  it('shows an error when internal case conversation file upload fails', async () => {
+    const file = new File(['large body'], 'large.pdf', { type: 'application/pdf' });
+    vi.mocked(apiService.addCaseConversationEntry).mockRejectedValueOnce(new Error('Файл вложения не должен превышать 25 МБ.'));
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Переписка' }));
+    fireEvent.change(screen.getByLabelText('Сообщение во внутреннюю переписку дела'), {
+      target: { value: 'Пробую отправить файл.' },
+    });
+    fireEvent.change(screen.getByLabelText('Файлы к сообщению'), {
+      target: { files: [file] },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Отправить/u }));
+
+    expect(await screen.findByText('Файл вложения не должен превышать 25 МБ.')).toBeTruthy();
+    expect(screen.getByText('large.pdf')).toBeTruthy();
+  });
+
+  it('keeps internal case conversation read-only without edit access', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit={false} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Переписка' }));
+
+    expect(await screen.findByText('Проверить документы перед заседанием.')).toBeTruthy();
+    expect(screen.getByText('Переписка доступна только для просмотра.')).toBeTruthy();
+    expect(screen.queryByLabelText('Сообщение во внутреннюю переписку дела')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Отправить/u })).toBeNull();
+  });
+
   it('updates status, stage, priority and responsible from the case card header', async () => {
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
 

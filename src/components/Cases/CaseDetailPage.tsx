@@ -2120,7 +2120,7 @@ export function CaseDetailPage({
   };
 
   const addConversationEntry = async () => {
-    if (!caseItem) return;
+    if (!caseItem || !canEdit) return;
     const text = conversationDraft.trim();
     if (!text) {
       setError('Введите текст сообщения по делу.');
@@ -3633,70 +3633,74 @@ export function CaseDetailPage({
 
           {activeTab === 'conversation' ? (
             <div className="space-y-4">
-              <section className="rounded-xl border border-slate-200 p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Внутренняя переписка</h2>
-                    <p className="mt-1 text-sm text-slate-500">Сообщения видны в контексте этого дела и не смешиваются с общим центром уведомлений.</p>
+              {canEdit ? (
+                <section className="rounded-xl border border-slate-200 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Внутренняя переписка</h2>
+                      <p className="mt-1 text-sm text-slate-500">Сообщения видны в контексте этого дела и не смешиваются с общим центром уведомлений.</p>
+                    </div>
+                    <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-600">
+                      <MessageSquare className="h-4 w-4" /> {conversation.length}
+                    </span>
                   </div>
-                  <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-600">
-                    <MessageSquare className="h-4 w-4" /> {conversation.length}
-                  </span>
-                </div>
-                <textarea
-                  aria-label="Сообщение во внутреннюю переписку дела"
-                  value={conversationDraft}
-                  onChange={(event) => setConversationDraft(event.target.value)}
-                  maxLength={2000}
-                  rows={4}
-                  className="mt-4 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-                  placeholder="Напишите короткое рабочее сообщение по делу для коллег."
-                />
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <input
-                    id="case-conversation-files"
-                    aria-label="Файлы к сообщению"
-                    type="file"
-                    multiple
-                    className="sr-only"
-                    onChange={(event) => setConversationFiles(Array.from(event.target.files ?? []))}
+                  <textarea
+                    aria-label="Сообщение во внутреннюю переписку дела"
+                    value={conversationDraft}
+                    onChange={(event) => setConversationDraft(event.target.value)}
+                    maxLength={2000}
+                    rows={4}
+                    className="mt-4 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                    placeholder="Напишите короткое рабочее сообщение по делу для коллег."
                   />
-                  <label
-                    htmlFor="case-conversation-files"
-                    className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
-                    <Paperclip className="h-4 w-4" /> Файлы
-                  </label>
                   {conversationFiles.length > 0 ? (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {conversationFiles.map((file) => (
+                        <span key={`${file.name}-${file.size}-${file.lastModified}`} className="inline-flex max-w-full items-center gap-2 rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs font-medium text-slate-600">
+                          <FileText className="h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate">{file.name}</span>
+                          <span className="shrink-0 text-slate-400">{formatFileSize(file.size)}</span>
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <input
+                      id="case-conversation-files"
+                      aria-label="Файлы к сообщению"
+                      type="file"
+                      multiple
+                      className="sr-only"
+                      onChange={(event) => setConversationFiles(Array.from(event.target.files ?? []))}
+                    />
+                    <label
+                      htmlFor="case-conversation-files"
+                      className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                      <Paperclip className="h-4 w-4" /> Файлы
+                    </label>
+                    {conversationFiles.length > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => setConversationFiles([])}
+                        className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-50">
+                        <X className="h-4 w-4" /> Очистить
+                      </button>
+                    ) : null}
+                  </div>
+                  <div className="mt-3 flex items-center justify-between gap-3">
+                    <span className="text-xs text-slate-400">{conversationDraft.length}/2000</span>
                     <button
                       type="button"
-                      onClick={() => setConversationFiles([])}
-                      className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-50">
-                      <X className="h-4 w-4" /> Очистить
+                      onClick={() => void addConversationEntry()}
+                      disabled={addingConversationEntry || !conversationDraft.trim()}
+                      className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+                      {addingConversationEntry ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Отправить
                     </button>
-                  ) : null}
-                </div>
-                {conversationFiles.length > 0 ? (
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {conversationFiles.map((file) => (
-                      <span key={`${file.name}-${file.size}-${file.lastModified}`} className="inline-flex max-w-full items-center gap-2 rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs font-medium text-slate-600">
-                        <FileText className="h-3.5 w-3.5 shrink-0" />
-                        <span className="truncate">{file.name}</span>
-                        <span className="shrink-0 text-slate-400">{formatFileSize(file.size)}</span>
-                      </span>
-                    ))}
                   </div>
-                ) : null}
-                <div className="mt-3 flex items-center justify-between gap-3">
-                  <span className="text-xs text-slate-400">{conversationDraft.length}/2000</span>
-                  <button
-                    type="button"
-                    onClick={() => void addConversationEntry()}
-                    disabled={addingConversationEntry || !conversationDraft.trim()}
-                    className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
-                    {addingConversationEntry ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Отправить
-                  </button>
-                </div>
-              </section>
+                </section>
+              ) : (
+                <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">Переписка доступна только для просмотра.</div>
+              )}
               {conversationLoading ? (
                 <LoadingBlock label="Загрузка переписки по делу..." />
               ) : conversation.length === 0 ? (
