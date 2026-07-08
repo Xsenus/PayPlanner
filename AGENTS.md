@@ -45,7 +45,11 @@ After a successful deployment, verify the live environment directly: check the p
 
 When the user asks to create or continue a roadmap, store it under `docs/` as a human-readable Markdown document with statuses, milestones, rationale, checks, and clear definition of done.
 
-Before implementing work that belongs to an existing roadmap, open the relevant roadmap first, check the current status of every related item, and update the roadmap as the work progresses. Use the roadmap status markers consistently:
+Only roadmap files located directly under `docs/` are active working roadmaps. Roadmaps under `docs/archive/roadmaps/` are historical context and must not be used as a source of current tasks, updated, reopened, or continued unless the user explicitly asks to work with a specific archived roadmap. When starting roadmap-driven work, inspect active roadmap files in `docs/` first and ignore archived roadmaps by default.
+
+When a roadmap is large enough to contain several independent workstreams, split it into a short index roadmap plus separate active roadmap files for each block. Each block roadmap must have its own progress summary and can be completed and moved to `docs/archive/roadmaps/` independently.
+
+Before implementing work that belongs to an existing active roadmap, open the relevant roadmap first, check the current status of every related item, and update the roadmap as the work progresses. Use the roadmap status markers consistently:
 
 - `[ ]` not started.
 - `[~]` in progress.
@@ -54,7 +58,11 @@ Before implementing work that belongs to an existing roadmap, open the relevant 
 - `[decision]` requires a user/business decision before implementation.
 - `[acceptance]` requires manual acceptance on real data or environment.
 
+Each active roadmap must include a visible progress summary: total items, completed items, blocked/decision/acceptance items, and completion percentage. Update these numbers whenever roadmap items change status, and mention the same percentage summary in the final response for roadmap work.
+
 Do not mark roadmap items as complete until code, tests, encoding checks, and local database checks required by that item have passed. If a new risk or prerequisite is discovered while working, add it to the roadmap instead of keeping it only in chat.
+
+When a roadmap is fully completed, accepted, or intentionally paused/closed by the user, move it from `docs/` to `docs/archive/roadmaps/` in the same change. After archiving, it is no longer an active source of work unless the user explicitly reopens it.
 
 ## UI Density
 
