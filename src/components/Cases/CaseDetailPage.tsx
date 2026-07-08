@@ -63,7 +63,7 @@ import type {
 } from '../../types';
 import { toRuDate } from '../../utils/dateUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
-import { buildCaseTaskPayload } from '../../utils/caseTaskPayload';
+import { buildCaseTaskPayload, getCaseStageTaskTemplates, type CaseStageTaskTemplate } from '../../utils/caseTaskPayload';
 import { formatDateTimeInTimeZone, fromTimeZoneDateTimeInput, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
 import { normalizeUserTimeZoneId, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
 import type { TaskJournalItem } from '../../utils/taskJournalStore';
@@ -1786,6 +1786,10 @@ export function CaseDetailPage({
     if (taskFilter === 'overdue') return tasks.filter(isOverdueTask);
     return tasks.filter(isActiveTask);
   }, [taskFilter, tasks]);
+  const stageTaskTemplates = useMemo(
+    () => caseItem ? getCaseStageTaskTemplates(caseItem) : [],
+    [caseItem],
+  );
 
   const participantOptions = useMemo(
     () => buildParticipantDirectoryOptions({
@@ -2928,6 +2932,25 @@ export function CaseDetailPage({
     }
   };
 
+  const createStageTaskForCase = async (template: CaseStageTaskTemplate) => {
+    if (!caseItem || !canCreateCaseTask) return;
+
+    setCreatingTask(true);
+    setError(null);
+    try {
+      await apiService.createTaskJournalItem(buildCaseTaskPayload(caseItem, caseTimeZoneId, template));
+      setReloadToken((value) => value + 1);
+      if (canViewTasks) {
+        setActiveTab('tasks');
+      }
+      setNotice(`Задача по этапу «${template.stageLabel}» создана.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось создать задачу по этапу дела.');
+    } finally {
+      setCreatingTask(false);
+    }
+  };
+
   const openOwner = () => {
     if (!caseItem) return;
     if (caseItem.clientId) {
@@ -3322,6 +3345,8 @@ export function CaseDetailPage({
                 filter={taskFilter}
                 onFilterChange={setTaskFilter}
                 onCreateTask={createTaskForCase}
+                stageTaskTemplates={stageTaskTemplates}
+                onCreateStageTask={createStageTaskForCase}
                 creatingTask={creatingTask}
                 canCreateTask={canCreateCaseTask}
               />
@@ -5202,6 +5227,8 @@ function TaskList({
   filter,
   onFilterChange,
   onCreateTask,
+  stageTaskTemplates,
+  onCreateStageTask,
   creatingTask,
   canCreateTask,
 }: {
@@ -5211,6 +5238,8 @@ function TaskList({
   filter: CaseTaskFilter;
   onFilterChange: (filter: CaseTaskFilter) => void;
   onCreateTask: () => void;
+  stageTaskTemplates: CaseStageTaskTemplate[];
+  onCreateStageTask: (template: CaseStageTaskTemplate) => void;
   creatingTask: boolean;
   canCreateTask: boolean;
 }) {
@@ -5251,6 +5280,37 @@ function TaskList({
           </div>
         </div>
       </div>
+      {canCreateTask && stageTaskTemplates.length > 0 ? (
+        <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-blue-700">Подсказки по этапу</h3>
+              <div className="mt-1 text-sm text-slate-600">Создайте типовую задачу с уже заполненными названием, описанием, приоритетом и связью с делом.</div>
+            </div>
+          </div>
+          <div className="mt-3 grid gap-2 lg:grid-cols-2">
+            {stageTaskTemplates.map((template) => (
+              <div key={template.key} className="rounded-lg border border-blue-100 bg-white p-3">
+                <div className="text-xs font-semibold uppercase tracking-[0.12em] text-blue-600">{template.stageLabel}</div>
+                <div className="mt-1 font-semibold text-slate-900">{template.title}</div>
+                <div className="mt-1 line-clamp-2 text-sm text-slate-600">{template.description}</div>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                  <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                    {PRIORITY_LABELS[template.priority]}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void onCreateStageTask(template)}
+                    disabled={creatingTask}
+                    className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+                    {creatingTask ? <Loader2 className="h-4 w-4 animate-spin" /> : <ClipboardPlus className="h-4 w-4" />} Создать по шаблону
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
       {tasks.length === 0 ? <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">По выбранному фильтру задач нет.</div> : null}
       <div className="overflow-x-auto">
         <table className="w-full min-w-[760px] text-left text-sm">

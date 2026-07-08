@@ -1478,6 +1478,31 @@ describe('CaseDetailPage', () => {
     });
   });
 
+  it('creates a stage template task from the case tasks tab', async () => {
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Задачи' }));
+
+    expect(await screen.findByText('Подсказки по этапу')).toBeTruthy();
+    expect(screen.getByText('Подготовиться к заседанию первой инстанции')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /Создать по шаблону/u }));
+
+    await waitFor(() => {
+      expect(apiService.createTaskJournalItem).toHaveBeenCalledWith(expect.objectContaining({
+        clientCaseId: 15,
+        clientId: 12,
+        title: 'Подготовиться к заседанию первой инстанции',
+        priority: 'high',
+        tags: expect.arrayContaining(['суд', 'первая инстанция']),
+        description: expect.stringContaining('Этап: Судебное производство'),
+      }));
+      expect(apiService.createTaskJournalCaseAutomationTask).not.toHaveBeenCalled();
+      expect(apiService.getCaseV2).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it('filters case tasks and creates a task from the tasks tab', async () => {
     vi.mocked(apiService.getTaskJournalItems).mockResolvedValue({
       items: [
