@@ -47,6 +47,16 @@ describe('buildCaseTaskPayload', () => {
     expect(payload.clientCaseId).toBe(15);
   });
 
+  it('keeps pretrial stage templates separate from court stages', () => {
+    const templates = getCaseStageTaskTemplates(createCase({
+      caseType: 'Внесудебное урегулирование',
+      stage: 'Внесудебное производство',
+    }));
+
+    expect(templates.map((item) => item.key)).toEqual(['pretrial-position']);
+    expect(templates[0].title).toBe('Проверить досудебную позицию и доказательства');
+  });
+
   it('falls back to general case task templates when the free-text stage is not recognized', () => {
     const templates = getCaseStageTaskTemplates(createCase({ stage: 'Индивидуальный этап заказчика', caseType: '' }));
 

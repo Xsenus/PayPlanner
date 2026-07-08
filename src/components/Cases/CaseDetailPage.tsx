@@ -63,7 +63,7 @@ import type {
 } from '../../types';
 import { toRuDate } from '../../utils/dateUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
-import { buildCaseTaskPayload, getCaseStageTaskTemplates, type CaseStageTaskTemplate } from '../../utils/caseTaskPayload';
+import { buildCaseTaskPayload, getCaseStageTaskTemplates, isPretrialCaseStage, type CaseStageTaskTemplate } from '../../utils/caseTaskPayload';
 import { formatDateTimeInTimeZone, fromTimeZoneDateTimeInput, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
 import { normalizeUserTimeZoneId, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
 import type { TaskJournalItem } from '../../utils/taskJournalStore';
@@ -1019,6 +1019,10 @@ function hasCaseStageChanged(previousStage?: string | null, nextStage?: string |
 }
 
 function buildCaseStageDeadlineSuggestions(caseItem: ClientCase): CaseStageDeadlineSuggestion[] {
+  if (isPretrialCaseStage(caseItem)) {
+    return [];
+  }
+
   const stageText = [
     normalizeCaseStage(caseItem.stage),
     normalizeCaseStage(caseItem.caseType),
@@ -5883,6 +5887,7 @@ function CourtPanel({
   onCloseProceduralDeadline: (deadline: ClientCaseProceduralDeadline) => void;
 }) {
   const hasCourtBinding = Boolean(caseItem.courtName || caseItem.courtCaseNumber || caseItem.courtUrl);
+  const isPretrialCase = isPretrialCaseStage(caseItem);
   const deadlines = [
     ['Подача заявления', caseItem.claimFiledAt],
     ['Ближайшее заседание', caseItem.nextHearingAt],
@@ -5899,6 +5904,51 @@ function CourtPanel({
   const selectedCourtInstanceMeta = COURT_INSTANCE_TABS.find((item) => item.value === activeCourtInstance) ?? COURT_INSTANCE_TABS[0];
   const selectedCourtEvents = courtEvents.filter((event) => event.courtInstance === activeCourtInstance);
   const courtDirectoryForInstance = courtDirectory.filter((court) => court.instance === activeCourtInstance || (activeCourtInstance === 'supreme' && court.instance === 'supervision'));
+  const [courtSafeModeExpanded, setCourtSafeModeExpanded] = useState(false);
+  const hasCourtInstanceData = courtInstances.some((instance) => Boolean(
+    instance.courtName
+    || instance.courtCaseNumber
+    || instance.courtUrl
+    || instance.judgeName
+    || instance.courtroom
+    || instance.secretaryName
+    || instance.notes
+    || (instance.complaints?.length ?? 0),
+  ));
+  const hasStoredCourtData = hasCourtBinding
+    || hasCourtInstanceData
+    || deadlines.length > 0
+    || courtEvents.length > 0
+    || proceduralDeadlines.length > 0
+    || logs.length > 0
+    || courtParties.length > 0;
+  const showPretrialSafeMode = isPretrialCase && !hasStoredCourtData && !courtSafeModeExpanded;
+
+  if (showPretrialSafeMode) {
+    return (
+      <div className="space-y-4">
+        <section className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div className="min-w-0">
+              <div className="inline-flex items-center gap-2 rounded-full bg-white px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-emerald-700">
+                <Check className="h-3.5 w-3.5" /> Внесудебный режим
+              </div>
+              <h2 className="mt-3 text-lg font-semibold text-emerald-950">Судебные данные сейчас не обязательны</h2>
+              <p className="mt-1 max-w-3xl text-sm text-emerald-900">
+                Дело отмечено как внесудебное, поэтому CRM не просит заполнять суд, номер дела, инстанции, заседания и процессуальные сроки. Если дело перейдет в суд, судебный блок можно открыть вручную или сменить этап дела.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setCourtSafeModeExpanded(true)}
+              className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-300 bg-white px-4 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-100">
+              <Gavel className="h-4 w-4" /> Заполнить судебный блок
+            </button>
+          </div>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">

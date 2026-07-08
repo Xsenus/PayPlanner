@@ -98,6 +98,8 @@ const STAGE_TASK_TEMPLATES: Array<CaseStageTaskTemplate & { aliases: string[] }>
   },
 ];
 
+const PRETRIAL_STAGE_ALIASES = ['внесуд', 'досуд', 'претенз', 'переговор'];
+
 function truncate(value: string, maxLength: number) {
   return value.length > maxLength ? value.slice(0, maxLength - 1).trimEnd() : value;
 }
@@ -126,15 +128,33 @@ function normalizeStageText(value?: string | null) {
   return (value ?? '').trim().toLocaleLowerCase('ru');
 }
 
+function stripStageTemplateAliases({ aliases: _aliases, ...template }: CaseStageTaskTemplate & { aliases: string[] }) {
+  return template;
+}
+
+export function isPretrialCaseStage(caseItem: Pick<ClientCase, 'stage' | 'caseType'>): boolean {
+  const haystack = [
+    normalizeStageText(caseItem.stage),
+    normalizeStageText(caseItem.caseType),
+  ].filter(Boolean).join(' ');
+
+  return PRETRIAL_STAGE_ALIASES.some((alias) => haystack.includes(alias));
+}
+
 export function getCaseStageTaskTemplates(caseItem: ClientCase): CaseStageTaskTemplate[] {
   const haystack = [
     normalizeStageText(caseItem.stage),
     normalizeStageText(caseItem.caseType),
   ].filter(Boolean).join(' ');
 
+  if (isPretrialCaseStage(caseItem)) {
+    const pretrialTemplate = STAGE_TASK_TEMPLATES.find((template) => template.key === 'pretrial-position');
+    return pretrialTemplate ? [stripStageTemplateAliases(pretrialTemplate)] : DEFAULT_STAGE_TASK_TEMPLATES;
+  }
+
   const matched = STAGE_TASK_TEMPLATES
     .filter((template) => template.aliases.some((alias) => haystack.includes(alias)))
-    .map(({ aliases: _aliases, ...template }) => template);
+    .map(stripStageTemplateAliases);
 
   if (matched.length > 0) {
     return matched;

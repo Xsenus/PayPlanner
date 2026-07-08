@@ -2207,6 +2207,44 @@ describe('CaseDetailPage', () => {
     });
   });
 
+  it('keeps the court tab in safe mode for pretrial cases without court data', async () => {
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
+      caseType: 'Внесудебное урегулирование',
+      stage: 'Внесудебное производство',
+      courtName: '',
+      courtCaseNumber: '',
+      courtUrl: '',
+      nextHearingAt: null,
+      claimFiledAt: null,
+      courtDecisionAt: null,
+      appealDeadlineAt: null,
+      cassationDeadlineAt: null,
+      motionDeadlineAt: null,
+      objectionDeadlineAt: null,
+    }));
+    vi.mocked(apiService.getCaseCourtInstances).mockResolvedValue([]);
+    vi.mocked(apiService.getCaseCourtEvents).mockResolvedValue([]);
+    vi.mocked(apiService.getCaseProceduralDeadlines).mockResolvedValue([]);
+    vi.mocked(apiService.getCaseCourtParties).mockResolvedValue([]);
+    vi.mocked(apiService.getCaseCourtSyncLogs).mockResolvedValue([]);
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
+
+    expect(await screen.findByText('Внесудебный режим')).toBeTruthy();
+    expect(screen.getByText('Судебные данные сейчас не обязательны')).toBeTruthy();
+    expect(screen.queryByText('Поиск судебной карточки')).toBeNull();
+    expect(screen.queryByText('Инстанции судов')).toBeNull();
+    expect(screen.queryByText('Процессуальные сроки 2.0')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Проверить источник/u })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /Заполнить судебный блок/u }));
+    expect(await screen.findByText('Поиск судебной карточки')).toBeTruthy();
+    expect(screen.getByText('Инстанции судов')).toBeTruthy();
+  });
+
   it('shows an error when a court source check fails from the court tab', async () => {
     vi.mocked(apiService.runCaseCourtSync).mockRejectedValueOnce(new Error('Судебный источник временно недоступен.'));
 
