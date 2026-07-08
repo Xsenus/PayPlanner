@@ -128,8 +128,16 @@ function normalizeStageText(value?: string | null) {
   return (value ?? '').trim().toLocaleLowerCase('ru');
 }
 
-function stripStageTemplateAliases({ aliases: _aliases, ...template }: CaseStageTaskTemplate & { aliases: string[] }) {
-  return template;
+function stripStageTemplateAliases(template: CaseStageTaskTemplate & { aliases: string[] }): CaseStageTaskTemplate {
+  return {
+    key: template.key,
+    stageLabel: template.stageLabel,
+    title: template.title,
+    description: template.description,
+    priority: template.priority,
+    plannedDurationMinutes: template.plannedDurationMinutes,
+    tags: template.tags,
+  };
 }
 
 export function isPretrialCaseStage(caseItem: Pick<ClientCase, 'stage' | 'caseType'>): boolean {
