@@ -8047,6 +8047,59 @@ public class CasesV2ControllerTests
         Assert.Equal(new DateTime(2026, 5, 18, 5, 10, 0, DateTimeKind.Utc), existingComment.OccurredAt);
     }
 
+    [Fact]
+    public async Task Conversation_RequiresCasePermissionsAndVisibility()
+    {
+        await using var db = await CreateContextAsync();
+        var noViewUser = await CreateUserAsync(db, "conversation-no-view@example.com", "Без просмотра");
+        noViewUser.Role!.Permissions.Single(permission => permission.Section == RolePermissionCatalog.Cases).CanView = false;
+        var noEditUser = await CreateUserAsync(db, "conversation-no-edit@example.com", "Без редактирования");
+        noEditUser.Role!.Permissions.Single(permission => permission.Section == RolePermissionCatalog.Cases).CanEdit = false;
+        var limitedUser = await CreateUserAsync(db, "conversation-limited@example.com", "Ограниченный");
+        var otherResponsible = await CreateUserAsync(db, "conversation-other@example.com", "Другой");
+
+        var client = new Client
+        {
+            Name = "Клиент переписки",
+            IsActive = true,
+            ResponsibleUserId = noEditUser.Id,
+        };
+        var accessibleCase = new ClientCase
+        {
+            Client = client,
+            Title = "Доступная переписка",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = noEditUser.Id,
+            EventHistory = "18.05.2026 09:10: Комментарий по делу: Проверить документы. Автор: Администратор.",
+        };
+        var hiddenCase = new ClientCase
+        {
+            Client = client,
+            Title = "Чужая переписка",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = otherResponsible.Id,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.AddRange(accessibleCase, hiddenCase);
+        await db.SaveChangesAsync();
+
+        var noViewController = CreateController(db, noViewUser);
+        Assert.IsType<ForbidResult>((await noViewController.GetConversation(accessibleCase.Id, CancellationToken.None)).Result);
+
+        var noEditController = CreateController(db, noEditUser);
+        Assert.IsType<ForbidResult>((await noEditController.AddConversationEntry(
+            accessibleCase.Id,
+            new CasesV2Controller.AddClientCaseConversationEntryRequest { Text = "Новое сообщение" },
+            CancellationToken.None)).Result);
+
+        var limitedController = CreateController(db, limitedUser);
+        Assert.IsType<NotFoundResult>((await limitedController.GetConversation(hiddenCase.Id, CancellationToken.None)).Result);
+        Assert.IsType<NotFoundResult>((await limitedController.AddConversationEntry(
+            hiddenCase.Id,
+            new CasesV2Controller.AddClientCaseConversationEntryRequest { Text = "Новое сообщение" },
+            CancellationToken.None)).Result);
+    }
+
     private static IReadOnlyList<ClientCase> GetAnonymousItems(object? value)
     {
         Assert.NotNull(value);
