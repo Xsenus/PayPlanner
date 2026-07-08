@@ -8062,7 +8062,7 @@ public class CasesV2Controller : ControllerBase
         }
 
         return _sudrfCourtSyncService is not null && _sudrfCourtSyncService.CanHandle(sourceUrl)
-            ? new LegacySudrfCourtSyncProvider(_sudrfCourtSyncService)
+            ? new SudrfCourtSyncProvider(_sudrfCourtSyncService)
             : null;
     }
 
@@ -12211,27 +12211,6 @@ public class CasesV2Controller : ControllerBase
     {
         public string Date { get; set; } = string.Empty;
         public string? Note { get; set; }
-    }
-
-    private sealed class LegacySudrfCourtSyncProvider : ICourtSyncProvider
-    {
-        private readonly ISudrfCourtSyncService _service;
-
-        public LegacySudrfCourtSyncProvider(ISudrfCourtSyncService service)
-        {
-            _service = service;
-        }
-
-        public string Key => "sudrf";
-        public string Label => "ГАС Правосудие / sudrf.ru";
-        public string SourceType => "sudrf";
-        public IReadOnlyList<string> SupportedHosts { get; } = ["sudrf.ru"];
-
-        public bool CanHandle(string? sourceUrl)
-            => _service.CanHandle(sourceUrl);
-
-        public Task<SudrfCourtCaseData> FetchCaseAsync(string sourceUrl, CancellationToken ct, string? courtCaseNumber = null)
-            => _service.FetchCaseAsync(sourceUrl, ct, courtCaseNumber);
     }
 
     private readonly record struct CaseDocumentTemplate(

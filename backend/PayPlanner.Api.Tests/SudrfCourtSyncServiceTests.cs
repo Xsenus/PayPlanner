@@ -83,6 +83,51 @@ public class SudrfCourtSyncServiceTests
         Assert.Equal("Шафорост Виктория Васильевна", data.Participants.Single(item => item.Role == "ЗАИНТЕРЕСОВАННОЕ ЛИЦО").Name);
     }
 
+    [Fact]
+    public async Task SudrfProvider_SearchCasesAsync_MapsFetchedCaseToNeutralResult()
+    {
+        Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+        var bytes = Encoding.GetEncoding("windows-1251").GetBytes(BuildCourtHtml());
+        using var httpClient = new HttpClient(new FixedResponseHandler(_ => bytes))
+        {
+            BaseAddress = new Uri("https://kraevoy--hbr.sudrf.ru"),
+        };
+        var service = new SudrfCourtSyncService(httpClient, NullLogger<SudrfCourtSyncService>.Instance);
+        var provider = new SudrfCourtSyncProvider(service);
+
+        var results = await provider.SearchCasesAsync(
+            new CourtSyncCaseSearchRequest(
+                SourceUrl: "https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42",
+                CourtCaseNumber: "33а-3390/2026"),
+            CancellationToken.None);
+
+        var result = Assert.Single(results);
+        Assert.Equal("sudrf", result.ProviderKey);
+        Assert.Equal("sudrf", result.SourceType);
+        Assert.True(result.CanFetch);
+        Assert.Equal("Хабаровский краевой суд", result.CourtName);
+        Assert.Equal("33а-3390/2026", result.CaseNumber);
+        Assert.Equal("appeal", result.Instance);
+        Assert.Contains("Хабаровский краевой суд", result.Title);
+        Assert.Contains("Судья: Казарикова Оксана Витальевна", result.Summary);
+    }
+
+    [Fact]
+    public async Task SudrfProvider_SearchCasesAsync_ReturnsEmptyForUnsupportedSource()
+    {
+        using var httpClient = new HttpClient(new FixedResponseHandler(_ => []));
+        var service = new SudrfCourtSyncService(httpClient, NullLogger<SudrfCourtSyncService>.Instance);
+        var provider = new SudrfCourtSyncProvider(service);
+
+        var results = await provider.SearchCasesAsync(
+            new CourtSyncCaseSearchRequest(
+                SourceUrl: "https://kad.arbitr.ru/card/123",
+                CourtCaseNumber: "А55-12345/2026"),
+            CancellationToken.None);
+
+        Assert.Empty(results);
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.Unauthorized, "401")]
     [InlineData(HttpStatusCode.Forbidden, "403")]

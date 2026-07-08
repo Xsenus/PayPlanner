@@ -16,6 +16,32 @@ public sealed record CourtSyncProviderDescriptor(
     IReadOnlyList<string> SupportedHosts,
     string Message);
 
+public sealed record CourtSyncCaseSearchRequest(
+    string? SourceUrl = null,
+    string? CourtCaseNumber = null,
+    string? JudicialUid = null,
+    string? CourtName = null,
+    string? PartyName = null,
+    string? Instance = null);
+
+public sealed record CourtSyncCaseSearchResult(
+    string ProviderKey,
+    string SourceType,
+    string SourceUrl,
+    string CourtName,
+    string CaseNumber,
+    string JudicialUid,
+    string Instance,
+    string Title,
+    string Summary,
+    bool CanFetch);
+
+public sealed record CourtSyncCaseBinding(
+    string SourceUrl,
+    string? CourtCaseNumber = null,
+    string? JudicialUid = null,
+    string? Instance = null);
+
 public interface ICourtSyncProvider
 {
     string Key { get; }
@@ -23,7 +49,11 @@ public interface ICourtSyncProvider
     string SourceType { get; }
     IReadOnlyList<string> SupportedHosts { get; }
     bool CanHandle(string? sourceUrl);
-    Task<SudrfCourtCaseData> FetchCaseAsync(string sourceUrl, CancellationToken ct, string? courtCaseNumber = null);
+    Task<IReadOnlyList<CourtSyncCaseSearchResult>> SearchCasesAsync(CourtSyncCaseSearchRequest request, CancellationToken ct);
+    Task<SudrfCourtCaseData> FetchCaseAsync(CourtSyncCaseBinding binding, CancellationToken ct);
+
+    Task<SudrfCourtCaseData> FetchCaseAsync(string sourceUrl, CancellationToken ct, string? courtCaseNumber = null)
+        => FetchCaseAsync(new CourtSyncCaseBinding(sourceUrl, courtCaseNumber), ct);
 }
 
 public interface ICourtSyncProviderRegistry
@@ -49,8 +79,54 @@ public sealed class SudrfCourtSyncProvider : ICourtSyncProvider
     public bool CanHandle(string? sourceUrl)
         => _service.CanHandle(sourceUrl);
 
-    public Task<SudrfCourtCaseData> FetchCaseAsync(string sourceUrl, CancellationToken ct, string? courtCaseNumber = null)
-        => _service.FetchCaseAsync(sourceUrl, ct, courtCaseNumber);
+    public async Task<IReadOnlyList<CourtSyncCaseSearchResult>> SearchCasesAsync(CourtSyncCaseSearchRequest request, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.SourceUrl) || !CanHandle(request.SourceUrl))
+        {
+            return [];
+        }
+
+        var courtData = await FetchCaseAsync(
+            new CourtSyncCaseBinding(
+                request.SourceUrl,
+                FirstNonEmpty(request.CourtCaseNumber, request.JudicialUid),
+                request.JudicialUid,
+                request.Instance),
+            ct);
+
+        return [MapSearchResult(courtData)];
+    }
+
+    public Task<SudrfCourtCaseData> FetchCaseAsync(CourtSyncCaseBinding binding, CancellationToken ct)
+        => _service.FetchCaseAsync(binding.SourceUrl, ct, FirstNonEmpty(binding.CourtCaseNumber, binding.JudicialUid));
+
+    private CourtSyncCaseSearchResult MapSearchResult(SudrfCourtCaseData courtData)
+    {
+        var caseNumber = FirstNonEmpty(courtData.CaseNumber, courtData.JudicialUid);
+        var title = FirstNonEmpty(courtData.CourtName, caseNumber, courtData.SourceUrl) ?? courtData.SourceUrl;
+        var summaryParts = new[]
+            {
+                string.IsNullOrWhiteSpace(courtData.CourtName) ? null : courtData.CourtName,
+                string.IsNullOrWhiteSpace(caseNumber) ? null : $"№ {caseNumber}",
+                string.IsNullOrWhiteSpace(courtData.JudgeName) ? null : $"Судья: {courtData.JudgeName}",
+            }
+            .Where(static item => !string.IsNullOrWhiteSpace(item));
+
+        return new CourtSyncCaseSearchResult(
+            Key,
+            SourceType,
+            courtData.SourceUrl,
+            courtData.CourtName,
+            courtData.CaseNumber,
+            courtData.JudicialUid,
+            courtData.Instance,
+            title,
+            string.Join("; ", summaryParts),
+            !string.IsNullOrWhiteSpace(courtData.SourceUrl));
+    }
+
+    private static string? FirstNonEmpty(params string?[] values)
+        => values.FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value))?.Trim();
 }
 
 public sealed class CourtSyncProviderRegistry : ICourtSyncProviderRegistry
