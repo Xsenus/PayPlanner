@@ -82,6 +82,10 @@ public class CaseNotificationInventoryTests
         AssertMethodContains(
             source,
             "RunCourtSync",
+            "NotifyCourtSyncFailedForCaseAsync");
+        AssertMethodContains(
+            source,
+            "NotifyCourtSyncFailedForCaseAsync",
             "ResolveCaseNotificationRecipientIdsAsync",
             "NotifyCourtSyncFailedAsync");
 

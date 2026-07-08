@@ -933,6 +933,35 @@ public class CasesV2Controller : ControllerBase
         }
     }
 
+    private async Task NotifyCourtSyncFailedForCaseAsync(
+        ClientCase clientCase,
+        string providerName,
+        string summary,
+        int? actorUserId,
+        string actorName,
+        CancellationToken ct)
+    {
+        if (_notificationService is null)
+        {
+            return;
+        }
+
+        var recipients = await ResolveCaseNotificationRecipientIdsAsync(clientCase.Id, ct);
+        if (recipients.Count == 0)
+        {
+            return;
+        }
+
+        await _notificationService.NotifyCourtSyncFailedAsync(
+            clientCase,
+            providerName,
+            summary,
+            actorName,
+            actorUserId ?? 0,
+            recipients,
+            ct);
+    }
+
     private static string BuildCourtEventNotificationBody(
         ClientCase clientCase,
         ClientCaseCourtEvent courtEvent,
@@ -6600,6 +6629,13 @@ public class CasesV2Controller : ControllerBase
         catch (SudrfCourtSyncException ex)
         {
             syncError = ex.Message;
+            await NotifyCourtSyncFailedForCaseAsync(
+                clientCase,
+                provider.Label,
+                $"Автоматическая синхронизация после привязки не выполнена: {ex.Message}",
+                actorUserId,
+                actorName,
+                ct);
         }
 
         var externalIdSuffix = judicialUid is null
@@ -6763,21 +6799,13 @@ public class CasesV2Controller : ControllerBase
             {
                 var errorMessage = $"Проверка судебного источника не выполнена: {ex.Message} Проверьте ссылку на карточку дела суда и повторите попытку.";
                 AppendCaseEvent(clientCase, $"{errorMessage} Инициатор: {actorName}.");
-                if (_notificationService is not null)
-                {
-                    var recipients = await ResolveCaseNotificationRecipientIdsAsync(clientCase.Id, ct);
-                    if (recipients.Count > 0)
-                    {
-                        await _notificationService.NotifyCourtSyncFailedAsync(
-                            clientCase,
-                            courtSyncProvider.Label,
-                            errorMessage,
-                            actorName,
-                            User.GetUserId() ?? 0,
-                            recipients,
-                            ct);
-                    }
-                }
+                await NotifyCourtSyncFailedForCaseAsync(
+                    clientCase,
+                    courtSyncProvider.Label,
+                    errorMessage,
+                    User.GetUserId(),
+                    actorName,
+                    ct);
                 await _db.SaveChangesAsync(ct);
 
                 return Ok(new ClientCaseCourtSyncRunDto
@@ -7208,6 +7236,7 @@ public class CasesV2Controller : ControllerBase
         }
 
         var created = 0;
+        var createdDeadlines = new List<ClientCaseProceduralDeadline>();
         foreach (var spec in deadlineSpecs)
         {
             var exists = await _db.ClientCaseProceduralDeadlines.AnyAsync(item =>
@@ -7241,6 +7270,7 @@ public class CasesV2Controller : ControllerBase
                 UpdatedByUserName = Truncate(actorName, 256),
             };
             _db.ClientCaseProceduralDeadlines.Add(deadline);
+            createdDeadlines.Add(deadline);
             created++;
 
             if (spec.DeadlineType == "appeal")
@@ -7258,6 +7288,11 @@ public class CasesV2Controller : ControllerBase
         {
             AppendCaseEvent(clientCase, $"Процессуальные сроки по судебному акту «{courtAct.Title}» добавлены из ГАС «Правосудие». Добавлено: {created}.");
             await _db.SaveChangesAsync(ct);
+
+            foreach (var deadline in createdDeadlines)
+            {
+                await AddProceduralDeadlineUserNotificationsAsync(clientCase, deadline, "created", actorUserId, actorName, ct);
+            }
         }
 
         return created;

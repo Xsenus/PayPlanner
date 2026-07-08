@@ -5629,6 +5629,13 @@ public class CasesV2ControllerTests
         Assert.Equal(clientCase.Id, notification.ObjectId);
         Assert.Contains("Судебное заседание", notification.BodyPreview, StringComparison.Ordinal);
         Assert.Contains($"\"courtEventId\":{courtEvent.Id}", notification.MetadataJson, StringComparison.Ordinal);
+
+        var deadlineNotification = await db.UserNotifications.SingleAsync(item => item.Type == UserNotificationTypes.CaseProceduralDeadline);
+        Assert.Equal(responsible.Id, deadlineNotification.RecipientUserId);
+        Assert.Equal("case", deadlineNotification.ObjectType);
+        Assert.Equal(clientCase.Id, deadlineNotification.ObjectId);
+        Assert.Contains("Срок кассационного обжалования", deadlineNotification.BodyPreview, StringComparison.Ordinal);
+        Assert.Contains($"\"proceduralDeadlineId\":{deadline.Id}", deadlineNotification.MetadataJson, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -6105,6 +6112,7 @@ public class CasesV2ControllerTests
     {
         await using var db = await CreateContextAsync();
         var owner = await CreateUserAsync(db, "court-bind-owner@example.com", "Владелец");
+        var responsible = await CreateUserAsync(db, "court-bind-responsible@example.com", "Ответственный");
         var client = new Client
         {
             Name = "Земцов Виктор Александрович",
@@ -6116,6 +6124,7 @@ public class CasesV2ControllerTests
             Client = client,
             Title = "Земцов - привязка суда",
             Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id,
         };
         db.Clients.Add(client);
         db.ClientCases.Add(clientCase);
@@ -6140,7 +6149,11 @@ public class CasesV2ControllerTests
                 },
             ],
         };
-        var controller = CreateController(db, owner, sudrfCourtSyncService: new FixedSudrfCourtSyncService(courtData));
+        var controller = CreateController(
+            db,
+            owner,
+            sudrfCourtSyncService: new FixedSudrfCourtSyncService(courtData),
+            notificationService: CreateNotificationService(db));
 
         var result = await controller.BindCourtSyncCase(
             clientCase.Id,
@@ -6185,6 +6198,73 @@ public class CasesV2ControllerTests
         Assert.Equal("Судебное заседание", courtEvent.Title);
         Assert.Equal("зал 12", courtEvent.Courtroom);
         Assert.Equal("sudrf", courtEvent.SourceType);
+
+        var notification = await db.UserNotifications.SingleAsync(item => item.Type == UserNotificationTypes.CourtHearing);
+        Assert.Equal(responsible.Id, notification.RecipientUserId);
+        Assert.Contains("Судебное заседание", notification.BodyPreview, StringComparison.Ordinal);
+        Assert.Contains($"\"courtEventId\":{courtEvent.Id}", notification.MetadataJson, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task BindCourtSyncCase_NotifiesResponsibleWhenInitialSyncFails()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "court-bind-error-owner@example.com", "Владелец");
+        var responsible = await CreateUserAsync(db, "court-bind-error-responsible@example.com", "Ответственный");
+        var client = new Client
+        {
+            Name = "Клиент с ошибкой привязки суда",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело с ошибкой первичной синхронизации",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(
+            db,
+            owner,
+            sudrfCourtSyncService: new ThrowingSudrfCourtSyncService("Судебный источник не ответил"),
+            notificationService: CreateNotificationService(db));
+
+        var result = await controller.BindCourtSyncCase(
+            clientCase.Id,
+            new CasesV2Controller.ClientCaseCourtSyncBindRequest
+            {
+                Instance = "appeal",
+                ProviderKey = "sudrf",
+                SourceType = "sudrf",
+                SourceUrl = "https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42",
+                CourtName = "Хабаровский краевой суд",
+                CourtCaseNumber = "33а-3390/2026",
+                JudicialUid = "27RS0005-01-2025-002659-56",
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<CasesV2Controller.ClientCaseCourtSyncBindingDto>(ok.Value);
+        Assert.False(dto.SyncedFromExternalSource);
+        Assert.Equal("Судебный источник не ответил", dto.SyncError);
+        Assert.Contains("синхронизация не выполнена", dto.Message, StringComparison.Ordinal);
+
+        await db.Entry(clientCase).ReloadAsync();
+        Assert.Equal("Хабаровский краевой суд", clientCase.CourtName);
+        Assert.Equal("33а-3390/2026", clientCase.CourtCaseNumber);
+        Assert.Contains("Автоматическая синхронизация после привязки не выполнена", clientCase.EventHistory, StringComparison.Ordinal);
+
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(UserNotificationTypes.CourtSyncFailed, notification.Type);
+        Assert.Equal(responsible.Id, notification.RecipientUserId);
+        Assert.Equal("case", notification.ObjectType);
+        Assert.Equal(clientCase.Id, notification.ObjectId);
+        Assert.Contains("Судебный источник не ответил", notification.BodyPreview, StringComparison.Ordinal);
     }
 
     [Fact]
