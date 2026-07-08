@@ -134,6 +134,134 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task SmsSettings_NormalizeInvalidValuesAndSkipDeliveryWhenNotReady()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "sms-invalid@example.com", phoneNumber: "+7 (999) 333-44-55");
+        var smsService = new SystemSmsNotificationService(db);
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            smsNotificationService: smsService);
+
+        var settings = await service.UpdateSmsSettingsAsync(new UpdateSmsNotificationSettingsRequest
+        {
+            Enabled = true,
+            ProviderKey = "   ",
+            SenderName = "   ",
+            ApiToken = "   ",
+            KeepExistingApiToken = false,
+            DailyLimit = -15,
+            MaxMessageLength = 10,
+            Notes = new string('x', 600)
+        });
+
+        Assert.True(settings.Sms.Enabled);
+        Assert.False(settings.Sms.Ready);
+        Assert.False(settings.Sms.ProviderConfigured);
+        Assert.False(settings.Sms.ApiTokenSet);
+        Assert.Equal(1, settings.Sms.DailyLimit);
+        Assert.Equal(70, settings.Sms.MaxMessageLength);
+        Assert.Equal(500, settings.Sms.Notes.Length);
+        Assert.Contains("провайдер", settings.Sms.StatusText, StringComparison.OrdinalIgnoreCase);
+
+        var deliveries = await service.SendToUserAsync(
+            user.Id,
+            new NotificationMessage("SMS тест", "Проверка невалидных настроек SMS"),
+            [NotificationChannels.Sms],
+            "sms:test:invalid-settings");
+
+        var delivery = Assert.Single(deliveries);
+        Assert.Equal(NotificationChannels.Sms, delivery.Channel);
+        Assert.Equal(NotificationDeliveryStatus.Skipped, delivery.Status);
+        Assert.Equal("+79993334455", delivery.RecipientAddress);
+        Assert.Equal(settings.Sms.StatusText, delivery.Error);
+
+        var savedDelivery = await db.NotificationDeliveries.SingleAsync();
+        Assert.Equal(delivery.Id, savedDelivery.Id);
+        Assert.Equal(NotificationDeliveryStatus.Skipped, savedDelivery.Status);
+        Assert.Equal(settings.Sms.StatusText, savedDelivery.Error);
+    }
+
+    [Fact]
+    public async Task SmsDelivery_UsesReadyProviderAndPersistsSentLog()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "sms-sent@example.com", phoneNumber: "+7 (999) 444-55-66");
+        var smsService = new RecordingSmsNotificationService
+        {
+            NextResult = new SmsSendResult(true, NotificationDeliveryStatus.Sent)
+        };
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            smsNotificationService: smsService);
+
+        var deliveries = await service.SendToUserAsync(
+            user.Id,
+            new NotificationMessage("SMS тест", "Сообщение для успешной SMS-доставки"),
+            [NotificationChannels.Sms],
+            "sms:test:sent");
+
+        var delivery = Assert.Single(deliveries);
+        Assert.Equal(NotificationDeliveryStatus.Sent, delivery.Status);
+        Assert.Null(delivery.Error);
+        Assert.NotNull(delivery.SentAt);
+        Assert.Equal("+79994445566", delivery.RecipientAddress);
+        Assert.Equal("Тестовый SMS", delivery.SenderName);
+
+        var message = Assert.Single(smsService.Messages);
+        Assert.Equal("+79994445566", message.PhoneNumber);
+        Assert.Equal("Сообщение для успешной SMS-доставки", message.Text);
+
+        var savedDelivery = await db.NotificationDeliveries.SingleAsync();
+        Assert.Equal(delivery.Id, savedDelivery.Id);
+        Assert.Equal(NotificationDeliveryStatus.Sent, savedDelivery.Status);
+        Assert.Equal("Сообщение для успешной SMS-доставки", savedDelivery.BodyPreview);
+        Assert.NotNull(savedDelivery.SentAt);
+    }
+
+    [Fact]
+    public async Task SmsDelivery_PersistsProviderErrorInDeliveryLog()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "sms-failed@example.com", phoneNumber: "+7 (999) 555-66-77");
+        var smsService = new RecordingSmsNotificationService
+        {
+            NextResult = new SmsSendResult(false, NotificationDeliveryStatus.Failed, "Provider rejected phone")
+        };
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            smsNotificationService: smsService);
+
+        var deliveries = await service.SendToUserAsync(
+            user.Id,
+            new NotificationMessage("SMS тест", "Сообщение для ошибки SMS-провайдера"),
+            [NotificationChannels.Sms],
+            "sms:test:failed");
+
+        var delivery = Assert.Single(deliveries);
+        Assert.Equal(NotificationDeliveryStatus.Failed, delivery.Status);
+        Assert.Equal("Provider rejected phone", delivery.Error);
+        Assert.Null(delivery.SentAt);
+        Assert.Equal("+79995556677", delivery.RecipientAddress);
+
+        var message = Assert.Single(smsService.Messages);
+        Assert.Equal("+79995556677", message.PhoneNumber);
+        Assert.Equal("Сообщение для ошибки SMS-провайдера", message.Text);
+
+        var savedDelivery = await db.NotificationDeliveries.SingleAsync();
+        Assert.Equal(delivery.Id, savedDelivery.Id);
+        Assert.Equal(NotificationDeliveryStatus.Failed, savedDelivery.Status);
+        Assert.Equal("Provider rejected phone", savedDelivery.Error);
+        Assert.Null(savedDelivery.SentAt);
+    }
+
+    [Fact]
     public void NotificationEventEnvelope_UsesCatalogDefaultsAndExplicitOverrides()
     {
         var envelope = new NotificationEventEnvelope(
@@ -5106,6 +5234,41 @@ public class NotificationServiceTests
         {
             Messages.Add((chatId, text));
             return Task.FromResult(new TelegramSendResult(true, NotificationDeliveryStatus.Sent));
+        }
+    }
+
+    private sealed class RecordingSmsNotificationService : ISmsNotificationService
+    {
+        public List<(string PhoneNumber, string Text)> Messages { get; } = [];
+
+        public SmsNotificationSettingsDto Settings { get; set; } = new()
+        {
+            Enabled = true,
+            Ready = true,
+            ProviderConfigured = true,
+            AdapterConfigured = true,
+            ApiTokenSet = true,
+            ProviderKey = "test-provider",
+            SenderName = "Тестовый SMS",
+            DailyLimit = 100,
+            MaxMessageLength = 480,
+            StatusText = "SMS-канал готов к отправке."
+        };
+
+        public SmsSendResult NextResult { get; set; } = new(true, NotificationDeliveryStatus.Sent);
+
+        public Task<SmsNotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(Settings);
+
+        public Task<SmsNotificationSettingsDto> UpdateSettingsAsync(
+            UpdateSmsNotificationSettingsRequest request,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(Settings);
+
+        public Task<SmsSendResult> SendMessageAsync(string phoneNumber, string text, CancellationToken cancellationToken = default)
+        {
+            Messages.Add((phoneNumber, text));
+            return Task.FromResult(NextResult);
         }
     }
 
