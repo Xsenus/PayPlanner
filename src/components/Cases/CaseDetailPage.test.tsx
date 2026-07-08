@@ -1023,6 +1023,71 @@ describe('CaseDetailPage', () => {
     expect(await screen.findByText('Карточка дела обновлена.')).toBeTruthy();
   });
 
+  it('offers stage tasks and procedural deadlines after full case stage change', async () => {
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
+      stage: 'Первая инстанция',
+      appealDeadlineAt: null,
+      motionDeadlineAt: null,
+      objectionDeadlineAt: null,
+    }));
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+
+    expect(await screen.findByText('ЗЕМЦОВ - банкротство')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Редактировать дело' }));
+
+    const stageInput = await screen.findByLabelText('Стадия') as HTMLInputElement;
+    fireEvent.change(stageInput, { target: { value: 'Апелляция' } });
+    fireEvent.click(screen.getAllByRole('button', { name: /Сохранить дело/u }).at(-1) as HTMLElement);
+
+    expect(await screen.findByText('Этап дела изменён')).toBeTruthy();
+    expect(screen.getByText('Первая инстанция → Апелляция')).toBeTruthy();
+    expect(screen.getByText('Проверить срок и материалы для апелляции')).toBeTruthy();
+    expect(screen.getByText('Добавить срок апелляции')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /Создать задачу: Проверить срок и материалы для апелляции/u }));
+
+    await waitFor(() => {
+      expect(apiService.createTaskJournalItem).toHaveBeenCalledWith(expect.objectContaining({
+        clientCaseId: 15,
+        title: 'Проверить срок и материалы для апелляции',
+        priority: 'urgent',
+        tags: expect.arrayContaining(['апелляция']),
+        description: expect.stringContaining('Этап: Апелляция'),
+      }));
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Подготовить срок: Добавить срок апелляции/u }));
+
+    expect(await screen.findByText('Процессуальные сроки 2.0')).toBeTruthy();
+    expect((screen.getByPlaceholderText('Например, подать жалобу') as HTMLInputElement).value).toBe('Добавить срок апелляции');
+    expect(screen.getByDisplayValue('Проверьте дату решения суда и зафиксируйте срок подачи апелляционной жалобы.')).toBeTruthy();
+  });
+
+  it('offers stage actions after quick stage save in the header', async () => {
+    vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
+      stage: 'Апелляция',
+      cassationDeadlineAt: null,
+    }));
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} canEdit />);
+
+    expect(await screen.findByText('ЗЕМЦОВ - банкротство')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Стадия дела'), { target: { value: 'Кассация' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Сохранить$/u }));
+
+    await waitFor(() => {
+      expect(apiService.bulkUpdateCases).toHaveBeenCalledWith(expect.objectContaining({
+        ids: [15],
+        stage: 'Кассация',
+      }));
+    });
+    expect(await screen.findByText('Этап дела изменён')).toBeTruthy();
+    expect(screen.getByText('Апелляция → Кассация')).toBeTruthy();
+    expect(screen.getByText('Проверить срок и материалы для кассации')).toBeTruthy();
+    expect(screen.getByText('Добавить срок кассации')).toBeTruthy();
+  });
+
   it('shows inactivity and court sync indicators in the summary panel', async () => {
     vi.mocked(apiService.getCaseV2).mockResolvedValue(createCase({
       lastTaskAt: new Date().toISOString(),

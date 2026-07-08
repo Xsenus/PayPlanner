@@ -146,6 +146,20 @@ interface CaseEditDraft {
   inactivityRemindersEnabled: boolean;
 }
 
+interface CaseStageDeadlineSuggestion {
+  key: string;
+  deadlineType: 'appeal' | 'cassation' | 'motion' | 'objection';
+  title: string;
+  description: string;
+}
+
+interface StageTransitionPromptState {
+  previousStage: string;
+  nextStage: string;
+  taskTemplates: CaseStageTaskTemplate[];
+  deadlineSuggestions: CaseStageDeadlineSuggestion[];
+}
+
 interface ParticipantDirectoryOption {
   key: string;
   sourceType: ParticipantSourceType;
@@ -995,6 +1009,75 @@ function buildCaseUpdatePayload(base: ClientCase, patch: Partial<ClientCase>): O
   } as Omit<ClientCase, 'id' | 'createdAt' | 'payments'>;
 }
 
+function normalizeCaseStage(value?: string | null) {
+  return (value ?? '').trim().toLocaleLowerCase('ru');
+}
+
+function hasCaseStageChanged(previousStage?: string | null, nextStage?: string | null) {
+  const normalizedNextStage = normalizeCaseStage(nextStage);
+  return Boolean(normalizedNextStage) && normalizeCaseStage(previousStage) !== normalizedNextStage;
+}
+
+function buildCaseStageDeadlineSuggestions(caseItem: ClientCase): CaseStageDeadlineSuggestion[] {
+  const stageText = [
+    normalizeCaseStage(caseItem.stage),
+    normalizeCaseStage(caseItem.caseType),
+  ].filter(Boolean).join(' ');
+  const hasAny = (...aliases: string[]) => aliases.some((alias) => stageText.includes(alias));
+  const suggestions: CaseStageDeadlineSuggestion[] = [];
+
+  if (hasAny('апелл') && !caseItem.appealDeadlineAt) {
+    suggestions.push({
+      key: 'appeal-deadline',
+      deadlineType: 'appeal',
+      title: 'Добавить срок апелляции',
+      description: 'Проверьте дату решения суда и зафиксируйте срок подачи апелляционной жалобы.',
+    });
+  }
+
+  if (hasAny('кассац') && !caseItem.cassationDeadlineAt) {
+    suggestions.push({
+      key: 'cassation-deadline',
+      deadlineType: 'cassation',
+      title: 'Добавить срок кассации',
+      description: 'Проверьте судебные акты и зафиксируйте срок подачи кассационной жалобы.',
+    });
+  }
+
+  if (hasAny('судеб', 'перв', 'инстанц', 'заседан', 'подготов', 'иск') && !caseItem.motionDeadlineAt) {
+    suggestions.push({
+      key: 'motion-deadline',
+      deadlineType: 'motion',
+      title: 'Добавить срок ходатайств',
+      description: 'Проверьте ближайшее заседание и поставьте контрольный срок для ходатайств и процессуальных документов.',
+    });
+  }
+
+  if (hasAny('судеб', 'перв', 'инстанц', 'заседан') && !caseItem.objectionDeadlineAt) {
+    suggestions.push({
+      key: 'objection-deadline',
+      deadlineType: 'objection',
+      title: 'Добавить срок возражений',
+      description: 'Проверьте материалы другой стороны и поставьте срок подготовки возражений.',
+    });
+  }
+
+  return suggestions.slice(0, 2);
+}
+
+function buildStageTransitionPrompt(previousStage: string | null | undefined, nextCase: ClientCase): StageTransitionPromptState | null {
+  if (!hasCaseStageChanged(previousStage, nextCase.stage)) {
+    return null;
+  }
+
+  return {
+    previousStage: previousStage?.trim() || 'не указан',
+    nextStage: nextCase.stage?.trim() || 'не указан',
+    taskTemplates: getCaseStageTaskTemplates(nextCase),
+    deadlineSuggestions: buildCaseStageDeadlineSuggestions(nextCase),
+  };
+}
+
 export function CaseDetailPage({
   caseId,
   onBack,
@@ -1103,6 +1186,7 @@ export function CaseDetailPage({
   const [editPageOpen, setEditPageOpen] = useState(false);
   const [caseEditDraft, setCaseEditDraft] = useState<CaseEditDraft | null>(null);
   const [savingCaseEdit, setSavingCaseEdit] = useState(false);
+  const [stageTransitionPrompt, setStageTransitionPrompt] = useState<StageTransitionPromptState | null>(null);
   const [statusDraft, setStatusDraft] = useState('Open');
   const [priorityDraft, setPriorityDraft] = useState('normal');
   const [stageDraft, setStageDraft] = useState('');
@@ -1803,9 +1887,15 @@ export function CaseDetailPage({
     [participantClients, participantContacts, participantLegalEntities, participantSearch, participantSourceType, relatedParties],
   );
 
+  const rememberStageTransition = (previousStage: string | null | undefined, nextCase: ClientCase) => {
+    setStageTransitionPrompt(buildStageTransitionPrompt(previousStage, nextCase));
+  };
+
   const saveHeaderChanges = async () => {
     if (!caseItem) return;
 
+    const previousStage = caseItem.stage;
+    const nextStage = stageDraft.trim();
     setSavingHeader(true);
     setError(null);
     try {
@@ -1818,6 +1908,7 @@ export function CaseDetailPage({
         isHiddenFromExecutor: hiddenFromExecutorDraft,
         inactivityRemindersEnabled: inactivityRemindersDraft,
       });
+      rememberStageTransition(previousStage, { ...caseItem, stage: nextStage });
       setReloadToken((value) => value + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось сохранить параметры дела.');
@@ -1865,11 +1956,13 @@ export function CaseDetailPage({
     setSavingCaseEdit(true);
     setError(null);
     try {
+      const previousStage = caseItem.stage;
       const patch = buildCasePatchFromEditDraft(caseEditDraft);
       const updated = await apiService.updateCaseV2(caseItem.id, buildCaseUpdatePayload(caseItem, patch));
       setCaseItem(updated);
       setCaseEditDraft(buildCaseEditDraft(updated));
       setEditPageOpen(false);
+      rememberStageTransition(previousStage, updated);
       setNotice('Карточка дела обновлена.');
       setReloadToken((value) => value + 1);
     } catch (err) {
@@ -2932,13 +3025,14 @@ export function CaseDetailPage({
     }
   };
 
-  const createStageTaskForCase = async (template: CaseStageTaskTemplate) => {
+  const createStageTaskForCase = async (template: CaseStageTaskTemplate, stageOverride?: string | null) => {
     if (!caseItem || !canCreateCaseTask) return;
+    const sourceCase = stageOverride ? { ...caseItem, stage: stageOverride } : caseItem;
 
     setCreatingTask(true);
     setError(null);
     try {
-      await apiService.createTaskJournalItem(buildCaseTaskPayload(caseItem, caseTimeZoneId, template));
+      await apiService.createTaskJournalItem(buildCaseTaskPayload(sourceCase, caseTimeZoneId, template));
       setReloadToken((value) => value + 1);
       if (canViewTasks) {
         setActiveTab('tasks');
@@ -2949,6 +3043,19 @@ export function CaseDetailPage({
     } finally {
       setCreatingTask(false);
     }
+  };
+
+  const prepareStageDeadlineSuggestion = (suggestion: CaseStageDeadlineSuggestion) => {
+    setDeadlineTypeDraft(suggestion.deadlineType);
+    setDeadlineTitleDraft(suggestion.title);
+    setDeadlineDueAtDraft('');
+    setDeadlineDocumentIdDraft('');
+    setDeadlineCourtEventIdDraft('');
+    setDeadlineNotesDraft(suggestion.description);
+    setDeadlineCalculationPreview(null);
+    setActiveTab('court');
+    setStageTransitionPrompt(null);
+    setNotice('Процессуальный срок подготовлен в судебном блоке. Проверьте дату и добавьте срок.');
   };
 
   const openOwner = () => {
@@ -3084,6 +3191,16 @@ export function CaseDetailPage({
 
         {error ? <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
         {notice ? <div className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm text-cyan-800">{notice}</div> : null}
+        {stageTransitionPrompt ? (
+          <StageTransitionActions
+            prompt={stageTransitionPrompt}
+            canCreateTask={canCreateCaseTask}
+            creatingTask={creatingTask}
+            onCreateTask={(template) => void createStageTaskForCase(template, stageTransitionPrompt.nextStage)}
+            onPrepareDeadline={prepareStageDeadlineSuggestion}
+            onClose={() => setStageTransitionPrompt(null)}
+          />
+        ) : null}
 
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="grid items-stretch gap-3 md:grid-cols-2 xl:grid-cols-[170px_minmax(260px,1fr)_170px_230px_190px_190px_150px]">
@@ -4948,6 +5065,96 @@ function LoadingBlock({ label }: { label: string }) {
     <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">
       <span className="inline-flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> {label}</span>
     </div>
+  );
+}
+
+function StageTransitionActions({
+  prompt,
+  canCreateTask,
+  creatingTask,
+  onCreateTask,
+  onPrepareDeadline,
+  onClose,
+}: {
+  prompt: StageTransitionPromptState;
+  canCreateTask: boolean;
+  creatingTask: boolean;
+  onCreateTask: (template: CaseStageTaskTemplate) => void;
+  onPrepareDeadline: (suggestion: CaseStageDeadlineSuggestion) => void;
+  onClose: () => void;
+}) {
+  return (
+    <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950 shadow-sm">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-2 rounded-full bg-white px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-amber-700">
+              <Clock3 className="h-3.5 w-3.5" /> Этап дела изменён
+            </span>
+            <span className="text-xs text-amber-800">{prompt.previousStage} → {prompt.nextStage}</span>
+          </div>
+          <p className="mt-2 text-sm text-amber-900">
+            Проверьте типовые действия по новому этапу: можно сразу создать задачи и подготовить процессуальные сроки.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-amber-200 bg-white text-amber-700 hover:bg-amber-100"
+          aria-label="Скрыть подсказки по этапу">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+
+      <div className="mt-3 grid gap-3 xl:grid-cols-2">
+        <div className="rounded-lg border border-amber-200 bg-white p-3">
+          <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-amber-700">Задачи</h3>
+          <div className="mt-2 grid gap-2 md:grid-cols-2">
+            {prompt.taskTemplates.map((template) => (
+              <div key={template.key} className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                <div className="font-semibold text-slate-900">{template.title}</div>
+                <div className="mt-1 text-xs text-slate-600">{template.description}</div>
+                {canCreateTask ? (
+                  <button
+                    type="button"
+                    onClick={() => onCreateTask(template)}
+                    disabled={creatingTask}
+                    aria-label={`Создать задачу: ${template.title}`}
+                    className="mt-3 inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
+                    {creatingTask ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ClipboardPlus className="h-3.5 w-3.5" />} Создать задачу
+                  </button>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-amber-200 bg-white p-3">
+          <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-amber-700">Процессуальные сроки</h3>
+          {prompt.deadlineSuggestions.length > 0 ? (
+            <div className="mt-2 grid gap-2 md:grid-cols-2">
+              {prompt.deadlineSuggestions.map((suggestion) => (
+                <div key={suggestion.key} className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                  <div className="font-semibold text-slate-900">{suggestion.title}</div>
+                  <div className="mt-1 text-xs text-slate-600">{suggestion.description}</div>
+                  <button
+                    type="button"
+                    onClick={() => onPrepareDeadline(suggestion)}
+                    aria-label={`Подготовить срок: ${suggestion.title}`}
+                    className="mt-3 inline-flex items-center gap-2 rounded-lg border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50">
+                    <Clock3 className="h-3.5 w-3.5" /> Подготовить срок
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-2 rounded-lg border border-dashed border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              Для этого этапа нет обязательной подсказки по судебному сроку. Если срок нужен, откройте вкладку «Суд» и добавьте его вручную.
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
   );
 }
 
