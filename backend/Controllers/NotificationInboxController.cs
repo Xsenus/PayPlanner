@@ -804,7 +804,7 @@ public class NotificationInboxController : ControllerBase
             Priority = item.Priority,
             Domain = item.Domain,
             DomainLabel = item.DomainLabel,
-            Channels = item.EffectiveChannels,
+            Channels = item.PreferenceChannels,
             Deduplicate = item.Deduplicate,
             Digestible = item.Digestible,
             ShowToastByDefault = item.ShowToastByDefault,

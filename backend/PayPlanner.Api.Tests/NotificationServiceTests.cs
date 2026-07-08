@@ -204,11 +204,35 @@ public class NotificationServiceTests
             Assert.Contains(type.Priority, NotificationPriorities.All);
             Assert.NotEmpty(type.EffectiveChannels);
             Assert.All(type.EffectiveChannels, channel => Assert.Contains(channel, NotificationChannels.All));
+            Assert.NotEmpty(type.PreferenceChannels);
+            Assert.All(type.PreferenceChannels, channel => Assert.Contains(channel, NotificationChannels.UserPreferences));
+            Assert.All(type.EffectiveChannels, channel => Assert.Contains(channel, type.PreferenceChannels));
             Assert.Contains(NotificationChannels.InApp, type.EffectiveChannels);
             Assert.True(type.GroupingWindowSeconds >= 0);
             Assert.Same(type, UserNotificationTypes.Find(type.Key));
             Assert.True(UserNotificationTypes.IsKnown(type.Key));
         }
+    }
+
+    [Fact]
+    public void UserNotificationTypes_ExposeSmsOnlyAsPreferenceChannelForUrgentSupportedTypes()
+    {
+        var taskReminder = UserNotificationTypes.Find(UserNotificationTypes.TaskReminder)!;
+        var courtHearing = UserNotificationTypes.Find(UserNotificationTypes.CourtHearing)!;
+        var caseDeadline = UserNotificationTypes.Find(UserNotificationTypes.CaseProceduralDeadline)!;
+        var taskApproval = UserNotificationTypes.Find(UserNotificationTypes.TaskApprovalRequested)!;
+        var taskCompleted = UserNotificationTypes.Find(UserNotificationTypes.TaskCompleted)!;
+        var paymentAdvance = UserNotificationTypes.Find(UserNotificationTypes.PaymentAdvanceReviewRequired)!;
+
+        Assert.DoesNotContain(NotificationChannels.Sms, NotificationChannels.All);
+        Assert.Contains(NotificationChannels.Sms, NotificationChannels.UserPreferences);
+        Assert.Contains(NotificationChannels.Sms, taskReminder.PreferenceChannels);
+        Assert.Contains(NotificationChannels.Sms, courtHearing.PreferenceChannels);
+        Assert.Contains(NotificationChannels.Sms, caseDeadline.PreferenceChannels);
+        Assert.Contains(NotificationChannels.Sms, taskApproval.PreferenceChannels);
+        Assert.DoesNotContain(NotificationChannels.Sms, taskReminder.EffectiveChannels);
+        Assert.DoesNotContain(NotificationChannels.Sms, taskCompleted.PreferenceChannels);
+        Assert.DoesNotContain(NotificationChannels.Sms, paymentAdvance.PreferenceChannels);
     }
 
     [Fact]

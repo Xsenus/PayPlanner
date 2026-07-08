@@ -883,7 +883,7 @@ export interface UpdateStickyNoteLayoutPayload {
 }
 
 export type NotificationChannel = 'email' | 'telegram' | 'sms';
-export type UserNotificationDeliveryChannel = 'inApp' | 'toast' | 'webPush' | 'email' | 'telegram';
+export type UserNotificationDeliveryChannel = 'inApp' | 'toast' | 'webPush' | 'email' | 'telegram' | 'sms';
 
 export interface NotificationChannelDto {
   key: string;

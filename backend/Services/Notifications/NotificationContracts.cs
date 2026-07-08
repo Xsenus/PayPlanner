@@ -32,6 +32,7 @@ public static class NotificationChannels
     public static readonly IReadOnlyList<string> External = [Email, Telegram, WebPush];
     public static readonly IReadOnlyList<string> Future = [Sms, Max];
     public static readonly IReadOnlyList<string> Known = [InApp, Toast, WebPush, Email, Telegram, Sms, Max];
+    public static readonly IReadOnlyList<string> UserPreferences = [InApp, Toast, WebPush, Email, Telegram, Sms];
     public static readonly IReadOnlyList<NotificationChannelDefinition> Definitions =
     [
         new(InApp, "Центр уведомлений", "Внутренние уведомления в CRM, счетчик и центр уведомлений.", "active", true, true, true, false, false, false),
@@ -221,6 +222,25 @@ public static class UserNotificationTypes
     public const string NoteImportantChanged = "noteImportantChanged";
     public const string SystemAdminWarning = "systemAdminWarning";
 
+    private static readonly IReadOnlySet<string> SmsPreferenceTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        TaskAssigned,
+        TaskReminder,
+        TaskCancelled,
+        TaskScheduleConflict,
+        TaskApprovalRequested,
+        TaskRevisionRequested,
+        TaskApprovalOverdue,
+        CaseInactivityControl,
+        CaseCourtEvent,
+        CourtHearing,
+        CourtStatusChanged,
+        CourtDecisionPublished,
+        CourtSyncFailed,
+        CaseProceduralDeadline,
+        CaseInactivityReminder
+    };
+
     public static readonly IReadOnlyList<UserNotificationTypeDefinition> All =
     [
         new(TaskAssigned, "Новая задача", "Назначение новой задачи исполнителю или участникам.", "blue", NotificationPriorities.High, NotificationChannels.All, true, false),
@@ -308,6 +328,9 @@ public static class UserNotificationTypes
     public static UserNotificationTypeDefinition? Find(string? value)
         => All.FirstOrDefault(item => string.Equals(item.Key, value, StringComparison.OrdinalIgnoreCase));
 
+    public static bool SupportsSmsPreference(string? value)
+        => SmsPreferenceTypes.Contains(value ?? string.Empty);
+
     public static bool RequiresAction(string? value)
         => RequiresActionTypes.Contains(value ?? string.Empty, StringComparer.OrdinalIgnoreCase);
 }
@@ -327,6 +350,21 @@ public sealed record UserNotificationTypeDefinition(
     public IReadOnlyList<string> EffectiveChannels => NotificationPriorities.IsSilent(Priority)
         ? Channels.Where(channel => string.Equals(channel, NotificationChannels.InApp, StringComparison.OrdinalIgnoreCase)).ToList()
         : Channels;
+    public IReadOnlyList<string> PreferenceChannels
+    {
+        get
+        {
+            var channels = EffectiveChannels.ToList();
+            if (!NotificationPriorities.IsSilent(Priority)
+                && UserNotificationTypes.SupportsSmsPreference(Key)
+                && !channels.Contains(NotificationChannels.Sms, StringComparer.OrdinalIgnoreCase))
+            {
+                channels.Add(NotificationChannels.Sms);
+            }
+
+            return channels;
+        }
+    }
     public bool ShowToastByDefault => EffectiveChannels.Contains(NotificationChannels.Toast, StringComparer.OrdinalIgnoreCase);
     public string ToastPriority => Priority;
     public bool PushEligible => EffectiveChannels.Contains(NotificationChannels.WebPush, StringComparer.OrdinalIgnoreCase);
@@ -517,7 +555,7 @@ public static class UserNotificationPreferenceSettings
     private static string? NormalizeChannel(string? value)
     {
         var normalized = (value ?? string.Empty).Trim();
-        return NotificationChannels.All.FirstOrDefault(channel => string.Equals(channel, normalized, StringComparison.OrdinalIgnoreCase));
+        return NotificationChannels.UserPreferences.FirstOrDefault(channel => string.Equals(channel, normalized, StringComparison.OrdinalIgnoreCase));
     }
 
     private sealed class UserNotificationPreferenceStorage
@@ -542,7 +580,8 @@ public static class UserNotificationDoNotDisturbSettings
         NotificationChannels.Toast,
         NotificationChannels.WebPush,
         NotificationChannels.Email,
-        NotificationChannels.Telegram
+        NotificationChannels.Telegram,
+        NotificationChannels.Sms
     };
 
     public static readonly UserNotificationDoNotDisturbSnapshot Disabled = new(
@@ -718,7 +757,7 @@ public sealed record RoleNotificationPreferenceDefaultProfile(
 
 public static class RoleNotificationPreferenceDefaults
 {
-    private static readonly IReadOnlyList<string> ExternalChannels = [NotificationChannels.Email, NotificationChannels.Telegram];
+    private static readonly IReadOnlyList<string> ExternalChannels = [NotificationChannels.Email, NotificationChannels.Telegram, NotificationChannels.Sms];
 
     public static RoleNotificationPreferenceDefaultProfile Resolve(string? roleName, bool isSystemRole = false)
     {
