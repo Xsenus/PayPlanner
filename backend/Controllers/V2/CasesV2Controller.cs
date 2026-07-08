@@ -6442,6 +6442,173 @@ public class CasesV2Controller : ControllerBase
             .ToList());
     }
 
+    [HttpPost("{id:int}/court-sync/search")]
+    public async Task<ActionResult<IReadOnlyList<ClientCaseCourtSyncSearchResultDto>>> SearchCourtSyncCases(
+        int id,
+        [FromBody] ClientCaseCourtSyncSearchRequest? request,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var clientCase = await _db.ClientCases
+            .AsNoTracking()
+            .ApplyClientCaseVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (clientCase is null)
+        {
+            return NotFound();
+        }
+
+        var sourceUrl = NormalizeOptional(request?.SourceUrl) ?? NormalizeOptional(clientCase.CourtUrl);
+        if (sourceUrl is null)
+        {
+            return BadRequest(new { message = "Укажите ссылку на судебную карточку или страницу поиска суда." });
+        }
+
+        var provider = ResolveCourtSyncProvider(sourceUrl);
+        if (provider is null)
+        {
+            return BadRequest(new { message = "Для указанного источника пока нет активного провайдера судебной синхронизации." });
+        }
+
+        try
+        {
+            var results = await provider.SearchCasesAsync(
+                new CourtSyncCaseSearchRequest(
+                    sourceUrl,
+                    NormalizeOptional(request?.CourtCaseNumber) ?? NormalizeOptional(clientCase.CourtCaseNumber),
+                    NormalizeOptional(request?.JudicialUid),
+                    NormalizeOptional(request?.CourtName) ?? NormalizeOptional(clientCase.CourtName),
+                    NormalizeOptional(request?.PartyName),
+                    NormalizeCourtInstance(request?.Instance)),
+                ct);
+
+            return Ok(results.Select(MapCourtSyncSearchResult).ToList());
+        }
+        catch (SudrfCourtSyncException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("{id:int}/court-sync/bind")]
+    public async Task<ActionResult<ClientCaseCourtSyncBindingDto>> BindCourtSyncCase(
+        int id,
+        [FromBody] ClientCaseCourtSyncBindRequest? request,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
+
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var clientCase = await _db.ClientCases
+            .ApplyClientCaseVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (clientCase is null)
+        {
+            return NotFound();
+        }
+
+        var sourceUrl = NormalizeOptional(request?.SourceUrl);
+        if (sourceUrl is null)
+        {
+            return BadRequest(new { message = "Выберите судебную карточку или укажите ссылку на источник." });
+        }
+
+        var provider = ResolveCourtSyncProvider(sourceUrl);
+        if (provider is null)
+        {
+            return BadRequest(new { message = "Для указанного источника пока нет активного провайдера судебной синхронизации." });
+        }
+
+        var normalizedInstance = NormalizeCourtInstance(request?.Instance);
+        var actorUserId = User.GetUserId();
+        var actorName = User.GetDisplayName();
+        var now = DateTime.UtcNow;
+        var courtName = Truncate(NormalizeOptional(request?.CourtName) ?? NormalizeOptional(clientCase.CourtName) ?? string.Empty, 200);
+        var courtCaseNumber = Truncate(
+            NormalizeOptional(request?.CourtCaseNumber)
+                ?? NormalizeOptional(request?.JudicialUid)
+                ?? NormalizeOptional(clientCase.CourtCaseNumber)
+                ?? string.Empty,
+            100);
+        var judicialUid = NormalizeOptional(request?.JudicialUid);
+
+        clientCase.CourtName = courtName;
+        clientCase.CourtCaseNumber = courtCaseNumber;
+        clientCase.CourtUrl = Truncate(sourceUrl, 1000);
+
+        var courtInstance = await _db.ClientCaseCourtInstances
+            .Include(item => item.Complaints.Where(complaint => !complaint.IsArchived))
+            .FirstOrDefaultAsync(item => item.ClientCaseId == id && item.Instance == normalizedInstance, ct);
+        if (courtInstance is null)
+        {
+            courtInstance = new ClientCaseCourtInstance
+            {
+                ClientCaseId = id,
+                Instance = normalizedInstance,
+                CreatedAt = now,
+                CreatedByUserId = actorUserId,
+                CreatedByUserName = Truncate(actorName, 256),
+            };
+            _db.ClientCaseCourtInstances.Add(courtInstance);
+        }
+
+        courtInstance.CourtName = courtName;
+        courtInstance.CourtCaseNumber = courtCaseNumber;
+        courtInstance.CourtUrl = clientCase.CourtUrl;
+        if (judicialUid is not null)
+        {
+            var externalIdNote = $"Внешний идентификатор: {Truncate(judicialUid, 120)}";
+            if (!courtInstance.Notes.Contains(externalIdNote, StringComparison.OrdinalIgnoreCase))
+            {
+                courtInstance.Notes = string.IsNullOrWhiteSpace(courtInstance.Notes)
+                    ? externalIdNote
+                    : Truncate($"{courtInstance.Notes.Trim()}{Environment.NewLine}{externalIdNote}", 1000);
+            }
+        }
+        courtInstance.UpdatedAt = now;
+        courtInstance.UpdatedByUserId = actorUserId;
+        courtInstance.UpdatedByUserName = Truncate(actorName, 256);
+
+        var externalIdSuffix = judicialUid is null
+            ? string.Empty
+            : $" Внешний идентификатор: {Truncate(judicialUid, 120)}.";
+        AppendCaseEvent(clientCase, $"Привязана судебная карточка «{ResolveCourtInstanceLabel(normalizedInstance)}» через {provider.Label}. Суд: {FormatCaseTextValue(courtName)}; № в суде: {FormatCaseTextValue(courtCaseNumber)}.{externalIdSuffix} Автор: {actorName}.");
+        _db.SetAuditReason($"Привязана судебная карточка дела через {provider.Label}.");
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(new ClientCaseCourtSyncBindingDto
+        {
+            ClientCaseId = clientCase.Id,
+            Instance = courtInstance.Instance,
+            ProviderKey = provider.Key,
+            SourceType = provider.SourceType,
+            CourtName = clientCase.CourtName,
+            CourtCaseNumber = clientCase.CourtCaseNumber,
+            CourtUrl = clientCase.CourtUrl,
+            JudicialUid = judicialUid ?? string.Empty,
+            Message = "Судебная карточка привязана к делу.",
+            CourtInstance = MapCourtInstance(courtInstance),
+        });
+    }
+
     [HttpPut("court-sync/settings")]
     public async Task<ActionResult<ClientCaseCourtSyncSettingsDto>> UpdateCourtSyncSettings(
         UpdateClientCaseCourtSyncSettingsRequest request,
@@ -11144,6 +11311,22 @@ public class CasesV2Controller : ControllerBase
         };
     }
 
+    private static ClientCaseCourtSyncSearchResultDto MapCourtSyncSearchResult(CourtSyncCaseSearchResult item)
+        => new()
+        {
+            ProviderKey = item.ProviderKey,
+            SourceType = item.SourceType,
+            SourceUrl = item.SourceUrl,
+            CourtName = item.CourtName,
+            CourtCaseNumber = item.CaseNumber,
+            JudicialUid = item.JudicialUid,
+            Instance = NormalizeCourtInstance(item.Instance),
+            InstanceLabel = ResolveCourtInstanceLabel(item.Instance),
+            Title = item.Title,
+            Summary = item.Summary,
+            CanFetch = item.CanFetch,
+        };
+
     private static ClientCaseCourtSyncJournalEntryDto MapCourtSyncJournalEntry(CourtSyncJournalCaseRow row, string line, int index, TimeZoneInfo timeZone)
     {
         var log = MapCourtSyncLog(row.ClientCaseId, line, index, timeZone);
@@ -12055,6 +12238,56 @@ public class CasesV2Controller : ControllerBase
         public int CreatedCourtActDocuments { get; set; }
         public int CreatedProceduralDeadlines { get; set; }
         public DateTime? NextHearingAt { get; set; }
+    }
+
+    public sealed class ClientCaseCourtSyncSearchRequest
+    {
+        public string? SourceUrl { get; set; }
+        public string? CourtCaseNumber { get; set; }
+        public string? JudicialUid { get; set; }
+        public string? CourtName { get; set; }
+        public string? PartyName { get; set; }
+        public string? Instance { get; set; }
+    }
+
+    public sealed class ClientCaseCourtSyncSearchResultDto
+    {
+        public string ProviderKey { get; set; } = string.Empty;
+        public string SourceType { get; set; } = string.Empty;
+        public string SourceUrl { get; set; } = string.Empty;
+        public string CourtName { get; set; } = string.Empty;
+        public string CourtCaseNumber { get; set; } = string.Empty;
+        public string JudicialUid { get; set; } = string.Empty;
+        public string Instance { get; set; } = string.Empty;
+        public string InstanceLabel { get; set; } = string.Empty;
+        public string Title { get; set; } = string.Empty;
+        public string Summary { get; set; } = string.Empty;
+        public bool CanFetch { get; set; }
+    }
+
+    public sealed class ClientCaseCourtSyncBindRequest
+    {
+        public string? Instance { get; set; }
+        public string? ProviderKey { get; set; }
+        public string? SourceType { get; set; }
+        public string? SourceUrl { get; set; }
+        public string? CourtName { get; set; }
+        public string? CourtCaseNumber { get; set; }
+        public string? JudicialUid { get; set; }
+    }
+
+    public sealed class ClientCaseCourtSyncBindingDto
+    {
+        public int ClientCaseId { get; set; }
+        public string Instance { get; set; } = string.Empty;
+        public string ProviderKey { get; set; } = string.Empty;
+        public string SourceType { get; set; } = string.Empty;
+        public string CourtName { get; set; } = string.Empty;
+        public string CourtCaseNumber { get; set; } = string.Empty;
+        public string CourtUrl { get; set; } = string.Empty;
+        public string JudicialUid { get; set; } = string.Empty;
+        public string Message { get; set; } = string.Empty;
+        public ClientCaseCourtInstanceDto CourtInstance { get; set; } = new();
     }
 
     public sealed class ClientCaseCourtSyncLogDto

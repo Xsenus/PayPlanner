@@ -1142,6 +1142,52 @@ export interface ClientCaseCourtSyncRunRequest {
   comment?: string;
 }
 
+export interface ClientCaseCourtSyncSearchRequest {
+  sourceUrl?: string | null;
+  courtCaseNumber?: string | null;
+  judicialUid?: string | null;
+  courtName?: string | null;
+  partyName?: string | null;
+  instance?: string | null;
+}
+
+export interface ClientCaseCourtSyncSearchResult {
+  providerKey: string;
+  sourceType: string;
+  sourceUrl: string;
+  courtName: string;
+  courtCaseNumber: string;
+  judicialUid: string;
+  instance: string;
+  instanceLabel: string;
+  title: string;
+  summary: string;
+  canFetch: boolean;
+}
+
+export interface ClientCaseCourtSyncBindRequest {
+  instance?: string | null;
+  providerKey?: string | null;
+  sourceType?: string | null;
+  sourceUrl?: string | null;
+  courtName?: string | null;
+  courtCaseNumber?: string | null;
+  judicialUid?: string | null;
+}
+
+export interface ClientCaseCourtSyncBinding {
+  clientCaseId: number;
+  instance: string;
+  providerKey: string;
+  sourceType: string;
+  courtName: string;
+  courtCaseNumber: string;
+  courtUrl: string;
+  judicialUid: string;
+  message: string;
+  courtInstance: ClientCaseCourtInstance;
+}
+
 export interface ClientCaseCourtSyncLog {
   id: number;
   clientCaseId: number;

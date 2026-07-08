@@ -5176,6 +5176,20 @@ export class ApiService {
     });
   }
 
+  async searchCaseCourtSyncCases(caseId: number, payload: ClientCaseCourtSyncSearchRequest) {
+    return this.request<ClientCaseCourtSyncSearchResult[]>(`/v2/cases/${caseId}/court-sync/search`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async bindCaseCourtSyncCase(caseId: number, payload: ClientCaseCourtSyncBindRequest) {
+    return this.request<ClientCaseCourtSyncBinding>(`/v2/cases/${caseId}/court-sync/bind`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async getCaseCourtSyncLogs(caseId: number) {
     return this.request<ClientCaseCourtSyncLog[]>(`/v2/cases/${caseId}/court-sync/logs`);
   }
@@ -7010,10 +7024,14 @@ import type {
   ClientCaseActivity,
   ClientCaseConversationEntry,
   ClientCaseCourtSyncJournalEntry,
+  ClientCaseCourtSyncBinding,
+  ClientCaseCourtSyncBindRequest,
   ClientCaseCourtSyncLog,
   ClientCaseCourtSyncProvider,
   ClientCaseCourtSyncRun,
   ClientCaseCourtSyncRunRequest,
+  ClientCaseCourtSyncSearchRequest,
+  ClientCaseCourtSyncSearchResult,
   ClientCaseCourtSyncSettings,
   ClientCaseDocument,
   ClientCaseDocumentTemplate,

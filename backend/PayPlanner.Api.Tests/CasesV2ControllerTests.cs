@@ -6046,6 +6046,120 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task SearchCourtSyncCases_ReturnsProviderResults()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "court-search-owner@example.com", "Владелец");
+        var client = new Client
+        {
+            Name = "Земцов Виктор Александрович",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Земцов - поиск суда",
+            Status = ClientCaseStatus.Open,
+            CourtUrl = "https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42",
+            CourtCaseNumber = "33а-3390/2026",
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var courtData = new SudrfCourtCaseData
+        {
+            SourceUrl = clientCase.CourtUrl,
+            CourtName = "Хабаровский краевой суд",
+            CaseNumber = "33а-3390/2026",
+            JudicialUid = "27RS0005-01-2025-002659-56",
+            Instance = "appeal",
+            JudgeName = "Казарикова Оксана Витальевна",
+        };
+        var controller = CreateController(db, owner, sudrfCourtSyncService: new FixedSudrfCourtSyncService(courtData));
+
+        var result = await controller.SearchCourtSyncCases(
+            clientCase.Id,
+            new CasesV2Controller.ClientCaseCourtSyncSearchRequest
+            {
+                SourceUrl = clientCase.CourtUrl,
+                CourtCaseNumber = clientCase.CourtCaseNumber,
+                Instance = "appeal",
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var results = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.ClientCaseCourtSyncSearchResultDto>>(ok.Value);
+        var item = Assert.Single(results);
+        Assert.Equal("sudrf", item.ProviderKey);
+        Assert.Equal("Хабаровский краевой суд", item.CourtName);
+        Assert.Equal("33а-3390/2026", item.CourtCaseNumber);
+        Assert.Equal("27RS0005-01-2025-002659-56", item.JudicialUid);
+        Assert.Equal("appeal", item.Instance);
+        Assert.True(item.CanFetch);
+    }
+
+    [Fact]
+    public async Task BindCourtSyncCase_UpdatesCaseAndCourtInstance()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "court-bind-owner@example.com", "Владелец");
+        var client = new Client
+        {
+            Name = "Земцов Виктор Александрович",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Земцов - привязка суда",
+            Status = ClientCaseStatus.Open,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, owner, sudrfCourtSyncService: new FixedSudrfCourtSyncService(new SudrfCourtCaseData()));
+
+        var result = await controller.BindCourtSyncCase(
+            clientCase.Id,
+            new CasesV2Controller.ClientCaseCourtSyncBindRequest
+            {
+                Instance = "appeal",
+                ProviderKey = "sudrf",
+                SourceType = "sudrf",
+                SourceUrl = "https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42",
+                CourtName = "Хабаровский краевой суд",
+                CourtCaseNumber = "33а-3390/2026",
+                JudicialUid = "27RS0005-01-2025-002659-56",
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<CasesV2Controller.ClientCaseCourtSyncBindingDto>(ok.Value);
+        Assert.Equal("appeal", dto.Instance);
+        Assert.Equal("Хабаровский краевой суд", dto.CourtName);
+        Assert.Equal("33а-3390/2026", dto.CourtCaseNumber);
+        Assert.Equal("27RS0005-01-2025-002659-56", dto.JudicialUid);
+
+        await db.Entry(clientCase).ReloadAsync();
+        Assert.Equal("Хабаровский краевой суд", clientCase.CourtName);
+        Assert.Equal("33а-3390/2026", clientCase.CourtCaseNumber);
+        Assert.Equal("https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42", clientCase.CourtUrl);
+        Assert.Contains("Привязана судебная карточка", clientCase.EventHistory);
+        Assert.Contains("27RS0005-01-2025-002659-56", clientCase.EventHistory);
+
+        var courtInstance = await db.ClientCaseCourtInstances.SingleAsync(item => item.ClientCaseId == clientCase.Id);
+        Assert.Equal("appeal", courtInstance.Instance);
+        Assert.Equal("Хабаровский краевой суд", courtInstance.CourtName);
+        Assert.Equal("33а-3390/2026", courtInstance.CourtCaseNumber);
+        Assert.Equal(clientCase.CourtUrl, courtInstance.CourtUrl);
+        Assert.Contains("Внешний идентификатор: 27RS0005-01-2025-002659-56", courtInstance.Notes);
+    }
+
+    [Fact]
     public async Task RunCourtSync_ExplainsMissingCourtBinding()
     {
         await using var db = await CreateContextAsync();

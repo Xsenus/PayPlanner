@@ -39,6 +39,8 @@ vi.mock('../../services/api', () => ({
     getCaseConversation: vi.fn(),
     addCaseConversationEntry: vi.fn(),
     runCaseCourtSync: vi.fn(),
+    searchCaseCourtSyncCases: vi.fn(),
+    bindCaseCourtSyncCase: vi.fn(),
     getCaseCourtSyncLogs: vi.fn(),
     getCaseCourtDirectory: vi.fn(),
     getCaseCourtInstances: vi.fn(),
@@ -671,6 +673,36 @@ describe('CaseDetailPage', () => {
       courtName: 'Арбитражный суд Самарской области',
       courtCaseNumber: 'А55-12345/2026',
       courtUrl: 'https://kad.arbitr.ru/card',
+    });
+    vi.mocked(apiService.searchCaseCourtSyncCases).mockReset();
+    vi.mocked(apiService.searchCaseCourtSyncCases).mockResolvedValue([]);
+    vi.mocked(apiService.bindCaseCourtSyncCase).mockReset();
+    vi.mocked(apiService.bindCaseCourtSyncCase).mockResolvedValue({
+      clientCaseId: 15,
+      instance: 'first',
+      providerKey: 'sudrf',
+      sourceType: 'sudrf',
+      courtName: 'Арбитражный суд Самарской области',
+      courtCaseNumber: 'А55-12345/2026',
+      courtUrl: 'https://kad.arbitr.ru/card',
+      judicialUid: '',
+      message: 'Судебная карточка привязана к делу.',
+      courtInstance: {
+        id: 81,
+        clientCaseId: 15,
+        instance: 'first',
+        instanceLabel: 'Первая инстанция',
+        courtId: 3,
+        courtName: 'Арбитражный суд Самарской области',
+        courtCaseNumber: 'А55-12345/2026',
+        courtUrl: 'https://kad.arbitr.ru/card',
+        judgeName: '',
+        courtroom: '',
+        secretaryName: '',
+        notes: '',
+        createdAt: '2026-05-18T10:00:00Z',
+        complaints: [],
+      },
     });
     vi.mocked(apiService.getCaseCourtSyncLogs).mockReset();
     vi.mocked(apiService.getCaseCourtSyncLogs).mockResolvedValue([
@@ -1988,7 +2020,9 @@ describe('CaseDetailPage', () => {
 
     expect(screen.getByText('Судебный блок')).toBeTruthy();
     expect(await screen.findByDisplayValue('Арбитражный суд Самарской области')).toBeTruthy();
-    expect(await screen.findByDisplayValue('https://kad.arbitr.ru/card')).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getAllByDisplayValue('https://kad.arbitr.ru/card').length).toBeGreaterThan(0);
+    });
     expect(screen.getByText('Судебная хронология')).toBeTruthy();
     expect(screen.getAllByText('Ближайшее заседание').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Апелляция').length).toBeGreaterThan(0);
@@ -2001,6 +2035,87 @@ describe('CaseDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Проверить источник/u }));
     await waitFor(() => {
       expect(apiService.runCaseCourtSync).toHaveBeenCalledWith(15);
+    });
+  });
+
+  it('searches and binds an external court card from the court tab', async () => {
+    vi.mocked(apiService.searchCaseCourtSyncCases).mockResolvedValueOnce([
+      {
+        providerKey: 'sudrf',
+        sourceType: 'sudrf',
+        sourceUrl: 'https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42',
+        courtName: 'Хабаровский краевой суд',
+        courtCaseNumber: '33а-3390/2026',
+        judicialUid: '27RS0005-01-2025-002659-56',
+        instance: 'appeal',
+        instanceLabel: 'Апелляция',
+        title: 'Хабаровский краевой суд',
+        summary: 'Хабаровский краевой суд; № 33а-3390/2026; Судья: Казарикова О.В.',
+        canFetch: true,
+      },
+    ]);
+    vi.mocked(apiService.bindCaseCourtSyncCase).mockResolvedValueOnce({
+      clientCaseId: 15,
+      instance: 'first',
+      providerKey: 'sudrf',
+      sourceType: 'sudrf',
+      courtName: 'Хабаровский краевой суд',
+      courtCaseNumber: '33а-3390/2026',
+      courtUrl: 'https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42',
+      judicialUid: '27RS0005-01-2025-002659-56',
+      message: 'Судебная карточка привязана к делу.',
+      courtInstance: {
+        id: 81,
+        clientCaseId: 15,
+        instance: 'first',
+        instanceLabel: 'Первая инстанция',
+        courtId: null,
+        courtName: 'Хабаровский краевой суд',
+        courtCaseNumber: '33а-3390/2026',
+        courtUrl: 'https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42',
+        judgeName: '',
+        courtroom: '',
+        secretaryName: '',
+        notes: '',
+        createdAt: '2026-05-18T10:00:00Z',
+        complaints: [],
+      },
+    });
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Суд' }));
+    const sourceInput = await screen.findByPlaceholderText('https://...sudrf.ru/...');
+    fireEvent.change(sourceInput, {
+      target: { value: 'https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('33а-3390/2026'), {
+      target: { value: '33а-3390/2026' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Найти/u }));
+
+    expect(await screen.findByText('Хабаровский краевой суд')).toBeTruthy();
+    expect(screen.getByText(/UID 27RS0005-01-2025-002659-56/u)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Привязать/u }));
+
+    await waitFor(() => {
+      expect(apiService.searchCaseCourtSyncCases).toHaveBeenCalledWith(15, {
+        sourceUrl: 'https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42',
+        courtCaseNumber: '33а-3390/2026',
+        courtName: 'Арбитражный суд Самарской области',
+        instance: 'first',
+      });
+      expect(apiService.bindCaseCourtSyncCase).toHaveBeenCalledWith(15, {
+        instance: 'first',
+        providerKey: 'sudrf',
+        sourceType: 'sudrf',
+        sourceUrl: 'https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42',
+        courtName: 'Хабаровский краевой суд',
+        courtCaseNumber: '33а-3390/2026',
+        judicialUid: '27RS0005-01-2025-002659-56',
+      });
+      expect(screen.getByText('Судебная карточка привязана к делу.')).toBeTruthy();
     });
   });
 

@@ -22,6 +22,7 @@ import {
   RefreshCw,
   RotateCw,
   Save,
+  Search,
   Send,
   Trash2,
   UploadCloud,
@@ -45,6 +46,7 @@ import type {
   ClientCaseCourtParty,
   ClientCaseCourtSyncLog,
   ClientCaseCourtSyncRunRequest,
+  ClientCaseCourtSyncSearchResult,
   ClientCaseDocument,
   ClientCaseDocumentTemplate,
   ClientCaseFinanceDetail,
@@ -1014,6 +1016,7 @@ export function CaseDetailPage({
   const [courtParties, setCourtParties] = useState<ClientCaseCourtParty[]>([]);
   const [proceduralDeadlines, setProceduralDeadlines] = useState<ClientCaseProceduralDeadline[]>([]);
   const [courtSyncLogs, setCourtSyncLogs] = useState<ClientCaseCourtSyncLog[]>([]);
+  const [courtSyncSearchResults, setCourtSyncSearchResults] = useState<ClientCaseCourtSyncSearchResult[]>([]);
   const [timeline, setTimeline] = useState<ClientCaseTimelineEntry[]>([]);
   const [conversation, setConversation] = useState<ClientCaseConversationEntry[]>([]);
   const [financeDetail, setFinanceDetail] = useState<ClientCaseFinanceDetail | null>(null);
@@ -1059,6 +1062,8 @@ export function CaseDetailPage({
   const [updatingDocumentId, setUpdatingDocumentId] = useState<number | null>(null);
   const [deletingDocumentId, setDeletingDocumentId] = useState<number | null>(null);
   const [syncingCourt, setSyncingCourt] = useState(false);
+  const [searchingCourtSync, setSearchingCourtSync] = useState(false);
+  const [bindingCourtSyncSource, setBindingCourtSyncSource] = useState(false);
   const [savingCourtInstance, setSavingCourtInstance] = useState(false);
   const [savingCourtComplaint, setSavingCourtComplaint] = useState(false);
   const [editingCourtComplaint, setEditingCourtComplaint] = useState<ClientCaseCourtComplaint | null>(null);
@@ -1585,6 +1590,7 @@ export function CaseDetailPage({
     setCourtInstanceDraft(buildCourtInstanceDraft(selected ?? null));
     setCourtComplaintDraft(buildCourtComplaintDraft(activeCourtInstance));
     setEditingCourtComplaint(null);
+    setCourtSyncSearchResults([]);
   }, [activeCourtInstance, courtInstances]);
 
   useEffect(() => {
@@ -2157,6 +2163,76 @@ export function CaseDetailPage({
     if (comment === null) return;
 
     await runCourtSync({ manualOnly: true, comment: comment.trim() });
+  };
+
+  const searchCourtSyncCases = async () => {
+    if (!caseItem) return;
+
+    const sourceUrl = courtInstanceDraft.courtUrl.trim() || caseItem.courtUrl || '';
+    if (!sourceUrl.trim()) {
+      setError('Укажите ссылку на судебную карточку или страницу поиска суда.');
+      return;
+    }
+
+    setSearchingCourtSync(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const results = await apiService.searchCaseCourtSyncCases(caseItem.id, {
+        sourceUrl: sourceUrl.trim(),
+        courtCaseNumber: courtInstanceDraft.courtCaseNumber.trim() || caseItem.courtCaseNumber || null,
+        courtName: courtInstanceDraft.courtName.trim() || caseItem.courtName || null,
+        instance: activeCourtInstance,
+      });
+      setCourtSyncSearchResults(results ?? []);
+      setNotice((results?.length ?? 0) > 0 ? `Найдено карточек: ${results.length}.` : 'По указанным параметрам карточки не найдены.');
+    } catch (err) {
+      setCourtSyncSearchResults([]);
+      setError(err instanceof Error ? err.message : 'Не удалось найти судебную карточку.');
+    } finally {
+      setSearchingCourtSync(false);
+    }
+  };
+
+  const bindCourtSyncCase = async (result: ClientCaseCourtSyncSearchResult) => {
+    if (!caseItem) return;
+
+    setBindingCourtSyncSource(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const binding = await apiService.bindCaseCourtSyncCase(caseItem.id, {
+        instance: activeCourtInstance,
+        providerKey: result.providerKey,
+        sourceType: result.sourceType,
+        sourceUrl: result.sourceUrl,
+        courtName: result.courtName,
+        courtCaseNumber: result.courtCaseNumber,
+        judicialUid: result.judicialUid,
+      });
+      setCourtInstances((current) => {
+        const exists = current.some((entry) => entry.instance === binding.courtInstance.instance);
+        return exists
+          ? current.map((entry) => entry.instance === binding.courtInstance.instance ? binding.courtInstance : entry)
+          : [...current, binding.courtInstance];
+      });
+      setCourtInstanceDraft(buildCourtInstanceDraft(binding.courtInstance));
+      setCaseItem((current) => current
+        ? {
+          ...current,
+          courtName: binding.courtName,
+          courtCaseNumber: binding.courtCaseNumber,
+          courtUrl: binding.courtUrl,
+        }
+        : current);
+      setCourtSyncSearchResults([]);
+      setNotice(binding.message || 'Судебная карточка привязана к делу.');
+      setReloadToken((value) => value + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось привязать судебную карточку.');
+    } finally {
+      setBindingCourtSyncSource(false);
+    }
   };
 
   const saveCourtInstance = async () => {
@@ -3257,6 +3333,7 @@ export function CaseDetailPage({
               deadlineCalculationPreview={deadlineCalculationPreview}
               logs={courtSyncLogs}
               logsLoading={courtSyncLogsLoading}
+              courtSyncSearchResults={courtSyncSearchResults}
               savingCourtInstance={savingCourtInstance}
               savingCourtComplaint={savingCourtComplaint}
               archivingCourtComplaintId={archivingCourtComplaintId}
@@ -3269,8 +3346,12 @@ export function CaseDetailPage({
               onRunCourtSync={runCourtSync}
               onRecordManualCourtCheck={recordManualCourtCheck}
               syncingCourt={syncingCourt}
+              searchingCourtSync={searchingCourtSync}
+              bindingCourtSyncSource={bindingCourtSyncSource}
               onActiveCourtInstanceChange={setActiveCourtInstance}
               onCourtInstanceDraftChange={setCourtInstanceDraft}
+              onSearchCourtSyncCases={() => void searchCourtSyncCases()}
+              onBindCourtSyncCase={(result) => void bindCourtSyncCase(result)}
               onCourtComplaintDraftChange={setCourtComplaintDraft}
               onSaveCourtInstance={() => void saveCourtInstance()}
               onSaveCourtComplaint={() => void saveCourtComplaint()}
@@ -5292,6 +5373,7 @@ function CourtPanel({
   deadlineCalculationPreview,
   logs,
   logsLoading,
+  courtSyncSearchResults,
   savingCourtInstance,
   savingCourtComplaint,
   archivingCourtComplaintId,
@@ -5304,8 +5386,12 @@ function CourtPanel({
   onRunCourtSync,
   onRecordManualCourtCheck,
   syncingCourt,
+  searchingCourtSync,
+  bindingCourtSyncSource,
   onActiveCourtInstanceChange,
   onCourtInstanceDraftChange,
+  onSearchCourtSyncCases,
+  onBindCourtSyncCase,
   onCourtComplaintDraftChange,
   onSaveCourtInstance,
   onSaveCourtComplaint,
@@ -5376,6 +5462,7 @@ function CourtPanel({
   deadlineCalculationPreview: ProceduralDeadlineCalculationResult | null;
   logs: ClientCaseCourtSyncLog[];
   logsLoading: boolean;
+  courtSyncSearchResults: ClientCaseCourtSyncSearchResult[];
   savingCourtInstance: boolean;
   savingCourtComplaint: boolean;
   archivingCourtComplaintId: number | null;
@@ -5388,8 +5475,12 @@ function CourtPanel({
   onRunCourtSync: () => void;
   onRecordManualCourtCheck: () => void;
   syncingCourt: boolean;
+  searchingCourtSync: boolean;
+  bindingCourtSyncSource: boolean;
   onActiveCourtInstanceChange: (value: string) => void;
   onCourtInstanceDraftChange: (draft: CourtInstanceDraft) => void;
+  onSearchCourtSyncCases: () => void;
+  onBindCourtSyncCase: (result: ClientCaseCourtSyncSearchResult) => void;
   onCourtComplaintDraftChange: (draft: CourtComplaintDraft) => void;
   onSaveCourtInstance: () => void;
   onSaveCourtComplaint: () => void;
@@ -5466,6 +5557,71 @@ function CourtPanel({
           </button>
         </div>
       </div>
+
+      <section className="rounded-xl border border-slate-200 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Поиск судебной карточки</h2>
+            <div className="mt-1 text-sm text-slate-500">{selectedCourtInstanceMeta.label}</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => void onSearchCourtSyncCases()}
+            disabled={searchingCourtSync || bindingCourtSyncSource}
+            className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-200 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50">
+            {searchingCourtSync ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />} Найти
+          </button>
+        </div>
+        <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1.4fr)_minmax(220px,0.6fr)]">
+          <label className="text-sm font-medium text-slate-700">
+            <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Ссылка на источник</span>
+            <input
+              value={courtInstanceDraft.courtUrl}
+              onChange={(event) => onCourtInstanceDraftChange({ ...courtInstanceDraft, courtUrl: event.target.value })}
+              placeholder="https://...sudrf.ru/..."
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            />
+          </label>
+          <label className="text-sm font-medium text-slate-700">
+            <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Номер дела в суде</span>
+            <input
+              value={courtInstanceDraft.courtCaseNumber}
+              onChange={(event) => onCourtInstanceDraftChange({ ...courtInstanceDraft, courtCaseNumber: event.target.value })}
+              placeholder="33а-3390/2026"
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+            />
+          </label>
+        </div>
+        {courtSyncSearchResults.length > 0 ? (
+          <div className="mt-3 space-y-2">
+            {courtSyncSearchResults.map((result) => (
+              <div key={`${result.providerKey}-${result.sourceUrl}-${result.courtCaseNumber || result.judicialUid}`} className="rounded-lg border border-blue-100 bg-blue-50/40 p-3">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold text-slate-900">{result.title || result.courtName || result.courtCaseNumber || 'Судебная карточка'}</span>
+                      <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-blue-700">{result.instanceLabel}</span>
+                    </div>
+                    {result.summary ? <p className="mt-1 text-sm text-slate-600">{result.summary}</p> : null}
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-500">
+                      {result.courtCaseNumber ? <span>№ {result.courtCaseNumber}</span> : null}
+                      {result.judicialUid ? <span>UID {result.judicialUid}</span> : null}
+                      {result.sourceUrl ? <span className="max-w-full truncate">{result.sourceUrl}</span> : null}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void onBindCourtSyncCase(result)}
+                    disabled={bindingCourtSyncSource || !result.canFetch}
+                    className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+                    {bindingCourtSyncSource ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Привязать
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </section>
 
       <section className="rounded-xl border border-slate-200 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
