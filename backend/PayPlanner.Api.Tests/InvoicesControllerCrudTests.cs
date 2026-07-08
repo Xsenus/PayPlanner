@@ -1106,6 +1106,8 @@ public class InvoicesControllerCrudTests
                 Assert.Equal(ClientBalanceDirection.Credit, credit.Direction);
                 Assert.Equal(12_000m, credit.Amount);
                 Assert.Equal(sourceDto.Id, credit.PaymentId);
+                Assert.Equal(ClientBalanceService.BuildCancelledInvoiceAdvanceKey(sourceDto.Id), credit.ExternalKey);
+                Assert.Contains("INV-CANCEL-REALLOC-SRC", credit.Description, StringComparison.Ordinal);
             },
             debit =>
             {
@@ -1113,7 +1115,12 @@ public class InvoicesControllerCrudTests
                 Assert.Equal(ClientBalanceDirection.Debit, debit.Direction);
                 Assert.Equal(12_000m, debit.Amount);
                 Assert.Equal(targetDto.Id, debit.PaymentId);
+                Assert.Equal(ClientBalanceService.BuildCancelledInvoiceReallocationKey(sourceDto.Id, targetDto.Id), debit.ExternalKey);
+                Assert.Contains("INV-CANCEL-REALLOC-SRC", debit.Description, StringComparison.Ordinal);
+                Assert.Contains("INV-CANCEL-REALLOC-DST", debit.Description, StringComparison.Ordinal);
+                Assert.Contains("Перевыставили счёт", debit.Description, StringComparison.Ordinal);
             });
+        Assert.Contains($"аннулированному счёту #{sourceDto.Id}", storedTarget.SystemNotes, StringComparison.OrdinalIgnoreCase);
 
         var balance = await ClientBalanceService.GetBalanceAsync(db, clientId);
         Assert.Equal(0m, balance);
@@ -1182,6 +1189,8 @@ public class InvoicesControllerCrudTests
                 Assert.Equal(ClientBalanceDirection.Credit, credit.Direction);
                 Assert.Equal(12_000m, credit.Amount);
                 Assert.Equal(sourceDto.Id, credit.PaymentId);
+                Assert.Equal(ClientBalanceService.BuildCancelledInvoiceAdvanceKey(sourceDto.Id), credit.ExternalKey);
+                Assert.Contains("INV-CANCEL-LEGAL-REALLOC-SRC", credit.Description, StringComparison.Ordinal);
             },
             debit =>
             {
@@ -1191,7 +1200,12 @@ public class InvoicesControllerCrudTests
                 Assert.Equal(ClientBalanceDirection.Debit, debit.Direction);
                 Assert.Equal(12_000m, debit.Amount);
                 Assert.Equal(targetDto.Id, debit.PaymentId);
+                Assert.Equal(ClientBalanceService.BuildCancelledInvoiceReallocationKey(sourceDto.Id, targetDto.Id), debit.ExternalKey);
+                Assert.Contains("INV-CANCEL-LEGAL-REALLOC-SRC", debit.Description, StringComparison.Ordinal);
+                Assert.Contains("INV-CANCEL-LEGAL-REALLOC-DST", debit.Description, StringComparison.Ordinal);
+                Assert.Contains("Legal entity reallocate", debit.Description, StringComparison.Ordinal);
             });
+        Assert.Contains($"аннулированному счёту #{sourceDto.Id}", storedTarget.SystemNotes, StringComparison.OrdinalIgnoreCase);
 
         var balance = await ClientBalanceService.GetLegalEntityBalanceAsync(db, legalEntityId);
         Assert.Equal(0m, balance);

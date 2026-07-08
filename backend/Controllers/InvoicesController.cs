@@ -1106,6 +1106,7 @@ public class InvoicesController : ControllerBase
         if (reallocationTarget is not null)
         {
             await _db.SaveChangesAsync(ct);
+            var reallocationDescription = BuildCancelledInvoiceReallocationDescription(payment, reallocationTarget, reason);
             var reallocationResult = await ClientBalanceService.ApplyCounterpartyCreditAsync(
                 _db,
                 payment.ClientId,
@@ -1114,7 +1115,9 @@ public class InvoicesController : ControllerBase
                 receivedAmount,
                 now,
                 HttpContext,
-                ct);
+                ct,
+                description: reallocationDescription,
+                externalKey: ClientBalanceService.BuildCancelledInvoiceReallocationKey(payment.Id, reallocationTarget.Id));
 
             if (!reallocationResult.Success)
             {
@@ -1125,6 +1128,12 @@ public class InvoicesController : ControllerBase
             PaymentDomainService.AppendSystemNote(
                 payment,
                 $"Оплата зачтена на счёт #{reallocationTarget.Id}: {reallocatedAmount:N2}",
+                now,
+                actor,
+                invoiceTimeZone);
+            PaymentDomainService.AppendSystemNote(
+                reallocationTarget,
+                $"Зачтена оплата по аннулированному счёту #{payment.Id}: {reallocatedAmount:N2}",
                 now,
                 actor,
                 invoiceTimeZone);
@@ -1189,6 +1198,18 @@ public class InvoicesController : ControllerBase
             ? cancellationLine
             : $"{comment.Trim()}{Environment.NewLine}{cancellationLine}";
     }
+
+    private static string BuildCancelledInvoiceReallocationDescription(Payment sourcePayment, Payment targetPayment, string reason)
+    {
+        var sourceLabel = BuildInvoicePaymentReference(sourcePayment);
+        var targetLabel = BuildInvoicePaymentReference(targetPayment);
+        return $"Зачет оплаты по аннулированному счёту {sourceLabel} в счёт {targetLabel}. Причина: {reason}";
+    }
+
+    private static string BuildInvoicePaymentReference(Payment payment)
+        => string.IsNullOrWhiteSpace(payment.Account)
+            ? $"#{payment.Id}"
+            : $"№{payment.Account.Trim()} (#{payment.Id})";
 
     [HttpPost]
     public async Task<ActionResult<InvoiceDto>> Create([FromBody] UpsertInvoiceRequest request, CancellationToken ct)

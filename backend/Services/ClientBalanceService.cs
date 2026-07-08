@@ -9,6 +9,7 @@ namespace PayPlanner.Api.Services;
 public static class ClientBalanceService
 {
     private const decimal AmountEpsilon = 0.009m;
+    private const int DescriptionMaxLength = 500;
 
     public static Task<decimal> GetBalanceAsync(PaymentContext db, int clientId, CancellationToken ct = default)
         => GetBalanceAsync(db, clientId, null, ct);
@@ -102,8 +103,9 @@ public static class ClientBalanceService
         HttpContext? httpContext,
         CancellationToken ct = default,
         string? description = null,
-        int? sourcePaymentId = null)
-        => await ApplyCounterpartyCreditAsync(db, clientId, null, paymentId, requestedAmount, utcNow, httpContext, ct, description, sourcePaymentId);
+        int? sourcePaymentId = null,
+        string? externalKey = null)
+        => await ApplyCounterpartyCreditAsync(db, clientId, null, paymentId, requestedAmount, utcNow, httpContext, ct, description, sourcePaymentId, externalKey);
 
     public static async Task<(bool Success, string? Error, decimal AppliedAmount)> ApplyLegalEntityCreditAsync(
         PaymentContext db,
@@ -114,8 +116,9 @@ public static class ClientBalanceService
         HttpContext? httpContext,
         CancellationToken ct = default,
         string? description = null,
-        int? sourcePaymentId = null)
-        => await ApplyCounterpartyCreditAsync(db, null, legalEntityId, paymentId, requestedAmount, utcNow, httpContext, ct, description, sourcePaymentId);
+        int? sourcePaymentId = null,
+        string? externalKey = null)
+        => await ApplyCounterpartyCreditAsync(db, null, legalEntityId, paymentId, requestedAmount, utcNow, httpContext, ct, description, sourcePaymentId, externalKey);
 
     public static async Task<(bool Success, string? Error, decimal AppliedAmount)> ApplyCounterpartyCreditAsync(
         PaymentContext db,
@@ -127,7 +130,8 @@ public static class ClientBalanceService
         HttpContext? httpContext,
         CancellationToken ct = default,
         string? description = null,
-        int? sourcePaymentId = null)
+        int? sourcePaymentId = null,
+        string? externalKey = null)
     {
         if (!HasSingleOwner(clientId, legalEntityId))
         {
@@ -208,14 +212,15 @@ public static class ClientBalanceService
             Amount = applied,
             Type = ClientBalanceTransactionType.CreditApplied,
             Direction = ClientBalanceDirection.Debit,
-            Description = !string.IsNullOrWhiteSpace(description)
-                ? description.Trim()
+            Description = NormalizeDescription(!string.IsNullOrWhiteSpace(description)
+                ? description
                 : sourcePaymentId.HasValue
                     ? $"Зачет аванса по платежу #{sourcePaymentId.Value} в платеж #{payment.Id}"
-                    : $"Зачет баланса в платеж #{payment.Id}",
-            ExternalKey = sourcePaymentId.HasValue
-                ? BuildUnallocatedAdvanceApplicationKey(sourcePaymentId.Value, payment.Id, utcNow)
-                : null,
+                    : $"Зачет баланса в платеж #{payment.Id}"),
+            ExternalKey = NormalizeExternalKey(externalKey)
+                ?? (sourcePaymentId.HasValue
+                    ? BuildUnallocatedAdvanceApplicationKey(sourcePaymentId.Value, payment.Id, utcNow)
+                    : null),
             CreatedAt = utcNow,
             CreatedByUserId = actorUserId,
             CreatedByUserName = actor,
@@ -452,6 +457,9 @@ public static class ClientBalanceService
 
     public static string BuildCancelledInvoiceAdvanceKey(int paymentId) => $"invoice-cancellation-advance:{paymentId}";
 
+    public static string BuildCancelledInvoiceReallocationKey(int sourcePaymentId, int targetPaymentId)
+        => $"invoice-cancellation-reallocate:{sourcePaymentId}:{targetPaymentId}";
+
     public static string BuildUnallocatedAdvanceKey(int paymentId) => $"payment-unallocated-advance:{paymentId}";
 
     public static string BuildUnallocatedAdvanceApplicationKeyPrefix(int sourcePaymentId)
@@ -520,4 +528,16 @@ public static class ClientBalanceService
     private static bool HasSingleOwner(int? clientId, int? legalEntityId)
         => (clientId.HasValue && clientId.Value > 0 && !legalEntityId.HasValue)
             || (legalEntityId.HasValue && legalEntityId.Value > 0 && !clientId.HasValue);
+
+    private static string NormalizeDescription(string? description)
+    {
+        var normalized = string.IsNullOrWhiteSpace(description) ? string.Empty : description.Trim();
+        return normalized.Length <= DescriptionMaxLength ? normalized : normalized[..DescriptionMaxLength];
+    }
+
+    private static string? NormalizeExternalKey(string? externalKey)
+    {
+        var normalized = string.IsNullOrWhiteSpace(externalKey) ? null : externalKey.Trim();
+        return normalized;
+    }
 }
