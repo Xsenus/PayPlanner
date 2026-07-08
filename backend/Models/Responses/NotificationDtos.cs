@@ -4,6 +4,7 @@ public class NotificationSettingsDto
 {
     public EmailNotificationSettingsDto Email { get; set; } = new();
     public TelegramNotificationSettingsDto Telegram { get; set; } = new();
+    public SmsNotificationSettingsDto Sms { get; set; } = new();
     public IReadOnlyList<NotificationSenderDto> Senders { get; set; } = Array.Empty<NotificationSenderDto>();
     public IReadOnlyList<NotificationPurposeDto> Purposes { get; set; } = Array.Empty<NotificationPurposeDto>();
     public IReadOnlyList<NotificationTemplateDto> Templates { get; set; } = Array.Empty<NotificationTemplateDto>();
@@ -44,6 +45,16 @@ public class TelegramNotificationSettingsDto
     public bool BotTokenSet { get; set; }
     public string BotUsername { get; set; } = string.Empty;
     public int LinkedUsersCount { get; set; }
+}
+
+public class SmsNotificationSettingsDto
+{
+    public bool Enabled { get; set; }
+    public bool Ready { get; set; }
+    public bool ProviderConfigured { get; set; }
+    public string ProviderKey { get; set; } = string.Empty;
+    public string SenderName { get; set; } = string.Empty;
+    public string StatusText { get; set; } = string.Empty;
 }
 
 public class WebPushPublicKeyDto

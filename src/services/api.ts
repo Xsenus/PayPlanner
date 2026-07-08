@@ -882,7 +882,7 @@ export interface UpdateStickyNoteLayoutPayload {
   version?: number;
 }
 
-export type NotificationChannel = 'email' | 'telegram';
+export type NotificationChannel = 'email' | 'telegram' | 'sms';
 export type UserNotificationDeliveryChannel = 'inApp' | 'toast' | 'webPush' | 'email' | 'telegram';
 
 export interface NotificationChannelDto {
@@ -940,6 +940,15 @@ export interface TelegramNotificationSettingsDto {
   botTokenSet: boolean;
   botUsername: string;
   linkedUsersCount: number;
+}
+
+export interface SmsNotificationSettingsDto {
+  enabled: boolean;
+  ready: boolean;
+  providerConfigured: boolean;
+  providerKey: string;
+  senderName: string;
+  statusText: string;
 }
 
 export interface WebPushPublicKeyDto {
@@ -1048,6 +1057,7 @@ export interface NotificationSenderDto {
 export interface NotificationSettingsDto {
   email: EmailNotificationSettingsDto;
   telegram: TelegramNotificationSettingsDto;
+  sms: SmsNotificationSettingsDto;
   senders: NotificationSenderDto[];
   purposes: NotificationPurposeDto[];
   templates: NotificationTemplateDto[];

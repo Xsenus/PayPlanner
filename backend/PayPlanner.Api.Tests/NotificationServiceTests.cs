@@ -39,6 +39,39 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task SmsChannel_IsSkippedAndLoggedWhenProviderIsDisabled()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "sms-recipient@example.com", phoneNumber: "+7 (999) 111-22-33");
+        var emailService = new RecordingEmailService();
+        var telegramService = new RecordingTelegramService();
+        var smsService = new DisabledSmsNotificationService();
+        var service = CreateService(db, emailService, telegramService, smsNotificationService: smsService);
+
+        var settings = await service.GetSettingsAsync();
+        var deliveries = await service.SendToUserAsync(
+            user.Id,
+            new NotificationMessage("SMS тест", "Проверка SMS-канала"),
+            [NotificationChannels.Sms],
+            "sms:test:disabled");
+
+        Assert.False(settings.Sms.Enabled);
+        Assert.False(settings.Sms.Ready);
+        Assert.Contains("SMS-уведомления отключены", settings.Sms.StatusText, StringComparison.Ordinal);
+        var delivery = Assert.Single(deliveries);
+        Assert.Equal(NotificationChannels.Sms, delivery.Channel);
+        Assert.Equal(NotificationDeliveryStatus.Skipped, delivery.Status);
+        Assert.Equal("+79991112233", delivery.RecipientAddress);
+        Assert.Contains("SMS-уведомления отключены", delivery.Error, StringComparison.Ordinal);
+        Assert.Empty(emailService.Messages);
+        Assert.Empty(telegramService.Messages);
+
+        var savedDelivery = await db.NotificationDeliveries.SingleAsync();
+        Assert.Equal(delivery.Id, savedDelivery.Id);
+        Assert.Equal(NotificationDeliveryStatus.Skipped, savedDelivery.Status);
+    }
+
+    [Fact]
     public void NotificationEventEnvelope_UsesCatalogDefaultsAndExplicitOverrides()
     {
         var envelope = new NotificationEventEnvelope(
@@ -4558,7 +4591,8 @@ public class NotificationServiceTests
         IEmailService emailService,
         ITelegramNotificationService telegramService,
         IRealtimeNotificationPublisher? realtimePublisher = null,
-        IWebPushNotificationService? webPushNotificationService = null)
+        IWebPushNotificationService? webPushNotificationService = null,
+        ISmsNotificationService? smsNotificationService = null)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>())
@@ -4571,7 +4605,8 @@ public class NotificationServiceTests
             telegramService,
             NullLogger<NotificationService>.Instance,
             realtimePublisher,
-            webPushNotificationService);
+            webPushNotificationService,
+            smsNotificationService);
     }
 
     private static ExternalAuthService CreateExternalAuthService(
@@ -4679,7 +4714,11 @@ public class NotificationServiceTests
             CreatedAt = DateTime.UtcNow
         };
 
-    private static async Task<User> CreateUserAsync(PaymentContext db, string email, long? chatId = null)
+    private static async Task<User> CreateUserAsync(
+        PaymentContext db,
+        string email,
+        long? chatId = null,
+        string? phoneNumber = null)
     {
         var role = new Role
         {
@@ -4696,6 +4735,7 @@ public class NotificationServiceTests
             FullName = email,
             PasswordHash = "hash",
             RoleId = role.Id,
+            PhoneNumber = phoneNumber,
             IsActive = true,
             IsApproved = true,
             CreatedAt = DateTime.UtcNow,

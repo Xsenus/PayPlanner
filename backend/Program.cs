@@ -135,6 +135,7 @@ builder.Services.Configure<PasswordHasherOptions>(opt =>
 
 builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<ITelegramNotificationService, TelegramNotificationService>();
+builder.Services.AddScoped<ISmsNotificationService, DisabledSmsNotificationService>();
 builder.Services.AddScoped<ITelegramBotUpdateService, TelegramBotUpdateService>();
 builder.Services.AddScoped<IRealtimeNotificationPublisher, SignalRRealtimeNotificationPublisher>();
 builder.Services.AddScoped<IWebPushNotificationService, WebPushNotificationService>();

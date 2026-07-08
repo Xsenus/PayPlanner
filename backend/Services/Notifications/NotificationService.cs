@@ -47,6 +47,7 @@ public sealed class NotificationService : INotificationService
     private readonly IConfiguration _configuration;
     private readonly IEmailService _emailService;
     private readonly ITelegramNotificationService _telegramService;
+    private readonly ISmsNotificationService? _smsService;
     private readonly IRealtimeNotificationPublisher _realtimePublisher;
     private readonly IWebPushNotificationService? _webPushNotificationService;
     private readonly ILogger<NotificationService> _logger;
@@ -92,12 +93,14 @@ public sealed class NotificationService : INotificationService
         ITelegramNotificationService telegramService,
         ILogger<NotificationService> logger,
         IRealtimeNotificationPublisher? realtimePublisher = null,
-        IWebPushNotificationService? webPushNotificationService = null)
+        IWebPushNotificationService? webPushNotificationService = null,
+        ISmsNotificationService? smsService = null)
     {
         _context = context;
         _configuration = configuration;
         _emailService = emailService;
         _telegramService = telegramService;
+        _smsService = smsService;
         _realtimePublisher = realtimePublisher ?? NoOpRealtimeNotificationPublisher.Instance;
         _webPushNotificationService = webPushNotificationService;
         _logger = logger;
@@ -124,6 +127,15 @@ public sealed class NotificationService : INotificationService
         {
             Email = email,
             Telegram = telegram,
+            Sms = _smsService is null
+                ? new SmsNotificationSettingsDto
+                {
+                    Enabled = false,
+                    Ready = false,
+                    ProviderConfigured = false,
+                    StatusText = "SMS-уведомления отключены: SMS-сервис не подключен."
+                }
+                : await _smsService.GetSettingsAsync(cancellationToken),
             Senders = senders.Select(sender => MapSender(sender, subscriptionCounts.GetValueOrDefault(sender.Id))).ToList(),
             Purposes = PurposeDefinitions.Select(item => new NotificationPurposeDto
             {
@@ -2829,6 +2841,24 @@ public sealed class NotificationService : INotificationService
             return;
         }
 
+        if (delivery.Channel == NotificationChannels.Sms)
+        {
+            if (string.IsNullOrWhiteSpace(recipient.PhoneNumber))
+            {
+                delivery.Status = NotificationDeliveryStatus.Skipped;
+                delivery.Error = "У пользователя не указан номер телефона для SMS.";
+                return;
+            }
+
+            var result = _smsService is null
+                ? new SmsSendResult(false, NotificationDeliveryStatus.Skipped, "SMS-уведомления отключены: SMS-сервис не подключен.")
+                : await _smsService.SendMessageAsync(recipient.PhoneNumber, message.Body, cancellationToken);
+            delivery.Status = result.Status;
+            delivery.Error = result.Error;
+            delivery.SentAt = result.Success ? DateTime.UtcNow : null;
+            return;
+        }
+
         delivery.Status = NotificationDeliveryStatus.Skipped;
         delivery.Error = $"Канал '{delivery.Channel}' не поддерживается.";
     }
@@ -3375,6 +3405,33 @@ public sealed class NotificationService : INotificationService
                 telegram.Enabled ? "Telegram bot token не настроен." : "Telegram-уведомления отключены.");
         }
 
+        if (channel == NotificationChannels.Sms)
+        {
+            var sms = _smsService is null
+                ? new SmsNotificationSettingsDto
+                {
+                    Enabled = false,
+                    Ready = false,
+                    ProviderConfigured = false,
+                    StatusText = "SMS-уведомления отключены: SMS-сервис не подключен."
+                }
+                : await _smsService.GetSettingsAsync(cancellationToken);
+            var reason = string.IsNullOrWhiteSpace(sms.StatusText)
+                ? sms.Enabled
+                    ? "SMS-провайдер не настроен."
+                    : "SMS-уведомления отключены."
+                : sms.StatusText;
+            return new NotificationSenderTarget(
+                null,
+                channel,
+                string.IsNullOrWhiteSpace(sms.SenderName) ? "SMS по умолчанию" : sms.SenderName,
+                sms.Ready,
+                null,
+                null,
+                null,
+                reason);
+        }
+
         return null;
     }
 
@@ -3454,7 +3511,8 @@ public sealed class NotificationService : INotificationService
             user.Id,
             DisplayName(user),
             TechnicalEmailHelper.IsValidRealEmail(user.Email) ? user.Email : null,
-            telegramChatId);
+            telegramChatId,
+            NormalizePhoneNumber(user.PhoneNumber));
     }
 
     private static string DisplayName(User user)
@@ -3464,7 +3522,7 @@ public sealed class NotificationService : INotificationService
     {
         return (channels ?? [NotificationChannels.Email])
             .Select(NormalizeChannel)
-            .Where(channel => channel is NotificationChannels.Email or NotificationChannels.Telegram)
+            .Where(channel => channel is NotificationChannels.Email or NotificationChannels.Telegram or NotificationChannels.Sms)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Cast<string>()
             .ToList();
@@ -3517,7 +3575,30 @@ public sealed class NotificationService : INotificationService
     private static string ResolveRecipientAddress(NotificationRecipient recipient, string channel)
         => channel == NotificationChannels.Telegram
             ? recipient.TelegramChatId?.ToString(CultureInfo.InvariantCulture) ?? string.Empty
+            : channel == NotificationChannels.Sms
+                ? recipient.PhoneNumber ?? string.Empty
             : recipient.Email ?? string.Empty;
+
+    private static string? NormalizePhoneNumber(string? value)
+    {
+        var normalized = NormalizeOptional(value);
+        if (normalized is null)
+        {
+            return null;
+        }
+
+        var builder = new StringBuilder(normalized.Length);
+        foreach (var ch in normalized)
+        {
+            if (char.IsDigit(ch) || ch == '+')
+            {
+                builder.Append(ch);
+            }
+        }
+
+        var phone = builder.ToString();
+        return string.IsNullOrWhiteSpace(phone) ? null : phone;
+    }
 
     private static NotificationSenderDto MapSender(NotificationSender sender, int subscriptionsCount = 0)
     {

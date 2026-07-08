@@ -908,12 +908,24 @@ public sealed record NotificationRecipient(
     int? UserId,
     string DisplayName,
     string? Email,
-    long? TelegramChatId);
+    long? TelegramChatId,
+    string? PhoneNumber = null);
 
 public sealed record TelegramSendResult(
     bool Success,
     string Status,
     string? Error = null);
+
+public sealed record SmsSendResult(
+    bool Success,
+    string Status,
+    string? Error = null);
+
+public interface ISmsNotificationService
+{
+    Task<SmsNotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default);
+    Task<SmsSendResult> SendMessageAsync(string phoneNumber, string text, CancellationToken cancellationToken = default);
+}
 
 public sealed record TelegramBotConnectionSettings(
     string ProxyUrl = "",
