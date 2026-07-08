@@ -185,6 +185,14 @@ public static class ClientCaseDeadlineTaskSyncService
 
     private static IReadOnlyList<CaseDeadline> BuildDeadlines(ClientCase clientCase)
     {
+        if (ClientCaseStageClassifier.IsPretrial(clientCase))
+        {
+            return
+            [
+                new("due", "Крайний срок по делу", clientCase.DueDate, true, 60)
+            ];
+        }
+
         var result = new List<CaseDeadline>();
         var separateDeadlineTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var deadline in clientCase.ProceduralDeadlines.OrderBy(item => item.DueAt).ThenBy(item => item.Id))

@@ -1,4 +1,4 @@
-﻿using System.Text.RegularExpressions;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc.Routing;
 using PayPlanner.Api.Controllers;
@@ -92,13 +92,20 @@ public class CaseNotificationInventoryTests
         AssertMethodContains(
             source,
             "AddCourtEventUserNotificationsAsync",
+            "ClientCaseStageClassifier.IsPretrial",
             "ResolveCaseNotificationRecipientIdsAsync",
             "NotifyCaseCourtEventAsync");
         AssertMethodContains(
             source,
             "AddProceduralDeadlineUserNotificationsAsync",
+            "ClientCaseStageClassifier.IsPretrial",
             "ResolveCaseNotificationRecipientIdsAsync",
             "NotifyCaseProceduralDeadlineAsync");
+        AssertMethodContains(
+            source,
+            "NotifyCourtSyncFailedForCaseAsync",
+            "ClientCaseStageClassifier.IsPretrial",
+            "NotifyCourtSyncFailedAsync");
         AssertMethodContains(
             source,
             "AddCaseDocumentUserNotificationsAsync",
@@ -142,6 +149,7 @@ public class CaseNotificationInventoryTests
             "NotifyCreatedAutomationTasksAsync",
             "NotifyCaseInactivityControlTaskCreatedAsync");
         Assert.Contains("RunCourtSync", courtSyncSource, StringComparison.Ordinal);
+        Assert.Contains("ClientCaseStageClassifier.IsPretrial", courtSyncSource, StringComparison.Ordinal);
 
         Assert.Contains("UserNotificationTypes.CaseCourtEvent", inboxSource, StringComparison.Ordinal);
         Assert.Contains("UserNotificationTypes.CourtHearing", inboxSource, StringComparison.Ordinal);

@@ -146,10 +146,11 @@ public sealed class ClientCaseCourtSyncSchedulerService : BackgroundService
             .Where(item => item.Status == ClientCaseStatus.Open)
             .Where(item => item.CourtUrl != string.Empty)
             .OrderBy(item => item.Id)
-            .Select(item => new { item.Id, item.CourtUrl })
+            .Select(item => new { item.Id, item.CourtUrl, item.Stage, item.CaseType })
             .Take(candidateLimit)
             .ToListAsync(cancellationToken);
         var caseIds = candidates
+            .Where(item => !ClientCaseStageClassifier.IsPretrial(item.Stage, item.CaseType))
             .Where(item => registry?.Resolve(item.CourtUrl) is not null || item.CourtUrl.Contains(".sudrf.ru", StringComparison.OrdinalIgnoreCase))
             .Select(item => item.Id)
             .Take(NormalizeBatchSize(batchSize))

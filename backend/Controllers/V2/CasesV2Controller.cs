@@ -879,6 +879,11 @@ public class CasesV2Controller : ControllerBase
         string actorName,
         CancellationToken ct)
     {
+        if (ClientCaseStageClassifier.IsPretrial(clientCase))
+        {
+            return;
+        }
+
         var recipientUserIds = await ResolveCaseNotificationRecipientIdsAsync(clientCase.Id, ct);
         if (recipientUserIds.Count == 0)
         {
@@ -944,7 +949,7 @@ public class CasesV2Controller : ControllerBase
         string actorName,
         CancellationToken ct)
     {
-        if (_notificationService is null)
+        if (_notificationService is null || ClientCaseStageClassifier.IsPretrial(clientCase))
         {
             return;
         }
@@ -1022,6 +1027,11 @@ public class CasesV2Controller : ControllerBase
         string actorName,
         CancellationToken ct)
     {
+        if (ClientCaseStageClassifier.IsPretrial(clientCase))
+        {
+            return;
+        }
+
         var recipientUserIds = await ResolveCaseNotificationRecipientIdsAsync(clientCase.Id, ct);
         if (recipientUserIds.Count == 0)
         {

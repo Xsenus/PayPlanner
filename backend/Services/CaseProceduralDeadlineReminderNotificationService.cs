@@ -84,6 +84,9 @@ public sealed class CaseProceduralDeadlineReminderNotificationService : Backgrou
             .ThenBy(deadline => deadline.Id)
             .Take(ResolveBatchSize())
             .ToListAsync(cancellationToken);
+        deadlines = deadlines
+            .Where(deadline => !ClientCaseStageClassifier.IsPretrial(deadline.ClientCase))
+            .ToList();
 
         var notified = 0;
         foreach (var deadline in deadlines)

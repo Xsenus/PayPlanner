@@ -1200,6 +1200,85 @@ public class SystemJobsControllerTests
     }
 
     [Fact]
+    public async Task TaskReminderService_ForPretrialCasesBackfillsOnlyInternalCaseDeadline()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var now = DateTime.UtcNow;
+        var role = new Role { Name = $"pretrial-deadline-role-{Guid.NewGuid():N}", Description = "Pretrial deadline role" };
+        scope.Db.Roles.Add(role);
+        await scope.Db.SaveChangesAsync();
+        var responsible = new User
+        {
+            Email = $"pretrial-deadline-user-{Guid.NewGuid():N}@example.com",
+            FullName = "Pretrial Deadline Owner",
+            PasswordHash = "hash",
+            RoleId = role.Id,
+            IsApproved = true,
+            IsActive = true,
+        };
+        var client = new Client { Name = "Pretrial deadline client" };
+        scope.Db.Users.Add(responsible);
+        scope.Db.Clients.Add(client);
+        await scope.Db.SaveChangesAsync();
+        var clientCase = new ClientCase
+        {
+            ClientId = client.Id,
+            ResponsibleUserId = responsible.Id,
+            CaseNumber = "CASE-PRETRIAL-DEADLINE",
+            Title = "Pretrial case with court residue",
+            Status = ClientCaseStatus.Open,
+            CaseType = "Внесудебное урегулирование",
+            Stage = "Внесудебное производство",
+            DueDate = now.AddDays(8),
+            NextHearingAt = now.AddDays(4),
+            AppealDeadlineAt = now.AddDays(5),
+        };
+        scope.Db.ClientCases.Add(clientCase);
+        await scope.Db.SaveChangesAsync();
+        scope.Db.ClientCaseProceduralDeadlines.Add(new ClientCaseProceduralDeadline
+        {
+            ClientCaseId = clientCase.Id,
+            DeadlineType = "cassation",
+            Title = "Старый срок кассации",
+            DueAt = now.AddDays(6),
+            AllDay = true,
+            Status = "active",
+            WarningDaysBefore = 7,
+            CreatedAt = now.AddDays(-1),
+        });
+        await scope.Db.SaveChangesAsync();
+
+        var services = new ServiceCollection();
+        services.AddScoped(_ => new PaymentContext(scope.Options, useObjectAuditModel: false));
+        await using var provider = services.BuildServiceProvider();
+        var service = new TaskJournalReminderNotificationService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Notifications:TaskReminders:DeadlineSyncLookAheadDays"] = "14",
+                    ["Notifications:TaskReminders:DeadlineSyncBatchSize"] = "10",
+                })
+                .Build(),
+            NullLogger<TaskJournalReminderNotificationService>.Instance);
+
+        var sent = await service.RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal(0, sent);
+        scope.Db.ChangeTracker.Clear();
+        var tasks = await scope.Db.TaskJournalItems
+            .AsNoTracking()
+            .Where(task => task.ClientCaseId == clientCase.Id)
+            .ToListAsync();
+        var deadlineTask = Assert.Single(tasks);
+        Assert.Contains("case-deadline:due", deadlineTask.TagsJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("case-deadline:hearing", deadlineTask.TagsJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("case-deadline:appeal", deadlineTask.TagsJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("case-deadline:entity-", deadlineTask.TagsJson, StringComparison.Ordinal);
+        Assert.Equal(responsible.Id, deadlineTask.AssigneeUserId);
+    }
+
+    [Fact]
     public async Task TaskReminderService_UsesAssigneeLocalDateForDailyOverdue()
     {
         await using var scope = await CreateDbScopeAsync();
