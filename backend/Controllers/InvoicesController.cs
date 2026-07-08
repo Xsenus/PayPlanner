@@ -1338,7 +1338,7 @@ public class InvoicesController : ControllerBase
             return expenseClientValidationError;
         }
 
-        var contractValidationError = await ValidateContractClientLinkAsync(request.ContractId, request.ClientId, ct);
+        var contractValidationError = await ValidateContractClientLinkAsync(request.ContractId, request.ClientId, existingInvoiceId: null, ct);
         if (contractValidationError is not null)
         {
             return contractValidationError;
@@ -1519,7 +1519,7 @@ public class InvoicesController : ControllerBase
             return expenseClientValidationError;
         }
 
-        var contractValidationError = await ValidateContractClientLinkAsync(request.ContractId, request.ClientId, ct);
+        var contractValidationError = await ValidateContractClientLinkAsync(request.ContractId, request.ClientId, id, ct);
         if (contractValidationError is not null)
         {
             return contractValidationError;
@@ -3792,13 +3792,27 @@ public class InvoicesController : ControllerBase
         return NormalizeIds(ids);
     }
 
-    private async Task<ActionResult?> ValidateContractClientLinkAsync(int? contractId, int? clientId, CancellationToken ct)
+    private async Task<ActionResult?> ValidateContractClientLinkAsync(int? contractId, int? clientId, int? existingInvoiceId, CancellationToken ct)
     {
         if (!contractId.HasValue) return null;
         if (!clientId.HasValue || clientId.Value <= 0) return BadRequest("Contract can be linked only when a client counterparty is selected.");
 
-        var contractExists = await _db.Contracts.AsNoTracking().AnyAsync(c => c.Id == contractId.Value, ct);
-        if (!contractExists) return BadRequest($"Unknown contractId {contractId.Value}");
+        var contractStatus = await _db.Contracts.AsNoTracking()
+            .Where(c => c.Id == contractId.Value)
+            .Select(c => c.Status)
+            .FirstOrDefaultAsync(ct);
+        if (contractStatus is null) return BadRequest($"Unknown contractId {contractId.Value}");
+
+        if (string.Equals(contractStatus, ContractStatus.Terminated, StringComparison.OrdinalIgnoreCase))
+        {
+            var keepsExistingTerminatedContract = existingInvoiceId.HasValue
+                && await _db.Payments.AsNoTracking()
+                    .AnyAsync(payment => payment.Id == existingInvoiceId.Value && payment.ContractId == contractId.Value, ct);
+            if (!keepsExistingTerminatedContract)
+            {
+                return BadRequest("Нельзя создать новый счет или привязать счет к расторгнутому договору.");
+            }
+        }
 
         var linkExists = await _db.Set<ClientContract>().AsNoTracking()
             .AnyAsync(x => x.ContractId == contractId.Value && x.ClientId == clientId.Value, ct);

@@ -267,6 +267,83 @@ public class InvoicesControllerCrudTests
     }
 
     [Fact]
+    public async Task Create_RejectsInvoiceForTerminatedContract()
+    {
+        await using var db = await CreateContextAsync();
+
+        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Client Terminated Contract");
+        var contractId = await CreateContractAsync(db, clientId, "CTR-TERM-CREATE", ContractStatus.Terminated);
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+        var request = CreateRequest("INV-TERM-CREATE", clientId, new DateTime(2026, 4, 17), 11_000m);
+        request.ContractId = contractId;
+
+        var action = await controller.Create(request, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(action.Result);
+        Assert.Contains("расторгнутому договору", Convert.ToString(badRequest.Value), StringComparison.OrdinalIgnoreCase);
+        Assert.False(await db.Payments.AsNoTracking().AnyAsync(payment => payment.Account == "INV-TERM-CREATE"));
+    }
+
+    [Fact]
+    public async Task Update_RejectsNewLinkToTerminatedContract()
+    {
+        await using var db = await CreateContextAsync();
+
+        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Client Terminated Link");
+        var contractId = await CreateContractAsync(db, clientId, "CTR-TERM-LINK", ContractStatus.Terminated);
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+        var createRequest = CreateRequest("INV-TERM-LINK", clientId, new DateTime(2026, 4, 18), 12_000m);
+        var createAction = await controller.Create(createRequest, CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var createdDto = Assert.IsType<InvoiceDto>(created.Value);
+
+        var updateRequest = CreateRequest("INV-TERM-LINK", clientId, new DateTime(2026, 4, 18), 12_000m);
+        updateRequest.ContractId = contractId;
+
+        var updateAction = await controller.Update(createdDto.Id, updateRequest, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(updateAction.Result);
+        Assert.Contains("расторгнутому договору", Convert.ToString(badRequest.Value), StringComparison.OrdinalIgnoreCase);
+        var stored = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);
+        Assert.Null(stored.ContractId);
+    }
+
+    [Fact]
+    public async Task Update_AllowsSavingInvoiceAlreadyLinkedToTerminatedContract()
+    {
+        await using var db = await CreateContextAsync();
+
+        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Client Existing Terminated Contract");
+        var contractId = await CreateContractAsync(db, clientId, "CTR-TERM-EXISTING");
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+        var createRequest = CreateRequest("INV-TERM-EXISTING", clientId, new DateTime(2026, 4, 19), 13_000m);
+        createRequest.ContractId = contractId;
+        var createAction = await controller.Create(createRequest, CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var createdDto = Assert.IsType<InvoiceDto>(created.Value);
+
+        await db.Contracts
+            .Where(contract => contract.Id == contractId)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(contract => contract.Status, ContractStatus.Terminated)
+                .SetProperty(contract => contract.TerminationDate, new DateTime(2026, 4, 20))
+                .SetProperty(contract => contract.TerminationTerms, "Договор расторгнут после выставления счета"));
+
+        var updateRequest = CreateRequest("INV-TERM-EXISTING", clientId, new DateTime(2026, 4, 19), 13_500m);
+        updateRequest.ContractId = contractId;
+
+        var updateAction = await controller.Update(createdDto.Id, updateRequest, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(updateAction.Result);
+        var updated = Assert.IsType<InvoiceDto>(ok.Value);
+        Assert.Equal(contractId, updated.ContractId);
+        Assert.Equal(13_500m, updated.Amount);
+    }
+
+    [Fact]
     public async Task Get_FiltersByWorkflowStatus()
     {
         await using var db = await CreateContextAsync();
@@ -2882,7 +2959,7 @@ public class InvoicesControllerCrudTests
         return legalEntity.Id;
     }
 
-    private static async Task<int> CreateContractAsync(PaymentContext db, int clientId, string number)
+    private static async Task<int> CreateContractAsync(PaymentContext db, int clientId, string number, string status = ContractStatus.Draft)
     {
         var contract = new Contract
         {
@@ -2890,6 +2967,7 @@ public class InvoicesControllerCrudTests
             Title = $"Contract {number}",
             Date = new DateTime(2026, 4, 1),
             BillingMode = ContractBillingMode.Fixed,
+            Status = status,
             Amount = 100_000m,
         };
 
