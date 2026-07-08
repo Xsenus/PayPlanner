@@ -1185,6 +1185,14 @@ export interface ClientCaseCourtSyncBinding {
   courtUrl: string;
   judicialUid: string;
   message: string;
+  syncedFromExternalSource?: boolean;
+  updatedFields?: string[];
+  createdCourtEvents?: number;
+  updatedCourtEvents?: number;
+  createdCourtParties?: number;
+  createdCourtActDocuments?: number;
+  createdProceduralDeadlines?: number;
+  syncError?: string;
   courtInstance: ClientCaseCourtInstance;
 }
 

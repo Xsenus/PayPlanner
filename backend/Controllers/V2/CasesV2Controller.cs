@@ -6587,10 +6587,30 @@ public class CasesV2Controller : ControllerBase
         courtInstance.UpdatedByUserId = actorUserId;
         courtInstance.UpdatedByUserName = Truncate(actorName, 256);
 
+        CourtSyncApplyResult? syncResult = null;
+        string? syncError = null;
+        try
+        {
+            var courtData = await provider.FetchCaseAsync(
+                new CourtSyncCaseBinding(clientCase.CourtUrl, courtCaseNumber, judicialUid, normalizedInstance),
+                ct);
+            var sourceTimeZone = await ResolveCourtSyncSourceTimeZoneAsync(clientCase, ct);
+            syncResult = await ApplySudrfCourtSyncAsync(clientCase, courtData, sourceTimeZone, actorName, now, ct);
+        }
+        catch (SudrfCourtSyncException ex)
+        {
+            syncError = ex.Message;
+        }
+
         var externalIdSuffix = judicialUid is null
             ? string.Empty
             : $" Внешний идентификатор: {Truncate(judicialUid, 120)}.";
-        AppendCaseEvent(clientCase, $"Привязана судебная карточка «{ResolveCourtInstanceLabel(normalizedInstance)}» через {provider.Label}. Суд: {FormatCaseTextValue(courtName)}; № в суде: {FormatCaseTextValue(courtCaseNumber)}.{externalIdSuffix} Автор: {actorName}.");
+        var syncMessage = syncResult.HasValue
+            ? syncResult.Value.ChangedFields.Count == 0 && syncResult.Value.CreatedCourtEvents == 0 && syncResult.Value.UpdatedCourtEvents == 0
+                ? "Судебный источник проверен: новых изменений не найдено."
+                : $"Судебный источник обновлен: {FormatCourtSyncResult(syncResult.Value)}"
+            : $"Автоматическая синхронизация после привязки не выполнена: {syncError}";
+        AppendCaseEvent(clientCase, $"Привязана судебная карточка «{ResolveCourtInstanceLabel(normalizedInstance)}» через {provider.Label}. Суд: {FormatCaseTextValue(courtName)}; № в суде: {FormatCaseTextValue(courtCaseNumber)}.{externalIdSuffix} {syncMessage} Автор: {actorName}.");
         _db.SetAuditReason($"Привязана судебная карточка дела через {provider.Label}.");
         await _db.SaveChangesAsync(ct);
 
@@ -6604,7 +6624,17 @@ public class CasesV2Controller : ControllerBase
             CourtCaseNumber = clientCase.CourtCaseNumber,
             CourtUrl = clientCase.CourtUrl,
             JudicialUid = judicialUid ?? string.Empty,
-            Message = "Судебная карточка привязана к делу.",
+            Message = syncResult.HasValue
+                ? $"Судебная карточка привязана к делу. {syncMessage}"
+                : $"Судебная карточка привязана к делу, но синхронизация не выполнена: {syncError}",
+            SyncedFromExternalSource = syncResult.HasValue,
+            UpdatedFields = syncResult?.ChangedFields ?? [],
+            CreatedCourtEvents = syncResult?.CreatedCourtEvents ?? 0,
+            UpdatedCourtEvents = syncResult?.UpdatedCourtEvents ?? 0,
+            CreatedCourtParties = syncResult?.CreatedCourtParties ?? 0,
+            CreatedCourtActDocuments = syncResult?.CreatedCourtActDocuments ?? 0,
+            CreatedProceduralDeadlines = syncResult?.CreatedProceduralDeadlines ?? 0,
+            SyncError = syncError ?? string.Empty,
             CourtInstance = MapCourtInstance(courtInstance),
         });
     }
@@ -12287,6 +12317,14 @@ public class CasesV2Controller : ControllerBase
         public string CourtUrl { get; set; } = string.Empty;
         public string JudicialUid { get; set; } = string.Empty;
         public string Message { get; set; } = string.Empty;
+        public bool SyncedFromExternalSource { get; set; }
+        public IReadOnlyList<string> UpdatedFields { get; set; } = [];
+        public int CreatedCourtEvents { get; set; }
+        public int UpdatedCourtEvents { get; set; }
+        public int CreatedCourtParties { get; set; }
+        public int CreatedCourtActDocuments { get; set; }
+        public int CreatedProceduralDeadlines { get; set; }
+        public string SyncError { get; set; } = string.Empty;
         public ClientCaseCourtInstanceDto CourtInstance { get; set; } = new();
     }
 

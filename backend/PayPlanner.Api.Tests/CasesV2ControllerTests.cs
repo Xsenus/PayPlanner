@@ -6121,7 +6121,26 @@ public class CasesV2ControllerTests
         db.ClientCases.Add(clientCase);
         await db.SaveChangesAsync();
 
-        var controller = CreateController(db, owner, sudrfCourtSyncService: new FixedSudrfCourtSyncService(new SudrfCourtCaseData()));
+        var courtData = new SudrfCourtCaseData
+        {
+            SourceUrl = "https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=42",
+            CourtName = "Хабаровский краевой суд",
+            CaseNumber = "33а-3390/2026",
+            JudicialUid = "27RS0005-01-2025-002659-56",
+            Instance = "appeal",
+            JudgeName = "Казарикова Оксана Витальевна",
+            MovementEvents =
+            [
+                new SudrfCourtMovementEvent
+                {
+                    Title = "Судебное заседание",
+                    ScheduledAt = new DateTime(2026, 5, 27, 15, 0, 0),
+                    Place = "зал 12",
+                    SourceSummary = "Судебное заседание назначено на 27.05.2026 15:00.",
+                },
+            ],
+        };
+        var controller = CreateController(db, owner, sudrfCourtSyncService: new FixedSudrfCourtSyncService(courtData));
 
         var result = await controller.BindCourtSyncCase(
             clientCase.Id,
@@ -6143,6 +6162,9 @@ public class CasesV2ControllerTests
         Assert.Equal("Хабаровский краевой суд", dto.CourtName);
         Assert.Equal("33а-3390/2026", dto.CourtCaseNumber);
         Assert.Equal("27RS0005-01-2025-002659-56", dto.JudicialUid);
+        Assert.True(dto.SyncedFromExternalSource);
+        Assert.Equal(1, dto.CreatedCourtEvents);
+        Assert.Contains("Судебный источник обновлен", dto.Message);
 
         await db.Entry(clientCase).ReloadAsync();
         Assert.Equal("Хабаровский краевой суд", clientCase.CourtName);
@@ -6157,6 +6179,12 @@ public class CasesV2ControllerTests
         Assert.Equal("33а-3390/2026", courtInstance.CourtCaseNumber);
         Assert.Equal(clientCase.CourtUrl, courtInstance.CourtUrl);
         Assert.Contains("Внешний идентификатор: 27RS0005-01-2025-002659-56", courtInstance.Notes);
+
+        var courtEvent = await db.ClientCaseCourtEvents.SingleAsync(item => item.ClientCaseId == clientCase.Id);
+        Assert.Equal("appeal", courtEvent.CourtInstance);
+        Assert.Equal("Судебное заседание", courtEvent.Title);
+        Assert.Equal("зал 12", courtEvent.Courtroom);
+        Assert.Equal("sudrf", courtEvent.SourceType);
     }
 
     [Fact]
