@@ -46,6 +46,11 @@ public static class NotificationTemplateKeys
     public const string ContractCreated = "contract.created";
     public const string ContractChanged = "contract.changed";
     public const string ContractExpiring = "contract.expiring";
+    public const string SmsTaskReminder = "sms.taskReminder";
+    public const string SmsTaskApprovalRequested = "sms.taskApprovalRequested";
+    public const string SmsCourtEvent = "sms.courtEvent";
+    public const string SmsCaseProceduralDeadline = "sms.caseProceduralDeadline";
+    public const string SmsWorkOrderApproval = "sms.workOrderApproval";
 }
 
 public sealed record NotificationTemplateVariableDefinition(string Key, string Label);
@@ -189,6 +194,19 @@ public static class NotificationTemplateCatalog
         new("access.decision", "Решение"),
         new("access.requestedAt", "Дата запроса"),
         new("access.resolvedAt", "Дата решения")
+    ];
+
+    private static readonly IReadOnlyList<NotificationTemplateVariableDefinition> WorkOrderVariables =
+    [
+        new("actor.name", "Кто выполнил действие"),
+        new("case.title", "Название дела"),
+        new("case.number", "Номер дела"),
+        new("workOrder.title", "Название заказ-наряда"),
+        new("workOrder.number", "Номер заказ-наряда"),
+        new("workOrder.totalAmount", "Сумма заказ-наряда"),
+        new("workOrder.status", "Статус согласования"),
+        new("workOrder.approvalUrl", "Ссылка на согласование"),
+        new("client.name", "Имя клиента")
     ];
 
     public static readonly IReadOnlyList<NotificationTemplateDefinition> All =
@@ -512,7 +530,42 @@ public static class NotificationTemplateCatalog
             "Уведомление ответственным о приближении окончания договора.",
             "Истекает срок договора №{{contract.number}}",
             "Срок договора №{{contract.number}} подходит к концу.\n\nДоговор: {{contract.title}}\nДата окончания: {{contract.validUntil}}\nОсталось дней: {{contract.daysLeft}}\nСтатус: {{contract.status}}",
-            ContractVariables)
+            ContractVariables),
+        new(
+            NotificationTemplateKeys.SmsTaskReminder,
+            "SMS: срочная задача",
+            "Короткий текст SMS для срочного срока, просрочки или напоминания по задаче.",
+            "SMS: срочная задача",
+            "CRM: задача \"{{task.title}}\". Срок: {{task.dueAt}}. Исполнитель: {{task.assigneeName}}. Объект: {{task.objectName}}.",
+            TaskVariables),
+        new(
+            NotificationTemplateKeys.SmsTaskApprovalRequested,
+            "SMS: согласование задачи",
+            "Короткий текст SMS для задачи, которая ожидает решения согласующего.",
+            "SMS: согласование задачи",
+            "CRM: задача \"{{task.title}}\" ждет согласования. Согласующий: {{approval.approverName}}. Срок: {{approval.dueAt}}.",
+            [.. TaskVariables, new("approval.approverName", "Текущий согласующий"), new("approval.dueAt", "Срок согласования")]),
+        new(
+            NotificationTemplateKeys.SmsCourtEvent,
+            "SMS: судебное событие",
+            "Короткий текст SMS для судебного заседания, статуса или опубликованного результата по делу.",
+            "SMS: судебное событие",
+            "CRM: судебное событие по делу \"{{case.title}}\". {{courtEvent.title}}. Дата: {{courtEvent.scheduledAt}}. Суд: {{courtEvent.courtName}}.",
+            CourtEventVariables),
+        new(
+            NotificationTemplateKeys.SmsCaseProceduralDeadline,
+            "SMS: процессуальный срок",
+            "Короткий текст SMS для нового, перенесенного, закрытого или приближающегося процессуального срока.",
+            "SMS: процессуальный срок",
+            "CRM: {{deadline.action}} по делу \"{{case.title}}\". Срок: {{deadline.title}} до {{deadline.dueAt}}. Статус: {{deadline.status}}.",
+            ProceduralDeadlineVariables),
+        new(
+            NotificationTemplateKeys.SmsWorkOrderApproval,
+            "SMS: согласование заказ-наряда",
+            "Короткий текст SMS для будущего сценария клиентского согласования заказ-наряда.",
+            "SMS: согласование заказ-наряда",
+            "CRM: {{client.name}}, заказ-наряд \"{{workOrder.title}}\" по делу \"{{case.title}}\" ожидает согласования. Сумма: {{workOrder.totalAmount}}. {{workOrder.approvalUrl}}",
+            WorkOrderVariables)
     ];
 
     public static NotificationTemplateDefinition? Find(string key)

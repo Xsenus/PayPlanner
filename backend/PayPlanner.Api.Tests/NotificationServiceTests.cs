@@ -236,6 +236,66 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task SmsNotificationTemplates_AreAvailableCompactAndEditable()
+    {
+        await using var db = await CreateContextAsync();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+        var expectedKeys = new[]
+        {
+            NotificationTemplateKeys.SmsTaskReminder,
+            NotificationTemplateKeys.SmsTaskApprovalRequested,
+            NotificationTemplateKeys.SmsCourtEvent,
+            NotificationTemplateKeys.SmsCaseProceduralDeadline,
+            NotificationTemplateKeys.SmsWorkOrderApproval
+        };
+
+        var templates = await service.GetTemplatesAsync();
+        var smsTemplates = templates
+            .Where(template => expectedKeys.Contains(template.Key, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+
+        Assert.Equal(
+            expectedKeys.OrderBy(key => key, StringComparer.OrdinalIgnoreCase),
+            smsTemplates.Select(template => template.Key).OrderBy(key => key, StringComparer.OrdinalIgnoreCase));
+        Assert.All(smsTemplates, template =>
+        {
+            Assert.StartsWith("SMS:", template.Label, StringComparison.Ordinal);
+            Assert.True(template.DefaultBody.Length <= 240, $"{template.Key} default SMS body is too long.");
+            Assert.DoesNotContain("\n", template.DefaultBody, StringComparison.Ordinal);
+            Assert.NotEmpty(template.Variables);
+        });
+
+        var updated = await service.UpdateTemplateAsync(
+            NotificationTemplateKeys.SmsCaseProceduralDeadline,
+            new UpdateNotificationTemplateRequest
+            {
+                IsEnabled = true,
+                Subject = "SMS: срок {{case.title}}",
+                Body = "SMS {{case.title}} {{deadline.dueAt}}"
+            });
+
+        Assert.Equal("SMS: срок {{case.title}}", updated.Subject);
+        Assert.Equal("SMS {{case.title}} {{deadline.dueAt}}", updated.Body);
+
+        var rendered = await service.RenderTemplateAsync(
+            NotificationTemplateKeys.SmsCaseProceduralDeadline,
+            "Резервная тема",
+            "Резервный текст",
+            new Dictionary<string, string?>
+            {
+                ["case.title"] = "А40-123",
+                ["deadline.dueAt"] = "10.07.2026"
+            });
+
+        Assert.Equal("SMS: срок А40-123", rendered.Subject);
+        Assert.Equal("SMS А40-123 10.07.2026", rendered.Body);
+
+        var reset = await service.ResetTemplateAsync(NotificationTemplateKeys.SmsCaseProceduralDeadline);
+        Assert.Equal(reset.DefaultSubject, reset.Subject);
+        Assert.Equal(reset.DefaultBody, reset.Body);
+    }
+
+    [Fact]
     public void TaskNotificationTypes_HaveExpectedRoutingMetadata()
     {
         var expected = new Dictionary<string, (string Priority, bool RequiresAction, bool ShowsToast, bool PushEligible)>(StringComparer.OrdinalIgnoreCase)
