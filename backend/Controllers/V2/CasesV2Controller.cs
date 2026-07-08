@@ -35,6 +35,9 @@ public class CasesV2Controller : ControllerBase
     private const string RelatedPartySourceExternalContact = "externalContact";
     private const string RelatedPartySourceLegalEntity = "legalEntity";
     private const string CaseConversationPrefix = "Внутреннее сообщение:";
+    private const string CaseConversationAttachmentsMarker = "Вложения:";
+    private const string CaseConversationDocumentType = "Переписка";
+    private const string CaseConversationDocumentStatus = "Прикреплен к сообщению";
     private const string CaseHistoryCommentPrefix = "Комментарий по делу:";
     private const string CaseHistoryAuthorMarker = "Автор:";
     private const string CaseDocumentTemplatesSettingKey = "cases.documentTemplates";
@@ -3490,7 +3493,9 @@ public class CasesV2Controller : ControllerBase
         }
 
         var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
-        return Ok(MapCaseConversation(clientCase.Id, clientCase.EventHistory, timeZone));
+        var conversation = MapCaseConversation(clientCase.Id, clientCase.EventHistory, timeZone);
+        await PopulateConversationAttachmentsAsync(conversation, ct);
+        return Ok(conversation);
     }
 
     [HttpGet("{id:int}/summary")]
@@ -4236,6 +4241,115 @@ public class CasesV2Controller : ControllerBase
             _caseDocumentStorage.DeleteIfExists(relativePath);
             throw;
         }
+    }
+
+    private async Task<ActionResult<IReadOnlyList<ClientCaseConversationEntryDto>>> AddConversationEntryCore(
+        ClientCase clientCase,
+        string message,
+        IReadOnlyList<IFormFile> files,
+        CancellationToken ct)
+    {
+        var attachmentFiles = files
+            .Where(static file => file is not null)
+            .ToList();
+        foreach (var file in attachmentFiles)
+        {
+            var uploadError = UploadValidationHelper.ValidateRequiredFile(
+                file,
+                "Прикрепленный файл пустой.",
+                MaxCaseDocumentBytes,
+                "Файл вложения не должен превышать 25 МБ.");
+            if (uploadError is not null)
+            {
+                return BadRequest(new { message = uploadError.Message });
+            }
+        }
+
+        var storedPaths = new List<string>();
+        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+        try
+        {
+            var documents = new List<ClientCaseDocument>();
+            foreach (var file in attachmentFiles)
+            {
+                var document = await SaveConversationAttachmentDocumentAsync(clientCase, file, ct);
+                documents.Add(document);
+                storedPaths.Add(document.StoragePath);
+            }
+
+            if (documents.Count > 0)
+            {
+                await _db.SaveChangesAsync(ct);
+            }
+
+            var attachmentsText = documents.Count == 0
+                ? string.Empty
+                : $" {CaseConversationAttachmentsMarker} {string.Join(", ", documents.Select(static document => document.Id))}.";
+            AppendCaseEvent(
+                clientCase,
+                $"{CaseConversationPrefix} {message}.{attachmentsText} {CaseHistoryAuthorMarker} {User.GetDisplayName()}.");
+
+            foreach (var document in documents)
+            {
+                AddCaseDocumentAuditEvent(
+                    clientCase,
+                    document,
+                    "ConversationAttached",
+                    $"Файл «{document.OriginalFileName}» прикреплен к сообщению переписки дела.");
+            }
+
+            await _db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(ct);
+            foreach (var path in storedPaths)
+            {
+                _caseDocumentStorage.DeleteIfExists(path);
+            }
+
+            throw;
+        }
+
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
+        var conversation = MapCaseConversation(clientCase.Id, clientCase.EventHistory, timeZone);
+        await PopulateConversationAttachmentsAsync(conversation, ct);
+        return Ok(conversation);
+    }
+
+    private async Task<ClientCaseDocument> SaveConversationAttachmentDocumentAsync(
+        ClientCase clientCase,
+        IFormFile file,
+        CancellationToken ct)
+    {
+        var documentKey = Guid.NewGuid().ToString("N");
+        var safeFileName = SanitizeFileName(file.FileName);
+        var storedFileName = BuildStoredFileName(documentKey, 1, safeFileName);
+        var relativePath = _caseDocumentStorage.BuildRelativePath(clientCase.Id, storedFileName);
+
+        await using var stream = file.OpenReadStream();
+        await _caseDocumentStorage.SaveAsync(relativePath, stream, ct);
+
+        var document = new ClientCaseDocument
+        {
+            ClientCaseId = clientCase.Id,
+            DocumentKey = documentKey,
+            Version = 1,
+            DocumentType = CaseConversationDocumentType,
+            Status = CaseConversationDocumentStatus,
+            OriginalFileName = safeFileName,
+            StoredFileName = storedFileName,
+            StoragePath = relativePath,
+            ContentType = string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType,
+            SizeBytes = file.Length,
+            UploadedByUserId = User.GetUserId(),
+            UploadedByName = User.GetDisplayName(),
+            UploadedAt = DateTime.UtcNow,
+        };
+
+        _db.ClientCaseDocuments.Add(document);
+        return document;
     }
 
     private async Task<ClientCaseDocument> SaveGeneratedCaseDocumentAsync(
@@ -5063,6 +5177,7 @@ public class CasesV2Controller : ControllerBase
     }
 
     [HttpPost("{id:int}/conversation")]
+    [Consumes("application/json")]
     public async Task<ActionResult<IReadOnlyList<ClientCaseConversationEntryDto>>> AddConversationEntry(
         int id,
         [FromBody] AddClientCaseConversationEntryRequest request,
@@ -5079,16 +5194,10 @@ public class CasesV2Controller : ControllerBase
             return Unauthorized();
         }
 
-        var message = NormalizeOptional(request.Text);
-        if (message is null)
+        var messageResult = NormalizeConversationMessage(request.Text);
+        if (messageResult.Error is not null)
         {
-            return BadRequest(new { message = "Введите текст сообщения по делу." });
-        }
-
-        message = NormalizeHistoryText(message);
-        if (message.Length > 2000)
-        {
-            return BadRequest(new { message = "Сообщение по делу не должно превышать 2000 символов." });
+            return BadRequest(new { message = messageResult.Error });
         }
 
         var clientCase = await _db.ClientCases
@@ -5101,13 +5210,45 @@ public class CasesV2Controller : ControllerBase
             return NotFound();
         }
 
-        var displayName = User.GetDisplayName();
-        AppendCaseEvent(clientCase, $"{CaseConversationPrefix} {message}. {CaseHistoryAuthorMarker} {displayName}.");
+        return await AddConversationEntryCore(clientCase, messageResult.Text!, [], ct);
+    }
 
-        await _db.SaveChangesAsync(ct);
+    [HttpPost("{id:int}/conversation")]
+    [Consumes("multipart/form-data")]
+    [RequestSizeLimit(MaxCaseDocumentBytes)]
+    public async Task<ActionResult<IReadOnlyList<ClientCaseConversationEntryDto>>> AddConversationEntryWithAttachments(
+        int id,
+        [FromForm] AddClientCaseConversationEntryFormRequest request,
+        CancellationToken ct)
+    {
+        if (await RequireCasesPermissionAsync(static permission => permission.CanEdit, ct) is { } forbidden)
+        {
+            return forbidden;
+        }
 
-        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
-        return Ok(MapCaseConversation(clientCase.Id, clientCase.EventHistory, timeZone));
+        var visibility = await ResolveCasesVisibilityAsync(ct);
+        if (visibility is null)
+        {
+            return Unauthorized();
+        }
+
+        var messageResult = NormalizeConversationMessage(request.Text);
+        if (messageResult.Error is not null)
+        {
+            return BadRequest(new { message = messageResult.Error });
+        }
+
+        var clientCase = await _db.ClientCases
+            .Include(item => item.Client)
+            .Include(item => item.LegalEntity)
+            .ApplyClientCaseVisibility(visibility)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (clientCase is null)
+        {
+            return NotFound();
+        }
+
+        return await AddConversationEntryCore(clientCase, messageResult.Text!, request.Files ?? [], ct);
     }
 
     [HttpGet("{id:int}/related-parties")]
@@ -11292,6 +11433,67 @@ public class CasesV2Controller : ControllerBase
         };
     }
 
+    private async Task PopulateConversationAttachmentsAsync(
+        IReadOnlyList<ClientCaseConversationEntryDto> entries,
+        CancellationToken ct)
+    {
+        var documentIds = entries
+            .SelectMany(static entry => entry.Attachments)
+            .Select(static attachment => attachment.DocumentId)
+            .Distinct()
+            .ToList();
+        if (documentIds.Count == 0)
+        {
+            return;
+        }
+
+        var documents = await _db.ClientCaseDocuments
+            .AsNoTracking()
+            .Where(item => documentIds.Contains(item.Id))
+            .ToDictionaryAsync(item => item.Id, ct);
+        foreach (var entry in entries)
+        {
+            if (entry.Attachments.Count == 0)
+            {
+                continue;
+            }
+
+            entry.Attachments = entry.Attachments
+                .Select(attachment => documents.TryGetValue(attachment.DocumentId, out var document)
+                    ? MapConversationAttachment(document)
+                    : attachment)
+                .ToList();
+        }
+    }
+
+    private static ClientCaseConversationAttachmentDto MapConversationAttachment(ClientCaseDocument document)
+        => new()
+        {
+            DocumentId = document.Id,
+            FileName = document.OriginalFileName,
+            ContentType = document.ContentType,
+            SizeBytes = document.SizeBytes,
+            UploadedByName = document.UploadedByName,
+            UploadedAt = document.UploadedAt,
+        };
+
+    private static (string? Text, string? Error) NormalizeConversationMessage(string? text)
+    {
+        var message = NormalizeOptional(text);
+        if (message is null)
+        {
+            return (null, "Введите текст сообщения по делу.");
+        }
+
+        message = NormalizeHistoryText(message);
+        if (message.Length > 2000)
+        {
+            return (null, "Сообщение по делу не должно превышать 2000 символов.");
+        }
+
+        return (message, null);
+    }
+
     private static IReadOnlyList<ClientCaseConversationEntryDto> MapCaseConversation(int clientCaseId, string? eventHistory, TimeZoneInfo timeZone)
         => SplitCaseHistory(eventHistory)
             .Select((line, index) => MapConversationEntry(clientCaseId, line, index, timeZone))
@@ -11327,6 +11529,7 @@ public class CasesV2Controller : ControllerBase
             text = text[..authorIndex].Trim();
         }
 
+        var attachments = ExtractConversationAttachments(ref text);
         text = text.TrimEnd('.', ' ');
         if (string.IsNullOrWhiteSpace(text))
         {
@@ -11341,7 +11544,31 @@ public class CasesV2Controller : ControllerBase
             Text = text,
             AuthorName = authorName ?? string.Empty,
             Kind = kind,
+            Attachments = attachments,
         };
+    }
+
+    private static List<ClientCaseConversationAttachmentDto> ExtractConversationAttachments(ref string text)
+    {
+        var markerIndex = text.LastIndexOf(CaseConversationAttachmentsMarker, StringComparison.OrdinalIgnoreCase);
+        if (markerIndex < 0)
+        {
+            return [];
+        }
+
+        var attachmentSegment = text[(markerIndex + CaseConversationAttachmentsMarker.Length)..].Trim();
+        text = text[..markerIndex].Trim();
+
+        return attachmentSegment
+            .TrimEnd('.', ' ')
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(static item => item.Trim().TrimStart('#', '№').TrimEnd('.', ' '))
+            .Select(static item => int.TryParse(item, NumberStyles.Integer, CultureInfo.InvariantCulture, out var documentId)
+                ? documentId
+                : (int?)null)
+            .Where(static documentId => documentId.HasValue)
+            .Select(static documentId => new ClientCaseConversationAttachmentDto { DocumentId = documentId!.Value })
+            .ToList();
     }
 
     private static ClientCaseCourtSyncLogDto MapCourtSyncLog(int clientCaseId, string line, int index, TimeZoneInfo timeZone)
@@ -11645,6 +11872,12 @@ public class CasesV2Controller : ControllerBase
     public sealed class AddClientCaseConversationEntryRequest
     {
         public string? Text { get; set; }
+    }
+
+    public sealed class AddClientCaseConversationEntryFormRequest
+    {
+        public string? Text { get; set; }
+        public List<IFormFile> Files { get; set; } = [];
     }
 
     public sealed class UpsertClientCaseRelatedPartyRequest
@@ -12156,6 +12389,17 @@ public class CasesV2Controller : ControllerBase
         public string Text { get; set; } = string.Empty;
         public string AuthorName { get; set; } = string.Empty;
         public string Kind { get; set; } = string.Empty;
+        public List<ClientCaseConversationAttachmentDto> Attachments { get; set; } = [];
+    }
+
+    public sealed class ClientCaseConversationAttachmentDto
+    {
+        public int DocumentId { get; set; }
+        public string FileName { get; set; } = string.Empty;
+        public string ContentType { get; set; } = "application/octet-stream";
+        public long SizeBytes { get; set; }
+        public string UploadedByName { get; set; } = string.Empty;
+        public DateTime? UploadedAt { get; set; }
     }
 
     public sealed class ClientCaseSummaryDto

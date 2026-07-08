@@ -8048,6 +8048,65 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task Conversation_AddsMessageAttachmentsAsCaseDocuments()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "conversation-owner@example.com", "Владелец");
+        var client = new Client
+        {
+            Name = "Клиент переписки",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело с вложением",
+            Status = ClientCaseStatus.Open,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, owner);
+        var file = CreateFormFile("attachment body", "scan.pdf", "application/pdf");
+
+        var addResult = await controller.AddConversationEntryWithAttachments(
+            clientCase.Id,
+            new CasesV2Controller.AddClientCaseConversationEntryFormRequest
+            {
+                Text = "Прикрепил скан заявления.",
+                Files = [file],
+            },
+            CancellationToken.None);
+
+        var addOk = Assert.IsType<OkObjectResult>(addResult.Result);
+        var addedItems = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.ClientCaseConversationEntryDto>>(addOk.Value);
+        var message = Assert.Single(addedItems, item => item.Kind == "message");
+        Assert.Equal("Прикрепил скан заявления", message.Text);
+        var attachment = Assert.Single(message.Attachments);
+        Assert.Equal("scan.pdf", attachment.FileName);
+        Assert.Equal("application/pdf", attachment.ContentType);
+        Assert.Equal(file.Length, attachment.SizeBytes);
+
+        var document = await db.ClientCaseDocuments.SingleAsync();
+        Assert.Equal(document.Id, attachment.DocumentId);
+        Assert.Equal("Переписка", document.DocumentType);
+        Assert.Equal("Прикреплен к сообщению", document.Status);
+
+        await db.Entry(clientCase).ReloadAsync();
+        Assert.Contains($"Вложения: {document.Id}.", clientCase.EventHistory, StringComparison.Ordinal);
+        Assert.DoesNotContain("Документ «scan.pdf» загружен", clientCase.EventHistory, StringComparison.Ordinal);
+
+        var getResult = await controller.GetConversation(clientCase.Id, CancellationToken.None);
+        var getOk = Assert.IsType<OkObjectResult>(getResult.Result);
+        var getItems = Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.ClientCaseConversationEntryDto>>(getOk.Value);
+        var loadedAttachment = Assert.Single(Assert.Single(getItems).Attachments);
+        Assert.Equal(document.Id, loadedAttachment.DocumentId);
+        Assert.Equal("scan.pdf", loadedAttachment.FileName);
+    }
+
+    [Fact]
     public async Task Conversation_RequiresCasePermissionsAndVisibility()
     {
         await using var db = await CreateContextAsync();

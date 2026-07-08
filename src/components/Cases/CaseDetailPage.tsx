@@ -17,6 +17,7 @@ import {
   LockKeyhole,
   Mail,
   MessageSquare,
+  Paperclip,
   Pencil,
   Phone,
   RefreshCw,
@@ -38,6 +39,7 @@ import type {
   ActResponsible,
   Client,
   ClientCase,
+  ClientCaseConversationAttachment,
   ClientCaseConversationEntry,
   ClientCaseCourt,
   ClientCaseCourtComplaint,
@@ -366,6 +368,13 @@ function writeCaseDetailViewState(caseId: number, state: CaseDetailViewState) {
 
 function formatMoney(value?: number | null) {
   return typeof value === 'number' ? formatCurrencySmart(value).full : '—';
+}
+
+function formatFileSize(value?: number | null) {
+  if (!value || value <= 0) return '0 Б';
+  if (value < 1024) return `${value} Б`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} КБ`;
+  return `${(value / (1024 * 1024)).toFixed(1)} МБ`;
 }
 
 function formatRuDateTime(value?: string | null) {
@@ -1118,6 +1127,7 @@ export function CaseDetailPage({
   const [documentTemplateKey, setDocumentTemplateKey] = useState(initialViewState.documentTemplateKey ?? FALLBACK_DOCUMENT_TEMPLATE_OPTIONS[0].key);
   const [historyDraft, setHistoryDraft] = useState('');
   const [conversationDraft, setConversationDraft] = useState('');
+  const [conversationFiles, setConversationFiles] = useState<File[]>([]);
   const [deadlineTypeDraft, setDeadlineTypeDraft] = useState('motion');
   const [deadlineTitleDraft, setDeadlineTitleDraft] = useState('');
   const [deadlineDueAtDraft, setDeadlineDueAtDraft] = useState('');
@@ -2121,14 +2131,39 @@ export function CaseDetailPage({
     setError(null);
     setNotice(null);
     try {
-      const items = await apiService.addCaseConversationEntry(caseItem.id, { text });
+      const items = await apiService.addCaseConversationEntry(caseItem.id, conversationFiles.length > 0 ? { text, files: conversationFiles } : { text });
       setConversation(items ?? []);
       setConversationDraft('');
+      setConversationFiles([]);
       setNotice('Сообщение добавлено в переписку по делу.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось добавить сообщение в переписку по делу.');
     } finally {
       setAddingConversationEntry(false);
+    }
+  };
+
+  const downloadConversationAttachment = async (attachment: ClientCaseConversationAttachment) => {
+    if (!caseItem) return;
+
+    setDownloadingDocumentId(attachment.documentId);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await apiService.downloadCaseDocument(caseItem.id, attachment.documentId);
+      const url = URL.createObjectURL(result.blob);
+      const link = window.document.createElement('a');
+      link.href = url;
+      link.download = result.fileName || attachment.fileName || `case-conversation-attachment-${attachment.documentId}`;
+      window.document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setNotice(`Файл «${attachment.fileName || result.fileName}» подготовлен к скачиванию.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось скачать вложение переписки.');
+    } finally {
+      setDownloadingDocumentId(null);
     }
   };
 
@@ -3617,6 +3652,40 @@ export function CaseDetailPage({
                   className="mt-4 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
                   placeholder="Напишите короткое рабочее сообщение по делу для коллег."
                 />
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <input
+                    id="case-conversation-files"
+                    aria-label="Файлы к сообщению"
+                    type="file"
+                    multiple
+                    className="sr-only"
+                    onChange={(event) => setConversationFiles(Array.from(event.target.files ?? []))}
+                  />
+                  <label
+                    htmlFor="case-conversation-files"
+                    className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                    <Paperclip className="h-4 w-4" /> Файлы
+                  </label>
+                  {conversationFiles.length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => setConversationFiles([])}
+                      className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-50">
+                      <X className="h-4 w-4" /> Очистить
+                    </button>
+                  ) : null}
+                </div>
+                {conversationFiles.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {conversationFiles.map((file) => (
+                      <span key={`${file.name}-${file.size}-${file.lastModified}`} className="inline-flex max-w-full items-center gap-2 rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs font-medium text-slate-600">
+                        <FileText className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate">{file.name}</span>
+                        <span className="shrink-0 text-slate-400">{formatFileSize(file.size)}</span>
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
                 <div className="mt-3 flex items-center justify-between gap-3">
                   <span className="text-xs text-slate-400">{conversationDraft.length}/2000</span>
                   <button
@@ -3633,7 +3702,7 @@ export function CaseDetailPage({
               ) : conversation.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">Внутренней переписки по делу пока нет.</div>
               ) : (
-                <ConversationTimeline entries={conversation} />
+                <ConversationTimeline entries={conversation} downloadingDocumentId={downloadingDocumentId} onDownload={(attachment) => void downloadConversationAttachment(attachment)} />
               )}
             </div>
           ) : null}
@@ -3981,7 +4050,15 @@ function HistoryTimeline({ entries }: { entries: ClientCaseTimelineEntry[] }) {
   );
 }
 
-function ConversationTimeline({ entries }: { entries: ClientCaseConversationEntry[] }) {
+function ConversationTimeline({
+  entries,
+  downloadingDocumentId,
+  onDownload,
+}: {
+  entries: ClientCaseConversationEntry[];
+  downloadingDocumentId?: number | null;
+  onDownload: (attachment: ClientCaseConversationAttachment) => void;
+}) {
   return (
     <section className="rounded-xl border border-slate-200 p-4">
       <div className="mb-4 flex items-center justify-between gap-3">
@@ -4006,6 +4083,27 @@ function ConversationTimeline({ entries }: { entries: ClientCaseConversationEntr
               </span>
             </div>
             <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-700">{entry.text}</p>
+            {entry.attachments?.length ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {entry.attachments.map((attachment) => (
+                  <button
+                    key={attachment.documentId}
+                    type="button"
+                    onClick={() => onDownload(attachment)}
+                    className="inline-flex max-w-full items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs font-semibold text-slate-700 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                    aria-label={`Скачать вложение ${attachment.fileName}`}>
+                    <FileText className="h-4 w-4 shrink-0" />
+                    <span className="min-w-0 truncate">{attachment.fileName || `Документ #${attachment.documentId}`}</span>
+                    <span className="shrink-0 text-slate-400">{formatFileSize(attachment.sizeBytes)}</span>
+                    {downloadingDocumentId === attachment.documentId ? (
+                      <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                    ) : (
+                      <Download className="h-4 w-4 shrink-0" />
+                    )}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </article>
         ))}
       </div>

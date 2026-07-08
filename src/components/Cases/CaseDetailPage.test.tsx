@@ -1561,6 +1561,53 @@ describe('CaseDetailPage', () => {
     expect(screen.getByText('Сообщение добавлено в переписку по делу.')).toBeTruthy();
   });
 
+  it('adds files to internal case conversation messages', async () => {
+    const file = new File(['scan body'], 'scan.pdf', { type: 'application/pdf' });
+    vi.mocked(apiService.addCaseConversationEntry).mockResolvedValueOnce([
+      {
+        id: 2,
+        clientCaseId: 15,
+        occurredAt: '2026-05-18T11:00:00Z',
+        text: 'Прикрепил скан заявления.',
+        authorName: 'Кожеваткин Андрей Владимирович',
+        kind: 'message',
+        attachments: [
+          {
+            documentId: 19,
+            fileName: 'scan.pdf',
+            contentType: 'application/pdf',
+            sizeBytes: file.size,
+            uploadedByName: 'Кожеваткин Андрей Владимирович',
+            uploadedAt: '2026-05-18T11:00:00Z',
+          },
+        ],
+      },
+    ]);
+
+    render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    fireEvent.click(screen.getByRole('button', { name: 'Переписка' }));
+    fireEvent.change(screen.getByLabelText('Сообщение во внутреннюю переписку дела'), {
+      target: { value: 'Прикрепил скан заявления.' },
+    });
+    fireEvent.change(screen.getByLabelText('Файлы к сообщению'), {
+      target: { files: [file] },
+    });
+    expect(screen.getByText('scan.pdf')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /Отправить/u }));
+
+    await waitFor(() => {
+      expect(apiService.addCaseConversationEntry).toHaveBeenCalledWith(15, {
+        text: 'Прикрепил скан заявления.',
+        files: [file],
+      });
+    });
+    expect(await screen.findByText('Прикрепил скан заявления.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /Скачать вложение scan.pdf/u })).toBeTruthy();
+  });
+
   it('updates status, stage, priority and responsible from the case card header', async () => {
     render(<CaseDetailPage caseId={15} onBack={vi.fn()} />);
 

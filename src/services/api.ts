@@ -5064,10 +5064,20 @@ export class ApiService {
     return this.request<ClientCaseConversationEntry[]>(`/v2/cases/${caseId}/conversation`);
   }
 
-  async addCaseConversationEntry(caseId: number, payload: { text: string }) {
+  async addCaseConversationEntry(caseId: number, payload: { text: string; files?: File[] }) {
+    if (payload.files?.length) {
+      const form = new FormData();
+      form.append('text', payload.text);
+      payload.files.forEach((file) => form.append('files', file));
+      return this.request<ClientCaseConversationEntry[]>(`/v2/cases/${caseId}/conversation`, {
+        method: 'POST',
+        body: form,
+      });
+    }
+
     return this.request<ClientCaseConversationEntry[]>(`/v2/cases/${caseId}/conversation`, {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ text: payload.text }),
     });
   }
 

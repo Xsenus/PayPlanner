@@ -910,6 +910,16 @@ export interface ClientCaseConversationEntry {
   text: string;
   authorName?: string | null;
   kind: 'message' | 'comment' | string;
+  attachments?: ClientCaseConversationAttachment[];
+}
+
+export interface ClientCaseConversationAttachment {
+  documentId: number;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  uploadedByName?: string | null;
+  uploadedAt?: string | null;
 }
 
 export interface ClientCaseSummary {
