@@ -1054,9 +1054,11 @@ public class InvoicesControllerCrudTests
 
         var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
         var clientId = await CreateClientAsync(db, "Client Keep Paid Installment");
+        var caseId = await CreateClientCaseAsync(db, clientId, "Installment Case");
         var controller = CreateController(db, isAdmin: true, userId: actorUserId);
         var invoiceDate = DateTime.UtcNow.Date.AddDays(5);
         var request = CreateRequest("INV-CANCEL-UNPAID-INST", clientId, invoiceDate, 12_000m);
+        request.ClientCaseIds = [caseId];
         request.InstallmentPlan = CreateInstallmentPlanRequest(
             total: 12_000m,
             startDate: invoiceDate,
@@ -1123,6 +1125,11 @@ public class InvoicesControllerCrudTests
 
         Assert.Empty(await db.ClientBalanceTransactions.AsNoTracking().ToListAsync());
         Assert.Empty(await db.MoneyOperations.AsNoTracking().ToListAsync());
+
+        var clientCase = await db.ClientCases.AsNoTracking().SingleAsync(item => item.Id == caseId);
+        Assert.Contains("INV-CANCEL-UNPAID-INST", clientCase.EventHistory, StringComparison.Ordinal);
+        Assert.Contains("отменены только неоплаченные платежи", clientCase.EventHistory, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Оставить оплаченную часть", clientCase.EventHistory, StringComparison.Ordinal);
     }
 
     [Fact]

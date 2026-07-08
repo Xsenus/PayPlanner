@@ -1321,6 +1321,49 @@ public class ContractsControllerTests
     }
 
     [Fact]
+    public async Task UpdateStatus_Terminated_RejectsUnpaidInvoicesAndKeepsContractActive()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var invoicePayment = await CreateInvoicePaymentAsync(db, "INV-STATUS-UNPAID", new DateTime(2026, 5, 11), 18_500m);
+        var controller = CreateAdminController(db);
+
+        var createResult = await controller.Create(
+            new UpsertContractRequest
+            {
+                Number = "CT-STATUS-UNPAID",
+                Date = new DateTime(2026, 5, 1),
+                BillingMode = ContractBillingMode.Fixed,
+                Status = ContractStatus.Concluded,
+                Amount = 18_500m,
+                Clients = [new UpsertContractClientRequest { ClientId = client.Id }],
+                InvoiceIds = [invoicePayment.Id],
+            },
+            CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createResult.Result);
+        var createdDto = Assert.IsType<ContractDto>(created.Value);
+
+        var terminateAction = await controller.UpdateStatus(
+            createdDto.Id,
+            new UpdateNamedStatusRequest
+            {
+                Status = ContractStatus.Terminated,
+                Reason = "Быстрое расторжение",
+            },
+            CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(terminateAction.Result);
+        var message = Assert.IsType<string>(badRequest.Value);
+        Assert.Contains("неоплаченные счета", message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Расторгнуть", message, StringComparison.OrdinalIgnoreCase);
+
+        var stored = await db.Contracts.AsNoTracking().SingleAsync(contract => contract.Id == createdDto.Id);
+        Assert.Equal(ContractStatus.Concluded, stored.Status);
+        Assert.Null(stored.TerminationDate);
+        Assert.Null(stored.TerminationTerms);
+    }
+
+    [Fact]
     public async Task Terminate_SendsClientEmailNotification_WhenEmailServiceConfigured()
     {
         await using var db = await CreateContextAsync();
