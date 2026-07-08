@@ -30,6 +30,7 @@ public static class NotificationTemplateKeys
     public const string CourtDecisionPublished = "court.decisionPublished";
     public const string CourtSyncFailed = "court.syncFailed";
     public const string CaseProceduralDeadline = "case.proceduralDeadline";
+    public const string CaseConversation = "case.conversation";
     public const string CaseDocument = "case.document";
     public const string CaseAccessRequested = "case.accessRequested";
     public const string CaseAccessResolved = "case.accessResolved";
@@ -180,6 +181,17 @@ public static class NotificationTemplateCatalog
         new("document.version", "Версия"),
         new("document.size", "Размер файла"),
         new("document.requiresAction", "Требует действия")
+    ];
+
+    private static readonly IReadOnlyList<NotificationTemplateVariableDefinition> CaseConversationVariables =
+    [
+        new("actor.name", "Кто написал сообщение"),
+        new("case.title", "Название дела"),
+        new("case.number", "Номер дела"),
+        new("conversation.preview", "Текст сообщения"),
+        new("conversation.attachmentCount", "Количество вложений"),
+        new("conversation.hasAttachments", "Есть вложения"),
+        new("conversation.occurredAt", "Дата сообщения")
     ];
 
     private static readonly IReadOnlyList<NotificationTemplateVariableDefinition> CaseAccessVariables =
@@ -408,6 +420,13 @@ public static class NotificationTemplateCatalog
             "{{document.action}}: {{document.fileName}}",
             "{{actor.name}} {{document.action}} по делу {{case.title}}.\n\nДокумент: {{document.fileName}}\nТип: {{document.type}}\nСтатус: {{document.status}}\nВерсия: {{document.version}}\nТребуется действие: {{document.requiresAction}}",
             CaseDocumentVariables),
+        new(
+            NotificationTemplateKeys.CaseConversation,
+            "Переписка дела",
+            "Уведомление участникам дела о новом сообщении во внутренней переписке.",
+            "Новое сообщение по делу: {{case.title}}",
+            "{{actor.name}} написал(а) сообщение по делу {{case.title}}.\n\nСообщение: {{conversation.preview}}\nВложений: {{conversation.attachmentCount}}\nДата: {{conversation.occurredAt}}",
+            CaseConversationVariables),
         new(
             NotificationTemplateKeys.CaseAccessRequested,
             "Запрос доступа к делу",

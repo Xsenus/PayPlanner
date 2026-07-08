@@ -1971,6 +1971,67 @@ public sealed class NotificationService : INotificationService
         }
     }
 
+    public async Task NotifyCaseConversationAsync(
+        ClientCase clientCase,
+        string messageText,
+        int attachmentCount,
+        string actorName,
+        int actorUserId,
+        IReadOnlyCollection<int> recipientUserIds,
+        DateTime occurredAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        if (clientCase.Id <= 0 || recipientUserIds.Count == 0)
+        {
+            return;
+        }
+
+        var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
+        var normalizedMessageText = NormalizeNotificationText(messageText, "Новое сообщение");
+        var normalizedOccurredAt = NormalizeUtcInstant(occurredAtUtc);
+        var message = await RenderTemplateAsync(
+            NotificationTemplateKeys.CaseConversation,
+            BuildCaseConversationSubject(clientCase, attachmentCount),
+            BuildCaseConversationBody(clientCase, normalizedMessageText, attachmentCount, normalizedActorName, normalizedOccurredAt),
+            BuildCaseConversationTemplateValues(clientCase, normalizedMessageText, attachmentCount, normalizedActorName, normalizedOccurredAt),
+            purpose: NotificationPurposes.TaskReminder,
+            cancellationToken: cancellationToken);
+        var stateHash = BuildStableTextHash(string.Join("|",
+            clientCase.Id.ToString(CultureInfo.InvariantCulture),
+            normalizedMessageText,
+            Math.Max(attachmentCount, 0).ToString(CultureInfo.InvariantCulture),
+            normalizedActorName,
+            normalizedOccurredAt.Ticks.ToString(CultureInfo.InvariantCulture)));
+
+        foreach (var recipientUserId in recipientUserIds
+            .Where(userId => userId > 0 && !UserNotificationAntiSpamPolicy.ShouldSuppressSelfNotification(userId, actorUserId))
+            .Distinct())
+        {
+            await CreateUserNotificationAsync(
+                recipientUserId,
+                UserNotificationTypes.CaseConversation,
+                $"case:{clientCase.Id}:conversation:{stateHash}:{recipientUserId}",
+                message.Subject,
+                message.Body,
+                attachmentCount > 0 ? "emerald" : "blue",
+                "case",
+                clientCase.Id,
+                null,
+                null,
+                new
+                {
+                    clientCaseId = clientCase.Id,
+                    attachmentCount = Math.Max(attachmentCount, 0),
+                    hasAttachments = attachmentCount > 0,
+                    actorUserId,
+                    actorName = normalizedActorName,
+                    messagePreview = Truncate(normalizedMessageText, 300),
+                    occurredAt = normalizedOccurredAt
+                },
+                cancellationToken);
+        }
+    }
+
     public async Task NotifyCaseDocumentAsync(
         ClientCase clientCase,
         ClientCaseDocument document,
@@ -4993,6 +5054,23 @@ public sealed class NotificationService : INotificationService
             ["document.requiresAction"] = requiresAction ? "да" : "нет"
         };
 
+    private static Dictionary<string, string?> BuildCaseConversationTemplateValues(
+        ClientCase clientCase,
+        string messageText,
+        int attachmentCount,
+        string actorName,
+        DateTime occurredAtUtc)
+        => new()
+        {
+            ["actor.name"] = actorName,
+            ["case.title"] = BuildClientCaseTitle(clientCase),
+            ["case.number"] = NormalizeNotificationText(clientCase.CaseNumber, clientCase.Id.ToString(CultureInfo.InvariantCulture)),
+            ["conversation.preview"] = Truncate(messageText, 500),
+            ["conversation.attachmentCount"] = Math.Max(attachmentCount, 0).ToString(CultureInfo.InvariantCulture),
+            ["conversation.hasAttachments"] = attachmentCount > 0 ? "да" : "нет",
+            ["conversation.occurredAt"] = FormatCourtEventDate(occurredAtUtc, allDay: false)
+        };
+
     private static Dictionary<string, string?> BuildCaseAccessTemplateValues(
         ClientCase clientCase,
         string requesterName,
@@ -5109,6 +5187,38 @@ public sealed class NotificationService : INotificationService
             "deleted" => $"Удален документ: {BuildClientCaseTitle(clientCase)}",
             _ => $"Документ дела: {BuildClientCaseTitle(clientCase)}"
         };
+    }
+
+    private static string BuildCaseConversationSubject(ClientCase clientCase, int attachmentCount)
+        => attachmentCount > 0
+            ? $"Новое сообщение с вложением: {BuildClientCaseTitle(clientCase)}"
+            : $"Новое сообщение по делу: {BuildClientCaseTitle(clientCase)}";
+
+    private static string BuildCaseConversationBody(
+        ClientCase clientCase,
+        string messageText,
+        int attachmentCount,
+        string actorName,
+        DateTime occurredAtUtc)
+    {
+        var builder = new StringBuilder()
+            .Append(actorName)
+            .Append(" написал(а) сообщение по делу.")
+            .AppendLine()
+            .AppendLine()
+            .Append("Дело: ")
+            .Append(BuildClientCaseTitle(clientCase))
+            .AppendLine()
+            .Append("Сообщение: ")
+            .Append(Truncate(messageText, 700))
+            .AppendLine()
+            .Append("Вложений: ")
+            .Append(Math.Max(attachmentCount, 0).ToString(CultureInfo.InvariantCulture))
+            .AppendLine()
+            .Append("Дата: ")
+            .Append(FormatCourtEventDate(occurredAtUtc, allDay: false));
+
+        return NotificationTemplateCatalog.CompactBlankLines(builder.ToString());
     }
 
     private static string BuildCaseDocumentBody(

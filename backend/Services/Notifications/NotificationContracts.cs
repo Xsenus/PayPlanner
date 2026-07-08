@@ -110,6 +110,7 @@ public static class UserNotificationDomains
                 or UserNotificationTypes.CaseAccessRequested
                 or UserNotificationTypes.CaseAccessResolved
                 or UserNotificationTypes.CaseProceduralDeadline
+                or UserNotificationTypes.CaseConversation
                 or UserNotificationTypes.CaseDocument
                 or UserNotificationTypes.CaseInactivityReminder => Case,
             UserNotificationTypes.CaseCourtEvent
@@ -203,6 +204,7 @@ public static class UserNotificationTypes
     public const string CourtDecisionPublished = "courtDecisionPublished";
     public const string CourtSyncFailed = "courtSyncFailed";
     public const string CaseProceduralDeadline = "caseProceduralDeadline";
+    public const string CaseConversation = "caseConversation";
     public const string CaseDocument = "caseDocument";
     public const string CaseInactivityReminder = "caseInactivityReminder";
     public const string PaymentAssigned = "paymentAssigned";
@@ -264,6 +266,7 @@ public static class UserNotificationTypes
         new(CourtDecisionPublished, "Публикация решения", "По делу опубликовано решение, определение или другой судебный акт.", "emerald", "high", NotificationChannels.All, true, false),
         new(CourtSyncFailed, "Ошибка судебной синхронизации", "Судебный источник не удалось проверить или обновить автоматически.", "rose", NotificationPriorities.Critical, NotificationChannels.All, true, false),
         new(CaseProceduralDeadline, "Процессуальный срок", "По делу добавлен, перенесен, закрыт или приближается процессуальный срок.", "amber", "high", NotificationChannels.All, false, false),
+        new(CaseConversation, "Переписка дела", "По делу добавлено сообщение или вложение во внутренней переписке.", "emerald", "normal", NotificationChannels.All, true, true),
         new(CaseDocument, "Документы дела", "По делу загружен, сформирован, обновлен или удален документ.", "emerald", NotificationPriorities.Silent, NotificationChannels.All, false, false),
         new(CaseInactivityReminder, "Напоминание о неактивности", "По делу давно не было значимой активности, требуется проверка ответственного.", "amber", "high", NotificationChannels.All, true, false),
         new(PaymentAssigned, "Назначен платеж", "Ответственного добавили к платежу, который требует контроля.", "blue", "high", NotificationChannels.All, true, false),
@@ -1116,6 +1119,7 @@ public interface INotificationService
     Task NotifyContractExpiringAsync(Contract contract, int daysLeft, IReadOnlyCollection<int> recipientUserIds, CancellationToken cancellationToken = default);
     Task NotifyCaseCourtEventAsync(ClientCase clientCase, ClientCaseCourtEvent courtEvent, string action, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, CancellationToken cancellationToken = default);
     Task NotifyCaseProceduralDeadlineAsync(ClientCase clientCase, ClientCaseProceduralDeadline deadline, string action, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, CancellationToken cancellationToken = default);
+    Task NotifyCaseConversationAsync(ClientCase clientCase, string messageText, int attachmentCount, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, DateTime occurredAtUtc, CancellationToken cancellationToken = default);
     Task NotifyCaseDocumentAsync(ClientCase clientCase, ClientCaseDocument document, string action, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, CancellationToken cancellationToken = default);
     Task NotifyCaseAccessRequestedAsync(ClientCase clientCase, string requesterName, int requesterUserId, string? reason, DateTime requestedAt, IReadOnlyCollection<int> managerUserIds, CancellationToken cancellationToken = default);
     Task NotifyCaseAccessResolvedAsync(ClientCase clientCase, bool granted, string actorName, int actorUserId, int requestedByUserId, string requestedByUserName, string? requestReason, string? comment, DateTime resolvedAt, CancellationToken cancellationToken = default);

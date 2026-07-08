@@ -1252,6 +1252,33 @@ public class CasesV2Controller : ControllerBase
             .ToString();
     }
 
+    private async Task AddCaseConversationUserNotificationsAsync(
+        ClientCase clientCase,
+        string message,
+        int attachmentCount,
+        int? actorUserId,
+        string actorName,
+        DateTime occurredAtUtc,
+        CancellationToken ct)
+    {
+        var recipientUserIds = await ResolveCaseNotificationRecipientIdsAsync(clientCase.Id, ct);
+        if (recipientUserIds.Count == 0)
+        {
+            return;
+        }
+
+        var notificationService = _notificationService ?? CreateFallbackNotificationService();
+        await notificationService.NotifyCaseConversationAsync(
+            clientCase,
+            message,
+            attachmentCount,
+            actorName,
+            actorUserId ?? 0,
+            recipientUserIds,
+            occurredAtUtc,
+            ct);
+    }
+
     private static string BuildCaseOwnerName(ClientCase clientCase)
         => clientCase.Client?.Name
             ?? clientCase.LegalEntity?.ShortName
@@ -4285,9 +4312,12 @@ public class CasesV2Controller : ControllerBase
             var attachmentsText = documents.Count == 0
                 ? string.Empty
                 : $" {CaseConversationAttachmentsMarker} {string.Join(", ", documents.Select(static document => document.Id))}.";
+            var actorUserId = User.GetUserId();
+            var actorName = User.GetDisplayName();
+            var occurredAtUtc = DateTime.UtcNow;
             AppendCaseEvent(
                 clientCase,
-                $"{CaseConversationPrefix} {message}.{attachmentsText} {CaseHistoryAuthorMarker} {User.GetDisplayName()}.");
+                $"{CaseConversationPrefix} {message}.{attachmentsText} {CaseHistoryAuthorMarker} {actorName}.");
 
             foreach (var document in documents)
             {
@@ -4297,6 +4327,15 @@ public class CasesV2Controller : ControllerBase
                     "ConversationAttached",
                     $"Файл «{document.OriginalFileName}» прикреплен к сообщению переписки дела.");
             }
+
+            await AddCaseConversationUserNotificationsAsync(
+                clientCase,
+                message,
+                documents.Count,
+                actorUserId,
+                actorName,
+                occurredAtUtc,
+                ct);
 
             await _db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);

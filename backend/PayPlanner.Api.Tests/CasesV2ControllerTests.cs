@@ -8107,6 +8107,47 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task Conversation_NotifiesVisibleCaseParticipantsAboutNewMessage()
+    {
+        await using var db = await CreateContextAsync();
+        var actor = await CreateUserAsync(db, "conversation-actor@example.com", "Автор");
+        var recipient = await CreateUserAsync(db, "conversation-recipient@example.com", "Ответственный клиент");
+        var client = new Client
+        {
+            Name = "Клиент уведомления",
+            IsActive = true,
+            ResponsibleUserId = recipient.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело с уведомлением",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = actor.Id,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, actor);
+
+        var result = await controller.AddConversationEntry(clientCase.Id, new CasesV2Controller.AddClientCaseConversationEntryRequest
+        {
+            Text = "Проверьте новую позицию по делу.",
+        }, CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(recipient.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.CaseConversation, notification.Type);
+        Assert.Equal("case", notification.ObjectType);
+        Assert.Equal(clientCase.Id, notification.ObjectId);
+        Assert.Contains("Новое сообщение", notification.Title, StringComparison.Ordinal);
+        Assert.Contains("Проверьте новую позицию", notification.BodyPreview, StringComparison.Ordinal);
+        Assert.DoesNotContain(db.UserNotifications, item => item.RecipientUserId == actor.Id);
+    }
+
+    [Fact]
     public async Task Conversation_RequiresCasePermissionsAndVisibility()
     {
         await using var db = await CreateContextAsync();

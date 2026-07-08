@@ -1735,6 +1735,9 @@ public class SystemJobsControllerTests
         public Task NotifyCaseProceduralDeadlineAsync(ClientCase clientCase, ClientCaseProceduralDeadline deadline, string action, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 
+        public Task NotifyCaseConversationAsync(ClientCase clientCase, string messageText, int attachmentCount, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, DateTime occurredAtUtc, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
         public Task NotifyCaseDocumentAsync(ClientCase clientCase, ClientCaseDocument document, string action, string actorName, int actorUserId, IReadOnlyCollection<int> recipientUserIds, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
 

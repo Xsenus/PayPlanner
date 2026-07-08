@@ -186,6 +186,7 @@ public class CaseNotificationInventoryTests
             [UserNotificationTypes.CaseAccessRequested] = new(UserNotificationDomains.Case, NotificationPriorities.High, RequiresAction: true, ShowToast: true, PushEligible: true),
             [UserNotificationTypes.CaseAccessResolved] = new(UserNotificationDomains.Case, NotificationPriorities.Normal, RequiresAction: false, ShowToast: true, PushEligible: true),
             [UserNotificationTypes.CaseProceduralDeadline] = new(UserNotificationDomains.Case, NotificationPriorities.High, RequiresAction: true, ShowToast: true, PushEligible: true),
+            [UserNotificationTypes.CaseConversation] = new(UserNotificationDomains.Case, NotificationPriorities.Normal, RequiresAction: false, ShowToast: true, PushEligible: true),
             [UserNotificationTypes.CaseDocument] = new(UserNotificationDomains.Case, NotificationPriorities.Silent, RequiresAction: false, ShowToast: false, PushEligible: false),
             [UserNotificationTypes.CaseInactivityReminder] = new(UserNotificationDomains.Case, NotificationPriorities.High, RequiresAction: true, ShowToast: true, PushEligible: true),
             [UserNotificationTypes.CaseCourtEvent] = new(UserNotificationDomains.Court, NotificationPriorities.High, RequiresAction: true, ShowToast: true, PushEligible: true),
