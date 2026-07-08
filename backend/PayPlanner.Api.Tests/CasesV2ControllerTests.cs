@@ -5844,6 +5844,97 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task RunCourtSync_ReturnsNoChangesWhenSourceMatchesCase()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db, "court-sync-no-changes@example.com", "Владелец");
+        var hearingAt = new DateTime(2026, 5, 27, 15, 0, 0);
+        var client = new Client
+        {
+            Name = "Клиент без изменений суда",
+            IsActive = true,
+            ResponsibleUserId = owner.Id,
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Дело без изменений суда",
+            CourtUrl = "https://kraevoy--hbr.sudrf.ru/modules.php?name=sud_delo&name_op=case&delo_id=88",
+            CourtName = "Хабаровский краевой суд",
+            CourtCaseNumber = "33-88/2026",
+            JudgeName = "Казарикова Оксана Витальевна",
+            Courtroom = "зал 12",
+            NextHearingAt = hearingAt,
+            Status = ClientCaseStatus.Open,
+        };
+        var courtEvent = new ClientCaseCourtEvent
+        {
+            ClientCase = clientCase,
+            EventType = "hearing",
+            Title = "Судебное заседание",
+            ScheduledAt = hearingAt,
+            AllDay = false,
+            CourtName = "Хабаровский краевой суд",
+            CourtCaseNumber = "33-88/2026",
+            Courtroom = "зал 12",
+            JudgeName = "Казарикова Оксана Витальевна",
+            Description = "Судебное заседание; 27.05.2026 15:00; место: зал 12",
+            MovementStatus = "scheduled",
+            SourceType = "sudrf",
+            CourtInstance = "appeal",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.ClientCaseCourtEvents.Add(courtEvent);
+        await db.SaveChangesAsync();
+
+        var courtData = new SudrfCourtCaseData
+        {
+            SourceUrl = clientCase.CourtUrl,
+            CourtName = "Хабаровский краевой суд",
+            CaseNumber = "33-88/2026",
+            JudgeName = "Казарикова Оксана Витальевна",
+            Instance = "appeal",
+            NextHearingAt = hearingAt,
+            NextHearingPlace = "зал 12",
+            MovementEvents =
+            [
+                new()
+                {
+                    Title = "Судебное заседание",
+                    ScheduledAt = hearingAt,
+                    Place = "зал 12",
+                    SourceSummary = "Судебное заседание; 27.05.2026 15:00; место: зал 12",
+                },
+            ],
+        };
+        var controller = CreateController(
+            db,
+            owner,
+            sudrfCourtSyncService: new FixedSudrfCourtSyncService(courtData),
+            notificationService: CreateNotificationService(db));
+
+        var result = await controller.RunCourtSync(clientCase.Id, null, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<CasesV2Controller.ClientCaseCourtSyncRunDto>(ok.Value);
+        Assert.Equal("external-sync-completed", dto.Status);
+        Assert.Empty(dto.UpdatedFields);
+        Assert.Equal(0, dto.CreatedCourtEvents);
+        Assert.Equal(0, dto.UpdatedCourtEvents);
+        Assert.Equal(0, dto.CreatedCourtParties);
+        Assert.Equal(0, dto.CreatedCourtActDocuments);
+        Assert.Equal(0, dto.CreatedProceduralDeadlines);
+        Assert.Contains("новых изменений не найдено", dto.Message, StringComparison.Ordinal);
+
+        Assert.Equal(1, await db.ClientCaseCourtEvents.CountAsync(item => item.ClientCaseId == clientCase.Id));
+        Assert.Empty(await db.ClientCaseCourtEventHistory.Where(item => item.ClientCaseCourtEventId == courtEvent.Id).ToListAsync());
+        Assert.Empty(await db.UserNotifications.ToListAsync());
+    }
+
+    [Fact]
     public async Task CourtSyncLogs_ReturnManualCheckHistory()
     {
         await using var db = await CreateContextAsync();
