@@ -379,6 +379,69 @@ public class ActsController : ControllerBase
         return null;
     }
 
+    private async Task<ActionResult?> ValidateActContractLinkAsync(
+        int? contractId,
+        int? clientId,
+        int? legalEntityId,
+        Payment? invoice,
+        CancellationToken ct)
+    {
+        if (!contractId.HasValue || contractId.Value <= 0)
+        {
+            return null;
+        }
+
+        var contractExists = await _db.Contracts
+            .AsNoTracking()
+            .AnyAsync(contract => contract.Id == contractId.Value, ct);
+        if (!contractExists)
+        {
+            return BadRequest($"Unknown contractId {contractId.Value}");
+        }
+
+        if (clientId.HasValue)
+        {
+            var clientLinked = await _db.Set<ClientContract>()
+                .AsNoTracking()
+                .AnyAsync(link => link.ContractId == contractId.Value && link.ClientId == clientId.Value, ct);
+            if (!clientLinked)
+            {
+                return BadRequest("Client is not linked to selected contract.");
+            }
+        }
+
+        if (legalEntityId.HasValue)
+        {
+            var legalEntityLinked = await _db.Set<LegalEntityContract>()
+                .AsNoTracking()
+                .AnyAsync(link => link.ContractId == contractId.Value && link.LegalEntityId == legalEntityId.Value, ct);
+            if (!legalEntityLinked)
+            {
+                return BadRequest("Legal entity is not linked to selected contract.");
+            }
+        }
+
+        if (invoice is not null)
+        {
+            if (invoice.ContractId.HasValue && invoice.ContractId.Value != contractId.Value)
+            {
+                return BadRequest("Invoice is linked to another contract.");
+            }
+
+            var invoiceContractIds = await _db.ContractInvoices
+                .AsNoTracking()
+                .Where(link => link.InvoiceId == invoice.Id)
+                .Select(link => link.ContractId)
+                .ToListAsync(ct);
+            if (invoiceContractIds.Count > 0 && !invoiceContractIds.Contains(contractId.Value))
+            {
+                return BadRequest("Invoice is linked to another contract.");
+            }
+        }
+
+        return null;
+    }
+
     private sealed record CounterpartyOwner(int? ClientId, int? LegalEntityId);
 
     [HttpGet("{id:int}")]
@@ -717,6 +780,7 @@ public class ActsController : ControllerBase
         await _db.Entry(correction).Reference(act => act.Invoice).LoadAsync(ct);
         await _db.Entry(correction).Reference(act => act.OriginalAct).LoadAsync(ct);
         await _db.Entry(correction).Collection(act => act.LineItems).LoadAsync(ct);
+        await _db.Entry(correction).Collection(act => act.ContractActs).LoadAsync(ct);
         await _db.Entry(correction).Collection(act => act.CorrectionActs).LoadAsync(ct);
         await NotifyActCreatedAsync(correction, ct);
 
@@ -914,6 +978,9 @@ public class ActsController : ControllerBase
         var ownerValidationError = await ValidateActOwnerAsync(owner.ClientId, owner.LegalEntityId, ct);
         if (ownerValidationError is not null) return ownerValidationError;
 
+        var contractValidationError = await ValidateActContractLinkAsync(request.ContractId, owner.ClientId, owner.LegalEntityId, invoice, ct);
+        if (contractValidationError is not null) return contractValidationError;
+
         var act = new Act
         {
             Number = request.Number.Trim(),
@@ -936,6 +1003,7 @@ public class ActsController : ControllerBase
 
         _db.Acts.Add(act);
         SyncActLineItems(act, resolvedLineItems.LineItems);
+        SyncActContractLink(act, request.ContractId);
         await _db.SaveChangesAsync(ct);
 
         await _db.Entry(act).Reference(a => a.Client).LoadAsync(ct);
@@ -943,6 +1011,7 @@ public class ActsController : ControllerBase
         await _db.Entry(act).Reference(a => a.Responsible).LoadAsync(ct);
         await _db.Entry(act).Reference(a => a.Invoice).LoadAsync(ct);
         await _db.Entry(act).Collection(a => a.LineItems).LoadAsync(ct);
+        await _db.Entry(act).Collection(a => a.ContractActs).LoadAsync(ct);
         await NotifyActCreatedAsync(act, ct);
 
         return Created($"/api/acts/{act.Id}", Map(act));
@@ -979,6 +1048,7 @@ public class ActsController : ControllerBase
         var act = await _db.Acts
             .ApplyActVisibility(visibility)
             .Include(a => a.LineItems)
+            .Include(a => a.ContractActs)
             .FirstOrDefaultAsync(a => a.Id == id, ct);
         if (act is null)
         {
@@ -1004,6 +1074,9 @@ public class ActsController : ControllerBase
         var ownerValidationError = await ValidateActOwnerAsync(owner.ClientId, owner.LegalEntityId, ct);
         if (ownerValidationError is not null) return ownerValidationError;
 
+        var contractValidationError = await ValidateActContractLinkAsync(request.ContractId, owner.ClientId, owner.LegalEntityId, invoice, ct);
+        if (contractValidationError is not null) return contractValidationError;
+
         act.Number = request.Number.Trim();
         act.Title = Normalize(request.Title);
         act.Date = ActDomainService.NormalizeLocalDate(request.Date);
@@ -1020,6 +1093,7 @@ public class ActsController : ControllerBase
         act.Comment = Normalize(request.Comment);
         act.UpdatedAt = DateTime.UtcNow;
         SyncActLineItems(act, resolvedLineItems.LineItems);
+        SyncActContractLink(act, request.ContractId);
 
         await _db.SaveChangesAsync(ct);
 
@@ -1028,6 +1102,7 @@ public class ActsController : ControllerBase
         await _db.Entry(act).Reference(a => a.Responsible).LoadAsync(ct);
         await _db.Entry(act).Reference(a => a.Invoice).LoadAsync(ct);
         await _db.Entry(act).Collection(a => a.LineItems).LoadAsync(ct);
+        await _db.Entry(act).Collection(a => a.ContractActs).LoadAsync(ct);
         await NotifyActChangedAsync(act, BuildActStatusChangeLabels(originalStatus, act.Status, originalWorkflowStatus, act.WorkflowStatus), ct);
 
         return Ok(Map(act));
@@ -1350,7 +1425,9 @@ public class ActsController : ControllerBase
         OriginalActId = act.OriginalActId,
         OriginalActNumber = act.OriginalAct != null ? act.OriginalAct.Number : null,
         Type = act.Invoice != null ? act.Invoice.Type : null,
-        ContractId = act.Invoice != null ? act.Invoice.ContractId : null,
+        ContractId = act.Invoice != null && act.Invoice.ContractId.HasValue
+            ? act.Invoice.ContractId
+            : act.ContractActs.Select(link => (int?)link.ContractId).FirstOrDefault(),
         CounterpartyInn = act.CounterpartyInn,
         Status = act.Status,
         WorkflowStatus = act.WorkflowStatus,
@@ -1420,7 +1497,9 @@ public class ActsController : ControllerBase
         OriginalActId = act.OriginalActId,
         OriginalActNumber = act.OriginalAct != null ? act.OriginalAct.Number : null,
         Type = act.Invoice != null ? act.Invoice.Type : null,
-        ContractId = act.Invoice != null ? act.Invoice.ContractId : null,
+        ContractId = act.Invoice != null && act.Invoice.ContractId.HasValue
+            ? act.Invoice.ContractId
+            : act.ContractActs.Select(link => (int?)link.ContractId).FirstOrDefault(),
         CounterpartyInn = act.CounterpartyInn,
         Status = act.Status,
         WorkflowStatus = act.WorkflowStatus,
@@ -1750,6 +1829,23 @@ public class ActsController : ControllerBase
         }
     }
 
+    private static void SyncActContractLink(Act act, int? contractId)
+    {
+        foreach (var existing in act.ContractActs.ToList())
+        {
+            act.ContractActs.Remove(existing);
+        }
+
+        if (contractId.HasValue && contractId.Value > 0)
+        {
+            act.ContractActs.Add(new ContractAct
+            {
+                ContractId = contractId.Value,
+                ActId = act.Id,
+            });
+        }
+    }
+
     private Task<byte[]> RenderDocumentPdfAsync(string documentHtml, CancellationToken ct)
     {
         if (_invoiceDocumentPdfService is null)
@@ -1933,6 +2029,7 @@ public class ActsController : ControllerBase
             .Include(act => act.Responsible)
             .Include(act => act.Invoice)
             .Include(act => act.LineItems)
+            .Include(act => act.ContractActs)
             .FirstOrDefaultAsync(act => act.Id == id, ct);
     }
 
@@ -2040,7 +2137,8 @@ public class ActsController : ControllerBase
             OriginalActId = act.OriginalActId,
             OriginalActNumber = act.OriginalAct?.Number,
             Type = act.Invoice?.Type,
-            ContractId = act.Invoice?.ContractId,
+            ContractId = act.Invoice?.ContractId
+                ?? act.ContractActs.Select(link => (int?)link.ContractId).FirstOrDefault(),
             CounterpartyInn = act.CounterpartyInn,
             Status = act.Status,
             WorkflowStatus = act.WorkflowStatus,

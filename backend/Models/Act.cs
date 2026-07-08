@@ -29,6 +29,7 @@ public class Act
     public User? Responsible { get; set; }
     public string? Comment { get; set; }
     public ICollection<ActLineItem> LineItems { get; set; } = new List<ActLineItem>();
+    public ICollection<ContractAct> ContractActs { get; set; } = new List<ContractAct>();
     public ICollection<Act> CorrectionActs { get; set; } = new List<Act>();
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }

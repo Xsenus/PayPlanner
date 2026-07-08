@@ -530,6 +530,134 @@ public class ActsControllerTests
     }
 
     [Fact]
+    public async Task Create_ManualActWithContractId_CreatesContractLinkAndUpdatesContractActTotal()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var contract = await CreateContractAsync(db, "CON-ACT-MANUAL");
+        contract.BillingMode = ContractBillingMode.Fixed;
+        contract.Amount = 20_000m;
+        db.ClientContracts.Add(new ClientContract
+        {
+            ClientId = client.Id,
+            ContractId = contract.Id,
+        });
+        await db.SaveChangesAsync();
+        var controller = new ActsController(db, new NoopFormRequirementsService());
+
+        var action = await controller.Create(
+            new UpsertActRequest
+            {
+                Number = "ACT-MANUAL-CONTRACT",
+                Date = new DateTime(2026, 4, 23),
+                Amount = 12_500m,
+                CreationMode = ActCreationMode.Manual,
+                ClientId = client.Id,
+                ContractId = contract.Id,
+                Status = ActStatus.Created,
+            },
+            CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(action.Result);
+        var dto = Assert.IsType<ActDto>(created.Value);
+        Assert.Equal(contract.Id, dto.ContractId);
+        Assert.True(await db.ContractActs.AsNoTracking().AnyAsync(link =>
+            link.ContractId == contract.Id && link.ActId == dto.Id));
+
+        var contractsController = new ContractsController(db, new NoopFormRequirementsService());
+        var contractAction = await contractsController.GetById(contract.Id, CancellationToken.None);
+        var contractOk = Assert.IsType<OkObjectResult>(contractAction.Result);
+        var contractDto = Assert.IsType<ContractDto>(contractOk.Value);
+        Assert.Equal(12_500m, contractDto.ActAmountTotal);
+    }
+
+    [Fact]
+    public async Task Update_ManualActContractId_ReplacesContractLink()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var firstContract = await CreateContractAsync(db, "CON-ACT-FIRST");
+        var secondContract = await CreateContractAsync(db, "CON-ACT-SECOND");
+        db.ClientContracts.AddRange(
+            new ClientContract { ClientId = client.Id, ContractId = firstContract.Id },
+            new ClientContract { ClientId = client.Id, ContractId = secondContract.Id });
+        await db.SaveChangesAsync();
+        var controller = new ActsController(db, new NoopFormRequirementsService());
+
+        var createAction = await controller.Create(
+            new UpsertActRequest
+            {
+                Number = "ACT-MOVE-CONTRACT",
+                Date = new DateTime(2026, 4, 24),
+                Amount = 8_000m,
+                CreationMode = ActCreationMode.Manual,
+                ClientId = client.Id,
+                ContractId = firstContract.Id,
+                Status = ActStatus.Created,
+            },
+            CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var createdDto = Assert.IsType<ActDto>(created.Value);
+
+        var updateAction = await controller.Update(
+            createdDto.Id,
+            new UpsertActRequest
+            {
+                Number = "ACT-MOVE-CONTRACT",
+                Date = new DateTime(2026, 4, 24),
+                Amount = 9_000m,
+                CreationMode = ActCreationMode.Manual,
+                ClientId = client.Id,
+                ContractId = secondContract.Id,
+                Status = ActStatus.Created,
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(updateAction.Result);
+        var updated = Assert.IsType<ActDto>(ok.Value);
+        Assert.Equal(secondContract.Id, updated.ContractId);
+        var links = await db.ContractActs
+            .AsNoTracking()
+            .Where(link => link.ActId == createdDto.Id)
+            .Select(link => link.ContractId)
+            .ToListAsync();
+        Assert.Equal([secondContract.Id], links);
+    }
+
+    [Fact]
+    public async Task Create_RejectsContractThatIsNotLinkedToActClient()
+    {
+        await using var db = await CreateContextAsync();
+        var client = await CreateClientAsync(db);
+        var otherClient = await CreateClientAsync(db);
+        var contract = await CreateContractAsync(db, "CON-ACT-OTHER-CLIENT");
+        db.ClientContracts.Add(new ClientContract
+        {
+            ClientId = otherClient.Id,
+            ContractId = contract.Id,
+        });
+        await db.SaveChangesAsync();
+        var controller = new ActsController(db, new NoopFormRequirementsService());
+
+        var action = await controller.Create(
+            new UpsertActRequest
+            {
+                Number = "ACT-WRONG-CONTRACT",
+                Date = new DateTime(2026, 4, 25),
+                Amount = 7_000m,
+                CreationMode = ActCreationMode.Manual,
+                ClientId = client.Id,
+                ContractId = contract.Id,
+                Status = ActStatus.Created,
+            },
+            CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(action.Result);
+        Assert.Contains("Client is not linked", Convert.ToString(badRequest.Value), StringComparison.OrdinalIgnoreCase);
+        Assert.False(await db.Acts.AsNoTracking().AnyAsync(act => act.Number == "ACT-WRONG-CONTRACT"));
+    }
+
+    [Fact]
     public async Task Create_FullAct_UsesAllRemainingInvoiceLineItems()
     {
         await using var db = await CreateContextAsync();

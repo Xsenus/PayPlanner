@@ -409,7 +409,7 @@ public class PaymentContext : DbContext
             entity.HasKey(x => new { x.ContractId, x.ActId });
             entity.ToTable("ContractActs");
             entity.HasOne(x => x.Act)
-                .WithMany()
+                .WithMany(x => x.ContractActs)
                 .HasForeignKey(x => x.ActId)
                 .OnDelete(DeleteBehavior.Cascade);
             entity.HasIndex(x => x.ActId).HasDatabaseName("IX_ContractActs_ActId");
