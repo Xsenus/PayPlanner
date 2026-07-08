@@ -5,14 +5,14 @@
 
 ## Сводка прогресса
 
-Прогресс: 6 из 9 рабочих пунктов закрыто, 67%.
+Прогресс: 8 из 9 рабочих пунктов закрыто, 89%.
 
 - Всего рабочих пунктов: 9.
-- Закрыто и проверено: 6.
-- В работе: 1.
+- Закрыто и проверено: 8.
+- В работе: 0.
 - Заблокировано или отмечено как риск: 0.
 - Требует решения заказчика: 0.
-- Требует ручной приемки: 2.
+- Требует ручной приемки: 1.
 
 ## Цель
 
@@ -26,8 +26,8 @@
 - `[x]` Прогнать релевантные backend-тесты по измененным контроллерам, сервисам и моделям. Пройден фильтр по 11 измененным тестовым классам контроллеров, сервисов, уведомлений, судебной синхронизации, финансовых цепочек, ролей и задач: 609 тестов; сборка `PayPlanner.Api` завершилась без предупреждений и ошибок.
 - `[x]` Проверить сценарии на локальной БД, включая миграции и существующие данные. Миграции применены к временной копии существующей `payplanner.db`, pending-миграций не осталось; дополнительно пройдены SQLite smoke-тест миграций на новой базе и файловый сценарий создания акта.
 - `[x]` Проверить права доступа: пользователь без прав не видит и не вызывает новые действия прямым API. Пройдены прямые API-тесты прав по ролям, актам, судебной синхронизации, переписке, документам дела, заказ-нарядам, финансам дела и задачам.
-- `[~]` После push дождаться GitHub Actions, исправить ошибки при необходимости и проверить деплой. Push разрешен пользователем; ожидается проверка GitHub Actions и production-деплоя.
-- `[acceptance]` Проверить production health, frontend entry point, service worker при изменении уведомлений и статус VPS-сервиса.
+- `[x]` После push дождаться GitHub Actions, исправить ошибки при необходимости и проверить деплой. Первый прогон `28935342216` упал на frontend lint; ошибка исправлена отдельным коммитом `c333ecb3`. Повторный прогон `28936107151` завершился успешно: backend checks, frontend lint/typecheck/tests/build, загрузка пакета на VPS, deploy и production readiness прошли.
+- `[x]` Проверить production health, frontend entry point, service worker при изменении уведомлений и статус VPS-сервиса. Проверены `https://api.elitpravo.com/api/health`, `https://crm.elitpravo.com/`, `https://crm.elitpravo.com/payplanner-push-worker.js`, `https://crm.elitpravo.com/deploy-revision.txt`; revision совпал с `c333ecb32f6c65905fe35ea17a8bfe1c72810089`. В логах deploy на VPS `payplanner.service` перезапущен, внутренний health `http://127.0.0.1:5080/api/health` стал `ok` на 5-й попытке.
 - `[acceptance]` Получить ручное подтверждение заказчика по SMS/MAX, судебной синхронизации и клиентскому согласованию.
 
 ## Definition of Done
@@ -53,6 +53,10 @@
 - 2026-07-08: `dotnet test backend\PayPlanner.Api.Tests\PayPlanner.Api.Tests.csproj --filter ... --no-restore` по прямым API-проверкам прав прошел: 28 тестов.
 - 2026-07-08: GitHub Actions и deploy не запускались, потому что пользователь явно запретил push до отдельного разрешения.
 - 2026-07-08: пользователь разрешил push; deploy-пункт переведен в работу перед отправкой изменений в `origin/main`.
+- 2026-07-08: `git push origin main` отправил roadmap-статус в `683dddd4`; GitHub Actions `28935342216` упал на frontend lint из-за неиспользуемого alias в `src/utils/caseTaskPayload.ts`.
+- 2026-07-08: исправлен frontend lint, локально пройдены `npm run lint`, `npx vitest run src/utils/caseTaskPayload.test.ts --no-file-parallelism`, `git diff --check` и `npm run build`.
+- 2026-07-08: `git push origin main` отправил `c333ecb3`; GitHub Actions `28936107151` завершился успешно, deploy на VPS выполнен.
+- 2026-07-08: production-проверка подтвердила API health `{"status":"ok"}`, frontend 200, service worker 200, deploy revision `c333ecb32f6c65905fe35ea17a8bfe1c72810089`; readiness также подтвердил websocket auth challenge для `/hubs/notifications` и `/hubs/notes`.
 
 ## История
 
@@ -64,3 +68,5 @@
 - 2026-07-08: закрыта проверка прав доступа прямыми API-вызовами.
 - 2026-07-08: пункт GitHub Actions/deploy отмечен заблокированным до разрешения на push.
 - 2026-07-08: пункт GitHub Actions/deploy переведен в работу после разрешения на push.
+- 2026-07-08: пункт GitHub Actions/deploy закрыт после успешного прогона `28936107151` и production-проверки ревизии `c333ecb32f6c65905fe35ea17a8bfe1c72810089`.
+- 2026-07-08: закрыта техническая проверка production health, frontend entry point, service worker и статуса VPS-деплоя; ручная приемка заказчика осталась открытой.
