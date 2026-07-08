@@ -5598,12 +5598,13 @@ export function InvoiceModal({
                     <input
                       type="radio"
                       name="invoice-cancel-money-action"
+                      data-testid="invoice-cancel-money-advance"
                       checked={cancelMoneyAction === 'LeaveAsAdvance'}
                       onChange={() => setCancelMoneyAction('LeaveAsAdvance')}
                       className="mt-1"
                     />
                     <span>
-                      <span className="block font-medium text-slate-900">Оставить авансом клиента</span>
+                      <span className="block font-medium text-slate-900">Оставить авансом контрагента</span>
                       <span className="mt-1 block text-slate-600">Деньги останутся на балансе контрагента для будущих счетов.</span>
                     </span>
                   </label>
@@ -5611,6 +5612,7 @@ export function InvoiceModal({
                     <input
                       type="radio"
                       name="invoice-cancel-money-action"
+                      data-testid="invoice-cancel-money-reallocate"
                       checked={cancelMoneyAction === 'Reallocate'}
                       onChange={() => setCancelMoneyAction('Reallocate')}
                       className="mt-1"
@@ -5620,6 +5622,7 @@ export function InvoiceModal({
                       <span className="mt-1 block text-slate-600">Укажите ID счёта этого же контрагента.</span>
                       {cancelMoneyAction === 'Reallocate' && (
                         <input
+                          data-testid="invoice-cancel-target-payment-id"
                           value={cancelTargetPaymentId}
                           onChange={(event) => setCancelTargetPaymentId(event.target.value.replace(/[^\d]/g, ''))}
                           className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
@@ -5633,6 +5636,7 @@ export function InvoiceModal({
                     <input
                       type="radio"
                       name="invoice-cancel-money-action"
+                      data-testid="invoice-cancel-money-refund"
                       checked={cancelMoneyAction === 'Refund'}
                       onChange={() => setCancelMoneyAction('Refund')}
                       className="mt-1"
@@ -5643,6 +5647,7 @@ export function InvoiceModal({
                       {cancelMoneyAction === 'Refund' && (
                         <span className="mt-2 grid gap-2 sm:grid-cols-2">
                           <select
+                            data-testid="invoice-cancel-refund-source"
                             value={cancelRefundSource}
                             onChange={(event) => setCancelRefundSource(event.target.value as InvoiceCancellationRefundSource)}
                             className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
@@ -5652,6 +5657,7 @@ export function InvoiceModal({
                             ))}
                           </select>
                           <input
+                            data-testid="invoice-cancel-refund-date"
                             type="date"
                             value={cancelRefundDate}
                             onChange={(event) => setCancelRefundDate(event.target.value)}

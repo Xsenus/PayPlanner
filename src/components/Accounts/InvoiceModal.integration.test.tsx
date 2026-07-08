@@ -1091,6 +1091,213 @@ describe('InvoiceModal integration', () => {
     });
   });
 
+  it('submits the advance scenario for a paid invoice from the cancellation modal', async () => {
+    const invoice = {
+      id: 1901,
+      invoiceEntityId: 77,
+      number: '77',
+      date: '2026-05-01',
+      dueDate: '2026-05-01',
+      amount: 12000,
+      paidAmount: 12000,
+      outstandingAmount: 0,
+      type: 'Income',
+      status: 'Completed',
+      workflowStatus: 'Paid',
+      clientId: 1,
+      createdAt: '2026-05-01T00:00:00Z',
+      lineItems: [{ name: 'Юридические услуги', quantity: 1, unit: 'шт', price: 12000 }],
+    } as unknown as Invoice;
+
+    vi.mocked(apiService.cancelInvoice).mockResolvedValue({
+      ...invoice,
+      status: 'Cancelled',
+      workflowStatus: 'Cancelled',
+      paidAmount: 0,
+      outstandingAmount: 0,
+    } as Invoice);
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        presentation="page"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[createTestClient(1, 'Клиент с оплатой')]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Отмен[её]н/i }));
+
+    expect(await screen.findByTestId('invoice-cancel-dialog')).toBeTruthy();
+    expect(screen.getByText('Оставить авансом контрагента')).toBeTruthy();
+
+    fireEvent.change(screen.getByTestId('invoice-cancel-reason'), {
+      target: { value: 'Счет выставлен ошибочно' },
+    });
+    fireEvent.click(screen.getByTestId('invoice-cancel-submit'));
+
+    await waitFor(() => {
+      expect(apiService.cancelInvoice).toHaveBeenCalledWith(
+        1901,
+        'Счет выставлен ошибочно',
+        'LeaveAsAdvance',
+        null,
+        null,
+        null,
+        'All',
+      );
+    });
+  });
+
+  it('validates and submits the reallocation scenario from the cancellation modal', async () => {
+    const invoice = {
+      id: 1902,
+      invoiceEntityId: 78,
+      number: '78',
+      date: '2026-05-02',
+      dueDate: '2026-05-02',
+      amount: 15000,
+      paidAmount: 15000,
+      outstandingAmount: 0,
+      type: 'Income',
+      status: 'Completed',
+      workflowStatus: 'Paid',
+      clientId: 1,
+      createdAt: '2026-05-02T00:00:00Z',
+      lineItems: [{ name: 'Юридические услуги', quantity: 1, unit: 'шт', price: 15000 }],
+    } as unknown as Invoice;
+
+    vi.mocked(apiService.cancelInvoice).mockResolvedValue({
+      ...invoice,
+      status: 'Cancelled',
+      workflowStatus: 'Cancelled',
+      paidAmount: 0,
+      outstandingAmount: 0,
+    } as Invoice);
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        presentation="page"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[createTestClient(1, 'Клиент для зачета')]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Отмен[её]н/i }));
+    expect(await screen.findByTestId('invoice-cancel-dialog')).toBeTruthy();
+
+    fireEvent.change(screen.getByTestId('invoice-cancel-reason'), {
+      target: { value: 'Перевыставили счет' },
+    });
+    fireEvent.click(screen.getByTestId('invoice-cancel-money-reallocate'));
+    fireEvent.click(screen.getByTestId('invoice-cancel-submit'));
+
+    expect(await screen.findByText('Для зачёта укажите положительный ID счёта.')).toBeTruthy();
+    expect(apiService.cancelInvoice).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByTestId('invoice-cancel-target-payment-id'), {
+      target: { value: '2005' },
+    });
+    fireEvent.click(screen.getByTestId('invoice-cancel-submit'));
+
+    await waitFor(() => {
+      expect(apiService.cancelInvoice).toHaveBeenCalledWith(
+        1902,
+        'Перевыставили счет',
+        'Reallocate',
+        2005,
+        null,
+        null,
+        'All',
+      );
+    });
+  });
+
+  it('submits the refund scenario with source and date from the cancellation modal', async () => {
+    const invoice = {
+      id: 1903,
+      invoiceEntityId: 79,
+      number: '79',
+      date: '2026-05-03',
+      dueDate: '2026-05-03',
+      amount: 18000,
+      paidAmount: 18000,
+      outstandingAmount: 0,
+      type: 'Income',
+      status: 'Completed',
+      workflowStatus: 'Paid',
+      clientId: 1,
+      createdAt: '2026-05-03T00:00:00Z',
+      lineItems: [{ name: 'Юридические услуги', quantity: 1, unit: 'шт', price: 18000 }],
+    } as unknown as Invoice;
+
+    vi.mocked(apiService.cancelInvoice).mockResolvedValue({
+      ...invoice,
+      status: 'Cancelled',
+      workflowStatus: 'Cancelled',
+      paidAmount: 0,
+      outstandingAmount: 0,
+    } as Invoice);
+
+    render(
+      <InvoiceModal
+        open
+        mode="edit"
+        presentation="page"
+        invoice={invoice}
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(undefined)}
+        submitting={false}
+        clients={[createTestClient(1, 'Клиент для возврата')]}
+        responsibles={[]}
+        lookupsLoading={false}
+        relatedPayments={[]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Отмен[её]н/i }));
+    expect(await screen.findByTestId('invoice-cancel-dialog')).toBeTruthy();
+
+    fireEvent.change(screen.getByTestId('invoice-cancel-reason'), {
+      target: { value: 'Возвращаем оплату' },
+    });
+    fireEvent.click(screen.getByTestId('invoice-cancel-money-refund'));
+    fireEvent.change(screen.getByTestId('invoice-cancel-refund-source'), {
+      target: { value: 'Cash' },
+    });
+    fireEvent.change(screen.getByTestId('invoice-cancel-refund-date'), {
+      target: { value: '2026-05-09' },
+    });
+    fireEvent.click(screen.getByTestId('invoice-cancel-submit'));
+
+    await waitFor(() => {
+      expect(apiService.cancelInvoice).toHaveBeenCalledWith(
+        1903,
+        'Возвращаем оплату',
+        'Refund',
+        null,
+        'Cash',
+        '2026-05-09',
+        'All',
+      );
+    });
+  });
+
   it('prompts to align due date with the last installment payment before saving the invoice', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     const invoice = {
