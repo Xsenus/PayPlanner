@@ -1056,17 +1056,22 @@ public class InvoicesControllerCrudTests
 
         var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
         var clientId = await CreateClientAsync(db, "Client Reallocate");
+        var sourceCaseId = await CreateClientCaseAsync(db, clientId, "Source Case Reallocate");
+        var targetCaseId = await CreateClientCaseAsync(db, clientId, "Target Case Reallocate");
         var controller = CreateController(db, isAdmin: true, userId: actorUserId);
 
         var sourceRequest = CreateRequest("INV-CANCEL-REALLOC-SRC", clientId, new DateTime(2026, 4, 20), 12_000m);
         sourceRequest.Status = PaymentStatus.Completed;
         sourceRequest.PaidDate = new DateTime(2026, 4, 21);
+        sourceRequest.ClientCaseIds = [sourceCaseId];
         var sourceAction = await controller.Create(sourceRequest, CancellationToken.None);
         var sourceCreated = Assert.IsType<CreatedResult>(sourceAction.Result);
         var sourceDto = Assert.IsType<InvoiceDto>(sourceCreated.Value);
 
+        var targetRequest = CreateRequest("INV-CANCEL-REALLOC-DST", clientId, new DateTime(2026, 4, 22), 12_000m);
+        targetRequest.ClientCaseIds = [targetCaseId];
         var targetAction = await controller.Create(
-            CreateRequest("INV-CANCEL-REALLOC-DST", clientId, new DateTime(2026, 4, 22), 12_000m),
+            targetRequest,
             CancellationToken.None);
         var targetCreated = Assert.IsType<CreatedResult>(targetAction.Result);
         var targetDto = Assert.IsType<InvoiceDto>(targetCreated.Value);
@@ -1121,6 +1126,17 @@ public class InvoicesControllerCrudTests
                 Assert.Contains("Перевыставили счёт", debit.Description, StringComparison.Ordinal);
             });
         Assert.Contains($"аннулированному счёту #{sourceDto.Id}", storedTarget.SystemNotes, StringComparison.OrdinalIgnoreCase);
+
+        var sourceCase = await db.ClientCases.AsNoTracking().SingleAsync(item => item.Id == sourceCaseId);
+        Assert.Contains("Счёт №INV-CANCEL-REALLOC-SRC", sourceCase.EventHistory, StringComparison.Ordinal);
+        Assert.Contains("аннулирован", sourceCase.EventHistory, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("зачтена в счёт №INV-CANCEL-REALLOC-DST", sourceCase.EventHistory, StringComparison.Ordinal);
+        Assert.Contains("Перевыставили счёт", sourceCase.EventHistory, StringComparison.Ordinal);
+
+        var targetCase = await db.ClientCases.AsNoTracking().SingleAsync(item => item.Id == targetCaseId);
+        Assert.Contains("В счёт №INV-CANCEL-REALLOC-DST", targetCase.EventHistory, StringComparison.Ordinal);
+        Assert.Contains("зачтена оплата по аннулированному счёту №INV-CANCEL-REALLOC-SRC", targetCase.EventHistory, StringComparison.Ordinal);
+        Assert.Contains("Перевыставили счёт", targetCase.EventHistory, StringComparison.Ordinal);
 
         var balance = await ClientBalanceService.GetBalanceAsync(db, clientId);
         Assert.Equal(0m, balance);
@@ -1219,6 +1235,7 @@ public class InvoicesControllerCrudTests
 
         var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
         var clientId = await CreateClientAsync(db, "Client Refund");
+        var caseId = await CreateClientCaseAsync(db, clientId, "Refund Case");
         var cashSourceId = await CreatePaymentSourceAsync(db, "Касса");
         var controller = CreateController(db, isAdmin: true, userId: actorUserId);
 
@@ -1226,6 +1243,7 @@ public class InvoicesControllerCrudTests
         request.Status = PaymentStatus.Completed;
         request.PaidDate = new DateTime(2026, 4, 21);
         request.PaymentSourceId = cashSourceId;
+        request.ClientCaseIds = [caseId];
 
         var createAction = await controller.Create(request, CancellationToken.None);
         var created = Assert.IsType<CreatedResult>(createAction.Result);
@@ -1273,6 +1291,12 @@ public class InvoicesControllerCrudTests
 
         var balance = await ClientBalanceService.GetBalanceAsync(db, clientId);
         Assert.Equal(0m, balance);
+
+        var clientCase = await db.ClientCases.AsNoTracking().SingleAsync(item => item.Id == caseId);
+        Assert.Contains("Счёт №INV-CANCEL-REFUND", clientCase.EventHistory, StringComparison.Ordinal);
+        Assert.Contains("аннулирован", clientCase.EventHistory, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains($"денежной операцией #{operation.Id}", clientCase.EventHistory, StringComparison.Ordinal);
+        Assert.Contains("Возврат клиенту", clientCase.EventHistory, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -980,6 +980,13 @@ public class InvoicesController : ControllerBase
                 return unpaidInstallmentCancelError;
             }
 
+            await AppendInvoiceCancellationCaseEventsAsync(
+                payment,
+                $"По счёту {BuildInvoicePaymentReference(payment)} отменены только неоплаченные платежи графика рассрочки. Оплаченная часть сохранена. Причина: {reason}. Инициатор: {actor}.",
+                now,
+                invoiceTimeZone,
+                ct);
+
             await _db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
 
@@ -1137,6 +1144,12 @@ public class InvoicesController : ControllerBase
                 now,
                 actor,
                 invoiceTimeZone);
+            await AppendInvoiceCancellationCaseEventsAsync(
+                reallocationTarget,
+                $"В счёт {BuildInvoicePaymentReference(reallocationTarget)} зачтена оплата по аннулированному счёту {BuildInvoicePaymentReference(payment)}: {reallocatedAmount:N2}. Причина: {reason}. Инициатор: {actor}.",
+                now,
+                invoiceTimeZone,
+                ct);
         }
 
         payment.Status = PaymentStatus.Cancelled;
@@ -1157,6 +1170,12 @@ public class InvoicesController : ControllerBase
                 ? $" Полученная оплата перенесена в аванс контрагента: {receivedAmount:N2}."
                 : string.Empty;
         PaymentDomainService.AppendSystemNote(payment, $"Счёт аннулирован. Причина: {reason}{advanceNote}", now, actor, invoiceTimeZone);
+        await AppendInvoiceCancellationCaseEventsAsync(
+            payment,
+            BuildInvoiceCancellationCaseEvent(payment, reason, receivedAmount, hasReceivedMoney, request.ReceivedMoneyAction, refundOperation, reallocationTarget, reallocatedAmount, actor),
+            now,
+            invoiceTimeZone,
+            ct);
 
         await _db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
@@ -1210,6 +1229,83 @@ public class InvoicesController : ControllerBase
         => string.IsNullOrWhiteSpace(payment.Account)
             ? $"#{payment.Id}"
             : $"№{payment.Account.Trim()} (#{payment.Id})";
+
+    private async Task AppendInvoiceCancellationCaseEventsAsync(
+        Payment payment,
+        string eventText,
+        DateTime utcNow,
+        TimeZoneInfo timeZone,
+        CancellationToken ct)
+    {
+        var caseIds = new HashSet<int>();
+        if (payment.ClientCaseId is > 0)
+        {
+            caseIds.Add(payment.ClientCaseId.Value);
+        }
+
+        var linkedCaseIds = await _db.Set<InvoiceClientCase>()
+            .Where(link => link.PaymentId == payment.Id)
+            .Select(link => link.ClientCaseId)
+            .ToListAsync(ct);
+        foreach (var caseId in linkedCaseIds)
+        {
+            caseIds.Add(caseId);
+        }
+
+        if (caseIds.Count == 0)
+        {
+            return;
+        }
+
+        var clientCases = await _db.ClientCases
+            .Where(clientCase => caseIds.Contains(clientCase.Id))
+            .ToListAsync(ct);
+        var localNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utcNow, DateTimeKind.Utc), timeZone);
+        foreach (var clientCase in clientCases)
+        {
+            AppendCaseEvent(clientCase, eventText, localNow);
+        }
+    }
+
+    private static string BuildInvoiceCancellationCaseEvent(
+        Payment payment,
+        string reason,
+        decimal receivedAmount,
+        bool hasReceivedMoney,
+        InvoiceCancellationMoneyAction moneyAction,
+        MoneyOperation? refundOperation,
+        Payment? reallocationTarget,
+        decimal reallocatedAmount,
+        string actor)
+    {
+        var moneyText = hasReceivedMoney
+            ? moneyAction switch
+            {
+                InvoiceCancellationMoneyAction.Refund when refundOperation is not null
+                    => $" Полученная оплата возвращена клиенту денежной операцией #{refundOperation.Id}: {receivedAmount:N2}.",
+                InvoiceCancellationMoneyAction.Reallocate when reallocationTarget is not null
+                    => $" Полученная оплата зачтена в счёт {BuildInvoicePaymentReference(reallocationTarget)}: {reallocatedAmount:N2}.",
+                InvoiceCancellationMoneyAction.LeaveAsAdvance
+                    => $" Полученная оплата перенесена в аванс контрагента: {receivedAmount:N2}.",
+                _ => string.Empty,
+            }
+            : string.Empty;
+
+        return $"Счёт {BuildInvoicePaymentReference(payment)} аннулирован. Причина: {reason}.{moneyText} Инициатор: {actor}.";
+    }
+
+    private static void AppendCaseEvent(ClientCase clientCase, string eventText, DateTime localNow)
+    {
+        var line = $"{localNow:dd.MM.yyyy HH:mm}: {eventText}";
+        var existing = clientCase.EventHistory?.Trim();
+        var next = string.IsNullOrWhiteSpace(existing)
+            ? line
+            : $"{existing}{Environment.NewLine}{line}";
+
+        clientCase.EventHistory = next.Length <= 4000
+            ? next
+            : next[^4000..].TrimStart();
+    }
 
     [HttpPost]
     public async Task<ActionResult<InvoiceDto>> Create([FromBody] UpsertInvoiceRequest request, CancellationToken ct)
