@@ -110,6 +110,10 @@ type ModalState = {
   dueAt?: string;
   defaults?: Partial<TaskJournalUpsertPayload>;
 } | null;
+type DeadlineChangeDecisionPromptState = {
+  task: TaskJournalItem;
+  request: TaskJournalDeadlineChangeRequest;
+} | null;
 type TaskJournalMode = 'journal' | 'approvals';
 type TaskApprovalFinalAction = 'complete' | 'returnToAssignee';
 type TaskJournalProps = {
@@ -1876,6 +1880,10 @@ export function TaskJournal({
   const [completionPromptResult, setCompletionPromptResult] = useState('');
   const [completionPromptError, setCompletionPromptError] = useState<string | null>(null);
   const [completionPromptSaving, setCompletionPromptSaving] = useState(false);
+  const [deadlineChangeDecisionPrompt, setDeadlineChangeDecisionPrompt] = useState<DeadlineChangeDecisionPromptState>(null);
+  const [deadlineChangeDecisionComment, setDeadlineChangeDecisionComment] = useState('');
+  const [deadlineChangeDecisionError, setDeadlineChangeDecisionError] = useState<string | null>(null);
+  const [deadlineChangeDecisionSaving, setDeadlineChangeDecisionSaving] = useState<'approve' | 'reject' | null>(null);
   const [highlightedTaskId, setHighlightedTaskId] = useState<number | null>(routeTaskId);
   const [calendarAnchorDate, setCalendarAnchorDate] = useState(() => getCurrentCalendarDate());
   const [calendarSelectedDate, setCalendarSelectedDate] = useState(() => getCurrentCalendarDate());
@@ -1890,6 +1898,7 @@ export function TaskJournal({
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const routeTaskRequestRef = useRef(0);
   const lastOpenedRouteTaskIdRef = useRef<number | null>(null);
+  const processedDeadlineChangeRequestIdsRef = useRef<Set<number>>(new Set());
   const previousCalendarTimeZoneRef = useRef(currentTimeZoneId);
   const skipNextFilterSaveRef = useRef(false);
   const previousInitialViewRef = useRef(initialView);
@@ -2507,6 +2516,59 @@ export function TaskJournal({
     return statusAndPeriodFilteredTasks.filter((task) => matchesMetricFilter(task, metricFilter, nowDate));
   }, [effectiveTaskJournalTimeZoneId, metricFilter, statusAndPeriodFilteredTasks]);
 
+  const pendingDeadlineChangeDecision = useMemo<Exclude<DeadlineChangeDecisionPromptState, null> | null>(() => {
+    if (!isApprovalsMode) {
+      return null;
+    }
+
+    for (const task of tasks) {
+      const request = getPendingDeadlineChangeRequests(task)
+        .find((item) =>
+          !processedDeadlineChangeRequestIdsRef.current.has(item.id) &&
+          (isAdminUser || (currentUserId !== null && item.reviewerUserId === currentUserId)));
+      if (request) {
+        return { task, request };
+      }
+    }
+
+    return null;
+  }, [currentUserId, isAdminUser, isApprovalsMode, tasks]);
+
+  useEffect(() => {
+    if (!isApprovalsMode) {
+      setDeadlineChangeDecisionPrompt(null);
+      return;
+    }
+
+    if (deadlineChangeDecisionPrompt) {
+      const stillPending = tasks.some((task) =>
+        task.id === deadlineChangeDecisionPrompt.task.id &&
+        getPendingDeadlineChangeRequests(task).some((request) => request.id === deadlineChangeDecisionPrompt.request.id));
+      if (!stillPending) {
+        setDeadlineChangeDecisionPrompt(null);
+        setDeadlineChangeDecisionComment('');
+        setDeadlineChangeDecisionError(null);
+      }
+      return;
+    }
+
+    if (!pendingDeadlineChangeDecision || modal || completionPromptTask || deadlineChangeDecisionSaving) {
+      return;
+    }
+
+    setDeadlineChangeDecisionPrompt(pendingDeadlineChangeDecision);
+    setDeadlineChangeDecisionComment('');
+    setDeadlineChangeDecisionError(null);
+  }, [
+    completionPromptTask,
+    deadlineChangeDecisionPrompt,
+    deadlineChangeDecisionSaving,
+    isApprovalsMode,
+    modal,
+    pendingDeadlineChangeDecision,
+    tasks,
+  ]);
+
   const calendarTasks = useMemo(
     () => {
       const scopeLimitedTasks = !visibleTaskCalendarUserIds
@@ -2913,6 +2975,61 @@ export function TaskJournal({
       setCompletionPromptError(extractDisplayErrorMessage(error, 'Не удалось завершить задачу.'));
     } finally {
       setCompletionPromptSaving(false);
+    }
+  };
+
+  const resetDeadlineChangeDecisionPrompt = () => {
+    setDeadlineChangeDecisionPrompt(null);
+    setDeadlineChangeDecisionComment('');
+    setDeadlineChangeDecisionError(null);
+    setDeadlineChangeDecisionSaving(null);
+  };
+
+  const approveDeadlineChangeDecision = async () => {
+    if (!deadlineChangeDecisionPrompt || deadlineChangeDecisionSaving) return;
+
+    const { task, request } = deadlineChangeDecisionPrompt;
+    const comment = deadlineChangeDecisionComment.trim();
+    setDeadlineChangeDecisionSaving('approve');
+    setDeadlineChangeDecisionError(null);
+    try {
+      await apiService.approveTaskJournalDeadlineChangeRequest(task.id, request.id, {
+        approvedDueAt: request.requestedDueAt,
+        comment: comment || null,
+      });
+      toast.success('Перенос срока согласован.', 'Согласования');
+      processedDeadlineChangeRequestIdsRef.current.add(request.id);
+      resetDeadlineChangeDecisionPrompt();
+      await refreshTasks();
+      emitTaskChange();
+    } catch (error) {
+      setDeadlineChangeDecisionError(extractDisplayErrorMessage(error, 'Не удалось согласовать перенос срока.'));
+      setDeadlineChangeDecisionSaving(null);
+    }
+  };
+
+  const rejectDeadlineChangeDecision = async () => {
+    if (!deadlineChangeDecisionPrompt || deadlineChangeDecisionSaving) return;
+
+    const comment = deadlineChangeDecisionComment.trim();
+    if (!comment) {
+      setDeadlineChangeDecisionError('Укажите причину отказа в переносе срока.');
+      return;
+    }
+
+    const { task, request } = deadlineChangeDecisionPrompt;
+    setDeadlineChangeDecisionSaving('reject');
+    setDeadlineChangeDecisionError(null);
+    try {
+      await apiService.rejectTaskJournalDeadlineChangeRequest(task.id, request.id, { comment });
+      toast.success('Перенос срока отклонен.', 'Согласования');
+      processedDeadlineChangeRequestIdsRef.current.add(request.id);
+      resetDeadlineChangeDecisionPrompt();
+      await refreshTasks();
+      emitTaskChange();
+    } catch (error) {
+      setDeadlineChangeDecisionError(extractDisplayErrorMessage(error, 'Не удалось отклонить перенос срока.'));
+      setDeadlineChangeDecisionSaving(null);
     }
   };
 
@@ -3966,6 +4083,22 @@ export function TaskJournal({
           onClose={closeCompletionPrompt}
         />
       ) : null}
+      {deadlineChangeDecisionPrompt ? (
+        <TaskDeadlineChangeDecisionPrompt
+          state={deadlineChangeDecisionPrompt}
+          comment={deadlineChangeDecisionComment}
+          error={deadlineChangeDecisionError}
+          saving={deadlineChangeDecisionSaving}
+          onCommentChange={(value) => {
+            setDeadlineChangeDecisionComment(value);
+            if (deadlineChangeDecisionError) {
+              setDeadlineChangeDecisionError(null);
+            }
+          }}
+          onApprove={() => void approveDeadlineChangeDecision()}
+          onReject={() => void rejectDeadlineChangeDecision()}
+        />
+      ) : null}
     </div>
   );
 }
@@ -4042,6 +4175,110 @@ function TaskCompletionResultPrompt({
             className="w-full rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60 sm:w-auto"
           >
             {saving ? 'Сохраняем...' : 'Завершить задачу'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TaskDeadlineChangeDecisionPrompt({
+  state,
+  comment,
+  error,
+  saving,
+  onCommentChange,
+  onApprove,
+  onReject,
+}: {
+  state: Exclude<DeadlineChangeDecisionPromptState, null>;
+  comment: string;
+  error: string | null;
+  saving: 'approve' | 'reject' | null;
+  onCommentChange: (value: string) => void;
+  onApprove: () => void;
+  onReject: () => void;
+}) {
+  const { task, request } = state;
+  const rejectDisabled = Boolean(saving) || !comment.trim();
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto bg-slate-950/55 px-3 py-4 backdrop-blur-sm sm:items-center sm:px-4 sm:py-6">
+      <div
+        className="max-h-[calc(100vh-2rem)] w-full max-w-[min(46rem,calc(100vw-1.5rem))] overflow-y-auto rounded-2xl border border-amber-200 bg-white p-4 shadow-2xl sm:p-6"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="deadline-change-decision-title"
+        data-testid="deadline-change-decision-prompt"
+      >
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-700">Запрос переноса срока</p>
+            <h2 id="deadline-change-decision-title" className="mt-2 text-xl font-semibold text-slate-950">
+              У вас запросили перенос срока по задаче
+            </h2>
+            <p className="mt-2 line-clamp-2 text-sm text-slate-600">{task.title}</p>
+          </div>
+          <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">
+            <TimerReset className="h-3.5 w-3.5" />
+            Требует решения
+          </span>
+        </div>
+
+        <div className="mt-5 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 sm:grid-cols-2">
+          <div>
+            <div className="text-xs font-semibold uppercase text-slate-400">Запросил</div>
+            <div className="mt-1 font-semibold text-slate-900">{request.requestedByName || 'Не указано'}</div>
+          </div>
+          <div>
+            <div className="text-xs font-semibold uppercase text-slate-400">Постановщик</div>
+            <div className="mt-1 font-semibold text-slate-900">{request.reviewerName || task.authorName || 'Не указано'}</div>
+          </div>
+          <div>
+            <div className="text-xs font-semibold uppercase text-slate-400">Текущий срок</div>
+            <div className="mt-1 font-medium">{formatDateTime(request.currentDueAt)}</div>
+          </div>
+          <div>
+            <div className="text-xs font-semibold uppercase text-slate-400">Запрошенный срок</div>
+            <div className="mt-1 font-medium">{formatDateTime(request.requestedDueAt)}</div>
+          </div>
+        </div>
+
+        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm leading-6 text-amber-950">
+          <span className="font-semibold">Причина переноса:</span> {request.reason || 'Не указана'}
+        </div>
+
+        <label className="mt-4 block text-sm font-semibold text-slate-700" htmlFor="deadline-change-decision-comment">
+          Комментарий к решению
+        </label>
+        <textarea
+          id="deadline-change-decision-comment"
+          value={comment}
+          onChange={(event) => onCommentChange(event.target.value)}
+          className="mt-2 block w-full min-h-[96px] resize-y rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm leading-6 text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:cursor-wait disabled:bg-slate-50"
+          rows={4}
+          placeholder="Для отказа укажите причину. Для согласования комментарий можно оставить пустым."
+          disabled={Boolean(saving)}
+          autoFocus
+        />
+        {error ? <p className="mt-2 text-sm font-semibold text-rose-600">{error}</p> : null}
+
+        <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onReject}
+            disabled={rejectDisabled}
+            className="w-full rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+          >
+            {saving === 'reject' ? 'Отклоняем...' : 'Отказать'}
+          </button>
+          <button
+            type="button"
+            onClick={onApprove}
+            disabled={Boolean(saving)}
+            className="w-full rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60 sm:w-auto"
+          >
+            {saving === 'approve' ? 'Согласовываем...' : 'Согласовать перенос'}
           </button>
         </div>
       </div>

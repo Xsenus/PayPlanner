@@ -35,6 +35,8 @@ const apiMock = vi.hoisted(() => ({
   createTaskJournalComment: vi.fn(),
   createTaskJournalDeadlineChangeRequest: vi.fn(),
   getTaskJournalDeadlineChangeRequests: vi.fn(),
+  approveTaskJournalDeadlineChangeRequest: vi.fn(),
+  rejectTaskJournalDeadlineChangeRequest: vi.fn(),
   getTaskJournalFiles: vi.fn(),
   uploadTaskJournalFile: vi.fn(),
   downloadTaskJournalFile: vi.fn(),
@@ -465,6 +467,8 @@ describe('TaskJournal', () => {
       updatedAt: null,
     });
     apiMock.getTaskJournalDeadlineChangeRequests.mockResolvedValue([]);
+    apiMock.approveTaskJournalDeadlineChangeRequest.mockResolvedValue(createTask());
+    apiMock.rejectTaskJournalDeadlineChangeRequest.mockResolvedValue(createTask());
     apiMock.getTaskJournalFiles.mockResolvedValue([]);
     apiMock.uploadTaskJournalFile.mockResolvedValue({
       id: 601,
@@ -1379,10 +1383,65 @@ describe('TaskJournal', () => {
     });
 
     expect(apiMock.getTaskJournalItems).toHaveBeenCalledWith(expect.objectContaining({ includeDeadlineChangeRequests: true }));
-    expect(screen.getByText(deadlineRequestTask.title)).toBeTruthy();
+    expect(screen.getAllByText(deadlineRequestTask.title).length).toBeGreaterThan(0);
     expect(screen.getByTestId('task-deadline-change-request-badge-204')).toBeTruthy();
-    expect(screen.getByText('Запрос переноса срока')).toBeTruthy();
+    expect(screen.getAllByText('Запрос переноса срока').length).toBeGreaterThan(0);
     expect(screen.queryByText(regularTask.title)).toBeNull();
+  });
+
+  it('shows a forced decision prompt for deadline change requests in approvals mode', async () => {
+    authState.isAdmin = false;
+    authState.user = { id: 8, fullName: 'Постановщик', email: 'author@example.com' };
+    const requestedDueAt = todayAt(20);
+
+    const deadlineRequestTask = createTask({
+      id: 206,
+      title: 'Согласовать перенос срока документов',
+      status: 'new',
+      authorUserId: 8,
+      authorName: 'Постановщик',
+      assigneeUserId: 7,
+      assigneeName: 'Исполнитель',
+      activeDeadlineChangeRequests: [
+        {
+          id: 902,
+          taskJournalItemId: 206,
+          requestedByUserId: 7,
+          requestedByName: 'Исполнитель',
+          reviewerUserId: 8,
+          reviewerName: 'Постановщик',
+          currentDueAt: todayAt(18),
+          requestedDueAt,
+          reason: 'Документы будут готовы завтра',
+          status: 'pending',
+          decisionDueAt: null,
+          decisionComment: null,
+          decidedByUserId: null,
+          decidedByName: null,
+          decidedAt: null,
+          createdCommentId: 501,
+          decisionCommentId: null,
+          createdAt: todayAt(12),
+          updatedAt: todayAt(12),
+        },
+      ],
+    });
+
+    await renderJournal([deadlineRequestTask], {
+      mode: 'approvals',
+      waitForTitle: deadlineRequestTask.title,
+    });
+
+    const prompt = await screen.findByTestId('deadline-change-decision-prompt');
+    expect(within(prompt).getByText('У вас запросили перенос срока по задаче')).toBeTruthy();
+    expect(within(prompt).getByText('Документы будут готовы завтра')).toBeTruthy();
+
+    fireEvent.click(within(prompt).getByRole('button', { name: 'Согласовать перенос' }));
+
+    await waitFor(() => expect(apiMock.approveTaskJournalDeadlineChangeRequest).toHaveBeenCalledWith(206, 902, {
+      approvedDueAt: requestedDueAt,
+      comment: null,
+    }));
   });
 
   it('shows approval action buttons only for the current approver in queue', async () => {

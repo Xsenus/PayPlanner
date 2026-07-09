@@ -4190,6 +4190,20 @@ export class ApiService {
     return this.request<TaskJournalDeadlineChangeRequest[]>(`/tasks/${id}/deadline-change-requests`);
   }
 
+  async approveTaskJournalDeadlineChangeRequest(id: number, requestId: number, payload: { approvedDueAt: string; comment?: string | null }) {
+    return this.request<TaskJournalItem>(`/tasks/${id}/deadline-change-requests/${requestId}/approve`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async rejectTaskJournalDeadlineChangeRequest(id: number, requestId: number, payload: { comment: string }) {
+    return this.request<TaskJournalItem>(`/tasks/${id}/deadline-change-requests/${requestId}/reject`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async getTaskJournalFiles(id: number) {
     return this.request<TaskJournalFile[]>(`/tasks/${id}/files`);
   }
