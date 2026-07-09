@@ -126,6 +126,10 @@ function buildForcedTaskQueueItem(notification: UserNotificationDto, rule: Force
     return null;
   }
 
+  if (notification.forcedModalEnabled === false) {
+    return null;
+  }
+
   const decisionKind = rule.resolveDecisionKind(notification);
   if (!decisionKind) {
     return null;

@@ -76,6 +76,7 @@ const DEFAULT_PURPOSES = ['manualTest'];
 const ROLE_CHANNEL_OPTIONS: Array<{ value: UserNotificationPreferenceChannel; label: string; Icon: typeof Monitor }> = [
   { value: 'inApp', label: 'Центр', Icon: Monitor },
   { value: 'toast', label: 'Всплывающие', Icon: Bell },
+  { value: 'forcedModal', label: 'Окно', Icon: Monitor },
   { value: 'webPush', label: 'Push', Icon: Smartphone },
   { value: 'email', label: 'Email', Icon: Mail },
   { value: 'telegram', label: 'Telegram', Icon: Send },

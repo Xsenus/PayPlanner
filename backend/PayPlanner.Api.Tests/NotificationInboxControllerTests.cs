@@ -29,6 +29,7 @@ public class NotificationInboxControllerTests
         Assert.Equal(NotificationPriorities.High, approval.Priority);
         Assert.Contains(NotificationChannels.InApp, approval.Channels);
         Assert.Contains(NotificationChannels.Toast, approval.Channels);
+        Assert.Contains(NotificationChannels.ForcedModal, approval.Channels);
         Assert.Equal(UserNotificationDomains.Task, approval.Domain);
         Assert.Equal("Задачи", approval.DomainLabel);
         Assert.True(approval.Deduplicate);
@@ -76,6 +77,39 @@ public class NotificationInboxControllerTests
         Assert.Contains(types, item => item.Key == UserNotificationTypes.CourtSyncFailed && item.Priority == NotificationPriorities.Critical && item.Tone == "rose");
         Assert.Contains(types, item => item.Key == UserNotificationTypes.CaseInactivityReminder && item.Priority == NotificationPriorities.High && item.Domain == UserNotificationDomains.Case);
         Assert.Contains(types, item => item.Key == UserNotificationTypes.SystemAdminWarning && item.Tone == "rose");
+    }
+
+    [Fact]
+    public async Task GetNotifications_KeepsNotificationVisibleWhenForcedModalChannelDisabled()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "forced-modal-disabled@example.com");
+        var notification = CreateNotification(
+            user.Id,
+            "task:1:approval-request",
+            UserNotificationTypes.TaskApprovalRequested,
+            title: "Ожидает согласования");
+        db.UserNotifications.Add(notification);
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = user.Id,
+            Key = UserNotificationPreferenceSettings.SettingKey,
+            Value = """{"disabledChannels":{"taskApprovalRequested":["forcedModal"]}}""",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, user.Id);
+
+        var listResult = await controller.GetNotifications("active", null, null);
+        var page = Assert.IsType<PagedResponse<UserNotificationDto>>(Assert.IsType<OkObjectResult>(listResult.Result).Value);
+        var item = Assert.Single(page.Items);
+
+        Assert.Equal(notification.Id, item.Id);
+        Assert.False(item.ForcedModalEnabled);
+        Assert.True(item.ToastEnabled);
+        Assert.False(item.IsRead);
     }
 
     [Fact]

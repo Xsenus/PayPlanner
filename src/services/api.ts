@@ -883,7 +883,7 @@ export interface UpdateStickyNoteLayoutPayload {
 }
 
 export type NotificationChannel = 'email' | 'telegram' | 'sms';
-export type UserNotificationDeliveryChannel = 'inApp' | 'toast' | 'webPush' | 'email' | 'telegram' | 'sms';
+export type UserNotificationDeliveryChannel = 'inApp' | 'toast' | 'forcedModal' | 'webPush' | 'email' | 'telegram' | 'sms';
 
 export interface NotificationChannelDto {
   key: string;
@@ -1121,6 +1121,7 @@ export interface UserNotificationDto {
   bodyPreview: string;
   tone: 'rose' | 'amber' | 'blue' | 'emerald' | string;
   toastEnabled: boolean;
+  forcedModalEnabled?: boolean;
   objectType: string;
   objectId?: number | null;
   taskId?: number | null;

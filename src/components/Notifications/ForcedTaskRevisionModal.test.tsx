@@ -390,4 +390,13 @@ describe('ForcedTaskRevisionModal', () => {
     expect(await screen.findByRole('dialog')).toBeTruthy();
     expect(screen.getByText('Задача на доработку')).toBeTruthy();
   });
+  it('does not show the mandatory modal when the forced modal channel is disabled', async () => {
+    mockNotificationPages([createNotification({ forcedModalEnabled: false })]);
+
+    render(<ForcedTaskRevisionModal />);
+
+    await waitFor(() => expect(apiMock.getUserNotifications).toHaveBeenCalled());
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+  });
 });

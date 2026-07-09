@@ -782,6 +782,11 @@ public class NotificationInboxController : ControllerBase
                     NotificationChannels.Toast,
                     DateTime.UtcNow,
                     effectiveTimeZone),
+            ForcedModalEnabled = type?.PreferenceChannels.Contains(NotificationChannels.ForcedModal, StringComparer.OrdinalIgnoreCase) == true
+                && UserNotificationPreferenceSettings.IsChannelEnabled(
+                    effectivePreferences,
+                    item.Type,
+                    NotificationChannels.ForcedModal),
             ObjectType = item.ObjectType,
             ObjectId = item.ObjectId,
             TaskId = item.TaskJournalItemId,

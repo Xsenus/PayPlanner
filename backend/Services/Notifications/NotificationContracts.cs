@@ -23,6 +23,7 @@ public static class NotificationChannels
 {
     public const string InApp = "inApp";
     public const string Toast = "toast";
+    public const string ForcedModal = "forcedModal";
     public const string Email = "email";
     public const string Telegram = "telegram";
     public const string WebPush = "webPush";
@@ -31,8 +32,8 @@ public static class NotificationChannels
     public static readonly IReadOnlyList<string> All = [InApp, Toast, WebPush, Email, Telegram];
     public static readonly IReadOnlyList<string> External = [Email, Telegram, WebPush];
     public static readonly IReadOnlyList<string> Future = [Sms, Max];
-    public static readonly IReadOnlyList<string> Known = [InApp, Toast, WebPush, Email, Telegram, Sms, Max];
-    public static readonly IReadOnlyList<string> UserPreferences = [InApp, Toast, WebPush, Email, Telegram, Sms];
+    public static readonly IReadOnlyList<string> Known = [InApp, Toast, ForcedModal, WebPush, Email, Telegram, Sms, Max];
+    public static readonly IReadOnlyList<string> UserPreferences = [InApp, Toast, ForcedModal, WebPush, Email, Telegram, Sms];
     public static readonly IReadOnlyList<NotificationChannelDefinition> Definitions =
     [
         new(InApp, "Центр уведомлений", "Внутренние уведомления в CRM, счетчик и центр уведомлений.", "active", true, true, true, false, false, false),
@@ -250,6 +251,14 @@ public static class UserNotificationTypes
         CaseInactivityReminder
     };
 
+    private static readonly IReadOnlySet<string> ForcedModalPreferenceTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        TaskApprovalRequested,
+        TaskApproved,
+        TaskRevisionRequested,
+        TaskDeadlineChangeRequested
+    };
+
     public static readonly IReadOnlyList<UserNotificationTypeDefinition> All =
     [
         new(TaskAssigned, "Новая задача", "Назначение новой задачи исполнителю или участникам.", "blue", NotificationPriorities.High, NotificationChannels.All, true, false),
@@ -345,6 +354,9 @@ public static class UserNotificationTypes
     public static bool SupportsSmsPreference(string? value)
         => SmsPreferenceTypes.Contains(value ?? string.Empty);
 
+    public static bool SupportsForcedModalPreference(string? value)
+        => ForcedModalPreferenceTypes.Contains(value ?? string.Empty);
+
     public static bool RequiresAction(string? value)
         => RequiresActionTypes.Contains(value ?? string.Empty, StringComparer.OrdinalIgnoreCase);
 }
@@ -374,6 +386,12 @@ public sealed record UserNotificationTypeDefinition(
                 && !channels.Contains(NotificationChannels.Sms, StringComparer.OrdinalIgnoreCase))
             {
                 channels.Add(NotificationChannels.Sms);
+            }
+
+            if (UserNotificationTypes.SupportsForcedModalPreference(Key)
+                && !channels.Contains(NotificationChannels.ForcedModal, StringComparer.OrdinalIgnoreCase))
+            {
+                channels.Add(NotificationChannels.ForcedModal);
             }
 
             return channels;

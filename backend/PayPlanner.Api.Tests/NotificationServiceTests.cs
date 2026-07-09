@@ -1385,6 +1385,7 @@ public class NotificationServiceTests
                 [UserNotificationTypes.TaskAssigned] =
                 [
                     NotificationChannels.Email,
+                    NotificationChannels.ForcedModal,
                     "unknown",
                     NotificationChannels.Email
                 ]
@@ -1392,6 +1393,7 @@ public class NotificationServiceTests
         });
 
         Assert.False(UserNotificationPreferenceSettings.IsChannelEnabled(rawValue, UserNotificationTypes.TaskAssigned, NotificationChannels.Email));
+        Assert.False(UserNotificationPreferenceSettings.IsChannelEnabled(rawValue, UserNotificationTypes.TaskAssigned, NotificationChannels.ForcedModal));
         Assert.True(UserNotificationPreferenceSettings.IsChannelEnabled(rawValue, UserNotificationTypes.TaskAssigned, NotificationChannels.Telegram));
         Assert.False(UserNotificationPreferenceSettings.IsChannelEnabled(rawValue, UserNotificationTypes.TaskComment, NotificationChannels.InApp));
     }

@@ -143,6 +143,7 @@ public class UserNotificationDto
     public string BodyPreview { get; set; } = string.Empty;
     public string Tone { get; set; } = "blue";
     public bool ToastEnabled { get; set; } = true;
+    public bool ForcedModalEnabled { get; set; } = true;
     public string ObjectType { get; set; } = string.Empty;
     public int? ObjectId { get; set; }
     public int? TaskId { get; set; }

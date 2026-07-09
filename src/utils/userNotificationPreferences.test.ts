@@ -31,13 +31,14 @@ describe('userNotificationPreferences', () => {
 
   it('normalizes and toggles disabled channels by type', () => {
     const preferences = parseUserNotificationTypePreferences(
-      '{"disabledChannels":{"taskAssigned":["email","toast","webPush","sms","unknown","email"],"unknown":["inApp"]}}',
+      '{"disabledChannels":{"taskAssigned":["email","toast","forcedModal","webPush","sms","unknown","email"],"unknown":["inApp"]}}',
       ['taskAssigned'],
     );
 
-    expect(preferences.disabledChannels).toEqual({ taskAssigned: ['email', 'toast', 'webPush', 'sms'] });
+    expect(preferences.disabledChannels).toEqual({ taskAssigned: ['email', 'toast', 'forcedModal', 'webPush', 'sms'] });
     expect(isUserNotificationChannelEnabled(preferences, 'taskAssigned', 'email')).toBe(false);
     expect(isUserNotificationChannelEnabled(preferences, 'taskAssigned', 'toast')).toBe(false);
+    expect(isUserNotificationChannelEnabled(preferences, 'taskAssigned', 'forcedModal')).toBe(false);
     expect(isUserNotificationChannelEnabled(preferences, 'taskAssigned', 'webPush')).toBe(false);
     expect(isUserNotificationChannelEnabled(preferences, 'taskAssigned', 'sms')).toBe(false);
     expect(isUserNotificationChannelEnabled(preferences, 'taskAssigned', 'telegram')).toBe(true);
@@ -45,7 +46,7 @@ describe('userNotificationPreferences', () => {
     const enabled = toggleUserNotificationChannelPreference(preferences, 'taskAssigned', 'sms', true);
     const disabled = toggleUserNotificationChannelPreference(enabled, 'taskAssigned', 'telegram', false);
 
-    expect(enabled.disabledChannels).toEqual({ taskAssigned: ['email', 'toast', 'webPush'] });
-    expect(disabled.disabledChannels).toEqual({ taskAssigned: ['email', 'toast', 'webPush', 'telegram'] });
+    expect(enabled.disabledChannels).toEqual({ taskAssigned: ['email', 'toast', 'forcedModal', 'webPush'] });
+    expect(disabled.disabledChannels).toEqual({ taskAssigned: ['email', 'toast', 'forcedModal', 'webPush', 'telegram'] });
   });
 });
