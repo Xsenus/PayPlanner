@@ -75,6 +75,7 @@ export interface TaskJournalItem {
   channels: TaskJournalChannel[];
   tags: string[];
   participants?: TaskJournalParticipant[];
+  activeDeadlineChangeRequests?: TaskJournalDeadlineChangeRequest[];
   createdAt: string;
   updatedAt: string;
 }

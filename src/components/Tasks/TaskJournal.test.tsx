@@ -1329,6 +1329,62 @@ describe('TaskJournal', () => {
     expect(screen.queryByText(regularTask.title)).toBeNull();
   });
 
+  it('shows pending deadline change requests in approvals mode for the reviewer', async () => {
+    authState.isAdmin = false;
+    authState.user = { id: 8, fullName: 'Постановщик', email: 'author@example.com' };
+
+    const deadlineRequestTask = createTask({
+      id: 204,
+      title: 'Перенести срок подготовки документов',
+      status: 'new',
+      authorUserId: 8,
+      authorName: 'Постановщик',
+      assigneeUserId: 7,
+      assigneeName: 'Исполнитель',
+      activeDeadlineChangeRequests: [
+        {
+          id: 901,
+          taskJournalItemId: 204,
+          requestedByUserId: 7,
+          requestedByName: 'Исполнитель',
+          reviewerUserId: 8,
+          reviewerName: 'Постановщик',
+          currentDueAt: todayAt(18),
+          requestedDueAt: todayAt(20),
+          reason: 'Нужно дождаться документы от клиента',
+          status: 'pending',
+          decisionDueAt: null,
+          decisionComment: null,
+          decidedByUserId: null,
+          decidedByName: null,
+          decidedAt: null,
+          createdCommentId: 501,
+          decisionCommentId: null,
+          createdAt: todayAt(12),
+          updatedAt: todayAt(12),
+        },
+      ],
+    });
+    const regularTask = createTask({
+      id: 205,
+      title: 'Обычная задача без согласования',
+      status: 'new',
+      authorUserId: 8,
+      assigneeUserId: 7,
+    });
+
+    await renderJournal([deadlineRequestTask, regularTask], {
+      mode: 'approvals',
+      waitForTitle: deadlineRequestTask.title,
+    });
+
+    expect(apiMock.getTaskJournalItems).toHaveBeenCalledWith(expect.objectContaining({ includeDeadlineChangeRequests: true }));
+    expect(screen.getByText(deadlineRequestTask.title)).toBeTruthy();
+    expect(screen.getByTestId('task-deadline-change-request-badge-204')).toBeTruthy();
+    expect(screen.getByText('Запрос переноса срока')).toBeTruthy();
+    expect(screen.queryByText(regularTask.title)).toBeNull();
+  });
+
   it('shows approval action buttons only for the current approver in queue', async () => {
     await renderJournal([
       createTask({

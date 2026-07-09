@@ -121,6 +121,7 @@ public class TasksController : ControllerBase
         [FromQuery] string? priority = null,
         [FromQuery] bool? underControl = null,
         [FromQuery] bool calendarView = false,
+        [FromQuery] bool includeDeadlineChangeRequests = false,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
         [FromQuery] string? sortBy = null,
@@ -160,10 +161,17 @@ public class TasksController : ControllerBase
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(ct);
+        var activeDeadlineChangeRequests = includeDeadlineChangeRequests
+            ? await LoadActiveDeadlineChangeRequestsAsync(items.Select(item => item.Id).ToList(), ct)
+            : new Dictionary<int, IReadOnlyList<TaskJournalDeadlineChangeRequest>>();
 
         return Ok(new PagedResponse<TaskJournalItemDto>
         {
-            Items = items.Select(item => Map(item)).ToList(),
+            Items = items
+                .Select(item => Map(
+                    item,
+                    activeDeadlineChangeRequests: activeDeadlineChangeRequests.GetValueOrDefault(item.Id)))
+                .ToList(),
             Total = total,
             Page = page,
             PageSize = pageSize,
@@ -3652,7 +3660,33 @@ public class TasksController : ControllerBase
         return null;
     }
 
-    private static TaskJournalItemDto Map(TaskJournalItem entity, TaskClientBinding? binding = null)
+    private async Task<IReadOnlyDictionary<int, IReadOnlyList<TaskJournalDeadlineChangeRequest>>> LoadActiveDeadlineChangeRequestsAsync(
+        IReadOnlyCollection<int> taskIds,
+        CancellationToken ct)
+    {
+        if (taskIds.Count == 0)
+        {
+            return new Dictionary<int, IReadOnlyList<TaskJournalDeadlineChangeRequest>>();
+        }
+
+        var requests = await _db.TaskJournalDeadlineChangeRequests
+            .AsNoTracking()
+            .Where(item => taskIds.Contains(item.TaskJournalItemId) && item.Status == "pending")
+            .OrderByDescending(item => item.CreatedAt)
+            .ThenByDescending(item => item.Id)
+            .ToListAsync(ct);
+
+        return requests
+            .GroupBy(item => item.TaskJournalItemId)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyList<TaskJournalDeadlineChangeRequest>)group.ToList());
+    }
+
+    private static TaskJournalItemDto Map(
+        TaskJournalItem entity,
+        TaskClientBinding? binding = null,
+        IReadOnlyList<TaskJournalDeadlineChangeRequest>? activeDeadlineChangeRequests = null)
         => new()
         {
             Id = entity.Id,
@@ -3707,6 +3741,13 @@ public class TasksController : ControllerBase
                     Resolution = participant.Resolution ?? string.Empty,
                     RespondedAt = participant.RespondedAt.HasValue ? ToIso(participant.RespondedAt.Value) : null,
                 })
+                .ToList(),
+            ActiveDeadlineChangeRequests = (activeDeadlineChangeRequests ?? entity.DeadlineChangeRequests
+                    .Where(request => string.Equals(request.Status, "pending", StringComparison.OrdinalIgnoreCase))
+                    .OrderByDescending(request => request.CreatedAt)
+                    .ThenByDescending(request => request.Id)
+                    .ToList())
+                .Select(MapDeadlineChangeRequest)
                 .ToList(),
             CreatedAt = ToIso(entity.CreatedAt),
             UpdatedAt = entity.UpdatedAt.HasValue ? ToIso(entity.UpdatedAt.Value) : null,

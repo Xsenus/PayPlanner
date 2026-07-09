@@ -732,6 +732,7 @@ async function loadAllTaskJournalItems(
   calendarView = false,
   sortBy: TaskJournalSortKey = 'dueAt',
   sortDir: 'asc' | 'desc' = 'asc',
+  includeDeadlineChangeRequests = false,
 ) {
   const pageSize = 200;
   let page = 1;
@@ -746,6 +747,7 @@ async function loadAllTaskJournalItems(
       clientId: contextFilter?.clientId ?? undefined,
       legalEntityId: contextFilter?.legalEntityId ?? undefined,
       calendarView,
+      includeDeadlineChangeRequests,
       sortBy,
       sortDir,
     });
@@ -1082,7 +1084,29 @@ function getApprovalSummary(task: TaskJournalItem) {
   return `Согласует: ${currentName || allNames}`;
 }
 
+function getPendingDeadlineChangeRequests(task: TaskJournalItem) {
+  return (task.activeDeadlineChangeRequests ?? [])
+    .filter((request) => request.status === 'pending');
+}
+
+function hasPendingDeadlineChangeRequestForApprovals(task: TaskJournalItem, userId: number | null, isAdminUser: boolean) {
+  const requests = getPendingDeadlineChangeRequests(task);
+  if (requests.length === 0) {
+    return false;
+  }
+
+  if (isAdminUser) {
+    return true;
+  }
+
+  return Boolean(userId && requests.some((request) => request.reviewerUserId === userId));
+}
+
 function isTaskInApprovalsScope(task: TaskJournalItem, userId: number | null, isAdminUser: boolean) {
+  if (hasPendingDeadlineChangeRequestForApprovals(task, userId, isAdminUser)) {
+    return true;
+  }
+
   if (task.status !== 'onApproval' && task.status !== 'overdueApproval') {
     return false;
   }
@@ -2115,7 +2139,7 @@ export function TaskJournal({
       const settingsPromise = apiService.getTaskJournalSettings();
       const automationPromise = settingsPromise.then((settingsResponse) => loadAutomationCandidates(settingsResponse, searchRef.current));
       const [taskItems, assigneeResponse, settingsResponse, notificationDefaultsResponse, timeZoneResponse, calendarSyncSettingsResponse, automationResponse] = await Promise.all([
-        loadAllTaskJournalItems(contextFilter, underControlOnly, shouldUseCalendarVisibility, sortBy, sortDir),
+        loadAllTaskJournalItems(contextFilter, underControlOnly, shouldUseCalendarVisibility, sortBy, sortDir, isApprovalsMode),
         apiService.getTaskJournalAssignees({ calendarView: shouldUseCalendarVisibility }),
         settingsPromise,
         apiService.getUserSetting(TASK_NOTIFICATION_DEFAULTS_SETTING_KEY).catch(() => null),
@@ -2135,7 +2159,7 @@ export function TaskJournal({
     } finally {
       setLoading(false);
     }
-  }, [contextFilter, loadAutomationCandidates, shouldUseCalendarVisibility, sortBy, sortDir, toast, underControlOnly]);
+  }, [contextFilter, isApprovalsMode, loadAutomationCandidates, shouldUseCalendarVisibility, sortBy, sortDir, toast, underControlOnly]);
 
   useEffect(() => {
     void refreshTasks();
@@ -4400,6 +4424,8 @@ function TaskTable({
               const isHighlighted = highlightedTaskId === task.id;
               const taskAssignees = getTaskParticipants(task, 'assignee');
               const approvalSummary = getApprovalSummary(task);
+              const pendingDeadlineRequests = getPendingDeadlineChangeRequests(task);
+              const pendingDeadlineRequest = pendingDeadlineRequests[0] ?? null;
               const taskObservers = getTaskParticipants(task, 'observer');
               const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
               const counterpartyName = getTaskClientName(task);
@@ -4497,6 +4523,19 @@ function TaskTable({
                     <span className={`mt-3 inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${priorityClass(task.priority)}`}>
                       {getPriorityLabel(task.priority)}
                     </span>
+                    {pendingDeadlineRequest ? (
+                      <div
+                        className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800"
+                        data-testid={`task-deadline-change-request-badge-${task.id}`}
+                        title={pendingDeadlineRequest.reason || undefined}
+                      >
+                        <TimerReset className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate">
+                          Запрос переноса срока
+                          {pendingDeadlineRequests.length > 1 ? ` (${pendingDeadlineRequests.length})` : ''}
+                        </span>
+                      </div>
+                    ) : null}
                   </td>
                   <td className="px-2 py-4 text-sm text-slate-600 sm:px-3 xl:px-4">
                     <div className="font-semibold text-slate-700">

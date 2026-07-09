@@ -3838,6 +3838,7 @@ export class ApiService {
     from?: string;
     to?: string;
     calendarView?: boolean;
+    includeDeadlineChangeRequests?: boolean;
     page?: number;
     pageSize?: number;
     sortBy?: TaskJournalSortKey;
@@ -3856,6 +3857,7 @@ export class ApiService {
       from: params?.from,
       to: params?.to,
       calendarView: params?.calendarView,
+      includeDeadlineChangeRequests: params?.includeDeadlineChangeRequests,
       page: params?.page ?? 1,
       pageSize: params?.pageSize ?? 100,
       sortBy: params?.sortBy,

@@ -39,6 +39,7 @@ public class TaskJournalItemDto
     public IReadOnlyList<string> Channels { get; set; } = Array.Empty<string>();
     public IReadOnlyList<string> Tags { get; set; } = Array.Empty<string>();
     public IReadOnlyList<TaskJournalParticipantDto> Participants { get; set; } = Array.Empty<TaskJournalParticipantDto>();
+    public IReadOnlyList<TaskJournalDeadlineChangeRequestDto> ActiveDeadlineChangeRequests { get; set; } = Array.Empty<TaskJournalDeadlineChangeRequestDto>();
     public string CreatedAt { get; set; } = string.Empty;
     public string? UpdatedAt { get; set; }
 }

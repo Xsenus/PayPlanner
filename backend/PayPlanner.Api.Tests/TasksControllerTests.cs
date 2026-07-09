@@ -1151,6 +1151,65 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task GetTasks_IncludesActiveDeadlineChangeRequestsWhenRequested()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "deadline-approvals-author@example.com", "Автор");
+        var assignee = await CreateTaskUserAsync(db, "deadline-approvals-assignee@example.com", "Исполнитель", canEdit: false);
+        var client = await CreateClientAsync(db, "Клиент для согласования срока");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id);
+        var createdAt = DateTime.SpecifyKind(DateTime.UtcNow.AddMinutes(-10), DateTimeKind.Utc);
+        db.TaskJournalDeadlineChangeRequests.Add(new TaskJournalDeadlineChangeRequest
+        {
+            TaskJournalItemId = task.Id,
+            RequestedByUserId = assignee.Id,
+            RequestedByName = assignee.FullName,
+            ReviewerUserId = author.Id,
+            ReviewerName = author.FullName,
+            CurrentDueAt = task.DueAt,
+            RequestedDueAt = task.DueAt.AddDays(1),
+            Reason = "Нужно дождаться документы от клиента.",
+            Status = "pending",
+            CreatedAt = createdAt,
+        });
+        db.TaskJournalDeadlineChangeRequests.Add(new TaskJournalDeadlineChangeRequest
+        {
+            TaskJournalItemId = task.Id,
+            RequestedByUserId = assignee.Id,
+            RequestedByName = assignee.FullName,
+            ReviewerUserId = author.Id,
+            ReviewerName = author.FullName,
+            CurrentDueAt = task.DueAt,
+            RequestedDueAt = task.DueAt.AddDays(2),
+            Reason = "Старый обработанный запрос.",
+            Status = "rejected",
+            CreatedAt = createdAt.AddMinutes(-1),
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.GetTasks(
+            search: null,
+            status: null,
+            type: null,
+            assigneeUserId: null,
+            from: null,
+            to: null,
+            includeDeadlineChangeRequests: true,
+            page: 1,
+            pageSize: 50,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var page = Assert.IsType<PagedResponse<TaskJournalItemDto>>(ok.Value);
+        var dto = Assert.Single(page.Items, item => item.Id == task.Id);
+        var request = Assert.Single(dto.ActiveDeadlineChangeRequests);
+        Assert.Equal("pending", request.Status);
+        Assert.Equal("Нужно дождаться документы от клиента.", request.Reason);
+        Assert.Equal(author.FullName, request.ReviewerName);
+    }
+
+    [Fact]
     public async Task ApproveDeadlineChangeRequest_UpdatesDueAtAndClosesRequest()
     {
         await using var db = await CreateContextAsync();
