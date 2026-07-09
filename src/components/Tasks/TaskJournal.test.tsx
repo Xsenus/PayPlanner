@@ -2624,6 +2624,50 @@ describe('TaskJournal', () => {
     }));
   });
 
+  it('asks for a result before sending a task to approval in the modern task card', async () => {
+    await renderJournal([
+      createTask({
+        participants: [
+          { userId: 7, role: 'assignee', displayName: 'Администратор', approvalStatus: 'pending' },
+          { userId: 8, role: 'approver', displayName: 'Согласующий', approvalStatus: 'pending' },
+        ],
+      }),
+    ], {
+      settings: { taskCardWindowMode: 'modern' },
+      assignees: [
+        { id: 7, name: 'Администратор', email: 'admin@example.com' },
+        { id: 8, name: 'Согласующий', email: 'approver@example.com' },
+      ],
+    });
+
+    await openFirstTaskForEdit();
+    const modernCard = await screen.findByTestId('task-modern-card-window');
+
+    fireEvent.click(within(modernCard).getByRole('button', { name: 'На согласование' }));
+
+    expect(await screen.findByRole('heading', { name: 'Добавить результат по задаче' })).toBeTruthy();
+    expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить на согласование' }));
+    expect(screen.getByText('Добавьте результат по задаче перед отправкой на согласование.')).toBeTruthy();
+    expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByPlaceholderText('Опишите подробно, что было сделано и какой результат был достигнут.'), {
+      target: { value: 'В новом окне результат заполнен перед согласованием.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить на согласование' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
+    expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({
+      status: 'onApproval',
+      result: 'В новом окне результат заполнен перед согласованием.',
+      approvalDueAt: expect.any(String),
+      participants: expect.arrayContaining([
+        expect.objectContaining({ role: 'approver', userId: 8, approvalStatus: 'pending' }),
+      ]),
+    }));
+  });
+
   it('requires a result when completing an approved task from the editor', async () => {
     await renderJournal([
       createTask({

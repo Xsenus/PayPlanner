@@ -6698,8 +6698,7 @@ function TaskModal({
   });
 
   const isApprovalResultPromptRequired = (nextForm: TaskForm) =>
-    !isModernChrome
-    && requireCompletionResult
+    requireCompletionResult
     && (nextForm.status === 'onApproval' || nextForm.status === 'overdueApproval')
     && !nextForm.result.trim();
 
