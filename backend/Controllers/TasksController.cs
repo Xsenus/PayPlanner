@@ -1180,8 +1180,7 @@ public class TasksController : ControllerBase
                 reason,
             }, JsonOptions));
 
-        _db.TaskJournalComments.Add(comment);
-        _db.TaskJournalDeadlineChangeRequests.Add(new TaskJournalDeadlineChangeRequest
+        var deadlineRequest = new TaskJournalDeadlineChangeRequest
         {
             TaskJournalItemId = entity.Id,
             RequestedByUserId = access.UserId,
@@ -1194,9 +1193,13 @@ public class TasksController : ControllerBase
             Status = "pending",
             CreatedComment = comment,
             CreatedAt = DateTime.UtcNow,
-        });
+        };
+
+        _db.TaskJournalComments.Add(comment);
+        _db.TaskJournalDeadlineChangeRequests.Add(deadlineRequest);
         entity.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
+        await _notificationService.NotifyTaskDeadlineChangeRequestedAsync(entity, deadlineRequest, ct);
 
         return Created($"/api/tasks/{entity.Id}/comments/{comment.Id}", MapComment(comment));
     }
@@ -1321,8 +1324,7 @@ public class TasksController : ControllerBase
         deadlineRequest.UpdatedAt = decidedAt;
 
         await _db.SaveChangesAsync(ct);
-        var changeLabels = new[] { $"срок: {FormatHistoryDateTime(previousDueAt)} -> {FormatHistoryDateTime(approvedDueAt)}" };
-        await _notificationService.NotifyTaskChangedAsync(entity, changeLabels, access.DisplayName, access.UserId, decisionComment, ct);
+        await _notificationService.NotifyTaskDeadlineChangeApprovedAsync(entity, deadlineRequest, ct);
         await NotifyTaskScheduleConflictIfNeededAsync(entity, access, ct);
         await SafeSyncExternalCalendarTaskAsync(entity.Id, ct);
 
@@ -1413,13 +1415,7 @@ public class TasksController : ControllerBase
         deadlineRequest.UpdatedAt = decidedAt;
 
         await _db.SaveChangesAsync(ct);
-        await _notificationService.NotifyTaskChangedAsync(
-            entity,
-            ["запрос переноса срока отклонен"],
-            access.DisplayName,
-            access.UserId,
-            decisionComment,
-            ct);
+        await _notificationService.NotifyTaskDeadlineChangeRejectedAsync(entity, deadlineRequest, ct);
 
         return Ok(Map(entity));
     }

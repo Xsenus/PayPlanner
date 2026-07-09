@@ -484,6 +484,9 @@ public class NotificationServiceTests
             [UserNotificationTypes.TaskApprovalRequested] = (NotificationPriorities.High, true, true, true),
             [UserNotificationTypes.TaskApproved] = (NotificationPriorities.Normal, true, true, true),
             [UserNotificationTypes.TaskRevisionRequested] = (NotificationPriorities.High, true, true, true),
+            [UserNotificationTypes.TaskDeadlineChangeRequested] = (NotificationPriorities.High, true, true, true),
+            [UserNotificationTypes.TaskDeadlineChangeApproved] = (NotificationPriorities.Normal, false, true, true),
+            [UserNotificationTypes.TaskDeadlineChangeRejected] = (NotificationPriorities.High, false, true, true),
             [UserNotificationTypes.TaskApprovalOverdue] = (NotificationPriorities.Critical, true, true, true),
         };
         var actual = UserNotificationTypes.All
@@ -2264,6 +2267,128 @@ public class NotificationServiceTests
         Assert.Equal(
             notifications.Select(item => item.Id).OrderBy(id => id),
             realtime.Notifications.Select(item => item.Id).OrderBy(id => id));
+    }
+
+    [Fact]
+    public async Task NotifyTaskDeadlineChangeRequestedAsync_NotifiesReviewerAndObservers()
+    {
+        await using var db = await CreateContextAsync();
+        var (task, author, assignee, observer) = await CreateTaskWithObserverAsync(db, "deadline-requested");
+        var request = new TaskJournalDeadlineChangeRequest
+        {
+            TaskJournalItemId = task.Id,
+            RequestedByUserId = assignee.Id,
+            RequestedByName = assignee.FullName,
+            ReviewerUserId = author.Id,
+            ReviewerName = author.FullName,
+            CurrentDueAt = task.DueAt,
+            RequestedDueAt = task.DueAt.AddDays(2),
+            Reason = "Жду документы от клиента.",
+            Status = "pending",
+            CreatedAt = DateTime.UtcNow
+        };
+        db.TaskJournalDeadlineChangeRequests.Add(request);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+
+        var deliveries = await service.NotifyTaskDeadlineChangeRequestedAsync(task, request);
+
+        Assert.Empty(deliveries);
+        var notifications = await db.UserNotifications.OrderBy(item => item.RecipientUserId).ToListAsync();
+        Assert.Equal([author.Id, observer.Id], notifications.Select(item => item.RecipientUserId).ToArray());
+        Assert.DoesNotContain(notifications, item => item.RecipientUserId == assignee.Id);
+        Assert.All(notifications, notification =>
+        {
+            Assert.Equal(UserNotificationTypes.TaskDeadlineChangeRequested, notification.Type);
+            Assert.True(UserNotificationTypes.RequiresAction(notification.Type));
+            Assert.Equal(task.Id, notification.TaskJournalItemId);
+            Assert.Contains("Запрос переноса срока", notification.Title, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Жду документы от клиента", notification.BodyPreview, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
+    [Fact]
+    public async Task NotifyTaskDeadlineChangeApprovedAsync_NotifiesRequesterAndObservers()
+    {
+        await using var db = await CreateContextAsync();
+        var (task, author, assignee, observer) = await CreateTaskWithObserverAsync(db, "deadline-approved");
+        var request = new TaskJournalDeadlineChangeRequest
+        {
+            TaskJournalItemId = task.Id,
+            RequestedByUserId = assignee.Id,
+            RequestedByName = assignee.FullName,
+            ReviewerUserId = author.Id,
+            ReviewerName = author.FullName,
+            CurrentDueAt = task.DueAt,
+            RequestedDueAt = task.DueAt.AddDays(2),
+            Reason = "Нужен новый срок.",
+            Status = "approved",
+            DecisionDueAt = task.DueAt.AddDays(3),
+            DecisionComment = "Согласовано до новой даты.",
+            DecidedByUserId = author.Id,
+            DecidedByName = author.FullName,
+            DecidedAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow
+        };
+        db.TaskJournalDeadlineChangeRequests.Add(request);
+        task.DueAt = request.DecisionDueAt.Value;
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+
+        var deliveries = await service.NotifyTaskDeadlineChangeApprovedAsync(task, request);
+
+        Assert.Empty(deliveries);
+        var notifications = await db.UserNotifications.OrderBy(item => item.RecipientUserId).ToListAsync();
+        Assert.Equal([assignee.Id, observer.Id], notifications.Select(item => item.RecipientUserId).ToArray());
+        Assert.DoesNotContain(notifications, item => item.RecipientUserId == author.Id);
+        Assert.All(notifications, notification =>
+        {
+            Assert.Equal(UserNotificationTypes.TaskDeadlineChangeApproved, notification.Type);
+            Assert.Equal("emerald", notification.Tone);
+            Assert.Contains("Перенос срока согласован", notification.Title, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Согласовано до новой даты", notification.BodyPreview, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
+    [Fact]
+    public async Task NotifyTaskDeadlineChangeRejectedAsync_NotifiesRequesterAndObservers()
+    {
+        await using var db = await CreateContextAsync();
+        var (task, author, assignee, observer) = await CreateTaskWithObserverAsync(db, "deadline-rejected");
+        var request = new TaskJournalDeadlineChangeRequest
+        {
+            TaskJournalItemId = task.Id,
+            RequestedByUserId = assignee.Id,
+            RequestedByName = assignee.FullName,
+            ReviewerUserId = author.Id,
+            ReviewerName = author.FullName,
+            CurrentDueAt = task.DueAt,
+            RequestedDueAt = task.DueAt.AddDays(2),
+            Reason = "Нужен новый срок.",
+            Status = "rejected",
+            DecisionComment = "Срок менять нельзя.",
+            DecidedByUserId = author.Id,
+            DecidedByName = author.FullName,
+            DecidedAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow
+        };
+        db.TaskJournalDeadlineChangeRequests.Add(request);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+
+        var deliveries = await service.NotifyTaskDeadlineChangeRejectedAsync(task, request);
+
+        Assert.Empty(deliveries);
+        var notifications = await db.UserNotifications.OrderBy(item => item.RecipientUserId).ToListAsync();
+        Assert.Equal([assignee.Id, observer.Id], notifications.Select(item => item.RecipientUserId).ToArray());
+        Assert.DoesNotContain(notifications, item => item.RecipientUserId == author.Id);
+        Assert.All(notifications, notification =>
+        {
+            Assert.Equal(UserNotificationTypes.TaskDeadlineChangeRejected, notification.Type);
+            Assert.Equal("orange", notification.Tone);
+            Assert.Contains("Перенос срока отклонен", notification.Title, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Срок менять нельзя", notification.BodyPreview, StringComparison.OrdinalIgnoreCase);
+        });
     }
 
     [Fact]
@@ -4951,6 +5076,68 @@ public class NotificationServiceTests
             passwordHasher,
             authService,
             NullLogger<ExternalAuthService>.Instance);
+    }
+
+    private static async Task<(TaskJournalItem Task, User Author, User Assignee, User Observer)> CreateTaskWithObserverAsync(
+        PaymentContext db,
+        string prefix)
+    {
+        var author = await CreateUserAsync(db, $"{prefix}-author@example.com");
+        var assignee = new User
+        {
+            Email = $"{prefix}-assignee@example.com",
+            FullName = $"{prefix} assignee",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        var observer = new User
+        {
+            Email = $"{prefix}-observer@example.com",
+            FullName = $"{prefix} observer",
+            PasswordHash = "hash",
+            RoleId = author.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        db.Users.AddRange(assignee, observer);
+        await db.SaveChangesAsync();
+
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Дело клиента",
+            Title = $"Задача {prefix}",
+            AuthorUserId = author.Id,
+            AuthorName = author.FullName,
+            AssigneeUserId = assignee.Id,
+            AssigneeName = assignee.FullName,
+            DueAt = new DateTime(2026, 7, 10, 9, 0, 0, DateTimeKind.Utc),
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "inProgress",
+            Participants =
+            [
+                new TaskJournalParticipant
+                {
+                    UserId = observer.Id,
+                    Role = "observer",
+                    DisplayName = observer.FullName,
+                    Email = observer.Email,
+                    SortOrder = 0,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                }
+            ]
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        return (task, author, assignee, observer);
     }
 
     private static async Task<PaymentContext> CreateContextAsync()

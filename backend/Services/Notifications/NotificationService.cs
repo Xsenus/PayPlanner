@@ -2556,6 +2556,191 @@ public sealed class NotificationService : INotificationService
         return deliveries;
     }
 
+    public async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskDeadlineChangeRequestedAsync(
+        TaskJournalItem task,
+        TaskJournalDeadlineChangeRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var actorUserId = request.RequestedByUserId ?? 0;
+        var recipients = ResolveDeadlineChangeRequestRecipientUserIds(task, request, actorUserId, includeReviewer: true, includeRequester: false, includeObservers: true);
+        if (recipients.Count == 0)
+        {
+            return Array.Empty<NotificationDelivery>();
+        }
+
+        var channels = ResolveTaskMessageChannels(task);
+        var eventKey = $"task:{task.Id}:deadline-change-request:{request.Id}:requested";
+        var deliveries = new List<NotificationDelivery>();
+        foreach (var userId in recipients)
+        {
+            var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(userId, cancellationToken);
+            var subject = $"Запрос переноса срока: {task.Title}";
+            var body = BuildTaskDeadlineChangeRequestBody(task, request, recipientTimeZone);
+            var message = await RenderTemplateAsync(
+                NotificationTemplateKeys.TaskChanged,
+                subject,
+                body,
+                NotificationTemplateCatalog.MergeValues(
+                    BuildTaskTemplateValues(task, recipientTimeZone, request.RequestedByName),
+                    new Dictionary<string, string?>
+                    {
+                        ["task.changeSubject"] = subject,
+                        ["task.changes"] = $"- Запрошен перенос срока на {FormatTaskDueAt(request.RequestedDueAt, recipientTimeZone)}",
+                        ["task.commentBlock"] = $"Причина: {request.Reason.Trim()}",
+                    }),
+                purpose: NotificationPurposes.TaskReminder,
+                cancellationToken: cancellationToken);
+
+            if (HasTaskChannel(task, NotificationChannels.InApp))
+            {
+                await CreateUserNotificationAsync(
+                    userId,
+                    UserNotificationTypes.TaskDeadlineChangeRequested,
+                    eventKey,
+                    message.Subject,
+                    message.Body,
+                    "violet",
+                    task,
+                    new
+                    {
+                        deadlineChangeRequestId = request.Id,
+                        request.RequestedByUserId,
+                        request.RequestedByName,
+                        request.ReviewerUserId,
+                        request.ReviewerName,
+                        requestedDueAt = request.RequestedDueAt,
+                        reason = request.Reason
+                    },
+                    cancellationToken);
+            }
+
+            var enabledChannels = await ResolveUserNotificationChannelsAsync(
+                userId,
+                UserNotificationTypes.TaskDeadlineChangeRequested,
+                channels,
+                cancellationToken);
+            if (enabledChannels.Count > 0)
+            {
+                deliveries.AddRange(await SendToUserAsync(userId, message, enabledChannels, eventKey, cancellationToken));
+            }
+        }
+
+        return deliveries;
+    }
+
+    public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskDeadlineChangeApprovedAsync(
+        TaskJournalItem task,
+        TaskJournalDeadlineChangeRequest request,
+        CancellationToken cancellationToken = default)
+        => NotifyTaskDeadlineChangeDecisionAsync(
+            task,
+            request,
+            UserNotificationTypes.TaskDeadlineChangeApproved,
+            $"Перенос срока согласован: {task.Title}",
+            "согласовал(а) перенос срока",
+            "emerald",
+            cancellationToken);
+
+    public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskDeadlineChangeRejectedAsync(
+        TaskJournalItem task,
+        TaskJournalDeadlineChangeRequest request,
+        CancellationToken cancellationToken = default)
+        => NotifyTaskDeadlineChangeDecisionAsync(
+            task,
+            request,
+            UserNotificationTypes.TaskDeadlineChangeRejected,
+            $"Перенос срока отклонен: {task.Title}",
+            "отказал(а) в переносе срока",
+            "orange",
+            cancellationToken);
+
+    private async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskDeadlineChangeDecisionAsync(
+        TaskJournalItem task,
+        TaskJournalDeadlineChangeRequest request,
+        string type,
+        string subject,
+        string actionText,
+        string tone,
+        CancellationToken cancellationToken)
+    {
+        var actorUserId = request.DecidedByUserId ?? 0;
+        var recipients = ResolveDeadlineChangeRequestRecipientUserIds(task, request, actorUserId, includeReviewer: true, includeRequester: true, includeObservers: true);
+        if (recipients.Count == 0)
+        {
+            return Array.Empty<NotificationDelivery>();
+        }
+
+        var channels = ResolveTaskMessageChannels(task);
+        var statusSegment = string.Equals(type, UserNotificationTypes.TaskDeadlineChangeApproved, StringComparison.OrdinalIgnoreCase)
+            ? "approved"
+            : "rejected";
+        var eventKey = $"task:{task.Id}:deadline-change-request:{request.Id}:{statusSegment}";
+        var actorName = string.IsNullOrWhiteSpace(request.DecidedByName) ? request.ReviewerName : request.DecidedByName.Trim();
+        var deliveries = new List<NotificationDelivery>();
+
+        foreach (var userId in recipients)
+        {
+            var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(userId, cancellationToken);
+            var body = BuildTaskDeadlineChangeDecisionBody(task, request, actionText, actorName, recipientTimeZone);
+            var decisionDueAtText = request.DecisionDueAt.HasValue
+                ? FormatTaskDueAt(request.DecisionDueAt.Value, recipientTimeZone)
+                : FormatTaskDueAt(task.DueAt, recipientTimeZone);
+            var message = await RenderTemplateAsync(
+                NotificationTemplateKeys.TaskChanged,
+                subject,
+                body,
+                NotificationTemplateCatalog.MergeValues(
+                    BuildTaskTemplateValues(task, recipientTimeZone, actorName),
+                    new Dictionary<string, string?>
+                    {
+                        ["task.changeSubject"] = subject,
+                        ["task.changes"] = string.Equals(statusSegment, "approved", StringComparison.OrdinalIgnoreCase)
+                            ? $"- Перенос срока согласован на {decisionDueAtText}"
+                            : "- Запрос переноса срока отклонен",
+                        ["task.commentBlock"] = string.IsNullOrWhiteSpace(request.DecisionComment)
+                            ? string.Empty
+                            : $"Комментарий: {request.DecisionComment.Trim()}",
+                    }),
+                purpose: NotificationPurposes.TaskReminder,
+                cancellationToken: cancellationToken);
+
+            if (HasTaskChannel(task, NotificationChannels.InApp))
+            {
+                await CreateUserNotificationAsync(
+                    userId,
+                    type,
+                    eventKey,
+                    message.Subject,
+                    message.Body,
+                    tone,
+                    task,
+                    new
+                    {
+                        deadlineChangeRequestId = request.Id,
+                        request.RequestedByUserId,
+                        request.RequestedByName,
+                        request.ReviewerUserId,
+                        request.ReviewerName,
+                        request.DecidedByUserId,
+                        request.DecidedByName,
+                        request.RequestedDueAt,
+                        request.DecisionDueAt,
+                        request.DecisionComment,
+                        request.Status
+                    },
+                    cancellationToken);
+            }
+
+            var enabledChannels = await ResolveUserNotificationChannelsAsync(userId, type, channels, cancellationToken);
+            if (enabledChannels.Count > 0)
+            {
+                deliveries.AddRange(await SendToUserAsync(userId, message, enabledChannels, eventKey, cancellationToken));
+            }
+        }
+
+        return deliveries;
+    }
+
     public async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskApprovalOverdueAsync(
         TaskJournalItem task,
         DateTime nowUtc,
@@ -4500,6 +4685,70 @@ public sealed class NotificationService : INotificationService
         return string.Join('\n', lines);
     }
 
+    private static string BuildTaskDeadlineChangeRequestBody(
+        TaskJournalItem task,
+        TaskJournalDeadlineChangeRequest request,
+        TimeZoneInfo timeZone)
+    {
+        var currentDueAt = FormatTaskDueAt(request.CurrentDueAt, timeZone);
+        var requestedDueAt = FormatTaskDueAt(request.RequestedDueAt, timeZone);
+        var lines = new List<string>
+        {
+            $"{request.RequestedByName} запросил(а) перенос срока по задаче.",
+            string.Empty,
+            $"Клиент/дело: {task.ObjectName}",
+            $"Задача: {task.Title}",
+            $"Текущий срок: {currentDueAt}",
+            $"Запрошенный срок: {requestedDueAt}",
+            $"Постановщик: {FormatNotificationName(request.ReviewerName)}",
+            string.Empty,
+            $"Причина: {request.Reason.Trim()}",
+            string.Empty,
+            "Откройте раздел \"Согласования\", чтобы согласовать перенос или отказать."
+        };
+
+        return string.Join('\n', lines);
+    }
+
+    private static string BuildTaskDeadlineChangeDecisionBody(
+        TaskJournalItem task,
+        TaskJournalDeadlineChangeRequest request,
+        string actionText,
+        string actorName,
+        TimeZoneInfo timeZone)
+    {
+        var requestedDueAt = FormatTaskDueAt(request.RequestedDueAt, timeZone);
+        var decisionDueAt = request.DecisionDueAt.HasValue
+            ? FormatTaskDueAt(request.DecisionDueAt.Value, timeZone)
+            : FormatTaskDueAt(task.DueAt, timeZone);
+        var lines = new List<string>
+        {
+            $"{actorName} {actionText}.",
+            string.Empty,
+            $"Клиент/дело: {task.ObjectName}",
+            $"Задача: {task.Title}",
+            $"Запрашивал(а): {FormatNotificationName(request.RequestedByName)}",
+            $"Запрошенный срок: {requestedDueAt}",
+        };
+
+        if (string.Equals(request.Status, "approved", StringComparison.OrdinalIgnoreCase))
+        {
+            lines.Add($"Новый срок: {decisionDueAt}");
+        }
+        else
+        {
+            lines.Add($"Текущий срок остался: {decisionDueAt}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.DecisionComment))
+        {
+            lines.Add(string.Empty);
+            lines.Add($"Комментарий: {request.DecisionComment.Trim()}");
+        }
+
+        return string.Join('\n', lines);
+    }
+
     private static string BuildTaskApprovalOverdueBody(
         TaskJournalItem task,
         TaskJournalParticipant approver,
@@ -5733,6 +5982,54 @@ public sealed class NotificationService : INotificationService
             .Where(participant => !string.Equals(participant.Role, "approver", StringComparison.OrdinalIgnoreCase))
             .Where(participant => participant.UserId.HasValue)
             .Select(participant => participant.UserId!.Value));
+
+        return userIds
+            .Where(userId => userId > 0 && !UserNotificationAntiSpamPolicy.ShouldSuppressSelfNotification(userId, actorUserId))
+            .Distinct()
+            .ToList();
+    }
+
+    private static IReadOnlyList<int> ResolveDeadlineChangeRequestRecipientUserIds(
+        TaskJournalItem task,
+        TaskJournalDeadlineChangeRequest request,
+        int actorUserId,
+        bool includeReviewer,
+        bool includeRequester,
+        bool includeObservers)
+    {
+        var userIds = new List<int>();
+
+        if (includeReviewer)
+        {
+            if (request.ReviewerUserId.HasValue)
+            {
+                userIds.Add(request.ReviewerUserId.Value);
+            }
+            else if (task.AuthorUserId.HasValue)
+            {
+                userIds.Add(task.AuthorUserId.Value);
+            }
+        }
+
+        if (includeRequester)
+        {
+            if (request.RequestedByUserId.HasValue)
+            {
+                userIds.Add(request.RequestedByUserId.Value);
+            }
+            else if (task.AssigneeUserId.HasValue)
+            {
+                userIds.Add(task.AssigneeUserId.Value);
+            }
+        }
+
+        if (includeObservers)
+        {
+            userIds.AddRange(task.Participants
+                .Where(participant => string.Equals(participant.Role, "observer", StringComparison.OrdinalIgnoreCase))
+                .Where(participant => participant.UserId.HasValue)
+                .Select(participant => participant.UserId!.Value));
+        }
 
         return userIds
             .Where(userId => userId > 0 && !UserNotificationAntiSpamPolicy.ShouldSuppressSelfNotification(userId, actorUserId))

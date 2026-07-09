@@ -1003,7 +1003,8 @@ public class TasksControllerTests
         var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id);
         var originalDueAt = task.DueAt;
         var requestedDueAt = originalDueAt.AddDays(2);
-        var controller = CreateController(db, new RecordingNotificationService(), assignee);
+        var notifications = new RecordingNotificationService();
+        var controller = CreateController(db, notifications, assignee);
 
         var result = await controller.CreateDeadlineChangeRequest(task.Id, new CreateTaskJournalDeadlineChangeRequest
         {
@@ -1032,6 +1033,7 @@ public class TasksControllerTests
         Assert.Equal(author.Id, deadlineRequest.ReviewerUserId);
         Assert.Equal("Автор", deadlineRequest.ReviewerName);
         Assert.Equal(comment.Id, deadlineRequest.CreatedCommentId);
+        Assert.Equal([task.Id], notifications.DeadlineChangeRequestedTaskIds);
     }
 
     [Fact]
@@ -1261,9 +1263,8 @@ public class TasksControllerTests
         Assert.Equal(2, comments.Count);
         Assert.Contains("согласовал перенос срока", comments[1].Text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Согласовано до новой даты", comments[1].Text, StringComparison.OrdinalIgnoreCase);
-        Assert.Single(notifications.ChangedTasks);
-        Assert.Equal(task.Id, notifications.ChangedTasks[0].TaskId);
-        Assert.Contains("срок", notifications.ChangedTasks[0].ChangeLabels[0], StringComparison.OrdinalIgnoreCase);
+        Assert.Equal([task.Id], notifications.DeadlineChangeApprovedTaskIds);
+        Assert.Empty(notifications.ChangedTasks);
     }
 
     [Fact]
@@ -1387,10 +1388,9 @@ public class TasksControllerTests
             .ToListAsync();
         Assert.Equal(2, comments.Count);
         Assert.Contains("отказал в переносе срока", comments[1].Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal([task.Id], notifications.DeadlineChangeRejectedTaskIds);
+        Assert.Empty(notifications.ChangedTasks);
         Assert.Contains("Срок менять нельзя", comments[1].Text, StringComparison.OrdinalIgnoreCase);
-        Assert.Single(notifications.ChangedTasks);
-        Assert.Equal(task.Id, notifications.ChangedTasks[0].TaskId);
-        Assert.Contains("отклонен", notifications.ChangedTasks[0].ChangeLabels[0], StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -4944,6 +4944,9 @@ public class TasksControllerTests
         public List<int> ApprovalRequestedTaskIds { get; } = [];
         public List<(int TaskId, string Decision)> ApprovalDecisionTaskIds { get; } = [];
         public List<int> ApprovalOverdueTaskIds { get; } = [];
+        public List<int> DeadlineChangeRequestedTaskIds { get; } = [];
+        public List<int> DeadlineChangeApprovedTaskIds { get; } = [];
+        public List<int> DeadlineChangeRejectedTaskIds { get; } = [];
         public List<(int TaskId, IReadOnlyList<string> ChangeLabels, string? Comment)> ChangedTasks { get; } = [];
         public List<(int TaskId, int? PreviousAssigneeUserId, string? PreviousAssigneeName, IReadOnlyList<string> ChangeLabels, string? Comment)> ReassignedTasks { get; } = [];
         public List<int> CommentTaskIds { get; } = [];
@@ -5043,6 +5046,24 @@ public class TasksControllerTests
         public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskApprovalDecisionAsync(TaskJournalItem task, TaskJournalParticipant approver, string decision, string actorName, int actorUserId, string? resolution = null, CancellationToken cancellationToken = default)
         {
             ApprovalDecisionTaskIds.Add((task.Id, decision));
+            return Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+        }
+
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskDeadlineChangeRequestedAsync(TaskJournalItem task, TaskJournalDeadlineChangeRequest request, CancellationToken cancellationToken = default)
+        {
+            DeadlineChangeRequestedTaskIds.Add(task.Id);
+            return Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+        }
+
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskDeadlineChangeApprovedAsync(TaskJournalItem task, TaskJournalDeadlineChangeRequest request, CancellationToken cancellationToken = default)
+        {
+            DeadlineChangeApprovedTaskIds.Add(task.Id);
+            return Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+        }
+
+        public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskDeadlineChangeRejectedAsync(TaskJournalItem task, TaskJournalDeadlineChangeRequest request, CancellationToken cancellationToken = default)
+        {
+            DeadlineChangeRejectedTaskIds.Add(task.Id);
             return Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
         }
 

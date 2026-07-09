@@ -89,6 +89,9 @@ public static class UserNotificationDomains
                 or UserNotificationTypes.TaskApprovalRequested
                 or UserNotificationTypes.TaskApproved
                 or UserNotificationTypes.TaskRevisionRequested
+                or UserNotificationTypes.TaskDeadlineChangeRequested
+                or UserNotificationTypes.TaskDeadlineChangeApproved
+                or UserNotificationTypes.TaskDeadlineChangeRejected
                 or UserNotificationTypes.TaskApprovalOverdue => Task,
             UserNotificationTypes.CalendarAccessChanged => Calendar,
             UserNotificationTypes.NoteMention
@@ -193,6 +196,9 @@ public static class UserNotificationTypes
     public const string TaskApprovalRequested = "taskApprovalRequested";
     public const string TaskApproved = "taskApproved";
     public const string TaskRevisionRequested = "taskRevisionRequested";
+    public const string TaskDeadlineChangeRequested = "taskDeadlineChangeRequested";
+    public const string TaskDeadlineChangeApproved = "taskDeadlineChangeApproved";
+    public const string TaskDeadlineChangeRejected = "taskDeadlineChangeRejected";
     public const string TaskApprovalOverdue = "taskApprovalOverdue";
     public const string CalendarAccessChanged = "calendarAccessChanged";
     public const string CaseInactivityControl = "caseInactivityControl";
@@ -231,6 +237,7 @@ public static class UserNotificationTypes
         TaskCancelled,
         TaskScheduleConflict,
         TaskApprovalRequested,
+        TaskDeadlineChangeRequested,
         TaskRevisionRequested,
         TaskApprovalOverdue,
         CaseInactivityControl,
@@ -255,6 +262,9 @@ public static class UserNotificationTypes
         new(TaskApprovalRequested, "Ожидает согласования", "Задача отправлена согласующему на решение.", "violet", "high", NotificationChannels.All, true, false),
         new(TaskApproved, "Задача согласована", "Согласующий подтвердил результат задачи.", "emerald", "normal", NotificationChannels.All, false, false),
         new(TaskRevisionRequested, "Возврат на доработку", "Согласующий вернул задачу исполнителю на доработку.", "orange", "high", NotificationChannels.All, false, false),
+        new(TaskDeadlineChangeRequested, "Запрос переноса срока", "Исполнитель запросил перенос срока задачи, постановщику нужно принять решение.", "violet", "high", NotificationChannels.All, true, false),
+        new(TaskDeadlineChangeApproved, "Перенос срока согласован", "Постановщик согласовал перенос срока задачи.", "emerald", "normal", NotificationChannels.All, false, false),
+        new(TaskDeadlineChangeRejected, "Перенос срока отклонен", "Постановщик отказал в переносе срока задачи.", "orange", "high", NotificationChannels.All, false, false),
         new(TaskApprovalOverdue, "Просрочено согласование", "Срок согласования задачи истек, требуется решение согласующего или контроль исполнителя.", "rose", NotificationPriorities.Critical, NotificationChannels.All, true, false),
         new(CalendarAccessChanged, "Изменена видимость календарей", "Администратор изменил, календари каких сотрудников доступны пользователям роли.", "violet", "high", NotificationChannels.All, true, false),
         new(CaseInactivityControl, "Автоконтроль дела", "По делу долго не было активных задач, создана контрольная задача.", "amber", "high", NotificationChannels.All, true, false),
@@ -296,6 +306,7 @@ public static class UserNotificationTypes
         TaskApprovalRequested,
         TaskApproved,
         TaskRevisionRequested,
+        TaskDeadlineChangeRequested,
         TaskApprovalOverdue,
         CalendarAccessChanged,
         CaseInactivityControl,
@@ -1097,6 +1108,9 @@ public interface INotificationService
     Task<IReadOnlyList<NotificationDelivery>> NotifyTaskScheduleConflictAsync(TaskJournalItem task, IReadOnlyList<TaskJournalItem> conflicts, string actorName, int actorUserId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<NotificationDelivery>> NotifyTaskApprovalRequestedAsync(TaskJournalItem task, string actorName, int actorUserId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<NotificationDelivery>> NotifyTaskApprovalDecisionAsync(TaskJournalItem task, TaskJournalParticipant approver, string decision, string actorName, int actorUserId, string? resolution = null, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<NotificationDelivery>> NotifyTaskDeadlineChangeRequestedAsync(TaskJournalItem task, TaskJournalDeadlineChangeRequest request, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<NotificationDelivery>> NotifyTaskDeadlineChangeApprovedAsync(TaskJournalItem task, TaskJournalDeadlineChangeRequest request, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<NotificationDelivery>> NotifyTaskDeadlineChangeRejectedAsync(TaskJournalItem task, TaskJournalDeadlineChangeRequest request, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<NotificationDelivery>> NotifyTaskApprovalOverdueAsync(TaskJournalItem task, DateTime nowUtc, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<NotificationDelivery>> NotifyTaskReassignedAsync(TaskJournalItem task, int? previousAssigneeUserId, string? previousAssigneeName, IReadOnlyList<string> changeLabels, string actorName, int actorUserId, string? comment = null, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<NotificationDelivery>> NotifyTaskChangedAsync(TaskJournalItem task, IReadOnlyList<string> changeLabels, string actorName, int actorUserId, string? comment = null, CancellationToken cancellationToken = default);
