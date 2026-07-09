@@ -1290,6 +1290,101 @@ public class TasksController : ControllerBase
         return Ok(Map(entity));
     }
 
+    [HttpPost("{id:int}/deadline-change-requests/{requestId:int}/reject")]
+    public async Task<ActionResult<TaskJournalItemDto>> RejectDeadlineChangeRequest(
+        int id,
+        int requestId,
+        [FromBody] RejectTaskJournalDeadlineChangeRequest request,
+        CancellationToken ct)
+    {
+        var access = await GetTaskAccessAsync(ct);
+        if (access is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!access.IsAdmin && access.Permission?.CanView != true)
+        {
+            return Forbid();
+        }
+
+        var entity = await BuildVisibleTasksQuery(access).FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (entity is null)
+        {
+            return NotFound();
+        }
+
+        var deadlineRequest = await _db.TaskJournalDeadlineChangeRequests
+            .FirstOrDefaultAsync(item => item.Id == requestId && item.TaskJournalItemId == entity.Id, ct);
+        if (deadlineRequest is null)
+        {
+            return NotFound();
+        }
+
+        if (!string.Equals(deadlineRequest.Status, "pending", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new { message = "Запрос переноса срока уже обработан." });
+        }
+
+        if (!access.IsAdmin && !IsTaskAuthor(entity, access.UserId))
+        {
+            return Forbid();
+        }
+
+        var decisionComment = NormalizeOptional(request.Comment);
+        if (decisionComment is null)
+        {
+            return BadRequest(new { message = "Укажите причину отказа в переносе срока." });
+        }
+
+        if (decisionComment.Length > 1000)
+        {
+            return BadRequest(new { message = "Комментарий решения не должен превышать 1000 символов." });
+        }
+
+        var decidedAt = DateTime.UtcNow;
+        entity.UpdatedAt = decidedAt;
+
+        var decisionHistory = CreateTaskComment(
+            entity.Id,
+            access,
+            "system",
+            BuildDeadlineChangeRejectionText(access.DisplayName, deadlineRequest.RequestedDueAt, decisionComment),
+            JsonSerializer.Serialize(new
+            {
+                type = "deadlineChangeRejected",
+                deadlineChangeRequestId = deadlineRequest.Id,
+                requestedByUserId = deadlineRequest.RequestedByUserId,
+                requestedByName = deadlineRequest.RequestedByName,
+                reviewerUserId = deadlineRequest.ReviewerUserId,
+                reviewerName = deadlineRequest.ReviewerName,
+                currentDueAt = ToIso(entity.DueAt),
+                requestedDueAt = ToIso(deadlineRequest.RequestedDueAt),
+                decisionComment,
+                decidedAt = ToIso(decidedAt),
+            }, JsonOptions));
+        _db.TaskJournalComments.Add(decisionHistory);
+
+        deadlineRequest.Status = "rejected";
+        deadlineRequest.DecisionComment = decisionComment;
+        deadlineRequest.DecidedByUserId = access.UserId;
+        deadlineRequest.DecidedByName = access.DisplayName;
+        deadlineRequest.DecidedAt = decidedAt;
+        deadlineRequest.DecisionCommentEntry = decisionHistory;
+        deadlineRequest.UpdatedAt = decidedAt;
+
+        await _db.SaveChangesAsync(ct);
+        await _notificationService.NotifyTaskChangedAsync(
+            entity,
+            ["запрос переноса срока отклонен"],
+            access.DisplayName,
+            access.UserId,
+            decisionComment,
+            ct);
+
+        return Ok(Map(entity));
+    }
+
     [HttpGet("{id:int}/files")]
     public async Task<ActionResult<IReadOnlyList<TaskJournalFileDto>>> GetFiles(int id, CancellationToken ct)
     {
@@ -5005,6 +5100,12 @@ public class TasksController : ControllerBase
             ? text
             : $"{text} Комментарий: {decisionComment}";
     }
+
+    private static string BuildDeadlineChangeRejectionText(
+        string reviewerName,
+        DateTime requestedDueAt,
+        string decisionComment)
+        => $"{reviewerName} отказал в переносе срока задачи на {FormatHistoryDateTime(requestedDueAt)}. Причина: {decisionComment}";
 
     private static string FormatHistoryDateTime(DateTime value)
         => DateTime.SpecifyKind(value, DateTimeKind.Utc).ToString("dd.MM.yyyy HH:mm");

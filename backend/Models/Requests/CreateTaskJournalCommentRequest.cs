@@ -16,3 +16,8 @@ public class ApproveTaskJournalDeadlineChangeRequest
     public DateTime ApprovedDueAt { get; set; }
     public string? Comment { get; set; }
 }
+
+public class RejectTaskJournalDeadlineChangeRequest
+{
+    public string? Comment { get; set; }
+}
