@@ -6,13 +6,14 @@ import { parseUserNotificationMetadata } from '../../utils/userNotificationMetad
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatDateTimeInTimeZone, fromTimeZoneDateTimeInput, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
 import { normalizeUserTimeZoneId, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
+import type { TaskJournalItem, TaskJournalParticipant } from '../../utils/taskJournalStore';
 
 type ForcedTaskRevisionModalProps = {
   onOpenTask?: (taskId: number) => void;
 };
 
-type ForcedTaskDecisionKind = 'revision' | 'completedApproval' | 'deadlineChangeRequest';
-type ForcedTaskQueueAction = 'acknowledge' | 'deadlineChangeDecision';
+type ForcedTaskDecisionKind = 'revision' | 'completedApproval' | 'deadlineChangeRequest' | 'approvalRequest';
+type ForcedTaskQueueAction = 'acknowledge' | 'deadlineChangeDecision' | 'approvalDecision';
 
 type ForcedTaskNotificationRule = {
   type: string;
@@ -65,9 +66,18 @@ function getDeadlineChangeReason(notification: UserNotificationDto): string {
   return readString(metadata.reason) || notification.bodyPreview || 'Причина переноса срока не указана.';
 }
 
+function getApprovalParticipantId(notification: UserNotificationDto): number | null {
+  const metadata = getNotificationMetadata(notification);
+  return readPositiveInteger(metadata.currentApproverId);
+}
+
 function getDecisionKind(notification: UserNotificationDto): ForcedTaskDecisionKind | null {
   if (notification.type === 'taskDeadlineChangeRequested') {
     return notification.taskId && getDeadlineChangeRequestId(notification) ? 'deadlineChangeRequest' : null;
+  }
+
+  if (notification.type === 'taskApprovalRequested') {
+    return notification.taskId ? 'approvalRequest' : null;
   }
 
   if (notification.type === 'taskRevisionRequested') {
@@ -89,6 +99,11 @@ function getDecisionKind(notification: UserNotificationDto): ForcedTaskDecisionK
 }
 
 const FORCED_TASK_NOTIFICATION_RULES: ForcedTaskNotificationRule[] = [
+  {
+    type: 'taskApprovalRequested',
+    action: 'approvalDecision',
+    resolveDecisionKind: getDecisionKind,
+  },
   {
     type: 'taskDeadlineChangeRequested',
     action: 'deadlineChangeDecision',
@@ -155,6 +170,46 @@ function getTaskTitle(notification: UserNotificationDto): string {
     .trim() || title;
 }
 
+function getOrderedApprovers(task: TaskJournalItem): TaskJournalParticipant[] {
+  return (task.participants ?? [])
+    .filter((participant) => participant.role === 'approver')
+    .slice()
+    .sort((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0) || (left.id ?? 0) - (right.id ?? 0));
+}
+
+function getCurrentApprovalParticipant(task: TaskJournalItem, notification: UserNotificationDto): TaskJournalParticipant | null {
+  const participantId = getApprovalParticipantId(notification);
+  const approvers = getOrderedApprovers(task);
+  if (participantId) {
+    return approvers.find((participant) => participant.id === participantId) ?? null;
+  }
+
+  return approvers.find((participant) => participant.approvalStatus !== 'approved') ?? null;
+}
+
+function getParticipantDisplayName(participant?: TaskJournalParticipant | null): string {
+  return participant?.displayName?.trim() || participant?.name?.trim() || participant?.email?.trim() || '';
+}
+
+function isFinalApprovalParticipant(task: TaskJournalItem, participant?: TaskJournalParticipant | null): boolean {
+  if (!participant) return false;
+  const approvers = getOrderedApprovers(task);
+  return approvers.length > 0 && approvers.every((item) => item.id === participant.id || item.approvalStatus === 'approved');
+}
+
+function getDefaultRevisionDueAtInput(task: TaskJournalItem, timeZoneId: string): string {
+  const currentDueAt = new Date(task.dueAt);
+  const now = new Date();
+  if (!Number.isNaN(currentDueAt.getTime()) && currentDueAt.getTime() > now.getTime()) {
+    return toTimeZoneDateTimeInput(currentDueAt.toISOString(), timeZoneId);
+  }
+
+  const nextDueAt = new Date(now);
+  nextDueAt.setDate(nextDueAt.getDate() + 1);
+  nextDueAt.setMinutes(0, 0, 0);
+  return toTimeZoneDateTimeInput(nextDueAt.toISOString(), timeZoneId);
+}
+
 function sortQueueItems(left: ForcedTaskQueueItem, right: ForcedTaskQueueItem): number {
   const leftTime = Date.parse(left.notification.createdAt) || 0;
   const rightTime = Date.parse(right.notification.createdAt) || 0;
@@ -170,6 +225,12 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
   const [deadlineChangeComment, setDeadlineChangeComment] = useState('');
   const [deadlineChangeError, setDeadlineChangeError] = useState<string | null>(null);
   const [deadlineChangeSaving, setDeadlineChangeSaving] = useState<'approve' | 'reject' | null>(null);
+  const [approvalTask, setApprovalTask] = useState<TaskJournalItem | null>(null);
+  const [approvalTaskLoading, setApprovalTaskLoading] = useState(false);
+  const [approvalRevisionText, setApprovalRevisionText] = useState('');
+  const [approvalRevisionDueAt, setApprovalRevisionDueAt] = useState('');
+  const [approvalError, setApprovalError] = useState<string | null>(null);
+  const [approvalSaving, setApprovalSaving] = useState<'approve' | 'approveComplete' | 'approveReturn' | 'revision' | null>(null);
   const acknowledgedIdsRef = useRef<Set<number>>(new Set());
 
   const loadItems = useCallback(async () => {
@@ -254,6 +315,48 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
     setDeadlineChangeError(null);
     setDeadlineChangeSaving(null);
   }, [current?.id, current, decisionKind, timeZoneId]);
+
+  useEffect(() => {
+    if (!current || decisionKind !== 'approvalRequest' || !current.taskId) {
+      setApprovalTask(null);
+      setApprovalTaskLoading(false);
+      setApprovalRevisionText('');
+      setApprovalRevisionDueAt('');
+      setApprovalError(null);
+      setApprovalSaving(null);
+      return;
+    }
+
+    let cancelled = false;
+    setApprovalTaskLoading(true);
+    setApprovalTask(null);
+    setApprovalRevisionText('');
+    setApprovalRevisionDueAt('');
+    setApprovalError(null);
+    setApprovalSaving(null);
+
+    apiService.getTaskJournalItem(current.taskId)
+      .then((task) => {
+        if (!cancelled) {
+          setApprovalTask(task);
+          setApprovalRevisionDueAt(getDefaultRevisionDueAtInput(task, timeZoneId));
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setApprovalError(extractDisplayErrorMessage(error, 'Не удалось загрузить задачу для согласования.'));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setApprovalTaskLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [current?.id, current?.taskId, current, decisionKind, timeZoneId]);
 
   const finishCurrentNotification = async (reason: string) => {
     if (!current) return;
@@ -343,8 +446,239 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
     }
   };
 
+  const approveTaskApprovalRequest = async (finalAction?: 'complete' | 'returnToAssignee') => {
+    if (!current || approvalSaving) return;
+
+    const taskId = current.taskId;
+    if (!taskId) {
+      setApprovalError('Не удалось определить задачу для согласования.');
+      return;
+    }
+
+    const participantId = approvalTask ? getCurrentApprovalParticipant(approvalTask, current)?.id : getApprovalParticipantId(current) ?? undefined;
+    const savingKey = finalAction === 'complete'
+      ? 'approveComplete'
+      : finalAction === 'returnToAssignee'
+        ? 'approveReturn'
+        : 'approve';
+    setApprovalSaving(savingKey);
+    setApprovalError(null);
+    try {
+      await apiService.updateTaskJournalApproval(
+        taskId,
+        'approved',
+        approvalTask?.result?.trim() || undefined,
+        participantId ?? undefined,
+        finalAction,
+      );
+      await finishCurrentNotification('forced-task-approval-approved');
+    } catch (error) {
+      setApprovalError(extractDisplayErrorMessage(error, 'Не удалось согласовать задачу.'));
+    } finally {
+      setApprovalSaving(null);
+    }
+  };
+
+  const returnTaskApprovalToRevision = async () => {
+    if (!current || approvalSaving) return;
+
+    const taskId = current.taskId;
+    if (!taskId) {
+      setApprovalError('Не удалось определить задачу для согласования.');
+      return;
+    }
+
+    const resolution = approvalRevisionText.trim();
+    if (!resolution) {
+      setApprovalError('Укажите, что нужно исправить перед возвратом задачи на доработку.');
+      return;
+    }
+
+    const participantId = approvalTask ? getCurrentApprovalParticipant(approvalTask, current)?.id : getApprovalParticipantId(current) ?? undefined;
+    const revisionDueAt = approvalRevisionDueAt ? fromTimeZoneDateTimeInput(approvalRevisionDueAt, timeZoneId) : undefined;
+    setApprovalSaving('revision');
+    setApprovalError(null);
+    try {
+      await apiService.updateTaskJournalApproval(
+        taskId,
+        'revisionRequested',
+        resolution,
+        participantId ?? undefined,
+        undefined,
+        revisionDueAt,
+      );
+      await finishCurrentNotification('forced-task-approval-revision');
+    } catch (error) {
+      setApprovalError(extractDisplayErrorMessage(error, 'Не удалось вернуть задачу на доработку.'));
+    } finally {
+      setApprovalSaving(null);
+    }
+  };
+
   if (!current || !decisionKind) {
     return null;
+  }
+
+  if (currentItem?.rule.action === 'approvalDecision') {
+    const participant = approvalTask ? getCurrentApprovalParticipant(approvalTask, current) : null;
+    const resultText = approvalTask?.result?.trim() || current.bodyPreview || 'Результат по задаче не заполнен.';
+    const isFinalApprover = approvalTask ? isFinalApprovalParticipant(approvalTask, participant) : false;
+    const queueCountText = items.length > 1 ? `Еще обязательных уведомлений: ${items.length - 1}` : null;
+    const isSaving = Boolean(approvalSaving);
+
+    return (
+      <div className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto bg-slate-950/55 px-3 py-4 backdrop-blur-sm sm:items-center sm:px-4 sm:py-6" role="dialog" aria-modal="true" aria-labelledby="forced-task-approval-title" data-testid="forced-task-approval-prompt">
+        <div className="max-h-[calc(100vh-2rem)] w-full max-w-[min(48rem,calc(100vw-1.5rem))] overflow-y-auto rounded-2xl border border-emerald-200 bg-white p-4 shadow-2xl sm:p-6">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">Согласование задачи</p>
+              <h2 id="forced-task-approval-title" className="mt-2 text-xl font-semibold text-slate-950">
+                У вас задача на согласовании
+              </h2>
+              {queueCountText ? (
+                <p className="mt-1 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+                  {queueCountText}
+                </p>
+              ) : null}
+              <p className="mt-2 line-clamp-2 text-sm text-slate-600">{approvalTask?.title || getTaskTitle(current)}</p>
+            </div>
+            <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Требует решения
+            </span>
+          </div>
+
+          <div className="mt-5 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 sm:grid-cols-2">
+            <div>
+              <div className="text-xs font-semibold uppercase text-slate-400">Согласующий</div>
+              <div className="mt-1 font-semibold text-slate-900">{getParticipantDisplayName(participant) || 'Не указан'}</div>
+            </div>
+            <div>
+              <div className="text-xs font-semibold uppercase text-slate-400">Исполнитель</div>
+              <div className="mt-1 font-semibold text-slate-900">{approvalTask?.assigneeName || 'Не указан'}</div>
+            </div>
+            <div>
+              <div className="text-xs font-semibold uppercase text-slate-400">Постановщик</div>
+              <div className="mt-1 font-medium">{approvalTask?.authorName || 'Не указан'}</div>
+            </div>
+            <div>
+              <div className="text-xs font-semibold uppercase text-slate-400">Срок задачи</div>
+              <div className="mt-1 font-medium">{approvalTask?.dueAt ? formatDateTimeInTimeZone(approvalTask.dueAt, timeZoneId) : 'Не указан'}</div>
+            </div>
+          </div>
+
+          {approvalTaskLoading ? (
+            <div className="mt-4 flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-600">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Загружаем данные задачи...
+            </div>
+          ) : null}
+
+          {approvalTask?.description ? (
+            <div className="mt-4 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm leading-6 text-slate-700">
+              <div className="mb-1 text-xs font-semibold uppercase text-slate-400">Описание задачи</div>
+              <div className="whitespace-pre-wrap">{approvalTask.description}</div>
+            </div>
+          ) : null}
+
+          <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm leading-6 text-emerald-950">
+            <div className="mb-1 text-xs font-semibold uppercase text-emerald-700">Результат исполнителя</div>
+            <div className="whitespace-pre-wrap">{resultText}</div>
+          </div>
+
+          <label className="mt-4 block text-sm font-semibold text-slate-700" htmlFor="forced-task-approval-revision-due-at">
+            Срок доработки
+          </label>
+          <input
+            id="forced-task-approval-revision-due-at"
+            type="datetime-local"
+            value={approvalRevisionDueAt}
+            onChange={(event) => {
+              setApprovalRevisionDueAt(event.target.value);
+              if (approvalError) setApprovalError(null);
+            }}
+            className="mt-2 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:cursor-wait disabled:bg-slate-50"
+            disabled={isSaving || approvalTaskLoading}
+            aria-label="Срок доработки"
+          />
+          <p className="mt-2 text-sm text-slate-500">
+            Поле используется только при возврате на доработку. Если задача согласована, срок доработки не применяется.
+          </p>
+
+          <label className="mt-4 block text-sm font-semibold text-slate-700" htmlFor="forced-task-approval-revision-comment">
+            Комментарий для возврата на доработку
+          </label>
+          <textarea
+            id="forced-task-approval-revision-comment"
+            value={approvalRevisionText}
+            onChange={(event) => {
+              setApprovalRevisionText(event.target.value);
+              if (approvalError) setApprovalError(null);
+            }}
+            className="mt-2 block w-full min-h-[104px] resize-y rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm leading-6 text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:cursor-wait disabled:bg-slate-50"
+            rows={4}
+            placeholder="Если задача требует правок, укажите что именно нужно исправить."
+            disabled={isSaving || approvalTaskLoading}
+          />
+          {approvalError ? <p className="mt-2 text-sm font-semibold text-rose-600">{approvalError}</p> : null}
+
+          <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-end">
+            {current.taskId && onOpenTask ? (
+              <button
+                type="button"
+                onClick={() => onOpenTask(current.taskId!)}
+                disabled={isSaving}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60 sm:w-auto"
+              >
+                <ExternalLink className="h-4 w-4" />
+                Открыть задачу
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => void returnTaskApprovalToRevision()}
+              disabled={isSaving || approvalTaskLoading}
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-orange-200 bg-white px-4 py-2.5 text-sm font-semibold text-orange-700 transition hover:bg-orange-50 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+            >
+              {approvalSaving === 'revision' ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
+              Вернуть на доработку
+            </button>
+            {isFinalApprover ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void approveTaskApprovalRequest('returnToAssignee')}
+                  disabled={isSaving || approvalTaskLoading}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700 transition hover:bg-blue-100 disabled:cursor-wait disabled:opacity-60 sm:w-auto"
+                >
+                  {approvalSaving === 'approveReturn' ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                  Согласовать и отправить исполнителю
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void approveTaskApprovalRequest('complete')}
+                  disabled={isSaving || approvalTaskLoading}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60 sm:w-auto"
+                >
+                  {approvalSaving === 'approveComplete' ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                  Согласовать и завершить
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void approveTaskApprovalRequest()}
+                disabled={isSaving || approvalTaskLoading}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60 sm:w-auto"
+              >
+                {approvalSaving === 'approve' ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                Согласовать
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (currentItem?.rule.action === 'deadlineChangeDecision') {

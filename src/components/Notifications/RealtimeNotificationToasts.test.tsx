@@ -282,6 +282,41 @@ describe('RealtimeNotificationToasts', () => {
     window.removeEventListener(USER_NOTIFICATIONS_EVENT, listener);
   });
 
+  it('does not show a regular toast for approval requests handled by forced modals', async () => {
+    const changedEvents: UserNotificationsChangedDetail[] = [];
+    const listener = (event: Event) => {
+      changedEvents.push((event as CustomEvent<UserNotificationsChangedDetail>).detail);
+    };
+    window.addEventListener(USER_NOTIFICATIONS_EVENT, listener);
+    render(<RealtimeNotificationToasts userId={5} onOpenTask={vi.fn()} />);
+
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.({
+        id: 48,
+        recipientUserId: 5,
+        type: 'taskApprovalRequested',
+        eventKey: 'task:129:approval-request:701:20260630120000000',
+        title: 'Задача ожидает согласования',
+        bodyPreview: 'Исполнитель отправил результат на согласование.',
+        tone: 'violet',
+        objectType: 'task',
+        objectId: 129,
+        taskJournalItemId: 129,
+        metadataJson: '{"currentApproverId":701}',
+        createdAt: '2026-05-25T10:00:00Z',
+      });
+    });
+
+    expect(toastMock.showToast).not.toHaveBeenCalled();
+    expect(changedEvents).toContainEqual(expect.objectContaining({
+      notificationId: 48,
+      unreadDelta: 1,
+    }));
+    window.removeEventListener(USER_NOTIFICATIONS_EVENT, listener);
+  });
+
   it('marks a realtime toast as read from quick action', async () => {
     const changedEvents: UserNotificationsChangedDetail[] = [];
     const listener = (event: Event) => {

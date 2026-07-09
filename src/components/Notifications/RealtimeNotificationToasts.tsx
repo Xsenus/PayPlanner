@@ -127,7 +127,11 @@ function shouldShowRealtimeToast(notification: RealtimeUserNotification): boolea
 }
 
 function isForcedTaskDecisionNotification(notification: RealtimeUserNotification): boolean {
-  if (notification.type === 'taskRevisionRequested' || notification.type === 'taskDeadlineChangeRequested') {
+  if (
+    notification.type === 'taskRevisionRequested' ||
+    notification.type === 'taskDeadlineChangeRequested' ||
+    notification.type === 'taskApprovalRequested'
+  ) {
     return true;
   }
 

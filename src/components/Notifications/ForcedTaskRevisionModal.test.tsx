@@ -7,10 +7,12 @@ import { USER_NOTIFICATIONS_EVENT } from '../../utils/userNotifications';
 
 const apiMock = vi.hoisted(() => ({
   approveTaskJournalDeadlineChangeRequest: vi.fn(),
+  getTaskJournalItem: vi.fn(),
   getUserSetting: vi.fn(),
   getUserNotifications: vi.fn(),
   markUserNotificationRead: vi.fn(),
   rejectTaskJournalDeadlineChangeRequest: vi.fn(),
+  updateTaskJournalApproval: vi.fn(),
 }));
 
 vi.mock('../../services/api', () => ({
@@ -88,12 +90,60 @@ function createDeadlineChangeNotification(overrides: Partial<UserNotificationDto
   });
 }
 
+function createApprovalRequestNotification(overrides: Partial<UserNotificationDto> = {}): UserNotificationDto {
+  return createNotification({
+    id: 61,
+    type: 'taskApprovalRequested',
+    typeLabel: 'Ожидает согласования',
+    eventKey: 'task:404:approval-request:701:20260630120000000',
+    title: 'Задача ожидает согласования: Проверить иск',
+    bodyPreview: 'Юрист отправил результат задачи на согласование.',
+    tone: 'violet',
+    objectId: 404,
+    taskId: 404,
+    metadataJson: JSON.stringify({
+      actorUserId: 8,
+      actorName: 'Мария Юрист',
+      currentApproverId: 701,
+    }),
+    ...overrides,
+  });
+}
+
+function createApprovalTask(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 404,
+    title: 'Проверить иск',
+    description: 'Проверить правовую позицию и документы.',
+    assigneeName: 'Мария Юрист',
+    authorName: 'Андрей Руководитель',
+    dueAt: '2026-07-01T09:00:00Z',
+    result: 'Иск проверен, правки внесены, документы готовы.',
+    participants: [
+      {
+        id: 701,
+        userId: 17,
+        role: 'approver',
+        displayName: 'Анна Согласующая',
+        sortOrder: 0,
+        approvalStatus: 'pending',
+      },
+    ],
+    ...overrides,
+  };
+}
+
 function mockNotificationPages(
   revisions: UserNotificationDto[] = [],
   approvals: UserNotificationDto[] = [],
   deadlineChanges: UserNotificationDto[] = [],
+  approvalRequests: UserNotificationDto[] = [],
 ) {
   apiMock.getUserNotifications.mockImplementation(async (params?: { type?: string }) => {
+    if (params?.type === 'taskApprovalRequested') {
+      return createPage(approvalRequests);
+    }
+
     if (params?.type === 'taskDeadlineChangeRequested') {
       return createPage(deadlineChanges);
     }
@@ -113,14 +163,18 @@ function mockNotificationPages(
 describe('ForcedTaskRevisionModal', () => {
   beforeEach(() => {
     apiMock.approveTaskJournalDeadlineChangeRequest.mockReset();
+    apiMock.getTaskJournalItem.mockReset();
     apiMock.getUserSetting.mockReset();
     apiMock.getUserNotifications.mockReset();
     apiMock.markUserNotificationRead.mockReset();
     apiMock.rejectTaskJournalDeadlineChangeRequest.mockReset();
+    apiMock.updateTaskJournalApproval.mockReset();
     apiMock.approveTaskJournalDeadlineChangeRequest.mockResolvedValue({});
+    apiMock.getTaskJournalItem.mockResolvedValue(createApprovalTask());
     apiMock.getUserSetting.mockResolvedValue({ key: 'profile.timeZoneId', value: 'Europe/Samara' });
     apiMock.markUserNotificationRead.mockImplementation(async (id: number) => createNotification({ id, isRead: true }));
     apiMock.rejectTaskJournalDeadlineChangeRequest.mockResolvedValue({});
+    apiMock.updateTaskJournalApproval.mockResolvedValue({});
   });
 
   it('shows unread revision requests as a mandatory modal and acknowledges them', async () => {
@@ -181,6 +235,13 @@ describe('ForcedTaskRevisionModal', () => {
     expect(await screen.findByTestId('forced-task-action-queue')).toBeTruthy();
     expect(screen.getByText('Еще обязательных уведомлений: 1')).toBeTruthy();
     expect(screen.getByText('Согласование завершено')).toBeTruthy();
+    expect(apiMock.getUserNotifications).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'unread',
+      type: 'taskApprovalRequested',
+      requiresAction: true,
+      page: 1,
+      pageSize: 25,
+    }));
     expect(apiMock.getUserNotifications).toHaveBeenCalledWith(expect.objectContaining({
       status: 'unread',
       type: 'taskDeadlineChangeRequested',
@@ -254,6 +315,63 @@ describe('ForcedTaskRevisionModal', () => {
       comment: 'Клиент уже подтвердил прежний срок.',
     }));
     await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(52));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('lets the approver approve and complete a task from the forced approval prompt', async () => {
+    mockNotificationPages([], [], [], [createApprovalRequestNotification()]);
+
+    render(<ForcedTaskRevisionModal />);
+
+    expect(await screen.findByTestId('forced-task-approval-prompt')).toBeTruthy();
+    expect(apiMock.getTaskJournalItem).toHaveBeenCalledWith(404);
+    expect(screen.getByText('У вас задача на согласовании')).toBeTruthy();
+    expect(screen.getByText('Проверить иск')).toBeTruthy();
+    expect(screen.getByText('Анна Согласующая')).toBeTruthy();
+    expect(screen.getByText('Иск проверен, правки внесены, документы готовы.')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Согласовать и завершить' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalApproval).toHaveBeenCalledWith(
+      404,
+      'approved',
+      'Иск проверен, правки внесены, документы готовы.',
+      701,
+      'complete',
+    ));
+    await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(61));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('requires a revision comment before returning an approval task to revision', async () => {
+    mockNotificationPages([], [], [], [createApprovalRequestNotification({ id: 62 })]);
+
+    render(<ForcedTaskRevisionModal />);
+
+    expect(await screen.findByTestId('forced-task-approval-prompt')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Вернуть на доработку' }));
+
+    expect(await screen.findByText('Укажите, что нужно исправить перед возвратом задачи на доработку.')).toBeTruthy();
+    expect(apiMock.updateTaskJournalApproval).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText('Комментарий для возврата на доработку'), {
+      target: { value: 'Нужно добавить расчет госпошлины.' },
+    });
+    fireEvent.change(screen.getByLabelText('Срок доработки'), {
+      target: { value: '2026-07-02T11:00' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Вернуть на доработку' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalApproval).toHaveBeenCalledWith(
+      404,
+      'revisionRequested',
+      'Нужно добавить расчет госпошлины.',
+      701,
+      undefined,
+      '2026-07-02T07:00:00.000Z',
+    ));
+    await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(62));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
