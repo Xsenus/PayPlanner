@@ -247,6 +247,41 @@ describe('RealtimeNotificationToasts', () => {
     window.removeEventListener(USER_NOTIFICATIONS_EVENT, listener);
   });
 
+  it('does not show a regular toast for revision requests handled by forced modals', async () => {
+    const changedEvents: UserNotificationsChangedDetail[] = [];
+    const listener = (event: Event) => {
+      changedEvents.push((event as CustomEvent<UserNotificationsChangedDetail>).detail);
+    };
+    window.addEventListener(USER_NOTIFICATIONS_EVENT, listener);
+    render(<RealtimeNotificationToasts userId={5} onOpenTask={vi.fn()} />);
+
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.({
+        id: 49,
+        recipientUserId: 5,
+        type: 'taskRevisionRequested',
+        eventKey: 'task:130:approval-decision:701:revisionRequested:20260630120000000',
+        title: 'Задача возвращена на доработку',
+        bodyPreview: 'Нужно исправить расчет и приложить документ.',
+        tone: 'orange',
+        objectType: 'task',
+        objectId: 130,
+        taskJournalItemId: 130,
+        metadataJson: '{"decision":"revisionRequested","resolution":"Нужно исправить расчет и приложить документ."}',
+        createdAt: '2026-05-25T10:00:00Z',
+      });
+    });
+
+    expect(toastMock.showToast).not.toHaveBeenCalled();
+    expect(changedEvents).toContainEqual(expect.objectContaining({
+      notificationId: 49,
+      unreadDelta: 1,
+    }));
+    window.removeEventListener(USER_NOTIFICATIONS_EVENT, listener);
+  });
+
   it('does not show a regular toast for deadline change requests handled by forced modals', async () => {
     const changedEvents: UserNotificationsChangedDetail[] = [];
     const listener = (event: Event) => {
