@@ -1,7 +1,7 @@
 # Модель запроса переноса срока задачи
 
 Дата проектирования: 9 июля 2026.
-Связанный roadmap: `task-deadline-change-approval-roadmap-2026-07-09.md`.
+Связанный roadmap: `archive/roadmaps/task-deadline-change-approval-roadmap-2026-07-09.md`.
 
 ## Выбранный подход
 
