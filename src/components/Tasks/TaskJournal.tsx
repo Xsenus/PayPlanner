@@ -6388,7 +6388,9 @@ function TaskModal({
   const [deadlineChangeRequestsLoading, setDeadlineChangeRequestsLoading] = useState(false);
   const [changeComment, setChangeComment] = useState('');
   const [deadlineRequestDueAt, setDeadlineRequestDueAt] = useState(() => state?.task ? toLocalInputValue(state.task.dueAt) : '');
-  const [deadlineRequestReason, setDeadlineRequestReason] = useState('');
+  const [deadlineRequestReasonDialogOpen, setDeadlineRequestReasonDialogOpen] = useState(false);
+  const [deadlineRequestReasonDraft, setDeadlineRequestReasonDraft] = useState('');
+  const [deadlineRequestReasonError, setDeadlineRequestReasonError] = useState<string | null>(null);
   const [deadlineRequestSaving, setDeadlineRequestSaving] = useState(false);
   const [files, setFiles] = useState<TaskJournalFile[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
@@ -6898,12 +6900,30 @@ function TaskModal({
     }
   };
 
+  const openDeadlineRequestReasonDialog = () => {
+    if (!deadlineRequestDueAt) {
+      toast.error('Укажите новый срок для запроса переноса.', 'Журнал задач');
+      return;
+    }
+
+    setDeadlineRequestReasonDraft('');
+    setDeadlineRequestReasonError(null);
+    setDeadlineRequestReasonDialogOpen(true);
+  };
+
+  const closeDeadlineRequestReasonDialog = () => {
+    if (deadlineRequestSaving) return;
+    setDeadlineRequestReasonDialogOpen(false);
+    setDeadlineRequestReasonDraft('');
+    setDeadlineRequestReasonError(null);
+  };
+
   const handleDeadlineRequest = async () => {
     const requestedDueAt = fromLocalInputValue(deadlineRequestDueAt);
     if (!taskId || !deadlineRequestDueAt) return;
-    const reason = deadlineRequestReason.trim();
+    const reason = deadlineRequestReasonDraft.trim();
     if (!reason) {
-      toast.error('Укажите причину переноса срока.', 'Журнал задач');
+      setDeadlineRequestReasonError('Укажите причину переноса срока.');
       return;
     }
 
@@ -6916,10 +6936,12 @@ function TaskModal({
       setComments((previous) => [created, ...previous]);
       const requests = await apiService.getTaskJournalDeadlineChangeRequests(taskId);
       setDeadlineChangeRequests(requests);
-      setDeadlineRequestReason('');
+      setDeadlineRequestReasonDialogOpen(false);
+      setDeadlineRequestReasonDraft('');
+      setDeadlineRequestReasonError(null);
       toast.success('Запрос переноса срока добавлен в историю задачи.', 'Журнал задач');
     } catch (error) {
-      toast.error(extractDisplayErrorMessage(error, 'Не удалось отправить запрос переноса срока.'), 'Журнал задач');
+      setDeadlineRequestReasonError(extractDisplayErrorMessage(error, 'Не удалось отправить запрос переноса срока.'));
     } finally {
       setDeadlineRequestSaving(false);
     }
@@ -7155,6 +7177,82 @@ function TaskModal({
             disabled={revisionReviewSaving}
           >
             {revisionReviewSaving ? 'Отправляем...' : 'Отправить на доработку с поправками'}
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
+  const deadlineRequestReasonDialog = deadlineRequestReasonDialogOpen ? (
+    <div className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-slate-950/45 px-3 py-4 backdrop-blur-sm sm:items-center sm:px-4 sm:py-6">
+      <div
+        className="max-h-[calc(100vh-2rem)] w-full max-w-[min(40rem,calc(100vw-1.5rem))] overflow-y-auto rounded-2xl border border-amber-200 bg-white p-4 shadow-2xl sm:p-5"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="deadline-request-reason-title"
+        data-testid="deadline-request-reason-dialog"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-700">Запрос переноса срока</div>
+            <h2 id="deadline-request-reason-title" className="mt-2 text-lg font-semibold text-slate-950">
+              Укажите причину переноса срока
+            </h2>
+            <p className="mt-2 line-clamp-2 text-sm text-slate-600">{state?.task?.title}</p>
+          </div>
+          <button
+            type="button"
+            onClick={closeDeadlineRequestReasonDialog}
+            disabled={deadlineRequestSaving}
+            className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:cursor-wait disabled:opacity-60"
+            aria-label="Закрыть окно причины переноса срока"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          Новый срок: {deadlineRequestDueAt ? formatDateTime(fromLocalInputValue(deadlineRequestDueAt)) : 'не выбран'}
+        </div>
+        <label className="mt-4 block text-sm font-semibold text-slate-700" htmlFor="deadline-request-reason">
+          Причина запроса
+        </label>
+        <textarea
+          id="deadline-request-reason"
+          value={deadlineRequestReasonDraft}
+          onChange={(event) => {
+            setDeadlineRequestReasonDraft(event.target.value);
+            if (deadlineRequestReasonError) {
+              setDeadlineRequestReasonError(null);
+            }
+          }}
+          className="mt-2 min-h-[140px] w-full resize-y rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm leading-6 text-slate-700 outline-none transition focus:border-amber-400 focus:ring-2 focus:ring-amber-100 disabled:cursor-wait disabled:bg-slate-50"
+          maxLength={1000}
+          disabled={deadlineRequestSaving}
+          placeholder="Например: жду документы от клиента, нужно дополнительное время на проверку."
+          autoFocus
+        />
+        <div className="mt-2 flex items-center justify-between gap-3 text-xs">
+          <span className={deadlineRequestReasonError ? 'font-semibold text-rose-600' : 'text-slate-500'}>
+            {deadlineRequestReasonError ?? 'Без причины запрос не будет отправлен постановщику.'}
+          </span>
+          <span className="shrink-0 text-slate-400">{deadlineRequestReasonDraft.trim().length}/1000</span>
+        </div>
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={closeDeadlineRequestReasonDialog}
+            disabled={deadlineRequestSaving}
+            className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60"
+          >
+            Отмена
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleDeadlineRequest()}
+            disabled={deadlineRequestSaving || !deadlineRequestReasonDraft.trim()}
+            className="rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {deadlineRequestSaving ? 'Отправляем...' : 'Отправить запрос'}
           </button>
         </div>
       </div>
@@ -7803,8 +7901,7 @@ function TaskModal({
                 <section className="rounded-xl border border-amber-200 bg-amber-50 p-3">
                   <div className="mb-2 text-sm font-semibold text-amber-900">Запрос переноса срока</div>
                   <input type="datetime-local" value={deadlineRequestDueAt} onChange={(event) => setDeadlineRequestDueAt(event.target.value)} className="w-full rounded-lg border border-amber-200 bg-white px-2 py-2 text-sm" />
-                  <textarea value={deadlineRequestReason} onChange={(event) => setDeadlineRequestReason(event.target.value)} className="mt-2 min-h-[64px] w-full rounded-lg border border-amber-200 bg-white px-2 py-2 text-sm" placeholder="Причина" />
-                  <button type="button" onClick={() => void handleDeadlineRequest()} disabled={deadlineRequestSaving || !deadlineRequestDueAt || !deadlineRequestReason.trim()} className="mt-2 w-full rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-amber-600 disabled:opacity-60">
+                  <button type="button" onClick={openDeadlineRequestReasonDialog} disabled={deadlineRequestSaving || !deadlineRequestDueAt} className="mt-2 w-full rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-amber-600 disabled:opacity-60">
                     {deadlineRequestSaving ? 'Отправляем...' : 'Запросить перенос'}
                   </button>
                 </section>
@@ -7844,6 +7941,7 @@ function TaskModal({
         </div>
         {approvalChoiceDialog}
         {revisionReviewDialog}
+        {deadlineRequestReasonDialog}
       </div>
     );
   }
@@ -8451,7 +8549,7 @@ function TaskModal({
 
           {canRequestDeadlineChange ? (
             <section className="mt-5 rounded-2xl border border-amber-200 bg-amber-50/60 p-4">
-              <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)_auto] lg:items-end">
+              <div className="grid gap-4 lg:grid-cols-[220px_auto] lg:items-end">
                 <Field label="Новый срок">
                   <input
                     type="datetime-local"
@@ -8461,21 +8559,10 @@ function TaskModal({
                     className="form-input bg-white"
                   />
                 </Field>
-                <Field label="Причина">
-                  <textarea
-                    aria-label="Причина переноса срока"
-                    value={deadlineRequestReason}
-                    onChange={(event) => setDeadlineRequestReason(event.target.value)}
-                    className="form-textarea min-h-[44px] bg-white"
-                    rows={1}
-                    maxLength={1000}
-                    placeholder="Коротко опишите причину"
-                  />
-                </Field>
                 <button
                   type="button"
-                  onClick={() => void handleDeadlineRequest()}
-                  disabled={deadlineRequestSaving || !deadlineRequestDueAt || !deadlineRequestReason.trim()}
+                  onClick={openDeadlineRequestReasonDialog}
+                  disabled={deadlineRequestSaving || !deadlineRequestDueAt}
                   className="inline-flex h-11 items-center justify-center rounded-xl border border-amber-300 bg-white px-4 text-sm font-semibold text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {deadlineRequestSaving ? 'Отправляем...' : 'Запросить перенос'}
@@ -8745,6 +8832,7 @@ function TaskModal({
       </div>
       {approvalChoiceDialog}
       {revisionReviewDialog}
+      {deadlineRequestReasonDialog}
       <style>{`
         .form-input {
           height: 44px;

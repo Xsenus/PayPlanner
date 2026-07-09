@@ -2889,8 +2889,12 @@ describe('TaskJournal', () => {
     await screen.findByRole('heading', { name: 'Просмотр задачи' });
 
     fireEvent.change(screen.getByLabelText('Новый срок для запроса переноса'), { target: { value: '2026-05-15T10:30' } });
-    fireEvent.change(screen.getByLabelText('Причина переноса срока'), { target: { value: 'Нужны документы от клиента' } });
     fireEvent.click(screen.getByRole('button', { name: 'Запросить перенос' }));
+
+    const reasonDialog = await screen.findByTestId('deadline-request-reason-dialog');
+    expect(apiMock.createTaskJournalDeadlineChangeRequest).not.toHaveBeenCalled();
+    fireEvent.change(within(reasonDialog).getByLabelText('Причина запроса'), { target: { value: 'Нужны документы от клиента' } });
+    fireEvent.click(within(reasonDialog).getByRole('button', { name: 'Отправить запрос' }));
 
     await waitFor(() => expect(apiMock.createTaskJournalDeadlineChangeRequest).toHaveBeenCalledWith(101, {
       requestedDueAt: expect.any(String),
