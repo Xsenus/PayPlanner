@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ForcedTaskRevisionModal } from './ForcedTaskRevisionModal';
 import type { PagedResult, UserNotificationDto } from '../../services/api';
+import { USER_NOTIFICATIONS_EVENT } from '../../utils/userNotifications';
 
 const apiMock = vi.hoisted(() => ({
   getUserNotifications: vi.fn(),
@@ -124,5 +125,53 @@ describe('ForcedTaskRevisionModal', () => {
 
     await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(41));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('loads configured forced notifications into one queue and keeps the oldest item first', async () => {
+    mockNotificationPages(
+      [createNotification({ id: 32, createdAt: '2026-06-29T12:05:00Z' })],
+      [createCompletedApprovalNotification({ id: 41, createdAt: '2026-06-29T12:00:00Z' })],
+    );
+
+    render(<ForcedTaskRevisionModal />);
+
+    expect(await screen.findByTestId('forced-task-action-queue')).toBeTruthy();
+    expect(screen.getByText('Еще обязательных уведомлений: 1')).toBeTruthy();
+    expect(screen.getByText('Согласование завершено')).toBeTruthy();
+    expect(apiMock.getUserNotifications).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'unread',
+      type: 'taskRevisionRequested',
+      requiresAction: true,
+      page: 1,
+      pageSize: 25,
+    }));
+    expect(apiMock.getUserNotifications).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'unread',
+      type: 'taskApproved',
+      requiresAction: true,
+      page: 1,
+      pageSize: 25,
+    }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ознакомлен' }));
+
+    await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(41));
+    expect(await screen.findByText('Задача на доработку')).toBeTruthy();
+  });
+
+  it('restores a forced notification from the unread inbox after the notification event', async () => {
+    let revisions: UserNotificationDto[] = [];
+    mockNotificationPages(revisions, []);
+
+    render(<ForcedTaskRevisionModal />);
+
+    await waitFor(() => expect(apiMock.getUserNotifications).toHaveBeenCalled());
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    revisions.splice(0, revisions.length, createNotification({ id: 51 }));
+    window.dispatchEvent(new CustomEvent(USER_NOTIFICATIONS_EVENT));
+
+    expect(await screen.findByRole('dialog')).toBeTruthy();
+    expect(screen.getByText('Задача на доработку')).toBeTruthy();
   });
 });
