@@ -7049,6 +7049,44 @@ function TaskModal({
   const selectedCaseTitle = selectableClientCases.find((item) => item.id === form.clientCaseId)?.title ?? state?.task?.clientCaseTitle ?? '';
   const visibleObservers = getVisibleParticipantsByRole('observer');
   const visibleApprovers = getVisibleParticipantsByRole('approver');
+  const renderModernSelectedParticipantList = (
+    role: TaskJournalParticipantRole,
+    participants: TaskJournalParticipant[],
+    testId: string,
+  ) => {
+    if (participants.length === 0) return null;
+
+    return (
+      <div className="space-y-1.5" data-testid={testId}>
+        {participants.map((participant, index) => {
+          const participantName = getParticipantDisplayName(participant);
+
+          return (
+            <div
+              key={`${role}-modern-${participant.id ?? participant.userId ?? participantName}-${index}`}
+              className="flex items-start justify-between gap-2 rounded-lg border border-slate-100 bg-slate-50 px-2.5 py-2 text-sm"
+            >
+              <span className="min-w-0">
+                <span className="block truncate font-semibold text-slate-700">{participantName}</span>
+                {participant.email ? <span className="block truncate text-xs text-slate-400">{participant.email}</span> : null}
+              </span>
+              {!isReadOnly ? (
+                <button
+                  type="button"
+                  onClick={() => removeParticipant(role, participant)}
+                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-white hover:text-rose-600"
+                  aria-label={`Удалить участника ${participantName}`}
+                  title="Удалить"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
   const canShowApprovalActions = Boolean(
     state?.task
     && (form.status === 'onApproval' || form.status === 'overdueApproval')
@@ -7832,6 +7870,7 @@ function TaskModal({
                         <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
                       ))}
                     </select>
+                    {renderModernSelectedParticipantList('approver', visibleApprovers, 'task-modern-approver-list')}
                     <select
                       aria-label="Добавить наблюдателя"
                       value=""

@@ -2793,6 +2793,50 @@ describe('TaskJournal', () => {
     ]));
   });
 
+  it('shows selected approvers in the modern task card and removes them from the list', async () => {
+    await renderJournal([
+      createTask({
+        participants: [
+          { userId: 7, role: 'assignee', displayName: 'Администратор', approvalStatus: 'pending' },
+        ],
+      }),
+    ], {
+      assignees: [
+        { id: 7, name: 'Администратор', email: 'admin@example.com' },
+        { id: 8, name: 'Первый согласующий', email: 'first-approver@example.com' },
+        { id: 9, name: 'Второй согласующий', email: 'second-approver@example.com' },
+      ],
+      settings: { taskCardWindowMode: 'modern' },
+    });
+
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId('task-modern-card-window');
+    const addApproverSelect = within(card).getByLabelText('Добавить согласующего');
+
+    fireEvent.change(addApproverSelect, { target: { value: '8' } });
+    fireEvent.change(addApproverSelect, { target: { value: '9' } });
+
+    const approverList = await within(card).findByTestId('task-modern-approver-list');
+    expect(within(approverList).getByText('Первый согласующий')).toBeTruthy();
+    expect(within(approverList).getByText('first-approver@example.com')).toBeTruthy();
+    expect(within(approverList).getByText('Второй согласующий')).toBeTruthy();
+
+    fireEvent.click(within(approverList).getByRole('button', { name: 'Удалить участника Первый согласующий' }));
+
+    expect(within(approverList).queryByText('Первый согласующий')).toBeNull();
+    expect(within(approverList).getByText('Второй согласующий')).toBeTruthy();
+
+    fireEvent.click(within(card).getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
+    const [, payload] = apiMock.updateTaskJournalItem.mock.calls[0];
+    const approvers = payload.participants.filter((participant: { role: string }) => participant.role === 'approver');
+
+    expect(approvers).toEqual([
+      expect.objectContaining({ userId: 9, displayName: 'Второй согласующий', role: 'approver' }),
+    ]);
+  });
+
   it.each(['legacy', 'modern'] as const)('keeps multiple observers selected in the %s task card', async (taskCardWindowMode) => {
     await renderJournal([
       createTask({
