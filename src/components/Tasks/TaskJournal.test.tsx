@@ -2956,6 +2956,98 @@ describe('TaskJournal', () => {
     ]));
   });
 
+  it.each(['legacy', 'modern'] as const)('covers participant create edit remove reopen and save in the %s task card', async (taskCardWindowMode) => {
+    const assignees: TaskJournalAssignee[] = [
+      { id: 7, name: 'Администратор', email: 'admin@example.com' },
+      { id: 8, name: 'Первый согласующий', email: 'first-approver@example.com' },
+      { id: 10, name: 'Первый наблюдатель', email: 'first-observer@example.com' },
+    ];
+    const addApproverLabel = taskCardWindowMode === 'modern' ? 'Добавить согласующего' : 'Добавить: Согласующие';
+    const addObserverLabel = taskCardWindowMode === 'modern' ? 'Добавить наблюдателя' : 'Добавить: Наблюдатели';
+    const createdTaskTitle = `Проверка участников ${taskCardWindowMode}`;
+
+    await renderJournal([], {
+      assignees,
+      settings: { taskCardWindowMode },
+      waitForTitle: null,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
+    await screen.findByRole('heading', { name: 'Новая задача' });
+    const createCard = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+
+    fireEvent.click(within(createCard).getByTestId('task-internal-checkbox'));
+    fireEvent.change(within(createCard).getByTestId('task-title-input'), { target: { value: createdTaskTitle } });
+    fireEvent.change(within(createCard).getByLabelText(addApproverLabel), { target: { value: '8' } });
+    fireEvent.change(within(createCard).getByLabelText(addObserverLabel), { target: { value: '10' } });
+    fireEvent.click(within(createCard).getAllByRole('button', { name: 'Создать задачу' }).at(-1)!);
+
+    await waitFor(() => expect(apiMock.createTaskJournalItem).toHaveBeenCalledTimes(1));
+    const [createPayload] = apiMock.createTaskJournalItem.mock.calls[0];
+    expect(createPayload.participants).toEqual(expect.arrayContaining([
+      expect.objectContaining({ userId: 8, displayName: 'Первый согласующий', role: 'approver' }),
+      expect.objectContaining({ userId: 10, displayName: 'Первый наблюдатель', role: 'observer' }),
+    ]));
+
+    const createdTask = createTask({
+      id: 202,
+      title: createdTaskTitle,
+      isInternal: true,
+      clientId: null,
+      legalEntityId: null,
+      clientCaseId: null,
+      objectName: 'Внутренняя задача',
+      participants: createPayload.participants,
+    });
+
+    cleanup();
+    apiMock.createTaskJournalItem.mockClear();
+    apiMock.updateTaskJournalItem.mockClear();
+
+    await renderJournal([createdTask], {
+      assignees,
+      settings: { taskCardWindowMode },
+      waitForTitle: createdTaskTitle,
+    });
+    await openFirstTaskForEdit();
+    const editCard = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+
+    if (taskCardWindowMode === 'modern') {
+      expect(within(await within(editCard).findByTestId('task-modern-approver-list')).getByText('Первый согласующий')).toBeTruthy();
+      expect(within(await within(editCard).findByTestId('task-modern-observer-list')).getByText('Первый наблюдатель')).toBeTruthy();
+    } else {
+      expect(within(editCard).getByRole('button', { name: 'Удалить участника Первый согласующий' })).toBeTruthy();
+      expect(within(editCard).getByRole('button', { name: 'Удалить участника Первый наблюдатель' })).toBeTruthy();
+    }
+    fireEvent.click(within(editCard).getByRole('button', { name: 'Удалить участника Первый согласующий' }));
+    expect(within(editCard).queryByRole('button', { name: 'Удалить участника Первый согласующий' })).toBeNull();
+    expect(within(editCard).getByRole('button', { name: 'Удалить участника Первый наблюдатель' })).toBeTruthy();
+    fireEvent.click(within(editCard).getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
+    const [, updatePayload] = apiMock.updateTaskJournalItem.mock.calls[0];
+    expect(updatePayload.participants).toEqual(expect.arrayContaining([
+      expect.objectContaining({ userId: 10, displayName: 'Первый наблюдатель', role: 'observer' }),
+    ]));
+    expect(updatePayload.participants.some((participant: { role: string; userId?: number | null }) => (
+      participant.role === 'approver' && participant.userId === 8
+    ))).toBe(false);
+
+    cleanup();
+    apiMock.updateTaskJournalItem.mockClear();
+
+    await renderJournal([{ ...createdTask, participants: updatePayload.participants }], {
+      assignees,
+      settings: { taskCardWindowMode },
+      waitForTitle: createdTaskTitle,
+    });
+    await openFirstTaskForEdit();
+    const reopenedCard = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+
+    expect(within(reopenedCard).queryByRole('button', { name: 'Удалить участника Первый согласующий' })).toBeNull();
+    expect(within(reopenedCard).getByRole('button', { name: 'Удалить участника Первый наблюдатель' })).toBeTruthy();
+  });
+
   it('sends a change comment with task edits', async () => {
     await renderJournal();
 
