@@ -2916,6 +2916,46 @@ describe('TaskJournal', () => {
     ]);
   });
 
+  it.each(['legacy', 'modern'] as const)('keeps existing participants visible and saved in the %s task card', async (taskCardWindowMode) => {
+    await renderJournal([
+      createTask({
+        participants: [
+          { userId: 7, role: 'assignee', displayName: 'Администратор', email: 'admin@example.com', approvalStatus: 'pending' },
+          { userId: 8, role: 'approver', displayName: 'Текущий согласующий', email: 'current-approver@example.com', approvalStatus: 'pending' },
+          { userId: 10, role: 'observer', displayName: 'Текущий наблюдатель', email: 'current-observer@example.com', approvalStatus: 'pending' },
+        ],
+      }),
+    ], {
+      assignees: [
+        { id: 7, name: 'Администратор', email: 'admin@example.com' },
+        { id: 8, name: 'Текущий согласующий', email: 'current-approver@example.com' },
+        { id: 10, name: 'Текущий наблюдатель', email: 'current-observer@example.com' },
+      ],
+      settings: { taskCardWindowMode },
+    });
+
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+
+    if (taskCardWindowMode === 'modern') {
+      expect(within(await within(card).findByTestId('task-modern-approver-list')).getByText('Текущий согласующий')).toBeTruthy();
+      expect(within(await within(card).findByTestId('task-modern-observer-list')).getByText('Текущий наблюдатель')).toBeTruthy();
+    } else {
+      expect(within(card).getByRole('button', { name: 'Удалить участника Текущий согласующий' })).toBeTruthy();
+      expect(within(card).getByRole('button', { name: 'Удалить участника Текущий наблюдатель' })).toBeTruthy();
+    }
+
+    fireEvent.click(within(card).getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
+    const [, payload] = apiMock.updateTaskJournalItem.mock.calls[0];
+
+    expect(payload.participants).toEqual(expect.arrayContaining([
+      expect.objectContaining({ userId: 8, displayName: 'Текущий согласующий', role: 'approver' }),
+      expect.objectContaining({ userId: 10, displayName: 'Текущий наблюдатель', role: 'observer' }),
+    ]));
+  });
+
   it('sends a change comment with task edits', async () => {
     await renderJournal();
 

@@ -7854,6 +7854,12 @@ function TaskModal({
                 <div className="mb-2 text-sm font-semibold text-slate-700">Участники</div>
                 <ModernParticipantRow label="Согласующие" count={visibleApprovers.length} />
                 <ModernParticipantRow label="Наблюдатели" count={visibleObservers.length} />
+                {isReadOnly && (visibleApprovers.length > 0 || visibleObservers.length > 0) ? (
+                  <div className="mt-2 grid gap-2">
+                    {renderModernSelectedParticipantList('approver', visibleApprovers, 'task-modern-approver-list')}
+                    {renderModernSelectedParticipantList('observer', visibleObservers, 'task-modern-observer-list')}
+                  </div>
+                ) : null}
                 {!isReadOnly ? (
                   <div className="mt-2 grid gap-2">
                     <select
