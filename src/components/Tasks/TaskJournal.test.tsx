@@ -2793,6 +2793,41 @@ describe('TaskJournal', () => {
     ]));
   });
 
+  it.each(['legacy', 'modern'] as const)('keeps multiple observers selected in the %s task card', async (taskCardWindowMode) => {
+    await renderJournal([
+      createTask({
+        participants: [
+          { userId: 7, role: 'assignee', displayName: 'Администратор', approvalStatus: 'pending' },
+        ],
+      }),
+    ], {
+      assignees: [
+        { id: 7, name: 'Администратор', email: 'admin@example.com' },
+        { id: 10, name: 'Первый наблюдатель', email: 'first-observer@example.com' },
+        { id: 11, name: 'Второй наблюдатель', email: 'second-observer@example.com' },
+      ],
+      settings: { taskCardWindowMode },
+    });
+
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    const addObserverLabel = taskCardWindowMode === 'modern' ? 'Добавить наблюдателя' : 'Добавить: Наблюдатели';
+
+    fireEvent.change(within(card).getByLabelText(addObserverLabel), { target: { value: '10' } });
+    fireEvent.change(within(card).getByLabelText(addObserverLabel), { target: { value: '11' } });
+    fireEvent.click(within(card).getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
+    const [, payload] = apiMock.updateTaskJournalItem.mock.calls[0];
+    const observers = payload.participants.filter((participant: { role: string }) => participant.role === 'observer');
+
+    expect(observers).toHaveLength(2);
+    expect(observers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ userId: 10, displayName: 'Первый наблюдатель', role: 'observer' }),
+      expect.objectContaining({ userId: 11, displayName: 'Второй наблюдатель', role: 'observer' }),
+    ]));
+  });
+
   it('sends a change comment with task edits', async () => {
     await renderJournal();
 
