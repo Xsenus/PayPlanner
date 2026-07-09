@@ -1881,6 +1881,7 @@ export function TaskJournal({
   const [completionPromptError, setCompletionPromptError] = useState<string | null>(null);
   const [completionPromptSaving, setCompletionPromptSaving] = useState(false);
   const [deadlineChangeDecisionPrompt, setDeadlineChangeDecisionPrompt] = useState<DeadlineChangeDecisionPromptState>(null);
+  const [deadlineChangeDecisionDueAt, setDeadlineChangeDecisionDueAt] = useState('');
   const [deadlineChangeDecisionComment, setDeadlineChangeDecisionComment] = useState('');
   const [deadlineChangeDecisionError, setDeadlineChangeDecisionError] = useState<string | null>(null);
   const [deadlineChangeDecisionSaving, setDeadlineChangeDecisionSaving] = useState<'approve' | 'reject' | null>(null);
@@ -2537,6 +2538,7 @@ export function TaskJournal({
   useEffect(() => {
     if (!isApprovalsMode) {
       setDeadlineChangeDecisionPrompt(null);
+      setDeadlineChangeDecisionDueAt('');
       return;
     }
 
@@ -2546,6 +2548,7 @@ export function TaskJournal({
         getPendingDeadlineChangeRequests(task).some((request) => request.id === deadlineChangeDecisionPrompt.request.id));
       if (!stillPending) {
         setDeadlineChangeDecisionPrompt(null);
+        setDeadlineChangeDecisionDueAt('');
         setDeadlineChangeDecisionComment('');
         setDeadlineChangeDecisionError(null);
       }
@@ -2557,6 +2560,7 @@ export function TaskJournal({
     }
 
     setDeadlineChangeDecisionPrompt(pendingDeadlineChangeDecision);
+    setDeadlineChangeDecisionDueAt(toLocalInputValue(pendingDeadlineChangeDecision.request.requestedDueAt));
     setDeadlineChangeDecisionComment('');
     setDeadlineChangeDecisionError(null);
   }, [
@@ -2980,6 +2984,7 @@ export function TaskJournal({
 
   const resetDeadlineChangeDecisionPrompt = () => {
     setDeadlineChangeDecisionPrompt(null);
+    setDeadlineChangeDecisionDueAt('');
     setDeadlineChangeDecisionComment('');
     setDeadlineChangeDecisionError(null);
     setDeadlineChangeDecisionSaving(null);
@@ -2990,11 +2995,17 @@ export function TaskJournal({
 
     const { task, request } = deadlineChangeDecisionPrompt;
     const comment = deadlineChangeDecisionComment.trim();
+    if (!deadlineChangeDecisionDueAt) {
+      setDeadlineChangeDecisionError('Укажите дату и время нового срока.');
+      return;
+    }
+
+    const approvedDueAt = fromLocalInputValue(deadlineChangeDecisionDueAt);
     setDeadlineChangeDecisionSaving('approve');
     setDeadlineChangeDecisionError(null);
     try {
       await apiService.approveTaskJournalDeadlineChangeRequest(task.id, request.id, {
-        approvedDueAt: request.requestedDueAt,
+        approvedDueAt,
         comment: comment || null,
       });
       toast.success('Перенос срока согласован.', 'Согласования');
@@ -4086,9 +4097,16 @@ export function TaskJournal({
       {deadlineChangeDecisionPrompt ? (
         <TaskDeadlineChangeDecisionPrompt
           state={deadlineChangeDecisionPrompt}
+          approvedDueAt={deadlineChangeDecisionDueAt}
           comment={deadlineChangeDecisionComment}
           error={deadlineChangeDecisionError}
           saving={deadlineChangeDecisionSaving}
+          onApprovedDueAtChange={(value) => {
+            setDeadlineChangeDecisionDueAt(value);
+            if (deadlineChangeDecisionError) {
+              setDeadlineChangeDecisionError(null);
+            }
+          }}
           onCommentChange={(value) => {
             setDeadlineChangeDecisionComment(value);
             if (deadlineChangeDecisionError) {
@@ -4184,17 +4202,21 @@ function TaskCompletionResultPrompt({
 
 function TaskDeadlineChangeDecisionPrompt({
   state,
+  approvedDueAt,
   comment,
   error,
   saving,
+  onApprovedDueAtChange,
   onCommentChange,
   onApprove,
   onReject,
 }: {
   state: Exclude<DeadlineChangeDecisionPromptState, null>;
+  approvedDueAt: string;
   comment: string;
   error: string | null;
   saving: 'approve' | 'reject' | null;
+  onApprovedDueAtChange: (value: string) => void;
   onCommentChange: (value: string) => void;
   onApprove: () => void;
   onReject: () => void;
@@ -4248,6 +4270,23 @@ function TaskDeadlineChangeDecisionPrompt({
           <span className="font-semibold">Причина переноса:</span> {request.reason || 'Не указана'}
         </div>
 
+        <label className="mt-4 block text-sm font-semibold text-slate-700" htmlFor="deadline-change-approved-due-at">
+          Новый срок задачи
+        </label>
+        <input
+          id="deadline-change-approved-due-at"
+          type="datetime-local"
+          value={approvedDueAt}
+          onChange={(event) => onApprovedDueAtChange(event.target.value)}
+          className="mt-2 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:cursor-wait disabled:bg-slate-50"
+          disabled={Boolean(saving)}
+          aria-label="Новый срок задачи"
+          autoFocus
+        />
+        <p className="mt-2 text-sm text-slate-500">
+          По умолчанию указана дата, которую запросил исполнитель. Ее можно изменить перед согласованием.
+        </p>
+
         <label className="mt-4 block text-sm font-semibold text-slate-700" htmlFor="deadline-change-decision-comment">
           Комментарий к решению
         </label>
@@ -4259,7 +4298,6 @@ function TaskDeadlineChangeDecisionPrompt({
           rows={4}
           placeholder="Для отказа укажите причину. Для согласования комментарий можно оставить пустым."
           disabled={Boolean(saving)}
-          autoFocus
         />
         {error ? <p className="mt-2 text-sm font-semibold text-rose-600">{error}</p> : null}
 
@@ -4275,7 +4313,7 @@ function TaskDeadlineChangeDecisionPrompt({
           <button
             type="button"
             onClick={onApprove}
-            disabled={Boolean(saving)}
+            disabled={Boolean(saving) || !approvedDueAt}
             className="w-full rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60 sm:w-auto"
           >
             {saving === 'approve' ? 'Согласовываем...' : 'Согласовать перенос'}

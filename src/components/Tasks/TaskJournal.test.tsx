@@ -1436,10 +1436,18 @@ describe('TaskJournal', () => {
     expect(within(prompt).getByText('У вас запросили перенос срока по задаче')).toBeTruthy();
     expect(within(prompt).getByText('Документы будут готовы завтра')).toBeTruthy();
 
+    const approvedDueAtInput = within(prompt).getByLabelText('Новый срок задачи') as HTMLInputElement;
+    expect(approvedDueAtInput.value).toBe(toDatetimeLocalInputValue(new Date(requestedDueAt)));
+    const changedDueAt = new Date(requestedDueAt);
+    changedDueAt.setHours(changedDueAt.getHours() + 2);
+    fireEvent.change(approvedDueAtInput, {
+      target: { value: toDatetimeLocalInputValue(changedDueAt) },
+    });
+
     fireEvent.click(within(prompt).getByRole('button', { name: 'Согласовать перенос' }));
 
     await waitFor(() => expect(apiMock.approveTaskJournalDeadlineChangeRequest).toHaveBeenCalledWith(206, 902, {
-      approvedDueAt: requestedDueAt,
+      approvedDueAt: expect.not.stringMatching(requestedDueAt),
       comment: null,
     }));
   });
