@@ -2758,6 +2758,41 @@ describe('TaskJournal', () => {
     expect(payload.participants.filter((participant: { role: string; userId?: number | null }) => participant.role === 'assignee' && participant.userId === 7)).toHaveLength(1);
   });
 
+  it.each(['legacy', 'modern'] as const)('keeps multiple approvers selected in the %s task card', async (taskCardWindowMode) => {
+    await renderJournal([
+      createTask({
+        participants: [
+          { userId: 7, role: 'assignee', displayName: 'Администратор', approvalStatus: 'pending' },
+        ],
+      }),
+    ], {
+      assignees: [
+        { id: 7, name: 'Администратор', email: 'admin@example.com' },
+        { id: 8, name: 'Первый согласующий', email: 'first-approver@example.com' },
+        { id: 9, name: 'Второй согласующий', email: 'second-approver@example.com' },
+      ],
+      settings: { taskCardWindowMode },
+    });
+
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    const addApproverLabel = taskCardWindowMode === 'modern' ? 'Добавить согласующего' : 'Добавить: Согласующие';
+
+    fireEvent.change(within(card).getByLabelText(addApproverLabel), { target: { value: '8' } });
+    fireEvent.change(within(card).getByLabelText(addApproverLabel), { target: { value: '9' } });
+    fireEvent.click(within(card).getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
+    const [, payload] = apiMock.updateTaskJournalItem.mock.calls[0];
+    const approvers = payload.participants.filter((participant: { role: string }) => participant.role === 'approver');
+
+    expect(approvers).toHaveLength(2);
+    expect(approvers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ userId: 8, displayName: 'Первый согласующий', role: 'approver' }),
+      expect.objectContaining({ userId: 9, displayName: 'Второй согласующий', role: 'approver' }),
+    ]));
+  });
+
   it('sends a change comment with task edits', async () => {
     await renderJournal();
 

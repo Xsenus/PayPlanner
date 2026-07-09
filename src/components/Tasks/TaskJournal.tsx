@@ -6579,10 +6579,13 @@ function TaskModal({
 
   const addParticipant = (role: TaskJournalParticipantRole, assignee: TaskJournalAssignee) => {
     if (isReadOnly) return;
-    if (form.assigneeUserId === assignee.id || isParticipantSelected(role, assignee.id)) return;
 
     setForm((prev) => {
       const participants = prev.participants ?? [];
+      if (prev.assigneeUserId === assignee.id || participants.some((participant) => participant.role === role && participant.userId === assignee.id)) {
+        return prev;
+      }
+
       return {
         ...prev,
         participants: [
