@@ -2664,6 +2664,57 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.Kind).HasDatabaseName("IX_TaskJournalComments_Kind");
         });
 
+        modelBuilder.Entity<TaskJournalDeadlineChangeRequest>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.RequestedByName).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ReviewerName).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.Reason).HasMaxLength(1000).IsRequired();
+            entity.Property(e => e.Status).HasMaxLength(32).HasDefaultValue("pending").IsRequired();
+            entity.Property(e => e.DecisionComment).HasMaxLength(1000);
+            entity.Property(e => e.DecidedByName).HasMaxLength(256);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.TaskJournalItem)
+                .WithMany(e => e.DeadlineChangeRequests)
+                .HasForeignKey(e => e.TaskJournalItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.RequestedByUser)
+                .WithMany()
+                .HasForeignKey(e => e.RequestedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.ReviewerUser)
+                .WithMany()
+                .HasForeignKey(e => e.ReviewerUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.DecidedByUser)
+                .WithMany()
+                .HasForeignKey(e => e.DecidedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.CreatedComment)
+                .WithMany()
+                .HasForeignKey(e => e.CreatedCommentId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.DecisionCommentEntry)
+                .WithMany()
+                .HasForeignKey(e => e.DecisionCommentId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => e.TaskJournalItemId).HasDatabaseName("IX_TaskDeadlineChangeRequests_TaskJournalItemId");
+            entity.HasIndex(e => e.RequestedByUserId).HasDatabaseName("IX_TaskDeadlineChangeRequests_RequestedByUserId");
+            entity.HasIndex(e => e.ReviewerUserId).HasDatabaseName("IX_TaskDeadlineChangeRequests_ReviewerUserId");
+            entity.HasIndex(e => e.DecidedByUserId).HasDatabaseName("IX_TaskDeadlineChangeRequests_DecidedByUserId");
+            entity.HasIndex(e => e.CreatedCommentId).HasDatabaseName("IX_TaskDeadlineChangeRequests_CreatedCommentId");
+            entity.HasIndex(e => e.DecisionCommentId).HasDatabaseName("IX_TaskDeadlineChangeRequests_DecisionCommentId");
+            entity.HasIndex(e => new { e.TaskJournalItemId, e.Status }).HasDatabaseName("IX_TaskDeadlineChangeRequests_Task_Status");
+            entity.HasIndex(e => new { e.ReviewerUserId, e.Status, e.CreatedAt }).HasDatabaseName("IX_TaskDeadlineChangeRequests_Reviewer_Status_Created");
+        });
+
         modelBuilder.Entity<TaskJournalFile>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -2970,6 +3021,8 @@ public class PaymentContext : DbContext
         modelBuilder.Entity<StickyNoteBoardMember>()
             .HasQueryFilter(item => StickyNoteBoards.Any(parent => parent.Id == item.BoardId));
         modelBuilder.Entity<TaskJournalComment>()
+            .HasQueryFilter(item => TaskJournalItems.Any(parent => parent.Id == item.TaskJournalItemId));
+        modelBuilder.Entity<TaskJournalDeadlineChangeRequest>()
             .HasQueryFilter(item => TaskJournalItems.Any(parent => parent.Id == item.TaskJournalItemId));
         modelBuilder.Entity<TaskJournalFile>()
             .HasQueryFilter(item => TaskJournalItems.Any(parent => parent.Id == item.TaskJournalItemId));
@@ -3619,6 +3672,7 @@ public class PaymentContext : DbContext
     public DbSet<TaskJournalItem> TaskJournalItems { get; set; }
     public DbSet<TaskJournalParticipant> TaskJournalParticipants { get; set; }
     public DbSet<TaskJournalComment> TaskJournalComments { get; set; }
+    public DbSet<TaskJournalDeadlineChangeRequest> TaskJournalDeadlineChangeRequests { get; set; }
     public DbSet<TaskJournalFile> TaskJournalFiles { get; set; }
     public DbSet<NotificationDelivery> NotificationDeliveries { get; set; }
     public DbSet<UserNotification> UserNotifications { get; set; }

@@ -1141,12 +1141,24 @@ public class TasksController : ControllerBase
         }
 
         var reason = NormalizeOptional(request.Reason);
-        if (reason is not null && reason.Length > 1000)
+        if (reason is null)
+        {
+            return BadRequest(new { message = "Введите причину переноса срока задачи." });
+        }
+
+        if (reason.Length > 1000)
         {
             return BadRequest(new { message = "Причина переноса не должна превышать 1000 символов." });
         }
 
         var requestedDueAt = NormalizeUtcInstant(request.RequestedDueAt);
+        var hasPendingDeadlineChangeRequest = await _db.TaskJournalDeadlineChangeRequests
+            .AnyAsync(item => item.TaskJournalItemId == entity.Id && item.Status == "pending", ct);
+        if (hasPendingDeadlineChangeRequest)
+        {
+            return BadRequest(new { message = "По этой задаче уже есть активный запрос переноса срока." });
+        }
+
         var commentText = BuildDeadlineChangeRequestText(entity, access.DisplayName, requestedDueAt, reason);
         var comment = CreateTaskComment(
             entity.Id,
@@ -1161,6 +1173,20 @@ public class TasksController : ControllerBase
             }, JsonOptions));
 
         _db.TaskJournalComments.Add(comment);
+        _db.TaskJournalDeadlineChangeRequests.Add(new TaskJournalDeadlineChangeRequest
+        {
+            TaskJournalItemId = entity.Id,
+            RequestedByUserId = access.UserId,
+            RequestedByName = access.DisplayName,
+            ReviewerUserId = entity.AuthorUserId,
+            ReviewerName = entity.AuthorName,
+            CurrentDueAt = entity.DueAt,
+            RequestedDueAt = requestedDueAt,
+            Reason = reason,
+            Status = "pending",
+            CreatedComment = comment,
+            CreatedAt = DateTime.UtcNow,
+        });
         entity.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
 

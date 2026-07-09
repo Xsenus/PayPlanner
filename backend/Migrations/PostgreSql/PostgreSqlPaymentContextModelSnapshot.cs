@@ -6706,6 +6706,111 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.ToTable("TaskJournalComments");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.TaskJournalDeadlineChangeRequest", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp without time zone")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<int?>("CreatedCommentId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CurrentDueAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<DateTime?>("DecidedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("DecidedByName")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int?>("DecidedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DecisionComment")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int?>("DecisionCommentId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("DecisionDueAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("RequestedByName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int?>("RequestedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("RequestedDueAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<string>("ReviewerName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int?>("ReviewerUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("pending");
+
+                    b.Property<int>("TaskJournalItemId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedCommentId")
+                        .HasDatabaseName("IX_TaskDeadlineChangeRequests_CreatedCommentId");
+
+                    b.HasIndex("DecidedByUserId")
+                        .HasDatabaseName("IX_TaskDeadlineChangeRequests_DecidedByUserId");
+
+                    b.HasIndex("DecisionCommentId")
+                        .HasDatabaseName("IX_TaskDeadlineChangeRequests_DecisionCommentId");
+
+                    b.HasIndex("RequestedByUserId")
+                        .HasDatabaseName("IX_TaskDeadlineChangeRequests_RequestedByUserId");
+
+                    b.HasIndex("ReviewerUserId")
+                        .HasDatabaseName("IX_TaskDeadlineChangeRequests_ReviewerUserId");
+
+                    b.HasIndex("TaskJournalItemId")
+                        .HasDatabaseName("IX_TaskDeadlineChangeRequests_TaskJournalItemId");
+
+                    b.HasIndex("TaskJournalItemId", "Status")
+                        .HasDatabaseName("IX_TaskDeadlineChangeRequests_Task_Status");
+
+                    b.HasIndex("ReviewerUserId", "Status", "CreatedAt")
+                        .HasDatabaseName("IX_TaskDeadlineChangeRequests_Reviewer_Status_Created");
+
+                    b.ToTable("TaskJournalDeadlineChangeRequests");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.TaskJournalFile", b =>
                 {
                     b.Property<int>("Id")
@@ -8841,7 +8946,7 @@ namespace PayPlanner.Api.Migrations.PostgreSql
             modelBuilder.Entity("PayPlanner.Api.Models.ContractAct", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.Act", "Act")
-                        .WithMany()
+                        .WithMany("ContractActs")
                         .HasForeignKey("ActId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
@@ -9428,6 +9533,52 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("TaskJournalItem");
                 });
 
+            modelBuilder.Entity("PayPlanner.Api.Models.TaskJournalDeadlineChangeRequest", b =>
+                {
+                    b.HasOne("PayPlanner.Api.Models.TaskJournalComment", "CreatedComment")
+                        .WithMany()
+                        .HasForeignKey("CreatedCommentId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.User", "DecidedByUser")
+                        .WithMany()
+                        .HasForeignKey("DecidedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.TaskJournalComment", "DecisionCommentEntry")
+                        .WithMany()
+                        .HasForeignKey("DecisionCommentId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.User", "RequestedByUser")
+                        .WithMany()
+                        .HasForeignKey("RequestedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.User", "ReviewerUser")
+                        .WithMany()
+                        .HasForeignKey("ReviewerUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.TaskJournalItem", "TaskJournalItem")
+                        .WithMany("DeadlineChangeRequests")
+                        .HasForeignKey("TaskJournalItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("CreatedComment");
+
+                    b.Navigation("DecidedByUser");
+
+                    b.Navigation("DecisionCommentEntry");
+
+                    b.Navigation("RequestedByUser");
+
+                    b.Navigation("ReviewerUser");
+
+                    b.Navigation("TaskJournalItem");
+                });
+
             modelBuilder.Entity("PayPlanner.Api.Models.TaskJournalFile", b =>
                 {
                     b.HasOne("PayPlanner.Api.Models.TaskJournalItem", "TaskJournalItem")
@@ -9724,6 +9875,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
             modelBuilder.Entity("PayPlanner.Api.Models.Act", b =>
                 {
+                    b.Navigation("ContractActs");
+
                     b.Navigation("CorrectionActs");
 
                     b.Navigation("LineItems");
@@ -9940,6 +10093,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
             modelBuilder.Entity("PayPlanner.Api.Models.TaskJournalItem", b =>
                 {
                     b.Navigation("Comments");
+
+                    b.Navigation("DeadlineChangeRequests");
 
                     b.Navigation("Files");
 

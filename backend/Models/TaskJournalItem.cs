@@ -86,6 +86,7 @@ public class TaskJournalItem
     public ICollection<TaskJournalParticipant> Participants { get; set; } = new List<TaskJournalParticipant>();
     public ICollection<TaskJournalComment> Comments { get; set; } = new List<TaskJournalComment>();
     public ICollection<TaskJournalFile> Files { get; set; } = new List<TaskJournalFile>();
+    public ICollection<TaskJournalDeadlineChangeRequest> DeadlineChangeRequests { get; set; } = new List<TaskJournalDeadlineChangeRequest>();
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }

@@ -1021,6 +1021,68 @@ public class TasksControllerTests
             .Where(item => item.Id == task.Id)
             .Select(item => item.DueAt)
             .SingleAsync());
+
+        var deadlineRequest = await db.TaskJournalDeadlineChangeRequests.SingleAsync(item => item.TaskJournalItemId == task.Id);
+        Assert.Equal("pending", deadlineRequest.Status);
+        Assert.Equal(originalDueAt, deadlineRequest.CurrentDueAt);
+        Assert.Equal(requestedDueAt, deadlineRequest.RequestedDueAt);
+        Assert.Equal("Жду документы от клиента.", deadlineRequest.Reason);
+        Assert.Equal(assignee.Id, deadlineRequest.RequestedByUserId);
+        Assert.Equal("Исполнитель", deadlineRequest.RequestedByName);
+        Assert.Equal(author.Id, deadlineRequest.ReviewerUserId);
+        Assert.Equal("Автор", deadlineRequest.ReviewerName);
+        Assert.Equal(comment.Id, deadlineRequest.CreatedCommentId);
+    }
+
+    [Fact]
+    public async Task CreateDeadlineChangeRequest_RequiresReason()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "deadline-reason-author@example.com", "Автор");
+        var assignee = await CreateTaskUserAsync(db, "deadline-reason-assignee@example.com", "Исполнитель", canEdit: false);
+        var client = await CreateClientAsync(db, "Клиент причины переноса");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id);
+        var controller = CreateController(db, new RecordingNotificationService(), assignee);
+
+        var result = await controller.CreateDeadlineChangeRequest(task.Id, new CreateTaskJournalDeadlineChangeRequest
+        {
+            RequestedDueAt = task.DueAt.AddDays(1),
+            Reason = "   ",
+        }, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.Contains("причину", badRequest.Value?.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.False(await db.TaskJournalComments.AnyAsync(item => item.TaskJournalItemId == task.Id));
+        Assert.False(await db.TaskJournalDeadlineChangeRequests.AnyAsync(item => item.TaskJournalItemId == task.Id));
+    }
+
+    [Fact]
+    public async Task CreateDeadlineChangeRequest_RejectsDuplicatePendingRequest()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "deadline-duplicate-author@example.com", "Автор");
+        var assignee = await CreateTaskUserAsync(db, "deadline-duplicate-assignee@example.com", "Исполнитель", canEdit: false);
+        var client = await CreateClientAsync(db, "Клиент повторного переноса");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id);
+        var controller = CreateController(db, new RecordingNotificationService(), assignee);
+
+        var firstResult = await controller.CreateDeadlineChangeRequest(task.Id, new CreateTaskJournalDeadlineChangeRequest
+        {
+            RequestedDueAt = task.DueAt.AddDays(1),
+            Reason = "Нужны дополнительные материалы.",
+        }, CancellationToken.None);
+        Assert.IsType<CreatedResult>(firstResult.Result);
+
+        var secondResult = await controller.CreateDeadlineChangeRequest(task.Id, new CreateTaskJournalDeadlineChangeRequest
+        {
+            RequestedDueAt = task.DueAt.AddDays(2),
+            Reason = "Пробую отправить второй запрос.",
+        }, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(secondResult.Result);
+        Assert.Contains("активный запрос", badRequest.Value?.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, await db.TaskJournalDeadlineChangeRequests.CountAsync(item => item.TaskJournalItemId == task.Id));
+        Assert.Equal(1, await db.TaskJournalComments.CountAsync(item => item.TaskJournalItemId == task.Id));
     }
 
     [Fact]
