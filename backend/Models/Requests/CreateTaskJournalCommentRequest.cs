@@ -10,3 +10,9 @@ public class CreateTaskJournalDeadlineChangeRequest
     public DateTime RequestedDueAt { get; set; }
     public string? Reason { get; set; }
 }
+
+public class ApproveTaskJournalDeadlineChangeRequest
+{
+    public DateTime ApprovedDueAt { get; set; }
+    public string? Comment { get; set; }
+}

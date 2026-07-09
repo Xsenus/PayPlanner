@@ -1086,6 +1086,135 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task ApproveDeadlineChangeRequest_UpdatesDueAtAndClosesRequest()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "deadline-approve-author@example.com", "Автор");
+        var assignee = await CreateTaskUserAsync(db, "deadline-approve-assignee@example.com", "Исполнитель", canEdit: false);
+        var client = await CreateClientAsync(db, "Клиент согласования переноса");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id);
+        var originalDueAt = task.DueAt;
+        var requestedDueAt = originalDueAt.AddDays(2);
+        var approvedDueAt = originalDueAt.AddDays(3);
+        var assigneeController = CreateController(db, new RecordingNotificationService(), assignee);
+
+        var createResult = await assigneeController.CreateDeadlineChangeRequest(task.Id, new CreateTaskJournalDeadlineChangeRequest
+        {
+            RequestedDueAt = requestedDueAt,
+            Reason = "Не успеваю получить документы.",
+        }, CancellationToken.None);
+        Assert.IsType<CreatedResult>(createResult.Result);
+        var deadlineRequest = await db.TaskJournalDeadlineChangeRequests.SingleAsync(item => item.TaskJournalItemId == task.Id);
+        var notifications = new RecordingNotificationService();
+        var authorController = CreateController(db, notifications, author);
+
+        var approveResult = await authorController.ApproveDeadlineChangeRequest(task.Id, deadlineRequest.Id, new ApproveTaskJournalDeadlineChangeRequest
+        {
+            ApprovedDueAt = approvedDueAt,
+            Comment = "Согласовано до новой даты.",
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(approveResult.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(ok.Value);
+        Assert.Equal(DateTime.SpecifyKind(approvedDueAt, DateTimeKind.Utc).ToString("O"), dto.DueAt);
+
+        var storedTask = await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id);
+        Assert.Equal(approvedDueAt, storedTask.DueAt);
+
+        var storedRequest = await db.TaskJournalDeadlineChangeRequests.AsNoTracking().SingleAsync(item => item.Id == deadlineRequest.Id);
+        Assert.Equal("approved", storedRequest.Status);
+        Assert.Equal(approvedDueAt, storedRequest.DecisionDueAt);
+        Assert.Equal("Согласовано до новой даты.", storedRequest.DecisionComment);
+        Assert.Equal(author.Id, storedRequest.DecidedByUserId);
+        Assert.Equal("Автор", storedRequest.DecidedByName);
+        Assert.NotNull(storedRequest.DecidedAt);
+        Assert.NotNull(storedRequest.DecisionCommentId);
+
+        var comments = await db.TaskJournalComments.AsNoTracking()
+            .Where(item => item.TaskJournalItemId == task.Id)
+            .OrderBy(item => item.Id)
+            .ToListAsync();
+        Assert.Equal(2, comments.Count);
+        Assert.Contains("согласовал перенос срока", comments[1].Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Согласовано до новой даты", comments[1].Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Single(notifications.ChangedTasks);
+        Assert.Equal(task.Id, notifications.ChangedTasks[0].TaskId);
+        Assert.Contains("срок", notifications.ChangedTasks[0].ChangeLabels[0], StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ApproveDeadlineChangeRequest_ForbidsExecutor()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "deadline-approve-forbid-author@example.com", "Автор");
+        var assignee = await CreateTaskUserAsync(db, "deadline-approve-forbid-assignee@example.com", "Исполнитель", canEdit: false);
+        var client = await CreateClientAsync(db, "Клиент запрета согласования");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id);
+        var originalDueAt = task.DueAt;
+        var assigneeController = CreateController(db, new RecordingNotificationService(), assignee);
+
+        var createResult = await assigneeController.CreateDeadlineChangeRequest(task.Id, new CreateTaskJournalDeadlineChangeRequest
+        {
+            RequestedDueAt = originalDueAt.AddDays(1),
+            Reason = "Нужно больше времени.",
+        }, CancellationToken.None);
+        Assert.IsType<CreatedResult>(createResult.Result);
+        var deadlineRequest = await db.TaskJournalDeadlineChangeRequests.SingleAsync(item => item.TaskJournalItemId == task.Id);
+
+        var approveResult = await assigneeController.ApproveDeadlineChangeRequest(task.Id, deadlineRequest.Id, new ApproveTaskJournalDeadlineChangeRequest
+        {
+            ApprovedDueAt = originalDueAt.AddDays(1),
+        }, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(approveResult.Result);
+        var storedTask = await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id);
+        Assert.Equal(originalDueAt, storedTask.DueAt);
+        var storedRequest = await db.TaskJournalDeadlineChangeRequests.AsNoTracking().SingleAsync(item => item.Id == deadlineRequest.Id);
+        Assert.Equal("pending", storedRequest.Status);
+    }
+
+    [Fact]
+    public async Task ApproveDeadlineChangeRequest_RejectsAlreadyProcessedRequest()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "deadline-approve-processed-author@example.com", "Автор");
+        var assignee = await CreateTaskUserAsync(db, "deadline-approve-processed-assignee@example.com", "Исполнитель", canEdit: false);
+        var client = await CreateClientAsync(db, "Клиент повторного согласования");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id);
+        var originalDueAt = task.DueAt;
+        var deadlineRequest = new TaskJournalDeadlineChangeRequest
+        {
+            TaskJournalItemId = task.Id,
+            RequestedByUserId = assignee.Id,
+            RequestedByName = "Исполнитель",
+            ReviewerUserId = author.Id,
+            ReviewerName = "Автор",
+            CurrentDueAt = originalDueAt,
+            RequestedDueAt = originalDueAt.AddDays(1),
+            Reason = "Уже обработано.",
+            Status = "approved",
+            DecisionDueAt = originalDueAt.AddDays(1),
+            DecidedByUserId = author.Id,
+            DecidedByName = "Автор",
+            DecidedAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.TaskJournalDeadlineChangeRequests.Add(deadlineRequest);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.ApproveDeadlineChangeRequest(task.Id, deadlineRequest.Id, new ApproveTaskJournalDeadlineChangeRequest
+        {
+            ApprovedDueAt = originalDueAt.AddDays(2),
+        }, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.Contains("уже обработан", badRequest.Value?.ToString(), StringComparison.OrdinalIgnoreCase);
+        var storedTask = await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id);
+        Assert.Equal(originalDueAt, storedTask.DueAt);
+    }
+
+    [Fact]
     public async Task CreateDeadlineChangeRequest_ReturnsNotFoundForHiddenTask()
     {
         await using var db = await CreateContextAsync();

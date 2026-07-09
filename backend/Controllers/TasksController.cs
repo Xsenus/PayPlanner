@@ -1193,6 +1193,103 @@ public class TasksController : ControllerBase
         return Created($"/api/tasks/{entity.Id}/comments/{comment.Id}", MapComment(comment));
     }
 
+    [HttpPost("{id:int}/deadline-change-requests/{requestId:int}/approve")]
+    public async Task<ActionResult<TaskJournalItemDto>> ApproveDeadlineChangeRequest(
+        int id,
+        int requestId,
+        [FromBody] ApproveTaskJournalDeadlineChangeRequest request,
+        CancellationToken ct)
+    {
+        var access = await GetTaskAccessAsync(ct);
+        if (access is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!access.IsAdmin && access.Permission?.CanView != true)
+        {
+            return Forbid();
+        }
+
+        var entity = await BuildVisibleTasksQuery(access).FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (entity is null)
+        {
+            return NotFound();
+        }
+
+        var deadlineRequest = await _db.TaskJournalDeadlineChangeRequests
+            .FirstOrDefaultAsync(item => item.Id == requestId && item.TaskJournalItemId == entity.Id, ct);
+        if (deadlineRequest is null)
+        {
+            return NotFound();
+        }
+
+        if (!string.Equals(deadlineRequest.Status, "pending", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new { message = "Запрос переноса срока уже обработан." });
+        }
+
+        if (!access.IsAdmin && !IsTaskAuthor(entity, access.UserId))
+        {
+            return Forbid();
+        }
+
+        if (request.ApprovedDueAt == default)
+        {
+            return BadRequest(new { message = "Укажите новый срок задачи." });
+        }
+
+        var approvedDueAt = NormalizeUtcInstant(request.ApprovedDueAt);
+        var decisionComment = NormalizeOptional(request.Comment);
+        if (decisionComment is not null && decisionComment.Length > 1000)
+        {
+            return BadRequest(new { message = "Комментарий решения не должен превышать 1000 символов." });
+        }
+
+        var previousDueAt = entity.DueAt;
+        var decidedAt = DateTime.UtcNow;
+        entity.DueAt = approvedDueAt;
+        entity.UpdatedAt = decidedAt;
+
+        var decisionHistory = CreateTaskComment(
+            entity.Id,
+            access,
+            "system",
+            BuildDeadlineChangeApprovalText(access.DisplayName, previousDueAt, approvedDueAt, decisionComment),
+            JsonSerializer.Serialize(new
+            {
+                type = "deadlineChangeApproved",
+                deadlineChangeRequestId = deadlineRequest.Id,
+                requestedByUserId = deadlineRequest.RequestedByUserId,
+                requestedByName = deadlineRequest.RequestedByName,
+                reviewerUserId = deadlineRequest.ReviewerUserId,
+                reviewerName = deadlineRequest.ReviewerName,
+                previousDueAt = ToIso(previousDueAt),
+                requestedDueAt = ToIso(deadlineRequest.RequestedDueAt),
+                approvedDueAt = ToIso(approvedDueAt),
+                decisionComment,
+                decidedAt = ToIso(decidedAt),
+            }, JsonOptions));
+        _db.TaskJournalComments.Add(decisionHistory);
+
+        deadlineRequest.Status = "approved";
+        deadlineRequest.DecisionDueAt = approvedDueAt;
+        deadlineRequest.DecisionComment = decisionComment;
+        deadlineRequest.DecidedByUserId = access.UserId;
+        deadlineRequest.DecidedByName = access.DisplayName;
+        deadlineRequest.DecidedAt = decidedAt;
+        deadlineRequest.DecisionCommentEntry = decisionHistory;
+        deadlineRequest.UpdatedAt = decidedAt;
+
+        await _db.SaveChangesAsync(ct);
+        var changeLabels = new[] { $"срок: {FormatHistoryDateTime(previousDueAt)} -> {FormatHistoryDateTime(approvedDueAt)}" };
+        await _notificationService.NotifyTaskChangedAsync(entity, changeLabels, access.DisplayName, access.UserId, decisionComment, ct);
+        await NotifyTaskScheduleConflictIfNeededAsync(entity, access, ct);
+        await SafeSyncExternalCalendarTaskAsync(entity.Id, ct);
+
+        return Ok(Map(entity));
+    }
+
     [HttpGet("{id:int}/files")]
     public async Task<ActionResult<IReadOnlyList<TaskJournalFileDto>>> GetFiles(int id, CancellationToken ct)
     {
@@ -4895,6 +4992,18 @@ public class TasksController : ControllerBase
         return string.IsNullOrWhiteSpace(reason)
             ? text
             : $"{text} Причина: {reason}";
+    }
+
+    private static string BuildDeadlineChangeApprovalText(
+        string reviewerName,
+        DateTime previousDueAt,
+        DateTime approvedDueAt,
+        string? decisionComment)
+    {
+        var text = $"{reviewerName} согласовал перенос срока задачи с {FormatHistoryDateTime(previousDueAt)} на {FormatHistoryDateTime(approvedDueAt)}.";
+        return string.IsNullOrWhiteSpace(decisionComment)
+            ? text
+            : $"{text} Комментарий: {decisionComment}";
     }
 
     private static string FormatHistoryDateTime(DateTime value)
