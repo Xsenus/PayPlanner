@@ -1328,7 +1328,7 @@ describe('TaskJournal', () => {
     });
 
     expect(screen.getByRole('heading', { name: 'Согласования' })).toBeTruthy();
-    expect(screen.getByText(approvalTask.title)).toBeTruthy();
+    expect(screen.getAllByText(approvalTask.title).length).toBeGreaterThan(0);
     expect(screen.queryByText(laterApprovalTask.title)).toBeNull();
     expect(screen.queryByText(regularTask.title)).toBeNull();
   });
@@ -1467,6 +1467,104 @@ describe('TaskJournal', () => {
 
     expect(screen.queryByRole('button', { name: 'Согласовать' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'На доработку' })).toBeNull();
+  });
+
+  it('shows a forced approval decision prompt for the current approver in approvals mode', async () => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Согласующий', email: 'approver@example.com' };
+    permissionsState.taskCanEdit = false;
+
+    await renderJournal([
+      createTask({
+        status: 'onApproval',
+        result: 'Исполнитель подготовил документы и приложил результат.',
+        participants: [
+          { id: 76, userId: 6, role: 'approver', displayName: 'Первый согласующий', sortOrder: 0, approvalStatus: 'approved' },
+          { id: 77, userId: 7, role: 'approver', displayName: 'Согласующий', sortOrder: 1, approvalStatus: 'pending' },
+          { id: 78, userId: 8, role: 'approver', displayName: 'Следующий согласующий', sortOrder: 2, approvalStatus: 'pending' },
+        ],
+      }),
+    ], { mode: 'approvals' });
+
+    const prompt = await screen.findByTestId('task-approval-decision-prompt');
+    expect(within(prompt).getByRole('heading', { name: 'У вас задача на согласовании' })).toBeTruthy();
+    expect(within(prompt).getByText('Исполнитель подготовил документы и приложил результат.')).toBeTruthy();
+
+    fireEvent.click(within(prompt).getByRole('button', { name: 'Согласовать' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalApproval).toHaveBeenCalledWith(
+      101,
+      'approved',
+      'Исполнитель подготовил документы и приложил результат.',
+      77,
+      undefined,
+    ));
+  });
+
+  it('requires a revision comment in the forced approval decision prompt', async () => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Согласующий', email: 'approver@example.com' };
+    permissionsState.taskCanEdit = false;
+
+    await renderJournal([
+      createTask({
+        status: 'onApproval',
+        result: 'Результат на проверку.',
+        participants: [
+          { id: 77, userId: 7, role: 'approver', displayName: 'Согласующий', sortOrder: 0, approvalStatus: 'pending' },
+        ],
+      }),
+    ], { mode: 'approvals' });
+
+    const prompt = await screen.findByTestId('task-approval-decision-prompt');
+    fireEvent.click(within(prompt).getByRole('button', { name: 'Вернуть на доработку' }));
+
+    expect(within(prompt).getByText('Напишите, что нужно исправить перед повторным согласованием.')).toBeTruthy();
+    expect(apiMock.updateTaskJournalApproval).not.toHaveBeenCalled();
+
+    fireEvent.change(within(prompt).getByLabelText('Комментарий для возврата на доработку'), {
+      target: { value: 'Нужно приложить акт и уточнить дату.' },
+    });
+    fireEvent.change(within(prompt).getByLabelText('Срок доработки'), {
+      target: { value: '2099-01-10T10:30' },
+    });
+    fireEvent.click(within(prompt).getByRole('button', { name: 'Вернуть на доработку' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalApproval).toHaveBeenCalledWith(
+      101,
+      'revisionRequested',
+      'Нужно приложить акт и уточнить дату.',
+      77,
+      undefined,
+      expect.any(String),
+    ));
+  });
+
+  it('lets the final approver complete the task from the forced approval decision prompt', async () => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Согласующий', email: 'approver@example.com' };
+    permissionsState.taskCanEdit = false;
+
+    await renderJournal([
+      createTask({
+        status: 'onApproval',
+        result: 'Все работы выполнены.',
+        participants: [
+          { id: 77, userId: 7, role: 'approver', displayName: 'Согласующий', sortOrder: 0, approvalStatus: 'pending' },
+        ],
+      }),
+    ], { mode: 'approvals' });
+
+    const prompt = await screen.findByTestId('task-approval-decision-prompt');
+    fireEvent.click(within(prompt).getByRole('button', { name: 'Согласовать и завершить' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalApproval).toHaveBeenCalledWith(
+      101,
+      'approved',
+      'Все работы выполнены.',
+      77,
+      'complete',
+    ));
   });
 
   it('lets the current final approver choose whether to complete the task from view mode', async () => {

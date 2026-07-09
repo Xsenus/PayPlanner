@@ -114,6 +114,10 @@ type DeadlineChangeDecisionPromptState = {
   task: TaskJournalItem;
   request: TaskJournalDeadlineChangeRequest;
 } | null;
+type ApprovalDecisionPromptState = {
+  task: TaskJournalItem;
+  participant: TaskJournalParticipant;
+} | null;
 type TaskJournalMode = 'journal' | 'approvals';
 type TaskApprovalFinalAction = 'complete' | 'returnToAssignee';
 type TaskJournalProps = {
@@ -1886,6 +1890,11 @@ export function TaskJournal({
   const [deadlineChangeDecisionComment, setDeadlineChangeDecisionComment] = useState('');
   const [deadlineChangeDecisionError, setDeadlineChangeDecisionError] = useState<string | null>(null);
   const [deadlineChangeDecisionSaving, setDeadlineChangeDecisionSaving] = useState<'approve' | 'reject' | null>(null);
+  const [approvalDecisionPrompt, setApprovalDecisionPrompt] = useState<ApprovalDecisionPromptState>(null);
+  const [approvalDecisionRevisionText, setApprovalDecisionRevisionText] = useState('');
+  const [approvalDecisionRevisionDueAt, setApprovalDecisionRevisionDueAt] = useState('');
+  const [approvalDecisionError, setApprovalDecisionError] = useState<string | null>(null);
+  const [approvalDecisionSaving, setApprovalDecisionSaving] = useState<'approve' | 'approveComplete' | 'approveReturn' | 'revision' | null>(null);
   const [highlightedTaskId, setHighlightedTaskId] = useState<number | null>(routeTaskId);
   const [calendarAnchorDate, setCalendarAnchorDate] = useState(() => getCurrentCalendarDate());
   const [calendarSelectedDate, setCalendarSelectedDate] = useState(() => getCurrentCalendarDate());
@@ -2536,6 +2545,29 @@ export function TaskJournal({
     return null;
   }, [currentUserId, isAdminUser, isApprovalsMode, tasks]);
 
+  const pendingApprovalDecision = useMemo<Exclude<ApprovalDecisionPromptState, null> | null>(() => {
+    if (!isApprovalsMode) {
+      return null;
+    }
+
+    for (const task of tasks) {
+      if (task.status !== 'onApproval' && task.status !== 'overdueApproval') {
+        continue;
+      }
+
+      const participant = getCurrentPendingApprover(task);
+      if (!participant) {
+        continue;
+      }
+
+      if (isAdminUser || (currentUserId !== null && participant.userId === currentUserId)) {
+        return { task, participant };
+      }
+    }
+
+    return null;
+  }, [currentUserId, isAdminUser, isApprovalsMode, tasks]);
+
   useEffect(() => {
     if (!isApprovalsMode) {
       setDeadlineChangeDecisionPrompt(null);
@@ -2556,7 +2588,7 @@ export function TaskJournal({
       return;
     }
 
-    if (!pendingDeadlineChangeDecision || modal || completionPromptTask || deadlineChangeDecisionSaving) {
+    if (!pendingDeadlineChangeDecision || modal || completionPromptTask || deadlineChangeDecisionSaving || approvalDecisionPrompt || approvalDecisionSaving) {
       return;
     }
 
@@ -2571,6 +2603,69 @@ export function TaskJournal({
     isApprovalsMode,
     modal,
     pendingDeadlineChangeDecision,
+    approvalDecisionPrompt,
+    approvalDecisionSaving,
+    tasks,
+  ]);
+
+  useEffect(() => {
+    if (!isApprovalsMode) {
+      setApprovalDecisionPrompt(null);
+      setApprovalDecisionRevisionText('');
+      setApprovalDecisionRevisionDueAt('');
+      setApprovalDecisionError(null);
+      return;
+    }
+
+    if (approvalDecisionPrompt) {
+      const stillPending = tasks.some((task) => {
+        if (task.id !== approvalDecisionPrompt.task.id || (task.status !== 'onApproval' && task.status !== 'overdueApproval')) {
+          return false;
+        }
+        const participant = getCurrentPendingApprover(task);
+        return Boolean(
+          participant
+          && participant.id === approvalDecisionPrompt.participant.id
+          && (isAdminUser || (currentUserId !== null && participant.userId === currentUserId)),
+        );
+      });
+      if (!stillPending) {
+        setApprovalDecisionPrompt(null);
+        setApprovalDecisionRevisionText('');
+        setApprovalDecisionRevisionDueAt('');
+        setApprovalDecisionError(null);
+      }
+      return;
+    }
+
+    if (
+      !pendingApprovalDecision
+      || pendingDeadlineChangeDecision
+      || modal
+      || completionPromptTask
+      || deadlineChangeDecisionPrompt
+      || deadlineChangeDecisionSaving
+      || approvalDecisionSaving
+    ) {
+      return;
+    }
+
+    setApprovalDecisionPrompt(pendingApprovalDecision);
+    setApprovalDecisionRevisionText('');
+    setApprovalDecisionRevisionDueAt('');
+    setApprovalDecisionError(null);
+  }, [
+    approvalDecisionPrompt,
+    approvalDecisionSaving,
+    completionPromptTask,
+    currentUserId,
+    deadlineChangeDecisionPrompt,
+    deadlineChangeDecisionSaving,
+    isAdminUser,
+    isApprovalsMode,
+    modal,
+    pendingDeadlineChangeDecision,
+    pendingApprovalDecision,
     tasks,
   ]);
 
@@ -3172,8 +3267,63 @@ export function TaskJournal({
       closeTaskModal();
       await refreshTasks();
       emitTaskChange();
+      return true;
     } catch (error) {
       toast.error(extractDisplayErrorMessage(error, 'Не удалось сохранить решение по согласованию.'), 'Журнал задач');
+      return false;
+    }
+  };
+
+  const resetApprovalDecisionPrompt = () => {
+    setApprovalDecisionPrompt(null);
+    setApprovalDecisionRevisionText('');
+    setApprovalDecisionRevisionDueAt('');
+    setApprovalDecisionError(null);
+    setApprovalDecisionSaving(null);
+  };
+
+  const approvePromptDecision = async (finalAction?: TaskApprovalFinalAction) => {
+    if (!approvalDecisionPrompt || approvalDecisionSaving) return;
+
+    const savingState =
+      finalAction === 'complete'
+        ? 'approveComplete'
+        : finalAction === 'returnToAssignee'
+          ? 'approveReturn'
+          : 'approve';
+
+    setApprovalDecisionSaving(savingState);
+    setApprovalDecisionError(null);
+    const { task, participant } = approvalDecisionPrompt;
+    const saved = await handleApprovalDecision(task.id, 'approved', task.result.trim(), participant.id, finalAction);
+    if (saved) {
+      resetApprovalDecisionPrompt();
+    } else {
+      setApprovalDecisionError('Не удалось сохранить решение по согласованию. Проверьте данные и попробуйте еще раз.');
+      setApprovalDecisionSaving(null);
+    }
+  };
+
+  const returnPromptDecisionToRevision = async () => {
+    if (!approvalDecisionPrompt || approvalDecisionSaving) return;
+
+    const text = approvalDecisionRevisionText.trim();
+    if (!text) {
+      setApprovalDecisionError('Напишите, что нужно исправить перед повторным согласованием.');
+      return;
+    }
+
+    const revisionDueAt = approvalDecisionRevisionDueAt ? fromLocalInputValue(approvalDecisionRevisionDueAt) : null;
+    const { task, participant } = approvalDecisionPrompt;
+
+    setApprovalDecisionSaving('revision');
+    setApprovalDecisionError(null);
+    const saved = await handleApprovalDecision(task.id, 'revisionRequested', text, participant.id, undefined, revisionDueAt);
+    if (saved) {
+      resetApprovalDecisionPrompt();
+    } else {
+      setApprovalDecisionError('Не удалось вернуть задачу на доработку. Проверьте данные и попробуйте еще раз.');
+      setApprovalDecisionSaving(null);
     }
   };
 
@@ -4118,6 +4268,31 @@ export function TaskJournal({
           onReject={() => void rejectDeadlineChangeDecision()}
         />
       ) : null}
+      {approvalDecisionPrompt ? (
+        <TaskApprovalDecisionPrompt
+          state={approvalDecisionPrompt}
+          revisionText={approvalDecisionRevisionText}
+          revisionDueAt={approvalDecisionRevisionDueAt}
+          error={approvalDecisionError}
+          saving={approvalDecisionSaving}
+          onRevisionTextChange={(value) => {
+            setApprovalDecisionRevisionText(value);
+            if (approvalDecisionError) {
+              setApprovalDecisionError(null);
+            }
+          }}
+          onRevisionDueAtChange={(value) => {
+            setApprovalDecisionRevisionDueAt(value);
+            if (approvalDecisionError) {
+              setApprovalDecisionError(null);
+            }
+          }}
+          onApprove={() => void approvePromptDecision()}
+          onApproveComplete={() => void approvePromptDecision('complete')}
+          onApproveReturnToAssignee={() => void approvePromptDecision('returnToAssignee')}
+          onReturnToRevision={() => void returnPromptDecisionToRevision()}
+        />
+      ) : null}
     </div>
   );
 }
@@ -4201,6 +4376,165 @@ function TaskCompletionResultPrompt({
           >
             {saving ? 'Сохраняем...' : submitLabel}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TaskApprovalDecisionPrompt({
+  state,
+  revisionText,
+  revisionDueAt,
+  error,
+  saving,
+  onRevisionTextChange,
+  onRevisionDueAtChange,
+  onApprove,
+  onApproveComplete,
+  onApproveReturnToAssignee,
+  onReturnToRevision,
+}: {
+  state: Exclude<ApprovalDecisionPromptState, null>;
+  revisionText: string;
+  revisionDueAt: string;
+  error: string | null;
+  saving: 'approve' | 'approveComplete' | 'approveReturn' | 'revision' | null;
+  onRevisionTextChange: (value: string) => void;
+  onRevisionDueAtChange: (value: string) => void;
+  onApprove: () => void;
+  onApproveComplete: () => void;
+  onApproveReturnToAssignee: () => void;
+  onReturnToRevision: () => void;
+}) {
+  const { task, participant } = state;
+  const approvers = getOrderedApprovers(task);
+  const isFinalApprover = approvers.every((item) => item === participant || item.approvalStatus === 'approved');
+  const revisionDisabled = Boolean(saving);
+  const resultText = task.result.trim() || 'Результат по задаче не заполнен.';
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto bg-slate-950/55 px-3 py-4 backdrop-blur-sm sm:items-center sm:px-4 sm:py-6">
+      <div
+        className="max-h-[calc(100vh-2rem)] w-full max-w-[min(48rem,calc(100vw-1.5rem))] overflow-y-auto rounded-2xl border border-emerald-200 bg-white p-4 shadow-2xl sm:p-6"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="task-approval-decision-title"
+        data-testid="task-approval-decision-prompt"
+      >
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-700">Согласование задачи</p>
+            <h2 id="task-approval-decision-title" className="mt-2 text-xl font-semibold text-slate-950">
+              У вас задача на согласовании
+            </h2>
+            <p className="mt-2 line-clamp-2 text-sm text-slate-600">{task.title}</p>
+          </div>
+          <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            Требует решения
+          </span>
+        </div>
+
+        <div className="mt-5 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 sm:grid-cols-2">
+          <div>
+            <div className="text-xs font-semibold uppercase text-slate-400">Согласующий</div>
+            <div className="mt-1 font-semibold text-slate-900">{getParticipantDisplayName(participant) || 'Не указано'}</div>
+          </div>
+          <div>
+            <div className="text-xs font-semibold uppercase text-slate-400">Исполнитель</div>
+            <div className="mt-1 font-semibold text-slate-900">{task.assigneeName || 'Не указан'}</div>
+          </div>
+          <div>
+            <div className="text-xs font-semibold uppercase text-slate-400">Постановщик</div>
+            <div className="mt-1 font-medium">{task.authorName || 'Не указан'}</div>
+          </div>
+          <div>
+            <div className="text-xs font-semibold uppercase text-slate-400">Срок задачи</div>
+            <div className="mt-1 font-medium">{formatDateTime(task.dueAt)}</div>
+          </div>
+        </div>
+
+        {task.description ? (
+          <div className="mt-4 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm leading-6 text-slate-700">
+            <div className="mb-1 text-xs font-semibold uppercase text-slate-400">Описание задачи</div>
+            <div className="whitespace-pre-wrap">{task.description}</div>
+          </div>
+        ) : null}
+
+        <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm leading-6 text-emerald-950">
+          <div className="mb-1 text-xs font-semibold uppercase text-emerald-700">Результат исполнителя</div>
+          <div className="whitespace-pre-wrap">{resultText}</div>
+        </div>
+
+        <label className="mt-4 block text-sm font-semibold text-slate-700" htmlFor="task-approval-revision-due-at">
+          Срок доработки
+        </label>
+        <input
+          id="task-approval-revision-due-at"
+          type="datetime-local"
+          value={revisionDueAt}
+          onChange={(event) => onRevisionDueAtChange(event.target.value)}
+          className="mt-2 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:cursor-wait disabled:bg-slate-50"
+          disabled={Boolean(saving)}
+          aria-label="Срок доработки"
+        />
+        <p className="mt-2 text-sm text-slate-500">
+          Заполняется только при возврате на доработку. Если оставить пустым, срок задачи не изменится.
+        </p>
+
+        <label className="mt-4 block text-sm font-semibold text-slate-700" htmlFor="task-approval-revision-comment">
+          Комментарий для возврата на доработку
+        </label>
+        <textarea
+          id="task-approval-revision-comment"
+          value={revisionText}
+          onChange={(event) => onRevisionTextChange(event.target.value)}
+          className="mt-2 block w-full min-h-[104px] resize-y rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm leading-6 text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:cursor-wait disabled:bg-slate-50"
+          rows={4}
+          placeholder="Если задача требует правок, укажите что именно нужно исправить."
+          disabled={Boolean(saving)}
+        />
+        {error ? <p className="mt-2 text-sm font-semibold text-rose-600">{error}</p> : null}
+
+        <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onReturnToRevision}
+            disabled={revisionDisabled}
+            className="w-full rounded-xl border border-orange-200 bg-white px-4 py-2.5 text-sm font-semibold text-orange-700 transition hover:bg-orange-50 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+          >
+            {saving === 'revision' ? 'Возвращаем...' : 'Вернуть на доработку'}
+          </button>
+          {isFinalApprover ? (
+            <>
+              <button
+                type="button"
+                onClick={onApproveReturnToAssignee}
+                disabled={Boolean(saving)}
+                className="w-full rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700 transition hover:bg-blue-100 disabled:cursor-wait disabled:opacity-60 sm:w-auto"
+              >
+                {saving === 'approveReturn' ? 'Согласовываем...' : 'Согласовать и отправить исполнителю'}
+              </button>
+              <button
+                type="button"
+                onClick={onApproveComplete}
+                disabled={Boolean(saving)}
+                className="w-full rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60 sm:w-auto"
+              >
+                {saving === 'approveComplete' ? 'Согласовываем...' : 'Согласовать и завершить'}
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={onApprove}
+              disabled={Boolean(saving)}
+              className="w-full rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60 sm:w-auto"
+            >
+              {saving === 'approve' ? 'Согласовываем...' : 'Согласовать'}
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -6289,7 +6623,7 @@ type TaskModalProps = {
     participantId?: number,
     finalAction?: TaskApprovalFinalAction,
     revisionDueAt?: string | null,
-  ) => void | Promise<void>;
+  ) => boolean | void | Promise<boolean | void>;
   onDelete: (task: TaskJournalItem) => boolean | Promise<boolean>;
   onDuplicate: (task: TaskJournalItem) => boolean | Promise<boolean>;
 };
