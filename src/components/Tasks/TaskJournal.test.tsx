@@ -2657,7 +2657,7 @@ describe('TaskJournal', () => {
     expect(toastMock.error).not.toHaveBeenCalledWith('Добавьте результат по задаче перед завершением.', 'Журнал задач');
   });
 
-  it('sends a task with pending approvers to approval from the quick completion action', async () => {
+  it('asks for task result before quick completion sends a task to approval', async () => {
     authState.isAdmin = false;
     authState.user = { id: 7, fullName: 'Исполнитель', email: 'assignee@example.com' };
     await renderJournal([
@@ -2673,7 +2673,25 @@ describe('TaskJournal', () => {
 
     fireEvent.click(screen.getAllByTitle('Завершить')[0]);
 
-    await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(101, 'onApproval', undefined));
+    expect(await screen.findByRole('heading', { name: 'Добавить результат по задаче' })).toBeTruthy();
+    expect(screen.getByText('Отправка на согласование')).toBeTruthy();
+    expect(apiMock.updateTaskJournalStatus).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить на согласование' }));
+    expect(screen.getByText('Добавьте результат по задаче перед отправкой на согласование.')).toBeTruthy();
+    expect(apiMock.updateTaskJournalStatus).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByPlaceholderText('Опишите подробно, что было сделано и какой результат был достигнут.'), {
+      target: { value: 'Работа выполнена, результат готов к проверке.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить на согласование' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(
+      101,
+      'onApproval',
+      'Работа выполнена, результат готов к проверке.',
+    ));
+    expect(toastMock.success).toHaveBeenCalledWith('Задача отправлена на согласование.', 'Журнал задач');
     expect(toastMock.error).not.toHaveBeenCalledWith(
       'Задачу нельзя завершить, пока все согласующие не согласовали её.',
       'Журнал задач',

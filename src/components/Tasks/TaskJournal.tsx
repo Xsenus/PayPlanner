@@ -1885,6 +1885,10 @@ export function TaskJournal({
   const [completionPromptResult, setCompletionPromptResult] = useState('');
   const [completionPromptError, setCompletionPromptError] = useState<string | null>(null);
   const [completionPromptSaving, setCompletionPromptSaving] = useState(false);
+  const [quickApprovalPromptTask, setQuickApprovalPromptTask] = useState<TaskJournalItem | null>(null);
+  const [quickApprovalPromptResult, setQuickApprovalPromptResult] = useState('');
+  const [quickApprovalPromptError, setQuickApprovalPromptError] = useState<string | null>(null);
+  const [quickApprovalPromptSaving, setQuickApprovalPromptSaving] = useState(false);
   const [deadlineChangeDecisionPrompt, setDeadlineChangeDecisionPrompt] = useState<DeadlineChangeDecisionPromptState>(null);
   const [deadlineChangeDecisionDueAt, setDeadlineChangeDecisionDueAt] = useState('');
   const [deadlineChangeDecisionComment, setDeadlineChangeDecisionComment] = useState('');
@@ -2588,7 +2592,7 @@ export function TaskJournal({
       return;
     }
 
-    if (!pendingDeadlineChangeDecision || modal || completionPromptTask || deadlineChangeDecisionSaving || approvalDecisionPrompt || approvalDecisionSaving) {
+    if (!pendingDeadlineChangeDecision || modal || completionPromptTask || quickApprovalPromptTask || deadlineChangeDecisionSaving || approvalDecisionPrompt || approvalDecisionSaving) {
       return;
     }
 
@@ -2598,6 +2602,7 @@ export function TaskJournal({
     setDeadlineChangeDecisionError(null);
   }, [
     completionPromptTask,
+    quickApprovalPromptTask,
     deadlineChangeDecisionPrompt,
     deadlineChangeDecisionSaving,
     isApprovalsMode,
@@ -2643,6 +2648,7 @@ export function TaskJournal({
       || pendingDeadlineChangeDecision
       || modal
       || completionPromptTask
+      || quickApprovalPromptTask
       || deadlineChangeDecisionPrompt
       || deadlineChangeDecisionSaving
       || approvalDecisionSaving
@@ -2658,6 +2664,7 @@ export function TaskJournal({
     approvalDecisionPrompt,
     approvalDecisionSaving,
     completionPromptTask,
+    quickApprovalPromptTask,
     currentUserId,
     deadlineChangeDecisionPrompt,
     deadlineChangeDecisionSaving,
@@ -3053,6 +3060,19 @@ export function TaskJournal({
     setCompletionPromptError(null);
   };
 
+  const closeQuickApprovalPrompt = () => {
+    if (quickApprovalPromptSaving) return;
+    setQuickApprovalPromptTask(null);
+    setQuickApprovalPromptResult('');
+    setQuickApprovalPromptError(null);
+  };
+
+  const openQuickApprovalPrompt = (task: TaskJournalItem) => {
+    setQuickApprovalPromptTask(task);
+    setQuickApprovalPromptResult(task.result.trim());
+    setQuickApprovalPromptError(null);
+  };
+
   const submitCompletionPrompt = async () => {
     if (!completionPromptTask || completionPromptSaving) return;
 
@@ -3075,6 +3095,31 @@ export function TaskJournal({
       setCompletionPromptError(extractDisplayErrorMessage(error, 'Не удалось завершить задачу.'));
     } finally {
       setCompletionPromptSaving(false);
+    }
+  };
+
+  const submitQuickApprovalPrompt = async () => {
+    if (!quickApprovalPromptTask || quickApprovalPromptSaving) return;
+
+    const normalizedResult = quickApprovalPromptResult.trim();
+    if (requireCompletionResult && !normalizedResult) {
+      setQuickApprovalPromptError(TASK_APPROVAL_RESULT_REQUIRED_MESSAGE);
+      return;
+    }
+
+    setQuickApprovalPromptSaving(true);
+    try {
+      await apiService.updateTaskJournalStatus(quickApprovalPromptTask.id, 'onApproval', normalizedResult || undefined);
+      toast.success('Задача отправлена на согласование.', 'Журнал задач');
+      setQuickApprovalPromptTask(null);
+      setQuickApprovalPromptResult('');
+      setQuickApprovalPromptError(null);
+      await refreshTasks();
+      emitTaskChange();
+    } catch (error) {
+      setQuickApprovalPromptError(extractDisplayErrorMessage(error, 'Не удалось отправить задачу на согласование.'));
+    } finally {
+      setQuickApprovalPromptSaving(false);
     }
   };
 
@@ -3211,6 +3256,11 @@ export function TaskJournal({
 
     if (nextStatus === 'done' && requireCompletionResult && !task.result.trim()) {
       openCompletionPrompt(task);
+      return;
+    }
+
+    if ((nextStatus === 'onApproval' || nextStatus === 'overdueApproval') && requireCompletionResult && !task.result.trim()) {
+      openQuickApprovalPrompt(task);
       return;
     }
 
@@ -4243,6 +4293,25 @@ export function TaskJournal({
           requireCompletionResult={requireCompletionResult}
           onSubmit={() => void submitCompletionPrompt()}
           onClose={closeCompletionPrompt}
+        />
+      ) : null}
+      {quickApprovalPromptTask ? (
+        <TaskCompletionResultPrompt
+          task={quickApprovalPromptTask}
+          eyebrow="Отправка на согласование"
+          submitLabel="Отправить на согласование"
+          result={quickApprovalPromptResult}
+          error={quickApprovalPromptError}
+          saving={quickApprovalPromptSaving}
+          onResultChange={(value) => {
+            setQuickApprovalPromptResult(value);
+            if (quickApprovalPromptError) {
+              setQuickApprovalPromptError(null);
+            }
+          }}
+          requireCompletionResult={requireCompletionResult}
+          onSubmit={() => void submitQuickApprovalPrompt()}
+          onClose={closeQuickApprovalPrompt}
         />
       ) : null}
       {deadlineChangeDecisionPrompt ? (
