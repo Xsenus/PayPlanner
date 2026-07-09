@@ -57,6 +57,42 @@ public class TaskJournalParticipantDto
     public string? RespondedAt { get; set; }
 }
 
+public class TaskJournalTemplateDto
+{
+    public int Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string TaskDescription { get; set; } = string.Empty;
+    public string Type { get; set; } = "task";
+    public string Priority { get; set; } = "normal";
+    public int PlannedDurationMinutes { get; set; } = 60;
+    public int DueOffsetMinutes { get; set; } = 1440;
+    public int? AssigneeUserId { get; set; }
+    public string AssigneeName { get; set; } = string.Empty;
+    public string BindingType { get; set; } = "none";
+    public string BindingKey { get; set; } = string.Empty;
+    public bool IsActive { get; set; } = true;
+    public IReadOnlyList<string> Reminders { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<string> Channels { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<string> Tags { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<TaskJournalTemplateParticipantDto> Participants { get; set; } = Array.Empty<TaskJournalTemplateParticipantDto>();
+    public int? CreatedByUserId { get; set; }
+    public string CreatedByName { get; set; } = string.Empty;
+    public string CreatedAt { get; set; } = string.Empty;
+    public string? UpdatedAt { get; set; }
+}
+
+public class TaskJournalTemplateParticipantDto
+{
+    public int Id { get; set; }
+    public int? UserId { get; set; }
+    public string Role { get; set; } = "observer";
+    public string DisplayName { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public int SortOrder { get; set; }
+}
+
 public class TaskJournalCommentDto
 {
     public int Id { get; set; }

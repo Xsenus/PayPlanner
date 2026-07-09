@@ -57,6 +57,10 @@ public class TasksController : ControllerBase
     {
         "approved", "revisionRequested"
     };
+    private static readonly HashSet<string> AllowedTemplateBindingTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "none", "caseStage", "caseType"
+    };
     private static readonly string[] ActiveTaskStatuses =
     [
         "new", "inProgress", "waiting", "onApproval", "approved", "revision", "overdueApproval"
@@ -1013,6 +1017,305 @@ public class TasksController : ControllerBase
             CreatedTasks = created.Select(item => Map(item.Entity, item.Binding)).ToList(),
             SkippedCount = candidates.Count - created.Count,
         });
+    }
+
+    [HttpGet("templates")]
+    public async Task<ActionResult<IReadOnlyList<TaskJournalTemplateDto>>> GetTemplates(
+        [FromQuery] string? search,
+        [FromQuery] bool? active,
+        [FromQuery] string? type,
+        [FromQuery] string? priority,
+        [FromQuery] string? bindingType,
+        [FromQuery] int? assigneeUserId,
+        CancellationToken ct)
+    {
+        var access = await GetTaskAccessAsync(ct);
+        if (access is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!access.IsAdmin && access.Permission?.CanView != true)
+        {
+            return Forbid();
+        }
+
+        var query = _db.TaskJournalTemplates
+            .Include(template => template.Participants)
+            .AsQueryable();
+
+        if (active.HasValue)
+        {
+            query = query.Where(template => template.IsActive == active.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(type) && !string.Equals(type, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            var normalizedType = NormalizeEnumValue(type, AllowedTypes, string.Empty);
+            if (!string.IsNullOrWhiteSpace(normalizedType))
+            {
+                query = query.Where(template => template.Type == normalizedType);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(priority) && !string.Equals(priority, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            var normalizedPriority = NormalizeEnumValue(priority, AllowedPriorities, string.Empty);
+            if (!string.IsNullOrWhiteSpace(normalizedPriority))
+            {
+                query = query.Where(template => template.Priority == normalizedPriority);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(bindingType) && !string.Equals(bindingType, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            var normalizedBindingType = NormalizeEnumValue(bindingType, AllowedTemplateBindingTypes, string.Empty);
+            if (!string.IsNullOrWhiteSpace(normalizedBindingType))
+            {
+                query = query.Where(template => template.BindingType == normalizedBindingType);
+            }
+        }
+
+        if (assigneeUserId is > 0)
+        {
+            query = query.Where(template => template.AssigneeUserId == assigneeUserId.Value);
+        }
+
+        var normalizedSearch = NormalizeOptional(search);
+        if (normalizedSearch is not null)
+        {
+            var lowered = normalizedSearch.ToLower();
+            query = query.Where(template =>
+                template.Name.ToLower().Contains(lowered)
+                || template.Title.ToLower().Contains(lowered)
+                || (template.Description != null && template.Description.ToLower().Contains(lowered))
+                || (template.TaskDescription != null && template.TaskDescription.ToLower().Contains(lowered))
+                || template.TagsJson.ToLower().Contains(lowered)
+                || template.BindingKey.ToLower().Contains(lowered));
+        }
+
+        var templates = await query
+            .OrderByDescending(template => template.IsActive)
+            .ThenBy(template => template.Name)
+            .ThenBy(template => template.Id)
+            .Take(200)
+            .ToListAsync(ct);
+
+        return Ok(templates.Select(MapTemplate).ToList());
+    }
+
+    [HttpGet("templates/{id:int}")]
+    public async Task<ActionResult<TaskJournalTemplateDto>> GetTemplate(int id, CancellationToken ct)
+    {
+        var access = await GetTaskAccessAsync(ct);
+        if (access is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!access.IsAdmin && access.Permission?.CanView != true)
+        {
+            return Forbid();
+        }
+
+        var template = await _db.TaskJournalTemplates
+            .Include(item => item.Participants)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+
+        return template is null ? NotFound() : Ok(MapTemplate(template));
+    }
+
+    [HttpPost("templates")]
+    public async Task<ActionResult<TaskJournalTemplateDto>> CreateTemplate(
+        [FromBody] UpsertTaskJournalTemplateRequest request,
+        CancellationToken ct)
+    {
+        var access = await GetTaskAccessAsync(ct);
+        if (access is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!access.IsAdmin && access.Permission?.CanCreate != true)
+        {
+            return Forbid();
+        }
+
+        var validation = ValidateTemplateRequest(request);
+        if (validation is not null)
+        {
+            return BadRequest(new { message = validation });
+        }
+
+        var assignee = await ResolveTemplateAssigneeAsync(request, ct);
+        if (assignee.Error is not null)
+        {
+            return BadRequest(new { message = assignee.Error });
+        }
+
+        var participants = await ResolveTemplateParticipantsAsync(request, ct);
+        if (participants.Error is not null)
+        {
+            return BadRequest(new { message = participants.Error });
+        }
+
+        var now = DateTime.UtcNow;
+        var entity = new TaskJournalTemplate
+        {
+            Name = request.Name.Trim(),
+            Description = NormalizeOptional(request.Description),
+            Title = request.Title.Trim(),
+            TaskDescription = NormalizeOptional(request.TaskDescription),
+            Type = NormalizeEnumValue(request.Type, AllowedTypes, "task"),
+            Priority = NormalizeEnumValue(request.Priority, AllowedPriorities, "normal"),
+            PlannedDurationMinutes = NormalizeTaskDuration(request.PlannedDurationMinutes),
+            DueOffsetMinutes = NormalizeTemplateDueOffsetMinutes(request.DueOffsetMinutes),
+            AssigneeUserId = assignee.UserId,
+            AssigneeName = assignee.Name,
+            BindingType = NormalizeEnumValue(request.BindingType, AllowedTemplateBindingTypes, "none"),
+            BindingKey = NormalizeTemplateBindingKey(request.BindingType, request.BindingKey),
+            IsActive = request.IsActive,
+            RemindersJson = SerializeList(request.Reminders, AllowedReminders, ["atDue"]),
+            ChannelsJson = SerializeList(request.Channels, AllowedChannels, ["inApp"]),
+            TagsJson = SerializeFreeList(request.Tags),
+            CreatedByUserId = access.UserId,
+            CreatedByName = access.DisplayName,
+            CreatedAt = now,
+            UpdatedAt = now,
+            Participants = participants.Items.Select(ToTemplateParticipantEntity).ToList(),
+        };
+
+        _db.TaskJournalTemplates.Add(entity);
+        await _db.SaveChangesAsync(ct);
+        return Created($"/api/tasks/templates/{entity.Id}", MapTemplate(entity));
+    }
+
+    [HttpPut("templates/{id:int}")]
+    public async Task<ActionResult<TaskJournalTemplateDto>> UpdateTemplate(
+        int id,
+        [FromBody] UpsertTaskJournalTemplateRequest request,
+        CancellationToken ct)
+    {
+        var access = await GetTaskAccessAsync(ct);
+        if (access is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!access.IsAdmin && access.Permission?.CanEdit != true)
+        {
+            return Forbid();
+        }
+
+        var entity = await _db.TaskJournalTemplates
+            .Include(item => item.Participants)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (entity is null)
+        {
+            return NotFound();
+        }
+
+        var validation = ValidateTemplateRequest(request);
+        if (validation is not null)
+        {
+            return BadRequest(new { message = validation });
+        }
+
+        var assignee = await ResolveTemplateAssigneeAsync(request, ct);
+        if (assignee.Error is not null)
+        {
+            return BadRequest(new { message = assignee.Error });
+        }
+
+        var participants = await ResolveTemplateParticipantsAsync(request, ct);
+        if (participants.Error is not null)
+        {
+            return BadRequest(new { message = participants.Error });
+        }
+
+        entity.Name = request.Name.Trim();
+        entity.Description = NormalizeOptional(request.Description);
+        entity.Title = request.Title.Trim();
+        entity.TaskDescription = NormalizeOptional(request.TaskDescription);
+        entity.Type = NormalizeEnumValue(request.Type, AllowedTypes, "task");
+        entity.Priority = NormalizeEnumValue(request.Priority, AllowedPriorities, "normal");
+        entity.PlannedDurationMinutes = NormalizeTaskDuration(request.PlannedDurationMinutes);
+        entity.DueOffsetMinutes = NormalizeTemplateDueOffsetMinutes(request.DueOffsetMinutes);
+        entity.AssigneeUserId = assignee.UserId;
+        entity.AssigneeName = assignee.Name;
+        entity.BindingType = NormalizeEnumValue(request.BindingType, AllowedTemplateBindingTypes, "none");
+        entity.BindingKey = NormalizeTemplateBindingKey(request.BindingType, request.BindingKey);
+        entity.IsActive = request.IsActive;
+        entity.RemindersJson = SerializeList(request.Reminders, AllowedReminders, ["atDue"]);
+        entity.ChannelsJson = SerializeList(request.Channels, AllowedChannels, ["inApp"]);
+        entity.TagsJson = SerializeFreeList(request.Tags);
+        entity.UpdatedAt = DateTime.UtcNow;
+
+        _db.TaskJournalTemplateParticipants.RemoveRange(entity.Participants);
+        entity.Participants.Clear();
+        foreach (var participant in participants.Items.Select(ToTemplateParticipantEntity))
+        {
+            entity.Participants.Add(participant);
+        }
+
+        await _db.SaveChangesAsync(ct);
+        return Ok(MapTemplate(entity));
+    }
+
+    [HttpPatch("templates/{id:int}/active")]
+    public async Task<ActionResult<TaskJournalTemplateDto>> UpdateTemplateActive(
+        int id,
+        [FromBody] UpdateTaskJournalTemplateActiveRequest request,
+        CancellationToken ct)
+    {
+        var access = await GetTaskAccessAsync(ct);
+        if (access is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!access.IsAdmin && access.Permission?.CanEdit != true)
+        {
+            return Forbid();
+        }
+
+        var entity = await _db.TaskJournalTemplates
+            .Include(item => item.Participants)
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (entity is null)
+        {
+            return NotFound();
+        }
+
+        entity.IsActive = request.IsActive;
+        entity.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+        return Ok(MapTemplate(entity));
+    }
+
+    [HttpDelete("templates/{id:int}")]
+    public async Task<IActionResult> DeleteTemplate(int id, CancellationToken ct)
+    {
+        var access = await GetTaskAccessAsync(ct);
+        if (access is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!access.IsAdmin && access.Permission?.CanDelete != true)
+        {
+            return Forbid();
+        }
+
+        var entity = await _db.TaskJournalTemplates.FirstOrDefaultAsync(item => item.Id == id, ct);
+        if (entity is null)
+        {
+            return NotFound();
+        }
+
+        _db.TaskJournalTemplates.Remove(entity);
+        await _db.SaveChangesAsync(ct);
+        return NoContent();
     }
 
     [HttpGet("{id:int}")]
@@ -3392,6 +3695,87 @@ public class TasksController : ControllerBase
             normalized);
     }
 
+    private async Task<(int? UserId, string Name, string? Error)> ResolveTemplateAssigneeAsync(
+        UpsertTaskJournalTemplateRequest request,
+        CancellationToken ct)
+    {
+        if (request.AssigneeUserId.HasValue)
+        {
+            var user = await _db.Users
+                .AsNoTracking()
+                .Where(item => item.Id == request.AssigneeUserId.Value && item.IsActive && item.IsApproved)
+                .Select(item => new { item.Id, item.FullName, item.Email })
+                .FirstOrDefaultAsync(ct);
+
+            if (user is null)
+            {
+                return (null, string.Empty, "Указанный исполнитель шаблона не найден.");
+            }
+
+            return (user.Id, string.IsNullOrWhiteSpace(user.FullName) ? user.Email : user.FullName, null);
+        }
+
+        return (null, NormalizeOptional(request.AssigneeName) ?? string.Empty, null);
+    }
+
+    private async Task<TaskTemplateParticipantsResolution> ResolveTemplateParticipantsAsync(
+        UpsertTaskJournalTemplateRequest request,
+        CancellationToken ct)
+    {
+        var drafts = new List<TaskTemplateParticipantDraft>();
+        var index = 0;
+
+        foreach (var participant in request.Participants)
+        {
+            var role = NormalizeEnumValue(participant.Role, AllowedParticipantRoles, string.Empty);
+            if (string.IsNullOrWhiteSpace(role))
+            {
+                return TaskTemplateParticipantsResolution.Invalid("Участник шаблона указан с некорректной ролью.");
+            }
+
+            User? user = null;
+            if (participant.UserId.HasValue)
+            {
+                user = await _db.Users
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(item => item.Id == participant.UserId.Value && item.IsActive && item.IsApproved, ct);
+                if (user is null)
+                {
+                    return TaskTemplateParticipantsResolution.Invalid("Указанный участник шаблона не найден.");
+                }
+            }
+
+            if (string.Equals(role, "approver", StringComparison.OrdinalIgnoreCase) && user is null)
+            {
+                return TaskTemplateParticipantsResolution.Invalid("Согласующий в шаблоне должен быть выбран из пользователей системы.");
+            }
+
+            var displayName = user is null
+                ? NormalizeOptional(participant.Name)
+                : BuildUserDisplayName(user.FullName, user.Email);
+            if (string.IsNullOrWhiteSpace(displayName))
+            {
+                return TaskTemplateParticipantsResolution.Invalid("Укажите имя участника шаблона.");
+            }
+
+            drafts.Add(new TaskTemplateParticipantDraft(
+                user?.Id,
+                displayName,
+                user?.Email ?? string.Empty,
+                role,
+                participant.SortOrder ?? index));
+            index++;
+        }
+
+        var normalized = drafts
+            .GroupBy(item => $"{item.Role}:{item.UserId?.ToString(CultureInfo.InvariantCulture) ?? item.DisplayName}", StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .Select((item, position) => item with { SortOrder = item.SortOrder == 0 ? position : item.SortOrder })
+            .ToList();
+
+        return TaskTemplateParticipantsResolution.Valid(normalized);
+    }
+
     private async Task<(int? UserId, string Name)?> ResolveAssigneeAsync(
         UpsertTaskJournalItemRequest request,
         int fallbackUserId,
@@ -3659,6 +4043,53 @@ public class TasksController : ControllerBase
         return null;
     }
 
+    private static string? ValidateTemplateRequest(UpsertTaskJournalTemplateRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            return "Укажите название шаблона задачи.";
+        }
+
+        if (request.Name.Trim().Length > 200)
+        {
+            return "Название шаблона не должно превышать 200 символов.";
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Title))
+        {
+            return "Укажите наименование задачи в шаблоне.";
+        }
+
+        if (request.Title.Trim().Length > 500)
+        {
+            return "Наименование задачи в шаблоне не должно превышать 500 символов.";
+        }
+
+        if (NormalizeEnumValue(request.Type, AllowedTypes, string.Empty) == string.Empty)
+        {
+            return "Некорректный тип задачи в шаблоне.";
+        }
+
+        if (NormalizeEnumValue(request.Priority, AllowedPriorities, string.Empty) == string.Empty)
+        {
+            return "Некорректный приоритет задачи в шаблоне.";
+        }
+
+        if (NormalizeEnumValue(request.BindingType, AllowedTemplateBindingTypes, string.Empty) == string.Empty)
+        {
+            return "Некорректная привязка шаблона задачи.";
+        }
+
+        var bindingType = NormalizeEnumValue(request.BindingType, AllowedTemplateBindingTypes, "none");
+        if (!string.Equals(bindingType, "none", StringComparison.OrdinalIgnoreCase)
+            && string.IsNullOrWhiteSpace(request.BindingKey))
+        {
+            return "Укажите этап или тип дела для привязанного шаблона.";
+        }
+
+        return null;
+    }
+
     private async Task<IReadOnlyDictionary<int, IReadOnlyList<TaskJournalDeadlineChangeRequest>>> LoadActiveDeadlineChangeRequestsAsync(
         IReadOnlyCollection<int> taskIds,
         CancellationToken ct)
@@ -3748,6 +4179,46 @@ public class TasksController : ControllerBase
                     .ToList())
                 .Select(MapDeadlineChangeRequest)
                 .ToList(),
+            CreatedAt = ToIso(entity.CreatedAt),
+            UpdatedAt = entity.UpdatedAt.HasValue ? ToIso(entity.UpdatedAt.Value) : null,
+        };
+
+    private static TaskJournalTemplateDto MapTemplate(TaskJournalTemplate entity)
+        => new()
+        {
+            Id = entity.Id,
+            Name = entity.Name,
+            Description = entity.Description ?? string.Empty,
+            Title = entity.Title,
+            TaskDescription = entity.TaskDescription ?? string.Empty,
+            Type = entity.Type,
+            Priority = entity.Priority,
+            PlannedDurationMinutes = entity.PlannedDurationMinutes,
+            DueOffsetMinutes = entity.DueOffsetMinutes,
+            AssigneeUserId = entity.AssigneeUserId,
+            AssigneeName = entity.AssigneeName,
+            BindingType = entity.BindingType,
+            BindingKey = entity.BindingKey,
+            IsActive = entity.IsActive,
+            Reminders = DeserializeList(entity.RemindersJson),
+            Channels = DeserializeList(entity.ChannelsJson),
+            Tags = DeserializeList(entity.TagsJson),
+            Participants = entity.Participants
+                .OrderBy(participant => ParticipantRoleOrder(participant.Role))
+                .ThenBy(participant => participant.SortOrder)
+                .ThenBy(participant => participant.Id)
+                .Select(participant => new TaskJournalTemplateParticipantDto
+                {
+                    Id = participant.Id,
+                    UserId = participant.UserId,
+                    Role = participant.Role,
+                    DisplayName = participant.DisplayName,
+                    Email = participant.Email,
+                    SortOrder = participant.SortOrder,
+                })
+                .ToList(),
+            CreatedByUserId = entity.CreatedByUserId,
+            CreatedByName = entity.CreatedByName,
             CreatedAt = ToIso(entity.CreatedAt),
             UpdatedAt = entity.UpdatedAt.HasValue ? ToIso(entity.UpdatedAt.Value) : null,
         };
@@ -3878,6 +4349,26 @@ public class TasksController : ControllerBase
         var minutes = value.GetValueOrDefault(60);
         minutes = Math.Clamp(minutes, 15, 8 * 60);
         return (int)Math.Round(minutes / 15m, MidpointRounding.AwayFromZero) * 15;
+    }
+
+    private static int NormalizeTemplateDueOffsetMinutes(int? value)
+    {
+        var minutes = value.GetValueOrDefault(1440);
+        minutes = Math.Clamp(minutes, 0, 365 * 24 * 60);
+        return (int)Math.Round(minutes / 15m, MidpointRounding.AwayFromZero) * 15;
+    }
+
+    private static string NormalizeTemplateBindingKey(string? bindingType, string? bindingKey)
+    {
+        var normalizedBindingType = NormalizeEnumValue(bindingType, AllowedTemplateBindingTypes, "none");
+        if (string.Equals(normalizedBindingType, "none", StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Empty;
+        }
+
+        return (NormalizeOptional(bindingKey) ?? string.Empty).Length > 120
+            ? (NormalizeOptional(bindingKey) ?? string.Empty)[..120]
+            : NormalizeOptional(bindingKey) ?? string.Empty;
     }
 
     private async Task SyncContractorPaymentAsync(TaskJournalItem entity, DateTime? resultBaseDate, CancellationToken ct)
@@ -4411,6 +4902,18 @@ public class TasksController : ControllerBase
             RespondedAt = string.Equals(draft.ApprovalStatus, "pending", StringComparison.OrdinalIgnoreCase)
                 ? null
                 : DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+
+    private static TaskJournalTemplateParticipant ToTemplateParticipantEntity(TaskTemplateParticipantDraft draft)
+        => new()
+        {
+            UserId = draft.UserId,
+            Role = draft.Role,
+            DisplayName = draft.DisplayName,
+            Email = draft.Email,
+            SortOrder = draft.SortOrder,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         };
@@ -5280,7 +5783,10 @@ public class TasksController : ControllerBase
         };
 
     private static int ParticipantRoleOrder(TaskJournalParticipant participant)
-        => participant.Role switch
+        => ParticipantRoleOrder(participant.Role);
+
+    private static int ParticipantRoleOrder(string role)
+        => role switch
         {
             "assignee" => 0,
             "approver" => 1,
@@ -5315,6 +5821,24 @@ public class TasksController : ControllerBase
 
         public static TaskParticipantsResolution Invalid(string error)
             => new(null, string.Empty, Array.Empty<TaskParticipantDraft>(), error);
+    }
+
+    private sealed record TaskTemplateParticipantDraft(
+        int? UserId,
+        string DisplayName,
+        string Email,
+        string Role,
+        int SortOrder);
+
+    private sealed record TaskTemplateParticipantsResolution(
+        IReadOnlyList<TaskTemplateParticipantDraft> Items,
+        string? Error)
+    {
+        public static TaskTemplateParticipantsResolution Valid(IReadOnlyList<TaskTemplateParticipantDraft> items)
+            => new(items, null);
+
+        public static TaskTemplateParticipantsResolution Invalid(string error)
+            => new(Array.Empty<TaskTemplateParticipantDraft>(), error);
     }
 
     private sealed record TaskClientBinding(

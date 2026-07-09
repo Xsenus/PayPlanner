@@ -72,6 +72,7 @@ public class PaymentContext : DbContext
         typeof(CashOrder),
         typeof(CashInventory),
         typeof(TaskJournalItem),
+        typeof(TaskJournalTemplate),
         typeof(StickyNoteBoard),
         typeof(StickyNote)
     };
@@ -2639,6 +2640,67 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => new { e.TaskJournalItemId, e.Role, e.SortOrder }).HasDatabaseName("IX_TaskJournalParticipants_Task_Role_Order");
         });
 
+        modelBuilder.Entity<TaskJournalTemplate>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.Description).HasMaxLength(4000);
+            entity.Property(e => e.Title).HasMaxLength(500).IsRequired();
+            entity.Property(e => e.TaskDescription).HasMaxLength(4000);
+            entity.Property(e => e.Type).HasMaxLength(32).HasDefaultValue("task").IsRequired();
+            entity.Property(e => e.Priority).HasMaxLength(32).HasDefaultValue("normal").IsRequired();
+            entity.Property(e => e.PlannedDurationMinutes).HasDefaultValue(60);
+            entity.Property(e => e.DueOffsetMinutes).HasDefaultValue(1440);
+            entity.Property(e => e.AssigneeName).HasMaxLength(256).HasDefaultValue("").IsRequired();
+            entity.Property(e => e.BindingType).HasMaxLength(32).HasDefaultValue("none").IsRequired();
+            entity.Property(e => e.BindingKey).HasMaxLength(120).HasDefaultValue("").IsRequired();
+            entity.Property(e => e.IsActive).HasDefaultValue(true);
+            entity.Property(e => e.RemindersJson).HasColumnType("text").HasDefaultValue("[]").IsRequired();
+            entity.Property(e => e.ChannelsJson).HasColumnType("text").HasDefaultValue("[]").IsRequired();
+            entity.Property(e => e.TagsJson).HasColumnType("text").HasDefaultValue("[]").IsRequired();
+            entity.Property(e => e.CreatedByName).HasMaxLength(256).HasDefaultValue("").IsRequired();
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.AssigneeUser)
+                .WithMany()
+                .HasForeignKey(e => e.AssigneeUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.CreatedByUser)
+                .WithMany()
+                .HasForeignKey(e => e.CreatedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => e.Name).HasDatabaseName("IX_TaskJournalTemplates_Name");
+            entity.HasIndex(e => e.IsActive).HasDatabaseName("IX_TaskJournalTemplates_IsActive");
+            entity.HasIndex(e => e.Type).HasDatabaseName("IX_TaskJournalTemplates_Type");
+            entity.HasIndex(e => e.Priority).HasDatabaseName("IX_TaskJournalTemplates_Priority");
+            entity.HasIndex(e => new { e.BindingType, e.BindingKey }).HasDatabaseName("IX_TaskJournalTemplates_Binding");
+        });
+
+        modelBuilder.Entity<TaskJournalTemplateParticipant>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Role).HasMaxLength(32).HasDefaultValue("observer").IsRequired();
+            entity.Property(e => e.DisplayName).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.Email).HasMaxLength(320).HasDefaultValue("").IsRequired();
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+            entity.HasOne(e => e.TaskJournalTemplate)
+                .WithMany(e => e.Participants)
+                .HasForeignKey(e => e.TaskJournalTemplateId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(e => e.TaskJournalTemplateId).HasDatabaseName("IX_TaskJournalTemplateParticipants_TemplateId");
+            entity.HasIndex(e => e.UserId).HasDatabaseName("IX_TaskJournalTemplateParticipants_UserId");
+            entity.HasIndex(e => new { e.TaskJournalTemplateId, e.Role, e.SortOrder }).HasDatabaseName("IX_TaskJournalTemplateParticipants_Template_Role_Order");
+        });
+
         modelBuilder.Entity<TaskJournalComment>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -2969,6 +3031,7 @@ public class PaymentContext : DbContext
             ConfigureAudit<CashOrder>(modelBuilder);
             ConfigureAudit<CashInventory>(modelBuilder);
             ConfigureAudit<TaskJournalItem>(modelBuilder);
+            ConfigureAudit<TaskJournalTemplate>(modelBuilder);
             ConfigureAudit<StickyNoteBoard>(modelBuilder);
             ConfigureAudit<StickyNote>(modelBuilder);
             ConfigureAudit<Role>(modelBuilder, enableSoftDelete: false);
@@ -3028,6 +3091,8 @@ public class PaymentContext : DbContext
             .HasQueryFilter(item => TaskJournalItems.Any(parent => parent.Id == item.TaskJournalItemId));
         modelBuilder.Entity<TaskJournalParticipant>()
             .HasQueryFilter(item => TaskJournalItems.Any(parent => parent.Id == item.TaskJournalItemId));
+        modelBuilder.Entity<TaskJournalTemplateParticipant>()
+            .HasQueryFilter(item => TaskJournalTemplates.Any(parent => parent.Id == item.TaskJournalTemplateId));
         modelBuilder.Entity<UserCompanyAccess>()
             .HasQueryFilter(item => LegalEntities.Any(parent => parent.Id == item.LegalEntityId));
         modelBuilder.Entity<YandexCalendarTaskLink>()
@@ -3427,6 +3492,7 @@ public class PaymentContext : DbContext
         if (clrType == typeof(CashOrder)) return "cash-order";
         if (clrType == typeof(CashInventory)) return "cash-inventory";
         if (clrType == typeof(TaskJournalItem)) return "task-journal-item";
+        if (clrType == typeof(TaskJournalTemplate)) return "task-journal-template";
         if (clrType == typeof(StickyNoteBoard)) return "sticky-note-board";
         if (clrType == typeof(StickyNote)) return "sticky-note";
 
@@ -3674,6 +3740,8 @@ public class PaymentContext : DbContext
     public DbSet<TaskJournalComment> TaskJournalComments { get; set; }
     public DbSet<TaskJournalDeadlineChangeRequest> TaskJournalDeadlineChangeRequests { get; set; }
     public DbSet<TaskJournalFile> TaskJournalFiles { get; set; }
+    public DbSet<TaskJournalTemplate> TaskJournalTemplates { get; set; }
+    public DbSet<TaskJournalTemplateParticipant> TaskJournalTemplateParticipants { get; set; }
     public DbSet<NotificationDelivery> NotificationDeliveries { get; set; }
     public DbSet<UserNotification> UserNotifications { get; set; }
     public DbSet<NotificationSender> NotificationSenders { get; set; }

@@ -23,6 +23,145 @@ namespace PayPlanner.Api.Tests;
 public class TasksControllerTests
 {
     [Fact]
+    public async Task TaskTemplateCrud_PersistsAndReplacesParticipants()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "template-author@example.com", "РђРІС‚РѕСЂ С€Р°Р±Р»РѕРЅР°");
+        var assignee = await CreateAdminUserAsync(db, "template-assignee@example.com", "РСЃРїРѕР»РЅРёС‚РµР»СЊ С€Р°Р±Р»РѕРЅР°");
+        var approver = await CreateAdminUserAsync(db, "template-approver@example.com", "РЎРѕРіР»Р°СЃСѓСЋС‰РёР№ С€Р°Р±Р»РѕРЅР°");
+        var observer = await CreateAdminUserAsync(db, "template-observer@example.com", "РќР°Р±Р»СЋРґР°С‚РµР»СЊ С€Р°Р±Р»РѕРЅР°");
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var create = await controller.CreateTemplate(new UpsertTaskJournalTemplateRequest
+        {
+            Name = "РЁР°Р±Р»РѕРЅ РїРѕРґРіРѕС‚РѕРІРєРё РґРµР»Р°",
+            Description = "РќР°Р±РѕСЂ РїРѕР»РµР№ РґР»СЏ СЃС‚Р°СЂС‚Р° РґРµР»Р°.",
+            Title = "РџРѕРґРіРѕС‚РѕРІРёС‚СЊ РјР°С‚РµСЂРёР°Р»С‹",
+            TaskDescription = "РџСЂРѕРІРµСЂРёС‚СЊ РґРѕРєСѓРјРµРЅС‚С‹ Рё Р·Р°РїСѓСЃС‚РёС‚СЊ СЃРѕРіР»Р°СЃРѕРІР°РЅРёРµ.",
+            Type = "document",
+            Priority = "high",
+            PlannedDurationMinutes = 125,
+            DueOffsetMinutes = 180,
+            AssigneeUserId = assignee.Id,
+            BindingType = "caseStage",
+            BindingKey = "start",
+            IsActive = true,
+            Reminders = ["before1h", "atDue"],
+            Channels = ["inApp", "email"],
+            Tags = ["РґРµР»Рѕ", "СЃС‚Р°СЂС‚"],
+            Participants =
+            [
+                new TaskJournalTemplateParticipantRequest
+                {
+                    UserId = approver.Id,
+                    Role = "approver",
+                    SortOrder = 1,
+                },
+                new TaskJournalTemplateParticipantRequest
+                {
+                    UserId = observer.Id,
+                    Role = "observer",
+                    SortOrder = 2,
+                },
+            ],
+        }, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(create.Result);
+        var createdDto = Assert.IsType<TaskJournalTemplateDto>(created.Value);
+        Assert.True(createdDto.Id > 0);
+        Assert.Equal(assignee.Id, createdDto.AssigneeUserId);
+        Assert.Equal("РСЃРїРѕР»РЅРёС‚РµР»СЊ С€Р°Р±Р»РѕРЅР°", createdDto.AssigneeName);
+        Assert.Equal(2, createdDto.Participants.Count);
+        Assert.Equal("approver", createdDto.Participants[0].Role);
+
+        var stored = await db.TaskJournalTemplates
+            .Include(item => item.Participants)
+            .SingleAsync(item => item.Id == createdDto.Id);
+        Assert.Equal("high", stored.Priority);
+        Assert.Equal(2, stored.Participants.Count);
+
+        var list = await controller.GetTemplates(null, true, "document", "high", "caseStage", assignee.Id, CancellationToken.None);
+        var listOk = Assert.IsType<OkObjectResult>(list.Result);
+        var listDto = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalTemplateDto>>(listOk.Value);
+        Assert.Single(listDto);
+        Assert.Equal(createdDto.Id, listDto[0].Id);
+
+        var update = await controller.UpdateTemplate(createdDto.Id, new UpsertTaskJournalTemplateRequest
+        {
+            Name = "РЁР°Р±Р»РѕРЅ РїСЂРѕРІРµСЂРєРё РґРµР»Р°",
+            Title = "РџСЂРѕРІРµСЂРёС‚СЊ РјР°С‚РµСЂРёР°Р»С‹",
+            TaskDescription = "РћС‚РґРµР»СЊРЅР°СЏ РёРЅСЃС‚СЂСѓРєС†РёСЏ РїРѕ С€Р°Р±Р»РѕРЅСѓ.",
+            Type = "task",
+            Priority = "normal",
+            PlannedDurationMinutes = 40,
+            DueOffsetMinutes = 0,
+            AssigneeName = "Р”РµР¶СѓСЂРЅС‹Р№ СЃРѕС‚СЂСѓРґРЅРёРє",
+            BindingType = "none",
+            IsActive = false,
+            Reminders = [],
+            Channels = [],
+            Tags = ["РїСЂРѕРІРµСЂРєР°"],
+            Participants =
+            [
+                new TaskJournalTemplateParticipantRequest
+                {
+                    Name = "Р’РЅРµС€РЅРёР№ РЅР°Р±Р»СЋРґР°С‚РµР»СЊ",
+                    Role = "observer",
+                },
+            ],
+        }, CancellationToken.None);
+
+        var updateOk = Assert.IsType<OkObjectResult>(update.Result);
+        var updatedDto = Assert.IsType<TaskJournalTemplateDto>(updateOk.Value);
+        Assert.False(updatedDto.IsActive);
+        Assert.Null(updatedDto.AssigneeUserId);
+        Assert.Equal("Р”РµР¶СѓСЂРЅС‹Р№ СЃРѕС‚СЂСѓРґРЅРёРє", updatedDto.AssigneeName);
+        Assert.Equal("none", updatedDto.BindingType);
+        Assert.Equal(string.Empty, updatedDto.BindingKey);
+        Assert.Single(updatedDto.Participants);
+        Assert.Equal("Р’РЅРµС€РЅРёР№ РЅР°Р±Р»СЋРґР°С‚РµР»СЊ", updatedDto.Participants[0].DisplayName);
+
+        var active = await controller.UpdateTemplateActive(createdDto.Id, new UpdateTaskJournalTemplateActiveRequest
+        {
+            IsActive = true,
+        }, CancellationToken.None);
+        var activeOk = Assert.IsType<OkObjectResult>(active.Result);
+        Assert.True(Assert.IsType<TaskJournalTemplateDto>(activeOk.Value).IsActive);
+
+        var delete = await controller.DeleteTemplate(createdDto.Id, CancellationToken.None);
+        Assert.IsType<NoContentResult>(delete);
+
+        var deleted = await controller.GetTemplate(createdDto.Id, CancellationToken.None);
+        Assert.IsType<NotFoundResult>(deleted.Result);
+        Assert.True(await db.TaskJournalTemplates.IgnoreQueryFilters().AnyAsync(item => item.Id == createdDto.Id && EF.Property<bool>(item, "IsDeleted")));
+    }
+
+    [Fact]
+    public async Task CreateTemplate_RejectsParticipantWithoutNameOrUser()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "template-invalid-author@example.com", "РђРІС‚РѕСЂ С€Р°Р±Р»РѕРЅР°");
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.CreateTemplate(new UpsertTaskJournalTemplateRequest
+        {
+            Name = "РЁР°Р±Р»РѕРЅ СЃ РѕС€РёР±РєРѕР№",
+            Title = "РџСЂРѕРІРµСЂРёС‚СЊ СѓС‡Р°СЃС‚РЅРёРєРѕРІ",
+            AssigneeName = "РСЃРїРѕР»РЅРёС‚РµР»СЊ",
+            Participants =
+            [
+                new TaskJournalTemplateParticipantRequest
+                {
+                    Role = "observer",
+                },
+            ],
+        }, CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.Empty(db.TaskJournalTemplates);
+    }
+
+    [Fact]
     public async Task CreateTask_RequiresClient()
     {
         await using var db = await CreateContextAsync();

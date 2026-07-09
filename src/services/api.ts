@@ -4108,6 +4108,54 @@ export class ApiService {
     });
   }
 
+  async getTaskJournalTemplates(params?: {
+    search?: string;
+    active?: boolean;
+    type?: string;
+    priority?: string;
+    bindingType?: TaskJournalTemplateBindingType | 'all';
+    assigneeUserId?: number;
+  }) {
+    const q = buildQuery({
+      search: params?.search,
+      active: params?.active,
+      type: params?.type,
+      priority: params?.priority,
+      bindingType: params?.bindingType,
+      assigneeUserId: params?.assigneeUserId,
+    });
+    return this.request<TaskJournalTemplate[]>(`/tasks/templates${q}`);
+  }
+
+  async getTaskJournalTemplate(id: number) {
+    return this.request<TaskJournalTemplate>(`/tasks/templates/${id}`);
+  }
+
+  async createTaskJournalTemplate(payload: TaskJournalTemplateUpsertPayload) {
+    return this.request<TaskJournalTemplate>('/tasks/templates', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateTaskJournalTemplate(id: number, payload: TaskJournalTemplateUpsertPayload) {
+    return this.request<TaskJournalTemplate>(`/tasks/templates/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateTaskJournalTemplateActive(id: number, isActive: boolean) {
+    return this.request<TaskJournalTemplate>(`/tasks/templates/${id}/active`, {
+      method: 'PATCH',
+      body: JSON.stringify({ isActive }),
+    });
+  }
+
+  async deleteTaskJournalTemplate(id: number) {
+    return this.request<void>(`/tasks/templates/${id}`, { method: 'DELETE' });
+  }
+
   async getTaskJournalItem(id: number) {
     return this.request<TaskJournalItem>(`/tasks/${id}`);
   }
@@ -7214,5 +7262,8 @@ import type {
   TaskJournalItem,
   TaskJournalNotification,
   TaskJournalStatus,
+  TaskJournalTemplate,
+  TaskJournalTemplateBindingType,
+  TaskJournalTemplateUpsertPayload,
   TaskJournalUpsertPayload,
 } from '../utils/taskJournalStore';

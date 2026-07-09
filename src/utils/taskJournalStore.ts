@@ -37,6 +37,53 @@ export interface TaskJournalParticipant {
   respondedAt?: string | null;
 }
 
+export type TaskJournalTemplateBindingType = 'none' | 'caseStage' | 'caseType';
+
+export interface TaskJournalTemplateParticipant {
+  id?: number;
+  userId?: number | null;
+  role: TaskJournalParticipantRole;
+  displayName: string;
+  email?: string;
+  sortOrder?: number;
+}
+
+export interface TaskJournalTemplateParticipantUpsertPayload {
+  userId?: number | null;
+  name?: string | null;
+  role: TaskJournalParticipantRole;
+  sortOrder?: number | null;
+}
+
+export interface TaskJournalTemplate {
+  id: number;
+  name: string;
+  description?: string | null;
+  title: string;
+  taskDescription?: string | null;
+  type: TaskJournalType;
+  priority: TaskJournalPriority;
+  plannedDurationMinutes: number;
+  dueOffsetMinutes: number;
+  assigneeUserId?: number | null;
+  assigneeName: string;
+  bindingType: TaskJournalTemplateBindingType;
+  bindingKey: string;
+  isActive: boolean;
+  reminders: TaskJournalReminder[];
+  channels: TaskJournalChannel[];
+  tags: string[];
+  participants: TaskJournalTemplateParticipant[];
+  createdByUserId?: number | null;
+  createdByName: string;
+  createdAt: string;
+  updatedAt?: string | null;
+}
+
+export type TaskJournalTemplateUpsertPayload = Omit<TaskJournalTemplate, 'id' | 'participants' | 'createdByUserId' | 'createdByName' | 'createdAt' | 'updatedAt'> & {
+  participants?: TaskJournalTemplateParticipantUpsertPayload[];
+};
+
 export interface TaskJournalItem {
   id: number;
   clientId?: number | null;
