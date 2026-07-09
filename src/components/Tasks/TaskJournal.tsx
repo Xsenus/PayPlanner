@@ -87,6 +87,7 @@ import {
 } from '../../utils/taskNotificationDefaults';
 import { applyTaskTemplateDefaults, type TaskTemplateField } from '../../utils/taskTemplateApplication';
 import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
+import { TaskTemplatesPanel } from './TaskTemplatesPanel';
 
 type ViewMode = 'list' | 'board' | 'calendar' | 'timeline';
 type PeriodMode = 'day' | 'week' | 'month' | 'all';
@@ -1806,6 +1807,7 @@ export function TaskJournal({
   const { clients } = useClients({ enabled: canViewClients });
   const { legalEntities } = useLegalEntities({ enabled: canViewLegalEntities });
   const canCreateTasks = isAdminUser || permissions.tasks.canCreate;
+  const canEditTasks = isAdminUser || permissions.tasks.canEdit;
   const canDeleteTasks = isAdminUser || permissions.tasks.canDelete;
   const canExportTasks = isAdminUser || permissions.tasks.canExport;
   const canExportCases = isAdminUser || permissions.cases.canExport;
@@ -1912,6 +1914,7 @@ export function TaskJournal({
   const [bulkDueAt, setBulkDueAt] = useState('');
   const [bulkSaving, setBulkSaving] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [templatesPanelOpen, setTemplatesPanelOpen] = useState(false);
   const routeTaskRequestRef = useRef(0);
   const lastOpenedRouteTaskIdRef = useRef<number | null>(null);
   const processedDeadlineChangeRequestIdsRef = useRef<Set<number>>(new Set());
@@ -2114,6 +2117,17 @@ export function TaskJournal({
     }
 
     setModal({ mode: 'create', defaults: taskContextDefaults });
+    setHighlightedTaskId(null);
+    onRouteTaskChange?.(null);
+  }, [canCreateTasks, onRouteTaskChange, taskContextDefaults, toast]);
+
+  const openTaskCreateFromTemplate = useCallback((defaults: Partial<TaskJournalUpsertPayload>) => {
+    if (!canCreateTasks) {
+      toast.error('У роли нет права на создание задач.', 'Журнал задач');
+      return;
+    }
+
+    setModal({ mode: 'create', defaults: { ...taskContextDefaults, ...defaults } });
     setHighlightedTaskId(null);
     onRouteTaskChange?.(null);
   }, [canCreateTasks, onRouteTaskChange, taskContextDefaults, toast]);
@@ -3765,18 +3779,43 @@ export function TaskJournal({
                 </>
               ) : null}
               {!isApprovalsMode && canCreateTasks ? (
-                <button
-                  type="button"
-                  onClick={openTaskCreate}
-                  className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800"
-                >
-                  <Plus className="h-4 w-4" />
-                  Добавить задачу
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setTemplatesPanelOpen((current) => !current)}
+                    aria-pressed={templatesPanelOpen}
+                    className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold transition ${
+                      templatesPanelOpen
+                        ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100'
+                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <ClipboardList className="h-4 w-4" />
+                    Шаблоны
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openTaskCreate}
+                    className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Добавить задачу
+                  </button>
+                </>
               ) : null}
             </div>
           </div>
         </section>
+
+        {templatesPanelOpen && !isApprovalsMode ? (
+          <TaskTemplatesPanel
+            assignees={assigneeOptions}
+            canCreate={canCreateTasks}
+            canEdit={canEditTasks}
+            canDelete={canDeleteTasks}
+            onUseTemplate={openTaskCreateFromTemplate}
+          />
+        ) : null}
 
         <section className="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <MetricCard
