@@ -3979,7 +3979,7 @@ public class TasksControllerTests
         var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
         var approver = await CreateAdminUserAsync(db, "approver@example.com", "Согласующий");
         var client = await CreateClientAsync(db, "Иванов Иван Иванович");
-        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id, result: null);
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id, result: "Документы подготовлены и приложены.");
         task.Status = "onApproval";
         task.Participants.Add(new TaskJournalParticipant
         {
@@ -4016,9 +4016,13 @@ public class TasksControllerTests
         var commentsOk = Assert.IsType<OkObjectResult>(commentsResult.Result);
         var comments = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalCommentDto>>(commentsOk.Value);
         var history = Assert.Single(comments, item => item.Kind == "system" && item.Text.Contains("Возвращено на доработку", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("Документы подготовлены и приложены.", history.Text, StringComparison.OrdinalIgnoreCase);
         using var metadata = JsonDocument.Parse(history.MetadataJson);
         Assert.Equal("approvalDecision", metadata.RootElement.GetProperty("kind").GetString());
+        Assert.Equal(approver.Id, metadata.RootElement.GetProperty("actorUserId").GetInt32());
+        Assert.Equal(approver.FullName, metadata.RootElement.GetProperty("actorName").GetString());
         Assert.Equal("revisionRequested", metadata.RootElement.GetProperty("decision").GetString());
+        Assert.Equal("Документы подготовлены и приложены.", metadata.RootElement.GetProperty("taskResult").GetString());
         Assert.Equal("revision", metadata.RootElement.GetProperty("resultingStatus").GetString());
         Assert.Equal(revisionDueAt, metadata.RootElement.GetProperty("revisionDueAt").GetDateTime());
         Assert.Equal(approver.Id, metadata.RootElement.GetProperty("approverUserId").GetInt32());

@@ -4257,6 +4257,7 @@ public class NotificationServiceTests
             RemindersJson = "[]",
             ChannelsJson = "[\"inApp\"]",
             Status = "revision",
+            Result = "Исполнитель подготовил документы.",
             Participants = [participant]
         };
         db.TaskJournalItems.Add(task);
@@ -4277,6 +4278,7 @@ public class NotificationServiceTests
         Assert.Equal(assignee.Id, notification.RecipientUserId);
         Assert.Equal(UserNotificationTypes.TaskRevisionRequested, notification.Type);
         Assert.Contains("доработку", notification.Title, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Исполнитель подготовил документы.", notification.BodyPreview);
         Assert.Contains("Нужно исправить результат", notification.BodyPreview);
     }
 
@@ -4341,6 +4343,7 @@ public class NotificationServiceTests
             RemindersJson = "[]",
             ChannelsJson = "[\"inApp\"]",
             Status = "approved",
+            Result = "Задача выполнена и результат приложен.",
             Participants =
             [
                 participant,
@@ -4378,6 +4381,7 @@ public class NotificationServiceTests
             Assert.Equal(UserNotificationTypes.TaskApproved, notification.Type);
             Assert.Equal("emerald", notification.Tone);
             Assert.Contains("согласована", notification.Title, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Задача выполнена и результат приложен.", notification.BodyPreview, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("Можно закрывать", notification.BodyPreview, StringComparison.OrdinalIgnoreCase);
         });
         Assert.Equal(

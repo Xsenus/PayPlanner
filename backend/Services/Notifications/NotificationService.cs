@@ -4259,6 +4259,7 @@ public sealed class NotificationService : INotificationService
             ["task.priority"] = task.Priority,
             ["task.assigneeName"] = string.IsNullOrWhiteSpace(task.AssigneeName) ? "не указан" : task.AssigneeName.Trim(),
             ["task.authorName"] = string.IsNullOrWhiteSpace(task.AuthorName) ? "не указан" : task.AuthorName.Trim(),
+            ["task.result"] = string.IsNullOrWhiteSpace(task.Result) ? "не заполнен" : task.Result.Trim(),
             ["actor.name"] = string.IsNullOrWhiteSpace(actorName) ? "Система" : actorName.Trim(),
         };
 
@@ -4673,6 +4674,12 @@ public sealed class NotificationService : INotificationService
         {
             lines.Add(string.Empty);
             lines.Add(isRevision ? $"Рецензия: {resolution.Trim()}" : $"Резолюция: {resolution.Trim()}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(task.Result))
+        {
+            lines.Add(string.Empty);
+            lines.Add($"Результат исполнителя: {task.Result.Trim()}");
         }
 
         if (isRevision)

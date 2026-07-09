@@ -2579,15 +2579,18 @@ public class TasksController : ControllerBase
         AddTaskHistory(
             entity,
             access,
-            BuildApprovalHistoryText(decision, participant.DisplayName, resolution),
+            BuildApprovalHistoryText(decision, participant.DisplayName, resolution, entity.Result),
             new
             {
                 kind = "approvalDecision",
+                actorUserId = access.UserId,
+                actorName = access.DisplayName,
                 participantId = participant.Id,
                 approverUserId = participant.UserId,
                 approverName = participant.DisplayName,
                 decision,
                 resolution,
+                taskResult = NormalizeOptional(entity.Result),
                 resultingStatus = entity.Status,
                 finalAction,
                 revisionDueAt,
@@ -5163,11 +5166,16 @@ public class TasksController : ControllerBase
         return currentKeys.SequenceEqual(nextKeys, StringComparer.OrdinalIgnoreCase);
     }
 
-    private static string BuildApprovalHistoryText(string decision, string approverName, string? resolution)
+    private static string BuildApprovalHistoryText(string decision, string approverName, string? resolution, string? taskResult)
     {
         var text = string.Equals(decision, "approved", StringComparison.OrdinalIgnoreCase)
             ? $"Согласовано: {approverName}."
             : $"Возвращено на доработку: {approverName}.";
+
+        if (!string.IsNullOrWhiteSpace(taskResult))
+        {
+            text = $"{text} Результат исполнителя: {taskResult.Trim()}";
+        }
 
         return string.IsNullOrWhiteSpace(resolution)
             ? text

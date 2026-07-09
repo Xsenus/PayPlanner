@@ -83,6 +83,7 @@ public static class NotificationTemplateCatalog
         new("task.priority", "Приоритет задачи"),
         new("task.assigneeName", "Исполнитель"),
         new("task.authorName", "Постановщик"),
+        new("task.result", "Результат задачи"),
         new("task.assignedSubject", "Тема уведомления о назначении задачи"),
         new("task.assignmentDetails", "Детали назначения или переназначения"),
         new("actor.name", "Кто выполнил действие")
@@ -321,14 +322,14 @@ public static class NotificationTemplateCatalog
             "Задача согласована",
             "Уведомление после подтверждения результата задачи.",
             "Задача согласована: {{task.title}}",
-            "{{actor.name}} согласовал задачу: {{task.title}}\n\nРешение: {{approval.resolution}}",
+            "{{actor.name}} согласовал задачу: {{task.title}}\n\nРезультат исполнителя: {{task.result}}\nРешение: {{approval.resolution}}",
             [.. TaskVariables, new("approval.resolution", "Комментарий согласующего")]),
         new(
             NotificationTemplateKeys.TaskRevisionRequested,
             "Возврат на доработку",
             "Уведомление при возврате задачи исполнителю.",
             "Задача возвращена на доработку: {{task.title}}",
-            "{{actor.name}} вернул задачу на доработку: {{task.title}}\n\nКомментарий: {{approval.resolution}}",
+            "{{actor.name}} вернул задачу на доработку: {{task.title}}\n\nРезультат исполнителя: {{task.result}}\nКомментарий: {{approval.resolution}}",
             [.. TaskVariables, new("approval.resolution", "Комментарий согласующего")]),
         new(
             NotificationTemplateKeys.TaskApprovalOverdue,
