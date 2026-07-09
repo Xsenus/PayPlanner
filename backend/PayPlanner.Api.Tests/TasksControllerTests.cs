@@ -527,6 +527,7 @@ public class TasksControllerTests
             DueAt = DateTime.UtcNow.AddHours(2),
             ApprovalDueAt = approvalDueAt,
             Status = "onApproval",
+            Result = "Документы подготовлены и переданы на проверку.",
             Participants =
             [
                 new TaskJournalParticipantRequest
@@ -644,6 +645,71 @@ public class TasksControllerTests
         var stored = await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id);
         Assert.Equal("new", stored.Status);
         Assert.Null(stored.Result);
+    }
+
+    [Fact]
+    public async Task UpdateStatus_OnApprovalWithoutResultRequiresResult()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author-approval-result@example.com", "Автор");
+        var approver = await CreateAdminUserAsync(db, "approver-approval-result@example.com", "Согласующий");
+        var client = await CreateClientAsync(db, "Клиент результата согласования");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id, result: null);
+        task.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = approver.Id,
+            Role = "approver",
+            DisplayName = approver.FullName,
+            Email = approver.Email,
+            ApprovalStatus = "pending",
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "onApproval",
+        }, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.Contains("результат", badRequest.Value?.ToString(), StringComparison.OrdinalIgnoreCase);
+
+        var stored = await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id);
+        Assert.Equal("new", stored.Status);
+        Assert.Null(stored.Result);
+    }
+
+    [Fact]
+    public async Task UpdateStatus_OnApprovalWithResultSavesResultAndStartsApproval()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author-approval-result-ok@example.com", "Автор");
+        var approver = await CreateAdminUserAsync(db, "approver-approval-result-ok@example.com", "Согласующий");
+        var client = await CreateClientAsync(db, "Клиент результата согласования");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id, result: null);
+        task.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = approver.Id,
+            Role = "approver",
+            DisplayName = approver.FullName,
+            Email = approver.Email,
+            ApprovalStatus = "pending",
+        });
+        await db.SaveChangesAsync();
+        var notifications = new RecordingNotificationService();
+        var controller = CreateController(db, notifications, author);
+
+        var result = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "onApproval",
+            Result = "Работа выполнена, документы приложены к задаче.",
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(ok.Value);
+        Assert.Equal("onApproval", dto.Status);
+        Assert.Equal("Работа выполнена, документы приложены к задаче.", dto.Result);
+        Assert.Contains(task.Id, notifications.ApprovalRequestedTaskIds);
     }
 
     [Fact]

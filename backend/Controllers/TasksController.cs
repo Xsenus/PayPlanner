@@ -4535,6 +4535,13 @@ public class TasksController : ControllerBase
             return "Перед завершением задачи заполните результат.";
         }
 
+        if (IsApprovalActiveStatus(status)
+            && requireCompletionResult
+            && string.IsNullOrWhiteSpace(result))
+        {
+            return "Перед отправкой задачи на согласование заполните результат.";
+        }
+
         if (string.Equals(status, "done", StringComparison.OrdinalIgnoreCase)
             && approverCount > 0
             && !allApproversApproved
