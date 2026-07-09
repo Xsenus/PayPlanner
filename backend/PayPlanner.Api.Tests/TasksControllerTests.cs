@@ -121,6 +121,35 @@ public class TasksControllerTests
         Assert.Single(updatedDto.Participants);
         Assert.Equal("Р’РЅРµС€РЅРёР№ РЅР°Р±Р»СЋРґР°С‚РµР»СЊ", updatedDto.Participants[0].DisplayName);
 
+        var fetched = await controller.GetTemplate(createdDto.Id, CancellationToken.None);
+        var fetchedOk = Assert.IsType<OkObjectResult>(fetched.Result);
+        var fetchedDto = Assert.IsType<TaskJournalTemplateDto>(fetchedOk.Value);
+        Assert.Equal(updatedDto.Id, fetchedDto.Id);
+        Assert.Equal(updatedDto.Name, fetchedDto.Name);
+        Assert.Equal(updatedDto.Title, fetchedDto.Title);
+        Assert.Equal(updatedDto.TaskDescription, fetchedDto.TaskDescription);
+        Assert.Equal("task", fetchedDto.Type);
+        Assert.Equal("normal", fetchedDto.Priority);
+        Assert.Equal(updatedDto.PlannedDurationMinutes, fetchedDto.PlannedDurationMinutes);
+        Assert.Equal(0, fetchedDto.DueOffsetMinutes);
+        Assert.Null(fetchedDto.AssigneeUserId);
+        Assert.Equal(updatedDto.AssigneeName, fetchedDto.AssigneeName);
+        Assert.Equal("none", fetchedDto.BindingType);
+        Assert.Equal(string.Empty, fetchedDto.BindingKey);
+        Assert.False(fetchedDto.IsActive);
+        Assert.Equal(updatedDto.Reminders, fetchedDto.Reminders);
+        Assert.Equal(updatedDto.Channels, fetchedDto.Channels);
+        Assert.Equal(updatedDto.Tags, fetchedDto.Tags);
+        Assert.Equal(author.Id, fetchedDto.CreatedByUserId);
+        Assert.Equal(author.FullName, fetchedDto.CreatedByName);
+        Assert.NotEqual(default, fetchedDto.CreatedAt);
+        Assert.NotNull(fetchedDto.UpdatedAt);
+        var fetchedParticipant = Assert.Single(fetchedDto.Participants);
+        Assert.Null(fetchedParticipant.UserId);
+        Assert.Equal("observer", fetchedParticipant.Role);
+        Assert.Equal(updatedDto.Participants[0].DisplayName, fetchedParticipant.DisplayName);
+        Assert.Equal(0, fetchedParticipant.SortOrder);
+
         var active = await controller.UpdateTemplateActive(createdDto.Id, new UpdateTaskJournalTemplateActiveRequest
         {
             IsActive = true,

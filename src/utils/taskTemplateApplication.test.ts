@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { TaskJournalUpsertPayload } from './taskJournalStore';
+import type { TaskJournalTemplate, TaskJournalUpsertPayload } from './taskJournalStore';
 import { applyTaskTemplateDefaults } from './taskTemplateApplication';
 
 function createPayload(overrides: Partial<TaskJournalUpsertPayload> = {}): TaskJournalUpsertPayload {
@@ -52,6 +52,86 @@ describe('applyTaskTemplateDefaults', () => {
     expect(result.dueAt).toBe('2026-07-10T06:00:00.000Z');
     expect(result.plannedDurationMinutes).toBe(90);
     expect(result.tags).toEqual(['дело', 'документы']);
+  });
+
+  it('applies values mapped from a saved task template without overwriting protected case context', () => {
+    const savedTemplate: TaskJournalTemplate = {
+      id: 17,
+      name: 'Case checklist',
+      description: 'Reusable saved template',
+      title: 'Prepare case checklist',
+      taskDescription: 'Check documents and prepare the next action plan.',
+      type: 'document',
+      priority: 'urgent',
+      plannedDurationMinutes: 120,
+      dueOffsetMinutes: 180,
+      assigneeUserId: 12,
+      assigneeName: 'Template assignee',
+      bindingType: 'caseStage',
+      bindingKey: 'appeal',
+      isActive: true,
+      reminders: ['before1d', 'atDue'],
+      channels: ['inApp', 'telegram'],
+      tags: ['case', 'checklist'],
+      participants: [
+        { userId: 21, role: 'approver', displayName: 'Template approver', sortOrder: 0 },
+        { userId: 22, role: 'observer', displayName: 'Template observer', sortOrder: 0 },
+      ],
+      createdByUserId: 5,
+      createdByName: 'Template author',
+      createdAt: '2026-07-09T05:00:00.000Z',
+      updatedAt: '2026-07-09T06:00:00.000Z',
+    };
+
+    const result = applyTaskTemplateDefaults(createPayload({
+      clientId: 101,
+      clientCaseId: 202,
+      objectName: 'Existing case context',
+      title: '',
+      description: '',
+      tags: ['manual'],
+      reminders: ['before1h'],
+      channels: ['email'],
+    }), {
+      title: savedTemplate.title,
+      description: savedTemplate.taskDescription ?? '',
+      type: savedTemplate.type,
+      priority: savedTemplate.priority,
+      plannedDurationMinutes: savedTemplate.plannedDurationMinutes,
+      assigneeUserId: savedTemplate.assigneeUserId,
+      assigneeName: savedTemplate.assigneeName,
+      reminders: savedTemplate.reminders,
+      channels: savedTemplate.channels,
+      tags: savedTemplate.tags,
+      participants: savedTemplate.participants.map((participant) => ({
+        userId: participant.userId,
+        role: participant.role,
+        displayName: participant.displayName,
+        email: participant.email,
+        sortOrder: participant.sortOrder,
+      })),
+    }, {
+      protectedFields: ['clientId', 'clientCaseId', 'objectName'],
+      replaceFields: ['type', 'priority', 'plannedDurationMinutes', 'assigneeUserId', 'assigneeName'],
+    });
+
+    expect(result.clientId).toBe(101);
+    expect(result.clientCaseId).toBe(202);
+    expect(result.objectName).toBe('Existing case context');
+    expect(result.title).toBe('Prepare case checklist');
+    expect(result.description).toBe('Check documents and prepare the next action plan.');
+    expect(result.type).toBe('document');
+    expect(result.priority).toBe('urgent');
+    expect(result.plannedDurationMinutes).toBe(120);
+    expect(result.assigneeUserId).toBe(12);
+    expect(result.assigneeName).toBe('Template assignee');
+    expect(result.reminders).toEqual(['before1h', 'before1d', 'atDue']);
+    expect(result.channels).toEqual(['email', 'inApp', 'telegram']);
+    expect(result.tags).toEqual(['manual', 'case', 'checklist']);
+    expect(result.participants).toEqual([
+      expect.objectContaining({ userId: 21, role: 'approver', displayName: 'Template approver', sortOrder: 0, approvalStatus: 'pending' }),
+      expect.objectContaining({ userId: 22, role: 'observer', displayName: 'Template observer', sortOrder: 0, approvalStatus: 'pending' }),
+    ]);
   });
 
   it('keeps protected manual values and merges list fields', () => {
