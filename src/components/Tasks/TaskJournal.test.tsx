@@ -2872,6 +2872,50 @@ describe('TaskJournal', () => {
     ]));
   });
 
+  it('shows selected observers in the modern task card and removes them from the list', async () => {
+    await renderJournal([
+      createTask({
+        participants: [
+          { userId: 7, role: 'assignee', displayName: 'Администратор', approvalStatus: 'pending' },
+        ],
+      }),
+    ], {
+      assignees: [
+        { id: 7, name: 'Администратор', email: 'admin@example.com' },
+        { id: 10, name: 'Первый наблюдатель', email: 'first-observer@example.com' },
+        { id: 11, name: 'Второй наблюдатель', email: 'second-observer@example.com' },
+      ],
+      settings: { taskCardWindowMode: 'modern' },
+    });
+
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId('task-modern-card-window');
+    const addObserverSelect = within(card).getByLabelText('Добавить наблюдателя');
+
+    fireEvent.change(addObserverSelect, { target: { value: '10' } });
+    fireEvent.change(addObserverSelect, { target: { value: '11' } });
+
+    const observerList = await within(card).findByTestId('task-modern-observer-list');
+    expect(within(observerList).getByText('Первый наблюдатель')).toBeTruthy();
+    expect(within(observerList).getByText('first-observer@example.com')).toBeTruthy();
+    expect(within(observerList).getByText('Второй наблюдатель')).toBeTruthy();
+
+    fireEvent.click(within(observerList).getByRole('button', { name: 'Удалить участника Первый наблюдатель' }));
+
+    expect(within(observerList).queryByText('Первый наблюдатель')).toBeNull();
+    expect(within(observerList).getByText('Второй наблюдатель')).toBeTruthy();
+
+    fireEvent.click(within(card).getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
+    const [, payload] = apiMock.updateTaskJournalItem.mock.calls[0];
+    const observers = payload.participants.filter((participant: { role: string }) => participant.role === 'observer');
+
+    expect(observers).toEqual([
+      expect.objectContaining({ userId: 11, displayName: 'Второй наблюдатель', role: 'observer' }),
+    ]);
+  });
+
   it('sends a change comment with task edits', async () => {
     await renderJournal();
 

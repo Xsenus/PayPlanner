@@ -7885,6 +7885,7 @@ function TaskModal({
                         <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
                       ))}
                     </select>
+                    {renderModernSelectedParticipantList('observer', visibleObservers, 'task-modern-observer-list')}
                   </div>
                 ) : null}
               </section>
