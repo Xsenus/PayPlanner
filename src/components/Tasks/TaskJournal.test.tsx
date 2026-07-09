@@ -2601,9 +2601,22 @@ describe('TaskJournal', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'На согласование' }));
 
+    expect(await screen.findByRole('heading', { name: 'Добавить результат по задаче' })).toBeTruthy();
+    expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить на согласование' }));
+    expect(screen.getByText('Добавьте результат по задаче перед отправкой на согласование.')).toBeTruthy();
+    expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByPlaceholderText('Опишите подробно, что было сделано и какой результат был достигнут.'), {
+      target: { value: 'Документы подготовлены, проверены и приложены к задаче.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Отправить на согласование' }));
+
     await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
     expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({
       status: 'onApproval',
+      result: 'Документы подготовлены, проверены и приложены к задаче.',
       approvalDueAt: expect.any(String),
       participants: expect.arrayContaining([
         expect.objectContaining({ role: 'approver', userId: 8, approvalStatus: 'pending' }),
