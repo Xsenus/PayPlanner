@@ -399,4 +399,24 @@ describe('ForcedTaskRevisionModal', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
   });
+
+  it('does not restore an acknowledged notification when the inbox reloads before the server hides it', async () => {
+    const revision = createNotification({ id: 71 });
+    mockNotificationPages([revision]);
+
+    render(<ForcedTaskRevisionModal />);
+
+    expect(await screen.findByRole('dialog')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Информация прочитана' }));
+
+    await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(71));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+
+    window.dispatchEvent(new CustomEvent(USER_NOTIFICATIONS_EVENT));
+
+    await waitFor(() => expect(apiMock.getUserNotifications.mock.calls.length).toBeGreaterThanOrEqual(8));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(apiMock.markUserNotificationRead).toHaveBeenCalledTimes(1);
+  });
 });
