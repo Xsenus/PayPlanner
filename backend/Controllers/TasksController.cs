@@ -1193,6 +1193,37 @@ public class TasksController : ControllerBase
         return Created($"/api/tasks/{entity.Id}/comments/{comment.Id}", MapComment(comment));
     }
 
+    [HttpGet("{id:int}/deadline-change-requests")]
+    public async Task<ActionResult<IReadOnlyList<TaskJournalDeadlineChangeRequestDto>>> GetDeadlineChangeRequests(int id, CancellationToken ct)
+    {
+        var access = await GetTaskAccessAsync(ct);
+        if (access is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!access.IsAdmin && access.Permission?.CanView != true)
+        {
+            return Forbid();
+        }
+
+        var exists = await BuildVisibleTasksQuery(access).AnyAsync(item => item.Id == id, ct);
+        if (!exists)
+        {
+            return NotFound();
+        }
+
+        var requests = await _db.TaskJournalDeadlineChangeRequests
+            .AsNoTracking()
+            .Where(item => item.TaskJournalItemId == id)
+            .OrderBy(item => item.Status == "pending" ? 0 : 1)
+            .ThenByDescending(item => item.CreatedAt)
+            .ThenByDescending(item => item.Id)
+            .ToListAsync(ct);
+
+        return Ok(requests.Select(MapDeadlineChangeRequest).ToList());
+    }
+
     [HttpPost("{id:int}/deadline-change-requests/{requestId:int}/approve")]
     public async Task<ActionResult<TaskJournalItemDto>> ApproveDeadlineChangeRequest(
         int id,
@@ -4563,6 +4594,30 @@ public class TasksController : ControllerBase
             MetadataJson = string.IsNullOrWhiteSpace(comment.MetadataJson) ? "{}" : comment.MetadataJson,
             CreatedAt = ToIso(comment.CreatedAt),
             UpdatedAt = comment.UpdatedAt.HasValue ? ToIso(comment.UpdatedAt.Value) : null,
+        };
+
+    private static TaskJournalDeadlineChangeRequestDto MapDeadlineChangeRequest(TaskJournalDeadlineChangeRequest request)
+        => new()
+        {
+            Id = request.Id,
+            TaskJournalItemId = request.TaskJournalItemId,
+            RequestedByUserId = request.RequestedByUserId,
+            RequestedByName = request.RequestedByName,
+            ReviewerUserId = request.ReviewerUserId,
+            ReviewerName = request.ReviewerName,
+            CurrentDueAt = ToIso(request.CurrentDueAt),
+            RequestedDueAt = ToIso(request.RequestedDueAt),
+            Reason = request.Reason,
+            Status = request.Status,
+            DecisionDueAt = request.DecisionDueAt.HasValue ? ToIso(request.DecisionDueAt.Value) : null,
+            DecisionComment = request.DecisionComment ?? string.Empty,
+            DecidedByUserId = request.DecidedByUserId,
+            DecidedByName = request.DecidedByName ?? string.Empty,
+            DecidedAt = request.DecidedAt.HasValue ? ToIso(request.DecidedAt.Value) : null,
+            CreatedCommentId = request.CreatedCommentId,
+            DecisionCommentId = request.DecisionCommentId,
+            CreatedAt = ToIso(request.CreatedAt),
+            UpdatedAt = request.UpdatedAt.HasValue ? ToIso(request.UpdatedAt.Value) : null,
         };
 
     private async Task<Dictionary<string, int>> ResolveTaskCaseDocumentIdsAsync(

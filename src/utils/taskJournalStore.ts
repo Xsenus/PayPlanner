@@ -100,6 +100,30 @@ export interface TaskJournalComment {
   updatedAt?: string | null;
 }
 
+export type TaskJournalDeadlineChangeRequestStatus = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'superseded';
+
+export interface TaskJournalDeadlineChangeRequest {
+  id: number;
+  taskJournalItemId: number;
+  requestedByUserId?: number | null;
+  requestedByName: string;
+  reviewerUserId?: number | null;
+  reviewerName: string;
+  currentDueAt: string;
+  requestedDueAt: string;
+  reason: string;
+  status: TaskJournalDeadlineChangeRequestStatus | string;
+  decisionDueAt?: string | null;
+  decisionComment?: string | null;
+  decidedByUserId?: number | null;
+  decidedByName?: string | null;
+  decidedAt?: string | null;
+  createdCommentId?: number | null;
+  decisionCommentId?: number | null;
+  createdAt: string;
+  updatedAt?: string | null;
+}
+
 export interface TaskJournalFile {
   id: number;
   taskJournalItemId: number;

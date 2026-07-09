@@ -34,6 +34,7 @@ const apiMock = vi.hoisted(() => ({
   getTaskJournalComments: vi.fn(),
   createTaskJournalComment: vi.fn(),
   createTaskJournalDeadlineChangeRequest: vi.fn(),
+  getTaskJournalDeadlineChangeRequests: vi.fn(),
   getTaskJournalFiles: vi.fn(),
   uploadTaskJournalFile: vi.fn(),
   downloadTaskJournalFile: vi.fn(),
@@ -463,6 +464,7 @@ describe('TaskJournal', () => {
       createdAt: todayAt(12),
       updatedAt: null,
     });
+    apiMock.getTaskJournalDeadlineChangeRequests.mockResolvedValue([]);
     apiMock.getTaskJournalFiles.mockResolvedValue([]);
     apiMock.uploadTaskJournalFile.mockResolvedValue({
       id: 601,
@@ -2772,6 +2774,50 @@ describe('TaskJournal', () => {
       reason: 'Нужны документы от клиента',
     }));
     expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+  });
+
+  it('shows deadline change requests in the task card', async () => {
+    apiMock.getTaskJournalDeadlineChangeRequests.mockResolvedValue([
+      {
+        id: 901,
+        taskJournalItemId: 101,
+        requestedByUserId: 7,
+        requestedByName: 'Исполнитель',
+        reviewerUserId: 8,
+        reviewerName: 'Постановщик',
+        currentDueAt: todayAt(18),
+        requestedDueAt: todayAt(20),
+        reason: 'Нужно дождаться документы от клиента',
+        status: 'pending',
+        decisionDueAt: null,
+        decisionComment: null,
+        decidedByUserId: null,
+        decidedByName: null,
+        decidedAt: null,
+        createdCommentId: 501,
+        decisionCommentId: null,
+        createdAt: todayAt(12),
+        updatedAt: todayAt(12),
+      },
+    ]);
+
+    await renderJournal([
+      createTask({
+        assigneeUserId: 7,
+        assigneeName: 'Исполнитель',
+        authorUserId: 8,
+        authorName: 'Постановщик',
+      }),
+    ]);
+
+    fireEvent.click(screen.getByTitle('Просмотр'));
+
+    const requestsSection = await screen.findByTestId('task-deadline-change-requests');
+    expect(within(requestsSection).getByText('Запросы переноса срока')).toBeTruthy();
+    expect(within(requestsSection).getByText('Ожидает решения')).toBeTruthy();
+    expect(within(requestsSection).getByText('Исполнитель')).toBeTruthy();
+    expect(within(requestsSection).getByText('Ожидает решения: Постановщик')).toBeTruthy();
+    expect(within(requestsSection).getByText(/Нужно дождаться документы от клиента/)).toBeTruthy();
   });
 
   it('renders task calendar as a journal subgroup', async () => {

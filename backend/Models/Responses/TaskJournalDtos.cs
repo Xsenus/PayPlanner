@@ -69,6 +69,29 @@ public class TaskJournalCommentDto
     public string? UpdatedAt { get; set; }
 }
 
+public class TaskJournalDeadlineChangeRequestDto
+{
+    public int Id { get; set; }
+    public int TaskJournalItemId { get; set; }
+    public int? RequestedByUserId { get; set; }
+    public string RequestedByName { get; set; } = string.Empty;
+    public int? ReviewerUserId { get; set; }
+    public string ReviewerName { get; set; } = string.Empty;
+    public string CurrentDueAt { get; set; } = string.Empty;
+    public string RequestedDueAt { get; set; } = string.Empty;
+    public string Reason { get; set; } = string.Empty;
+    public string Status { get; set; } = "pending";
+    public string? DecisionDueAt { get; set; }
+    public string DecisionComment { get; set; } = string.Empty;
+    public int? DecidedByUserId { get; set; }
+    public string DecidedByName { get; set; } = string.Empty;
+    public string? DecidedAt { get; set; }
+    public int? CreatedCommentId { get; set; }
+    public int? DecisionCommentId { get; set; }
+    public string CreatedAt { get; set; } = string.Empty;
+    public string? UpdatedAt { get; set; }
+}
+
 public class TaskJournalFileDto
 {
     public int Id { get; set; }

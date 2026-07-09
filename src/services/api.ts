@@ -4184,6 +4184,10 @@ export class ApiService {
     });
   }
 
+  async getTaskJournalDeadlineChangeRequests(id: number) {
+    return this.request<TaskJournalDeadlineChangeRequest[]>(`/tasks/${id}/deadline-change-requests`);
+  }
+
   async getTaskJournalFiles(id: number) {
     return this.request<TaskJournalFile[]>(`/tasks/${id}/files`);
   }
@@ -7187,6 +7191,7 @@ import type {
   TaskJournalAutomationCreateResult,
   TaskJournalCaseAutomationCandidate,
   TaskJournalComment,
+  TaskJournalDeadlineChangeRequest,
   TaskJournalFile,
   TaskJournalBulkUpdatePayload,
   TaskJournalBulkUpdateResult,

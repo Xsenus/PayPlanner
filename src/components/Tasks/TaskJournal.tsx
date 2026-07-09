@@ -67,6 +67,7 @@ import {
   type TaskJournalCaseAutomationCandidate,
   type TaskJournalChannel,
   type TaskJournalComment,
+  type TaskJournalDeadlineChangeRequest,
   type TaskJournalFile,
   type TaskJournalItem,
   type TaskJournalParticipant,
@@ -597,6 +598,50 @@ function fromLocalDateInputValue(value: string) {
 
 function formatDateTime(value: string) {
   return formatDateTimeInTimeZone(value, activeTaskJournalTimeZoneId);
+}
+
+function getDeadlineChangeRequestStatusLabel(status: string) {
+  switch (status) {
+    case 'pending':
+      return 'Ожидает решения';
+    case 'approved':
+      return 'Согласовано';
+    case 'rejected':
+      return 'Отклонено';
+    case 'cancelled':
+      return 'Отменено';
+    case 'superseded':
+      return 'Заменено';
+    default:
+      return status || 'Неизвестно';
+  }
+}
+
+function getDeadlineChangeRequestStatusClass(status: string) {
+  switch (status) {
+    case 'pending':
+      return 'border-amber-200 bg-amber-50 text-amber-800';
+    case 'approved':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+    case 'rejected':
+      return 'border-rose-200 bg-rose-50 text-rose-700';
+    default:
+      return 'border-slate-200 bg-slate-50 text-slate-600';
+  }
+}
+
+function getDeadlineChangeRequestActionLabel(request: TaskJournalDeadlineChangeRequest) {
+  if (request.status === 'pending') {
+    return request.reviewerName
+      ? `Ожидает решения: ${request.reviewerName}`
+      : 'Ожидает решения постановщика';
+  }
+
+  if (request.decidedByName) {
+    return `Обработал: ${request.decidedByName}`;
+  }
+
+  return 'Решение зафиксировано';
 }
 
 function formatRelative(value: string) {
@@ -6025,6 +6070,8 @@ function TaskModal({
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentSaving, setCommentSaving] = useState(false);
   const [commentText, setCommentText] = useState('');
+  const [deadlineChangeRequests, setDeadlineChangeRequests] = useState<TaskJournalDeadlineChangeRequest[]>([]);
+  const [deadlineChangeRequestsLoading, setDeadlineChangeRequestsLoading] = useState(false);
   const [changeComment, setChangeComment] = useState('');
   const [deadlineRequestDueAt, setDeadlineRequestDueAt] = useState(() => state?.task ? toLocalInputValue(state.task.dueAt) : '');
   const [deadlineRequestReason, setDeadlineRequestReason] = useState('');
@@ -6456,6 +6503,37 @@ function TaskModal({
 
   useEffect(() => {
     if (!taskId) {
+      setDeadlineChangeRequests([]);
+      setDeadlineChangeRequestsLoading(false);
+      return;
+    }
+
+    let active = true;
+    setDeadlineChangeRequestsLoading(true);
+    apiService.getTaskJournalDeadlineChangeRequests(taskId)
+      .then((items) => {
+        if (active) {
+          setDeadlineChangeRequests(items);
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          toast.error(extractDisplayErrorMessage(error, 'Не удалось загрузить запросы переноса срока.'), 'Журнал задач');
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setDeadlineChangeRequestsLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [taskId, toast]);
+
+  useEffect(() => {
+    if (!taskId) {
       setFiles([]);
       setFilesLoading(false);
       return;
@@ -6509,14 +6587,21 @@ function TaskModal({
   const handleDeadlineRequest = async () => {
     const requestedDueAt = fromLocalInputValue(deadlineRequestDueAt);
     if (!taskId || !deadlineRequestDueAt) return;
+    const reason = deadlineRequestReason.trim();
+    if (!reason) {
+      toast.error('Укажите причину переноса срока.', 'Журнал задач');
+      return;
+    }
 
     setDeadlineRequestSaving(true);
     try {
       const created = await apiService.createTaskJournalDeadlineChangeRequest(taskId, {
         requestedDueAt,
-        reason: deadlineRequestReason.trim() || null,
+        reason,
       });
       setComments((previous) => [created, ...previous]);
+      const requests = await apiService.getTaskJournalDeadlineChangeRequests(taskId);
+      setDeadlineChangeRequests(requests);
       setDeadlineRequestReason('');
       toast.success('Запрос переноса срока добавлен в историю задачи.', 'Журнал задач');
     } catch (error) {
@@ -6762,6 +6847,68 @@ function TaskModal({
     </div>
   ) : null;
 
+  const deadlineChangeRequestsSection = taskId && (deadlineChangeRequestsLoading || deadlineChangeRequests.length > 0) ? (
+    <section className="rounded-xl border border-amber-200 bg-amber-50/70 p-3" data-testid="task-deadline-change-requests">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-amber-950">
+            <TimerReset className="h-4 w-4 text-amber-700" />
+            Запросы переноса срока
+          </h3>
+          <p className="mt-1 text-xs leading-5 text-amber-800">
+            Здесь видно, кто запросил перенос, какой срок предложен и кто должен принять решение.
+          </p>
+        </div>
+        <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-amber-800 ring-1 ring-amber-200">
+          {deadlineChangeRequestsLoading ? 'Загрузка' : `${deadlineChangeRequests.length} шт.`}
+        </span>
+      </div>
+
+      {deadlineChangeRequestsLoading ? (
+        <div className="mt-3 rounded-lg border border-amber-100 bg-white px-3 py-2 text-sm text-amber-700">Загружаем запросы...</div>
+      ) : (
+        <div className="mt-3 space-y-2">
+          {deadlineChangeRequests.map((request) => (
+            <article key={request.id} className="rounded-lg border border-amber-100 bg-white px-3 py-2 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${getDeadlineChangeRequestStatusClass(request.status)}`}>
+                  {getDeadlineChangeRequestStatusLabel(request.status)}
+                </span>
+                <span className="text-xs text-slate-500">{formatDateTime(request.createdAt)}</span>
+              </div>
+              <div className="mt-2 grid gap-2 text-slate-700 sm:grid-cols-2">
+                <div>
+                  <div className="text-xs font-semibold uppercase text-slate-400">Запросил</div>
+                  <div className="font-medium">{request.requestedByName || 'Не указано'}</div>
+                </div>
+                <div>
+                  <div className="text-xs font-semibold uppercase text-slate-400">Действие</div>
+                  <div className="font-medium">{getDeadlineChangeRequestActionLabel(request)}</div>
+                </div>
+                <div>
+                  <div className="text-xs font-semibold uppercase text-slate-400">Текущий срок</div>
+                  <div>{formatDateTime(request.currentDueAt)}</div>
+                </div>
+                <div>
+                  <div className="text-xs font-semibold uppercase text-slate-400">Запрошенный срок</div>
+                  <div>{formatDateTime(request.requestedDueAt)}</div>
+                </div>
+              </div>
+              <div className="mt-2 rounded-md bg-amber-50 px-2 py-2 text-sm leading-5 text-amber-900">
+                <span className="font-semibold">Причина:</span> {request.reason || 'Не указана'}
+              </div>
+              {request.decisionComment ? (
+                <div className="mt-2 rounded-md bg-slate-50 px-2 py-2 text-sm leading-5 text-slate-700">
+                  <span className="font-semibold">Решение:</span> {request.decisionComment}
+                </div>
+              ) : null}
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  ) : null;
+
   if (isModernChrome) {
     const TypeIcon = typeOption.icon;
     const titleText = state?.mode === 'view'
@@ -6915,6 +7062,8 @@ function TaskModal({
                 />
                 {resultError ? <p className="mt-2 text-xs font-semibold text-rose-600">{resultError}</p> : null}
               </section>
+
+              {deadlineChangeRequestsSection}
 
               <section className="rounded-xl border border-slate-200 bg-white">
                 <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-3 py-2 text-sm">
@@ -7341,7 +7490,7 @@ function TaskModal({
                   <div className="mb-2 text-sm font-semibold text-amber-900">Запрос переноса срока</div>
                   <input type="datetime-local" value={deadlineRequestDueAt} onChange={(event) => setDeadlineRequestDueAt(event.target.value)} className="w-full rounded-lg border border-amber-200 bg-white px-2 py-2 text-sm" />
                   <textarea value={deadlineRequestReason} onChange={(event) => setDeadlineRequestReason(event.target.value)} className="mt-2 min-h-[64px] w-full rounded-lg border border-amber-200 bg-white px-2 py-2 text-sm" placeholder="Причина" />
-                  <button type="button" onClick={() => void handleDeadlineRequest()} disabled={deadlineRequestSaving || !deadlineRequestDueAt} className="mt-2 w-full rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-amber-600 disabled:opacity-60">
+                  <button type="button" onClick={() => void handleDeadlineRequest()} disabled={deadlineRequestSaving || !deadlineRequestDueAt || !deadlineRequestReason.trim()} className="mt-2 w-full rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-amber-600 disabled:opacity-60">
                     {deadlineRequestSaving ? 'Отправляем...' : 'Запросить перенос'}
                   </button>
                 </section>
@@ -8012,13 +8161,19 @@ function TaskModal({
                 <button
                   type="button"
                   onClick={() => void handleDeadlineRequest()}
-                  disabled={deadlineRequestSaving || !deadlineRequestDueAt}
+                  disabled={deadlineRequestSaving || !deadlineRequestDueAt || !deadlineRequestReason.trim()}
                   className="inline-flex h-11 items-center justify-center rounded-xl border border-amber-300 bg-white px-4 text-sm font-semibold text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {deadlineRequestSaving ? 'Отправляем...' : 'Запросить перенос'}
                 </button>
               </div>
             </section>
+          ) : null}
+
+          {deadlineChangeRequestsSection ? (
+            <div className="mt-5">
+              {deadlineChangeRequestsSection}
+            </div>
           ) : null}
 
           <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
