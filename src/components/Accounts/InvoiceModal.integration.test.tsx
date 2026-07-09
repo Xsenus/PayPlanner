@@ -3037,6 +3037,50 @@ describe('InvoiceModal integration', () => {
     });
   });
 
+  it('keeps the default client case in the create payload when case options are incomplete', async () => {
+    const getCasesMock = vi.mocked(apiService.getCases);
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    getCasesMock.mockResolvedValue([]);
+
+    render(
+      <InvoiceModal
+        open
+        mode="create"
+        invoice={null}
+        onClose={vi.fn()}
+        onSubmit={onSubmit}
+        submitting={false}
+        clients={[createTestClient(1, 'Client owner')]}
+        responsibles={[]}
+        lookupsLoading={false}
+        defaultClientId={1}
+        defaultClientCaseId={901}
+        relatedPayments={[]}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(getCasesMock).toHaveBeenCalledWith({ clientId: 1 });
+    });
+
+    fireEvent.change(screen.getByLabelText(/Номер сч[её]та/i), {
+      target: { value: 'INV-DEFAULT-CASE-1' },
+    });
+
+    const form = document.getElementById('invoice-edit-form') as HTMLFormElement | null;
+    expect(form).toBeTruthy();
+    fireEvent.submit(form!);
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+        number: 'INV-DEFAULT-CASE-1',
+        clientId: 1,
+        clientCaseId: 901,
+        clientCaseIds: [901],
+      }));
+    });
+  });
+
   it('submits an expense invoice without an expense counterparty', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
 

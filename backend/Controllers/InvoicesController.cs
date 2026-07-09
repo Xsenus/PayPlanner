@@ -4598,6 +4598,7 @@ public class InvoicesController : ControllerBase
 
         var existingPaymentRows = await _db.Payments
             .Include(payment => payment.Responsibles)
+            .Include(payment => payment.InvoiceClientCases)
             .Where(payment =>
                 payment.InvoiceId == invoiceEntityId.Value
                 && payment.Id != invoicePayment.Id)
@@ -4896,6 +4897,7 @@ public class InvoicesController : ControllerBase
         foreach (var installment in generatedInstallments)
         {
             SyncPaymentBindingsFromInvoice(installment, invoicePayment);
+            SyncInvoiceClientCasesFromInvoice(installment, invoicePayment);
             SyncPaymentResponsibles(installment, responsibleIds);
         }
     }
@@ -5235,6 +5237,7 @@ public class InvoicesController : ControllerBase
         payment.PaymentStatusId = request.PaymentStatusEntityId;
         payment.CounterpartyName = null;
         payment.SystemNotes = MergeInstallmentMetadataIntoSystemNotes(payment.SystemNotes, plan, item);
+        SyncInvoiceClientCasesFromInvoice(payment, invoicePayment);
 
         if (!HasProtectedInstallmentActivity(payment))
         {
@@ -5247,6 +5250,40 @@ public class InvoicesController : ControllerBase
         SyncPaymentResponsibles(payment, responsibleIds);
         PaymentDomainService.Normalize(payment);
         PaymentDomainService.ApplyStatusRules(payment, DateTime.UtcNow, invoiceTimeZone);
+    }
+
+    private static void SyncInvoiceClientCasesFromInvoice(Payment payment, Payment invoicePayment)
+    {
+        var targetIds = invoicePayment.InvoiceClientCases
+            .Select(link => link.ClientCaseId)
+            .Where(id => id > 0)
+            .Distinct()
+            .ToHashSet();
+
+        var toRemove = payment.InvoiceClientCases
+            .Where(link => !targetIds.Contains(link.ClientCaseId))
+            .ToList();
+        foreach (var link in toRemove)
+        {
+            payment.InvoiceClientCases.Remove(link);
+        }
+
+        var existingIds = payment.InvoiceClientCases.Select(link => link.ClientCaseId).ToHashSet();
+        foreach (var clientCaseId in targetIds)
+        {
+            if (existingIds.Contains(clientCaseId))
+            {
+                continue;
+            }
+
+            payment.InvoiceClientCases.Add(new InvoiceClientCase
+            {
+                PaymentId = payment.Id,
+                ClientCaseId = clientCaseId,
+            });
+        }
+
+        payment.ClientCaseId = targetIds.Count > 0 ? targetIds.First() : null;
     }
 
     private static void SyncPaymentResponsibles(Payment payment, IReadOnlyCollection<int> responsibleIds)

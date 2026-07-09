@@ -178,6 +178,7 @@ vi.mock('../Accounts/InvoiceModal', () => ({
         <div>{`draft-legal:${props.resumeDraft?.form?.legalEntityId ?? ''}`}</div>
         <div>{`draft-contract:${props.resumeDraft?.form?.contractId ?? ''}`}</div>
         <div>{`draft-case-count:${props.resumeDraft?.selectedClientCaseIds?.length ?? 0}`}</div>
+        <div>{`draft-case-ids:${props.resumeDraft?.selectedClientCaseIds?.join(',') ?? ''}`}</div>
         <button
           type="button"
           onClick={() =>
@@ -1103,6 +1104,7 @@ describe('PaymentModal integration', () => {
     expect(screen.getByText('draft-client:69')).toBeTruthy();
     expect(screen.getByText('draft-contract:321')).toBeTruthy();
     expect(screen.getByText('draft-case-count:1')).toBeTruthy();
+    expect(screen.getByText('draft-case-ids:501')).toBeTruthy();
 
     fireEvent.click(screen.getByText('submit-created-invoice'));
 

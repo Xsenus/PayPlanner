@@ -255,6 +255,10 @@ public class InvoicesControllerCrudTests
             Assert.Contains(installment.ClientCaseId ?? 0, new[] { caseId1, caseId2 });
             Assert.False(installment.IsPaid);
         });
+        Assert.All(storedInstallments, installment =>
+        {
+            Assert.Equal(new[] { caseId1, caseId2 }, installment.InvoiceClientCases.Select(link => link.ClientCaseId).OrderBy(id => id).ToArray());
+        });
 
         var installmentResponsibleIds = await db.Set<PaymentResponsible>()
             .AsNoTracking()
@@ -1633,6 +1637,10 @@ public class InvoicesControllerCrudTests
             Assert.Equal(dealTypeId2, installment.DealTypeId);
             Assert.Equal(paymentStatusId2, installment.PaymentStatusId);
         });
+        Assert.All(updatedInstallments, installment =>
+        {
+            Assert.Equal(new[] { caseId2 }, installment.InvoiceClientCases.Select(link => link.ClientCaseId).ToArray());
+        });
 
         var updatedInstallmentResponsibleIds = await db.Set<PaymentResponsible>()
             .AsNoTracking()
@@ -1641,6 +1649,63 @@ public class InvoicesControllerCrudTests
             .Distinct()
             .ToListAsync();
         Assert.Equal(new[] { responsibleId2 }, updatedInstallmentResponsibleIds);
+    }
+
+    [Fact]
+    public async Task Update_WithoutReplacingInstallmentPlan_SyncsGeneratedInstallmentCaseLinks()
+    {
+        await using var db = await CreateContextAsync();
+        await ConfigureInvoiceRulesAsync(db, maxClientCases: 2, maxActs: 2);
+
+        var actorUserId = await CreateUserAsync(db, "Admin User", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Installment Case Sync Client");
+        var contractId = await CreateContractAsync(db, clientId, "CTR-CASE-SYNC");
+        var caseId1 = await CreateClientCaseAsync(db, clientId, "Initial Case");
+        var caseId2 = await CreateClientCaseAsync(db, clientId, "Updated Case");
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+
+        var createRequest = CreateRequest("INV-CASE-SYNC", clientId, new DateTime(2026, 4, 10), 12_000m);
+        createRequest.ContractId = contractId;
+        createRequest.ClientCaseIds = [caseId1];
+        createRequest.InstallmentPlan = CreateInstallmentPlanRequest(
+            total: 12_000m,
+            startDate: new DateTime(2026, 4, 10),
+            new DateTime(2026, 5, 10),
+            new DateTime(2026, 6, 10));
+
+        var createAction = await controller.Create(createRequest, CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(createAction.Result);
+        var createdDto = Assert.IsType<InvoiceDto>(created.Value);
+
+        db.ChangeTracker.Clear();
+        var parent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);
+        var originalInstallmentIds = (await LoadInstallmentPaymentsAsync(db, parent.InvoiceId!.Value, createdDto.Id))
+            .Select(payment => payment.Id)
+            .OrderBy(id => id)
+            .ToArray();
+
+        var updateRequest = CreateRequest("INV-CASE-SYNC", clientId, new DateTime(2026, 4, 10), 12_000m);
+        updateRequest.ContractId = contractId;
+        updateRequest.ClientCaseIds = [caseId2];
+
+        var updateAction = await controller.Update(createdDto.Id, updateRequest, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(updateAction.Result);
+        var updatedDto = Assert.IsType<InvoiceDto>(ok.Value);
+        Assert.Equal(new[] { caseId2 }, updatedDto.ClientCaseIds);
+
+        db.ChangeTracker.Clear();
+        var updatedParent = await db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == createdDto.Id);
+        Assert.Equal(caseId2, updatedParent.ClientCaseId);
+
+        var updatedInstallments = await LoadInstallmentPaymentsAsync(db, updatedParent.InvoiceId!.Value, createdDto.Id);
+        Assert.Equal(originalInstallmentIds, updatedInstallments.Select(payment => payment.Id).OrderBy(id => id).ToArray());
+        Assert.All(updatedInstallments, installment =>
+        {
+            Assert.Equal(contractId, installment.ContractId);
+            Assert.Equal(caseId2, installment.ClientCaseId);
+            Assert.Equal(new[] { caseId2 }, installment.InvoiceClientCases.Select(link => link.ClientCaseId).ToArray());
+        });
     }
 
     [Fact]
@@ -2909,6 +2974,7 @@ public class InvoicesControllerCrudTests
     {
         return await db.Payments
             .AsNoTracking()
+            .Include(payment => payment.InvoiceClientCases)
             .Where(payment =>
                 payment.InvoiceId == invoiceEntityId
                 && payment.Id != parentPaymentId

@@ -439,7 +439,7 @@ function filterClientCaseIdsForOwner(
     const option = optionsById.get(id);
     if (option && isClientCaseLinkedToOwner(option, ownerClientId, ownerLegalEntityId)) {
       result.push(id);
-    } else if (!option && !optionsLoaded) {
+    } else if (!option) {
       result.push(id);
     }
   });
