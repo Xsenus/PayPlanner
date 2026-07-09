@@ -6,8 +6,11 @@ import type { PagedResult, UserNotificationDto } from '../../services/api';
 import { USER_NOTIFICATIONS_EVENT } from '../../utils/userNotifications';
 
 const apiMock = vi.hoisted(() => ({
+  approveTaskJournalDeadlineChangeRequest: vi.fn(),
+  getUserSetting: vi.fn(),
   getUserNotifications: vi.fn(),
   markUserNotificationRead: vi.fn(),
+  rejectTaskJournalDeadlineChangeRequest: vi.fn(),
 }));
 
 vi.mock('../../services/api', () => ({
@@ -63,21 +66,61 @@ function createCompletedApprovalNotification(overrides: Partial<UserNotification
   });
 }
 
-function mockNotificationPages(revisions: UserNotificationDto[] = [], approvals: UserNotificationDto[] = []) {
+function createDeadlineChangeNotification(overrides: Partial<UserNotificationDto> = {}): UserNotificationDto {
+  return createNotification({
+    id: 51,
+    type: 'taskDeadlineChangeRequested',
+    typeLabel: 'Запрос переноса срока',
+    eventKey: 'task:303:deadline-change-request:901:requested',
+    title: 'Запрос переноса срока: Подготовить претензию',
+    bodyPreview: 'Исполнитель запросил перенос срока задачи.',
+    tone: 'violet',
+    objectId: 303,
+    taskId: 303,
+    metadataJson: JSON.stringify({
+      deadlineChangeRequestId: 901,
+      requestedByName: 'Иван Петров',
+      reviewerName: 'Анна Смирнова',
+      requestedDueAt: '2026-06-30T09:00:00Z',
+      reason: 'Нужно дождаться ответа клиента.',
+    }),
+    ...overrides,
+  });
+}
+
+function mockNotificationPages(
+  revisions: UserNotificationDto[] = [],
+  approvals: UserNotificationDto[] = [],
+  deadlineChanges: UserNotificationDto[] = [],
+) {
   apiMock.getUserNotifications.mockImplementation(async (params?: { type?: string }) => {
+    if (params?.type === 'taskDeadlineChangeRequested') {
+      return createPage(deadlineChanges);
+    }
+
     if (params?.type === 'taskApproved') {
       return createPage(approvals);
     }
 
-    return createPage(revisions);
+    if (params?.type === 'taskRevisionRequested') {
+      return createPage(revisions);
+    }
+
+    return createPage([]);
   });
 }
 
 describe('ForcedTaskRevisionModal', () => {
   beforeEach(() => {
+    apiMock.approveTaskJournalDeadlineChangeRequest.mockReset();
+    apiMock.getUserSetting.mockReset();
     apiMock.getUserNotifications.mockReset();
     apiMock.markUserNotificationRead.mockReset();
+    apiMock.rejectTaskJournalDeadlineChangeRequest.mockReset();
+    apiMock.approveTaskJournalDeadlineChangeRequest.mockResolvedValue({});
+    apiMock.getUserSetting.mockResolvedValue({ key: 'profile.timeZoneId', value: 'Europe/Samara' });
     apiMock.markUserNotificationRead.mockImplementation(async (id: number) => createNotification({ id, isRead: true }));
+    apiMock.rejectTaskJournalDeadlineChangeRequest.mockResolvedValue({});
   });
 
   it('shows unread revision requests as a mandatory modal and acknowledges them', async () => {
@@ -140,6 +183,13 @@ describe('ForcedTaskRevisionModal', () => {
     expect(screen.getByText('Согласование завершено')).toBeTruthy();
     expect(apiMock.getUserNotifications).toHaveBeenCalledWith(expect.objectContaining({
       status: 'unread',
+      type: 'taskDeadlineChangeRequested',
+      requiresAction: true,
+      page: 1,
+      pageSize: 25,
+    }));
+    expect(apiMock.getUserNotifications).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'unread',
       type: 'taskRevisionRequested',
       requiresAction: true,
       page: 1,
@@ -157,6 +207,54 @@ describe('ForcedTaskRevisionModal', () => {
 
     await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(41));
     expect(await screen.findByText('Задача на доработку')).toBeTruthy();
+  });
+
+  it('lets the reviewer approve a deadline change request from the forced queue', async () => {
+    mockNotificationPages([], [], [createDeadlineChangeNotification()]);
+
+    render(<ForcedTaskRevisionModal />);
+
+    expect(await screen.findByTestId('forced-deadline-change-prompt')).toBeTruthy();
+    expect(screen.getByText('У вас запросили перенос срока по задаче')).toBeTruthy();
+    expect(screen.getByText('Подготовить претензию')).toBeTruthy();
+    expect(screen.getByText(/Нужно дождаться ответа клиента/)).toBeTruthy();
+
+    const dueAtInput = screen.getByLabelText('Новый срок задачи') as HTMLInputElement;
+    await waitFor(() => expect(dueAtInput.value).toBe('2026-06-30T13:00'));
+
+    fireEvent.change(dueAtInput, { target: { value: '2026-07-01T10:30' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Согласовать перенос' }));
+
+    await waitFor(() => expect(apiMock.approveTaskJournalDeadlineChangeRequest).toHaveBeenCalledWith(303, 901, {
+      approvedDueAt: '2026-07-01T06:30:00.000Z',
+      comment: null,
+    }));
+    await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(51));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('requires a comment before rejecting a deadline change request from the forced queue', async () => {
+    mockNotificationPages([], [], [createDeadlineChangeNotification({ id: 52 })]);
+
+    render(<ForcedTaskRevisionModal />);
+
+    expect(await screen.findByTestId('forced-deadline-change-prompt')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Отказать' }));
+
+    expect(await screen.findByText('Укажите причину отказа в переносе срока.')).toBeTruthy();
+    expect(apiMock.rejectTaskJournalDeadlineChangeRequest).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText('Комментарий к решению'), {
+      target: { value: 'Клиент уже подтвердил прежний срок.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Отказать' }));
+
+    await waitFor(() => expect(apiMock.rejectTaskJournalDeadlineChangeRequest).toHaveBeenCalledWith(303, 901, {
+      comment: 'Клиент уже подтвердил прежний срок.',
+    }));
+    await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(52));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
   it('restores a forced notification from the unread inbox after the notification event', async () => {

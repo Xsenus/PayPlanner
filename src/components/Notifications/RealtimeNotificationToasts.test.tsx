@@ -247,6 +247,41 @@ describe('RealtimeNotificationToasts', () => {
     window.removeEventListener(USER_NOTIFICATIONS_EVENT, listener);
   });
 
+  it('does not show a regular toast for deadline change requests handled by forced modals', async () => {
+    const changedEvents: UserNotificationsChangedDetail[] = [];
+    const listener = (event: Event) => {
+      changedEvents.push((event as CustomEvent<UserNotificationsChangedDetail>).detail);
+    };
+    window.addEventListener(USER_NOTIFICATIONS_EVENT, listener);
+    render(<RealtimeNotificationToasts userId={5} onOpenTask={vi.fn()} />);
+
+    await waitFor(() => expect(connectionState.start).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      connectionState.handlers.get(REALTIME_USER_NOTIFICATION_CREATED_EVENT)?.({
+        id: 47,
+        recipientUserId: 5,
+        type: 'taskDeadlineChangeRequested',
+        eventKey: 'task:128:deadline-change-request:901:requested',
+        title: 'Запрос переноса срока',
+        bodyPreview: 'Исполнитель запросил перенос срока задачи.',
+        tone: 'violet',
+        objectType: 'task',
+        objectId: 128,
+        taskJournalItemId: 128,
+        metadataJson: '{"deadlineChangeRequestId":901,"requestedDueAt":"2026-06-30T09:00:00Z"}',
+        createdAt: '2026-05-25T10:00:00Z',
+      });
+    });
+
+    expect(toastMock.showToast).not.toHaveBeenCalled();
+    expect(changedEvents).toContainEqual(expect.objectContaining({
+      notificationId: 47,
+      unreadDelta: 1,
+    }));
+    window.removeEventListener(USER_NOTIFICATIONS_EVENT, listener);
+  });
+
   it('marks a realtime toast as read from quick action', async () => {
     const changedEvents: UserNotificationsChangedDetail[] = [];
     const listener = (event: Event) => {
