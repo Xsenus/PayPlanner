@@ -47,6 +47,43 @@ describe('buildCaseTaskPayload', () => {
     expect(payload.clientCaseId).toBe(15);
   });
 
+  it('applies extended case template fields while keeping the case context protected', () => {
+    const payload = buildCaseTaskPayload(createCase({ responsibleUserId: 7 }), 'Europe/Samara', {
+      key: 'custom-stage-template',
+      stageLabel: 'Индивидуальный этап',
+      title: 'Шаблонная задача по делу',
+      description: 'Описание из шаблона.',
+      priority: 'high',
+      plannedDurationMinutes: 120,
+      tags: ['дело', 'контроль'],
+      assigneeUserId: 8,
+      assigneeName: 'Исполнитель шаблона',
+      reminders: ['before1d', 'atDue'],
+      channels: ['inApp', 'telegram'],
+      participants: [
+        { userId: 9, role: 'approver', displayName: 'Согласующий шаблона' },
+        { userId: 10, role: 'observer', displayName: 'Наблюдатель шаблона' },
+      ],
+    });
+
+    expect(payload.clientId).toBe(12);
+    expect(payload.clientCaseId).toBe(15);
+    expect(payload.objectName).toBe('ЗЕМЦОВ - банкротство');
+    expect(payload.title).toBe('Шаблонная задача по делу');
+    expect(payload.description).toContain('Описание из шаблона.');
+    expect(payload.description).toContain('Создано из карточки дела');
+    expect(payload.priority).toBe('high');
+    expect(payload.plannedDurationMinutes).toBe(120);
+    expect(payload.assigneeUserId).toBe(8);
+    expect(payload.tags).toEqual(['дело', 'контроль']);
+    expect(payload.reminders).toEqual(['atDue', 'before1d']);
+    expect(payload.channels).toEqual(['inApp', 'telegram']);
+    expect(payload.participants).toEqual([
+      expect.objectContaining({ userId: 9, role: 'approver', displayName: 'Согласующий шаблона', approvalStatus: 'pending' }),
+      expect.objectContaining({ userId: 10, role: 'observer', displayName: 'Наблюдатель шаблона', approvalStatus: 'pending' }),
+    ]);
+  });
+
   it('keeps pretrial stage templates separate from court stages', () => {
     const templates = getCaseStageTaskTemplates(createCase({
       caseType: 'Внесудебное урегулирование',

@@ -1,6 +1,13 @@
 import type { ClientCase } from '../types';
+import { applyTaskTemplateDefaults } from './taskTemplateApplication';
 import { fromTimeZoneDateTimeInput, toTimeZoneDateKey } from './timeZoneDate';
-import type { TaskJournalPriority, TaskJournalUpsertPayload } from './taskJournalStore';
+import type {
+  TaskJournalChannel,
+  TaskJournalParticipant,
+  TaskJournalPriority,
+  TaskJournalReminder,
+  TaskJournalUpsertPayload,
+} from './taskJournalStore';
 
 const ALLOWED_TASK_PRIORITIES = new Set<TaskJournalPriority>(['low', 'normal', 'high', 'urgent']);
 
@@ -12,6 +19,11 @@ export interface CaseStageTaskTemplate {
   priority: TaskJournalPriority;
   plannedDurationMinutes: number;
   tags: string[];
+  assigneeUserId?: number | null;
+  assigneeName?: string;
+  reminders?: TaskJournalReminder[];
+  channels?: TaskJournalChannel[];
+  participants?: TaskJournalParticipant[];
 }
 
 const DEFAULT_STAGE_TASK_TEMPLATES: CaseStageTaskTemplate[] = [
@@ -176,20 +188,14 @@ export function buildCaseTaskPayload(
   timeZoneId?: string | null,
   template?: CaseStageTaskTemplate | null,
 ): TaskJournalUpsertPayload {
-  const tags = template?.tags?.length ? template.tags : ['дело'];
-  const title = template?.title ?? `Задача по делу: ${caseItem.title}`;
-  const description = template
-    ? `${template.description}\n\nСоздано из карточки дела «${caseItem.title}». Этап: ${caseItem.stage?.trim() || 'не указан'}.`
-    : `Создано из карточки дела «${caseItem.title}».`;
-
-  return {
+  const payload: TaskJournalUpsertPayload = {
     clientId: caseItem.clientId ?? null,
     legalEntityId: caseItem.legalEntityId ?? null,
     isInternal: false,
     clientCaseId: caseItem.id,
     objectName: caseItem.title,
-    title: truncate(title, 200),
-    description,
+    title: truncate(`Задача по делу: ${caseItem.title}`, 200),
+    description: `Создано из карточки дела «${caseItem.title}».`,
     assigneeUserId: caseItem.responsibleUserId ?? null,
     assigneeName: '',
     dueAt: buildDefaultDueAt(timeZoneId),
@@ -205,7 +211,30 @@ export function buildCaseTaskPayload(
     result: '',
     reminders: ['atDue'],
     channels: ['inApp'],
-    tags,
+    tags: ['дело'],
     participants: [],
   };
+
+  if (!template) {
+    return payload;
+  }
+
+  const description = `${template.description}\n\nСоздано из карточки дела «${caseItem.title}». Этап: ${caseItem.stage?.trim() || 'не указан'}.`;
+
+  return applyTaskTemplateDefaults(payload, {
+    title: truncate(template.title, 200),
+    description,
+    assigneeUserId: template.assigneeUserId ?? undefined,
+    assigneeName: template.assigneeName,
+    plannedDurationMinutes: template.plannedDurationMinutes,
+    type: 'task',
+    priority: resolveTaskPriority(template.priority),
+    reminders: template.reminders,
+    channels: template.channels,
+    tags: template.tags,
+    participants: template.participants,
+  }, {
+    protectedFields: ['clientId', 'legalEntityId', 'isInternal', 'clientCaseId', 'objectName'],
+    replaceFields: ['title', 'description', 'assigneeUserId', 'assigneeName', 'plannedDurationMinutes', 'type', 'priority'],
+  });
 }
