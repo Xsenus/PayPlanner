@@ -85,6 +85,7 @@ import {
   TASK_REMINDER_DEFAULT_OPTIONS,
   type TaskNotificationDefaults,
 } from '../../utils/taskNotificationDefaults';
+import { applyTaskTemplateDefaults, type TaskTemplateField } from '../../utils/taskTemplateApplication';
 import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
 
 type ViewMode = 'list' | 'board' | 'calendar' | 'timeline';
@@ -6776,17 +6777,35 @@ function TaskModal({
       };
     }
     const next = emptyForm(currentUserName, currentUserId, notificationDefaults);
-    const withDefaults = {
-      ...next,
-      ...state?.defaults,
-      isInternal: state?.defaults?.isInternal ?? next.isInternal,
-      reminders: next.reminders,
-      channels: next.channels,
-      participants: next.participants,
-      dueAt: state?.dueAt ? toLocalInputValue(state.dueAt) : next.dueAt,
-      approvalDueAt: next.approvalDueAt,
+    const protectedFields: TaskTemplateField[] = state?.dueAt ? ['dueAt'] : [];
+    const withDefaults = applyTaskTemplateDefaults(next, state?.defaults, {
+      protectedFields,
+      replaceFields: [
+        'assigneeUserId',
+        'assigneeName',
+        'type',
+        'priority',
+        'status',
+        'dueAt',
+        'approvalDueAt',
+        'plannedDurationMinutes',
+        'isUnderControl',
+      ],
+    });
+    return {
+      ...withDefaults,
+      dueAt: state?.dueAt
+        ? toLocalInputValue(state.dueAt)
+        : state?.defaults?.dueAt
+          ? toLocalInputValue(withDefaults.dueAt)
+          : withDefaults.dueAt,
+      approvalDueAt: withDefaults.approvalDueAt && state?.defaults?.approvalDueAt
+        ? toLocalInputValue(withDefaults.approvalDueAt)
+        : withDefaults.approvalDueAt,
+      contractorPaymentDueDate: withDefaults.contractorPaymentDueDate && state?.defaults?.contractorPaymentDueDate
+        ? withDefaults.contractorPaymentDueDate.split('T')[0]
+        : withDefaults.contractorPaymentDueDate,
     };
-    return withDefaults;
   });
   const [resultError, setResultError] = useState<string | null>(null);
   const [approvalResultPrompt, setApprovalResultPrompt] = useState<{ form: TaskForm; taskId?: number } | null>(null);
