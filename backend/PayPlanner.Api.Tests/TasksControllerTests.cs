@@ -1059,6 +1059,38 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task CreateDeadlineChangeRequest_RejectsWhenSettingDisabled()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "deadline-disabled-author@example.com", "Автор");
+        var assignee = await CreateTaskUserAsync(db, "deadline-disabled-assignee@example.com", "Исполнитель", canEdit: false);
+        var client = await CreateClientAsync(db, "Клиент отключенного переноса");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id);
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "tasks.allowExecutorDeadlineChangeRequests",
+            Value = "false",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var notifications = new RecordingNotificationService();
+        var controller = CreateController(db, notifications, assignee);
+
+        var result = await controller.CreateDeadlineChangeRequest(task.Id, new CreateTaskJournalDeadlineChangeRequest
+        {
+            RequestedDueAt = task.DueAt.AddDays(1),
+            Reason = "Нужно больше времени.",
+        }, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.Contains("отключен", badRequest.Value?.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.False(await db.TaskJournalComments.AnyAsync(item => item.TaskJournalItemId == task.Id));
+        Assert.False(await db.TaskJournalDeadlineChangeRequests.AnyAsync(item => item.TaskJournalItemId == task.Id));
+        Assert.Empty(notifications.DeadlineChangeRequestedTaskIds);
+    }
+
+    [Fact]
     public async Task CreateDeadlineChangeRequest_RejectsDuplicatePendingRequest()
     {
         await using var db = await CreateContextAsync();

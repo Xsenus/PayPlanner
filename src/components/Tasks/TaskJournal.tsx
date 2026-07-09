@@ -7900,7 +7900,7 @@ function TaskModal({
               {canRequestDeadlineChange ? (
                 <section className="rounded-xl border border-amber-200 bg-amber-50 p-3">
                   <div className="mb-2 text-sm font-semibold text-amber-900">Запрос переноса срока</div>
-                  <input type="datetime-local" value={deadlineRequestDueAt} onChange={(event) => setDeadlineRequestDueAt(event.target.value)} className="w-full rounded-lg border border-amber-200 bg-white px-2 py-2 text-sm" />
+                  <input type="datetime-local" aria-label="Новый срок для запроса переноса" value={deadlineRequestDueAt} onChange={(event) => setDeadlineRequestDueAt(event.target.value)} className="w-full rounded-lg border border-amber-200 bg-white px-2 py-2 text-sm" />
                   <button type="button" onClick={openDeadlineRequestReasonDialog} disabled={deadlineRequestSaving || !deadlineRequestDueAt} className="mt-2 w-full rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-amber-600 disabled:opacity-60">
                     {deadlineRequestSaving ? 'Отправляем...' : 'Запросить перенос'}
                   </button>

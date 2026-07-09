@@ -2870,7 +2870,7 @@ describe('TaskJournal', () => {
     await waitFor(() => expect(apiMock.createTaskJournalComment).toHaveBeenCalledWith(101, 'Комментарий исполнителя'));
   });
 
-  it('allows executor to request deadline change without moving task directly', async () => {
+  it.each(['legacy', 'modern'] as const)('allows executor to request deadline change from the %s task card without moving task directly', async (taskCardWindowMode) => {
     authState.isAdmin = false;
     authState.user = { id: 7, fullName: 'Исполнитель', email: 'assignee@example.com' };
     await renderJournal([
@@ -2883,13 +2883,13 @@ describe('TaskJournal', () => {
           { userId: 7, role: 'assignee', displayName: 'Исполнитель', approvalStatus: 'pending' },
         ],
       }),
-    ]);
+    ], { settings: { taskCardWindowMode } });
 
     fireEvent.click(screen.getByTitle('Просмотр'));
-    await screen.findByRole('heading', { name: 'Просмотр задачи' });
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
 
-    fireEvent.change(screen.getByLabelText('Новый срок для запроса переноса'), { target: { value: '2026-05-15T10:30' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Запросить перенос' }));
+    fireEvent.change(within(card).getByLabelText('Новый срок для запроса переноса'), { target: { value: '2026-05-15T10:30' } });
+    fireEvent.click(within(card).getByRole('button', { name: 'Запросить перенос' }));
 
     const reasonDialog = await screen.findByTestId('deadline-request-reason-dialog');
     expect(apiMock.createTaskJournalDeadlineChangeRequest).not.toHaveBeenCalled();
