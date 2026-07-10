@@ -423,16 +423,9 @@ function filterClientCaseIdsForOwner(
   options: ClientCaseOption[],
   ownerClientId: number | null,
   ownerLegalEntityId: number | null,
-  optionsLoaded = false,
 ): number[] {
   if (!ownerClientId && !ownerLegalEntityId) {
     return [];
-  }
-
-  if (!optionsLoaded) {
-    return ids.filter((id, index, source) => (
-      Number.isFinite(id) && id > 0 && source.indexOf(id) === index
-    ));
   }
 
   const optionsById = new Map(options.map((option) => [option.id, option]));
@@ -1803,7 +1796,6 @@ export function InvoiceModal({
         clientCaseOptions,
         caseOwnerClientIdNumber,
         caseOwnerLegalEntityIdNumber,
-        clientCasesLoadedOwnerKey === caseOwnerKey,
       );
 
       return next.length === prev.length && next.every((id, index) => id === prev[index])
@@ -2701,7 +2693,6 @@ export function InvoiceModal({
       clientCaseOptions,
       caseOwnerClientIdNumber,
       caseOwnerLegalEntityIdNumber,
-      clientCasesLoadedOwnerKey === caseOwnerKey,
     );
     const actIds = includeActLinks
       ? selectedActs.map((item) => item.id).filter((id) => Number.isFinite(id) && id > 0)
@@ -2753,10 +2744,8 @@ export function InvoiceModal({
     };
   }, [
     caseOwnerClientIdNumber,
-    caseOwnerKey,
     caseOwnerLegalEntityIdNumber,
     clientCaseOptions,
-    clientCasesLoadedOwnerKey,
     form,
     installmentPlan,
     installmentPlanTouched,
