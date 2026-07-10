@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CheckCircle2, ExternalLink, Loader2, TimerReset, XCircle } from 'lucide-react';
+import { CheckCircle2, Clock3, ExternalLink, Loader2, TimerReset, XCircle } from 'lucide-react';
 import { apiService, type UserNotificationDto } from '../../services/api';
 import { emitUserNotificationsChanged, USER_NOTIFICATIONS_EVENT } from '../../utils/userNotifications';
 import { parseUserNotificationMetadata } from '../../utils/userNotificationMetadata';
@@ -29,6 +29,75 @@ type ForcedTaskQueueItem = {
 
 const FORCED_TASK_QUEUE_PAGE_SIZE = 25;
 const FORCED_TASK_POLL_INTERVAL_MS = 30_000;
+const FORCED_TASK_SNOOZE_STORAGE_KEY = 'pp.forcedTaskModalSnoozes.v1';
+const FORCED_TASK_SNOOZE_OPTIONS = [
+  { minutes: 10, label: '10 мин' },
+  { minutes: 30, label: '30 мин' },
+  { minutes: 60, label: '1 час' },
+  { minutes: 24 * 60, label: '1 день' },
+];
+
+function readSnoozes(now = Date.now()): Record<string, number> {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(FORCED_TASK_SNOOZE_STORAGE_KEY) || '{}') as Record<string, unknown>;
+    const active: Record<string, number> = {};
+    Object.entries(parsed).forEach(([id, value]) => {
+      if (typeof value === 'number' && value > now) {
+        active[id] = value;
+      }
+    });
+    window.localStorage.setItem(FORCED_TASK_SNOOZE_STORAGE_KEY, JSON.stringify(active));
+    return active;
+  } catch {
+    return {};
+  }
+}
+
+function isNotificationSnoozed(notificationId: number, now = Date.now()) {
+  const snoozes = readSnoozes(now);
+  return (snoozes[String(notificationId)] ?? 0) > now;
+}
+
+function snoozeNotification(notificationId: number, minutes: number) {
+  const now = Date.now();
+  const snoozes = readSnoozes(now);
+  snoozes[String(notificationId)] = now + minutes * 60_000;
+  window.localStorage.setItem(FORCED_TASK_SNOOZE_STORAGE_KEY, JSON.stringify(snoozes));
+}
+
+function SnoozeMenu({
+  disabled,
+  onSnooze,
+}: {
+  disabled?: boolean;
+  onSnooze: (minutes: number) => void;
+}) {
+  return (
+    <details className="relative">
+      <summary
+        className={`inline-flex w-fit cursor-pointer list-none items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 ${
+          disabled ? 'pointer-events-none opacity-60' : ''
+        }`}
+      >
+        <Clock3 className="h-3.5 w-3.5" />
+        Отложить
+      </summary>
+      <div className="absolute right-0 z-10 mt-2 w-36 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-xl">
+        {FORCED_TASK_SNOOZE_OPTIONS.map((option) => (
+          <button
+            key={option.minutes}
+            type="button"
+            onClick={() => onSnooze(option.minutes)}
+            disabled={disabled}
+            className="block w-full rounded-lg px-3 py-2 text-left text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </details>
+  );
+}
 
 function getNotificationMetadata(notification: UserNotificationDto): Record<string, unknown> {
   return parseUserNotificationMetadata(notification.metadataJson);
@@ -253,7 +322,7 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
       pages.forEach((page, index) => {
         const rule = FORCED_TASK_NOTIFICATION_RULES[index];
         page.items.forEach((notification) => {
-          if (notification.isRead || acknowledgedIdsRef.current.has(notification.id)) {
+          if (notification.isRead || acknowledgedIdsRef.current.has(notification.id) || isNotificationSnoozed(notification.id)) {
             return;
           }
 
@@ -390,6 +459,18 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
     } finally {
       setAcknowledgingId(null);
     }
+  };
+
+  const snoozeCurrent = (minutes: number) => {
+    if (!current) return;
+
+    snoozeNotification(current.id, minutes);
+    setItems((previous) => previous.filter((item) => item.notification.id !== current.id));
+    emitUserNotificationsChanged({
+      source: 'system',
+      reason: 'forced-task-action-snoozed',
+      notificationId: current.id,
+    });
   };
 
   const approveDeadlineChange = async () => {
@@ -546,10 +627,13 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
               ) : null}
               <p className="mt-2 line-clamp-2 text-sm text-slate-600">{approvalTask?.title || getTaskTitle(current)}</p>
             </div>
-            <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              Требует решения
-            </span>
+            <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
+              <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                Требует решения
+              </span>
+              <SnoozeMenu disabled={isSaving || approvalTaskLoading} onSnooze={snoozeCurrent} />
+            </div>
           </div>
 
           <div className="mt-5 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 sm:grid-cols-2">
@@ -707,10 +791,13 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
               ) : null}
               <p className="mt-2 line-clamp-2 text-sm text-slate-600">{getTaskTitle(current)}</p>
             </div>
-            <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">
-              <TimerReset className="h-3.5 w-3.5" />
-              Требует решения
-            </span>
+            <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
+              <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">
+                <TimerReset className="h-3.5 w-3.5" />
+                Требует решения
+              </span>
+              <SnoozeMenu disabled={isSaving} onSnooze={snoozeCurrent} />
+            </div>
           </div>
 
           <div className="mt-5 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 sm:grid-cols-2">
@@ -842,6 +929,7 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
               {modalDescription}
             </p>
           </div>
+          <SnoozeMenu disabled={acknowledgingId === current.id} onSnooze={snoozeCurrent} />
         </div>
 
         <div className="mt-5 block text-sm font-semibold text-slate-700">

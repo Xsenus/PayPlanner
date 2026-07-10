@@ -446,6 +446,7 @@ public class TasksControllerTests
             AllowExecutorDeadlineChangeRequests = false,
             RequireCompletionResult = false,
             AllowAdminCompleteAnyTask = true,
+            ApprovalDueDays = 400,
             TaskCardWindowMode = "modern",
             CaseInactivityAutomationEnabled = false,
             CaseInactivityDays = 400,
@@ -462,6 +463,7 @@ public class TasksControllerTests
         Assert.False(dto.AllowExecutorDeadlineChangeRequests);
         Assert.False(dto.RequireCompletionResult);
         Assert.True(dto.AllowAdminCompleteAnyTask);
+        Assert.Equal(365, dto.ApprovalDueDays);
         Assert.Equal("modern", dto.TaskCardWindowMode);
         Assert.False(dto.CaseInactivityAutomationEnabled);
         Assert.Equal(365, dto.CaseInactivityDays);
@@ -472,9 +474,10 @@ public class TasksControllerTests
 
         var stored = await db.SystemSettings
             .AsNoTracking()
-            .Where(item => item.Key.StartsWith("tasks.automation.caseControl."))
+            .Where(item => item.Key.StartsWith("tasks.automation.caseControl.") || item.Key == "tasks.approvalDueDays")
             .ToDictionaryAsync(item => item.Key, item => item.Value);
 
+        Assert.Equal("365", stored["tasks.approvalDueDays"]);
         Assert.Equal("false", stored["tasks.automation.caseControl.enabled"]);
         Assert.Equal("365", stored["tasks.automation.caseControl.inactiveDays"]);
         Assert.Equal("1", stored["tasks.automation.caseControl.limit"]);
@@ -715,6 +718,56 @@ public class TasksControllerTests
             .Where(item => item.Id == dto.Id)
             .Select(item => item.ApprovalDueAt)
             .SingleAsync());
+    }
+
+    [Fact]
+    public async Task CreateTask_DefaultsApprovalDueAtFromSettingsWhenApprovalStarts()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author-default-approval@example.com", "Автор");
+        var approver = await CreateAdminUserAsync(db, "approver-default-approval@example.com", "Согласующий");
+        var client = await CreateClientAsync(db, "Портнягин Дмитрий Олегович");
+        var now = DateTime.UtcNow;
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "tasks.approvalDueDays",
+            Value = "3",
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var before = DateTime.UtcNow;
+        var result = await controller.CreateTask(new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            Title = "Проверить документы",
+            DueAt = DateTime.UtcNow.AddHours(2),
+            Status = "onApproval",
+            Result = "Документы проверены и переданы на согласование.",
+            Participants =
+            [
+                new TaskJournalParticipantRequest
+                {
+                    UserId = approver.Id,
+                    Role = "approver",
+                    Name = approver.FullName,
+                },
+            ],
+        }, CancellationToken.None);
+        var after = DateTime.UtcNow;
+
+        var created = Assert.IsType<CreatedResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(created.Value);
+        Assert.NotNull(dto.ApprovalDueAt);
+
+        var storedApprovalDueAt = await db.TaskJournalItems
+            .Where(item => item.Id == dto.Id)
+            .Select(item => item.ApprovalDueAt)
+            .SingleAsync();
+        Assert.NotNull(storedApprovalDueAt);
+        Assert.InRange(storedApprovalDueAt.Value, before.AddDays(3).AddSeconds(-2), after.AddDays(3).AddSeconds(2));
     }
 
     [Fact]

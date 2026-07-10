@@ -205,6 +205,7 @@ public class TaskJournalSettingsDto
     public bool AllowExecutorDeadlineChangeRequests { get; set; } = true;
     public bool RequireCompletionResult { get; set; } = true;
     public bool AllowAdminCompleteAnyTask { get; set; } = true;
+    public int ApprovalDueDays { get; set; } = 5;
     public string TaskCardWindowMode { get; set; } = "legacy";
     public bool CaseInactivityAutomationEnabled { get; set; } = true;
     public int CaseInactivityDays { get; set; } = 14;

@@ -10,6 +10,7 @@ const DEFAULT_SETTINGS: TaskJournalSettingsDto = {
   allowExecutorDeadlineChangeRequests: true,
   requireCompletionResult: true,
   allowAdminCompleteAnyTask: true,
+  approvalDueDays: 5,
   taskCardWindowMode: 'legacy',
   caseInactivityAutomationEnabled: true,
   caseInactivityDays: 14,
@@ -186,6 +187,24 @@ export function TaskJournalSettings() {
             <span className="block font-semibold text-gray-900">Требовать результат при завершении задачи</span>
             <span className="mt-1 block text-gray-500">Если выключено, задачу можно закрыть без описания результата. Право закрытия по ролям сохраняется без изменений.</span>
           </span>
+        </label>
+
+        <label className="block rounded-2xl border border-gray-200 bg-white p-4 text-sm text-gray-700">
+          <span className="block font-semibold text-gray-900">Срок согласования задачи, дней</span>
+          <span className="mt-1 block text-gray-500">Если в карточке не указан отдельный срок согласования, CRM автоматически поставит срок от даты отправки на согласование.</span>
+          <input
+            type="number"
+            min={1}
+            max={365}
+            value={settings.approvalDueDays}
+            onChange={(event) => setSettings((prev) => ({
+              ...prev,
+              approvalDueDays: Math.min(365, Math.max(1, Number(event.target.value) || 1)),
+            }))}
+            disabled={loading || saving}
+            className="mt-3 w-full max-w-40 rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:bg-gray-100"
+            data-testid="task-approval-due-days-input"
+          />
         </label>
 
         <label className="flex items-start gap-3 rounded-2xl border border-gray-200 bg-white p-4 text-sm text-gray-700">

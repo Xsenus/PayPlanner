@@ -287,6 +287,7 @@ async function renderJournal(
     allowExecutorDeadlineChangeRequests: true,
     requireCompletionResult: true,
     allowAdminCompleteAnyTask: true,
+    approvalDueDays: 5,
     taskCardWindowMode: 'legacy',
     caseInactivityAutomationEnabled: true,
     caseInactivityDays: 14,
@@ -2726,6 +2727,7 @@ describe('TaskJournal', () => {
         ],
       }),
     ], {
+      settings: { approvalDueDays: 9 },
       assignees: [
         { id: 7, name: 'Администратор', email: 'admin@example.com' },
         { id: 8, name: 'Согласующий', email: 'approver@example.com' },
@@ -2749,6 +2751,10 @@ describe('TaskJournal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Отправить на согласование' }));
 
     await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
+    const payload = apiMock.updateTaskJournalItem.mock.calls[0][1];
+    const approvalDueAt = new Date(payload.approvalDueAt).getTime();
+    expect(approvalDueAt).toBeGreaterThan(Date.now() + 8 * 24 * 60 * 60 * 1000);
+    expect(approvalDueAt).toBeLessThan(Date.now() + 10 * 24 * 60 * 60 * 1000);
     expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({
       status: 'onApproval',
       result: 'Документы подготовлены, проверены и приложены к задаче.',

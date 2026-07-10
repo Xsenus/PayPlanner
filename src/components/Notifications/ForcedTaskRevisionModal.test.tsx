@@ -169,6 +169,7 @@ describe('ForcedTaskRevisionModal', () => {
     apiMock.markUserNotificationRead.mockReset();
     apiMock.rejectTaskJournalDeadlineChangeRequest.mockReset();
     apiMock.updateTaskJournalApproval.mockReset();
+    window.localStorage.clear();
     apiMock.approveTaskJournalDeadlineChangeRequest.mockResolvedValue({});
     apiMock.getTaskJournalItem.mockResolvedValue(createApprovalTask());
     apiMock.getUserSetting.mockResolvedValue({ key: 'profile.timeZoneId', value: 'Europe/Samara' });
@@ -193,6 +194,25 @@ describe('ForcedTaskRevisionModal', () => {
 
     await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(31));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('snoozes a mandatory modal without marking the notification read', async () => {
+    mockNotificationPages([createNotification()]);
+
+    render(<ForcedTaskRevisionModal />);
+
+    expect(await screen.findByRole('dialog')).toBeTruthy();
+    fireEvent.click(screen.getByText('Отложить'));
+    fireEvent.click(screen.getByRole('button', { name: '10 мин' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(apiMock.markUserNotificationRead).not.toHaveBeenCalled();
+    const snoozes = JSON.parse(window.localStorage.getItem('pp.forcedTaskModalSnoozes.v1') || '{}') as Record<string, number>;
+    expect(snoozes['31']).toBeGreaterThan(Date.now());
+
+    window.dispatchEvent(new Event(USER_NOTIFICATIONS_EVENT));
+    await waitFor(() => expect(apiMock.getUserNotifications).toHaveBeenCalled());
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('marks the message read before opening the task', async () => {

@@ -1651,6 +1651,7 @@ export interface TaskJournalSettingsDto {
   allowExecutorDeadlineChangeRequests: boolean;
   requireCompletionResult: boolean;
   allowAdminCompleteAnyTask: boolean;
+  approvalDueDays: number;
   taskCardWindowMode: 'legacy' | 'modern';
   caseInactivityAutomationEnabled: boolean;
   caseInactivityDays: number;
@@ -1681,6 +1682,7 @@ export interface UpdateTaskJournalSettingsRequest {
   allowExecutorDeadlineChangeRequests: boolean;
   requireCompletionResult: boolean;
   allowAdminCompleteAnyTask: boolean;
+  approvalDueDays: number;
   taskCardWindowMode: 'legacy' | 'modern';
   caseInactivityAutomationEnabled: boolean;
   caseInactivityDays: number;

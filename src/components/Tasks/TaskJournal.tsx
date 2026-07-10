@@ -172,6 +172,7 @@ const DEFAULT_TASK_JOURNAL_SETTINGS: TaskJournalSettingsDto = {
   allowExecutorDeadlineChangeRequests: true,
   requireCompletionResult: true,
   allowAdminCompleteAnyTask: true,
+  approvalDueDays: 5,
   taskCardWindowMode: 'legacy',
   caseInactivityAutomationEnabled: true,
   caseInactivityDays: 14,
@@ -597,6 +598,17 @@ function getDefaultRevisionDueAtInput(task: TaskJournalItem) {
   nextDueAt.setDate(nextDueAt.getDate() + 1);
   nextDueAt.setMinutes(0, 0, 0);
   return toLocalInputValue(nextDueAt.toISOString());
+}
+
+function normalizeApprovalDueDays(value: number | null | undefined) {
+  const days = Number.isFinite(value ?? NaN) ? Number(value) : 5;
+  return Math.min(365, Math.max(1, Math.round(days)));
+}
+
+function getDefaultApprovalDueAtInput(settings: TaskJournalSettingsDto) {
+  const approvalDueAt = new Date();
+  approvalDueAt.setDate(approvalDueAt.getDate() + normalizeApprovalDueDays(settings.approvalDueDays));
+  return toLocalInputValue(approvalDueAt.toISOString());
 }
 
 function isFutureDateTime(value: string) {
@@ -7129,7 +7141,7 @@ function TaskModal({
     const task = state?.task;
     let nextForm = withChangeComment({ ...form, status });
     if ((status === 'onApproval' || status === 'overdueApproval') && !nextForm.approvalDueAt) {
-      nextForm = { ...nextForm, approvalDueAt: nextForm.dueAt };
+      nextForm = { ...nextForm, approvalDueAt: getDefaultApprovalDueAtInput(taskSettings) };
     }
 
     if (status === 'done' && requireCompletionResult && !nextForm.result.trim()) {
@@ -7210,7 +7222,11 @@ function TaskModal({
   };
 
   const handleSaveForm = async () => {
-    const nextForm = withChangeComment();
+    let nextForm = withChangeComment();
+    if ((nextForm.status === 'onApproval' || nextForm.status === 'overdueApproval') && !nextForm.approvalDueAt) {
+      nextForm = { ...nextForm, approvalDueAt: getDefaultApprovalDueAtInput(taskSettings) };
+    }
+
     if (nextForm.status === 'done' && requireCompletionResult && !nextForm.result.trim()) {
       setForm(nextForm);
       setResultError(TASK_COMPLETION_RESULT_REQUIRED_MESSAGE);

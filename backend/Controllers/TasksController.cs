@@ -75,6 +75,8 @@ public class TasksController : ControllerBase
     private const string AllowExecutorDeadlineChangeRequestsSettingKey = "tasks.allowExecutorDeadlineChangeRequests";
     private const string RequireCompletionResultSettingKey = "tasks.requireCompletionResult";
     private const string AllowAdminCompleteAnyTaskSettingKey = "tasks.allowAdminCompleteAnyTask";
+    private const string ApprovalDueDaysSettingKey = "tasks.approvalDueDays";
+    private const int DefaultApprovalDueDays = 5;
     private const string TaskCardWindowModeSettingKey = "tasks.taskCardWindowMode";
     private const string TaskCardWindowModeLegacy = "legacy";
     private const string TaskCardWindowModeModern = "modern";
@@ -346,11 +348,13 @@ public class TasksController : ControllerBase
             ? requestedEscalationUserId.ToString()
             : "0";
         var taskCardWindowMode = NormalizeTaskCardWindowMode(request.TaskCardWindowMode);
+        var approvalDueDays = Math.Clamp(request.ApprovalDueDays, 1, 365);
 
         await UpsertSystemSettingAsync(RestrictExecutorEditingSettingKey, request.RestrictExecutorEditing ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(AllowExecutorDeadlineChangeRequestsSettingKey, request.AllowExecutorDeadlineChangeRequests ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(RequireCompletionResultSettingKey, request.RequireCompletionResult ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(AllowAdminCompleteAnyTaskSettingKey, request.AllowAdminCompleteAnyTask ? "true" : "false", now, ct);
+        await UpsertSystemSettingAsync(ApprovalDueDaysSettingKey, approvalDueDays.ToString(), now, ct);
         await UpsertSystemSettingAsync(TaskCardWindowModeSettingKey, taskCardWindowMode, now, ct);
         await UpsertSystemSettingAsync(CaseInactivityAutomationEnabledSettingKey, request.CaseInactivityAutomationEnabled ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(CaseInactivityAutomationDaysSettingKey, inactivityDays.ToString(), now, ct);
@@ -2055,8 +2059,10 @@ public class TasksController : ControllerBase
             return BadRequest(new { message = statusValidation });
         }
 
+        var createdAt = DateTime.UtcNow;
         var normalizedDueAt = NormalizeUtcInstant(request.DueAt);
-        var revisionDueAtValidation = ValidateRevisionDueAt(nextStatus, normalizedDueAt, DateTime.UtcNow);
+        var approvalDueAt = ResolveApprovalDueAt(nextStatus, request.ApprovalDueAt, settings.ApprovalDueDays, createdAt);
+        var revisionDueAtValidation = ValidateRevisionDueAt(nextStatus, normalizedDueAt, createdAt);
         if (revisionDueAtValidation is not null)
         {
             return BadRequest(new { message = revisionDueAtValidation });
@@ -2075,7 +2081,7 @@ public class TasksController : ControllerBase
             AuthorUserId = access.UserId,
             AuthorName = access.DisplayName,
             DueAt = normalizedDueAt,
-            ApprovalDueAt = NormalizeApprovalDueAt(request.ApprovalDueAt),
+            ApprovalDueAt = approvalDueAt,
             PlannedDurationMinutes = NormalizeTaskDuration(request.PlannedDurationMinutes),
             ContractorPaymentEnabled = request.ContractorPaymentEnabled,
             ContractorPaymentAmount = NormalizeMoneyAmount(request.ContractorPaymentAmount),
@@ -2093,8 +2099,8 @@ public class TasksController : ControllerBase
             RemindersJson = SerializeList(request.Reminders, AllowedReminders, ["atDue"]),
             ChannelsJson = SerializeList(request.Channels, AllowedChannels, ["inApp"]),
             TagsJson = SerializeFreeList(request.Tags),
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
+            CreatedAt = createdAt,
+            UpdatedAt = createdAt,
             Participants = participants.Items.Select(ToParticipantEntity).ToList(),
         };
 
@@ -2186,6 +2192,8 @@ public class TasksController : ControllerBase
         var changeLabels = BuildTaskChangeLabels(entity, request, binding, participants, nextStatus);
         var assigneeChanged = HasTaskAssigneeChange(changeLabels);
         var changeComment = NormalizeOptional(request.ChangeComment);
+        var updatedAt = DateTime.UtcNow;
+        var approvalDueAt = ResolveApprovalDueAt(nextStatus, request.ApprovalDueAt, settings.ApprovalDueDays, updatedAt);
 
         entity.ClientId = binding.ClientId;
         entity.LegalEntityId = binding.LegalEntityId;
@@ -2196,7 +2204,7 @@ public class TasksController : ControllerBase
         entity.AssigneeUserId = participants.PrimaryAssigneeUserId;
         entity.AssigneeName = participants.PrimaryAssigneeName;
         entity.DueAt = requestDueAt;
-        entity.ApprovalDueAt = NormalizeApprovalDueAt(request.ApprovalDueAt);
+        entity.ApprovalDueAt = approvalDueAt;
         entity.PlannedDurationMinutes = NormalizeTaskDuration(request.PlannedDurationMinutes);
         entity.ContractorPaymentEnabled = request.ContractorPaymentEnabled;
         entity.ContractorPaymentAmount = NormalizeMoneyAmount(request.ContractorPaymentAmount);
@@ -2211,7 +2219,7 @@ public class TasksController : ControllerBase
         entity.RemindersJson = SerializeList(request.Reminders, AllowedReminders, ["atDue"]);
         entity.ChannelsJson = SerializeList(request.Channels, AllowedChannels, ["inApp"]);
         entity.TagsJson = SerializeFreeList(request.Tags);
-        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedAt = updatedAt;
 
         _db.TaskJournalParticipants.RemoveRange(entity.Participants);
         entity.Participants.Clear();
@@ -2327,6 +2335,10 @@ public class TasksController : ControllerBase
 
         entity.Status = nextStatus;
         entity.DueAt = requestedDueAt;
+        if (!IsApprovalActiveStatus(oldStatus) && IsApprovalActiveStatus(nextStatus) && entity.ApprovalDueAt is null)
+        {
+            entity.ApprovalDueAt = ResolveApprovalDueAt(nextStatus, null, settings.ApprovalDueDays, DateTime.UtcNow);
+        }
         if (requestedResult is not null
             || (string.Equals(nextStatus, "done", StringComparison.OrdinalIgnoreCase)
                 && string.IsNullOrWhiteSpace(entity.Result)))
@@ -2600,6 +2612,11 @@ public class TasksController : ControllerBase
                 entity.Status = nextStatus;
                 approvalRequested = approvalQueueRestarted
                     || (!IsApprovalActiveStatus(oldStatus) && IsApprovalActiveStatus(entity.Status));
+                if (approvalRequested && entity.ApprovalDueAt is null)
+                {
+                    entity.ApprovalDueAt = ResolveApprovalDueAt(nextStatus, null, settings.ApprovalDueDays, now);
+                    changes.Add("Срок согласования");
+                }
                 if (requestedResult is not null
                     || (string.Equals(nextStatus, "done", StringComparison.OrdinalIgnoreCase)
                         && string.IsNullOrWhiteSpace(oldResult)))
@@ -3521,6 +3538,7 @@ public class TasksController : ControllerBase
                 item.Key == AllowExecutorDeadlineChangeRequestsSettingKey ||
                 item.Key == RequireCompletionResultSettingKey ||
                 item.Key == AllowAdminCompleteAnyTaskSettingKey ||
+                item.Key == ApprovalDueDaysSettingKey ||
                 item.Key == TaskCardWindowModeSettingKey ||
                 item.Key == CaseInactivityAutomationEnabledSettingKey ||
                 item.Key == CaseInactivityAutomationDaysSettingKey ||
@@ -3539,6 +3557,7 @@ public class TasksController : ControllerBase
             AllowExecutorDeadlineChangeRequests = ParseBoolSetting(settings.GetValueOrDefault(AllowExecutorDeadlineChangeRequestsSettingKey), true),
             RequireCompletionResult = ParseBoolSetting(settings.GetValueOrDefault(RequireCompletionResultSettingKey), true),
             AllowAdminCompleteAnyTask = ParseBoolSetting(settings.GetValueOrDefault(AllowAdminCompleteAnyTaskSettingKey), true),
+            ApprovalDueDays = Math.Clamp(ParseIntSetting(settings.GetValueOrDefault(ApprovalDueDaysSettingKey), DefaultApprovalDueDays), 1, 365),
             TaskCardWindowMode = NormalizeTaskCardWindowMode(settings.GetValueOrDefault(TaskCardWindowModeSettingKey)),
             CaseInactivityAutomationEnabled = ParseBoolSetting(settings.GetValueOrDefault(CaseInactivityAutomationEnabledSettingKey), true),
             CaseInactivityDays = inactivityDays,
@@ -4276,6 +4295,21 @@ public class TasksController : ControllerBase
 
     private static DateTime? NormalizeApprovalDueAt(DateTime? value)
         => value.HasValue && value.Value != default ? NormalizeUtcInstant(value.Value) : null;
+
+    private static DateTime? ResolveApprovalDueAt(
+        string status,
+        DateTime? requestedApprovalDueAt,
+        int approvalDueDays,
+        DateTime baseUtc)
+    {
+        var normalized = NormalizeApprovalDueAt(requestedApprovalDueAt);
+        if (normalized.HasValue || !IsApprovalActiveStatus(status))
+        {
+            return normalized;
+        }
+
+        return baseUtc.AddDays(Math.Clamp(approvalDueDays, 1, 365));
+    }
 
     private static string? ValidateRevisionDueAt(string? status, DateTime dueAt, DateTime nowUtc)
         => string.Equals(status, "revision", StringComparison.OrdinalIgnoreCase) && dueAt <= nowUtc
