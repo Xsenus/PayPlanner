@@ -376,7 +376,7 @@ describe('ForcedTaskRevisionModal', () => {
   });
 
   it('restores a forced notification from the unread inbox after the notification event', async () => {
-    let revisions: UserNotificationDto[] = [];
+    const revisions: UserNotificationDto[] = [];
     mockNotificationPages(revisions, []);
 
     render(<ForcedTaskRevisionModal />);

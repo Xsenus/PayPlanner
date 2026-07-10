@@ -429,6 +429,12 @@ function filterClientCaseIdsForOwner(
     return [];
   }
 
+  if (!optionsLoaded) {
+    return ids.filter((id, index, source) => (
+      Number.isFinite(id) && id > 0 && source.indexOf(id) === index
+    ));
+  }
+
   const optionsById = new Map(options.map((option) => [option.id, option]));
   const result: number[] = [];
   ids.forEach((id) => {
