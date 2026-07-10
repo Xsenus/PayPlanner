@@ -1526,6 +1526,77 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task UpdateInvoiceManaged_WhenCashOrderNumberIsAlreadyUsed_GeneratesFreeNumber()
+    {
+        await using var db = await CreateContextAsync();
+
+        var occupiedNumber = "\u041f\u041a\u041e-2026-0001";
+        var client = new Client { Name = "Invoice client" };
+        var invoice = new Invoice { Number = "34", Date = new DateTime(2026, 4, 3) };
+        var cashSource = new PaymentSource { Name = "cash" };
+        db.AddRange(
+            client,
+            invoice,
+            cashSource,
+            new CashOrder
+            {
+                Number = occupiedNumber,
+                Type = CashOrderType.Incoming,
+                Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 4, 20),
+                Amount = 10_000m,
+                Currency = "RUB",
+                Account = "Main cash",
+            });
+        await db.SaveChangesAsync();
+
+        var representative = CreatePayment(invoice.Date, 200_000m, "Invoice 34");
+        representative.DocumentKind = DocumentKind.Invoice;
+        representative.InvoiceId = invoice.Id;
+        representative.Account = invoice.Number;
+        representative.AccountDate = invoice.Date;
+        representative.ClientId = client.Id;
+
+        var installment = CreatePayment(new DateTime(2026, 4, 20), 25_000m, "Installment 1/8");
+        installment.InvoiceId = invoice.Id;
+        installment.Account = invoice.Number;
+        installment.AccountDate = invoice.Date;
+        installment.ClientId = client.Id;
+        installment.SystemNotes = $"{InstallmentPaymentMarker} {{\"Sequence\":1}}";
+        db.Payments.AddRange(representative, installment);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var controller = new PaymentsController(db, new NoopFormRequirementsService());
+        var update = CreatePayment(installment.Date, installment.Amount, "Cash installment 1/8");
+        update.InvoiceId = null;
+        update.Account = "BROKEN";
+        update.AccountDate = new DateTime(2030, 1, 1);
+        update.SystemNotes = installment.SystemNotes;
+        update.PaymentSourceId = cashSource.Id;
+        update.Status = PaymentStatus.Completed;
+        update.PaidAmount = installment.Amount;
+        update.PaidDate = installment.Date;
+        update.LastPaymentDate = installment.Date;
+        update.PaymentOrderNumber = occupiedNumber;
+        update.PaymentDocumentDate = installment.Date;
+
+        var actionResult = await controller.UpdateInvoiceManaged(installment.Id, update, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult);
+        var updated = Assert.IsType<Payment>(ok.Value);
+        Assert.NotEqual(occupiedNumber, updated.PaymentOrderNumber);
+        Assert.StartsWith("\u041f\u041a\u041e-2026-", updated.PaymentOrderNumber);
+
+        db.ChangeTracker.Clear();
+        Assert.Equal(1, await db.CashOrders.CountAsync(order => order.Number == occupiedNumber));
+        var linkedOrder = await db.CashOrders.AsNoTracking().SingleAsync(order => order.PaymentId == installment.Id);
+        Assert.Equal(updated.PaymentOrderNumber, linkedOrder.Number);
+        Assert.Equal(CashOrderType.Incoming, linkedOrder.Type);
+        Assert.Equal(CashOrderStatus.Posted, linkedOrder.Status);
+    }
+
+    [Fact]
     public async Task UpdateInvoiceManaged_UpdatesRepresentativeInvoicePayment_AndSavesDescription()
     {
         await using var db = await CreateContextAsync();

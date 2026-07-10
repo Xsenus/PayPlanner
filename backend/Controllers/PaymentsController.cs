@@ -2806,9 +2806,13 @@ public class PaymentsController : ControllerBase
             : CashOrderType.Incoming;
         var orderDate = (payment.PaymentDocumentDate ?? payment.LastPaymentDate ?? payment.PaidDate ?? payment.Date).Date;
         var orderToUpdate = existingOrders.FirstOrDefault();
-        var orderNumber = Normalize(payment.PaymentOrderNumber)
-            ?? orderToUpdate?.Number
-            ?? await GenerateCashOrderNumberAsync(orderType, orderDate, ct);
+        var orderNumber = await ResolveCashOrderNumberAsync(
+            orderType,
+            orderDate,
+            Normalize(payment.PaymentOrderNumber),
+            orderToUpdate?.Number,
+            orderToUpdate?.Id,
+            ct);
 
         payment.PaymentOrderNumber = orderNumber;
         payment.PaymentDocumentDate = orderDate;
@@ -2866,6 +2870,39 @@ public class PaymentsController : ControllerBase
         orderToUpdate.Comment = payment.Notes;
         orderToUpdate.UpdatedAt = now;
     }
+
+    private async Task<string> ResolveCashOrderNumberAsync(
+        CashOrderType type,
+        DateTime date,
+        string? requestedNumber,
+        string? currentOrderNumber,
+        int? currentOrderId,
+        CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(requestedNumber) &&
+            !await IsCashOrderNumberUsedByAnotherOrderAsync(requestedNumber, currentOrderId, ct))
+        {
+            return requestedNumber;
+        }
+
+        var normalizedCurrentNumber = Normalize(currentOrderNumber);
+        if (!string.IsNullOrWhiteSpace(normalizedCurrentNumber) &&
+            !await IsCashOrderNumberUsedByAnotherOrderAsync(normalizedCurrentNumber, currentOrderId, ct))
+        {
+            return normalizedCurrentNumber;
+        }
+
+        return await GenerateCashOrderNumberAsync(type, date, ct);
+    }
+
+    private Task<bool> IsCashOrderNumberUsedByAnotherOrderAsync(
+        string number,
+        int? currentOrderId,
+        CancellationToken ct)
+        => _db.CashOrders.AnyAsync(order =>
+            order.Number == number &&
+            (!currentOrderId.HasValue || order.Id != currentOrderId.Value),
+            ct);
 
     private static string BuildPaymentCashOrderBasis(Payment payment)
     {
