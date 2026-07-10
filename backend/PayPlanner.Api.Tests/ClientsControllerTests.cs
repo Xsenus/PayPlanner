@@ -738,6 +738,28 @@ public class ClientsControllerTests
     }
 
     [Fact]
+    public async Task GetAll_ReturnsTooManyRequests_WhenFullClientListIsRequestedTooOften()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserAsync(db, roleName: "admin");
+        var controller = CreateController(db, userId);
+        controller.Request.Headers.UserAgent = $"PayPlannerTest/{Guid.NewGuid():N}";
+        controller.Request.Headers["X-Forwarded-For"] = $"203.0.113.{Random.Shared.Next(1, 200)}";
+
+        for (var i = 0; i < 60; i += 1)
+        {
+            var action = await controller.GetAll(CancellationToken.None);
+            Assert.IsType<OkObjectResult>(action);
+        }
+
+        var limited = await controller.GetAll(CancellationToken.None);
+        var result = Assert.IsType<ObjectResult>(limited);
+
+        Assert.Equal(StatusCodes.Status429TooManyRequests, result.StatusCode);
+        Assert.True(controller.Response.Headers.ContainsKey("Retry-After"));
+    }
+
+    [Fact]
     public async Task Create_RoundTripsStructuredAddressEntries_WithFullAddress()
     {
         await using var db = await CreateContextAsync();

@@ -270,9 +270,9 @@ jobs:
             sudo rsync -a --delete "$STAGE/be/" "$BE_DIR/"
 
             echo "[7/12] Rsync frontend"
-            # Keep previous hashed chunks so already-open browser tabs can switch lazy-loaded sections after a deploy.
-            sudo rsync -a "$STAGE/fe/" "$FE_APP_DIR/"
-            sudo rsync -a "$STAGE/fe/" "$FE_PUBLIC_DIR/"
+            # Remove stale hashed chunks: the frontend reloads itself if a browser tries to load an old lazy chunk.
+            sudo rsync -a --delete "$STAGE/fe/" "$FE_APP_DIR/"
+            sudo rsync -a --delete "$STAGE/fe/" "$FE_PUBLIC_DIR/"
 
             echo "[8/12] Write revision marker"
             printf '%s\n' "${{ github.sha }}" | sudo tee "$APP_DIR/REVISION" >/dev/null

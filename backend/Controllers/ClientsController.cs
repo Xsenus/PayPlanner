@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -18,7 +19,10 @@ namespace PayPlanner.Api.Controllers;
 public class ClientsController : ControllerBase
 {
     private const string CLIENT_PROFILE_NOTES_PREFIX = "__PP_CLIENT_PROFILE_V2__:";
+    private const int FullClientListRateLimitWindowSeconds = 60;
+    private const int FullClientListRateLimitMaxRequests = 60;
     private static readonly JsonSerializerOptions ClientProfileJsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly ConcurrentDictionary<string, RateLimitWindow> FullClientListRateLimits = new();
     private static readonly HashSet<string> LegalQuickClientRequirementFields = new(StringComparer.OrdinalIgnoreCase)
     {
         "Inn",
@@ -29,6 +33,12 @@ public class ClientsController : ControllerBase
     private readonly PaymentContext _db;
     private readonly ILegalEntityEnrichmentService _enrichment;
     private readonly IFormRequirementsService _formRequirements;
+
+    private sealed class RateLimitWindow
+    {
+        public long WindowStartUnixSeconds { get; set; }
+        public int Count { get; set; }
+    }
 
     public ClientsController(PaymentContext db, ILegalEntityEnrichmentService enrichment, IFormRequirementsService formRequirements)
     {
@@ -142,9 +152,86 @@ public class ClientsController : ControllerBase
             .ToList() ?? new List<int>();
     }
 
+    private IActionResult? EnforceFullClientListRateLimit()
+    {
+        var userId = User.GetUserId()?.ToString() ?? "anonymous";
+        var ipAddress = ResolveRequestIpAddress();
+        var userAgent = Request.Headers.UserAgent.FirstOrDefault() ?? "unknown";
+        var key = $"{userId}|{ipAddress}|{userAgent.GetHashCode()}";
+        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var windowStart = now - (now % FullClientListRateLimitWindowSeconds);
+        var counter = FullClientListRateLimits.GetOrAdd(key, _ => new RateLimitWindow
+        {
+            WindowStartUnixSeconds = windowStart,
+        });
+
+        int count;
+        lock (counter)
+        {
+            if (counter.WindowStartUnixSeconds != windowStart)
+            {
+                counter.WindowStartUnixSeconds = windowStart;
+                counter.Count = 0;
+            }
+
+            counter.Count += 1;
+            count = counter.Count;
+        }
+
+        if (FullClientListRateLimits.Count > 1000)
+        {
+            foreach (var entry in FullClientListRateLimits)
+            {
+                if (entry.Value.WindowStartUnixSeconds < windowStart)
+                {
+                    FullClientListRateLimits.TryRemove(entry.Key, out _);
+                }
+            }
+        }
+
+        if (count <= FullClientListRateLimitMaxRequests)
+        {
+            return null;
+        }
+
+        var retryAfterSeconds = Math.Max(1, (int)(windowStart + FullClientListRateLimitWindowSeconds - now));
+        Response.Headers.RetryAfter = retryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        return Problem(
+            title: "ClientsListRateLimit",
+            detail: "Слишком много запросов на полную загрузку клиентов. Обновите страницу CRM и повторите действие через несколько секунд.",
+            statusCode: StatusCodes.Status429TooManyRequests);
+    }
+
+    private string ResolveRequestIpAddress()
+    {
+        var forwardedFor = Request.Headers["X-Forwarded-For"].FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(forwardedFor))
+        {
+            var first = forwardedFor.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(first))
+            {
+                return first;
+            }
+        }
+
+        var realIp = Request.Headers["X-Real-IP"].FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(realIp))
+        {
+            return realIp;
+        }
+
+        return HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetAll(CancellationToken ct)
     {
+        var rateLimitResult = EnforceFullClientListRateLimit();
+        if (rateLimitResult is not null)
+        {
+            return rateLimitResult;
+        }
+
         var access = await GetCurrentAccessAsync(ct);
         if (access is null)
         {

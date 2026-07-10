@@ -108,7 +108,7 @@ public sealed class LegalFeatureFlagCiGateTests
 
         Assert.Contains("VITE_API_URL: ${{ env.FE_API_URL }}", workflow, StringComparison.Ordinal);
         Assert.Contains("cp -r dist/* \"${{ env.OUT_DIR }}/fe/\"", workflow, StringComparison.Ordinal);
-        Assert.Contains("sudo rsync -a \"$STAGE/fe/\" \"$FE_PUBLIC_DIR/\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("sudo rsync -a --delete \"$STAGE/fe/\" \"$FE_PUBLIC_DIR/\"", workflow, StringComparison.Ordinal);
         Assert.Contains("PUBLIC_API_HEALTH_URL", workflow, StringComparison.Ordinal);
         Assert.Contains("PUBLIC_FRONTEND_URL", workflow, StringComparison.Ordinal);
         Assert.Contains("sudo tee \"$APP_DIR/.deploy-revision\"", workflow, StringComparison.Ordinal);
@@ -155,7 +155,8 @@ public sealed class LegalFeatureFlagCiGateTests
             workflow,
             [
                 "sudo rsync -a --delete \"$STAGE/be/\" \"$BE_DIR/\"",
-                "sudo rsync -a \"$STAGE/fe/\" \"$FE_APP_DIR/\"",
+                "sudo rsync -a --delete \"$STAGE/fe/\" \"$FE_APP_DIR/\"",
+                "sudo rsync -a --delete \"$STAGE/fe/\" \"$FE_PUBLIC_DIR/\"",
                 "sudo systemctl enable payplanner.service",
                 "sudo systemctl restart payplanner.service",
                 "curl -fsS \"$PRIMARY_HEALTH_URL\"",
