@@ -2579,13 +2579,13 @@ export function TaskJournal({
         continue;
       }
 
-      if (isAdminUser || (currentUserId !== null && participant.userId === currentUserId)) {
+      if (currentUserId !== null && participant.userId === currentUserId) {
         return { task, participant };
       }
     }
 
     return null;
-  }, [currentUserId, isAdminUser, isApprovalsMode, tasks]);
+  }, [currentUserId, isApprovalsMode, tasks]);
 
   useEffect(() => {
     if (!isApprovalsMode) {
@@ -2646,7 +2646,8 @@ export function TaskJournal({
         return Boolean(
           participant
           && participant.id === approvalDecisionPrompt.participant.id
-          && (isAdminUser || (currentUserId !== null && participant.userId === currentUserId)),
+          && currentUserId !== null
+          && participant.userId === currentUserId,
         );
       });
       if (!stillPending) {
@@ -2683,7 +2684,6 @@ export function TaskJournal({
     currentUserId,
     deadlineChangeDecisionPrompt,
     deadlineChangeDecisionSaving,
-    isAdminUser,
     isApprovalsMode,
     modal,
     pendingDeadlineChangeDecision,

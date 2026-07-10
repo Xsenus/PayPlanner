@@ -1501,6 +1501,25 @@ describe('TaskJournal', () => {
     ));
   });
 
+  it('does not show the forced approval decision prompt to admin when admin is not the current approver', async () => {
+    authState.isAdmin = true;
+    authState.user = { id: 99, fullName: 'Admin viewer', email: 'admin-viewer@example.com' };
+    permissionsState.taskCanEdit = false;
+
+    await renderJournal([
+      createTask({
+        title: 'Task for another approver',
+        status: 'onApproval',
+        result: 'Work result is ready.',
+        participants: [
+          { id: 77, userId: 7, role: 'approver', displayName: 'Current approver', sortOrder: 0, approvalStatus: 'pending' },
+        ],
+      }),
+    ], { mode: 'approvals' });
+
+    expect(screen.queryByTestId('task-approval-decision-prompt')).toBeNull();
+  });
+
   it('requires a revision comment in the forced approval decision prompt', async () => {
     authState.isAdmin = false;
     authState.user = { id: 7, fullName: 'Согласующий', email: 'approver@example.com' };
