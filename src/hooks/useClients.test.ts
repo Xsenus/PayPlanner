@@ -17,7 +17,11 @@ const client: Client = {
   name: 'Test client',
   phone: '',
   email: '',
+  company: '',
+  address: '',
+  notes: '',
   createdAt: '2026-01-01T00:00:00Z',
+  isActive: true,
   cases: [],
   contracts: [],
 };
