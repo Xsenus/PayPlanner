@@ -91,7 +91,7 @@ public class NotificationInboxController : ControllerBase
         query = ApplyDisabledTypeFilter(query, preferences.DisabledTypes);
         query = ApplyTypeAndSearchFilters(query, type, search);
         query = ApplyDomainFilter(query, domain);
-        query = ApplyRequiresActionFilter(query, requiresAction);
+        query = ApplyRequiresActionFilter(query, requiresAction, _context, userId.Value);
         query = ApplyDateRangeFilter(query, dateFrom, dateTo);
         query = ApplyTaskReferenceFilters(query, _context, employeeId, clientId, taskRole);
         query = WhereNotificationTargetVisible(query, _context, visibility);
@@ -143,7 +143,7 @@ public class NotificationInboxController : ControllerBase
         query = ApplyDisabledTypeFilter(query, preferences.DisabledTypes);
         query = ApplyTypeAndSearchFilters(query, type, search);
         query = ApplyDomainFilter(query, domain);
-        query = ApplyRequiresActionFilter(query, requiresAction);
+        query = ApplyRequiresActionFilter(query, requiresAction, _context, userId.Value);
         query = ApplyDateRangeFilter(query, dateFrom, dateTo);
         query = ApplyTaskReferenceFilters(query, _context, employeeId, clientId, taskRole);
         query = WhereNotificationTargetVisible(query, _context, visibility);
@@ -530,7 +530,9 @@ public class NotificationInboxController : ControllerBase
 
     private static IQueryable<UserNotification> ApplyRequiresActionFilter(
         IQueryable<UserNotification> query,
-        bool? requiresAction)
+        bool? requiresAction,
+        PaymentContext context,
+        int userId)
     {
         if (requiresAction != true)
         {
@@ -538,7 +540,21 @@ public class NotificationInboxController : ControllerBase
         }
 
         var requiresActionTypes = UserNotificationTypes.RequiresActionTypes;
-        return query.Where(item => requiresActionTypes.Contains(item.Type));
+        return query.Where(item =>
+            requiresActionTypes.Contains(item.Type)
+            && (item.Type != UserNotificationTypes.TaskApprovalRequested
+                || (item.TaskJournalItemId.HasValue
+                    && context.TaskJournalParticipants.Any(participant =>
+                        participant.TaskJournalItemId == item.TaskJournalItemId.Value
+                        && participant.UserId == userId
+                        && participant.Role == "approver"
+                        && participant.ApprovalStatus != "approved"
+                        && !context.TaskJournalParticipants.Any(previous =>
+                            previous.TaskJournalItemId == item.TaskJournalItemId.Value
+                            && previous.Role == "approver"
+                            && previous.ApprovalStatus != "approved"
+                            && (previous.SortOrder < participant.SortOrder
+                                || (previous.SortOrder == participant.SortOrder && previous.Id < participant.Id)))))));
     }
 
     private static string? NormalizeNotificationDomain(string? domain)

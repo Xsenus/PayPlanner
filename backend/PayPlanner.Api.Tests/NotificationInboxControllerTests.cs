@@ -644,6 +644,85 @@ public class NotificationInboxControllerTests
     }
 
     [Fact]
+    public async Task GetNotifications_RequiresActionShowsApprovalRequestOnlyForCurrentApprover()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateUserAsync(db, "approval-author@example.com");
+        var assignee = await CreateUserAsync(db, "approval-assignee@example.com");
+        var firstApprover = await CreateUserAsync(db, "approval-first@example.com");
+        var nextApprover = await CreateUserAsync(db, "approval-next@example.com");
+        var task = CreateTask(author.Id, "Approval action task");
+        task.AssigneeUserId = assignee.Id;
+        task.AssigneeName = assignee.FullName;
+        task.Status = "onApproval";
+        task.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = firstApprover.Id,
+            Role = "approver",
+            DisplayName = firstApprover.FullName,
+            SortOrder = 0,
+            ApprovalStatus = "pending"
+        });
+        task.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = nextApprover.Id,
+            Role = "approver",
+            DisplayName = nextApprover.FullName,
+            SortOrder = 1,
+            ApprovalStatus = "pending"
+        });
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var assigneeNotification = CreateNotification(
+            assignee.Id,
+            $"task:{task.Id}:approval-request:{task.Participants.First().Id}",
+            UserNotificationTypes.TaskApprovalRequested,
+            title: "Task waits for approval");
+        assigneeNotification.TaskJournalItemId = task.Id;
+        assigneeNotification.ObjectType = "task";
+        assigneeNotification.ObjectId = task.Id;
+        var firstApproverNotification = CreateNotification(
+            firstApprover.Id,
+            $"task:{task.Id}:approval-request:{task.Participants.First().Id}",
+            UserNotificationTypes.TaskApprovalRequested,
+            title: "Task waits for approval");
+        firstApproverNotification.TaskJournalItemId = task.Id;
+        firstApproverNotification.ObjectType = "task";
+        firstApproverNotification.ObjectId = task.Id;
+        var nextApproverNotification = CreateNotification(
+            nextApprover.Id,
+            $"task:{task.Id}:approval-request:{task.Participants.First().Id}",
+            UserNotificationTypes.TaskApprovalRequested,
+            title: "Task waits for approval");
+        nextApproverNotification.TaskJournalItemId = task.Id;
+        nextApproverNotification.ObjectType = "task";
+        nextApproverNotification.ObjectId = task.Id;
+        db.UserNotifications.AddRange(assigneeNotification, firstApproverNotification, nextApproverNotification);
+        await db.SaveChangesAsync();
+
+        var assigneeController = CreateController(db, assignee.Id);
+        var assigneeActiveResult = await assigneeController.GetNotifications("active", null, null);
+        var assigneeActive = Assert.IsType<PagedResponse<UserNotificationDto>>(Assert.IsType<OkObjectResult>(assigneeActiveResult.Result).Value);
+        var assigneeActionResult = await assigneeController.GetNotifications("active", null, null, requiresAction: true);
+        var assigneeAction = Assert.IsType<PagedResponse<UserNotificationDto>>(Assert.IsType<OkObjectResult>(assigneeActionResult.Result).Value);
+
+        var firstApproverController = CreateController(db, firstApprover.Id);
+        var firstApproverActionResult = await firstApproverController.GetNotifications("active", null, null, requiresAction: true);
+        var firstApproverAction = Assert.IsType<PagedResponse<UserNotificationDto>>(Assert.IsType<OkObjectResult>(firstApproverActionResult.Result).Value);
+
+        var nextApproverController = CreateController(db, nextApprover.Id);
+        var nextApproverActionResult = await nextApproverController.GetNotifications("active", null, null, requiresAction: true);
+        var nextApproverAction = Assert.IsType<PagedResponse<UserNotificationDto>>(Assert.IsType<OkObjectResult>(nextApproverActionResult.Result).Value);
+
+        Assert.Single(assigneeActive.Items);
+        Assert.Empty(assigneeAction.Items);
+        var approverItem = Assert.Single(firstApproverAction.Items);
+        Assert.Equal(firstApproverNotification.Id, approverItem.Id);
+        Assert.Empty(nextApproverAction.Items);
+    }
+
+    [Fact]
     public async Task BulkArchiveAndDelete_UpdateOnlySelectedCurrentUserNotifications()
     {
         await using var db = await CreateContextAsync();
