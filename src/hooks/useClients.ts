@@ -45,8 +45,37 @@ export type ClientsListOptions = {
   filters?: Record<string, string>;
 };
 
+function serializeClientFilters(filters?: Record<string, string>) {
+  if (!filters) return '';
+  return Object.keys(filters)
+    .sort()
+    .map((key) => `${encodeURIComponent(key)}=${encodeURIComponent(filters[key] ?? '')}`)
+    .join('&');
+}
+
+function deserializeClientFilters(serialized: string) {
+  if (!serialized) return {};
+  return Object.fromEntries(
+    serialized
+      .split('&')
+      .filter(Boolean)
+      .map((part) => {
+        const [key, value = ''] = part.split('=');
+        return [decodeURIComponent(key), decodeURIComponent(value)];
+      }),
+  );
+}
+
 export function useClients(options?: ClientsListOptions) {
   const enabled = options?.enabled ?? true;
+  const mode = options?.mode;
+  const search = options?.search;
+  const isActive = options?.isActive;
+  const sortBy = options?.sortBy;
+  const sortDir = options?.sortDir;
+  const page = options?.page;
+  const pageSize = options?.pageSize;
+  const filtersKey = serializeClientFilters(options?.filters);
   const [clients, setClients] = useState<Client[]>([]);
   const [loadingInitial, setLoadingInitial] = useState(enabled);
   const [refreshing, setRefreshing] = useState(false);
@@ -55,7 +84,7 @@ export function useClients(options?: ClientsListOptions) {
   const hasLoadedRef = useRef(false);
   const requestIdRef = useRef(0);
 
-  const fetchClients = useCallback(async (mode?: 'initial' | 'refresh') => {
+  const fetchClients = useCallback(async (loadMode?: 'initial' | 'refresh') => {
     if (!enabled) {
       requestIdRef.current += 1;
       hasLoadedRef.current = true;
@@ -67,7 +96,7 @@ export function useClients(options?: ClientsListOptions) {
       return;
     }
 
-    const nextMode = mode ?? (hasLoadedRef.current ? 'refresh' : 'initial');
+    const nextMode = loadMode ?? (hasLoadedRef.current ? 'refresh' : 'initial');
     const requestId = ++requestIdRef.current;
 
     try {
@@ -78,15 +107,15 @@ export function useClients(options?: ClientsListOptions) {
       }
       setError(null);
 
-      if (options?.mode === 'paged') {
+      if (mode === 'paged') {
         const response = await apiService.getClientsV2({
-          search: options.search,
-          isActive: options.isActive,
-          sortBy: options.sortBy,
-          sortDir: options.sortDir,
-          page: options.page,
-          pageSize: options.pageSize,
-          ...(options.filters ?? {}),
+          search,
+          isActive,
+          sortBy,
+          sortDir,
+          page,
+          pageSize,
+          ...deserializeClientFilters(filtersKey),
         });
         if (requestId !== requestIdRef.current) {
           return;
@@ -135,7 +164,7 @@ export function useClients(options?: ClientsListOptions) {
         }
       }
     }
-  }, [enabled, options]);
+  }, [enabled, filtersKey, isActive, mode, page, pageSize, search, sortBy, sortDir]);
 
   useEffect(() => {
     void fetchClients();
@@ -147,7 +176,7 @@ export function useClients(options?: ClientsListOptions) {
       if (isClient(created)) {
         const normalized = normalizeClient(created);
         setClients((prev) => [normalized, ...prev]);
-        if (options?.mode === 'paged') {
+        if (mode === 'paged') {
           await fetchClients();
         }
       } else {
@@ -199,7 +228,7 @@ export function useClients(options?: ClientsListOptions) {
     try {
       setClients((prev) => prev.filter((c) => c.id !== id));
       await apiService.deleteClient(id);
-      if (options?.mode === 'paged') {
+      if (mode === 'paged') {
         await fetchClients();
       }
     } catch (err) {
