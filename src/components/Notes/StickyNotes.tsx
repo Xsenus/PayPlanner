@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent } from 'react';
 import {
+  Bold,
   Check,
   CalendarClock,
   Filter,
   LayoutGrid,
   List,
   Lock,
+  Maximize2,
+  Minus,
   Palette,
   Pin,
   PinOff,
@@ -40,15 +43,24 @@ import type { HubConnection } from '@microsoft/signalr';
 import { copyTextToClipboard, getEffectiveBoardNotesCount } from './stickyNotesUtils';
 
 const COLORS: Array<{ value: StickyNoteColor; label: string; className: string; swatchClassName: string; swatchTextClassName: string }> = [
-  { value: 'yellow', label: 'Желтая', className: 'bg-amber-100 border-amber-200 text-slate-950', swatchClassName: 'bg-amber-200 border-amber-400', swatchTextClassName: 'text-amber-950' },
-  { value: 'blue', label: 'Синяя', className: 'bg-sky-100 border-sky-200 text-slate-950', swatchClassName: 'bg-sky-200 border-sky-400', swatchTextClassName: 'text-sky-950' },
-  { value: 'green', label: 'Зеленая', className: 'bg-emerald-100 border-emerald-200 text-slate-950', swatchClassName: 'bg-emerald-200 border-emerald-400', swatchTextClassName: 'text-emerald-950' },
-  { value: 'pink', label: 'Розовая', className: 'bg-rose-100 border-rose-200 text-slate-950', swatchClassName: 'bg-rose-200 border-rose-400', swatchTextClassName: 'text-rose-950' },
-  { value: 'cyan', label: 'Бирюзовая', className: 'bg-cyan-100 border-cyan-200 text-slate-950', swatchClassName: 'bg-cyan-200 border-cyan-400', swatchTextClassName: 'text-cyan-950' },
+  { value: 'yellow', label: 'Желтая', className: 'bg-amber-200 border-amber-400 text-slate-950', swatchClassName: 'bg-amber-300 border-amber-500', swatchTextClassName: 'text-amber-950' },
+  { value: 'orange', label: 'Оранжевая', className: 'bg-orange-200 border-orange-400 text-slate-950', swatchClassName: 'bg-orange-300 border-orange-500', swatchTextClassName: 'text-orange-950' },
+  { value: 'blue', label: 'Синяя', className: 'bg-blue-200 border-blue-400 text-slate-950', swatchClassName: 'bg-blue-300 border-blue-500', swatchTextClassName: 'text-blue-950' },
+  { value: 'cyan', label: 'Бирюзовая', className: 'bg-cyan-200 border-cyan-400 text-slate-950', swatchClassName: 'bg-cyan-300 border-cyan-500', swatchTextClassName: 'text-cyan-950' },
+  { value: 'green', label: 'Зеленая', className: 'bg-emerald-200 border-emerald-400 text-slate-950', swatchClassName: 'bg-emerald-300 border-emerald-500', swatchTextClassName: 'text-emerald-950' },
+  { value: 'purple', label: 'Фиолетовая', className: 'bg-violet-200 border-violet-400 text-slate-950', swatchClassName: 'bg-violet-300 border-violet-500', swatchTextClassName: 'text-violet-950' },
+  { value: 'pink', label: 'Розовая', className: 'bg-rose-200 border-rose-400 text-slate-950', swatchClassName: 'bg-rose-300 border-rose-500', swatchTextClassName: 'text-rose-950' },
   { value: 'white', label: 'Белая', className: 'bg-white border-slate-200 text-slate-950', swatchClassName: 'bg-white border-slate-400', swatchTextClassName: 'text-slate-700' },
 ];
 
 const DEFAULT_NOTE_SIZE = { width: 220, height: 180 };
+const NOTE_SIZE_PRESETS = [
+  { width: 220, height: 180, label: 'Компактный' },
+  { width: 300, height: 240, label: 'Средний' },
+  { width: 400, height: 320, label: 'Большой' },
+] as const;
+const MIN_NOTE_FONT_SIZE = 12;
+const MAX_NOTE_FONT_SIZE = 20;
 const MAX_NOTES_PER_BOARD = 200;
 const FILTER_OPTIONS = [
   { value: 'all', label: 'Все' },
@@ -171,6 +183,9 @@ export function StickyNotes() {
   const newBoardTitleRef = useRef('');
   const activeBoardIdRef = useRef<number | null>(null);
   const autosaveTimersRef = useRef<Map<number, number>>(new Map());
+  const noteEditRevisionsRef = useRef<Map<number, number>>(new Map());
+  const noteSavesInFlightRef = useRef<Set<number>>(new Set());
+  const pendingNoteSavesRef = useRef<Map<number, StickyNoteItem>>(new Map());
   const boardLoadRequestIdRef = useRef(0);
   const notesLoadRequestIdRef = useRef(0);
   const membersLoadRequestIdRef = useRef(0);
@@ -231,6 +246,9 @@ export function StickyNotes() {
 
   const clearNoteTransientState = useCallback((noteId: number) => {
     clearAutosaveTimer(noteId);
+    noteEditRevisionsRef.current.delete(noteId);
+    noteSavesInFlightRef.current.delete(noteId);
+    pendingNoteSavesRef.current.delete(noteId);
     setSelectedNoteId((current) => (current === noteId ? null : current));
     setDeletedNoteId((current) => (current === noteId ? null : current));
     setColorPaletteNoteId((current) => (current === noteId ? null : current));
@@ -253,6 +271,9 @@ export function StickyNotes() {
       window.clearTimeout(timer);
     }
     autosaveTimersRef.current.clear();
+    noteEditRevisionsRef.current.clear();
+    noteSavesInFlightRef.current.clear();
+    pendingNoteSavesRef.current.clear();
     setSavingNoteIds(new Set());
     setNotes([]);
     setMembers([]);
@@ -506,7 +527,11 @@ export function StickyNotes() {
           return;
         }
 
-        if (event.type === 'noteUpdated' && autosaveTimersRef.current.has(event.note.id)) {
+        if (event.type === 'noteUpdated' && event.actorUserId === currentUserId) {
+          return;
+        }
+
+        if (event.type === 'noteUpdated' && (autosaveTimersRef.current.has(event.note.id) || noteSavesInFlightRef.current.has(event.note.id))) {
           const localNote = notesRef.current.find((note) => note.id === event.note!.id);
           if (localNote) {
             clearAutosaveTimer(event.note.id);
@@ -552,7 +577,7 @@ export function StickyNotes() {
       connectionRef.current = null;
       void stopNotesHubConnection(connection);
     };
-  }, [activeBoardId, clearActiveBoardState, clearAutosaveTimer, clearNoteTransientState, loadBoards, loadMembers, toast]);
+  }, [activeBoardId, clearActiveBoardState, clearAutosaveTimer, clearNoteTransientState, currentUserId, loadBoards, loadMembers, toast]);
 
   useEffect(() => {
     const connection = connectionRef.current;
@@ -650,6 +675,8 @@ export function StickyNotes() {
         x: Math.max(0, x ?? 56 + (offset % 360)),
         y: Math.max(0, y ?? 56 + (offset % 240)),
         ...DEFAULT_NOTE_SIZE,
+        fontSize: 14,
+        isBold: false,
         assignedUserId: null,
         reminderAt: null,
       });
@@ -687,6 +714,14 @@ export function StickyNotes() {
       autosaveTimersRef.current.delete(note.id);
     }
 
+    if (noteSavesInFlightRef.current.has(note.id)) {
+      pendingNoteSavesRef.current.set(note.id, note);
+      return;
+    }
+
+    noteSavesInFlightRef.current.add(note.id);
+    const savedRevision = noteEditRevisionsRef.current.get(note.id) ?? 0;
+
     setSavingNoteIds((current) => new Set(current).add(note.id));
     try {
       const saved = await apiService.updateStickyNote(note.id, {
@@ -696,6 +731,8 @@ export function StickyNotes() {
         y: note.y,
         width: note.width,
         height: note.height,
+        fontSize: note.fontSize,
+        isBold: note.isBold,
         zIndex: note.zIndex,
         isPinned: note.isPinned,
         assignedUserId: note.assignedUserId ?? null,
@@ -705,7 +742,31 @@ export function StickyNotes() {
       if (activeBoardIdRef.current !== requestedBoardId || saved.boardId !== requestedBoardId) {
         return;
       }
-      setNotes((current) => sortNotes(current.map((item) => (item.id === saved.id ? saved : item))));
+
+      const currentNote = notesRef.current.find((item) => item.id === saved.id);
+      const currentRevision = noteEditRevisionsRef.current.get(saved.id) ?? 0;
+      const nextNote = currentNote && currentRevision !== savedRevision
+        ? {
+          ...saved,
+          text: currentNote.text,
+          color: currentNote.color,
+          x: currentNote.x,
+          y: currentNote.y,
+          width: currentNote.width,
+          height: currentNote.height,
+          fontSize: currentNote.fontSize,
+          isBold: currentNote.isBold,
+          zIndex: currentNote.zIndex,
+          isPinned: currentNote.isPinned,
+          assignedUserId: currentNote.assignedUserId,
+          assignedUserName: currentNote.assignedUserName,
+          reminderAt: currentNote.reminderAt,
+          reminderSentAt: currentNote.reminderSentAt,
+        }
+        : saved;
+      const nextNotes = sortNotes(notesRef.current.map((item) => (item.id === saved.id ? nextNote : item)));
+      notesRef.current = nextNotes;
+      setNotes(nextNotes);
       setNoteConflict((current) => current?.local.id === saved.id ? null : current);
     } catch (error) {
       console.error(error);
@@ -726,11 +787,19 @@ export function StickyNotes() {
         }
       }
     } finally {
+      noteSavesInFlightRef.current.delete(note.id);
       setSavingNoteIds((current) => {
         const next = new Set(current);
         next.delete(note.id);
         return next;
       });
+
+      const pendingNote = pendingNoteSavesRef.current.get(note.id);
+      pendingNoteSavesRef.current.delete(note.id);
+      if (pendingNote && activeBoardIdRef.current === requestedBoardId) {
+        const latest = notesRef.current.find((item) => item.id === note.id) ?? pendingNote;
+        void saveNote(latest);
+      }
     }
   };
 
@@ -841,7 +910,36 @@ export function StickyNotes() {
   };
 
   const patchNote = (noteId: number, patch: Partial<StickyNoteItem>) => {
-    setNotes((current) => sortNotes(current.map((note) => (note.id === noteId ? { ...note, ...patch } : note))));
+    noteEditRevisionsRef.current.set(noteId, (noteEditRevisionsRef.current.get(noteId) ?? 0) + 1);
+    const nextNotes = sortNotes(notesRef.current.map((note) => (note.id === noteId ? { ...note, ...patch } : note)));
+    notesRef.current = nextNotes;
+    setNotes(nextNotes);
+  };
+
+  const updateNoteAppearance = (note: StickyNoteItem, patch: Partial<StickyNoteItem>) => {
+    if (!canEditActiveBoard) {
+      return;
+    }
+
+    patchNote(note.id, patch);
+    const latest = notesRef.current.find((item) => item.id === note.id);
+    if (latest) {
+      void saveNote(latest);
+    }
+  };
+
+  const changeNoteFontSize = (note: StickyNoteItem, delta: number) => {
+    const current = note.fontSize ?? 14;
+    const fontSize = Math.min(MAX_NOTE_FONT_SIZE, Math.max(MIN_NOTE_FONT_SIZE, current + delta));
+    if (fontSize !== current) {
+      updateNoteAppearance(note, { fontSize });
+    }
+  };
+
+  const cycleNoteSize = (note: StickyNoteItem) => {
+    const currentIndex = NOTE_SIZE_PRESETS.findIndex((preset) => preset.width === note.width && preset.height === note.height);
+    const nextPreset = NOTE_SIZE_PRESETS[(currentIndex + 1 + NOTE_SIZE_PRESETS.length) % NOTE_SIZE_PRESETS.length];
+    updateNoteAppearance(note, { width: nextPreset.width, height: nextPreset.height });
   };
 
   const selectNoteColor = (note: StickyNoteItem, color: StickyNoteColor) => {
@@ -1141,7 +1239,7 @@ export function StickyNotes() {
   };
 
   const startResize = (event: PointerEvent<HTMLButtonElement>, note: StickyNoteItem) => {
-    if (!canEditActiveBoard || note.isPinned) {
+    if (!canEditActiveBoard) {
       return;
     }
 
@@ -1177,6 +1275,9 @@ export function StickyNotes() {
     const isCanvas = mode === 'canvas';
     const currentColor = colorMeta(note.color);
     const isColorPaletteOpen = colorPaletteNoteId === note.id;
+    const currentFontSize = note.fontSize ?? 14;
+    const currentSizeLabel = NOTE_SIZE_PRESETS.find((preset) => preset.width === note.width && preset.height === note.height)?.label
+      ?? `${Math.round(note.width)}×${Math.round(note.height)}`;
 
     return (
       <div
@@ -1216,13 +1317,13 @@ export function StickyNotes() {
             </button>
             {isColorPaletteOpen ? (
               <div
-                className="absolute left-0 top-8 z-[90] w-[190px] rounded-lg border border-slate-200 bg-white p-2 shadow-xl"
+                className="absolute left-0 top-8 z-[90] w-[236px] rounded-lg border border-slate-200 bg-white p-2 shadow-xl"
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => event.stopPropagation()}
                 role="group"
                 aria-label="Палитра цветов заметки"
               >
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-4 gap-2">
                   {COLORS.map((item) => {
                     const selected = note.color === item.value;
                     return (
@@ -1287,6 +1388,59 @@ export function StickyNotes() {
             <Trash2 className="h-3.5 w-3.5" />
           </button>
         </div>
+        <div className="mb-1 flex items-center gap-1 rounded-md border border-black/10 bg-white/35 p-1">
+          <button
+            type="button"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => updateNoteAppearance(note, { isBold: !note.isBold })}
+            disabled={!canEditActiveBoard}
+            className={`inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 transition hover:bg-white disabled:opacity-50 ${note.isBold ? 'bg-slate-900 text-white' : 'bg-white/60 text-slate-700'}`}
+            title={note.isBold ? 'Обычный текст' : 'Жирный текст'}
+            aria-label={note.isBold ? 'Отключить жирный текст' : 'Включить жирный текст'}
+            aria-pressed={Boolean(note.isBold)}
+          >
+            <Bold className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => changeNoteFontSize(note, -2)}
+            disabled={!canEditActiveBoard || currentFontSize <= MIN_NOTE_FONT_SIZE}
+            className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white/60 text-slate-700 transition hover:bg-white disabled:opacity-40"
+            title="Уменьшить текст"
+            aria-label="Уменьшить текст заметки"
+          >
+            <Minus className="h-3.5 w-3.5" />
+          </button>
+          <span className="min-w-8 text-center text-[11px] font-semibold text-slate-700" aria-label={`Размер текста ${currentFontSize}`}>
+            {currentFontSize}
+          </span>
+          <button
+            type="button"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => changeNoteFontSize(note, 2)}
+            disabled={!canEditActiveBoard || currentFontSize >= MAX_NOTE_FONT_SIZE}
+            className="inline-flex h-7 w-7 items-center justify-center rounded border border-black/10 bg-white/60 text-slate-700 transition hover:bg-white disabled:opacity-40"
+            title="Увеличить текст"
+            aria-label="Увеличить текст заметки"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+          {isCanvas ? (
+            <button
+              type="button"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={() => cycleNoteSize(note)}
+              disabled={!canEditActiveBoard}
+              className="ml-auto inline-flex h-7 items-center justify-center gap-1 rounded border border-black/10 bg-white/60 px-2 text-[10px] font-medium text-slate-700 transition hover:bg-white disabled:opacity-50"
+              title={`Размер стикера: ${currentSizeLabel}. Нажмите, чтобы выбрать следующий.`}
+              aria-label={`Изменить размер стикера. Сейчас: ${currentSizeLabel}`}
+            >
+              <Maximize2 className="h-3.5 w-3.5" />
+              {currentSizeLabel}
+            </button>
+          ) : null}
+        </div>
         <div className="mb-1 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-1">
           <label className="flex min-w-0 items-center gap-1 rounded border border-black/10 bg-white/35 px-1.5 py-1 text-[10px] text-slate-600">
             <UserCheck className="h-3 w-3 shrink-0" />
@@ -1336,7 +1490,8 @@ export function StickyNotes() {
           onBlur={(event) => saveNote({ ...note, text: event.currentTarget.value })}
           readOnly={!canEditActiveBoard}
           maxLength={4000}
-          className="min-h-0 flex-1 resize-none bg-transparent text-sm leading-snug outline-none placeholder:text-slate-500"
+          className={`min-h-0 flex-1 resize-none bg-transparent leading-snug outline-none placeholder:text-slate-500 ${note.isBold ? 'font-bold' : 'font-normal'}`}
+          style={{ fontSize: `${currentFontSize}px` }}
           placeholder="Текст заметки"
         />
         <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-slate-500">
@@ -1349,7 +1504,7 @@ export function StickyNotes() {
           <button
             type="button"
             onPointerDown={(event) => startResize(event, note)}
-            className="absolute bottom-1 right-1 h-4 w-4 cursor-se-resize rounded-sm border-b-2 border-r-2 border-slate-400/70"
+            className="absolute bottom-1 right-1 h-5 w-5 cursor-se-resize rounded-sm border-b-[3px] border-r-[3px] border-slate-600/70 bg-white/20 hover:bg-white/50"
             title="Изменить размер"
           />
         ) : null}

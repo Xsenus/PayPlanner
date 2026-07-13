@@ -1364,6 +1364,68 @@ describe('StickyNotes', () => {
     })), { timeout: 2500 });
   }, 4000);
 
+  it('keeps multiline typing when an older save response arrives', async () => {
+    const firstSave = createDeferred<StickyNoteItem>();
+    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Первая строка', version: 1 }]);
+    apiMock.updateStickyNote
+      .mockImplementationOnce(() => firstSave.promise)
+      .mockImplementationOnce(async (_id, payload) => ({
+        ...createdNote,
+        ...payload,
+        text: payload.text,
+        version: 3,
+      }));
+
+    renderStickyNotes();
+
+    const textarea = await screen.findByDisplayValue('Первая строка');
+    fireEvent.change(textarea, { target: { value: 'Первая строка\nВторая строка' } });
+    fireEvent.blur(textarea);
+    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledTimes(1));
+
+    fireEvent.change(textarea, { target: { value: 'Первая строка\nВторая строка\nТретья строка' } });
+    fireEvent.blur(textarea);
+
+    await act(async () => {
+      firstSave.resolve({ ...createdNote, text: 'Первая строка\nВторая строка', version: 2 });
+      await firstSave.promise;
+    });
+
+    expect((textarea as HTMLTextAreaElement).value).toBe('Первая строка\nВторая строка\nТретья строка');
+    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenNthCalledWith(2, 11, expect.objectContaining({
+      text: 'Первая строка\nВторая строка\nТретья строка',
+      version: 2,
+    })));
+  });
+
+  it('changes note emphasis, font size, color and preset dimensions', async () => {
+    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Оформление', fontSize: 14, isBold: false }]);
+    apiMock.updateStickyNote.mockImplementation(async (_id, payload) => ({
+      ...createdNote,
+      ...payload,
+      text: payload.text,
+      version: 2,
+    }));
+
+    const user = userEvent.setup();
+    renderStickyNotes();
+
+    const textarea = await screen.findByDisplayValue('Оформление');
+    await user.click(screen.getByRole('button', { name: 'Включить жирный текст' }));
+    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledWith(11, expect.objectContaining({ isBold: true })));
+    expect(textarea.className).toContain('font-bold');
+
+    await user.click(screen.getByRole('button', { name: 'Увеличить текст заметки' }));
+    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledWith(11, expect.objectContaining({ fontSize: 16 })));
+
+    await user.click(screen.getByRole('button', { name: 'Изменить размер стикера. Сейчас: Компактный' }));
+    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledWith(11, expect.objectContaining({ width: 300, height: 240 })));
+
+    await user.click(screen.getByRole('button', { name: /Выбрать цвет заметки:/ }));
+    await user.click(screen.getByRole('button', { name: 'Цвет заметки: Фиолетовая' }));
+    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledWith(11, expect.objectContaining({ color: 'purple' })));
+  });
+
   it('cancels pending autosave when switching boards', async () => {
     apiMock.getStickyNoteBoards.mockResolvedValue([board, personalBoard]);
     apiMock.getStickyNotes.mockImplementation(async (boardId) => (

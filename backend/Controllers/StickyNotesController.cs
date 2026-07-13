@@ -28,7 +28,9 @@ public sealed class StickyNotesController : ControllerBase
         "yellow",
         "blue",
         "green",
+        "orange",
         "pink",
+        "purple",
         "white",
         "cyan",
     };
@@ -383,6 +385,8 @@ public sealed class StickyNotesController : ControllerBase
                 Y = note.Y,
                 Width = note.Width,
                 Height = note.Height,
+                FontSize = note.FontSize,
+                IsBold = note.IsBold,
                 ZIndex = note.ZIndex,
                 Version = note.Version,
                 IsPinned = note.IsPinned,
@@ -449,6 +453,8 @@ public sealed class StickyNotesController : ControllerBase
             Y = Clamp(request.Y ?? 80, 0, 5000),
             Width = Clamp(request.Width ?? 220, 140, 640),
             Height = Clamp(request.Height ?? 180, 120, 640),
+            FontSize = ClampFontSize(request.FontSize),
+            IsBold = request.IsBold ?? false,
             ZIndex = maxZIndex + 1,
             AuthorUserId = access.Value.UserId,
             AuthorUserName = access.Value.DisplayName,
@@ -513,6 +519,8 @@ public sealed class StickyNotesController : ControllerBase
         note.Y = Clamp(request.Y, 0, 5000);
         note.Width = Clamp(request.Width, 140, 640);
         note.Height = Clamp(request.Height, 120, 640);
+        note.FontSize = ClampFontSize(request.FontSize);
+        note.IsBold = request.IsBold ?? note.IsBold;
         note.ZIndex = Math.Max(1, request.ZIndex);
         note.IsPinned = request.IsPinned;
         note.AssignedUserId = assignment.UserId;
@@ -1155,6 +1163,8 @@ public sealed class StickyNotesController : ControllerBase
             Y = note.Y,
             Width = note.Width,
             Height = note.Height,
+            FontSize = note.FontSize,
+            IsBold = note.IsBold,
             ZIndex = note.ZIndex,
             Version = note.Version,
             IsPinned = note.IsPinned,
@@ -1191,6 +1201,9 @@ public sealed class StickyNotesController : ControllerBase
         => string.Equals(value, "editor", StringComparison.OrdinalIgnoreCase)
             ? "editor"
             : "viewer";
+
+    private static int ClampFontSize(int? value)
+        => Math.Clamp(value ?? 14, 12, 20);
 
     private static bool IsUserMentioned(string text, string? fullName, string? email)
     {

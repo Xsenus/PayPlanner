@@ -741,7 +741,7 @@ export interface RoleCalendarVisibleUserOptionDto {
   roleName: string;
 }
 
-export type StickyNoteColor = 'yellow' | 'blue' | 'green' | 'pink' | 'white' | 'cyan';
+export type StickyNoteColor = 'yellow' | 'orange' | 'blue' | 'cyan' | 'green' | 'purple' | 'pink' | 'white';
 export type StickyNoteBoardVisibility = 'personal' | 'shared';
 export type StickyNoteBoardBackground = 'cork' | 'gray';
 
@@ -791,6 +791,8 @@ export interface StickyNoteItem {
   y: number;
   width: number;
   height: number;
+  fontSize?: number;
+  isBold?: boolean;
   zIndex: number;
   version: number;
   isPinned: boolean;
@@ -855,6 +857,8 @@ export interface CreateStickyNotePayload {
   y?: number;
   width?: number;
   height?: number;
+  fontSize?: number;
+  isBold?: boolean;
   assignedUserId?: number | null;
   reminderAt?: string | null;
 }
@@ -866,6 +870,8 @@ export interface UpdateStickyNotePayload {
   y: number;
   width: number;
   height: number;
+  fontSize?: number;
+  isBold?: boolean;
   zIndex: number;
   isPinned: boolean;
   assignedUserId?: number | null;

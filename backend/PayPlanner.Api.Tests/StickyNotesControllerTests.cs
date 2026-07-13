@@ -218,6 +218,56 @@ public sealed class StickyNotesControllerTests
     }
 
     [Fact]
+    public async Task CreateAndUpdateNote_PersistsAppearanceSettings()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db);
+        var board = new StickyNoteBoard
+        {
+            Title = "Оформление",
+            Visibility = StickyNoteBoardVisibility.Shared,
+            Background = "cork",
+        };
+        db.StickyNoteBoards.Add(board);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, user);
+
+        var createResult = await controller.CreateNote(board.Id, new CreateStickyNoteRequest
+        {
+            Text = "Выделить важное",
+            Color = "purple",
+            FontSize = 99,
+            IsBold = true,
+        }, CancellationToken.None);
+
+        var created = Assert.IsType<StickyNoteDto>(Assert.IsType<CreatedAtActionResult>(createResult.Result).Value);
+        Assert.Equal("purple", created.Color);
+        Assert.Equal(20, created.FontSize);
+        Assert.True(created.IsBold);
+
+        var updateResult = await controller.UpdateNote(created.Id, new UpdateStickyNoteRequest
+        {
+            Text = created.Text,
+            Color = "orange",
+            X = created.X,
+            Y = created.Y,
+            Width = 300,
+            Height = 240,
+            FontSize = 12,
+            IsBold = false,
+            ZIndex = created.ZIndex,
+            Version = created.Version,
+        }, CancellationToken.None);
+
+        var updated = Assert.IsType<StickyNoteDto>(Assert.IsType<OkObjectResult>(updateResult.Result).Value);
+        Assert.Equal("orange", updated.Color);
+        Assert.Equal(12, updated.FontSize);
+        Assert.False(updated.IsBold);
+        Assert.Equal(300, updated.Width);
+        Assert.Equal(240, updated.Height);
+    }
+
+    [Fact]
     public async Task CreateNote_WithMention_NotifiesMentionedVisibleUser()
     {
         await using var db = await CreateContextAsync();

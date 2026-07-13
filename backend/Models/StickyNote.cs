@@ -20,6 +20,8 @@ public class StickyNote
     public double Y { get; set; } = 80;
     public double Width { get; set; } = 220;
     public double Height { get; set; } = 180;
+    public int FontSize { get; set; } = 14;
+    public bool IsBold { get; set; }
     public int ZIndex { get; set; } = 1;
     public int Version { get; set; } = 1;
     public bool IsPinned { get; set; }

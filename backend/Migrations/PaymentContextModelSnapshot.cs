@@ -6239,8 +6239,16 @@ namespace PayPlanner.Api.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("FontSize")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(14);
+
                     b.Property<double>("Height")
                         .HasColumnType("REAL");
+
+                    b.Property<bool>("IsBold")
+                        .HasColumnType("INTEGER");
 
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()

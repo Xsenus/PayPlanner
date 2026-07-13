@@ -48,6 +48,8 @@ public sealed class StickyNoteDto
     public double Y { get; set; }
     public double Width { get; set; }
     public double Height { get; set; }
+    public int FontSize { get; set; }
+    public bool IsBold { get; set; }
     public int ZIndex { get; set; }
     public int Version { get; set; }
     public bool IsPinned { get; set; }
