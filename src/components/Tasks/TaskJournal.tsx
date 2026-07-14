@@ -86,6 +86,15 @@ import {
   type TaskNotificationDefaults,
 } from '../../utils/taskNotificationDefaults';
 import { applyTaskTemplateDefaults, type TaskTemplateField } from '../../utils/taskTemplateApplication';
+import {
+  FORCED_TASK_SNOOZE_OPTIONS,
+  FORCED_TASK_SNOOZE_STORAGE_KEY,
+  FORCED_TASK_SNOOZES_EVENT,
+  getForcedTaskApprovalSnoozeKey,
+  getForcedTaskDeadlineChangeSnoozeKey,
+  readForcedTaskSnoozes,
+  snoozeForcedTaskActions,
+} from '../../utils/forcedTaskActionSnoozes';
 import { LookupSelect, type LookupSelectOption } from '../ui/LookupSelect';
 import { TaskTemplatesPanel } from './TaskTemplatesPanel';
 
@@ -1942,6 +1951,11 @@ export function TaskJournal({
   const [approvalDecisionRevisionDueAt, setApprovalDecisionRevisionDueAt] = useState('');
   const [approvalDecisionError, setApprovalDecisionError] = useState<string | null>(null);
   const [approvalDecisionSaving, setApprovalDecisionSaving] = useState<'approve' | 'approveComplete' | 'approveReturn' | 'revision' | null>(null);
+  const [forcedDecisionSnoozeRevision, setForcedDecisionSnoozeRevision] = useState(0);
+  const forcedDecisionSnoozes = useMemo(() => ({
+    revision: forcedDecisionSnoozeRevision,
+    values: readForcedTaskSnoozes(),
+  }), [forcedDecisionSnoozeRevision]);
   const [highlightedTaskId, setHighlightedTaskId] = useState<number | null>(routeTaskId);
   const [calendarAnchorDate, setCalendarAnchorDate] = useState(() => getCurrentCalendarDate());
   const [calendarSelectedDate, setCalendarSelectedDate] = useState(() => getCurrentCalendarDate());
@@ -2246,6 +2260,28 @@ export function TaskJournal({
     window.addEventListener(TASK_JOURNAL_EVENT, refresh);
     return () => window.removeEventListener(TASK_JOURNAL_EVENT, refresh);
   }, [refreshTasks]);
+
+  useEffect(() => {
+    if (!isApprovalsMode) {
+      return;
+    }
+
+    const refreshSnoozes = () => setForcedDecisionSnoozeRevision(Date.now());
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === FORCED_TASK_SNOOZE_STORAGE_KEY) {
+        refreshSnoozes();
+      }
+    };
+    const intervalId = window.setInterval(refreshSnoozes, 30_000);
+    window.addEventListener(FORCED_TASK_SNOOZES_EVENT, refreshSnoozes);
+    window.addEventListener('storage', handleStorage);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener(FORCED_TASK_SNOOZES_EVENT, refreshSnoozes);
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, [isApprovalsMode]);
 
   useEffect(() => {
     searchRef.current = search;
@@ -2595,6 +2631,7 @@ export function TaskJournal({
       const request = getPendingDeadlineChangeRequests(task)
         .find((item) =>
           !processedDeadlineChangeRequestIdsRef.current.has(item.id) &&
+          (forcedDecisionSnoozes.values[getForcedTaskDeadlineChangeSnoozeKey(task.id, item.id)] ?? 0) <= Date.now() &&
           (isAdminUser || (currentUserId !== null && item.reviewerUserId === currentUserId)));
       if (request) {
         return { task, request };
@@ -2602,7 +2639,7 @@ export function TaskJournal({
     }
 
     return null;
-  }, [currentUserId, isAdminUser, isApprovalsMode, tasks]);
+  }, [currentUserId, forcedDecisionSnoozes, isAdminUser, isApprovalsMode, tasks]);
 
   const pendingApprovalDecision = useMemo<Exclude<ApprovalDecisionPromptState, null> | null>(() => {
     if (!isApprovalsMode) {
@@ -2611,6 +2648,10 @@ export function TaskJournal({
 
     for (const task of tasks) {
       if (task.status !== 'onApproval' && task.status !== 'overdueApproval') {
+        continue;
+      }
+
+      if ((forcedDecisionSnoozes.values[getForcedTaskApprovalSnoozeKey(task.id)] ?? 0) > Date.now()) {
         continue;
       }
 
@@ -2625,7 +2666,7 @@ export function TaskJournal({
     }
 
     return null;
-  }, [currentUserId, isApprovalsMode, tasks]);
+  }, [currentUserId, forcedDecisionSnoozes, isApprovalsMode, tasks]);
 
   useEffect(() => {
     if (!isApprovalsMode) {
@@ -3186,6 +3227,14 @@ export function TaskJournal({
     setDeadlineChangeDecisionSaving(null);
   };
 
+  const snoozeDeadlineChangeDecisionPrompt = (minutes: number) => {
+    if (!deadlineChangeDecisionPrompt || deadlineChangeDecisionSaving) return;
+
+    const { task, request } = deadlineChangeDecisionPrompt;
+    snoozeForcedTaskActions([getForcedTaskDeadlineChangeSnoozeKey(task.id, request.id)], minutes);
+    resetDeadlineChangeDecisionPrompt();
+  };
+
   const approveDeadlineChangeDecision = async () => {
     if (!deadlineChangeDecisionPrompt || deadlineChangeDecisionSaving) return;
 
@@ -3385,6 +3434,13 @@ export function TaskJournal({
     setApprovalDecisionRevisionDueAt('');
     setApprovalDecisionError(null);
     setApprovalDecisionSaving(null);
+  };
+
+  const snoozeApprovalDecisionPrompt = (minutes: number) => {
+    if (!approvalDecisionPrompt || approvalDecisionSaving) return;
+
+    snoozeForcedTaskActions([getForcedTaskApprovalSnoozeKey(approvalDecisionPrompt.task.id)], minutes);
+    resetApprovalDecisionPrompt();
   };
 
   const approvePromptDecision = async (finalAction?: TaskApprovalFinalAction) => {
@@ -4422,6 +4478,7 @@ export function TaskJournal({
           }}
           onApprove={() => void approveDeadlineChangeDecision()}
           onReject={() => void rejectDeadlineChangeDecision()}
+          onSnooze={snoozeDeadlineChangeDecisionPrompt}
         />
       ) : null}
       {approvalDecisionPrompt ? (
@@ -4447,6 +4504,7 @@ export function TaskJournal({
           onApproveComplete={() => void approvePromptDecision('complete')}
           onApproveReturnToAssignee={() => void approvePromptDecision('returnToAssignee')}
           onReturnToRevision={() => void returnPromptDecisionToRevision()}
+          onSnooze={snoozeApprovalDecisionPrompt}
         />
       ) : null}
     </div>
@@ -4538,6 +4596,40 @@ function TaskCompletionResultPrompt({
   );
 }
 
+function TaskDecisionSnoozeMenu({
+  disabled,
+  onSnooze,
+}: {
+  disabled?: boolean;
+  onSnooze: (minutes: number) => void;
+}) {
+  return (
+    <details className="relative">
+      <summary
+        className={`inline-flex w-fit cursor-pointer list-none items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 ${
+          disabled ? 'pointer-events-none opacity-60' : ''
+        }`}
+      >
+        <Clock3 className="h-3.5 w-3.5" />
+        Отложить
+      </summary>
+      <div className="absolute right-0 z-10 mt-2 w-36 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-xl">
+        {FORCED_TASK_SNOOZE_OPTIONS.map((option) => (
+          <button
+            key={option.minutes}
+            type="button"
+            onClick={() => onSnooze(option.minutes)}
+            disabled={disabled}
+            className="block w-full rounded-lg px-3 py-2 text-left text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 function TaskApprovalDecisionPrompt({
   state,
   revisionText,
@@ -4550,6 +4642,7 @@ function TaskApprovalDecisionPrompt({
   onApproveComplete,
   onApproveReturnToAssignee,
   onReturnToRevision,
+  onSnooze,
 }: {
   state: Exclude<ApprovalDecisionPromptState, null>;
   revisionText: string;
@@ -4562,6 +4655,7 @@ function TaskApprovalDecisionPrompt({
   onApproveComplete: () => void;
   onApproveReturnToAssignee: () => void;
   onReturnToRevision: () => void;
+  onSnooze: (minutes: number) => void;
 }) {
   const { task, participant } = state;
   const approvers = getOrderedApprovers(task);
@@ -4586,10 +4680,13 @@ function TaskApprovalDecisionPrompt({
             </h2>
             <p className="mt-2 line-clamp-2 text-sm text-slate-600">{task.title}</p>
           </div>
-          <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            Требует решения
-          </span>
+          <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
+            <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Требует решения
+            </span>
+            <TaskDecisionSnoozeMenu disabled={Boolean(saving)} onSnooze={onSnooze} />
+          </div>
         </div>
 
         <div className="mt-5 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 sm:grid-cols-2">
@@ -4707,6 +4804,7 @@ function TaskDeadlineChangeDecisionPrompt({
   onCommentChange,
   onApprove,
   onReject,
+  onSnooze,
 }: {
   state: Exclude<DeadlineChangeDecisionPromptState, null>;
   approvedDueAt: string;
@@ -4717,6 +4815,7 @@ function TaskDeadlineChangeDecisionPrompt({
   onCommentChange: (value: string) => void;
   onApprove: () => void;
   onReject: () => void;
+  onSnooze: (minutes: number) => void;
 }) {
   const { task, request } = state;
   const rejectDisabled = Boolean(saving) || !comment.trim();
@@ -4738,10 +4837,13 @@ function TaskDeadlineChangeDecisionPrompt({
             </h2>
             <p className="mt-2 line-clamp-2 text-sm text-slate-600">{task.title}</p>
           </div>
-          <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">
-            <TimerReset className="h-3.5 w-3.5" />
-            Требует решения
-          </span>
+          <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
+            <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800">
+              <TimerReset className="h-3.5 w-3.5" />
+              Требует решения
+            </span>
+            <TaskDecisionSnoozeMenu disabled={Boolean(saving)} onSnooze={onSnooze} />
+          </div>
         </div>
 
         <div className="mt-5 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 sm:grid-cols-2">

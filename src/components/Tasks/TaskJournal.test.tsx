@@ -7,6 +7,11 @@ import type { TaskJournalSettingsDto } from '../../services/api';
 import type { Client, ClientCase, LegalEntitySummary } from '../../types';
 import { fromTimeZoneDateTimeInput, getZonedParts, toTimeZoneDateKey } from '../../utils/timeZoneDate';
 import type { TaskJournalAssignee, TaskJournalItem } from '../../utils/taskJournalStore';
+import {
+  FORCED_TASK_SNOOZE_STORAGE_KEY,
+  getForcedTaskApprovalSnoozeKey,
+  getForcedTaskDeadlineChangeSnoozeKey,
+} from '../../utils/forcedTaskActionSnoozes';
 
 const apiMock = vi.hoisted(() => ({
   getTaskJournalItems: vi.fn(),
@@ -1454,6 +1459,52 @@ describe('TaskJournal', () => {
     }));
   });
 
+  it('lets the reviewer snooze a deadline change decision in the approvals journal', async () => {
+    authState.isAdmin = false;
+    authState.user = { id: 8, fullName: 'Постановщик', email: 'author@example.com' };
+    const deadlineRequestTask = createTask({
+      id: 206,
+      title: 'Согласовать перенос срока документов',
+      status: 'new',
+      authorUserId: 8,
+      activeDeadlineChangeRequests: [
+        {
+          id: 902,
+          taskJournalItemId: 206,
+          requestedByUserId: 7,
+          requestedByName: 'Исполнитель',
+          reviewerUserId: 8,
+          reviewerName: 'Постановщик',
+          currentDueAt: todayAt(18),
+          requestedDueAt: todayAt(20),
+          reason: 'Документы будут готовы завтра',
+          status: 'pending',
+          decisionDueAt: null,
+          decisionComment: null,
+          decidedByUserId: null,
+          decidedByName: null,
+          decidedAt: null,
+          createdCommentId: 501,
+          decisionCommentId: null,
+          createdAt: todayAt(12),
+          updatedAt: todayAt(12),
+        },
+      ],
+    });
+
+    await renderJournal([deadlineRequestTask], { mode: 'approvals' });
+
+    const prompt = await screen.findByTestId('deadline-change-decision-prompt');
+    fireEvent.click(within(prompt).getByText('Отложить'));
+    fireEvent.click(within(prompt).getByRole('button', { name: '30 мин' }));
+
+    await waitFor(() => expect(screen.queryByTestId('deadline-change-decision-prompt')).toBeNull());
+    expect(apiMock.approveTaskJournalDeadlineChangeRequest).not.toHaveBeenCalled();
+    expect(apiMock.rejectTaskJournalDeadlineChangeRequest).not.toHaveBeenCalled();
+    const snoozes = JSON.parse(window.localStorage.getItem(FORCED_TASK_SNOOZE_STORAGE_KEY) || '{}') as Record<string, number>;
+    expect(snoozes[getForcedTaskDeadlineChangeSnoozeKey(206, 902)]).toBeGreaterThan(Date.now());
+  });
+
   it('shows approval action buttons only for the current approver in queue', async () => {
     await renderJournal([
       createTask({
@@ -1501,6 +1552,51 @@ describe('TaskJournal', () => {
       77,
       undefined,
     ));
+  });
+
+  it('keeps the approvals journal accessible when the same task was snoozed in the global prompt', async () => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Согласующий', email: 'approver@example.com' };
+    permissionsState.taskCanEdit = false;
+    window.localStorage.setItem(FORCED_TASK_SNOOZE_STORAGE_KEY, JSON.stringify({
+      [getForcedTaskApprovalSnoozeKey(101)]: Date.now() + 10 * 60_000,
+    }));
+
+    await renderJournal([
+      createTask({
+        status: 'onApproval',
+        participants: [
+          { id: 77, userId: 7, role: 'approver', displayName: 'Согласующий', sortOrder: 0, approvalStatus: 'pending' },
+        ],
+      }),
+    ], { mode: 'approvals' });
+
+    expect(screen.queryByTestId('task-approval-decision-prompt')).toBeNull();
+    expect(screen.getByTestId('task-view-controls')).toBeTruthy();
+  });
+
+  it('lets the approver snooze the journal decision prompt without resolving the task', async () => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Согласующий', email: 'approver@example.com' };
+    permissionsState.taskCanEdit = false;
+
+    await renderJournal([
+      createTask({
+        status: 'onApproval',
+        participants: [
+          { id: 77, userId: 7, role: 'approver', displayName: 'Согласующий', sortOrder: 0, approvalStatus: 'pending' },
+        ],
+      }),
+    ], { mode: 'approvals' });
+
+    const prompt = await screen.findByTestId('task-approval-decision-prompt');
+    fireEvent.click(within(prompt).getByText('Отложить'));
+    fireEvent.click(within(prompt).getByRole('button', { name: '10 мин' }));
+
+    await waitFor(() => expect(screen.queryByTestId('task-approval-decision-prompt')).toBeNull());
+    expect(apiMock.updateTaskJournalApproval).not.toHaveBeenCalled();
+    const snoozes = JSON.parse(window.localStorage.getItem(FORCED_TASK_SNOOZE_STORAGE_KEY) || '{}') as Record<string, number>;
+    expect(snoozes[getForcedTaskApprovalSnoozeKey(101)]).toBeGreaterThan(Date.now());
   });
 
   it('does not show the forced approval decision prompt to admin when admin is not the current approver', async () => {

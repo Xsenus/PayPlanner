@@ -1,9 +1,13 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ForcedTaskRevisionModal } from './ForcedTaskRevisionModal';
 import type { PagedResult, UserNotificationDto } from '../../services/api';
 import { USER_NOTIFICATIONS_EVENT } from '../../utils/userNotifications';
+import {
+  FORCED_TASK_SNOOZE_STORAGE_KEY,
+  getForcedTaskApprovalSnoozeKey,
+} from '../../utils/forcedTaskActionSnoozes';
 
 const apiMock = vi.hoisted(() => ({
   approveTaskJournalDeadlineChangeRequest: vi.fn(),
@@ -213,6 +217,35 @@ describe('ForcedTaskRevisionModal', () => {
     window.dispatchEvent(new Event(USER_NOTIFICATIONS_EVENT));
     await waitFor(() => expect(apiMock.getUserNotifications).toHaveBeenCalled());
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('shares an approval snooze with the approvals journal', async () => {
+    mockNotificationPages([], [], [], [createApprovalRequestNotification()]);
+
+    render(<ForcedTaskRevisionModal />);
+
+    const prompt = await screen.findByTestId('forced-task-approval-prompt');
+    fireEvent.click(within(prompt).getByText('Отложить'));
+    fireEvent.click(within(prompt).getByRole('button', { name: '10 мин' }));
+
+    await waitFor(() => expect(screen.queryByTestId('forced-task-approval-prompt')).toBeNull());
+    const snoozes = JSON.parse(window.localStorage.getItem(FORCED_TASK_SNOOZE_STORAGE_KEY) || '{}') as Record<string, number>;
+    expect(snoozes['61']).toBeGreaterThan(Date.now());
+    expect(snoozes[getForcedTaskApprovalSnoozeKey(404)]).toBeGreaterThan(Date.now());
+  });
+
+  it('migrates an active notification-only approval snooze to the shared task key', async () => {
+    const snoozedUntil = Date.now() + 30 * 60_000;
+    window.localStorage.setItem(FORCED_TASK_SNOOZE_STORAGE_KEY, JSON.stringify({ '61': snoozedUntil }));
+    mockNotificationPages([], [], [], [createApprovalRequestNotification()]);
+
+    render(<ForcedTaskRevisionModal />);
+
+    await waitFor(() => {
+      const snoozes = JSON.parse(window.localStorage.getItem(FORCED_TASK_SNOOZE_STORAGE_KEY) || '{}') as Record<string, number>;
+      expect(snoozes[getForcedTaskApprovalSnoozeKey(404)]).toBe(snoozedUntil);
+    });
+    expect(screen.queryByTestId('forced-task-approval-prompt')).toBeNull();
   });
 
   it('marks the message read before opening the task', async () => {

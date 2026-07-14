@@ -7,6 +7,15 @@ import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatDateTimeInTimeZone, fromTimeZoneDateTimeInput, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
 import { normalizeUserTimeZoneId, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
 import type { TaskJournalItem, TaskJournalParticipant } from '../../utils/taskJournalStore';
+import {
+  FORCED_TASK_SNOOZE_OPTIONS,
+  getForcedTaskApprovalSnoozeKey,
+  getForcedTaskDeadlineChangeSnoozeKey,
+  getForcedTaskNotificationSnoozeKey,
+  isForcedTaskActionSnoozed,
+  shareForcedTaskSnooze,
+  snoozeForcedTaskActions,
+} from '../../utils/forcedTaskActionSnoozes';
 
 type ForcedTaskRevisionModalProps = {
   onOpenTask?: (taskId: number) => void;
@@ -29,41 +38,6 @@ type ForcedTaskQueueItem = {
 
 const FORCED_TASK_QUEUE_PAGE_SIZE = 25;
 const FORCED_TASK_POLL_INTERVAL_MS = 30_000;
-const FORCED_TASK_SNOOZE_STORAGE_KEY = 'pp.forcedTaskModalSnoozes.v1';
-const FORCED_TASK_SNOOZE_OPTIONS = [
-  { minutes: 10, label: '10 мин' },
-  { minutes: 30, label: '30 мин' },
-  { minutes: 60, label: '1 час' },
-  { minutes: 24 * 60, label: '1 день' },
-];
-
-function readSnoozes(now = Date.now()): Record<string, number> {
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(FORCED_TASK_SNOOZE_STORAGE_KEY) || '{}') as Record<string, unknown>;
-    const active: Record<string, number> = {};
-    Object.entries(parsed).forEach(([id, value]) => {
-      if (typeof value === 'number' && value > now) {
-        active[id] = value;
-      }
-    });
-    window.localStorage.setItem(FORCED_TASK_SNOOZE_STORAGE_KEY, JSON.stringify(active));
-    return active;
-  } catch {
-    return {};
-  }
-}
-
-function isNotificationSnoozed(notificationId: number, now = Date.now()) {
-  const snoozes = readSnoozes(now);
-  return (snoozes[String(notificationId)] ?? 0) > now;
-}
-
-function snoozeNotification(notificationId: number, minutes: number) {
-  const now = Date.now();
-  const snoozes = readSnoozes(now);
-  snoozes[String(notificationId)] = now + minutes * 60_000;
-  window.localStorage.setItem(FORCED_TASK_SNOOZE_STORAGE_KEY, JSON.stringify(snoozes));
-}
 
 function SnoozeMenu({
   disabled,
@@ -211,6 +185,24 @@ function buildForcedTaskQueueItem(notification: UserNotificationDto, rule: Force
   };
 }
 
+function getQueueItemActionSnoozeKey(item: ForcedTaskQueueItem): string | null {
+  const taskId = item.notification.taskId;
+  if (!taskId) {
+    return null;
+  }
+
+  if (item.decisionKind === 'approvalRequest') {
+    return getForcedTaskApprovalSnoozeKey(taskId);
+  }
+
+  if (item.decisionKind === 'deadlineChangeRequest') {
+    const requestId = getDeadlineChangeRequestId(item.notification);
+    return requestId ? getForcedTaskDeadlineChangeSnoozeKey(taskId, requestId) : null;
+  }
+
+  return null;
+}
+
 function getRevisionText(notification: UserNotificationDto): string {
   const metadata = getNotificationMetadata(notification);
   const resolution = metadata.resolution;
@@ -322,14 +314,26 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
       pages.forEach((page, index) => {
         const rule = FORCED_TASK_NOTIFICATION_RULES[index];
         page.items.forEach((notification) => {
-          if (notification.isRead || acknowledgedIdsRef.current.has(notification.id) || isNotificationSnoozed(notification.id)) {
+          if (notification.isRead || acknowledgedIdsRef.current.has(notification.id)) {
             return;
           }
 
           const queueItem = buildForcedTaskQueueItem(notification, rule);
-          if (queueItem) {
-            nextItems.set(notification.id, queueItem);
+          if (!queueItem) {
+            return;
           }
+
+          const notificationKey = getForcedTaskNotificationSnoozeKey(notification.id);
+          const actionKey = getQueueItemActionSnoozeKey(queueItem);
+          const notificationSnoozed = isForcedTaskActionSnoozed(notificationKey);
+          if (notificationSnoozed) {
+            shareForcedTaskSnooze(notificationKey, actionKey);
+          }
+          if (notificationSnoozed || (actionKey && isForcedTaskActionSnoozed(actionKey))) {
+            return;
+          }
+
+          nextItems.set(notification.id, queueItem);
         });
       });
 
@@ -464,7 +468,10 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
   const snoozeCurrent = (minutes: number) => {
     if (!current) return;
 
-    snoozeNotification(current.id, minutes);
+    snoozeForcedTaskActions([
+      getForcedTaskNotificationSnoozeKey(current.id),
+      currentItem ? getQueueItemActionSnoozeKey(currentItem) : null,
+    ], minutes);
     setItems((previous) => previous.filter((item) => item.notification.id !== current.id));
     emitUserNotificationsChanged({
       source: 'system',
