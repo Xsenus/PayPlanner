@@ -3301,9 +3301,9 @@ describe('TaskJournal', () => {
     const resultInput = screen.getByTestId('task-result-field') as HTMLTextAreaElement;
     expect(resultInput.disabled).toBe(true);
     fireEvent.click(screen.getAllByRole('button', { name: 'Завершить' }).at(-1)!);
-    await waitFor(() => expect(resultInput.disabled).toBe(false));
-    fireEvent.change(resultInput, { target: { value: 'Результат исполнителя' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Сохранить результат' }));
+    expect(await screen.findByRole('heading', { name: 'Добавить результат по задаче' })).toBeTruthy();
+    fireEvent.change(document.getElementById('task-completion-result')!, { target: { value: 'Результат исполнителя' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Завершить задачу' }));
 
     await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(101, 'done', 'Результат исполнителя'));
     expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
@@ -3356,6 +3356,42 @@ describe('TaskJournal', () => {
     fireEvent.click(screen.getByRole('button', { name: /Добавить комментарий/i }));
 
     await waitFor(() => expect(apiMock.createTaskJournalComment).toHaveBeenCalledWith(101, 'Комментарий исполнителя'));
+  });
+
+  it.each(['legacy', 'modern'] as const)('allows executor to complete a read-only task from the %s task card', async (taskCardWindowMode) => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Исполнитель', email: 'assignee@example.com' };
+    await renderJournal([
+      createTask({
+        assigneeUserId: 7,
+        assigneeName: 'Исполнитель',
+        authorUserId: 8,
+        authorName: 'Постановщик',
+        result: '',
+        participants: [
+          { userId: 7, role: 'assignee', displayName: 'Исполнитель', approvalStatus: 'pending' },
+        ],
+      }),
+    ], { settings: { taskCardWindowMode } });
+
+    fireEvent.click(screen.getByTitle('Просмотр'));
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    const completeButtons = within(card).getAllByRole('button', { name: 'Завершить' });
+    fireEvent.click(completeButtons[completeButtons.length - 1]);
+
+    expect(await screen.findByRole('heading', { name: 'Добавить результат по задаче' })).toBeTruthy();
+    fireEvent.change(document.getElementById('task-completion-result')!, {
+      target: { value: 'Работа выполнена, результат передан постановщику.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Завершить задачу' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(
+      101,
+      'done',
+      'Работа выполнена, результат передан постановщику.',
+    ));
+    expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
+    expect(apiMock.createTaskJournalDeadlineChangeRequest).not.toHaveBeenCalled();
   });
 
   it.each(['legacy', 'modern'] as const)('allows executor to request deadline change from the %s task card without moving task directly', async (taskCardWindowMode) => {

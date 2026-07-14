@@ -7145,6 +7145,10 @@ function TaskModal({
     }
 
     if (status === 'done' && requireCompletionResult && !nextForm.result.trim()) {
+      if (isReadOnly && task) {
+        openApprovalResultPrompt(nextForm, task.id);
+        return;
+      }
       setForm(nextForm);
       setResultError(TASK_COMPLETION_RESULT_REQUIRED_MESSAGE);
       return;
@@ -7195,7 +7199,11 @@ function TaskModal({
 
     const normalizedResult = approvalResultPromptResult.trim();
     if (requireCompletionResult && !normalizedResult) {
-      setApprovalResultPromptError(TASK_APPROVAL_RESULT_REQUIRED_MESSAGE);
+      setApprovalResultPromptError(
+        approvalResultPrompt.form.status === 'done'
+          ? TASK_COMPLETION_RESULT_REQUIRED_MESSAGE
+          : TASK_APPROVAL_RESULT_REQUIRED_MESSAGE,
+      );
       return;
     }
 
@@ -7853,8 +7861,8 @@ function TaskModal({
     <TaskCompletionResultPrompt
       task={state?.task}
       taskTitle={approvalResultPrompt.form.title}
-      eyebrow="Отправка на согласование"
-      submitLabel="Отправить на согласование"
+      eyebrow={approvalResultPrompt.form.status === 'done' ? 'Завершение задачи' : 'Отправка на согласование'}
+      submitLabel={approvalResultPrompt.form.status === 'done' ? 'Завершить задачу' : 'Отправить на согласование'}
       result={approvalResultPromptResult}
       error={approvalResultPromptError}
       saving={approvalResultPromptSaving}
@@ -7960,7 +7968,7 @@ function TaskModal({
                 <button
                   type="button"
                   onClick={() => void saveWithStatus('inProgress')}
-                  disabled={isReadOnly && !canSwitchToEdit}
+                  disabled={isReadOnly && !canPostComment}
                   className="inline-flex h-9 items-center gap-2 rounded-lg bg-blue-50 px-3 text-sm font-semibold text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <Play className="h-4 w-4" />
@@ -8205,7 +8213,7 @@ function TaskModal({
                 <button
                   type="button"
                   onClick={() => void handleCompletionAction()}
-                  disabled={isLockedViewWithEditAccess}
+                  disabled={isReadOnly && !canPostComment}
                   className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
                   title={completionButtonLabel}
                   aria-label={completionButtonLabel}
@@ -8549,6 +8557,10 @@ function TaskModal({
               {isLockedViewWithEditAccess ? (
                 <button type="button" onClick={onEnableEdit} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800">
                   Редактировать задачу
+                </button>
+              ) : isReadOnly && state?.task && canPostComment ? (
+                <button type="button" onClick={() => void handleCompletionAction()} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700">
+                  {completionButtonLabel}
                 </button>
               ) : !isReadOnly ? (
                 <button type="button" onClick={() => void handleSaveForm()} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700">
@@ -9439,9 +9451,9 @@ function TaskModal({
             <button type="button" onClick={onEnableEdit} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
               Редактировать задачу
             </button>
-          ) : isReadOnly && state?.task ? (
-            <button type="button" onClick={() => void onResultSave(state.task!, form.status, form.result)} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
-              Сохранить результат
+          ) : isReadOnly && state?.task && canPostComment ? (
+            <button type="button" onClick={() => void handleCompletionAction()} className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700">
+              {completionButtonLabel}
             </button>
           ) : (
             <button type="button" onClick={() => void handleSaveForm()} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
