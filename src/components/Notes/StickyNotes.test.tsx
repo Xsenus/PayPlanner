@@ -1446,8 +1446,8 @@ describe('StickyNotes', () => {
     await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledWith(11, expect.objectContaining({ width: 300, height: 240 })));
 
     await user.click(screen.getByRole('button', { name: /Выбрать цвет заметки:/ }));
-    await user.click(screen.getByRole('button', { name: 'Цвет заметки: Фиолетовая' }));
-    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledWith(11, expect.objectContaining({ color: 'purple' })));
+    await user.click(screen.getByRole('button', { name: 'Цвет заметки: Индиго' }));
+    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledWith(11, expect.objectContaining({ color: 'indigo' })));
   });
 
   it('keeps the formatting control compact and does not create a note on a resize double click', async () => {

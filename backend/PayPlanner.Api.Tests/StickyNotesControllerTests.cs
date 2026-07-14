@@ -235,7 +235,7 @@ public sealed class StickyNotesControllerTests
         var createResult = await controller.CreateNote(board.Id, new CreateStickyNoteRequest
         {
             Text = "Выделить важное",
-            Color = "purple",
+            Color = "indigo",
             FontSize = 99,
             IsBold = true,
             IsItalic = true,
@@ -244,7 +244,7 @@ public sealed class StickyNotesControllerTests
         }, CancellationToken.None);
 
         var created = Assert.IsType<StickyNoteDto>(Assert.IsType<CreatedAtActionResult>(createResult.Result).Value);
-        Assert.Equal("purple", created.Color);
+        Assert.Equal("indigo", created.Color);
         Assert.Equal(28, created.FontSize);
         Assert.True(created.IsBold);
         Assert.True(created.IsItalic);
@@ -254,7 +254,7 @@ public sealed class StickyNotesControllerTests
         var updateResult = await controller.UpdateNote(created.Id, new UpdateStickyNoteRequest
         {
             Text = created.Text,
-            Color = "orange",
+            Color = "teal",
             X = created.X,
             Y = created.Y,
             Width = 300,
@@ -269,7 +269,7 @@ public sealed class StickyNotesControllerTests
         }, CancellationToken.None);
 
         var updated = Assert.IsType<StickyNoteDto>(Assert.IsType<OkObjectResult>(updateResult.Result).Value);
-        Assert.Equal("orange", updated.Color);
+        Assert.Equal("teal", updated.Color);
         Assert.Equal(12, updated.FontSize);
         Assert.False(updated.IsBold);
         Assert.False(updated.IsItalic);

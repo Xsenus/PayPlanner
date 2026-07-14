@@ -48,11 +48,15 @@ import { copyTextToClipboard, getEffectiveBoardNotesCount } from './stickyNotesU
 const COLORS: Array<{ value: StickyNoteColor; label: string; className: string; swatchClassName: string; swatchTextClassName: string }> = [
   { value: 'yellow', label: 'Желтая', className: 'bg-yellow-300 border-yellow-500 text-slate-950', swatchClassName: 'bg-yellow-400 border-yellow-600', swatchTextClassName: 'text-yellow-950' },
   { value: 'orange', label: 'Оранжевая', className: 'bg-orange-300 border-orange-500 text-slate-950', swatchClassName: 'bg-orange-400 border-orange-600', swatchTextClassName: 'text-orange-950' },
-  { value: 'blue', label: 'Синяя', className: 'bg-blue-300 border-blue-500 text-slate-950', swatchClassName: 'bg-blue-400 border-blue-600', swatchTextClassName: 'text-blue-950' },
-  { value: 'cyan', label: 'Бирюзовая', className: 'bg-cyan-300 border-cyan-500 text-slate-950', swatchClassName: 'bg-cyan-400 border-cyan-600', swatchTextClassName: 'text-cyan-950' },
-  { value: 'green', label: 'Зеленая', className: 'bg-emerald-300 border-emerald-500 text-slate-950', swatchClassName: 'bg-emerald-400 border-emerald-600', swatchTextClassName: 'text-emerald-950' },
-  { value: 'purple', label: 'Фиолетовая', className: 'bg-violet-300 border-violet-500 text-slate-950', swatchClassName: 'bg-violet-400 border-violet-600', swatchTextClassName: 'text-violet-950' },
+  { value: 'red', label: 'Красная', className: 'bg-red-300 border-red-500 text-slate-950', swatchClassName: 'bg-red-400 border-red-600', swatchTextClassName: 'text-red-950' },
   { value: 'pink', label: 'Розовая', className: 'bg-rose-300 border-rose-500 text-slate-950', swatchClassName: 'bg-rose-400 border-rose-600', swatchTextClassName: 'text-rose-950' },
+  { value: 'lime', label: 'Лаймовая', className: 'bg-lime-300 border-lime-500 text-slate-950', swatchClassName: 'bg-lime-400 border-lime-600', swatchTextClassName: 'text-lime-950' },
+  { value: 'green', label: 'Зеленая', className: 'bg-emerald-300 border-emerald-500 text-slate-950', swatchClassName: 'bg-emerald-400 border-emerald-600', swatchTextClassName: 'text-emerald-950' },
+  { value: 'teal', label: 'Мятная', className: 'bg-teal-300 border-teal-500 text-slate-950', swatchClassName: 'bg-teal-400 border-teal-600', swatchTextClassName: 'text-teal-950' },
+  { value: 'cyan', label: 'Бирюзовая', className: 'bg-cyan-300 border-cyan-500 text-slate-950', swatchClassName: 'bg-cyan-400 border-cyan-600', swatchTextClassName: 'text-cyan-950' },
+  { value: 'blue', label: 'Синяя', className: 'bg-blue-300 border-blue-500 text-slate-950', swatchClassName: 'bg-blue-400 border-blue-600', swatchTextClassName: 'text-blue-950' },
+  { value: 'indigo', label: 'Индиго', className: 'bg-indigo-300 border-indigo-500 text-slate-950', swatchClassName: 'bg-indigo-400 border-indigo-600', swatchTextClassName: 'text-indigo-950' },
+  { value: 'purple', label: 'Фиолетовая', className: 'bg-violet-300 border-violet-500 text-slate-950', swatchClassName: 'bg-violet-400 border-violet-600', swatchTextClassName: 'text-violet-950' },
   { value: 'white', label: 'Белая', className: 'bg-white border-slate-200 text-slate-950', swatchClassName: 'bg-white border-slate-400', swatchTextClassName: 'text-slate-700' },
 ];
 

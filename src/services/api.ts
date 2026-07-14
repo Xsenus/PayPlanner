@@ -742,7 +742,7 @@ export interface RoleCalendarVisibleUserOptionDto {
   roleName: string;
 }
 
-export type StickyNoteColor = 'yellow' | 'orange' | 'blue' | 'cyan' | 'green' | 'purple' | 'pink' | 'white';
+export type StickyNoteColor = 'yellow' | 'orange' | 'red' | 'pink' | 'lime' | 'green' | 'teal' | 'cyan' | 'blue' | 'indigo' | 'purple' | 'white';
 export type StickyNoteBoardVisibility = 'personal' | 'shared';
 export type StickyNoteBoardBackground = 'cork' | 'gray';
 

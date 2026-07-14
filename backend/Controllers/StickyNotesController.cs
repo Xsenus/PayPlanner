@@ -26,6 +26,10 @@ public sealed class StickyNotesController : ControllerBase
     private static readonly HashSet<string> AllowedColors = new(StringComparer.OrdinalIgnoreCase)
     {
         "yellow",
+        "red",
+        "lime",
+        "teal",
+        "indigo",
         "blue",
         "green",
         "orange",
