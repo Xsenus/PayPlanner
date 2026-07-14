@@ -1665,6 +1665,7 @@ export interface InvoiceDocumentTemplateSettingsDto {
 export interface TaskJournalSettingsDto {
   restrictExecutorEditing: boolean;
   allowExecutorDeadlineChangeRequests: boolean;
+  executorCompletionAllowedUserIds: number[];
   requireCompletionResult: boolean;
   allowAdminCompleteAnyTask: boolean;
   approvalDueDays: number;
@@ -1696,6 +1697,7 @@ export interface TaskJournalAutomationDiagnosticsDto {
 export interface UpdateTaskJournalSettingsRequest {
   restrictExecutorEditing: boolean;
   allowExecutorDeadlineChangeRequests: boolean;
+  executorCompletionAllowedUserIds: number[];
   requireCompletionResult: boolean;
   allowAdminCompleteAnyTask: boolean;
   approvalDueDays: number;

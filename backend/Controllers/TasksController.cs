@@ -73,6 +73,7 @@ public class TasksController : ControllerBase
     ];
     private const string RestrictExecutorEditingSettingKey = "tasks.restrictExecutorEditing";
     private const string AllowExecutorDeadlineChangeRequestsSettingKey = "tasks.allowExecutorDeadlineChangeRequests";
+    private const string ExecutorCompletionAllowedUserIdsSettingKey = "tasks.executorCompletionAllowedUserIds";
     private const string RequireCompletionResultSettingKey = "tasks.requireCompletionResult";
     private const string AllowAdminCompleteAnyTaskSettingKey = "tasks.allowAdminCompleteAnyTask";
     private const string ApprovalDueDaysSettingKey = "tasks.approvalDueDays";
@@ -349,9 +350,27 @@ public class TasksController : ControllerBase
             : "0";
         var taskCardWindowMode = NormalizeTaskCardWindowMode(request.TaskCardWindowMode);
         var approvalDueDays = Math.Clamp(request.ApprovalDueDays, 1, 365);
+        var executorCompletionAllowedUserIds = request.ExecutorCompletionAllowedUserIds
+            .Where(id => id > 0)
+            .Distinct()
+            .OrderBy(id => id)
+            .ToArray();
+        if (executorCompletionAllowedUserIds.Length > 0)
+        {
+            var activeUserIds = await _db.Users
+                .AsNoTracking()
+                .Where(user => executorCompletionAllowedUserIds.Contains(user.Id) && user.IsActive && user.IsApproved)
+                .Select(user => user.Id)
+                .ToListAsync(ct);
+            if (activeUserIds.Count != executorCompletionAllowedUserIds.Length)
+            {
+                return BadRequest(new { message = "Список сотрудников с правом завершения содержит недоступного пользователя." });
+            }
+        }
 
         await UpsertSystemSettingAsync(RestrictExecutorEditingSettingKey, request.RestrictExecutorEditing ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(AllowExecutorDeadlineChangeRequestsSettingKey, request.AllowExecutorDeadlineChangeRequests ? "true" : "false", now, ct);
+        await UpsertSystemSettingAsync(ExecutorCompletionAllowedUserIdsSettingKey, JsonSerializer.Serialize(executorCompletionAllowedUserIds, JsonOptions), now, ct);
         await UpsertSystemSettingAsync(RequireCompletionResultSettingKey, request.RequireCompletionResult ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(AllowAdminCompleteAnyTaskSettingKey, request.AllowAdminCompleteAnyTask ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(ApprovalDueDaysSettingKey, approvalDueDays.ToString(), now, ct);
@@ -2302,12 +2321,12 @@ public class TasksController : ControllerBase
         }
 
         var settings = await GetTaskJournalSettingsAsync(ct);
-        if (!CanUpdateTaskStatus(entity, access, settings))
+        var nextStatus = NormalizeEnumValue(request.Status, AllowedStatuses, "new");
+        if (!CanUpdateTaskStatus(entity, access, settings, nextStatus))
         {
             return Forbid();
         }
 
-        var nextStatus = NormalizeEnumValue(request.Status, AllowedStatuses, "new");
         var requestedResult = NormalizeOptional(request.Result);
         var nextResult = NormalizeCompletionResult(nextStatus, requestedResult ?? entity.Result);
 
@@ -3536,6 +3555,7 @@ public class TasksController : ControllerBase
             .Where(item =>
                 item.Key == RestrictExecutorEditingSettingKey ||
                 item.Key == AllowExecutorDeadlineChangeRequestsSettingKey ||
+                item.Key == ExecutorCompletionAllowedUserIdsSettingKey ||
                 item.Key == RequireCompletionResultSettingKey ||
                 item.Key == AllowAdminCompleteAnyTaskSettingKey ||
                 item.Key == ApprovalDueDaysSettingKey ||
@@ -3555,6 +3575,7 @@ public class TasksController : ControllerBase
         {
             RestrictExecutorEditing = ParseBoolSetting(settings.GetValueOrDefault(RestrictExecutorEditingSettingKey), true),
             AllowExecutorDeadlineChangeRequests = ParseBoolSetting(settings.GetValueOrDefault(AllowExecutorDeadlineChangeRequestsSettingKey), true),
+            ExecutorCompletionAllowedUserIds = ParseUserIdListSetting(settings.GetValueOrDefault(ExecutorCompletionAllowedUserIdsSettingKey)),
             RequireCompletionResult = ParseBoolSetting(settings.GetValueOrDefault(RequireCompletionResultSettingKey), true),
             AllowAdminCompleteAnyTask = ParseBoolSetting(settings.GetValueOrDefault(AllowAdminCompleteAnyTaskSettingKey), true),
             ApprovalDueDays = Math.Clamp(ParseIntSetting(settings.GetValueOrDefault(ApprovalDueDaysSettingKey), DefaultApprovalDueDays), 1, 365),
@@ -3614,6 +3635,27 @@ public class TasksController : ControllerBase
 
     private static int ParseIntSetting(string? value, int fallback)
         => int.TryParse(value, out var parsed) ? parsed : fallback;
+
+    private static List<int> ParseUserIdListSetting(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return [];
+        }
+
+        try
+        {
+            return (JsonSerializer.Deserialize<int[]>(value, JsonOptions) ?? [])
+                .Where(id => id > 0)
+                .Distinct()
+                .OrderBy(id => id)
+                .ToList();
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
 
     private async Task<TaskParticipantsResolution> ResolveParticipantsAsync(
         UpsertTaskJournalItemRequest request,
@@ -5419,10 +5461,23 @@ public class TasksController : ControllerBase
     private static bool CanUpdateTaskStatus(
         TaskJournalItem entity,
         TaskAccess access,
-        TaskJournalSettingsDto settings)
-        => access.IsAdmin
-            || CanFullyModifyTask(entity, access, access.Permission?.CanEdit == true, settings)
-            || CanPostTaskComment(entity, access);
+        TaskJournalSettingsDto settings,
+        string nextStatus)
+    {
+        if (access.IsAdmin || CanFullyModifyTask(entity, access, access.Permission?.CanEdit == true, settings))
+        {
+            return true;
+        }
+
+        var isCompletionAction = string.Equals(nextStatus, "done", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(nextStatus, "onApproval", StringComparison.OrdinalIgnoreCase);
+        if (isCompletionAction && IsTaskExecutor(entity, access.UserId) && !IsTaskAuthor(entity, access.UserId))
+        {
+            return settings.ExecutorCompletionAllowedUserIds.Contains(access.UserId);
+        }
+
+        return CanPostTaskComment(entity, access);
+    }
 
     private static bool CanAdminForceCompleteTask(
         TaskAccess access,

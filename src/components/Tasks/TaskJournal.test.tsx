@@ -285,6 +285,7 @@ async function renderJournal(
   apiMock.getTaskJournalSettings.mockResolvedValue({
     restrictExecutorEditing: true,
     allowExecutorDeadlineChangeRequests: true,
+    executorCompletionAllowedUserIds: [],
     requireCompletionResult: true,
     allowAdminCompleteAnyTask: true,
     approvalDueDays: 5,
@@ -2689,7 +2690,7 @@ describe('TaskJournal', () => {
           { userId: 8, role: 'approver', displayName: 'Согласующий', approvalStatus: 'pending' },
         ],
       }),
-    ]);
+    ], { settings: { executorCompletionAllowedUserIds: [7] } });
 
     fireEvent.click(screen.getAllByTitle('Завершить')[0]);
 
@@ -3290,7 +3291,7 @@ describe('TaskJournal', () => {
           { userId: 7, role: 'assignee', displayName: 'Исполнитель', approvalStatus: 'pending' },
         ],
       }),
-    ]);
+    ], { settings: { executorCompletionAllowedUserIds: [7] } });
 
     fireEvent.click(screen.getByTitle('Просмотр'));
     expect(await screen.findByRole('heading', { name: 'Просмотр задачи' })).toBeTruthy();
@@ -3372,7 +3373,7 @@ describe('TaskJournal', () => {
           { userId: 7, role: 'assignee', displayName: 'Исполнитель', approvalStatus: 'pending' },
         ],
       }),
-    ], { settings: { taskCardWindowMode } });
+    ], { settings: { taskCardWindowMode, executorCompletionAllowedUserIds: [7] } });
 
     fireEvent.click(screen.getByTitle('Просмотр'));
     const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
@@ -3392,6 +3393,28 @@ describe('TaskJournal', () => {
     ));
     expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
     expect(apiMock.createTaskJournalDeadlineChangeRequest).not.toHaveBeenCalled();
+  });
+
+  it.each(['legacy', 'modern'] as const)('hides completion from an executor without personal access in the %s task card', async (taskCardWindowMode) => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Исполнитель', email: 'assignee@example.com' };
+    await renderJournal([
+      createTask({
+        assigneeUserId: 7,
+        assigneeName: 'Исполнитель',
+        authorUserId: 8,
+        authorName: 'Постановщик',
+        participants: [
+          { userId: 7, role: 'assignee', displayName: 'Исполнитель', approvalStatus: 'pending' },
+        ],
+      }),
+    ], { settings: { taskCardWindowMode, executorCompletionAllowedUserIds: [] } });
+
+    fireEvent.click(screen.getByTitle('Просмотр'));
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+
+    expect(within(card).queryByRole('button', { name: 'Завершить' })).toBeNull();
+    expect(within(card).getAllByPlaceholderText(/комментарий/i).length).toBeGreaterThan(0);
   });
 
   it.each(['legacy', 'modern'] as const)('allows executor to request deadline change from the %s task card without moving task directly', async (taskCardWindowMode) => {

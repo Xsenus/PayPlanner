@@ -444,6 +444,7 @@ public class TasksControllerTests
         {
             RestrictExecutorEditing = false,
             AllowExecutorDeadlineChangeRequests = false,
+            ExecutorCompletionAllowedUserIds = [fallbackAssignee.Id],
             RequireCompletionResult = false,
             AllowAdminCompleteAnyTask = true,
             ApprovalDueDays = 400,
@@ -461,6 +462,7 @@ public class TasksControllerTests
 
         Assert.False(dto.RestrictExecutorEditing);
         Assert.False(dto.AllowExecutorDeadlineChangeRequests);
+        Assert.Equal([fallbackAssignee.Id], dto.ExecutorCompletionAllowedUserIds);
         Assert.False(dto.RequireCompletionResult);
         Assert.True(dto.AllowAdminCompleteAnyTask);
         Assert.Equal(365, dto.ApprovalDueDays);
@@ -474,10 +476,13 @@ public class TasksControllerTests
 
         var stored = await db.SystemSettings
             .AsNoTracking()
-            .Where(item => item.Key.StartsWith("tasks.automation.caseControl.") || item.Key == "tasks.approvalDueDays")
+            .Where(item => item.Key.StartsWith("tasks.automation.caseControl.")
+                || item.Key == "tasks.approvalDueDays"
+                || item.Key == "tasks.executorCompletionAllowedUserIds")
             .ToDictionaryAsync(item => item.Key, item => item.Value);
 
         Assert.Equal("365", stored["tasks.approvalDueDays"]);
+        Assert.Equal($"[{fallbackAssignee.Id}]", stored["tasks.executorCompletionAllowedUserIds"]);
         Assert.Equal("false", stored["tasks.automation.caseControl.enabled"]);
         Assert.Equal("365", stored["tasks.automation.caseControl.inactiveDays"]);
         Assert.Equal("1", stored["tasks.automation.caseControl.limit"]);
@@ -1265,6 +1270,14 @@ public class TasksControllerTests
         var assignee = await CreateTaskUserAsync(db, "assignee@example.com", "Исполнитель", canEdit: false);
         var client = await CreateClientAsync(db, "Иванов Иван Иванович");
         var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id, result: null);
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "tasks.executorCompletionAllowedUserIds",
+            Value = $"[{assignee.Id}]",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
         var controller = CreateController(db, new RecordingNotificationService(), assignee);
 
         var result = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
@@ -1278,6 +1291,28 @@ public class TasksControllerTests
 
         Assert.Equal("done", dto.Status);
         Assert.Equal("Документы переданы постановщику.", dto.Result);
+    }
+
+    [Fact]
+    public async Task UpdateStatus_ForbidsExecutorCompletionWithoutPersonalAccess()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author-no-completion-access@example.com", "Автор");
+        var assignee = await CreateTaskUserAsync(db, "assignee-no-completion-access@example.com", "Исполнитель", canEdit: false);
+        var client = await CreateClientAsync(db, "Клиент без права завершения");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id, result: null);
+        var controller = CreateController(db, new RecordingNotificationService(), assignee);
+
+        var result = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "done",
+            Result = "Попытка завершения.",
+        }, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result.Result);
+        var stored = await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id);
+        Assert.Equal("new", stored.Status);
+        Assert.Null(stored.Result);
     }
 
     [Fact]

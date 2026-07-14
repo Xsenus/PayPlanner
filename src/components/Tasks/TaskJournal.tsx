@@ -170,6 +170,7 @@ type TaskJournalSavedView = {
 const DEFAULT_TASK_JOURNAL_SETTINGS: TaskJournalSettingsDto = {
   restrictExecutorEditing: true,
   allowExecutorDeadlineChangeRequests: true,
+  executorCompletionAllowedUserIds: [],
   requireCompletionResult: true,
   allowAdminCompleteAnyTask: true,
   approvalDueDays: 5,
@@ -1247,6 +1248,33 @@ function isTaskReadOnlyForCurrentUser(
   }
 
   return task.authorUserId !== currentUserId && !isTaskExecutorForUser(task, currentUserId);
+}
+
+function canCompleteTaskForCurrentUser(
+  task: TaskJournalItem,
+  currentUserId: number | null,
+  isAdminUser: boolean,
+  settings: TaskJournalSettingsDto,
+  taskPermissions: MenuSectionPermissions,
+) {
+  if (!isTaskJournalActive(task.status)) {
+    return false;
+  }
+
+  if (!isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, settings, taskPermissions)) {
+    return true;
+  }
+
+  if (!currentUserId) {
+    return false;
+  }
+
+  if (task.authorUserId === currentUserId) {
+    return true;
+  }
+
+  return isTaskExecutorForUser(task, currentUserId)
+    && settings.executorCompletionAllowedUserIds.includes(currentUserId);
 }
 
 function canPostTaskCommentForCurrentUser(
@@ -4217,6 +4245,13 @@ export function TaskJournal({
             highlightedTaskId={highlightedTaskId}
             onEdit={openTaskEditor}
             onDone={(task) => setTaskStatus(task, 'done')}
+            canCompleteTask={(task) => canCompleteTaskForCurrentUser(
+              task,
+              currentUserId,
+              isAdminUser,
+              taskSettings,
+              permissions.tasks,
+            )}
           />
         ) : viewMode === 'calendar' ? (
           <>
@@ -5165,6 +5200,7 @@ function TaskTable({
               const pendingDeadlineRequest = pendingDeadlineRequests[0] ?? null;
               const taskObservers = getTaskParticipants(task, 'observer');
               const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
+              const canCompleteTask = canCompleteTaskForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
               const counterpartyName = getTaskClientName(task);
               const caseTitle = getTaskCaseTitle(task);
               const taskDescription = task.description || 'Описание не заполнено';
@@ -5344,7 +5380,7 @@ function TaskTable({
                           <ShieldAlert className="h-4 w-4" />
                         </button>
                       ) : null}
-                      {isTaskJournalActive(task.status) ? (
+                      {canCompleteTask ? (
                         <button type="button" onClick={() => onDone(task)} className="rounded-xl p-2 text-emerald-600 transition hover:bg-emerald-50 hover:text-emerald-700" title="Завершить">
                           <CheckCircle2 className="h-4 w-4" />
                         </button>
@@ -5374,11 +5410,13 @@ function TaskBoard({
   highlightedTaskId,
   onEdit,
   onDone,
+  canCompleteTask,
 }: {
   columns: Array<{ key: string; title: string; tone: string; items: TaskJournalItem[] }>;
   highlightedTaskId: number | null;
   onEdit: (task: TaskJournalItem) => void;
   onDone: (task: TaskJournalItem) => void;
+  canCompleteTask: (task: TaskJournalItem) => boolean;
 }) {
   return (
     <div data-testid="task-board" className="grid gap-4 xl:grid-cols-4">
@@ -5434,7 +5472,7 @@ function TaskBoard({
                     <span>•</span>
                     {formatDuration(task.plannedDurationMinutes)}
                   </div>
-                  {task.status !== 'done' ? (
+                  {canCompleteTask(task) ? (
                     <button
                       type="button"
                       onClick={() => onDone(task)}
@@ -5925,6 +5963,7 @@ function TaskTimelineCalendar({
                       {placements.map(({ task, top, height, lane, laneCount }) => {
                         const tone = getTimelineTaskTone(task, currentUserId, assigneeFilter, colorMode, completedTaskCalendarAction);
                         const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
+                        const canCompleteTask = canCompleteTaskForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
                         const start = new Date(task.dueAt);
                         const end = new Date(start.getTime() + normalizeTaskDuration(task.plannedDurationMinutes) * 60 * 1000);
                         const width = `calc(${100 / laneCount}% - ${TIMELINE_TASK_LANE_GAP}px)`;
@@ -5959,7 +5998,7 @@ function TaskTimelineCalendar({
                                   <span className="mt-0.5 block truncate opacity-90">{getTaskAssigneeNames(task).join(', ')}</span>
                                 ) : null}
                               </button>
-                              {isTaskJournalActive(task.status) ? (
+                              {canCompleteTask ? (
                                 <button
                                   type="button"
                                   onClick={(event) => {
@@ -6488,6 +6527,7 @@ function TaskCalendar({
               ) : selectedTasks.map((task) => {
                 const TypeIcon = getTypeMeta(task.type).icon;
                 const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
+                const canCompleteTask = canCompleteTaskForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
                 const isOverdue = isTaskOverdue(task);
                 return (
                   <article key={task.id} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
@@ -6538,7 +6578,7 @@ function TaskCalendar({
                         +15 мин
                       </button>
                     </div>
-                    {isTaskJournalActive(task.status) ? (
+                    {canCompleteTask ? (
                       <button
                         type="button"
                         onClick={() => onDone(task)}
@@ -6975,6 +7015,20 @@ function TaskModal({
   const isLockedViewWithEditAccess = Boolean(isReadOnly && canSwitchToEdit);
   const canRequestDeadlineChange = Boolean(taskId && isReadOnly && !canSwitchToEdit && taskSettings.allowExecutorDeadlineChangeRequests);
   const canPostComment = Boolean(taskId && canPostTaskCommentForCurrentUser(state?.task, currentUserId, canSwitchToEdit));
+  const canCompleteReadOnlyTask = Boolean(
+    taskId
+      && isReadOnly
+      && !canSwitchToEdit
+      && state?.task
+      && currentUserId
+      && (
+        state.task.authorUserId === currentUserId
+        || (
+          isTaskExecutorForUser(state.task, currentUserId)
+          && taskSettings.executorCompletionAllowedUserIds.includes(currentUserId)
+        )
+      ),
+  );
   const canManageFiles = Boolean(taskId && !isReadOnly);
   const taskAuthorLabel = state?.task ? getTaskAuthorName(state.task) : currentUserName || 'Текущий пользователь';
 
@@ -8210,16 +8264,17 @@ function TaskModal({
                 >
                   {STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                 </select>
-                <button
-                  type="button"
-                  onClick={() => void handleCompletionAction()}
-                  disabled={isReadOnly && !canPostComment}
-                  className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
-                  title={completionButtonLabel}
-                  aria-label={completionButtonLabel}
-                >
-                  <CheckCircle2 className="h-5 w-5" />
-                </button>
+                {!isReadOnly || canCompleteReadOnlyTask ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleCompletionAction()}
+                    className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700 transition hover:bg-emerald-100"
+                    title={completionButtonLabel}
+                    aria-label={completionButtonLabel}
+                  >
+                    <CheckCircle2 className="h-5 w-5" />
+                  </button>
+                ) : <span aria-hidden="true" />}
               </div>
 
               <section className="space-y-2 rounded-xl border border-slate-200 bg-white p-2">
@@ -8558,7 +8613,7 @@ function TaskModal({
                 <button type="button" onClick={onEnableEdit} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800">
                   Редактировать задачу
                 </button>
-              ) : isReadOnly && state?.task && canPostComment ? (
+              ) : canCompleteReadOnlyTask ? (
                 <button type="button" onClick={() => void handleCompletionAction()} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700">
                   {completionButtonLabel}
                 </button>
@@ -8616,13 +8671,15 @@ function TaskModal({
                     >
                       В работу
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => void handleCompletionAction()}
-                      className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700"
-                    >
-                      {completionButtonLabel}
-                    </button>
+                    {!isReadOnly || canCompleteReadOnlyTask ? (
+                      <button
+                        type="button"
+                        onClick={() => void handleCompletionAction()}
+                        className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700"
+                      >
+                        {completionButtonLabel}
+                      </button>
+                    ) : null}
                   </>
                 )}
                 {!isReadOnly ? (
@@ -9451,7 +9508,7 @@ function TaskModal({
             <button type="button" onClick={onEnableEdit} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
               Редактировать задачу
             </button>
-          ) : isReadOnly && state?.task && canPostComment ? (
+          ) : canCompleteReadOnlyTask ? (
             <button type="button" onClick={() => void handleCompletionAction()} className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700">
               {completionButtonLabel}
             </button>

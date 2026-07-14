@@ -203,6 +203,7 @@ public class TaskJournalSettingsDto
 {
     public bool RestrictExecutorEditing { get; set; } = true;
     public bool AllowExecutorDeadlineChangeRequests { get; set; } = true;
+    public List<int> ExecutorCompletionAllowedUserIds { get; set; } = [];
     public bool RequireCompletionResult { get; set; } = true;
     public bool AllowAdminCompleteAnyTask { get; set; } = true;
     public int ApprovalDueDays { get; set; } = 5;

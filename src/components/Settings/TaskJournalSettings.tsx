@@ -8,6 +8,7 @@ import type { TaskJournalAssignee } from '../../utils/taskJournalStore';
 const DEFAULT_SETTINGS: TaskJournalSettingsDto = {
   restrictExecutorEditing: true,
   allowExecutorDeadlineChangeRequests: true,
+  executorCompletionAllowedUserIds: [],
   requireCompletionResult: true,
   allowAdminCompleteAnyTask: true,
   approvalDueDays: 5,
@@ -160,6 +161,70 @@ export function TaskJournalSettings() {
             <span className="mt-1 block text-gray-500">Поля задачи, срок, участники, файлы и удаление доступны постановщику или администратору.</span>
           </span>
         </label>
+
+        <section className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-3 text-sm text-gray-700">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h5 className="font-semibold text-gray-900">Кто может завершать назначенные задачи</h5>
+              <p className="mt-1 text-gray-500">
+                Выбранные сотрудники увидят кнопку «Завершить» в карточке задачи, созданной другим пользователем. Остальные смогут просматривать задачу, писать комментарии и запрашивать перенос срока, но не закрывать её.
+              </p>
+            </div>
+            <div className="flex shrink-0 gap-2">
+              <button
+                type="button"
+                onClick={() => setSettings((prev) => ({
+                  ...prev,
+                  executorCompletionAllowedUserIds: assignees.map((assignee) => assignee.id),
+                }))}
+                disabled={loading || saving || assignees.length === 0}
+                className="rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+              >
+                Выбрать всех
+              </button>
+              <button
+                type="button"
+                onClick={() => setSettings((prev) => ({ ...prev, executorCompletionAllowedUserIds: [] }))}
+                disabled={loading || saving || settings.executorCompletionAllowedUserIds.length === 0}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Очистить
+              </button>
+            </div>
+          </div>
+          <div className="mt-3 grid max-h-48 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 xl:grid-cols-3" data-testid="executor-completion-access-list">
+            {assignees.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-3 text-slate-500 sm:col-span-2 xl:col-span-3">
+                {loading ? 'Загружаем сотрудников...' : 'Нет доступных сотрудников.'}
+              </div>
+            ) : assignees.map((assignee) => {
+              const checked = settings.executorCompletionAllowedUserIds.includes(assignee.id);
+              return (
+                <label key={assignee.id} className="flex cursor-pointer items-start gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 hover:border-emerald-300">
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(event) => setSettings((prev) => ({
+                      ...prev,
+                      executorCompletionAllowedUserIds: event.target.checked
+                        ? Array.from(new Set([...prev.executorCompletionAllowedUserIds, assignee.id]))
+                        : prev.executorCompletionAllowedUserIds.filter((id) => id !== assignee.id),
+                    }))}
+                    disabled={loading || saving}
+                    className="mt-0.5 h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium text-slate-800">{assignee.name}</span>
+                    {assignee.email ? <span className="block truncate text-xs text-slate-500">{assignee.email}</span> : null}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+          <div className="mt-2 text-xs font-medium text-emerald-800">
+            Выбрано: {settings.executorCompletionAllowedUserIds.length}
+          </div>
+        </section>
 
         <label className="flex items-start gap-3 rounded-2xl border border-gray-200 bg-white p-4 text-sm text-gray-700">
           <input
