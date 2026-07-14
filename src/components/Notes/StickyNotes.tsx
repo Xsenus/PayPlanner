@@ -123,7 +123,7 @@ function toUtcIsoFromLocalInput(value: string) {
 }
 
 function isInteractiveTarget(target: EventTarget | null) {
-  return target instanceof HTMLElement && Boolean(target.closest('textarea,button,select,input'));
+  return target instanceof Element && Boolean(target.closest('textarea,button,select,input'));
 }
 
 function readStoredViewMode(): NotesViewMode {
@@ -1334,6 +1334,7 @@ export function StickyNotes() {
       <div
         key={note.id}
         onPointerDown={isCanvas ? (event) => startDrag(event, note) : undefined}
+        onDoubleClick={(event) => event.stopPropagation()}
         onClick={() => setSelectedNoteId(note.id)}
         className={`${isCanvas ? 'absolute' : 'relative min-h-[160px] w-full'} flex flex-col rounded-sm border p-2 shadow-md ${colorClass(note.color)} ${
           selectedNoteId === note.id ? 'ring-2 ring-slate-900/40' : ''
@@ -1410,7 +1411,7 @@ export function StickyNotes() {
                 setFormatPanelNoteId((current) => (current === note.id ? null : note.id));
               }}
               disabled={!canEditActiveBoard}
-              className={`inline-flex h-6 min-w-8 items-center justify-center rounded border border-black/10 px-1 text-[11px] font-semibold transition hover:bg-white disabled:opacity-50 ${isFormatPanelOpen ? 'bg-slate-900 text-white' : 'bg-white/50 text-slate-700'}`}
+              className={`inline-flex h-6 w-6 items-center justify-center rounded border border-black/10 text-[9px] font-semibold transition hover:bg-white disabled:opacity-50 ${isFormatPanelOpen ? 'bg-slate-900 text-white' : 'bg-white/50 text-slate-700'}`}
               title="Оформление текста"
               aria-label="Открыть оформление текста"
               aria-expanded={isFormatPanelOpen}

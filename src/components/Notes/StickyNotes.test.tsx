@@ -1450,6 +1450,25 @@ describe('StickyNotes', () => {
     await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledWith(11, expect.objectContaining({ color: 'purple' })));
   });
 
+  it('keeps the formatting control compact and does not create a note on a resize double click', async () => {
+    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Не создавать дубль' }]);
+
+    renderStickyNotes();
+
+    await screen.findByDisplayValue('Не создавать дубль');
+    const formatButton = screen.getByRole('button', { name: 'Открыть оформление текста' });
+    expect(formatButton.className).toContain('h-6');
+    expect(formatButton.className).toContain('w-6');
+    expect(formatButton.className).not.toContain('min-w-8');
+
+    const resizeButton = screen.getByRole('button', { name: 'Изменить размер стикера. Сейчас: Компактный' });
+    const resizeIcon = resizeButton.querySelector('svg');
+    expect(resizeIcon).toBeTruthy();
+    fireEvent.doubleClick(resizeIcon!);
+
+    expect(apiMock.createStickyNote).not.toHaveBeenCalled();
+  });
+
   it('cancels pending autosave when switching boards', async () => {
     apiMock.getStickyNoteBoards.mockResolvedValue([board, personalBoard]);
     apiMock.getStickyNotes.mockImplementation(async (boardId) => (
