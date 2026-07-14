@@ -1352,6 +1352,64 @@ describe('apiService auth handling', () => {
     window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, listener);
   });
 
+  it('refreshes the session before retrying a Yandex Disk download', async () => {
+    localStorage.setItem('pp_token', 'old-token');
+    const listener = vi.fn();
+    window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, listener);
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url.includes('/auth/refresh')) {
+        return new Response(JSON.stringify({ token: 'renewed-token' }), {
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      const authorization = (init?.headers as Record<string, string>).Authorization;
+      if (authorization === 'Bearer old-token') {
+        return new Response('', { status: 401, statusText: 'Unauthorized' });
+      }
+
+      return new Response('file contents', {
+        headers: { 'content-disposition': "attachment; filename*=UTF-8''report.txt" },
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await apiService.downloadYandexDiskFile('/reports/report.txt');
+
+    expect(result.fileName).toBe('report.txt');
+    expect(await result.blob.text()).toBe('file contents');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(listener).not.toHaveBeenCalled();
+    expect(localStorage.getItem('pp_token')).toBe('renewed-token');
+    window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, listener);
+  });
+
+  it('does not end a refreshed session when an S3 download endpoint still returns 401', async () => {
+    localStorage.setItem('pp_token', 'old-token');
+    const listener = vi.fn();
+    window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, listener);
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      if (String(input).includes('/auth/refresh')) {
+        return new Response(JSON.stringify({ token: 'renewed-token' }), {
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      return new Response('Endpoint rejected the request', { status: 401, statusText: 'Unauthorized' });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(apiService.downloadS3StorageFile('storage-1', '/report.txt')).rejects.toThrow(
+      'Endpoint rejected the request',
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(listener).not.toHaveBeenCalled();
+    expect(localStorage.getItem('pp_token')).toBe('renewed-token');
+    window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, listener);
+  });
+
   it('does not emit a session-expired event for optional web push diagnostics', async () => {
     const listener = vi.fn();
     window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, listener);

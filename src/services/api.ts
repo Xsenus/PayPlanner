@@ -2522,16 +2522,14 @@ export class ApiService {
   }
 
   async downloadYandexDiskFile(path: string, connectionId?: string | null) {
-    const token = getAuthToken();
     const base = connectionId
       ? `/yandex-disk/connections/${encodeURIComponent(connectionId)}/download`
       : '/yandex-disk/download';
-    const response = await fetch(`${API_BASE_URL}${base}?path=${encodeURIComponent(path)}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    });
+    const url = `${API_BASE_URL}${base}?path=${encodeURIComponent(path)}`;
+    const { response, sessionRefreshed } = await this.fetchWithSessionRefresh(url, {});
 
     if (!response.ok) {
-      if (response.status === 401) {
+      if (response.status === 401 && !sessionRefreshed) {
         notifyAuthSessionExpired();
       }
       const text = await extractResponseErrorMessage(response);
@@ -2628,13 +2626,11 @@ export class ApiService {
   }
 
   async downloadS3StorageFile(id: string, path: string) {
-    const token = getAuthToken();
-    const response = await fetch(`${API_BASE_URL}/s3-storages/${encodeURIComponent(id)}/download?path=${encodeURIComponent(path)}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    });
+    const url = `${API_BASE_URL}/s3-storages/${encodeURIComponent(id)}/download?path=${encodeURIComponent(path)}`;
+    const { response, sessionRefreshed } = await this.fetchWithSessionRefresh(url, {});
 
     if (!response.ok) {
-      if (response.status === 401) {
+      if (response.status === 401 && !sessionRefreshed) {
         notifyAuthSessionExpired();
       }
       const text = await extractResponseErrorMessage(response);
