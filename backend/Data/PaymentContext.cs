@@ -2989,6 +2989,7 @@ public class PaymentContext : DbContext
             entity.Property(e => e.Text).HasMaxLength(4000);
             entity.Property(e => e.Color).HasMaxLength(24).HasDefaultValue("yellow").IsRequired();
             entity.Property(e => e.FontSize).HasDefaultValue(14);
+            entity.Property(e => e.Opacity).HasDefaultValue(100);
             entity.Property(e => e.AssignedUserName).HasMaxLength(256);
             entity.Property(e => e.AuthorUserName).HasMaxLength(256);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");

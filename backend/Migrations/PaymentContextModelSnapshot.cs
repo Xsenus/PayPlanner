@@ -6255,8 +6255,19 @@ namespace PayPlanner.Api.Migrations
                         .HasColumnType("INTEGER")
                         .HasDefaultValue(false);
 
+                    b.Property<bool>("IsItalic")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("IsPinned")
                         .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsUnderline")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Opacity")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(100);
 
                     b.Property<DateTime?>("ReminderAt")
                         .HasColumnType("TEXT");

@@ -45,6 +45,9 @@ public sealed class CreateStickyNoteRequest
     public double? Height { get; set; }
     public int? FontSize { get; set; }
     public bool? IsBold { get; set; }
+    public bool? IsItalic { get; set; }
+    public bool? IsUnderline { get; set; }
+    public int? Opacity { get; set; }
     public int? AssignedUserId { get; set; }
     public DateTime? ReminderAt { get; set; }
 }
@@ -63,6 +66,9 @@ public sealed class UpdateStickyNoteRequest
     public double Height { get; set; }
     public int? FontSize { get; set; }
     public bool? IsBold { get; set; }
+    public bool? IsItalic { get; set; }
+    public bool? IsUnderline { get; set; }
+    public int? Opacity { get; set; }
     public int ZIndex { get; set; }
     public bool IsPinned { get; set; }
     public int? AssignedUserId { get; set; }

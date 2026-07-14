@@ -794,6 +794,9 @@ export interface StickyNoteItem {
   height: number;
   fontSize?: number;
   isBold?: boolean;
+  isItalic?: boolean;
+  isUnderline?: boolean;
+  opacity?: number;
   zIndex: number;
   version: number;
   isPinned: boolean;
@@ -860,6 +863,9 @@ export interface CreateStickyNotePayload {
   height?: number;
   fontSize?: number;
   isBold?: boolean;
+  isItalic?: boolean;
+  isUnderline?: boolean;
+  opacity?: number;
   assignedUserId?: number | null;
   reminderAt?: string | null;
 }
@@ -873,6 +879,9 @@ export interface UpdateStickyNotePayload {
   height: number;
   fontSize?: number;
   isBold?: boolean;
+  isItalic?: boolean;
+  isUnderline?: boolean;
+  opacity?: number;
   zIndex: number;
   isPinned: boolean;
   assignedUserId?: number | null;

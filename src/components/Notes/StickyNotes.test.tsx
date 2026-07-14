@@ -1398,8 +1398,16 @@ describe('StickyNotes', () => {
     })));
   });
 
-  it('changes note emphasis, font size, color and preset dimensions', async () => {
-    apiMock.getStickyNotes.mockResolvedValue([{ ...createdNote, text: 'Оформление', fontSize: 14, isBold: false }]);
+  it('changes note formatting, opacity, checklist, color and preset dimensions', async () => {
+    apiMock.getStickyNotes.mockResolvedValue([{
+      ...createdNote,
+      text: 'Оформление',
+      fontSize: 14,
+      isBold: false,
+      isItalic: false,
+      isUnderline: false,
+      opacity: 100,
+    }]);
     apiMock.updateStickyNote.mockImplementation(async (_id, payload) => ({
       ...createdNote,
       ...payload,
@@ -1411,12 +1419,28 @@ describe('StickyNotes', () => {
     renderStickyNotes();
 
     const textarea = await screen.findByDisplayValue('Оформление');
+    await user.click(screen.getByRole('button', { name: 'Открыть оформление текста' }));
     await user.click(screen.getByRole('button', { name: 'Включить жирный текст' }));
     await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledWith(11, expect.objectContaining({ isBold: true })));
     expect(textarea.className).toContain('font-bold');
 
-    await user.click(screen.getByRole('button', { name: 'Увеличить текст заметки' }));
-    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledWith(11, expect.objectContaining({ fontSize: 16 })));
+    await user.click(screen.getByRole('button', { name: 'Включить курсив' }));
+    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledWith(11, expect.objectContaining({ isItalic: true })));
+    expect(textarea.className).toContain('italic');
+
+    await user.click(screen.getByRole('button', { name: 'Подчеркнуть текст' }));
+    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledWith(11, expect.objectContaining({ isUnderline: true })));
+    expect(textarea.className).toContain('underline');
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Размер текста заметки' }), '24');
+    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledWith(11, expect.objectContaining({ fontSize: 24 })));
+
+    await user.click(screen.getByRole('button', { name: 'Прозрачность 85%' }));
+    await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledWith(11, expect.objectContaining({ opacity: 85 })));
+
+    (textarea as HTMLTextAreaElement).setSelectionRange(0, textarea.textContent?.length ?? 0);
+    await user.click(screen.getByRole('button', { name: 'Переключить чек-лист выбранных строк' }));
+    await waitFor(() => expect((textarea as HTMLTextAreaElement).value).toBe('☐ Оформление'));
 
     await user.click(screen.getByRole('button', { name: 'Изменить размер стикера. Сейчас: Компактный' }));
     await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledWith(11, expect.objectContaining({ width: 300, height: 240 })));

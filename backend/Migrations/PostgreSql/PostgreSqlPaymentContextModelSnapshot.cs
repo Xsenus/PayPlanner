@@ -6406,8 +6406,19 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasColumnType("boolean")
                         .HasDefaultValue(false);
 
+                    b.Property<bool>("IsItalic")
+                        .HasColumnType("boolean");
+
                     b.Property<bool>("IsPinned")
                         .HasColumnType("boolean");
+
+                    b.Property<bool>("IsUnderline")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("Opacity")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(100);
 
                     b.Property<DateTime?>("ReminderAt")
                         .HasColumnType("timestamp without time zone");

@@ -238,12 +238,18 @@ public sealed class StickyNotesControllerTests
             Color = "purple",
             FontSize = 99,
             IsBold = true,
+            IsItalic = true,
+            IsUnderline = true,
+            Opacity = 1,
         }, CancellationToken.None);
 
         var created = Assert.IsType<StickyNoteDto>(Assert.IsType<CreatedAtActionResult>(createResult.Result).Value);
         Assert.Equal("purple", created.Color);
-        Assert.Equal(20, created.FontSize);
+        Assert.Equal(28, created.FontSize);
         Assert.True(created.IsBold);
+        Assert.True(created.IsItalic);
+        Assert.True(created.IsUnderline);
+        Assert.Equal(60, created.Opacity);
 
         var updateResult = await controller.UpdateNote(created.Id, new UpdateStickyNoteRequest
         {
@@ -255,6 +261,9 @@ public sealed class StickyNotesControllerTests
             Height = 240,
             FontSize = 12,
             IsBold = false,
+            IsItalic = false,
+            IsUnderline = false,
+            Opacity = 85,
             ZIndex = created.ZIndex,
             Version = created.Version,
         }, CancellationToken.None);
@@ -263,6 +272,9 @@ public sealed class StickyNotesControllerTests
         Assert.Equal("orange", updated.Color);
         Assert.Equal(12, updated.FontSize);
         Assert.False(updated.IsBold);
+        Assert.False(updated.IsItalic);
+        Assert.False(updated.IsUnderline);
+        Assert.Equal(85, updated.Opacity);
         Assert.Equal(300, updated.Width);
         Assert.Equal(240, updated.Height);
     }

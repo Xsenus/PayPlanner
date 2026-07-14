@@ -387,6 +387,9 @@ public sealed class StickyNotesController : ControllerBase
                 Height = note.Height,
                 FontSize = note.FontSize,
                 IsBold = note.IsBold,
+                IsItalic = note.IsItalic,
+                IsUnderline = note.IsUnderline,
+                Opacity = note.Opacity,
                 ZIndex = note.ZIndex,
                 Version = note.Version,
                 IsPinned = note.IsPinned,
@@ -455,6 +458,9 @@ public sealed class StickyNotesController : ControllerBase
             Height = Clamp(request.Height ?? 180, 120, 640),
             FontSize = ClampFontSize(request.FontSize),
             IsBold = request.IsBold ?? false,
+            IsItalic = request.IsItalic ?? false,
+            IsUnderline = request.IsUnderline ?? false,
+            Opacity = ClampOpacity(request.Opacity),
             ZIndex = maxZIndex + 1,
             AuthorUserId = access.Value.UserId,
             AuthorUserName = access.Value.DisplayName,
@@ -521,6 +527,9 @@ public sealed class StickyNotesController : ControllerBase
         note.Height = Clamp(request.Height, 120, 640);
         note.FontSize = ClampFontSize(request.FontSize);
         note.IsBold = request.IsBold ?? note.IsBold;
+        note.IsItalic = request.IsItalic ?? note.IsItalic;
+        note.IsUnderline = request.IsUnderline ?? note.IsUnderline;
+        note.Opacity = ClampOpacity(request.Opacity ?? note.Opacity);
         note.ZIndex = Math.Max(1, request.ZIndex);
         note.IsPinned = request.IsPinned;
         note.AssignedUserId = assignment.UserId;
@@ -1165,6 +1174,9 @@ public sealed class StickyNotesController : ControllerBase
             Height = note.Height,
             FontSize = note.FontSize,
             IsBold = note.IsBold,
+            IsItalic = note.IsItalic,
+            IsUnderline = note.IsUnderline,
+            Opacity = note.Opacity,
             ZIndex = note.ZIndex,
             Version = note.Version,
             IsPinned = note.IsPinned,
@@ -1203,7 +1215,10 @@ public sealed class StickyNotesController : ControllerBase
             : "viewer";
 
     private static int ClampFontSize(int? value)
-        => Math.Clamp(value ?? 14, 12, 20);
+        => Math.Clamp(value ?? 14, 10, 28);
+
+    private static int ClampOpacity(int? value)
+        => Math.Clamp(value ?? 100, 60, 100);
 
     private static bool IsUserMentioned(string text, string? fullName, string? email)
     {

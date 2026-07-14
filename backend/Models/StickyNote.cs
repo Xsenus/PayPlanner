@@ -22,6 +22,9 @@ public class StickyNote
     public double Height { get; set; } = 180;
     public int FontSize { get; set; } = 14;
     public bool IsBold { get; set; }
+    public bool IsItalic { get; set; }
+    public bool IsUnderline { get; set; }
+    public int Opacity { get; set; } = 100;
     public int ZIndex { get; set; } = 1;
     public int Version { get; set; } = 1;
     public bool IsPinned { get; set; }
