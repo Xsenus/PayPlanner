@@ -8,6 +8,8 @@ using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
 using PayPlanner.Api.Services;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
@@ -236,10 +238,34 @@ public class AuthServiceUserCompanyAccessTests
         }
     }
 
+    [Fact]
+    public async Task RefreshSessionAsync_IssuesNewTokenForActiveApprovedUser()
+    {
+        await using var db = await CreateContextAsync();
+        var roleId = await CreateRoleAsync(db, "manager");
+        var user = await CreateUserAsync(db, roleId, "session-refresh@example.com");
+        var service = CreateService(db);
+
+        var response = await service.RefreshSessionAsync(user.Id);
+
+        Assert.NotNull(response);
+        Assert.Equal(user.Id, response!.User.Id);
+        Assert.Equal("manager", response.User.Role.Name);
+
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(response.Token);
+        Assert.Equal(user.Id.ToString(), jwt.Claims.Single(claim => claim.Type == ClaimTypes.NameIdentifier).Value);
+        Assert.True(jwt.ValidTo > DateTime.UtcNow.AddDays(6));
+    }
+
     private static AuthService CreateService(PaymentContext db)
     {
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>())
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Jwt:Secret"] = "test-session-refresh-secret-with-at-least-thirty-two-characters",
+                ["Jwt:Issuer"] = "PayPlanner.Tests",
+                ["Jwt:Audience"] = "PayPlanner.Tests",
+            })
             .Build();
 
         return new AuthService(

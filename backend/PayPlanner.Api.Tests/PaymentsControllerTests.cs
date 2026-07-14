@@ -3461,6 +3461,32 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task Get_WithoutPaymentViewPermission_ReturnsForbidInsteadOfUnauthorized()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateBalanceUserAsync(
+            db,
+            canEditPayments: true,
+            viewScope: DataVisibilityScope.All,
+            canViewPayments: false);
+        var controller = CreatePaymentsController(db, user.Id);
+
+        var result = await controller.Get(
+            from: null,
+            to: null,
+            clientId: null,
+            caseId: null,
+            legalEntityId: null,
+            excludeInstallmentParents: true,
+            clientRole: null,
+            sortBy: null,
+            sortDir: null,
+            ct: CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result);
+    }
+
+    [Fact]
     public async Task LegalEntityBalanceRead_WithoutPaymentViewPermission_ReturnsForbid()
     {
         await using var db = await CreateContextAsync();

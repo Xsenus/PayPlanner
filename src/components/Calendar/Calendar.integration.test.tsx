@@ -14,8 +14,11 @@ const paymentsResult = {
 
 const permissionsState = vi.hoisted(() => ({
   tasksCanView: true,
+  paymentsCanView: true,
   calendarCanViewAnalytics: true,
 }));
+
+const usePaymentsMock = vi.hoisted(() => vi.fn());
 
 function createPersistedTableSettings(
   columns: Array<{ key: string; defaultWidth?: number; defaultVisible?: boolean }>,
@@ -82,6 +85,15 @@ vi.mock('../../hooks/useRolePermissions', () => ({
       viewScope: 'all',
       visibleUserIds: [],
     },
+    payments: {
+      canView: permissionsState.paymentsCanView,
+      canCreate: permissionsState.paymentsCanView,
+      canEdit: permissionsState.paymentsCanView,
+      canDelete: permissionsState.paymentsCanView,
+      canExport: permissionsState.paymentsCanView,
+      canViewAnalytics: permissionsState.paymentsCanView,
+      viewScope: 'all',
+    },
   }),
 }));
 
@@ -93,7 +105,10 @@ vi.mock('../../hooks/useTranslation', () => ({
 }));
 
 vi.mock('../../hooks/usePayments', () => ({
-  usePayments: () => paymentsResult,
+  usePayments: (...args: unknown[]) => {
+    usePaymentsMock(...args);
+    return paymentsResult;
+  },
 }));
 
 vi.mock('../../services/api', () => ({
@@ -175,7 +190,9 @@ describe('Calendar integration', () => {
   beforeEach(() => {
     paymentsResult.payments = [];
     permissionsState.tasksCanView = true;
+    permissionsState.paymentsCanView = true;
     permissionsState.calendarCanViewAnalytics = true;
+    usePaymentsMock.mockClear();
     localStorage.removeItem('pp.calendar_view');
     localStorage.removeItem('pp.calendar_section_mode');
   });
@@ -236,6 +253,23 @@ describe('Calendar integration', () => {
     await waitFor(() => {
       expect(localStorage.getItem('pp.calendar_section_mode')).toBe('finance');
     });
+  });
+
+  it('opens the CRM calendar and skips finance requests when payment access is closed', async () => {
+    permissionsState.paymentsCanView = false;
+    localStorage.setItem('pp.calendar_section_mode', 'finance');
+
+    render(<Calendar />);
+
+    expect((await screen.findByTestId('crm-task-calendar')).textContent).toContain('timeline');
+    expect(screen.queryByRole('button', { name: 'Финансы' })).toBeNull();
+    expect(screen.queryByTestId('calendar-grid')).toBeNull();
+    expect(usePaymentsMock).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.any(String),
+      expect.objectContaining({ enabled: false }),
+    );
+    expect(localStorage.getItem('pp.calendar_section_mode')).toBe('crm');
   });
 
   it('hides calendar analytics when analytics permission is closed', async () => {

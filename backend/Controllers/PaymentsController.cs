@@ -52,6 +52,9 @@ public class PaymentsController : ControllerBase
     private Task<DataVisibilityAccess?> ResolvePaymentsVisibilityAsync(CancellationToken ct)
         => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
 
+    private ActionResult AccessDenied()
+        => User.GetUserId().HasValue ? Forbid() : Unauthorized();
+
     private Task<TimeZoneInfo> ResolvePaymentTimeZoneAsync(CancellationToken ct)
         => CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, User.GetUserId(), ct);
 
@@ -432,7 +435,7 @@ public class PaymentsController : ControllerBase
         var visibility = await ResolvePaymentsVisibilityAsync(ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return AccessDenied();
         }
 
         var q = _db.Payments
@@ -455,7 +458,7 @@ public class PaymentsController : ControllerBase
         var visibility = await ResolvePaymentsVisibilityAsync(ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return AccessDenied();
         }
 
         var item = await ProjectPaymentsForRead(_db.Payments
@@ -543,7 +546,7 @@ public class PaymentsController : ControllerBase
         var visibility = await ResolvePaymentsVisibilityAsync(ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return AccessDenied();
         }
         if (!await CanAccessPaymentAsync(id, visibility, ct))
         {
@@ -750,7 +753,7 @@ public class PaymentsController : ControllerBase
         var visibility = await ResolvePaymentsVisibilityAsync(ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return AccessDenied();
         }
         if (!await CanAccessPaymentAsync(id, visibility, ct))
         {
@@ -848,7 +851,7 @@ public class PaymentsController : ControllerBase
         var visibility = await ResolvePaymentsVisibilityAsync(ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return AccessDenied();
         }
         if (await RequirePaymentsEditAsync(ct) is { } forbidden)
         {
@@ -887,7 +890,7 @@ public class PaymentsController : ControllerBase
         var visibility = await ResolvePaymentsVisibilityAsync(ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return AccessDenied();
         }
         if (await RequirePaymentsEditAsync(ct) is { } forbidden)
         {
@@ -926,7 +929,7 @@ public class PaymentsController : ControllerBase
         var visibility = await ResolvePaymentsVisibilityAsync(ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return AccessDenied();
         }
         if (await RequirePaymentsEditAsync(ct) is { } forbidden)
         {
@@ -987,7 +990,7 @@ public class PaymentsController : ControllerBase
         var visibility = await ResolvePaymentsVisibilityAsync(ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return AccessDenied();
         }
 
         limit = Math.Clamp(limit, 1, 500);
@@ -1053,7 +1056,7 @@ public class PaymentsController : ControllerBase
         var visibility = await ResolvePaymentsVisibilityAsync(ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return AccessDenied();
         }
 
         var queryText = string.IsNullOrWhiteSpace(q) ? null : q.Trim();
@@ -1195,7 +1198,7 @@ public class PaymentsController : ControllerBase
         var visibility = await ResolvePaymentsVisibilityAsync(ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return AccessDenied();
         }
         if (await RequirePaymentsEditAsync(ct) is { } forbidden)
         {
@@ -1284,7 +1287,7 @@ public class PaymentsController : ControllerBase
         var visibility = await ResolvePaymentsVisibilityAsync(ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return AccessDenied();
         }
         if (await RequirePaymentsEditAsync(ct) is { } forbidden)
         {
@@ -1378,7 +1381,7 @@ public class PaymentsController : ControllerBase
         var visibility = await ResolvePaymentsVisibilityAsync(ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return AccessDenied();
         }
         if (!await CanAccessPaymentAsync(id, visibility, ct))
         {
@@ -1584,7 +1587,7 @@ public class PaymentsController : ControllerBase
         var visibility = await ResolvePaymentsVisibilityAsync(ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return AccessDenied();
         }
 
         var query = _db.Payments
@@ -4530,7 +4533,7 @@ public class PaymentsController : ControllerBase
         var visibility = await ResolvePaymentsVisibilityAsync(ct);
         if (visibility is null)
         {
-            return Unauthorized();
+            return AccessDenied();
         }
         if (!await CanAccessPaymentAsync(id, visibility, ct))
         {

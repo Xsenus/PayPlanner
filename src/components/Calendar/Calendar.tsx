@@ -120,6 +120,7 @@ export function Calendar({ onOpenClient, onOpenUser }: CalendarProps) {
   const [tableSettingsOpen, setTableSettingsOpen] = useState(false);
   const permissions = useRolePermissions(user?.role?.id);
   const calendarPermissions = permissions.calendar;
+  const canViewFinancialCalendar = permissions.payments?.canView === true;
   const canViewTaskCalendar = permissions.tasks?.canView === true;
   const canOpenLinkedClients = permissions.clients?.canView === true;
   const canOpenLinkedCases = permissions.cases?.canView === true;
@@ -183,17 +184,22 @@ export function Calendar({ onOpenClient, onOpenUser }: CalendarProps) {
   }, [calendarPermissions.canViewAnalytics, tableFilter]);
 
   useEffect(() => {
-    if (canViewTaskCalendar || sectionMode !== 'crm') {
+    const nextMode = sectionMode === 'finance' && !canViewFinancialCalendar && canViewTaskCalendar
+      ? 'crm'
+      : sectionMode === 'crm' && !canViewTaskCalendar && canViewFinancialCalendar
+        ? 'finance'
+        : sectionMode;
+    if (nextMode === sectionMode) {
       return;
     }
 
-    setSectionMode('finance');
+    setSectionMode(nextMode);
     try {
-      localStorage.setItem(SECTION_MODE_STORAGE_KEY, 'finance');
+      localStorage.setItem(SECTION_MODE_STORAGE_KEY, nextMode);
     } catch {
       /** */
     }
-  }, [canViewTaskCalendar, sectionMode]);
+  }, [canViewFinancialCalendar, canViewTaskCalendar, sectionMode]);
 
   const year = currentDate.getFullYear();
   const m0 = currentDate.getMonth();
@@ -230,6 +236,7 @@ export function Calendar({ onOpenClient, onOpenUser }: CalendarProps) {
     deletePayment,
     refresh: refreshPayments,
   } = usePayments(fromDateStr, toDateStr, {
+    enabled: sectionMode === 'finance' && canViewFinancialCalendar,
     pollInterval,
     excludeInstallmentParents: true,
     sortBy: tableSortBy,
@@ -495,6 +502,11 @@ export function Calendar({ onOpenClient, onOpenUser }: CalendarProps) {
   };
 
   const handleSectionModeChange = (mode: CalendarSectionMode) => {
+    if (mode === 'finance' && !canViewFinancialCalendar) {
+      showPermissionNotice('Доступ к финансовому календарю запрещен для вашей роли.');
+      return;
+    }
+
     if (mode === 'crm' && !canViewTaskCalendar) {
       showPermissionNotice('Доступ к рабочему CRM-календарю задач запрещен для вашей роли.');
       return;
@@ -575,12 +587,17 @@ export function Calendar({ onOpenClient, onOpenUser }: CalendarProps) {
           <div>
             <div className="text-sm font-semibold text-slate-900">Календарь</div>
             <div className="text-xs text-slate-500">
-              {canViewTaskCalendar
+              {canViewFinancialCalendar && canViewTaskCalendar
                 ? 'Финансы и рабочий CRM-календарь разделены, чтобы платежи не смешивались с задачами и сроками.'
-                : 'Финансовый календарь показывает платежи и сроки оплаты по доступным правам.'}
+                : canViewTaskCalendar
+                  ? 'Рабочий календарь показывает доступные задачи и сроки.'
+                  : canViewFinancialCalendar
+                    ? 'Финансовый календарь показывает платежи и сроки оплаты по доступным правам.'
+                    : 'Для вашей роли пока не открыт доступ к данным календаря.'}
             </div>
           </div>
           <div className="inline-flex rounded-xl bg-slate-100 p-1">
+            {canViewFinancialCalendar ? (
             <button
               type="button"
               onClick={() => handleSectionModeChange('finance')}
@@ -594,6 +611,7 @@ export function Calendar({ onOpenClient, onOpenUser }: CalendarProps) {
             >
               Финансы
             </button>
+            ) : null}
             {canViewTaskCalendar ? (
               <button
                 type="button"
@@ -612,7 +630,11 @@ export function Calendar({ onOpenClient, onOpenUser }: CalendarProps) {
           </div>
         </div>
 
-        {sectionMode === 'crm' && canViewTaskCalendar ? (
+        {!canViewFinancialCalendar && !canViewTaskCalendar ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-5 text-sm text-amber-700 shadow-sm">
+            Данные календаря недоступны для вашей роли. Обратитесь к администратору, если этот раздел нужен для работы.
+          </div>
+        ) : sectionMode === 'crm' && canViewTaskCalendar ? (
           <Suspense
             fallback={
               <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
@@ -625,7 +647,7 @@ export function Calendar({ onOpenClient, onOpenUser }: CalendarProps) {
               onOpenClient={(clientId, caseId) => onOpenClient?.(clientId, caseId ?? undefined)}
             />
           </Suspense>
-        ) : (
+        ) : canViewFinancialCalendar ? (
           <>
         <div className="mb-4 sm:mb-8">
           <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -964,7 +986,7 @@ export function Calendar({ onOpenClient, onOpenUser }: CalendarProps) {
           }
         />
           </>
-        )}
+        ) : null}
       </div>
     </div>
   );

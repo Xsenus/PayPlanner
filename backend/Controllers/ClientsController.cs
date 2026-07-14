@@ -53,6 +53,9 @@ public class ClientsController : ControllerBase
     private Task<DataVisibilityAccess?> GetCurrentAccessAsync(CancellationToken ct)
         => _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Clients, ct);
 
+    private ActionResult AccessDenied()
+        => User.GetUserId().HasValue ? Forbid() : Unauthorized();
+
     private async Task<IActionResult?> RequireClientsPermissionAsync(
         Func<RolePermissionValues, bool> isAllowed,
         CancellationToken ct)
@@ -235,7 +238,7 @@ public class ClientsController : ControllerBase
         var access = await GetCurrentAccessAsync(ct);
         if (access is null)
         {
-            return Unauthorized();
+            return AccessDenied();
         }
 
         var clients = await BuildVisibleClientsQuery(access)
@@ -279,7 +282,7 @@ public class ClientsController : ControllerBase
         var access = await GetCurrentAccessAsync(ct);
         if (access is null)
         {
-            return Unauthorized();
+            return AccessDenied();
         }
 
         var client = await BuildVisibleClientsQuery(access)
@@ -318,7 +321,7 @@ public class ClientsController : ControllerBase
         var access = await GetCurrentAccessAsync(ct);
         if (access is null)
         {
-            return Unauthorized();
+            return AccessDenied();
         }
 
         var client = await BuildVisibleClientsQuery(access)
@@ -329,7 +332,7 @@ public class ClientsController : ControllerBase
         var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
         if (paymentsVisibility is null)
         {
-            return Unauthorized();
+            return AccessDenied();
         }
 
         var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
@@ -415,7 +418,7 @@ public class ClientsController : ControllerBase
         var access = await GetCurrentAccessAsync(ct);
         if (access is null)
         {
-            return Unauthorized();
+            return AccessDenied();
         }
 
         var client = await BuildVisibleClientsQuery(access)
@@ -426,7 +429,7 @@ public class ClientsController : ControllerBase
         var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
         if (paymentsVisibility is null)
         {
-            return Unauthorized();
+            return AccessDenied();
         }
         var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
 
@@ -541,7 +544,7 @@ public class ClientsController : ControllerBase
         var access = await GetCurrentAccessAsync(ct);
         if (access is null)
         {
-            return Unauthorized();
+            return AccessDenied();
         }
 
         var client = await BuildVisibleClientsQuery(access)
@@ -552,7 +555,7 @@ public class ClientsController : ControllerBase
         var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
         if (paymentsVisibility is null)
         {
-            return Unauthorized();
+            return AccessDenied();
         }
         var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
 
@@ -984,7 +987,7 @@ public class ClientsController : ControllerBase
         var access = await GetCurrentAccessAsync(ct);
         if (access is null)
         {
-            return Unauthorized();
+            return AccessDenied();
         }
 
         if (await RequireClientsPermissionAsync(permission => permission.CanCreate, ct) is { } forbidden)
@@ -1056,7 +1059,7 @@ public class ClientsController : ControllerBase
         var access = await GetCurrentAccessAsync(ct);
         if (access is null)
         {
-            return Unauthorized();
+            return AccessDenied();
         }
 
         if (await RequireClientsPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)
@@ -1358,7 +1361,7 @@ public class ClientsController : ControllerBase
         var access = await GetCurrentAccessAsync(ct);
         if (access is null)
         {
-            return Unauthorized();
+            return AccessDenied();
         }
 
         if (await RequireClientsPermissionAsync(permission => permission.CanDelete, ct) is { } forbidden)
@@ -1392,7 +1395,7 @@ public class ClientsController : ControllerBase
         var access = await GetCurrentAccessAsync(ct);
         if (access is null)
         {
-            return Unauthorized();
+            return AccessDenied();
         }
 
         if (await RequireClientsPermissionAsync(permission => permission.CanDelete, ct) is { } forbidden)
@@ -1458,7 +1461,7 @@ public class ClientsController : ControllerBase
         var access = await GetCurrentAccessAsync(ct);
         if (access is null)
         {
-            return Unauthorized();
+            return AccessDenied();
         }
 
         if (await RequireClientsPermissionAsync(permission => permission.CanEdit, ct) is { } forbidden)

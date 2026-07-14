@@ -33,4 +33,28 @@ describe('authService', () => {
     expect(String(url)).not.toContain('/auth/me');
     expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer token');
   });
+
+  it('renews a session shortly before token expiration and shares one refresh request', async () => {
+    const encode = (value: object) => btoa(JSON.stringify(value)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+    const expiringToken = `${encode({ alg: 'none' })}.${encode({ exp: Math.floor(Date.now() / 1000) + 60 })}.signature`;
+    const renewedToken = `${encode({ alg: 'none' })}.${encode({ exp: Math.floor(Date.now() / 1000) + 604800 })}.signature`;
+    localStorage.setItem('pp_token', expiringToken);
+
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ token: renewedToken }), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(Promise.all([
+      authService.ensureFreshSession(),
+      authService.ensureFreshSession(),
+    ])).resolves.toEqual([renewedToken, renewedToken]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/auth/refresh');
+    expect((fetchMock.mock.calls[0][1]?.headers as Record<string, string>).Authorization).toBe(`Bearer ${expiringToken}`);
+    expect(localStorage.getItem('pp_token')).toBe(renewedToken);
+    expect(localStorage.getItem('auth_token')).toBe(renewedToken);
+    expect(localStorage.getItem('pp.jwt')).toBe(renewedToken);
+  });
 });

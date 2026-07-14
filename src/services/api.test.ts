@@ -1298,6 +1298,60 @@ describe('apiService auth handling', () => {
     window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, listener);
   });
 
+  it('refreshes the session and retries a request once instead of logging the user out', async () => {
+    localStorage.setItem('pp_token', 'old-token');
+    const listener = vi.fn();
+    window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, listener);
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      if (url.includes('/auth/refresh')) {
+        expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer old-token');
+        return new Response(JSON.stringify({ token: 'renewed-token' }), {
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      const authorization = (init?.headers as Record<string, string>).Authorization;
+      if (authorization === 'Bearer old-token') {
+        return new Response('', { status: 401, statusText: 'Unauthorized' });
+      }
+
+      expect(authorization).toBe('Bearer renewed-token');
+      return new Response(JSON.stringify([]), { headers: { 'content-type': 'application/json' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(apiService.getTaskJournalNotifications()).resolves.toEqual([]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(listener).not.toHaveBeenCalled();
+    expect(localStorage.getItem('pp_token')).toBe('renewed-token');
+    window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, listener);
+  });
+
+  it('keeps a valid session when one endpoint still returns 401 after refresh', async () => {
+    localStorage.setItem('pp_token', 'old-token');
+    const listener = vi.fn();
+    window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, listener);
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      if (String(input).includes('/auth/refresh')) {
+        return new Response(JSON.stringify({ token: 'renewed-token' }), {
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      return new Response('Endpoint rejected the request', { status: 401, statusText: 'Unauthorized' });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(apiService.getTaskJournalNotifications()).rejects.toThrow('Endpoint rejected the request');
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(listener).not.toHaveBeenCalled();
+    expect(localStorage.getItem('pp_token')).toBe('renewed-token');
+    window.removeEventListener(AUTH_SESSION_EXPIRED_EVENT, listener);
+  });
+
   it('does not emit a session-expired event for optional web push diagnostics', async () => {
     const listener = vi.fn();
     window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, listener);

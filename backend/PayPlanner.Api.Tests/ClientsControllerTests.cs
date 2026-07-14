@@ -1320,7 +1320,7 @@ public class ClientsControllerTests
 
         var action = await controller.GetStats(client.Id, null, CancellationToken.None);
 
-        Assert.IsType<UnauthorizedResult>(action);
+        Assert.IsType<ForbidResult>(action);
     }
 
     [Fact]

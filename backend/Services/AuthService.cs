@@ -683,6 +683,32 @@ public partial class AuthService
         };
     }
 
+    public async Task<LoginResponse?> RefreshSessionAsync(int userId)
+    {
+        var user = await QueryUsersWithRelations()
+            .FirstOrDefaultAsync(item => item.Id == userId);
+        if (user is null)
+        {
+            return null;
+        }
+
+        if (!user.IsActive)
+        {
+            throw new InvalidOperationException("UserInactive");
+        }
+
+        if (!user.IsApproved)
+        {
+            throw new InvalidOperationException("PendingApproval");
+        }
+
+        return new LoginResponse
+        {
+            Token = GenerateJwtToken(user),
+            User = MapToDto(user)
+        };
+    }
+
     public async Task<UserDto?> RegisterAsync(RegisterRequest request)
     {
         var email = NormalizeEmail(request.Email);

@@ -3,6 +3,7 @@ import { apiService } from '../services/api';
 import type { Payment, PaymentPayload } from '../types';
 
 type UsePaymentsOptions = {
+  enabled?: boolean;
   pollInterval?: number;
   clientId?: number;
   caseId?: number;
@@ -37,6 +38,7 @@ export function usePayments(from?: string, to?: string, opts?: UsePaymentsOption
   const requestIdRef = useRef(0);
 
   const paramsKey = JSON.stringify({
+    enabled: opts?.enabled ?? true,
     from: from ?? '',
     to: to ?? '',
     clientId: opts?.clientId ?? null,
@@ -113,19 +115,27 @@ export function usePayments(from?: string, to?: string, opts?: UsePaymentsOption
     sigRef.current = 'init';
 
     abortRef.current?.abort();
+    if (opts?.enabled === false) {
+      setPayments([]);
+      setError(null);
+      setLoadingInitial(false);
+      setRefreshing(false);
+      return;
+    }
+
     void fetchOnce('initial');
 
     return () => {
       abortRef.current?.abort();
     };
-  }, [fetchOnce, paramsKey]);
+  }, [fetchOnce, opts?.enabled, paramsKey]);
 
   useEffect(() => {
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
-    const iv = opts?.pollInterval ?? 0;
+    const iv = opts?.enabled === false ? 0 : opts?.pollInterval ?? 0;
     if (iv > 0) {
       timerRef.current = window.setInterval(() => {
         void fetchOnce('background');
@@ -137,7 +147,7 @@ export function usePayments(from?: string, to?: string, opts?: UsePaymentsOption
         timerRef.current = null;
       }
     };
-  }, [fetchOnce, opts?.pollInterval, paramsKey]);
+  }, [fetchOnce, opts?.enabled, opts?.pollInterval, paramsKey]);
 
   const refresh = useCallback(async () => {
     await fetchOnce('background');

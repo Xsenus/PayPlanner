@@ -6,6 +6,8 @@ import { API_BASE_URL } from './apiBaseUrl';
 // ==== storage helpers (bkwd-compat) ====
 const KEY_MAIN = 'pp_token';
 const KEY_FALLBACKS = ['auth_token', 'pp.jwt'];
+const SESSION_REFRESH_WINDOW_MS = 24 * 60 * 60 * 1000;
+let sessionRefreshPromise: Promise<string | null> | null = null;
 
 function readToken(): string | null {
   return (
@@ -35,6 +37,20 @@ function clearToken() {
     sessionStorage.removeItem('auth_token');
   } catch {
     /* ignore */
+  }
+}
+
+function readTokenExpiresAt(token: string): number | null {
+  try {
+    const payloadPart = token.split('.')[1];
+    if (!payloadPart) return null;
+
+    const normalized = payloadPart.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+    const payload = JSON.parse(atob(padded)) as { exp?: unknown };
+    return typeof payload.exp === 'number' ? payload.exp * 1000 : null;
+  } catch {
+    return null;
   }
 }
 
@@ -407,6 +423,44 @@ class AuthApiService {
     clearToken();
   }
 
+  public async ensureFreshSession(force = false): Promise<string | null> {
+    const currentToken = readToken();
+    if (!currentToken) {
+      return null;
+    }
+
+    const expiresAt = readTokenExpiresAt(currentToken);
+    if (!force && (expiresAt === null || expiresAt - Date.now() > SESSION_REFRESH_WINDOW_MS)) {
+      return currentToken;
+    }
+
+    if (sessionRefreshPromise) {
+      return sessionRefreshPromise;
+    }
+
+    sessionRefreshPromise = (async () => {
+      const response = await this.request<LoginResponse>('/auth/refresh', { method: 'POST' });
+      if (!response.token) {
+        throw makeError('Сервер не вернул обновлённый токен сессии.');
+      }
+
+      writeToken(response.token);
+      return response.token;
+    })();
+
+    try {
+      return await sessionRefreshPromise;
+    } catch (error) {
+      if (force) {
+        throw error;
+      }
+
+      return currentToken;
+    } finally {
+      sessionRefreshPromise = null;
+    }
+  }
+
   public async completeSignIn(token: string, user?: User | null): Promise<User> {
     writeToken(token);
     if (user) {
@@ -417,6 +471,7 @@ class AuthApiService {
   }
 
   public async getCurrentUser(): Promise<User> {
+    await this.ensureFreshSession();
     return this.request<User>('/profile');
   }
 

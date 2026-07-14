@@ -53,6 +53,39 @@ public class AuthController : ControllerBase
         }
     }
 
+    [HttpPost("refresh")]
+    [Authorize]
+    public async Task<IActionResult> RefreshSession()
+    {
+        var id = GetUserId(User);
+        if (id is null)
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            var response = await _svc.RefreshSessionAsync(id.Value);
+            return response is null ? Unauthorized() : Ok(response);
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "PendingApproval")
+        {
+            return Problem(
+                title: "PendingApproval",
+                detail: "Ваш аккаунт ожидает одобрения администратором.",
+                statusCode: 403
+            );
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "UserInactive")
+        {
+            return Problem(
+                title: "UserInactive",
+                detail: "Ваш аккаунт отключён. Обратитесь к администратору.",
+                statusCode: 403
+            );
+        }
+    }
+
     [HttpPost("register")]
     [AllowAnonymous]
     public async Task<IActionResult> Register([FromBody] RegisterRequest req)

@@ -1,4 +1,5 @@
 import { API_BASE_URL } from './apiBaseUrl';
+import { authService } from './authService';
 
 export const AUTH_SESSION_EXPIRED_EVENT = 'payplanner:auth-session-expired';
 const AUTH_SESSION_EXPIRED_MESSAGE = 'Сессия истекла. Войдите снова.';
@@ -2132,24 +2133,58 @@ export async function extractResponseErrorMessage(response: Response): Promise<s
 }
 
 export class ApiService {
+  private async fetchWithSessionRefresh(
+    url: string,
+    options: RequestInit,
+    suppressAuthSessionExpired = false,
+  ): Promise<{ response: Response; sessionRefreshed: boolean }> {
+    let token = await authService.ensureFreshSession().catch(() => getAuthToken());
+
+    const execute = (authToken: string | null) => {
+      const headers: Record<string, string> = {
+        ...(options.headers as Record<string, string> | undefined),
+      };
+      if (authToken) {
+        headers.Authorization = `Bearer ${authToken}`;
+      }
+
+      return fetch(url, { ...options, headers });
+    };
+
+    let response = await execute(token);
+    let sessionRefreshed = false;
+
+    if (response.status === 401 && token && !suppressAuthSessionExpired) {
+      try {
+        token = await authService.ensureFreshSession(true);
+        if (token) {
+          sessionRefreshed = true;
+          response = await execute(token);
+        }
+      } catch {
+        // The common error path below expires the local session only when refresh also failed.
+      }
+    }
+
+    return { response, sessionRefreshed };
+  }
+
   private async request<T>(endpoint: string, options?: ApiRequestOptions): Promise<T> {
     const { suppressAuthSessionExpired = false, ...fetchOptions } = options ?? {};
     const url = `${API_BASE_URL}${endpoint}`;
-    const token = getAuthToken();
     const isFormData = typeof FormData !== 'undefined' && fetchOptions.body instanceof FormData;
     const headers: Record<string, string> = {
       ...(!isFormData && fetchOptions.body ? { 'Content-Type': 'application/json' } : {}),
       ...(fetchOptions.headers as Record<string, string> | undefined),
     };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
 
-    const response = await fetch(url, {
+    const { response, sessionRefreshed } = await this.fetchWithSessionRefresh(url, {
       ...fetchOptions,
       headers,
-    });
+    }, suppressAuthSessionExpired);
 
     if (!response.ok) {
-      if (response.status === 401 && !suppressAuthSessionExpired) {
+      if (response.status === 401 && !suppressAuthSessionExpired && !sessionRefreshed) {
         notifyAuthSessionExpired();
         throw new Error(`HTTP 401 Unauthorized at ${url} - ${AUTH_SESSION_EXPIRED_MESSAGE}`);
       }
@@ -2175,14 +2210,12 @@ export class ApiService {
 
   private async requestStickyNote<T>(endpoint: string, options?: RequestInit): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`;
-    const token = getAuthToken();
     const headers: Record<string, string> = {
       ...(options?.body ? { 'Content-Type': 'application/json' } : {}),
       ...(options?.headers as Record<string, string> | undefined),
     };
-    if (token) headers.Authorization = `Bearer ${token}`;
 
-    const response = await fetch(url, {
+    const { response, sessionRefreshed } = await this.fetchWithSessionRefresh(url, {
       ...options,
       headers,
     });
@@ -2201,7 +2234,7 @@ export class ApiService {
     }
 
     if (!response.ok) {
-      if (response.status === 401) {
+      if (response.status === 401 && !sessionRefreshed) {
         notifyAuthSessionExpired();
         throw new Error(`HTTP 401 Unauthorized at ${url} - ${AUTH_SESSION_EXPIRED_MESSAGE}`);
       }
