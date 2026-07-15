@@ -17,6 +17,15 @@ public sealed class UpsertYandexDiskConnectionRequest
     public bool IsEnabled { get; set; } = true;
 }
 
+public sealed class StartYandexDiskAuthRequest
+{
+    public string? ConnectionId { get; set; }
+    public string? Name { get; set; }
+    public string? RootPath { get; set; }
+    public bool IsEnabled { get; set; } = true;
+    public string? ReturnUrl { get; set; }
+}
+
 public sealed class TestYandexDiskConnectionRequest
 {
     public string? TestFolderPath { get; set; }

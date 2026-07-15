@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -60,6 +61,66 @@ public sealed class YandexDiskController : ControllerBase
         }
 
         return result;
+    }
+
+    [HttpPost("auth/start")]
+    public async Task<ActionResult<YandexDiskStartAuthResponseDto>> StartOAuth(
+        [FromBody] StartYandexDiskAuthRequest request,
+        CancellationToken ct)
+    {
+        var isNew = string.IsNullOrWhiteSpace(request.ConnectionId);
+        var forbidden = await RequirePermissionAsync(permission => permission.CanEdit && (!isNew || permission.CanCreate), ct);
+        if (forbidden is not null) return forbidden;
+
+        var userId = User.GetUserId();
+        if (userId is null) return Unauthorized();
+
+        try
+        {
+            var result = await _service.StartOAuthAsync(userId.Value, request, Request, ct);
+            await AddAuditAsync(
+                "OAuthConnectionStarted",
+                "Начато подключение общего Яндекс.Диска через Яндекс ID.",
+                new { request.ConnectionId, request.Name, request.RootPath, request.IsEnabled },
+                ct);
+            return Ok(result);
+        }
+        catch (YandexDiskOperationException ex)
+        {
+            return MapError(ex);
+        }
+    }
+
+    [HttpGet("auth/status/{state}")]
+    public async Task<ActionResult<YandexDiskAuthStatusDto>> GetOAuthStatus(string state, CancellationToken ct)
+    {
+        var forbidden = await RequirePermissionAsync(permission => permission.CanView, ct);
+        if (forbidden is not null) return forbidden;
+
+        var userId = User.GetUserId();
+        if (userId is null) return Unauthorized();
+
+        try
+        {
+            return Ok(await _service.GetOAuthStatusAsync(userId.Value, state, ct));
+        }
+        catch (YandexDiskOperationException ex)
+        {
+            return MapError(ex);
+        }
+    }
+
+    [AllowAnonymous]
+    [HttpGet("auth/callback")]
+    public async Task<IActionResult> OAuthCallback(
+        [FromQuery] string? state,
+        [FromQuery] string? code,
+        [FromQuery] string? error,
+        [FromQuery(Name = "error_description")] string? errorDescription,
+        CancellationToken ct)
+    {
+        var html = await _service.HandleOAuthCallbackAsync(state, code, error, errorDescription, Request, ct);
+        return Content(html, "text/html", Encoding.UTF8);
     }
 
     [HttpDelete("connections/{id}")]

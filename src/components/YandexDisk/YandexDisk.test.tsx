@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   confirmMock: vi.fn(),
   getYandexDiskConnectionsMock: vi.fn(),
   upsertYandexDiskConnectionMock: vi.fn(),
+  startYandexDiskAuthMock: vi.fn(),
+  getYandexDiskAuthStatusMock: vi.fn(),
   deleteYandexDiskConnectionMock: vi.fn(),
   testYandexDiskConnectionByIdMock: vi.fn(),
   listYandexDiskResourcesMock: vi.fn(),
@@ -63,6 +65,8 @@ vi.mock('../../services/api', () => ({
   apiService: {
     getYandexDiskConnections: mocks.getYandexDiskConnectionsMock,
     upsertYandexDiskConnection: mocks.upsertYandexDiskConnectionMock,
+    startYandexDiskAuth: mocks.startYandexDiskAuthMock,
+    getYandexDiskAuthStatus: mocks.getYandexDiskAuthStatusMock,
     deleteYandexDiskConnection: mocks.deleteYandexDiskConnectionMock,
     testYandexDiskConnectionById: mocks.testYandexDiskConnectionByIdMock,
     listYandexDiskResources: mocks.listYandexDiskResourcesMock,
@@ -130,6 +134,12 @@ describe('YandexDisk', () => {
       ],
     });
     mocks.upsertYandexDiskConnectionMock.mockResolvedValue(buildConnection({ id: 'ya-new', name: 'Я.Диск новый' }));
+    mocks.startYandexDiskAuthMock.mockResolvedValue({
+      state: 'oauth-state',
+      authUrl: 'https://oauth.yandex.ru/authorize?state=oauth-state',
+      pollIntervalMs: 2000,
+    });
+    mocks.getYandexDiskAuthStatusMock.mockResolvedValue({ state: 'oauth-state', status: 'pending', completed: false });
     mocks.deleteYandexDiskConnectionMock.mockResolvedValue(undefined);
     mocks.testYandexDiskConnectionByIdMock.mockResolvedValue({
       success: true,
@@ -231,6 +241,33 @@ describe('YandexDisk', () => {
       oAuthToken: 'ya-new-token',
       isEnabled: true,
     }));
+  });
+
+  it('starts simple Yandex ID authorization for a new shared disk connection', async () => {
+    const popup = { closed: false, close: vi.fn() } as unknown as Window;
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(popup);
+    const { unmount } = render(<YandexDisk />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Новое$/i }));
+    fireEvent.change(screen.getByLabelText('Название'), { target: { value: 'Рабочий диск' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Подключить Яндекс\.Диск$/i }));
+
+    await waitFor(() => expect(mocks.startYandexDiskAuthMock).toHaveBeenCalledWith({
+      connectionId: null,
+      name: 'Рабочий диск',
+      rootPath: 'disk:/PayPlanner',
+      isEnabled: true,
+      returnUrl: '/?ppTab=settings&settingsSection=yandex-disk',
+    }));
+    expect(openSpy).toHaveBeenCalledWith(
+      'https://oauth.yandex.ru/authorize?state=oauth-state',
+      'pp-yandex-disk-link',
+      'popup=yes,width=560,height=720',
+    );
+
+    unmount();
+    expect(popup.close).toHaveBeenCalled();
+    openSpy.mockRestore();
   });
 
   it('loads files by selected connection and opens a normal copy dialog', async () => {

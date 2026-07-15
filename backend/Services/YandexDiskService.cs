@@ -1,10 +1,15 @@
 using System.Net.Http.Headers;
+using System.Net;
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
@@ -17,6 +22,12 @@ public interface IYandexDiskService
     Task<YandexDiskConnectionsOverviewDto> GetConnectionsOverviewAsync(CancellationToken cancellationToken = default)
         => throw new NotSupportedException();
     Task<YandexDiskConnectionDto> UpsertConnectionAsync(UpsertYandexDiskConnectionRequest request, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException();
+    Task<YandexDiskStartAuthResponseDto> StartOAuthAsync(int userId, StartYandexDiskAuthRequest request, HttpRequest httpRequest, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException();
+    Task<YandexDiskAuthStatusDto> GetOAuthStatusAsync(int userId, string state, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException();
+    Task<string> HandleOAuthCallbackAsync(string? state, string? code, string? error, string? errorDescription, HttpRequest httpRequest, CancellationToken cancellationToken = default)
         => throw new NotSupportedException();
     Task DeleteConnectionAsync(string id, CancellationToken cancellationToken = default)
         => throw new NotSupportedException();
@@ -91,6 +102,10 @@ public sealed class YandexDiskService : IYandexDiskService
     private const string OAuthTokenSettingKey = "integrations.yandexDisk.oauthToken";
     private const string RootPathSettingKey = "integrations.yandexDisk.rootPath";
     private const string ConnectionsSettingKey = "integrations.yandexDisk.connections";
+    private const string OAuthRequestsSettingKey = "integrations.yandexDisk.oauthRequests";
+    private const string YandexEnabledKey = "auth.yandex.enabled";
+    private const string YandexClientIdKey = "auth.yandex.clientId";
+    private const string YandexClientSecretKey = "auth.yandex.clientSecret";
     private const string CrmSyncSettingsKey = "integrations.yandexDisk.crmSync.settings";
     private const string DefaultRootPath = "disk:/PayPlanner";
     private const string DefaultConnectionId = "default";
@@ -102,7 +117,15 @@ public sealed class YandexDiskService : IYandexDiskService
     private const string ConflictModeYandexDiskMaster = "yandexDiskMaster";
     private const string ConflictModeManualConfirmation = "manualConfirmation";
     private const string ApiBaseUrl = "https://cloud-api.yandex.net/v1/disk";
+    private const string YandexAuthEndpoint = "https://oauth.yandex.ru/authorize";
+    private const string YandexTokenEndpoint = "https://oauth.yandex.ru/token";
+    private const string YandexDiskScopes = "cloud_api:disk.read cloud_api:disk.write";
+    private const string ProtectedTokenPrefix = "protected:v1:";
+    private const int OAuthPollIntervalMs = 2000;
     private const int MaxTextFileBytes = 2 * 1024 * 1024;
+    private static readonly TimeSpan OAuthRequestLifetime = TimeSpan.FromMinutes(15);
+    private static readonly IDataProtectionProvider FallbackDataProtectionProvider = new EphemeralDataProtectionProvider();
+    private static readonly SemaphoreSlim OAuthRequestLock = new(1, 1);
     private static readonly string[] CrmSyncTemplateTokens =
     [
         "clientName",
@@ -118,11 +141,25 @@ public sealed class YandexDiskService : IYandexDiskService
 
     private readonly PaymentContext _db;
     private readonly HttpClient _httpClient;
+    private readonly IConfiguration _configuration;
+    private readonly IDataProtector _tokenProtector;
 
     public YandexDiskService(PaymentContext db, HttpClient httpClient)
+        : this(db, httpClient, new ConfigurationBuilder().Build(), FallbackDataProtectionProvider)
+    {
+    }
+
+    [ActivatorUtilitiesConstructor]
+    public YandexDiskService(
+        PaymentContext db,
+        HttpClient httpClient,
+        IConfiguration configuration,
+        IDataProtectionProvider dataProtectionProvider)
     {
         _db = db;
         _httpClient = httpClient;
+        _configuration = configuration;
+        _tokenProtector = dataProtectionProvider.CreateProtector("PayPlanner.YandexDisk.Tokens.v1");
     }
 
     public async Task<YandexDiskSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
@@ -189,6 +226,186 @@ public sealed class YandexDiskService : IYandexDiskService
 
         await SaveConnectionsAsync(connections, cancellationToken);
         return BuildConnectionDto(updated);
+    }
+
+    public async Task<YandexDiskStartAuthResponseDto> StartOAuthAsync(
+        int userId,
+        StartYandexDiskAuthRequest request,
+        HttpRequest httpRequest,
+        CancellationToken cancellationToken = default)
+    {
+        var oauthSettings = await ResolveOAuthSettingsAsync(cancellationToken);
+        if (!oauthSettings.Ready)
+        {
+            throw new YandexDiskOperationException(400, "OAuth Яндекса не настроен. Заполните Client ID и Client Secret в настройках внешней авторизации.");
+        }
+
+        var connections = await LoadConnectionsAsync(cancellationToken);
+        var existingId = string.IsNullOrWhiteSpace(request.ConnectionId) ? null : NormalizeConnectionId(request.ConnectionId);
+        var existing = existingId is null
+            ? null
+            : connections.FirstOrDefault(item => string.Equals(item.Id, existingId, StringComparison.OrdinalIgnoreCase));
+        if (existingId is not null && existing is null)
+        {
+            throw new YandexDiskOperationException(404, "Подключение Я.Диска не найдено.");
+        }
+
+        var connectionId = existing?.Id ?? Guid.NewGuid().ToString("N");
+        var state = GenerateToken(32);
+        var now = DateTime.UtcNow;
+        var authRequest = new YandexDiskOAuthRequestState(
+            state,
+            userId,
+            connectionId,
+            NormalizeConnectionName(request.Name, existing?.Name, connections.Count),
+            NormalizeRootPath(request.RootPath ?? existing?.RootPath),
+            request.IsEnabled,
+            NormalizeReturnUrl(request.ReturnUrl),
+            "pending",
+            null,
+            now,
+            now.Add(OAuthRequestLifetime),
+            null);
+
+        await OAuthRequestLock.WaitAsync(cancellationToken);
+        try
+        {
+            var requests = await LoadOAuthRequestsAsync(cancellationToken);
+            requests.RemoveAll(item => item.ExpiresAt < now.AddHours(-1));
+            requests.Add(authRequest);
+            await SaveOAuthRequestsAsync(requests, cancellationToken);
+        }
+        finally
+        {
+            OAuthRequestLock.Release();
+        }
+
+        var callbackUrl = BuildAbsoluteUrl(httpRequest, "/api/yandex-disk/auth/callback");
+        var query = new Dictionary<string, string?>
+        {
+            ["response_type"] = "code",
+            ["client_id"] = oauthSettings.ClientId,
+            ["redirect_uri"] = callbackUrl,
+            ["state"] = state,
+            ["scope"] = YandexDiskScopes,
+            ["force_confirm"] = "yes",
+            ["device_id"] = $"payplanner-yandex-disk-{connectionId}",
+            ["device_name"] = "PayPlanner CRM — общий Яндекс.Диск",
+        };
+
+        return new YandexDiskStartAuthResponseDto
+        {
+            State = state,
+            AuthUrl = QueryHelpers.AddQueryString(YandexAuthEndpoint, query),
+            PollIntervalMs = OAuthPollIntervalMs,
+        };
+    }
+
+    public async Task<YandexDiskAuthStatusDto> GetOAuthStatusAsync(
+        int userId,
+        string state,
+        CancellationToken cancellationToken = default)
+    {
+        var requests = await LoadOAuthRequestsAsync(cancellationToken);
+        var authRequest = requests.FirstOrDefault(item => item.UserId == userId && string.Equals(item.State, state, StringComparison.Ordinal))
+            ?? throw new YandexDiskOperationException(404, "Запрос подключения Я.Диска не найден.");
+        var status = authRequest.Status == "pending" && authRequest.ExpiresAt <= DateTime.UtcNow
+            ? "expired"
+            : authRequest.Status;
+
+        return new YandexDiskAuthStatusDto
+        {
+            State = authRequest.State,
+            Status = status,
+            Completed = status is "completed" or "failed" or "expired",
+            Detail = authRequest.Error,
+            ConnectionId = status == "completed" ? authRequest.ConnectionId : null,
+            ReturnUrl = authRequest.ReturnUrl,
+        };
+    }
+
+    public async Task<string> HandleOAuthCallbackAsync(
+        string? state,
+        string? code,
+        string? error,
+        string? errorDescription,
+        HttpRequest httpRequest,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedState = state?.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedState))
+        {
+            return BuildOAuthPopupHtml(false, "Яндекс не вернул идентификатор запроса.");
+        }
+
+        YandexDiskOAuthRequestState? authRequest;
+        await OAuthRequestLock.WaitAsync(cancellationToken);
+        try
+        {
+            var requests = await LoadOAuthRequestsAsync(cancellationToken);
+            authRequest = requests.FirstOrDefault(item => string.Equals(item.State, normalizedState, StringComparison.Ordinal));
+        }
+        finally
+        {
+            OAuthRequestLock.Release();
+        }
+
+        if (authRequest is null)
+        {
+            return BuildOAuthPopupHtml(false, "Запрос подключения Я.Диска не найден.");
+        }
+
+        if (authRequest.Status == "completed")
+        {
+            return BuildOAuthPopupHtml(true, "Яндекс.Диск уже подключён. Можно вернуться в CRM.", authRequest.ReturnUrl);
+        }
+
+        if (authRequest.Status == "failed")
+        {
+            return BuildOAuthPopupHtml(false, authRequest.Error ?? "Подключение Яндекс.Диска не завершено.", authRequest.ReturnUrl);
+        }
+
+        if (authRequest.ExpiresAt <= DateTime.UtcNow)
+        {
+            await UpdateOAuthRequestAsync(authRequest with { Status = "expired", Error = "Срок действия подключения истёк. Запустите его заново.", CompletedAt = DateTime.UtcNow }, cancellationToken);
+            return BuildOAuthPopupHtml(false, "Срок действия подключения истёк. Запустите его заново.", authRequest.ReturnUrl);
+        }
+
+        if (!string.IsNullOrWhiteSpace(error))
+        {
+            var detail = string.IsNullOrWhiteSpace(errorDescription) ? error.Trim() : errorDescription.Trim();
+            await UpdateOAuthRequestAsync(authRequest with { Status = "failed", Error = detail, CompletedAt = DateTime.UtcNow }, cancellationToken);
+            return BuildOAuthPopupHtml(false, detail, authRequest.ReturnUrl);
+        }
+
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            const string detail = "Яндекс не вернул код авторизации.";
+            await UpdateOAuthRequestAsync(authRequest with { Status = "failed", Error = detail, CompletedAt = DateTime.UtcNow }, cancellationToken);
+            return BuildOAuthPopupHtml(false, detail, authRequest.ReturnUrl);
+        }
+
+        try
+        {
+            var oauthSettings = await ResolveOAuthSettingsAsync(cancellationToken);
+            if (!oauthSettings.Ready)
+            {
+                throw new YandexDiskOperationException(400, "OAuth Яндекса больше не настроен.");
+            }
+
+            var callbackUrl = BuildAbsoluteUrl(httpRequest, "/api/yandex-disk/auth/callback");
+            var accessToken = await ExchangeOAuthCodeAsync(oauthSettings, code.Trim(), callbackUrl, cancellationToken);
+            await ValidateOAuthTokenAsync(accessToken, cancellationToken);
+            await SaveOAuthConnectionAsync(authRequest, accessToken, cancellationToken);
+            await UpdateOAuthRequestAsync(authRequest with { Status = "completed", Error = null, CompletedAt = DateTime.UtcNow }, cancellationToken);
+            return BuildOAuthPopupHtml(true, "Яндекс.Диск подключён. Можно вернуться в CRM.", authRequest.ReturnUrl);
+        }
+        catch (Exception ex) when (ex is YandexDiskOperationException or HttpRequestException or JsonException)
+        {
+            var detail = ex.Message;
+            await UpdateOAuthRequestAsync(authRequest with { Status = "failed", Error = detail, CompletedAt = DateTime.UtcNow }, cancellationToken);
+            return BuildOAuthPopupHtml(false, detail, authRequest.ReturnUrl);
+        }
     }
 
     public async Task DeleteConnectionAsync(string id, CancellationToken cancellationToken = default)
@@ -784,15 +1001,23 @@ public sealed class YandexDiskService : IYandexDiskService
             try
             {
                 var stored = JsonSerializer.Deserialize<List<YandexDiskConnectionState>>(connectionSetting.Value, JsonOptions) ?? [];
-                return stored
+                var normalized = stored
                     .Where(item => !string.IsNullOrWhiteSpace(item.Id))
                     .Select(item => item with
                     {
                         Id = NormalizeConnectionId(item.Id),
                         Name = NormalizeConnectionName(item.Name, null, 0),
+                        OAuthToken = UnprotectToken(item.OAuthToken),
                         RootPath = NormalizeRootPath(item.RootPath),
                     })
                     .ToList();
+                if (stored.Any(item => !string.IsNullOrWhiteSpace(item.OAuthToken)
+                    && !item.OAuthToken.StartsWith(ProtectedTokenPrefix, StringComparison.Ordinal)))
+                {
+                    await SaveConnectionsAsync(normalized, cancellationToken);
+                }
+
+                return normalized;
             }
             catch (JsonException)
             {
@@ -801,9 +1026,14 @@ public sealed class YandexDiskService : IYandexDiskService
         }
 
         var legacy = await LoadLegacySettingsAsync(cancellationToken);
-        return string.IsNullOrWhiteSpace(legacy.OAuthToken) && legacy.RootPath == DefaultRootPath
-            ? []
-            : [legacy];
+        if (string.IsNullOrWhiteSpace(legacy.OAuthToken) && legacy.RootPath == DefaultRootPath)
+        {
+            return [];
+        }
+
+        var migrated = new List<YandexDiskConnectionState> { legacy };
+        await SaveConnectionsAsync(migrated, cancellationToken);
+        return migrated;
     }
 
     private async Task<YandexDiskConnectionState> LoadLegacySettingsAsync(CancellationToken cancellationToken)
@@ -818,7 +1048,7 @@ public sealed class YandexDiskService : IYandexDiskService
         return new YandexDiskConnectionState(
             DefaultConnectionId,
             DefaultConnectionName,
-            tokenSetting?.Value?.Trim(),
+            UnprotectToken(tokenSetting?.Value?.Trim()),
             NormalizeRootPath(rootSetting?.Value),
             true,
             new[] { tokenSetting?.UpdatedAt, rootSetting?.UpdatedAt }.Where(value => value.HasValue).Max());
@@ -837,7 +1067,10 @@ public sealed class YandexDiskService : IYandexDiskService
             })
             .ToList();
 
-        await UpsertSettingAsync(ConnectionsSettingKey, JsonSerializer.Serialize(normalized, JsonOptions), now, cancellationToken);
+        var protectedConnections = normalized
+            .Select(item => item with { OAuthToken = ProtectToken(item.OAuthToken) })
+            .ToList();
+        await UpsertSettingAsync(ConnectionsSettingKey, JsonSerializer.Serialize(protectedConnections, JsonOptions), now, cancellationToken);
         var defaultConnection = ResolveDefaultConnection(normalized);
         if (defaultConnection is null)
         {
@@ -853,12 +1086,269 @@ public sealed class YandexDiskService : IYandexDiskService
             }
             else
             {
-                await UpsertSettingAsync(OAuthTokenSettingKey, defaultConnection.OAuthToken, now, cancellationToken);
+                await UpsertSettingAsync(OAuthTokenSettingKey, ProtectToken(defaultConnection.OAuthToken)!, now, cancellationToken);
             }
         }
 
         await _db.SaveChangesAsync(cancellationToken);
     }
+
+    private async Task<YandexOAuthSettings> ResolveOAuthSettingsAsync(CancellationToken cancellationToken)
+    {
+        var rows = await _db.SystemSettings
+            .AsNoTracking()
+            .Where(item => item.Key == YandexEnabledKey || item.Key == YandexClientIdKey || item.Key == YandexClientSecretKey)
+            .ToDictionaryAsync(item => item.Key, item => item.Value, cancellationToken);
+        var enabledRaw = GetSettingOrConfiguration(rows, YandexEnabledKey, "Auth:Yandex:Enabled");
+        var enabled = enabledRaw?.Trim().ToLowerInvariant() is "1" or "true" or "yes" or "on";
+        return new YandexOAuthSettings(
+            enabled,
+            GetSettingOrConfiguration(rows, YandexClientIdKey, "Auth:Yandex:ClientId"),
+            GetSettingOrConfiguration(rows, YandexClientSecretKey, "Auth:Yandex:ClientSecret"));
+    }
+
+    private string? GetSettingOrConfiguration(IReadOnlyDictionary<string, string> values, string key, string configPath)
+    {
+        if (values.TryGetValue(key, out var stored) && !string.IsNullOrWhiteSpace(stored))
+        {
+            return stored.Trim();
+        }
+
+        var configured = _configuration[configPath];
+        return string.IsNullOrWhiteSpace(configured) ? null : configured.Trim();
+    }
+
+    private async Task<string> ExchangeOAuthCodeAsync(
+        YandexOAuthSettings settings,
+        string code,
+        string callbackUrl,
+        CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.PostAsync(
+            YandexTokenEndpoint,
+            new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["grant_type"] = "authorization_code",
+                ["code"] = code,
+                ["client_id"] = settings.ClientId!,
+                ["client_secret"] = settings.ClientSecret!,
+                ["redirect_uri"] = callbackUrl,
+            }),
+            cancellationToken);
+        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new YandexDiskOperationException((int)response.StatusCode, ReadOAuthError(payload, response.ReasonPhrase));
+        }
+
+        using var document = JsonDocument.Parse(payload);
+        if (!document.RootElement.TryGetProperty("access_token", out var tokenElement) || string.IsNullOrWhiteSpace(tokenElement.GetString()))
+        {
+            throw new YandexDiskOperationException(400, "Яндекс не вернул OAuth-токен для Диска.");
+        }
+
+        return tokenElement.GetString()!;
+    }
+
+    private async Task ValidateOAuthTokenAsync(string accessToken, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"{ApiBaseUrl}?fields=user.login,user.display_name");
+        request.Headers.Authorization = new AuthenticationHeaderValue("OAuth", accessToken);
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        if (response.IsSuccessStatusCode)
+        {
+            return;
+        }
+
+        var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+        throw new YandexDiskOperationException(
+            (int)response.StatusCode,
+            response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden
+                ? "OAuth-приложению Яндекса не выданы права чтения и записи Яндекс.Диска. Добавьте их в настройках приложения и повторите подключение."
+                : BuildYandexDiskErrorMessage(
+                    (int)response.StatusCode,
+                    string.IsNullOrWhiteSpace(payload) ? response.ReasonPhrase ?? string.Empty : payload));
+    }
+
+    private async Task SaveOAuthConnectionAsync(
+        YandexDiskOAuthRequestState authRequest,
+        string accessToken,
+        CancellationToken cancellationToken)
+    {
+        var connections = await LoadConnectionsAsync(cancellationToken);
+        var existingIndex = connections.FindIndex(item => string.Equals(item.Id, authRequest.ConnectionId, StringComparison.OrdinalIgnoreCase));
+        var updated = new YandexDiskConnectionState(
+            authRequest.ConnectionId,
+            authRequest.Name,
+            accessToken,
+            authRequest.RootPath,
+            authRequest.IsEnabled,
+            DateTime.UtcNow);
+        if (existingIndex < 0)
+        {
+            connections.Add(updated);
+        }
+        else
+        {
+            connections[existingIndex] = updated;
+        }
+
+        await SaveConnectionsAsync(connections, cancellationToken);
+    }
+
+    private async Task<List<YandexDiskOAuthRequestState>> LoadOAuthRequestsAsync(CancellationToken cancellationToken)
+    {
+        var setting = await _db.SystemSettings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Key == OAuthRequestsSettingKey, cancellationToken);
+        if (string.IsNullOrWhiteSpace(setting?.Value))
+        {
+            return [];
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<YandexDiskOAuthRequestState>>(setting.Value, JsonOptions) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private async Task SaveOAuthRequestsAsync(List<YandexDiskOAuthRequestState> requests, CancellationToken cancellationToken)
+    {
+        await UpsertSettingAsync(OAuthRequestsSettingKey, JsonSerializer.Serialize(requests, JsonOptions), DateTime.UtcNow, cancellationToken);
+        await _db.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task UpdateOAuthRequestAsync(YandexDiskOAuthRequestState updated, CancellationToken cancellationToken)
+    {
+        await OAuthRequestLock.WaitAsync(cancellationToken);
+        try
+        {
+            var requests = await LoadOAuthRequestsAsync(cancellationToken);
+            var index = requests.FindIndex(item => string.Equals(item.State, updated.State, StringComparison.Ordinal));
+            if (index >= 0)
+            {
+                requests[index] = updated;
+                await SaveOAuthRequestsAsync(requests, cancellationToken);
+            }
+        }
+        finally
+        {
+            OAuthRequestLock.Release();
+        }
+    }
+
+    private string? ProtectToken(string? token)
+        => string.IsNullOrWhiteSpace(token) ? null : ProtectedTokenPrefix + _tokenProtector.Protect(token.Trim());
+
+    private string? UnprotectToken(string? storedToken)
+    {
+        if (string.IsNullOrWhiteSpace(storedToken))
+        {
+            return null;
+        }
+
+        var normalized = storedToken.Trim();
+        if (!normalized.StartsWith(ProtectedTokenPrefix, StringComparison.Ordinal))
+        {
+            return normalized;
+        }
+
+        try
+        {
+            return _tokenProtector.Unprotect(normalized[ProtectedTokenPrefix.Length..]);
+        }
+        catch (Exception ex) when (ex is CryptographicException or FormatException)
+        {
+            throw new YandexDiskOperationException(500, "Не удалось прочитать защищённый токен Яндекс.Диска. Проверьте ключи защиты данных на сервере.");
+        }
+    }
+
+    private static string ReadOAuthError(string payload, string? fallback)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(payload);
+            if (document.RootElement.TryGetProperty("error_description", out var description) && !string.IsNullOrWhiteSpace(description.GetString()))
+            {
+                return description.GetString()!;
+            }
+            if (document.RootElement.TryGetProperty("error", out var error) && !string.IsNullOrWhiteSpace(error.GetString()))
+            {
+                return error.GetString()!;
+            }
+        }
+        catch (JsonException)
+        {
+            // The provider may return plain text or HTML; use the generic message below.
+        }
+
+        return string.IsNullOrWhiteSpace(fallback) ? "Яндекс не выдал OAuth-токен для Диска." : fallback;
+    }
+
+    private static string BuildAbsoluteUrl(HttpRequest request, string relativePath)
+    {
+        var scheme = ReadForwardedHeader(request, "X-Forwarded-Proto") ?? request.Scheme;
+        var host = ReadForwardedHeader(request, "X-Forwarded-Host") ?? request.Host.Value;
+        var pathBase = ReadForwardedHeader(request, "X-Forwarded-Prefix") ?? request.PathBase.Value;
+        var normalizedBase = string.IsNullOrWhiteSpace(pathBase) || pathBase == "/" ? string.Empty : "/" + pathBase.Trim('/');
+        var normalizedPath = relativePath.StartsWith('/') ? relativePath : "/" + relativePath;
+        return $"{scheme}://{host}{normalizedBase}{normalizedPath}";
+    }
+
+    private static string? ReadForwardedHeader(HttpRequest request, string name)
+        => request.Headers[name].ToString()
+            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault();
+
+    private static string NormalizeReturnUrl(string? value)
+    {
+        var normalized = value?.Trim();
+        if (string.IsNullOrWhiteSpace(normalized) || normalized.Contains("://", StringComparison.Ordinal) || normalized.StartsWith("//", StringComparison.Ordinal))
+        {
+            return "/";
+        }
+
+        return normalized.StartsWith('/') ? normalized : "/" + normalized;
+    }
+
+    private static string BuildOAuthPopupHtml(bool success, string message, string? redirectPath = null)
+    {
+        var title = success ? "Яндекс.Диск подключён" : "Ошибка подключения Яндекс.Диска";
+        var safeTitle = WebUtility.HtmlEncode(title);
+        var safeMessage = WebUtility.HtmlEncode(message);
+        var redirectJson = JsonSerializer.Serialize(redirectPath ?? "/?ppTab=settings&settingsSection=yandex-disk");
+        return $$"""
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>{{safeTitle}}</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 24px; color: #111827; background: #f8fafc; }
+    .card { max-width: 420px; margin: 10vh auto; background: white; border-radius: 16px; padding: 24px; box-shadow: 0 12px 32px rgba(15,23,42,.08); }
+    h1 { font-size: 20px; margin: 0 0 12px; }
+    p { margin: 0; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <div class="card"><h1>{{safeTitle}}</h1><p>{{safeMessage}}</p></div>
+  <script>
+    setTimeout(function () {
+      if (window.opener && !window.opener.closed) { window.close(); return; }
+      window.location.replace({{redirectJson}});
+    }, 1200);
+  </script>
+</body>
+</html>
+""";
+    }
+
+    private static string GenerateToken(int bytesLength)
+        => WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(bytesLength));
 
     private static YandexDiskConnectionState? ResolveDefaultConnection(IReadOnlyList<YandexDiskConnectionState> connections)
     {
@@ -1519,6 +2009,25 @@ public sealed class YandexDiskService : IYandexDiskService
         string RootPath,
         bool IsEnabled,
         DateTime? UpdatedAt) : YandexDiskSettingsState(Id, Name, OAuthToken, RootPath, IsEnabled, UpdatedAt);
+
+    private sealed record YandexOAuthSettings(bool Enabled, string? ClientId, string? ClientSecret)
+    {
+        public bool Ready => Enabled && !string.IsNullOrWhiteSpace(ClientId) && !string.IsNullOrWhiteSpace(ClientSecret);
+    }
+
+    private sealed record YandexDiskOAuthRequestState(
+        string State,
+        int UserId,
+        string ConnectionId,
+        string Name,
+        string RootPath,
+        bool IsEnabled,
+        string ReturnUrl,
+        string Status,
+        string? Error,
+        DateTime CreatedAt,
+        DateTime ExpiresAt,
+        DateTime? CompletedAt);
 
     private sealed class YandexDiskLinkPayload
     {

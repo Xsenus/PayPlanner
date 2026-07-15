@@ -1,7 +1,10 @@
 using System.Net;
 using System.Text;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Requests;
@@ -12,6 +15,9 @@ namespace PayPlanner.Api.Tests;
 
 public sealed class YandexDiskServiceTests
 {
+    private static readonly IDataProtectionProvider TestDataProtectionProvider =
+        DataProtectionProvider.Create(new DirectoryInfo(Path.Combine(Path.GetTempPath(), "pp-yandex-disk-tests")));
+
     [Fact]
     public async Task UpdateSettings_NormalizesRootPathAndDoesNotReturnToken()
     {
@@ -30,7 +36,67 @@ public sealed class YandexDiskServiceTests
         Assert.DoesNotContain("secret-token", settings.TokenPreview);
 
         var storedToken = await scope.Db.SystemSettings.SingleAsync(item => item.Key == "integrations.yandexDisk.oauthToken");
-        Assert.Equal("secret-token-123456", storedToken.Value);
+        Assert.StartsWith("protected:v1:", storedToken.Value);
+        Assert.DoesNotContain("secret-token-123456", storedToken.Value);
+    }
+
+    [Fact]
+    public async Task OAuthFlow_UsesSharedYandexApplicationAndStoresProtectedDiskToken()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var now = DateTime.UtcNow;
+        scope.Db.SystemSettings.AddRange(
+            new SystemSetting { Key = "auth.yandex.enabled", Value = "true", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = "auth.yandex.clientId", Value = "shared-client", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = "auth.yandex.clientSecret", Value = "shared-secret", CreatedAt = now, UpdatedAt = now });
+        await scope.Db.SaveChangesAsync();
+
+        var service = new YandexDiskService(
+            scope.Db,
+            new HttpClient(new FakeYandexDiskHandler(request =>
+            {
+                if (request.RequestUri?.AbsoluteUri.StartsWith("https://oauth.yandex.ru/token", StringComparison.Ordinal) == true)
+                {
+                    return JsonResponse("""{"access_token":"oauth-disk-token","token_type":"bearer"}""");
+                }
+
+                Assert.Equal("OAuth", request.Headers.Authorization?.Scheme);
+                Assert.Equal("oauth-disk-token", request.Headers.Authorization?.Parameter);
+                return JsonResponse("""{"user":{"login":"company"}}""");
+            })),
+            new ConfigurationBuilder().Build(),
+            TestDataProtectionProvider);
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.Scheme = "https";
+        httpContext.Request.Host = new HostString("crm.elitpravo.com");
+
+        var started = await service.StartOAuthAsync(7, new StartYandexDiskAuthRequest
+        {
+            Name = "Рабочий диск",
+            RootPath = "disk:/PayPlanner",
+            ReturnUrl = "/?ppTab=settings&settingsSection=yandex-disk",
+        }, httpContext.Request, CancellationToken.None);
+
+        Assert.Contains("client_id=shared-client", started.AuthUrl);
+        Assert.Contains("cloud_api%3Adisk.read", started.AuthUrl);
+        Assert.Contains(Uri.EscapeDataString("https://crm.elitpravo.com/api/yandex-disk/auth/callback"), started.AuthUrl);
+
+        var html = await service.HandleOAuthCallbackAsync(started.State, "confirmation-code", null, null, httpContext.Request, CancellationToken.None);
+        Assert.Contains("Яндекс.Диск подключён", html);
+
+        var status = await service.GetOAuthStatusAsync(7, started.State, CancellationToken.None);
+        Assert.True(status.Completed);
+        Assert.Equal("completed", status.Status);
+        Assert.False(string.IsNullOrWhiteSpace(status.ConnectionId));
+
+        var overview = await service.GetConnectionsOverviewAsync(CancellationToken.None);
+        var connection = Assert.Single(overview.Connections);
+        Assert.True(connection.IsConfigured);
+        Assert.Equal("Рабочий диск", connection.Name);
+
+        var storedConnections = await scope.Db.SystemSettings.SingleAsync(item => item.Key == "integrations.yandexDisk.connections");
+        Assert.Contains("protected:v1:", storedConnections.Value);
+        Assert.DoesNotContain("oauth-disk-token", storedConnections.Value);
     }
 
     [Fact]
@@ -130,7 +196,9 @@ public sealed class YandexDiskServiceTests
         Assert.Equal("archive-token", captured?.Headers.Authorization?.Parameter);
         Assert.Contains("path=disk%3A%2FArchive%2FReports", captured?.RequestUri?.Query);
         Assert.NotNull(await scope.Db.SystemSettings.SingleOrDefaultAsync(item => item.Key == "integrations.yandexDisk.connections"));
-        Assert.Equal("main-token", (await scope.Db.SystemSettings.SingleAsync(item => item.Key == "integrations.yandexDisk.oauthToken")).Value);
+        var legacyToken = (await scope.Db.SystemSettings.SingleAsync(item => item.Key == "integrations.yandexDisk.oauthToken")).Value;
+        Assert.StartsWith("protected:v1:", legacyToken);
+        Assert.DoesNotContain("main-token", legacyToken);
     }
 
     [Fact]

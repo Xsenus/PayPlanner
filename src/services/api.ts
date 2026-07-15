@@ -482,6 +482,29 @@ export interface YandexDiskConnectionsOverviewDto {
   connections: YandexDiskConnectionDto[];
 }
 
+export interface StartYandexDiskAuthRequest {
+  connectionId?: string | null;
+  name?: string | null;
+  rootPath?: string | null;
+  isEnabled?: boolean;
+  returnUrl?: string | null;
+}
+
+export interface YandexDiskStartAuthResponseDto {
+  state: string;
+  authUrl: string;
+  pollIntervalMs: number;
+}
+
+export interface YandexDiskAuthStatusDto {
+  state: string;
+  status: string;
+  completed: boolean;
+  detail?: string | null;
+  connectionId?: string | null;
+  returnUrl?: string | null;
+}
+
 export interface UpdateYandexDiskSettingsRequest {
   oAuthToken?: string;
   clearToken?: boolean;
@@ -2441,6 +2464,17 @@ export class ApiService {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
+  }
+
+  async startYandexDiskAuth(payload: StartYandexDiskAuthRequest) {
+    return this.request<YandexDiskStartAuthResponseDto>('/yandex-disk/auth/start', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getYandexDiskAuthStatus(state: string) {
+    return this.request<YandexDiskAuthStatusDto>(`/yandex-disk/auth/status/${encodeURIComponent(state)}`);
   }
 
   async deleteYandexDiskConnection(id: string) {

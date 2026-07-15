@@ -24,6 +24,23 @@ public sealed class YandexDiskConnectionsOverviewDto
     public IReadOnlyList<YandexDiskConnectionDto> Connections { get; set; } = Array.Empty<YandexDiskConnectionDto>();
 }
 
+public sealed class YandexDiskStartAuthResponseDto
+{
+    public string State { get; set; } = string.Empty;
+    public string AuthUrl { get; set; } = string.Empty;
+    public int PollIntervalMs { get; set; }
+}
+
+public sealed class YandexDiskAuthStatusDto
+{
+    public string State { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public bool Completed { get; set; }
+    public string? Detail { get; set; }
+    public string? ConnectionId { get; set; }
+    public string? ReturnUrl { get; set; }
+}
+
 public sealed class YandexDiskResourceDto
 {
     public string Name { get; set; } = string.Empty;

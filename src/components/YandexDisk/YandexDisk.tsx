@@ -10,6 +10,7 @@ import {
   Folder,
   KeyRound,
   Loader2,
+  LogIn,
   MoveRight,
   Plus,
   RefreshCw,
@@ -235,6 +236,8 @@ export function YandexDisk({ embedded = false }: YandexDiskProps = {}) {
   const canTestConnection = canView && canEdit && canCreate && canDelete && canExport;
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const oauthPopupRef = useRef<Window | null>(null);
+  const oauthPollRef = useRef<number | null>(null);
   const [overview, setOverview] = useState<YandexDiskConnectionsOverviewDto | null>(null);
   const [activeTab, setActiveTab] = useState<YandexDiskTab>('connections');
   const [mode, setMode] = useState<YandexDiskMode>('overview');
@@ -253,9 +256,11 @@ export function YandexDisk({ embedded = false }: YandexDiskProps = {}) {
   const [loading, setLoading] = useState(false);
   const [loadingAction, setLoadingAction] = useState(false);
   const [savingConnection, setSavingConnection] = useState(false);
+  const [connectingOAuth, setConnectingOAuth] = useState(false);
   const [savingSync, setSavingSync] = useState(false);
 
   const connections = useMemo(() => overview?.connections ?? [], [overview]);
+  const oauthCallbackUrl = `${window.location.origin}/api/yandex-disk/auth/callback`;
   const selectedConnection = useMemo(
     () => connections.find((connection) => connection.id === selectedConnectionId) ?? connections[0] ?? null,
     [connections, selectedConnectionId],
@@ -338,6 +343,15 @@ export function YandexDisk({ embedded = false }: YandexDiskProps = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canView]);
 
+  useEffect(() => () => {
+    if (oauthPollRef.current !== null) {
+      window.clearInterval(oauthPollRef.current);
+    }
+    if (oauthPopupRef.current && !oauthPopupRef.current.closed) {
+      oauthPopupRef.current.close();
+    }
+  }, []);
+
   useEffect(() => {
     if (activeTab === 'files' && selectedConnection?.id) {
       void loadObjects('/');
@@ -386,6 +400,69 @@ export function YandexDisk({ embedded = false }: YandexDiskProps = {}) {
       showError(extractYandexDiskErrorMessage(saveError, 'Не удалось сохранить подключение Я.Диска.'));
     } finally {
       setSavingConnection(false);
+    }
+  };
+
+  const connectWithYandex = async () => {
+    if (!canEdit || (!draft.id && !canCreate)) return;
+    if (!draft.name.trim()) {
+      showError('Укажите название подключения Я.Диска.');
+      return;
+    }
+
+    setConnectingOAuth(true);
+    setError(null);
+    try {
+      const started = await apiService.startYandexDiskAuth({
+        connectionId: draft.id,
+        name: draft.name.trim(),
+        rootPath: draft.rootPath.trim() || 'disk:/PayPlanner',
+        isEnabled: draft.isEnabled,
+        returnUrl: '/?ppTab=settings&settingsSection=yandex-disk',
+      });
+      oauthPopupRef.current = window.open(started.authUrl, 'pp-yandex-disk-link', 'popup=yes,width=560,height=720');
+      if (!oauthPopupRef.current) {
+        window.location.assign(started.authUrl);
+        return;
+      }
+
+      oauthPollRef.current = window.setInterval(async () => {
+        try {
+          const authStatus = await apiService.getYandexDiskAuthStatus(started.state);
+          if (!authStatus.completed) return;
+
+          if (oauthPollRef.current !== null) {
+            window.clearInterval(oauthPollRef.current);
+            oauthPollRef.current = null;
+          }
+          if (oauthPopupRef.current && !oauthPopupRef.current.closed) {
+            oauthPopupRef.current.close();
+          }
+          oauthPopupRef.current = null;
+          setConnectingOAuth(false);
+
+          if (authStatus.status === 'completed' && authStatus.connectionId) {
+            await loadOverview();
+            setSelectedConnectionId(authStatus.connectionId);
+            setMode('overview');
+            setActiveTab('connections');
+            toast.success('Яндекс.Диск подключен через Яндекс ID.', 'Я.Диск');
+            return;
+          }
+
+          showError(authStatus.detail || 'Не удалось завершить подключение Яндекс.Диска.');
+        } catch (statusError) {
+          if (oauthPollRef.current !== null) {
+            window.clearInterval(oauthPollRef.current);
+            oauthPollRef.current = null;
+          }
+          setConnectingOAuth(false);
+          showError(extractYandexDiskErrorMessage(statusError, 'Не удалось проверить подключение Яндекс.Диска.'));
+        }
+      }, started.pollIntervalMs || 2000);
+    } catch (connectError) {
+      setConnectingOAuth(false);
+      showError(extractYandexDiskErrorMessage(connectError, 'Не удалось начать подключение Яндекс.Диска.'));
     }
   };
 
@@ -628,7 +705,7 @@ export function YandexDisk({ embedded = false }: YandexDiskProps = {}) {
               </div>
               <h2 className="mt-1 text-2xl font-semibold text-slate-900">{draft.id ? draft.name : 'Создание подключения Я.Диска'}</h2>
             </div>
-            <button type="button" onClick={saveConnection} disabled={savingConnection || !canEdit} className={iconButtonClass('primary')} title="Сохранить">
+            <button type="button" onClick={saveConnection} disabled={savingConnection || connectingOAuth || !canEdit} className={iconButtonClass()} title="Сохранить">
               {savingConnection ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
               Сохранить
             </button>
@@ -653,33 +730,59 @@ export function YandexDisk({ embedded = false }: YandexDiskProps = {}) {
                 <span className="text-sm font-semibold text-slate-700">Рабочая папка</span>
                 <input value={draft.rootPath} onChange={(event) => setDraft((current) => ({ ...current, rootPath: event.target.value }))} placeholder="disk:/PayPlanner" autoComplete="off" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
               </label>
-              <label className="space-y-1 lg:col-span-2">
-                <span className="text-sm font-semibold text-slate-700">OAuth-токен</span>
-                <div className="relative">
-                  <KeyRound className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-                  <input
-                    type="password"
-                    value={draft.oAuthToken}
-                    onChange={(event) => setDraft((current) => ({ ...current, oAuthToken: event.target.value }))}
-                    placeholder={draft.id ? 'Оставьте пустым, чтобы не менять сохраненный токен' : 'Вставьте OAuth-токен Я.Диска'}
-                    autoComplete="new-password"
-                    data-lpignore="true"
-                    data-1p-ignore="true"
-                    data-form-type="other"
-                    className="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm"
-                  />
-                </div>
-              </label>
-              {draft.id ? (
-                <button type="button" onClick={clearToken} disabled={savingConnection || !canEdit} className={iconButtonClass('danger')} title="Очистить сохраненный токен">
-                  <X className="h-4 w-4" />
-                  Очистить токен
-                </button>
-              ) : null}
               <label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
                 <input type="checkbox" checked={draft.isEnabled} onChange={(event) => setDraft((current) => ({ ...current, isEnabled: event.target.checked }))} className="h-4 w-4 rounded border-slate-300 text-sky-600" />
                 Включить подключение
               </label>
+              <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 lg:col-span-2">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="text-sm font-semibold text-sky-900">Подключение через Яндекс ID</div>
+                    <div className="mt-1 text-xs leading-5 text-sky-700">Войдите в нужный аккаунт Яндекса и разрешите CRM работу с общим Диском. Токен сохранится автоматически.</div>
+                    <div className="mt-1 break-all text-[11px] text-sky-600">Redirect URI для приложения Яндекса: {oauthCallbackUrl}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={connectWithYandex}
+                    disabled={connectingOAuth || savingConnection || !canEdit || (!draft.id && !canCreate)}
+                    className={iconButtonClass('primary')}
+                    title="Подключить через Яндекс ID"
+                  >
+                    {connectingOAuth ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
+                    {connectingOAuth ? 'Ожидаем Яндекс...' : draft.id ? 'Переподключить через Яндекс' : 'Подключить Яндекс.Диск'}
+                  </button>
+                </div>
+              </div>
+              <details className="rounded-lg border border-slate-200 bg-slate-50 p-3 lg:col-span-2">
+                <summary className="cursor-pointer text-sm font-semibold text-slate-700">Ручной OAuth-токен — резервный способ</summary>
+                <div className="mt-3 space-y-3">
+                  <label className="space-y-1">
+                    <span className="text-sm font-semibold text-slate-700">OAuth-токен</span>
+                    <span className="block text-xs text-slate-600">Используйте это поле только если вход через Яндекс временно недоступен.</span>
+                    <div className="relative">
+                      <KeyRound className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                      <input
+                        type="password"
+                        aria-label="OAuth-токен"
+                        value={draft.oAuthToken}
+                        onChange={(event) => setDraft((current) => ({ ...current, oAuthToken: event.target.value }))}
+                        placeholder={draft.id ? 'Оставьте пустым, чтобы не менять сохраненный токен' : 'Вставьте OAuth-токен Я.Диска'}
+                        autoComplete="new-password"
+                        data-lpignore="true"
+                        data-1p-ignore="true"
+                        data-form-type="other"
+                        className="w-full rounded-lg border border-slate-300 py-2 pl-9 pr-3 text-sm"
+                      />
+                    </div>
+                  </label>
+                  {draft.id ? (
+                    <button type="button" onClick={clearToken} disabled={savingConnection || connectingOAuth || !canEdit} className={iconButtonClass('danger')} title="Очистить сохраненный токен">
+                      <X className="h-4 w-4" />
+                      Очистить токен
+                    </button>
+                  ) : null}
+                </div>
+              </details>
             </div>
           </form>
         </div>
