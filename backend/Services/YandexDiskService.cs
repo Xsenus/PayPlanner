@@ -294,7 +294,7 @@ public sealed class YandexDiskService : IYandexDiskService
             ["state"] = state,
             ["scope"] = YandexDiskScopes,
             ["force_confirm"] = "yes",
-            ["device_id"] = $"payplanner-yandex-disk-{connectionId}",
+            ["device_id"] = $"pp-yd-{connectionId}",
             ["device_name"] = "PayPlanner CRM — общий Яндекс.Диск",
         };
 

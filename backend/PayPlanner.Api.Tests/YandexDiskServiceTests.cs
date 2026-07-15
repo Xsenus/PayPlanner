@@ -80,6 +80,11 @@ public sealed class YandexDiskServiceTests
         Assert.Contains("client_id=shared-client", started.AuthUrl);
         Assert.Contains("cloud_api%3Adisk.read", started.AuthUrl);
         Assert.Contains(Uri.EscapeDataString("https://crm.elitpravo.com/api/yandex-disk/auth/callback"), started.AuthUrl);
+        var oauthQuery = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(new Uri(started.AuthUrl).Query);
+        var deviceId = Assert.Single(oauthQuery["device_id"]);
+        Assert.NotNull(deviceId);
+        Assert.StartsWith("pp-yd-", deviceId);
+        Assert.InRange(deviceId.Length, 6, 50);
 
         var html = await service.HandleOAuthCallbackAsync(started.State, "confirmation-code", null, null, httpContext.Request, CancellationToken.None);
         Assert.Contains("Яндекс.Диск подключён", html);
