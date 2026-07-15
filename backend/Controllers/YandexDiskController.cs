@@ -38,7 +38,9 @@ public sealed class YandexDiskController : ControllerBase
         var forbidden = await RequirePermissionAsync(permission => permission.CanView, ct);
         if (forbidden is not null) return forbidden;
 
-        return Ok(await _service.GetConnectionsOverviewAsync(ct));
+        var result = await _service.GetConnectionsOverviewAsync(ct);
+        result.OAuthCallbackUrl = _service.GetOAuthCallbackUrl(Request);
+        return Ok(result);
     }
 
     [HttpPut("connections")]

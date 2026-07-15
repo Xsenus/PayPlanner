@@ -480,6 +480,7 @@ export interface YandexDiskConnectionDto {
 
 export interface YandexDiskConnectionsOverviewDto {
   connections: YandexDiskConnectionDto[];
+  oAuthCallbackUrl?: string | null;
 }
 
 export interface StartYandexDiskAuthRequest {

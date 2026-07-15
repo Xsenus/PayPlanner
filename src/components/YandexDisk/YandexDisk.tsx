@@ -260,7 +260,7 @@ export function YandexDisk({ embedded = false }: YandexDiskProps = {}) {
   const [savingSync, setSavingSync] = useState(false);
 
   const connections = useMemo(() => overview?.connections ?? [], [overview]);
-  const oauthCallbackUrl = `${window.location.origin}/api/yandex-disk/auth/callback`;
+  const oauthCallbackUrl = overview?.oAuthCallbackUrl;
   const selectedConnection = useMemo(
     () => connections.find((connection) => connection.id === selectedConnectionId) ?? connections[0] ?? null,
     [connections, selectedConnectionId],
@@ -739,7 +739,7 @@ export function YandexDisk({ embedded = false }: YandexDiskProps = {}) {
                   <div>
                     <div className="text-sm font-semibold text-sky-900">Подключение через Яндекс ID</div>
                     <div className="mt-1 text-xs leading-5 text-sky-700">Войдите в нужный аккаунт Яндекса и разрешите CRM работу с общим Диском. Токен сохранится автоматически.</div>
-                    <div className="mt-1 break-all text-[11px] text-sky-600">Redirect URI для приложения Яндекса: {oauthCallbackUrl}</div>
+                    {oauthCallbackUrl ? <div className="mt-1 break-all text-[11px] text-sky-600">Redirect URI для приложения Яндекса: {oauthCallbackUrl}</div> : null}
                   </div>
                   <button
                     type="button"

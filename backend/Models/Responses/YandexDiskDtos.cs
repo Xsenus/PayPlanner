@@ -22,6 +22,7 @@ public sealed class YandexDiskConnectionDto
 public sealed class YandexDiskConnectionsOverviewDto
 {
     public IReadOnlyList<YandexDiskConnectionDto> Connections { get; set; } = Array.Empty<YandexDiskConnectionDto>();
+    public string? OAuthCallbackUrl { get; set; }
 }
 
 public sealed class YandexDiskStartAuthResponseDto

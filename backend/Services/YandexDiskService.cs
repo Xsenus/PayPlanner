@@ -21,6 +21,8 @@ public interface IYandexDiskService
 {
     Task<YandexDiskConnectionsOverviewDto> GetConnectionsOverviewAsync(CancellationToken cancellationToken = default)
         => throw new NotSupportedException();
+    string GetOAuthCallbackUrl(HttpRequest httpRequest)
+        => $"{httpRequest.Scheme}://{httpRequest.Host}{httpRequest.PathBase}/api/yandex-disk/auth/callback";
     Task<YandexDiskConnectionDto> UpsertConnectionAsync(UpsertYandexDiskConnectionRequest request, CancellationToken cancellationToken = default)
         => throw new NotSupportedException();
     Task<YandexDiskStartAuthResponseDto> StartOAuthAsync(int userId, StartYandexDiskAuthRequest request, HttpRequest httpRequest, CancellationToken cancellationToken = default)
@@ -176,6 +178,9 @@ public sealed class YandexDiskService : IYandexDiskService
             Connections = connections.Select(BuildConnectionDto).ToList(),
         };
     }
+
+    public string GetOAuthCallbackUrl(HttpRequest httpRequest)
+        => BuildAbsoluteUrl(httpRequest, "/api/yandex-disk/auth/callback");
 
     public async Task<YandexDiskConnectionDto> UpsertConnectionAsync(
         UpsertYandexDiskConnectionRequest request,
