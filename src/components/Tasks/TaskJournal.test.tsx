@@ -3415,7 +3415,9 @@ describe('TaskJournal', () => {
     await openFirstTaskForEdit();
 
     fireEvent.click(screen.getByRole('button', { name: 'Действия с задачей' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Дублировать' }));
+    expect(screen.getByTestId('task-duplicate-icon')).toBeTruthy();
+    expect(screen.getByText('Создать отдельную копию с теми же данными')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Дублировать задачу' }));
 
     await waitFor(() => expect(apiMock.createTaskJournalItem).toHaveBeenCalledTimes(1));
     expect(apiMock.createTaskJournalItem).toHaveBeenCalledWith(expect.objectContaining({
@@ -3423,6 +3425,46 @@ describe('TaskJournal', () => {
       status: 'new',
       result: '',
     }));
+  });
+
+  it('cancels a task from the legacy actions menu without deleting it', async () => {
+    await renderJournal([createTask({ status: 'new' })]);
+
+    await openFirstTaskForEdit();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Действия с задачей' }));
+    expect(screen.getByTestId('task-cancel-icon')).toBeTruthy();
+    expect(screen.getByText('Оставить в журнале со статусом «Отменена»')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Отменить задачу' }));
+
+    expect(dialogMock.confirm).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Отменить задачу?',
+      confirmLabel: 'Отменить задачу',
+    }));
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({
+      status: 'cancelled',
+    })));
+    expect(apiMock.deleteTaskJournalItem).not.toHaveBeenCalled();
+  });
+
+  it('shows duplicate and cancel as direct icon actions in the modern task card', async () => {
+    await renderJournal([createTask({ status: 'new' })], {
+      settings: { taskCardWindowMode: 'modern' },
+    });
+
+    await openFirstTaskForEdit();
+
+    const duplicateButton = screen.getByRole('button', { name: 'Дублировать задачу' });
+    const cancelButton = screen.getByRole('button', { name: 'Отменить задачу' });
+    expect(duplicateButton.getAttribute('title')).toContain('создать отдельную копию');
+    expect(cancelButton.getAttribute('title')).toContain('статусом «Отменена»');
+    expect(within(duplicateButton).getByTestId('task-duplicate-icon')).toBeTruthy();
+    expect(within(cancelButton).getByTestId('task-cancel-icon')).toBeTruthy();
+
+    fireEvent.click(cancelButton);
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({
+      status: 'cancelled',
+    })));
   });
 
   it('opens executor task in view mode and saves result only after completion starts', async () => {

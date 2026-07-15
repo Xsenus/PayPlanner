@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   ClipboardList,
   Clock3,
+  Copy,
   Download,
   Eye,
   FileText,
@@ -39,6 +40,7 @@ import {
   UsersRound,
   WalletCards,
   X,
+  XCircle,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
@@ -7539,6 +7541,25 @@ function TaskModal({
     await onDuplicate(task);
   };
 
+  const handleCancelTask = async () => {
+    const task = state?.task;
+    if (!task || isReadOnly || !isTaskJournalActive(task.status)) return;
+
+    const accepted = await confirm({
+      title: 'Отменить задачу?',
+      description: `Задача «${task.title}» перейдет в статус «Отменена» и останется в журнале и истории.`,
+      confirmLabel: 'Отменить задачу',
+      cancelLabel: 'Вернуться',
+      variant: 'danger',
+    });
+    if (!accepted) return;
+
+    setActionMenuOpen(false);
+    await saveWithStatus('cancelled');
+  };
+
+  const canCancelTask = Boolean(state?.task && !isReadOnly && isTaskJournalActive(state.task.status));
+
   const openQuickPanel = (panel: 'assignee' | 'observer') => {
     if (isReadOnly) return;
     setQuickPanel((current) => (current === panel ? null : panel));
@@ -8197,7 +8218,29 @@ function TaskModal({
               <button type="button" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-amber-600 transition hover:bg-amber-50" title="Напоминание" aria-label="Напоминание">
                 <Bell className="h-4 w-4" />
               </button>
-              {state?.task && !isReadOnly && (canDuplicateTask || canDeleteTask) ? (
+              {state?.task && !isReadOnly && canDuplicateTask ? (
+                <button
+                  type="button"
+                  onClick={() => void handleDuplicateTask()}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-blue-50 hover:text-blue-700"
+                  title="Дублировать задачу — создать отдельную копию"
+                  aria-label="Дублировать задачу"
+                >
+                  <Copy className="h-4 w-4" data-testid="task-duplicate-icon" />
+                </button>
+              ) : null}
+              {canCancelTask ? (
+                <button
+                  type="button"
+                  onClick={() => void handleCancelTask()}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-rose-50 hover:text-rose-700"
+                  title="Отменить задачу — оставить в журнале со статусом «Отменена»"
+                  aria-label="Отменить задачу"
+                >
+                  <XCircle className="h-4 w-4" data-testid="task-cancel-icon" />
+                </button>
+              ) : null}
+              {state?.task && !isReadOnly && canDeleteTask ? (
                 <div className="relative">
                   <button
                     type="button"
@@ -8210,12 +8253,18 @@ function TaskModal({
                   </button>
                   {actionMenuOpen ? (
                     <div className="absolute right-0 z-20 mt-2 w-56 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 text-sm shadow-xl">
-                      {canDuplicateTask ? (
-                        <button type="button" onClick={() => void handleDuplicateTask()} className="block w-full px-3 py-2 text-left text-slate-700 transition hover:bg-slate-50">Дублировать задачу</button>
-                      ) : null}
-                      {canDeleteTask ? (
-                        <button type="button" onClick={() => void handleDeleteTask()} className="block w-full px-3 py-2 text-left text-rose-600 transition hover:bg-rose-50">Удалить задачу</button>
-                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteTask()}
+                        className="flex w-full items-start gap-3 px-3 py-2.5 text-left text-rose-600 transition hover:bg-rose-50"
+                        title="Удалить задачу безвозвратно"
+                      >
+                        <Trash2 className="mt-0.5 h-4 w-4 shrink-0" />
+                        <span>
+                          <span className="block font-semibold">Удалить задачу</span>
+                          <span className="mt-0.5 block text-xs font-normal text-rose-400">Безвозвратно удалить запись из журнала</span>
+                        </span>
+                      </button>
                     </div>
                   ) : null}
                 </div>
@@ -8869,13 +8918,48 @@ function TaskModal({
                           Вернуть в работу
                         </button>
                         {canDuplicateTask ? (
-                          <button type="button" onClick={() => void handleDuplicateTask()} className="block w-full px-4 py-2 text-left text-slate-700 transition hover:bg-slate-50">
-                            Дублировать
+                          <button
+                            type="button"
+                            onClick={() => void handleDuplicateTask()}
+                            className="flex w-full items-start gap-3 px-4 py-2.5 text-left text-slate-700 transition hover:bg-slate-50"
+                            title="Дублировать задачу — создать отдельную копию"
+                            aria-label="Дублировать задачу"
+                          >
+                            <Copy className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" data-testid="task-duplicate-icon" />
+                            <span>
+                              <span className="block font-semibold">Дублировать задачу</span>
+                              <span className="mt-0.5 block text-xs font-normal text-slate-400">Создать отдельную копию с теми же данными</span>
+                            </span>
+                          </button>
+                        ) : null}
+                        {canCancelTask ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleCancelTask()}
+                            className="flex w-full items-start gap-3 px-4 py-2.5 text-left text-slate-700 transition hover:bg-rose-50"
+                            title="Отменить задачу — оставить в журнале со статусом «Отменена»"
+                            aria-label="Отменить задачу"
+                          >
+                            <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" data-testid="task-cancel-icon" />
+                            <span>
+                              <span className="block font-semibold">Отменить задачу</span>
+                              <span className="mt-0.5 block text-xs font-normal text-slate-400">Оставить в журнале со статусом «Отменена»</span>
+                            </span>
                           </button>
                         ) : null}
                         {canDeleteTask ? (
-                          <button type="button" onClick={() => void handleDeleteTask()} className="block w-full px-4 py-2 text-left text-rose-600 transition hover:bg-rose-50">
-                            Удалить
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteTask()}
+                            className="flex w-full items-start gap-3 px-4 py-2.5 text-left text-rose-600 transition hover:bg-rose-50"
+                            title="Удалить задачу безвозвратно"
+                            aria-label="Удалить задачу"
+                          >
+                            <Trash2 className="mt-0.5 h-4 w-4 shrink-0" />
+                            <span>
+                              <span className="block font-semibold">Удалить задачу</span>
+                              <span className="mt-0.5 block text-xs font-normal text-rose-400">Безвозвратно удалить запись из журнала</span>
+                            </span>
                           </button>
                         ) : null}
                       </div>
