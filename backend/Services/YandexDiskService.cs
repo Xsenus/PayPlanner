@@ -595,12 +595,26 @@ public sealed class YandexDiskService : IYandexDiskService
         var normalizedOffset = Math.Max(offset, 0);
         var fullPath = BuildFullPath(settings.RootPath, NormalizeRelativePath(path));
         var token = settings.OAuthToken!;
-        var resource = await SendJsonAsync<YandexDiskResourcePayload>(
-            HttpMethod.Get,
-            $"{ApiBaseUrl}/resources?path={Uri.EscapeDataString(fullPath)}&limit={normalizedLimit}&offset={normalizedOffset}",
-            token,
-            null,
-            cancellationToken);
+        YandexDiskResourcePayload resource;
+        try
+        {
+            resource = await SendJsonAsync<YandexDiskResourcePayload>(
+                HttpMethod.Get,
+                $"{ApiBaseUrl}/resources?path={Uri.EscapeDataString(fullPath)}&limit={normalizedLimit}&offset={normalizedOffset}",
+                token,
+                null,
+                cancellationToken);
+        }
+        catch (YandexDiskOperationException ex) when (ex.StatusCode == StatusCodes.Status404NotFound && string.IsNullOrWhiteSpace(NormalizeRelativePath(path)))
+        {
+            await EnsureRootPathAsync(settings, cancellationToken);
+            resource = await SendJsonAsync<YandexDiskResourcePayload>(
+                HttpMethod.Get,
+                $"{ApiBaseUrl}/resources?path={Uri.EscapeDataString(fullPath)}&limit={normalizedLimit}&offset={normalizedOffset}",
+                token,
+                null,
+                cancellationToken);
+        }
 
         return new YandexDiskListResponseDto
         {
@@ -1189,6 +1203,8 @@ public sealed class YandexDiskService : IYandexDiskService
             authRequest.RootPath,
             authRequest.IsEnabled,
             DateTime.UtcNow);
+
+        await EnsureRootPathAsync(updated, cancellationToken);
         if (existingIndex < 0)
         {
             connections.Add(updated);
@@ -1769,6 +1785,7 @@ public sealed class YandexDiskService : IYandexDiskService
 
     private async Task EnsureFolderPathAsync(YandexDiskSettingsState settings, string folderPath, CancellationToken cancellationToken)
     {
+        await EnsureRootPathAsync(settings, cancellationToken);
         var normalizedFolder = NormalizeRelativePath(folderPath);
         if (string.IsNullOrWhiteSpace(normalizedFolder))
         {
@@ -1791,6 +1808,36 @@ public sealed class YandexDiskService : IYandexDiskService
                     cancellationToken);
             }
             catch (YandexDiskOperationException ex) when (ex.StatusCode == 409)
+            {
+                // Folder already exists.
+            }
+        }
+    }
+
+    private async Task EnsureRootPathAsync(YandexDiskSettingsState settings, CancellationToken cancellationToken)
+    {
+        var normalizedRoot = NormalizeRootPath(settings.RootPath);
+        var relativeRoot = NormalizeRelativePath(normalizedRoot);
+        if (string.IsNullOrWhiteSpace(relativeRoot))
+        {
+            return;
+        }
+
+        var token = settings.OAuthToken!;
+        var accumulated = string.Empty;
+        foreach (var part in relativeRoot.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            accumulated = string.IsNullOrWhiteSpace(accumulated) ? part : $"{accumulated}/{part}";
+            try
+            {
+                await SendAsync(
+                    HttpMethod.Put,
+                    $"{ApiBaseUrl}/resources?path={Uri.EscapeDataString($"disk:/{accumulated}")}",
+                    token,
+                    null,
+                    cancellationToken);
+            }
+            catch (YandexDiskOperationException ex) when (ex.StatusCode == StatusCodes.Status409Conflict)
             {
                 // Folder already exists.
             }

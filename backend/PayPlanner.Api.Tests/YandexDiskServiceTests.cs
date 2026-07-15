@@ -152,6 +152,42 @@ public sealed class YandexDiskServiceTests
     }
 
     [Fact]
+    public async Task ListAsync_CreatesMissingRootFolderAndRetries()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        scope.Db.SystemSettings.Add(new SystemSetting { Key = "integrations.yandexDisk.oauthToken", Value = "ya-token", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
+        scope.Db.SystemSettings.Add(new SystemSetting { Key = "integrations.yandexDisk.rootPath", Value = "disk:/PayPlanner", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
+        await scope.Db.SaveChangesAsync();
+
+        var requests = new List<string>();
+        var rootReads = 0;
+        var service = new YandexDiskService(scope.Db, new HttpClient(new FakeYandexDiskHandler(request =>
+        {
+            requests.Add($"{request.Method} {request.RequestUri}");
+            if (request.Method == HttpMethod.Get && ++rootReads == 1)
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound)
+                {
+                    Content = new StringContent("""{"message":"Not Found","error":"DiskNotFoundError"}""", Encoding.UTF8, "application/json"),
+                };
+            }
+
+            if (request.Method == HttpMethod.Put)
+            {
+                return new HttpResponseMessage(HttpStatusCode.Created);
+            }
+
+            return JsonResponse("""{ "name": "PayPlanner", "path": "disk:/PayPlanner", "type": "dir", "_embedded": { "limit": 100, "offset": 0, "total": 0, "items": [] } }""");
+        })));
+
+        var result = await service.ListAsync(null, 100, 0, CancellationToken.None);
+
+        Assert.Empty(result.Items);
+        Assert.Equal(2, rootReads);
+        Assert.Contains(requests, item => item.StartsWith("PUT https://cloud-api.yandex.net/v1/disk/resources?path=disk%3A%2FPayPlanner", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task ConnectionEndpoints_SaveSeveralYandexDiskAccountsAndUseSelectedOneForFiles()
     {
         await using var scope = await CreateDbScopeAsync();
