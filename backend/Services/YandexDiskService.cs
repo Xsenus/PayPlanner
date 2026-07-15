@@ -731,6 +731,9 @@ public sealed class YandexDiskService : IYandexDiskService
         CancellationToken cancellationToken)
     {
         var relativePath = NormalizeRequiredRelativePath(path, "Укажите путь файла для загрузки.");
+        var separatorIndex = relativePath.LastIndexOf('/');
+        var parentPath = separatorIndex > 0 ? relativePath[..separatorIndex] : string.Empty;
+        await EnsureFolderPathAsync(settings, parentPath, cancellationToken);
         var fullPath = BuildFullPath(settings.RootPath, relativePath);
         var token = settings.OAuthToken!;
         var link = await SendJsonAsync<YandexDiskLinkPayload>(
@@ -915,7 +918,6 @@ public sealed class YandexDiskService : IYandexDiskService
         var targetPath = string.IsNullOrWhiteSpace(folderPath) ? fileName : $"{folderPath}/{fileName}";
         var overwrite = ResolveCrmOverwrite(upload.OverwriteExisting, syncSettings);
 
-        await EnsureFolderPathAsync(settings, folderPath, cancellationToken);
         try
         {
             return await UploadAsync(targetPath, upload.Content, upload.ContentType, overwrite, cancellationToken);

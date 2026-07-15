@@ -725,6 +725,41 @@ public sealed class YandexDiskServiceTests
     }
 
     [Fact]
+    public async Task UploadAsync_CreatesNestedParentFoldersBeforeUploadingBackup()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        scope.Db.SystemSettings.Add(new SystemSetting { Key = "integrations.yandexDisk.oauthToken", Value = "ya-token", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
+        scope.Db.SystemSettings.Add(new SystemSetting { Key = "integrations.yandexDisk.rootPath", Value = "disk:/PayPlanner", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow });
+        await scope.Db.SaveChangesAsync();
+
+        var requests = new List<string>();
+        var service = new YandexDiskService(scope.Db, new HttpClient(new FakeYandexDiskHandler(request =>
+        {
+            requests.Add($"{request.Method} {request.RequestUri}");
+            if (request.RequestUri?.Host == "upload.local")
+            {
+                return new HttpResponseMessage(HttpStatusCode.Created);
+            }
+
+            if (request.RequestUri?.AbsolutePath.EndsWith("/resources/upload", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                return JsonResponse("""{ "href": "https://upload.local/backup" }""");
+            }
+
+            return JsonResponse("{}");
+        })));
+
+        await using var stream = new MemoryStream(Encoding.UTF8.GetBytes("backup"));
+        var result = await service.UploadAsync("backups/database/2026/07/payplanner.backup", stream, "application/octet-stream", true, CancellationToken.None);
+
+        Assert.Equal("/backups/database/2026/07/payplanner.backup", result.Path);
+        Assert.Contains(requests, item => item.Contains("/resources?path=disk%3A%2FPayPlanner%2Fbackups", StringComparison.Ordinal));
+        Assert.Contains(requests, item => item.Contains("/resources?path=disk%3A%2FPayPlanner%2Fbackups%2Fdatabase%2F2026%2F07", StringComparison.Ordinal));
+        Assert.Contains(requests, item => item.Contains("/resources/upload", StringComparison.Ordinal) && item.Contains("payplanner.backup", StringComparison.Ordinal));
+        Assert.Contains(requests, item => item.StartsWith("PUT https://upload.local/backup", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task PreviewCrmSyncAsync_BuildsDryRunPathsWithoutNetworkCalls()
     {
         await using var scope = await CreateDbScopeAsync();
