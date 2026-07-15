@@ -3012,6 +3012,7 @@ public class TasksControllerTests
         var result = await controller.ExportCalendar(
             from: null,
             to: null,
+            clientCaseId: null,
             clientId: null,
             legalEntityId: null,
             reminderMinutes: null,
@@ -3060,6 +3061,7 @@ public class TasksControllerTests
         var result = await controller.ExportCalendar(
             from: null,
             to: null,
+            clientCaseId: null,
             clientId: firstClient.Id,
             legalEntityId: null,
             reminderMinutes: null,
@@ -3073,6 +3075,44 @@ public class TasksControllerTests
 
         var auditEvent = await db.ObjectAuditEvents.SingleAsync(item => item.ObjectType == CalendarExportAudit.ObjectType);
         using var metadata = JsonDocument.Parse(auditEvent.MetadataJson!);
+        Assert.Equal(1, metadata.RootElement.GetProperty("exportedEventCount").GetInt32());
+    }
+
+    [Fact]
+    public async Task ExportCalendar_FiltersTasksByClientCase()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author-case-ics@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Клиент календаря дел");
+        var selectedCase = await CreateCaseAsync(db, client.Id, "Выбранное дело");
+        var otherCase = await CreateCaseAsync(db, client.Id, "Другое дело");
+        var selectedTask = await CreateTaskAsync(db, author.Id, client.Id, clientCaseId: selectedCase.Id);
+        selectedTask.Title = "Задача выбранного дела";
+        selectedTask.DueAt = new DateTime(2026, 5, 10, 9, 0, 0, DateTimeKind.Utc);
+        var otherTask = await CreateTaskAsync(db, author.Id, client.Id, clientCaseId: otherCase.Id);
+        otherTask.Title = "Задача другого дела";
+        otherTask.DueAt = new DateTime(2026, 5, 11, 9, 0, 0, DateTimeKind.Utc);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.ExportCalendar(
+            from: null,
+            to: null,
+            clientCaseId: selectedCase.Id,
+            clientId: null,
+            legalEntityId: null,
+            reminderMinutes: null,
+            ct: CancellationToken.None);
+
+        var file = Assert.IsType<FileContentResult>(result);
+        var content = Encoding.UTF8.GetString(file.FileContents);
+
+        Assert.Contains("SUMMARY:Задача выбранного дела", content);
+        Assert.DoesNotContain("SUMMARY:Задача другого дела", content);
+
+        var auditEvent = await db.ObjectAuditEvents.SingleAsync(item => item.ObjectType == CalendarExportAudit.ObjectType);
+        using var metadata = JsonDocument.Parse(auditEvent.MetadataJson!);
+        Assert.Equal(selectedCase.Id, metadata.RootElement.GetProperty("filters").GetProperty("clientCaseId").GetInt32());
         Assert.Equal(1, metadata.RootElement.GetProperty("exportedEventCount").GetInt32());
     }
 
@@ -3095,6 +3135,7 @@ public class TasksControllerTests
         var result = await controller.ExportCalendar(
             from: null,
             to: null,
+            clientCaseId: null,
             clientId: null,
             legalEntityId: null,
             reminderMinutes: null,
@@ -3126,6 +3167,7 @@ public class TasksControllerTests
         var result = await controller.ExportCalendar(
             from: null,
             to: null,
+            clientCaseId: null,
             clientId: null,
             legalEntityId: null,
             reminderMinutes: "120,30,0,abc,120",
@@ -3155,6 +3197,7 @@ public class TasksControllerTests
         var result = await controller.ExportCalendar(
             from: null,
             to: null,
+            clientCaseId: null,
             clientId: null,
             legalEntityId: null,
             reminderMinutes: null,

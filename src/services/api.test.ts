@@ -1435,6 +1435,7 @@ describe('apiService case calendar', () => {
     const result = await apiService.downloadTaskJournalCalendar({
       from: '2026-06-01',
       to: '2026-06-30',
+      clientCaseId: 8,
       clientId: 15,
       legalEntityId: 22,
       reminderMinutes: [60, 15],
@@ -1446,6 +1447,7 @@ describe('apiService case calendar', () => {
     expect(String(url)).toContain('/tasks/calendar.ics?');
     expect(String(url)).toContain('from=2026-06-01');
     expect(String(url)).toContain('to=2026-06-30');
+    expect(String(url)).toContain('clientCaseId=8');
     expect(String(url)).toContain('clientId=15');
     expect(String(url)).toContain('legalEntityId=22');
     expect(String(url)).toContain('reminderMinutes=60');

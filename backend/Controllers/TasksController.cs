@@ -495,6 +495,7 @@ public class TasksController : ControllerBase
     public async Task<IActionResult> ExportCalendar(
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
+        [FromQuery] int? clientCaseId,
         [FromQuery] int? clientId,
         [FromQuery] int? legalEntityId,
         [FromQuery] string? reminderMinutes,
@@ -528,6 +529,11 @@ public class TasksController : ControllerBase
         if (to.HasValue)
         {
             query = query.Where(task => task.DueAt <= to.Value);
+        }
+
+        if (clientCaseId.HasValue)
+        {
+            query = query.Where(task => task.ClientCaseId == clientCaseId.Value);
         }
 
         if (clientId.HasValue)
@@ -565,6 +571,7 @@ public class TasksController : ControllerBase
             {
                 from,
                 to,
+                clientCaseId,
             }));
         await _db.SaveChangesAsync(ct);
 

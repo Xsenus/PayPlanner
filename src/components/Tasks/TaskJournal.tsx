@@ -162,6 +162,7 @@ type TaskJournalFilterPreferences = {
   dateFrom: string;
   dateTo: string;
   statusFilter: TaskStatusFilter;
+  caseFilter: string;
   assigneeFilter: string;
   typeFilter: TaskJournalType | 'all';
   priorityFilter: TaskJournalPriority | 'all';
@@ -314,6 +315,7 @@ function createDefaultFilterPreferences(userId: number | null, mode: TaskJournal
     dateFrom: '',
     dateTo: '',
     statusFilter: 'active',
+    caseFilter: 'all',
     assigneeFilter: 'all',
     typeFilter: 'all',
     priorityFilter: 'all',
@@ -440,6 +442,9 @@ function normalizeTaskJournalFilterPreferences(
     dateFrom: isDateFilterValue(parsed?.dateFrom) ? parsed.dateFrom : defaults.dateFrom,
     dateTo: isDateFilterValue(parsed?.dateTo) ? parsed.dateTo : defaults.dateTo,
     statusFilter: isStatusFilter(parsed?.statusFilter) ? parsed.statusFilter : defaults.statusFilter,
+    caseFilter: typeof parsed?.caseFilter === 'string' && (parsed.caseFilter === 'all' || /^\d+$/.test(parsed.caseFilter))
+      ? parsed.caseFilter
+      : defaults.caseFilter,
     assigneeFilter: typeof parsed?.assigneeFilter === 'string' && parsed.assigneeFilter ? parsed.assigneeFilter : defaults.assigneeFilter,
     typeFilter: isTypeFilter(parsed?.typeFilter) ? parsed.typeFilter : defaults.typeFilter,
     priorityFilter: isPriorityFilter(parsed?.priorityFilter) ? parsed.priorityFilter : defaults.priorityFilter,
@@ -1925,6 +1930,7 @@ export function TaskJournal({
   const [icsReminderPreset, setIcsReminderPreset] = useState<IcsReminderPreset>(initialPreferences.icsReminderPreset);
   const [periodMode, setPeriodMode] = useState<PeriodMode>(initialPreferences.periodMode);
   const [statusFilter, setStatusFilter] = useState<TaskStatusFilter>(initialPreferences.statusFilter);
+  const [caseFilter, setCaseFilter] = useState(initialPreferences.caseFilter);
   const [assigneeFilter, setAssigneeFilter] = useState(initialPreferences.assigneeFilter);
   const [typeFilter, setTypeFilter] = useState<TaskJournalType | 'all'>(initialPreferences.typeFilter);
   const [priorityFilter, setPriorityFilter] = useState<TaskJournalPriority | 'all'>(initialPreferences.priorityFilter);
@@ -2009,6 +2015,7 @@ export function TaskJournal({
     setDateFromFilter(nextPreferences.dateFrom);
     setDateToFilter(nextPreferences.dateTo);
     setStatusFilter(nextPreferences.statusFilter);
+    setCaseFilter(nextPreferences.caseFilter);
     setAssigneeFilter(nextPreferences.assigneeFilter);
     setTypeFilter(nextPreferences.typeFilter);
     setPriorityFilter(nextPreferences.priorityFilter);
@@ -2046,6 +2053,7 @@ export function TaskJournal({
       dateFrom: dateFromFilter,
       dateTo: dateToFilter,
       statusFilter,
+      caseFilter,
       assigneeFilter,
       typeFilter,
       priorityFilter,
@@ -2053,7 +2061,7 @@ export function TaskJournal({
       sortBy,
       sortDir,
     }, mode);
-  }, [assigneeFilter, calendarColorMode, calendarConflictPolicy, calendarLoadWarningMode, currentUserId, dateFromFilter, dateToFilter, icsReminderPreset, metricFilter, mode, periodMode, priorityFilter, quickFilter, search, sortBy, sortDir, statusFilter, typeFilter, viewMode]);
+  }, [assigneeFilter, calendarColorMode, calendarConflictPolicy, calendarLoadWarningMode, caseFilter, currentUserId, dateFromFilter, dateToFilter, icsReminderPreset, metricFilter, mode, periodMode, priorityFilter, quickFilter, search, sortBy, sortDir, statusFilter, typeFilter, viewMode]);
 
   const captureSavedViewFilters = (): TaskJournalFilterPreferences => ({
     viewMode,
@@ -2067,6 +2075,7 @@ export function TaskJournal({
     dateFrom: dateFromFilter,
     dateTo: dateToFilter,
     statusFilter,
+    caseFilter,
     assigneeFilter,
     typeFilter,
     priorityFilter,
@@ -2087,6 +2096,7 @@ export function TaskJournal({
     setDateFromFilter(filters.dateFrom);
     setDateToFilter(filters.dateTo);
     setStatusFilter(filters.statusFilter);
+    setCaseFilter(filters.caseFilter);
     setAssigneeFilter(filters.assigneeFilter);
     setTypeFilter(filters.typeFilter);
     setPriorityFilter(filters.priorityFilter);
@@ -2309,6 +2319,26 @@ export function TaskJournal({
 
   const assigneeOptions = useMemo(() => Array.from(assigneeById.values()), [assigneeById]);
 
+  const caseFilterOptions = useMemo(() => {
+    const byId = new Map<number, string>();
+    tasks.forEach((task) => {
+      if (!task.clientCaseId || !task.clientCaseTitle?.trim()) {
+        return;
+      }
+
+      const ownerName = task.clientName?.trim() || task.legalEntityName?.trim() || '';
+      const label = ownerName
+        ? `${ownerName} — ${task.clientCaseTitle.trim()}`
+        : task.clientCaseTitle.trim();
+      if (!byId.has(task.clientCaseId)) {
+        byId.set(task.clientCaseId, label);
+      }
+    });
+
+    return Array.from(byId, ([id, label]) => ({ id, label }))
+      .sort((left, right) => left.label.localeCompare(right.label, 'ru'));
+  }, [tasks]);
+
   const visibleTaskCalendarUserIds = useMemo(() => {
     if (isAdminUser || taskCalendarViewScope === 'all') {
       return null;
@@ -2394,6 +2424,7 @@ export function TaskJournal({
     const params = {
       from: toLocalDateKey(range.from),
       to: toLocalDateKey(range.to),
+      clientCaseId: caseFilter !== 'all' ? Number(caseFilter) : undefined,
       responsibleUserId,
       includeTasks: false,
     };
@@ -2412,7 +2443,7 @@ export function TaskJournal({
     } finally {
       setCaseCalendarLoading(false);
     }
-  }, [calendarAnchorDate, calendarResponsibleUserId, canViewCases, effectiveTaskJournalTimeZoneId, periodMode, toast, viewMode]);
+  }, [calendarAnchorDate, calendarResponsibleUserId, canViewCases, caseFilter, effectiveTaskJournalTimeZoneId, periodMode, toast, viewMode]);
 
   const buildCaseCalendarParams = useCallback(() => {
     const range = getCaseCalendarRange(calendarAnchorDate, viewMode === 'timeline' ? 'week' : periodMode);
@@ -2421,10 +2452,11 @@ export function TaskJournal({
     return {
       from: toLocalDateKey(range.from),
       to: toLocalDateKey(range.to),
+      clientCaseId: caseFilter !== 'all' ? Number(caseFilter) : undefined,
       responsibleUserId,
       includeTasks: false,
     };
-  }, [calendarAnchorDate, calendarResponsibleUserId, effectiveTaskJournalTimeZoneId, periodMode, viewMode]);
+  }, [calendarAnchorDate, calendarResponsibleUserId, caseFilter, effectiveTaskJournalTimeZoneId, periodMode, viewMode]);
 
   useEffect(() => {
     void refreshCaseCalendarEvents();
@@ -2573,6 +2605,7 @@ export function TaskJournal({
         assigneeFilter === 'all' ||
         String(task.assigneeUserId ?? task.assigneeName) === assigneeFilter ||
         hasAssigneeParticipant(task, assigneeFilter);
+      const caseOk = caseFilter === 'all' || String(task.clientCaseId ?? '') === caseFilter;
       const typeOk = typeFilter === 'all' || task.type === typeFilter;
       const priorityOk = priorityFilter === 'all' || task.priority === priorityFilter;
       const dateOk =
@@ -2587,9 +2620,9 @@ export function TaskJournal({
         task.title,
       ].some((value) => value.toLowerCase().includes(q));
 
-      return approvalScopeOk && quickOk && assigneeOk && typeOk && priorityOk && dateOk && searchOk;
+      return approvalScopeOk && quickOk && assigneeOk && caseOk && typeOk && priorityOk && dateOk && searchOk;
     });
-  }, [assigneeFilter, currentUserId, currentUserName, dateRangeBounds, isAdminUser, isApprovalsMode, priorityFilter, quickFilter, search, tasks, typeFilter]);
+  }, [assigneeFilter, caseFilter, currentUserId, currentUserName, dateRangeBounds, isAdminUser, isApprovalsMode, priorityFilter, quickFilter, search, tasks, typeFilter]);
 
   const statusAndPeriodFilteredTasks = useMemo(() => {
     const nowDate = getCurrentCalendarDate();
@@ -3639,6 +3672,7 @@ export function TaskJournal({
 
     try {
       const response = await apiService.downloadTaskJournalCalendar({
+        clientCaseId: caseFilter !== 'all' ? Number(caseFilter) : undefined,
         clientId: contextFilter?.clientId ?? undefined,
         legalEntityId: contextFilter?.legalEntityId ?? undefined,
         reminderMinutes: icsReminderMinutes,
@@ -3723,6 +3757,7 @@ export function TaskJournal({
       type: typeFilter === 'all' ? undefined : typeFilter,
       priority: reportPriority,
       assigneeUserId: reportAssigneeUserId,
+      clientCaseId: caseFilter !== 'all' ? Number(caseFilter) : undefined,
       clientId: contextFilter?.clientId ?? undefined,
       legalEntityId: contextFilter?.legalEntityId ?? undefined,
       from,
@@ -4019,7 +4054,7 @@ export function TaskJournal({
 
         <section className="mb-6 min-w-0 max-w-full space-y-3" data-testid="task-filters-panel">
           <div
-            className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(260px,1fr)_repeat(4,minmax(150px,200px))]"
+            className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(240px,1fr)_repeat(5,minmax(140px,190px))]"
             data-testid="task-main-filter-row"
           >
             <label className="relative block">
@@ -4043,6 +4078,19 @@ export function TaskJournal({
               <option value="overdue">Просроченные</option>
               {STATUS_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+
+            <select
+              value={caseFilter}
+              onChange={(event) => setCaseFilter(event.target.value)}
+              className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              aria-label="Фильтр по делу"
+              data-testid="task-case-filter"
+            >
+              <option value="all">Все дела</option>
+              {caseFilterOptions.map((clientCase) => (
+                <option key={clientCase.id} value={String(clientCase.id)}>{clientCase.label}</option>
               ))}
             </select>
 
