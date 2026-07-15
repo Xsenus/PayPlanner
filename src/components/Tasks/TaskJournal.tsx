@@ -25,6 +25,7 @@ import {
   Mail,
   MessageSquare,
   MoreHorizontal,
+  Paperclip,
   Palette,
   Pencil,
   Phone,
@@ -539,6 +540,7 @@ function writeTaskJournalSavedViews(userId: number | null, mode: TaskJournalMode
 const INTERNAL_TASK_OBJECT_NAME = 'Внутренняя задача';
 const TASK_COMPLETION_RESULT_HINT = 'Опишите подробно, что было сделано и какой результат был достигнут.';
 const TASK_COMPLETION_RESULT_REQUIRED_MESSAGE = 'Добавьте результат по задаче перед завершением.';
+const MAX_TASK_COMPLETION_FILE_BYTES = 25 * 1024 * 1024;
 const TASK_APPROVAL_RESULT_REQUIRED_MESSAGE = 'Добавьте результат по задаче перед отправкой на согласование.';
 let activeTaskJournalTimeZoneId = normalizeUserTimeZoneId();
 
@@ -697,6 +699,12 @@ function formatFileSize(bytes: number) {
   if (bytes < 1024) return `${bytes} Б`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`;
   return `${(bytes / 1024 / 1024).toFixed(1)} МБ`;
+}
+
+async function uploadTaskCompletionFiles(taskId: number, files: readonly File[]) {
+  for (const file of files) {
+    await apiService.uploadTaskJournalFile(taskId, file);
+  }
 }
 
 function normalizeTaskDuration(value: number | null | undefined) {
@@ -3204,7 +3212,7 @@ export function TaskJournal({
     setQuickApprovalPromptError(null);
   };
 
-  const submitCompletionPrompt = async () => {
+  const submitCompletionPrompt = async (files: File[]) => {
     if (!completionPromptTask || completionPromptSaving) return;
 
     const normalizedResult = completionPromptResult.trim();
@@ -3215,6 +3223,7 @@ export function TaskJournal({
 
     setCompletionPromptSaving(true);
     try {
+      await uploadTaskCompletionFiles(completionPromptTask.id, files);
       await apiService.updateTaskJournalStatus(completionPromptTask.id, 'done', normalizedResult || undefined);
       toast.success('Задача завершена, результат сохранен.', 'Журнал задач');
       setCompletionPromptTask(null);
@@ -3223,13 +3232,13 @@ export function TaskJournal({
       await refreshTasks();
       emitTaskChange();
     } catch (error) {
-      setCompletionPromptError(extractDisplayErrorMessage(error, 'Не удалось завершить задачу.'));
+      setCompletionPromptError(extractDisplayErrorMessage(error, 'Не удалось прикрепить файл или завершить задачу.'));
     } finally {
       setCompletionPromptSaving(false);
     }
   };
 
-  const submitQuickApprovalPrompt = async () => {
+  const submitQuickApprovalPrompt = async (files: File[]) => {
     if (!quickApprovalPromptTask || quickApprovalPromptSaving) return;
 
     const normalizedResult = quickApprovalPromptResult.trim();
@@ -3240,6 +3249,7 @@ export function TaskJournal({
 
     setQuickApprovalPromptSaving(true);
     try {
+      await uploadTaskCompletionFiles(quickApprovalPromptTask.id, files);
       await apiService.updateTaskJournalStatus(quickApprovalPromptTask.id, 'onApproval', normalizedResult || undefined);
       toast.success('Задача отправлена на согласование.', 'Журнал задач');
       setQuickApprovalPromptTask(null);
@@ -3248,7 +3258,7 @@ export function TaskJournal({
       await refreshTasks();
       emitTaskChange();
     } catch (error) {
-      setQuickApprovalPromptError(extractDisplayErrorMessage(error, 'Не удалось отправить задачу на согласование.'));
+      setQuickApprovalPromptError(extractDisplayErrorMessage(error, 'Не удалось прикрепить файл или отправить задачу на согласование.'));
     } finally {
       setQuickApprovalPromptSaving(false);
     }
@@ -4484,7 +4494,7 @@ export function TaskJournal({
             }
           }}
           requireCompletionResult={requireCompletionResult}
-          onSubmit={() => void submitCompletionPrompt()}
+          onSubmit={(files) => void submitCompletionPrompt(files)}
           onClose={closeCompletionPrompt}
         />
       ) : null}
@@ -4503,7 +4513,7 @@ export function TaskJournal({
             }
           }}
           requireCompletionResult={requireCompletionResult}
-          onSubmit={() => void submitQuickApprovalPrompt()}
+          onSubmit={(files) => void submitQuickApprovalPrompt(files)}
           onClose={closeQuickApprovalPrompt}
         />
       ) : null}
@@ -4583,9 +4593,37 @@ function TaskCompletionResultPrompt({
   saving: boolean;
   requireCompletionResult: boolean;
   onResultChange: (value: string) => void;
-  onSubmit: () => void;
+  onSubmit: (files: File[]) => void;
   onClose: () => void;
 }) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [fileError, setFileError] = useState<string | null>(null);
+
+  const selectFiles = (files: FileList | null) => {
+    if (!files?.length) return;
+
+    const incoming = Array.from(files);
+    const invalidFile = incoming.find((file) => file.size <= 0 || file.size > MAX_TASK_COMPLETION_FILE_BYTES);
+    if (invalidFile) {
+      setFileError(
+        invalidFile.size <= 0
+          ? `Файл «${invalidFile.name}» пуст.`
+          : `Файл «${invalidFile.name}» превышает допустимый размер 25 МБ.`,
+      );
+      return;
+    }
+
+    setFileError(null);
+    setSelectedFiles((current) => {
+      const known = new Set(current.map((file) => `${file.name}:${file.size}:${file.lastModified}`));
+      return [
+        ...current,
+        ...incoming.filter((file) => !known.has(`${file.name}:${file.size}:${file.lastModified}`)),
+      ];
+    });
+  };
+
   return (
     <div className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-slate-900/40 px-3 py-4 backdrop-blur-sm sm:items-center sm:px-4 sm:py-6">
       <div className="max-h-[calc(100vh-2rem)] w-full max-w-[min(42rem,calc(100vw-1.5rem))] overflow-y-auto rounded-2xl bg-white p-4 shadow-2xl sm:p-6">
@@ -4617,10 +4655,63 @@ function TaskCompletionResultPrompt({
           rows={7}
           placeholder={TASK_COMPLETION_RESULT_HINT}
           autoFocus
+          disabled={saving}
         />
         <p className="mt-2 text-sm text-slate-500">
           {requireCompletionResult ? TASK_COMPLETION_RESULT_HINT : 'Можно оставить пустым, если результат не требуется.'}
         </p>
+        {task?.id ? (
+          <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="sr-only"
+              data-testid="task-completion-file-input"
+              onChange={(event) => {
+                selectFiles(event.currentTarget.files);
+                event.currentTarget.value = '';
+              }}
+              disabled={saving}
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={saving}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:text-blue-700 disabled:cursor-wait disabled:opacity-60"
+              >
+                <Paperclip className="h-4 w-4" />
+                Прикрепить файл
+              </button>
+              <span className="text-xs text-slate-500">До 25 МБ на файл. Можно выбрать несколько файлов.</span>
+            </div>
+            {selectedFiles.length > 0 ? (
+              <ul className="mt-3 space-y-2" aria-label="Файлы результата">
+                {selectedFiles.map((file) => {
+                  const key = `${file.name}:${file.size}:${file.lastModified}`;
+                  return (
+                    <li key={key} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                      <span className="min-w-0 truncate text-slate-700" title={file.name}>
+                        {file.name} <span className="text-xs text-slate-400">({formatFileSize(file.size)})</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedFiles((current) => current.filter((item) => `${item.name}:${item.size}:${item.lastModified}` !== key))}
+                        disabled={saving}
+                        className="shrink-0 rounded-md p-1 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600 disabled:cursor-wait disabled:opacity-60"
+                        aria-label={`Убрать файл ${file.name}`}
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
+            {fileError ? <p className="mt-2 text-sm font-semibold text-rose-600">{fileError}</p> : null}
+          </div>
+        ) : null}
         {error ? <p className="mt-2 text-sm font-semibold text-rose-600">{error}</p> : null}
 
         <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
@@ -4634,7 +4725,7 @@ function TaskCompletionResultPrompt({
           </button>
           <button
             type="button"
-            onClick={onSubmit}
+            onClick={() => onSubmit(selectedFiles)}
             disabled={saving}
             className="w-full rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60 sm:w-auto"
           >
@@ -7400,7 +7491,7 @@ function TaskModal({
     setApprovalResultPromptError(null);
   };
 
-  const submitApprovalResultPrompt = async () => {
+  const submitApprovalResultPrompt = async (files: File[]) => {
     if (!approvalResultPrompt || approvalResultPromptSaving) return;
 
     const normalizedResult = approvalResultPromptResult.trim();
@@ -7422,6 +7513,14 @@ function TaskModal({
     setResultError(null);
     setForm(nextForm);
     try {
+      const existingTaskId = approvalResultPrompt.taskId ?? state?.task?.id;
+      if (files.length > 0) {
+        if (!existingTaskId) {
+          setApprovalResultPromptError('Сначала сохраните задачу, затем прикрепите файл к результату.');
+          return;
+        }
+        await uploadTaskCompletionFiles(existingTaskId, files);
+      }
       if (isReadOnly && state?.task) {
         await onResultSave(state.task, nextForm.status, nextForm.result);
       } else {
@@ -7430,6 +7529,8 @@ function TaskModal({
       setApprovalResultPrompt(null);
       setApprovalResultPromptResult('');
       setApprovalResultPromptError(null);
+    } catch (error) {
+      setApprovalResultPromptError(extractDisplayErrorMessage(error, 'Не удалось прикрепить файл или сохранить результат задачи.'));
     } finally {
       setApprovalResultPromptSaving(false);
     }
@@ -8098,7 +8199,7 @@ function TaskModal({
           setApprovalResultPromptError(null);
         }
       }}
-      onSubmit={() => void submitApprovalResultPrompt()}
+      onSubmit={(files) => void submitApprovalResultPrompt(files)}
       onClose={closeApprovalResultPrompt}
     />
   ) : null;

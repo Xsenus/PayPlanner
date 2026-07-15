@@ -3948,6 +3948,59 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task UploadFile_AllowsExecutorWithPersonalCompletionAccess()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "upload-result-author@example.com", "Постановщик");
+        var assignee = await CreateTaskUserAsync(db, "upload-result-assignee@example.com", "Исполнитель", canEdit: false);
+        var client = await CreateClientAsync(db, "Клиент с итоговым файлом");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id);
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "tasks.executorCompletionAllowedUserIds",
+            Value = $"[{assignee.Id}]",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), assignee);
+
+        var result = await controller.UploadFile(
+            task.Id,
+            CreateFormFile("Итоговый документ", "результат.txt"),
+            null,
+            CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(result.Result);
+        var file = Assert.IsType<TaskJournalFileDto>(created.Value);
+        Assert.Equal(assignee.Id, file.UploadedByUserId);
+        Assert.Equal("результат.txt", file.OriginalFileName);
+
+        var adminController = CreateController(db, new RecordingNotificationService(), author);
+        Assert.IsType<NoContentResult>(await adminController.DeleteFile(task.Id, file.Id, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task UploadFile_ForbidsExecutorWithoutPersonalCompletionAccess()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "upload-forbidden-author@example.com", "Постановщик");
+        var assignee = await CreateTaskUserAsync(db, "upload-forbidden-assignee@example.com", "Исполнитель", canEdit: false);
+        var client = await CreateClientAsync(db, "Клиент без доступа к итоговым файлам");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id);
+        var controller = CreateController(db, new RecordingNotificationService(), assignee);
+
+        var result = await controller.UploadFile(
+            task.Id,
+            CreateFormFile("Попытка загрузки", "результат.txt"),
+            null,
+            CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result.Result);
+        Assert.Empty(await db.TaskJournalFiles.Where(item => item.TaskJournalItemId == task.Id).ToListAsync());
+    }
+
+    [Fact]
     public async Task UploadFile_CreatesDocumentVersionsAndHistory()
     {
         await using var db = await CreateContextAsync();

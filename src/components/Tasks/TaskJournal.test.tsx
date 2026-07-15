@@ -1191,6 +1191,23 @@ describe('TaskJournal', () => {
     ));
   });
 
+  it('keeps completion prompt open when result file upload fails', async () => {
+    apiMock.uploadTaskJournalFile.mockRejectedValueOnce(new Error('Файл не загрузился'));
+    await renderJournal([createTask({ id: 101, title: 'Задача с файлом', result: '' })], { waitForTitle: 'Задача с файлом' });
+
+    fireEvent.click(screen.getByTitle('Завершить'));
+    expect(await screen.findByRole('heading', { name: 'Добавить результат по задаче' })).toBeTruthy();
+
+    const resultFile = new File(['Результат'], 'итог.txt', { type: 'text/plain' });
+    fireEvent.change(screen.getByTestId('task-completion-file-input'), { target: { files: [resultFile] } });
+    fireEvent.change(document.getElementById('task-completion-result')!, { target: { value: 'Работа выполнена.' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Завершить задачу' }));
+
+    expect(await screen.findByText('Файл не загрузился')).toBeTruthy();
+    expect(apiMock.updateTaskJournalStatus).not.toHaveBeenCalled();
+    expect(screen.getByRole('heading', { name: 'Добавить результат по задаче' })).toBeTruthy();
+  });
+
   it('completes a task without result when completion result is optional', async () => {
     const task = createTask({ id: 101, title: 'Закрыть без результата', result: '' });
 
@@ -3570,16 +3587,24 @@ describe('TaskJournal', () => {
     fireEvent.click(completeButtons[completeButtons.length - 1]);
 
     expect(await screen.findByRole('heading', { name: 'Добавить результат по задаче' })).toBeTruthy();
+    const resultFile = new File(['Итоговый документ'], 'результат.pdf', { type: 'application/pdf' });
+    fireEvent.change(screen.getByTestId('task-completion-file-input'), {
+      target: { files: [resultFile] },
+    });
+    expect(screen.getByText('результат.pdf')).toBeTruthy();
     fireEvent.change(document.getElementById('task-completion-result')!, {
       target: { value: 'Работа выполнена, результат передан постановщику.' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Завершить задачу' }));
 
+    await waitFor(() => expect(apiMock.uploadTaskJournalFile).toHaveBeenCalledWith(101, resultFile));
     await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(
       101,
       'done',
       'Работа выполнена, результат передан постановщику.',
     ));
+    expect(apiMock.uploadTaskJournalFile.mock.invocationCallOrder[0])
+      .toBeLessThan(apiMock.updateTaskJournalStatus.mock.invocationCallOrder[0]);
     expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
     expect(apiMock.createTaskJournalDeadlineChangeRequest).not.toHaveBeenCalled();
   });

@@ -1817,7 +1817,8 @@ public class TasksController : ControllerBase
             return Forbid();
         }
 
-        if (ShouldRestrictExecutorFullEdit(entity, access, await GetTaskJournalSettingsAsync(ct)))
+        var settings = await GetTaskJournalSettingsAsync(ct);
+        if (!CanUploadTaskFile(entity, access, settings))
         {
             return Forbid();
         }
@@ -5484,6 +5485,20 @@ public class TasksController : ControllerBase
         }
 
         return CanPostTaskComment(entity, access);
+    }
+
+    private static bool CanUploadTaskFile(
+        TaskJournalItem entity,
+        TaskAccess access,
+        TaskJournalSettingsDto settings)
+    {
+        if (!ShouldRestrictExecutorFullEdit(entity, access, settings))
+        {
+            return true;
+        }
+
+        return IsTaskExecutor(entity, access.UserId)
+            && settings.ExecutorCompletionAllowedUserIds.Contains(access.UserId);
     }
 
     private static bool CanAdminForceCompleteTask(
