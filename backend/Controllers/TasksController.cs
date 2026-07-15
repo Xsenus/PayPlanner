@@ -2185,6 +2185,32 @@ public class TasksController : ControllerBase
             return BadRequest(new { message = participants.Error });
         }
 
+        var nextAuthorUserId = entity.AuthorUserId;
+        var nextAuthorName = entity.AuthorName;
+        var authorChanged = request.AuthorUserId.HasValue && request.AuthorUserId != entity.AuthorUserId;
+        if (authorChanged)
+        {
+            if (!access.IsAdmin)
+            {
+                return Forbid();
+            }
+
+            var nextAuthor = await _db.Users
+                .AsNoTracking()
+                .FirstOrDefaultAsync(user =>
+                    user.Id == request.AuthorUserId!.Value
+                    && user.IsActive
+                    && user.IsApproved,
+                    ct);
+            if (nextAuthor is null)
+            {
+                return BadRequest(new { message = "Выбранный постановщик не найден или неактивен." });
+            }
+
+            nextAuthorUserId = nextAuthor.Id;
+            nextAuthorName = BuildUserDisplayName(nextAuthor.FullName, nextAuthor.Email);
+        }
+
         var contractorPaymentValidation = await ValidateContractorPaymentRequestAsync(request, participants.PrimaryAssigneeUserId, ct);
         if (contractorPaymentValidation is not null)
         {
@@ -2216,7 +2242,8 @@ public class TasksController : ControllerBase
 
         var previousAssigneeUserId = entity.AssigneeUserId;
         var previousAssigneeName = entity.AssigneeName;
-        var changeLabels = BuildTaskChangeLabels(entity, request, binding, participants, nextStatus);
+        var changeLabels = BuildTaskChangeLabels(entity, request, binding, participants, nextStatus).ToList();
+        AddIfChanged(changeLabels, "Постановщик", entity.AuthorName, nextAuthorName);
         var assigneeChanged = HasTaskAssigneeChange(changeLabels);
         var changeComment = NormalizeOptional(request.ChangeComment);
         var updatedAt = DateTime.UtcNow;
@@ -2230,6 +2257,8 @@ public class TasksController : ControllerBase
         entity.Description = NormalizeOptional(request.Description);
         entity.AssigneeUserId = participants.PrimaryAssigneeUserId;
         entity.AssigneeName = participants.PrimaryAssigneeName;
+        entity.AuthorUserId = nextAuthorUserId;
+        entity.AuthorName = nextAuthorName;
         entity.DueAt = requestDueAt;
         entity.ApprovalDueAt = approvalDueAt;
         entity.PlannedDurationMinutes = NormalizeTaskDuration(request.PlannedDurationMinutes);
@@ -2253,6 +2282,19 @@ public class TasksController : ControllerBase
         foreach (var participant in participants.Items.Select(ToParticipantEntity))
         {
             entity.Participants.Add(participant);
+        }
+
+        if (authorChanged)
+        {
+            var pendingDeadlineRequests = await _db.TaskJournalDeadlineChangeRequests
+                .Where(item => item.TaskJournalItemId == entity.Id && item.Status == "pending")
+                .ToListAsync(ct);
+            foreach (var deadlineRequest in pendingDeadlineRequests)
+            {
+                deadlineRequest.ReviewerUserId = nextAuthorUserId;
+                deadlineRequest.ReviewerName = nextAuthorName;
+                deadlineRequest.UpdatedAt = updatedAt;
+            }
         }
 
         if (changeLabels.Count > 0)

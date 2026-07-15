@@ -1137,6 +1137,87 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task UpdateTask_AllowsAdminToChangeAuthorAndPendingDeadlineReviewer()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateAdminUserAsync(db, "author-change-admin@example.com", "Администратор");
+        var oldAuthor = await CreateAdminUserAsync(db, "author-change-old@example.com", "Старый постановщик");
+        var newAuthor = await CreateAdminUserAsync(db, "author-change-new@example.com", "Новый постановщик");
+        var assignee = await CreateAdminUserAsync(db, "author-change-assignee@example.com", "Исполнитель");
+        var client = await CreateClientAsync(db, "Клиент смены постановщика");
+        var task = await CreateTaskAsync(db, oldAuthor.Id, client.Id, assignee.Id);
+        db.TaskJournalDeadlineChangeRequests.Add(new TaskJournalDeadlineChangeRequest
+        {
+            TaskJournalItemId = task.Id,
+            RequestedByUserId = assignee.Id,
+            RequestedByName = assignee.FullName,
+            ReviewerUserId = oldAuthor.Id,
+            ReviewerName = oldAuthor.FullName,
+            CurrentDueAt = task.DueAt,
+            RequestedDueAt = task.DueAt.AddDays(1),
+            Reason = "Нужен дополнительный день.",
+            Status = "pending",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), admin);
+
+        var result = await controller.UpdateTask(task.Id, new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            Title = task.Title,
+            AssigneeUserId = assignee.Id,
+            AuthorUserId = newAuthor.Id,
+            DueAt = task.DueAt,
+            Status = task.Status,
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(ok.Value);
+        Assert.Equal(newAuthor.Id, dto.AuthorUserId);
+        Assert.Equal("Новый постановщик", dto.AuthorName);
+
+        var stored = await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id);
+        Assert.Equal(newAuthor.Id, stored.AuthorUserId);
+        Assert.Equal("Новый постановщик", stored.AuthorName);
+        var pendingRequest = await db.TaskJournalDeadlineChangeRequests.AsNoTracking().SingleAsync(item => item.TaskJournalItemId == task.Id);
+        Assert.Equal(newAuthor.Id, pendingRequest.ReviewerUserId);
+        Assert.Equal("Новый постановщик", pendingRequest.ReviewerName);
+        Assert.Contains(await db.TaskJournalComments.Where(item => item.TaskJournalItemId == task.Id).ToListAsync(), item =>
+            item.Kind == "system"
+            && item.Text.Contains("Постановщик", StringComparison.OrdinalIgnoreCase)
+            && item.Text.Contains("Новый постановщик", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task UpdateTask_ForbidsNonAdminFromChangingAuthor()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateTaskUserAsync(db, "author-change-user@example.com", "Постановщик", canEdit: true);
+        var newAuthor = await CreateTaskUserAsync(db, "author-change-target@example.com", "Другой постановщик", canEdit: true);
+        var assignee = await CreateTaskUserAsync(db, "author-change-worker@example.com", "Исполнитель", canEdit: true);
+        var client = await CreateClientAsync(db, "Клиент запрета смены постановщика");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id);
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.UpdateTask(task.Id, new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            Title = task.Title,
+            AssigneeUserId = assignee.Id,
+            AuthorUserId = newAuthor.Id,
+            DueAt = task.DueAt,
+            Status = task.Status,
+        }, CancellationToken.None);
+
+        Assert.IsType<ForbidResult>(result.Result);
+        var stored = await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id);
+        Assert.Equal(author.Id, stored.AuthorUserId);
+        Assert.Equal(task.AuthorName, stored.AuthorName);
+    }
+
+    [Fact]
     public async Task UpdateTask_WhenAssigneeChanges_NotifiesReassignment()
     {
         await using var db = await CreateContextAsync();

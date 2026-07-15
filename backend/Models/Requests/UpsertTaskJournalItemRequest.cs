@@ -11,6 +11,7 @@ public class UpsertTaskJournalItemRequest
     public string? Description { get; set; }
     public int? AssigneeUserId { get; set; }
     public string? AssigneeName { get; set; }
+    public int? AuthorUserId { get; set; }
     public DateTime DueAt { get; set; }
     public DateTime? ApprovalDueAt { get; set; }
     public int? PlannedDurationMinutes { get; set; }

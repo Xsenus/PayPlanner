@@ -570,6 +570,7 @@ const emptyForm = (
     description: '',
     assigneeUserId,
     assigneeName,
+    authorUserId: assigneeUserId ?? null,
     dueAt: toLocalInputValue(dueAt.toISOString()),
     approvalDueAt: null,
     plannedDurationMinutes: 60,
@@ -749,6 +750,7 @@ function taskToPayload(task: TaskJournalItem, overrides: Partial<TaskJournalUpse
     description: task.description,
     assigneeUserId: task.assigneeUserId ?? null,
     assigneeName: task.assigneeName,
+    authorUserId: task.authorUserId ?? null,
     dueAt: task.dueAt,
     approvalDueAt: task.approvalDueAt ?? null,
     plannedDurationMinutes: normalizeTaskDuration(task.plannedDurationMinutes),
@@ -1148,6 +1150,20 @@ function hasPendingDeadlineChangeRequestForApprovals(task: TaskJournalItem, user
   }
 
   return Boolean(userId && requests.some((request) => request.reviewerUserId === userId));
+}
+
+function getReviewableDeadlineChangeRequest(task: TaskJournalItem, userId: number | null, isAdminUser: boolean) {
+  return getPendingDeadlineChangeRequests(task)
+    .find((request) => isAdminUser || (userId !== null && request.reviewerUserId === userId)) ?? null;
+}
+
+function getReviewableApprovalParticipant(task: TaskJournalItem, userId: number | null) {
+  if (task.status !== 'onApproval' && task.status !== 'overdueApproval') {
+    return null;
+  }
+
+  const participant = getCurrentPendingApprover(task);
+  return userId !== null && participant?.userId === userId ? participant : null;
 }
 
 function isTaskInApprovalsScope(task: TaskJournalItem, userId: number | null, isAdminUser: boolean) {
@@ -2252,7 +2268,7 @@ export function TaskJournal({
       const settingsPromise = apiService.getTaskJournalSettings();
       const automationPromise = settingsPromise.then((settingsResponse) => loadAutomationCandidates(settingsResponse, searchRef.current));
       const [taskItems, assigneeResponse, settingsResponse, notificationDefaultsResponse, timeZoneResponse, calendarSyncSettingsResponse, automationResponse] = await Promise.all([
-        loadAllTaskJournalItems(contextFilter, underControlOnly, shouldUseCalendarVisibility, sortBy, sortDir, isApprovalsMode),
+        loadAllTaskJournalItems(contextFilter, underControlOnly, shouldUseCalendarVisibility, sortBy, sortDir, true),
         apiService.getTaskJournalAssignees({ calendarView: shouldUseCalendarVisibility }),
         settingsPromise,
         apiService.getUserSetting(TASK_NOTIFICATION_DEFAULTS_SETTING_KEY).catch(() => null),
@@ -2272,7 +2288,7 @@ export function TaskJournal({
     } finally {
       setLoading(false);
     }
-  }, [contextFilter, isApprovalsMode, loadAutomationCandidates, shouldUseCalendarVisibility, sortBy, sortDir, toast, underControlOnly]);
+  }, [contextFilter, loadAutomationCandidates, shouldUseCalendarVisibility, sortBy, sortDir, toast, underControlOnly]);
 
   useEffect(() => {
     void refreshTasks();
@@ -2713,8 +2729,6 @@ export function TaskJournal({
 
   useEffect(() => {
     if (!isApprovalsMode) {
-      setDeadlineChangeDecisionPrompt(null);
-      setDeadlineChangeDecisionDueAt('');
       return;
     }
 
@@ -2754,10 +2768,6 @@ export function TaskJournal({
 
   useEffect(() => {
     if (!isApprovalsMode) {
-      setApprovalDecisionPrompt(null);
-      setApprovalDecisionRevisionText('');
-      setApprovalDecisionRevisionDueAt('');
-      setApprovalDecisionError(null);
       return;
     }
 
@@ -3270,6 +3280,22 @@ export function TaskJournal({
     setDeadlineChangeDecisionComment('');
     setDeadlineChangeDecisionError(null);
     setDeadlineChangeDecisionSaving(null);
+  };
+
+  const openDeadlineChangeDecisionPrompt = (task: TaskJournalItem, request: TaskJournalDeadlineChangeRequest) => {
+    setDeadlineChangeDecisionPrompt({ task, request });
+    setDeadlineChangeDecisionDueAt(toLocalInputValue(request.requestedDueAt));
+    setDeadlineChangeDecisionComment('');
+    setDeadlineChangeDecisionError(null);
+    setDeadlineChangeDecisionSaving(null);
+  };
+
+  const openApprovalDecisionPrompt = (task: TaskJournalItem, participant: TaskJournalParticipant) => {
+    setApprovalDecisionPrompt({ task, participant });
+    setApprovalDecisionRevisionText('');
+    setApprovalDecisionRevisionDueAt('');
+    setApprovalDecisionError(null);
+    setApprovalDecisionSaving(null);
   };
 
   const snoozeDeadlineChangeDecisionPrompt = (minutes: number) => {
@@ -3822,6 +3848,7 @@ export function TaskJournal({
             counterpartyOptions={counterpartyOptions}
             currentUserId={currentUserId}
             currentUserName={currentUserName}
+            isAdminUser={isAdminUser}
             taskSettings={taskSettings}
             notificationDefaults={taskNotificationDefaults}
             canSwitchToEdit={canEditModalTask}
@@ -3833,6 +3860,14 @@ export function TaskJournal({
             onSave={handleSave}
             onResultSave={handleResultSave}
             onApprovalDecision={handleApprovalDecision}
+            onReviewDeadlineChange={(task, request) => {
+              closeTaskModal();
+              openDeadlineChangeDecisionPrompt(task, request);
+            }}
+            onReviewApproval={(task, participant) => {
+              closeTaskModal();
+              openApprovalDecisionPrompt(task, participant);
+            }}
             onDelete={handleDelete}
             onDuplicate={handleDuplicateTask}
           />
@@ -4350,6 +4385,8 @@ export function TaskJournal({
             onStatusChange={setTaskStatus}
             onToggleControl={toggleTaskControl}
             onDone={(task) => setTaskStatus(task, 'done')}
+            onReviewDeadlineChange={openDeadlineChangeDecisionPrompt}
+            onReviewApproval={openApprovalDecisionPrompt}
             sortBy={sortBy}
             sortDir={sortDir}
             onSortChange={handleSortChange}
@@ -4359,8 +4396,12 @@ export function TaskJournal({
           <TaskBoard
             columns={boardColumns}
             highlightedTaskId={highlightedTaskId}
+            currentUserId={currentUserId}
+            isAdminUser={isAdminUser}
             onEdit={openTaskEditor}
             onDone={(task) => setTaskStatus(task, 'done')}
+            onReviewDeadlineChange={openDeadlineChangeDecisionPrompt}
+            onReviewApproval={openApprovalDecisionPrompt}
             canCompleteTask={(task) => canCompleteTaskForCurrentUser(
               task,
               currentUserId,
@@ -4466,6 +4507,7 @@ export function TaskJournal({
           counterpartyOptions={counterpartyOptions}
           currentUserId={currentUserId}
           currentUserName={currentUserName}
+          isAdminUser={isAdminUser}
           taskSettings={taskSettings}
           notificationDefaults={taskNotificationDefaults}
           canSwitchToEdit={canEditModalTask}
@@ -4477,6 +4519,14 @@ export function TaskJournal({
           onSave={handleSave}
           onResultSave={handleResultSave}
           onApprovalDecision={handleApprovalDecision}
+          onReviewDeadlineChange={(task, request) => {
+            closeTaskModal();
+            openDeadlineChangeDecisionPrompt(task, request);
+          }}
+          onReviewApproval={(task, participant) => {
+            closeTaskModal();
+            openApprovalDecisionPrompt(task, participant);
+          }}
           onDelete={handleDelete}
           onDuplicate={handleDuplicateTask}
         />
@@ -5340,6 +5390,8 @@ function TaskTable({
   onStatusChange,
   onToggleControl,
   onDone,
+  onReviewDeadlineChange,
+  onReviewApproval,
   sortBy,
   sortDir,
   onSortChange,
@@ -5364,6 +5416,8 @@ function TaskTable({
   onStatusChange: (task: TaskJournalItem, status: TaskJournalStatus) => void;
   onToggleControl: (task: TaskJournalItem) => void;
   onDone: (task: TaskJournalItem) => void;
+  onReviewDeadlineChange: (task: TaskJournalItem, request: TaskJournalDeadlineChangeRequest) => void;
+  onReviewApproval: (task: TaskJournalItem, participant: TaskJournalParticipant) => void;
   sortBy: TaskJournalSortKey;
   sortDir: 'asc' | 'desc';
   onSortChange: (sortBy: TaskJournalSortKey) => void;
@@ -5441,6 +5495,8 @@ function TaskTable({
               const approvalSummary = getApprovalSummary(task);
               const pendingDeadlineRequests = getPendingDeadlineChangeRequests(task);
               const pendingDeadlineRequest = pendingDeadlineRequests[0] ?? null;
+              const reviewableDeadlineRequest = getReviewableDeadlineChangeRequest(task, currentUserId, isAdminUser);
+              const reviewableApprovalParticipant = getReviewableApprovalParticipant(task, currentUserId);
               const taskObservers = getTaskParticipants(task, 'observer');
               const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
               const canCompleteTask = canCompleteTaskForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
@@ -5608,6 +5664,28 @@ function TaskTable({
                   </td>
                   <td className={`sticky right-0 z-10 px-2 py-4 shadow-[-10px_0_18px_-18px_rgba(15,23,42,0.55)] sm:px-3 xl:px-4 ${isHighlighted ? 'bg-blue-50' : 'bg-white group-hover:bg-slate-50'}`}>
                     <div className="flex justify-end gap-2">
+                      {reviewableDeadlineRequest ? (
+                        <button
+                          type="button"
+                          onClick={() => onReviewDeadlineChange(task, reviewableDeadlineRequest)}
+                          className="rounded-xl p-2 text-amber-600 transition hover:bg-amber-50 hover:text-amber-700"
+                          title="Рассмотреть запрос переноса срока"
+                          aria-label="Рассмотреть запрос переноса срока"
+                        >
+                          <TimerReset className="h-4 w-4" />
+                        </button>
+                      ) : null}
+                      {reviewableApprovalParticipant ? (
+                        <button
+                          type="button"
+                          onClick={() => onReviewApproval(task, reviewableApprovalParticipant)}
+                          className="rounded-xl p-2 text-violet-600 transition hover:bg-violet-50 hover:text-violet-700"
+                          title="Рассмотреть согласование"
+                          aria-label="Рассмотреть согласование"
+                        >
+                          <Scale className="h-4 w-4" />
+                        </button>
+                      ) : null}
                       {isTaskJournalActive(task.status) && task.status !== 'inProgress' ? (
                         <button type="button" onClick={() => onStatusChange(task, 'inProgress')} className="rounded-xl p-2 text-blue-600 transition hover:bg-blue-50 hover:text-blue-700" title="Принять в работу">
                           <Play className="h-4 w-4" />
@@ -5651,14 +5729,22 @@ function TaskTable({
 function TaskBoard({
   columns,
   highlightedTaskId,
+  currentUserId,
+  isAdminUser,
   onEdit,
   onDone,
+  onReviewDeadlineChange,
+  onReviewApproval,
   canCompleteTask,
 }: {
   columns: Array<{ key: string; title: string; tone: string; items: TaskJournalItem[] }>;
   highlightedTaskId: number | null;
+  currentUserId: number | null;
+  isAdminUser: boolean;
   onEdit: (task: TaskJournalItem) => void;
   onDone: (task: TaskJournalItem) => void;
+  onReviewDeadlineChange: (task: TaskJournalItem, request: TaskJournalDeadlineChangeRequest) => void;
+  onReviewApproval: (task: TaskJournalItem, participant: TaskJournalParticipant) => void;
   canCompleteTask: (task: TaskJournalItem) => boolean;
 }) {
   return (
@@ -5679,6 +5765,8 @@ function TaskBoard({
             ) : column.items.map((task) => {
               const TypeIcon = getTypeMeta(task.type).icon;
               const isHighlighted = highlightedTaskId === task.id;
+              const reviewableDeadlineRequest = getReviewableDeadlineChangeRequest(task, currentUserId, isAdminUser);
+              const reviewableApprovalParticipant = getReviewableApprovalParticipant(task, currentUserId);
               return (
                 <article
                   key={task.id}
@@ -5715,6 +5803,26 @@ function TaskBoard({
                     <span>•</span>
                     {formatDuration(task.plannedDurationMinutes)}
                   </div>
+                  {reviewableDeadlineRequest ? (
+                    <button
+                      type="button"
+                      onClick={() => onReviewDeadlineChange(task, reviewableDeadlineRequest)}
+                      className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-amber-200 px-3 py-2 text-sm font-semibold text-amber-700 transition hover:bg-amber-50"
+                    >
+                      <TimerReset className="h-4 w-4" />
+                      Рассмотреть перенос срока
+                    </button>
+                  ) : null}
+                  {reviewableApprovalParticipant ? (
+                    <button
+                      type="button"
+                      onClick={() => onReviewApproval(task, reviewableApprovalParticipant)}
+                      className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-violet-200 px-3 py-2 text-sm font-semibold text-violet-700 transition hover:bg-violet-50"
+                    >
+                      <Scale className="h-4 w-4" />
+                      Рассмотреть согласование
+                    </button>
+                  ) : null}
                   {canCompleteTask(task) ? (
                     <button
                       type="button"
@@ -7010,6 +7118,7 @@ type TaskModalProps = {
   counterpartyOptions: LookupSelectOption[];
   currentUserId: number | null;
   currentUserName: string;
+  isAdminUser: boolean;
   taskSettings: TaskJournalSettingsDto;
   notificationDefaults: TaskNotificationDefaults;
   canSwitchToEdit: boolean;
@@ -7028,6 +7137,8 @@ type TaskModalProps = {
     finalAction?: TaskApprovalFinalAction,
     revisionDueAt?: string | null,
   ) => boolean | void | Promise<boolean | void>;
+  onReviewDeadlineChange: (task: TaskJournalItem, request: TaskJournalDeadlineChangeRequest) => void;
+  onReviewApproval: (task: TaskJournalItem, participant: TaskJournalParticipant) => void;
   onDelete: (task: TaskJournalItem) => boolean | Promise<boolean>;
   onDuplicate: (task: TaskJournalItem) => boolean | Promise<boolean>;
 };
@@ -7048,6 +7159,7 @@ function TaskModal({
   counterpartyOptions,
   currentUserId,
   currentUserName,
+  isAdminUser,
   taskSettings,
   notificationDefaults,
   canSwitchToEdit,
@@ -7059,6 +7171,8 @@ function TaskModal({
   onSave,
   onResultSave,
   onApprovalDecision,
+  onReviewDeadlineChange,
+  onReviewApproval,
   onDelete,
   onDuplicate,
 }: TaskModalProps) {
@@ -7083,6 +7197,7 @@ function TaskModal({
         description: state.task.description,
         assigneeUserId: state.task.assigneeUserId,
         assigneeName: state.task.assigneeName,
+        authorUserId: state.task.authorUserId ?? null,
         dueAt: state.task.dueAt,
         approvalDueAt: state.task.approvalDueAt ?? null,
         contractorPaymentEnabled: Boolean(state.task.contractorPaymentEnabled),
@@ -7273,7 +7388,10 @@ function TaskModal({
       ),
   );
   const canManageFiles = Boolean(taskId && !isReadOnly);
-  const taskAuthorLabel = state?.task ? getTaskAuthorName(state.task) : currentUserName || 'Текущий пользователь';
+  const selectedTaskAuthor = assignees.find((assignee) => assignee.id === form.authorUserId);
+  const taskAuthorLabel = selectedTaskAuthor?.name
+    || (state?.task ? getTaskAuthorName(state.task) : currentUserName)
+    || 'Текущий пользователь';
 
   const update = <K extends keyof TaskForm>(key: K, value: TaskForm[K]) => {
     if (isReadOnly && key !== 'result') return;
@@ -8254,6 +8372,18 @@ function TaskModal({
               <div className="mt-2 rounded-md bg-amber-50 px-2 py-2 text-sm leading-5 text-amber-900">
                 <span className="font-semibold">Причина:</span> {request.reason || 'Не указана'}
               </div>
+              {request.status === 'pending'
+                && state?.task
+                && (isAdminUser || (currentUserId !== null && request.reviewerUserId === currentUserId)) ? (
+                  <button
+                    type="button"
+                    onClick={() => onReviewDeadlineChange(state.task!, request)}
+                    className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-amber-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-amber-700"
+                  >
+                    <TimerReset className="h-4 w-4" />
+                    Рассмотреть запрос: согласовать или отказать
+                  </button>
+                ) : null}
               {request.decisionComment ? (
                 <div className="mt-2 rounded-md bg-slate-50 px-2 py-2 text-sm leading-5 text-slate-700">
                   <span className="font-semibold">Решение:</span> {request.decisionComment}
@@ -8592,6 +8722,24 @@ function TaskModal({
                     ))}
                   </select>
                 </ModernTaskQuickField>
+                {state?.task ? (
+                  <ModernTaskQuickField icon={<Pencil className="h-4 w-4" />} label="Постановщик">
+                    <select
+                      value={form.authorUserId ?? ''}
+                      onChange={(event) => update('authorUserId', Number(event.target.value) || null)}
+                      disabled={isReadOnly || !isAdminUser}
+                      data-testid="task-author-select"
+                      className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white disabled:text-slate-500"
+                    >
+                      {form.authorUserId && !selectedTaskAuthor ? (
+                        <option value={form.authorUserId}>{taskAuthorLabel}</option>
+                      ) : null}
+                      {assignees.map((assignee) => (
+                        <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
+                      ))}
+                    </select>
+                  </ModernTaskQuickField>
+                ) : null}
                 <ModernTaskQuickField icon={<CalendarClock className="h-4 w-4" />} label="Дата">
                   <input
                     type="datetime-local"
@@ -8835,6 +8983,14 @@ function TaskModal({
                   <div className="mt-1 text-xs text-emerald-700">
                     Сейчас решение ожидается от вас.
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => state?.task && currentApprovalParticipant && onReviewApproval(state.task, currentApprovalParticipant)}
+                    className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-violet-200 bg-white px-3 py-2 text-sm font-semibold text-violet-700 transition hover:bg-violet-50"
+                  >
+                    <Scale className="h-4 w-4" />
+                    Открыть окно согласования
+                  </button>
                   <div className="mt-3 grid gap-2">
                     <button
                       type="button"
@@ -9167,13 +9323,30 @@ function TaskModal({
                 ))}
               </select>
             </Field>
-            <Field label="Поручил">
-              <input
-                value={taskAuthorLabel}
-                disabled
-                data-testid="task-author-display"
-                className="form-input bg-slate-50 text-slate-600"
-              />
+            <Field label="Постановщик">
+              {state?.task && isAdminUser ? (
+                <select
+                  value={form.authorUserId ?? ''}
+                  onChange={(event) => update('authorUserId', Number(event.target.value) || null)}
+                  disabled={isReadOnly}
+                  data-testid="task-author-select"
+                  className="form-input disabled:bg-slate-50 disabled:text-slate-600"
+                >
+                  {form.authorUserId && !selectedTaskAuthor ? (
+                    <option value={form.authorUserId}>{taskAuthorLabel}</option>
+                  ) : null}
+                  {assignees.map((assignee) => (
+                    <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  value={taskAuthorLabel}
+                  disabled
+                  data-testid="task-author-display"
+                  className="form-input bg-slate-50 text-slate-600"
+                />
+              )}
             </Field>
             <Field label="Имя исполнителя">
               <input value={form.assigneeName} onChange={(event) => update('assigneeName', event.target.value)} disabled={isReadOnly} className="form-input" />
@@ -9478,7 +9651,14 @@ function TaskModal({
                             {participant.resolution ? <div className="mt-1 text-xs text-slate-500">{participant.resolution}</div> : null}
                           </div>
                           {isCurrentApprover && participant.approvalStatus !== 'approved' ? (
-                            <div className="flex shrink-0 gap-2">
+                            <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={() => state?.task && onReviewApproval(state.task, participant)}
+                                className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:bg-violet-100"
+                              >
+                                Открыть окно решения
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => handleApproveParticipant(participant)}

@@ -828,7 +828,32 @@ describe('TaskJournal', () => {
     fireEvent.click(screen.getAllByTitle('Просмотр')[0]);
     await screen.findByRole('heading', { name: 'Просмотр задачи' });
 
-    expect((screen.getByTestId('task-author-display') as HTMLInputElement).value).toBe('Диденко Анна Владимировна');
+    expect((screen.getByTestId('task-author-select') as HTMLSelectElement).selectedOptions[0]?.textContent).toBe('Диденко Анна Владимировна');
+  });
+
+  it.each(['legacy', 'modern'] as const)('allows an administrator to change the task author in the %s task card', async (taskCardWindowMode) => {
+    await renderJournal([
+      createTask({
+        authorUserId: 8,
+        authorName: 'Старый постановщик',
+      }),
+    ], {
+      settings: { taskCardWindowMode },
+      assignees: [
+        { id: 7, name: 'Администратор', email: 'admin@example.com' },
+        { id: 8, name: 'Старый постановщик', email: 'old-author@example.com' },
+        { id: 9, name: 'Новый постановщик', email: 'new-author@example.com' },
+      ],
+    });
+
+    await openFirstTaskForEdit();
+    const card = screen.getByTestId(`task-${taskCardWindowMode}-card-window`);
+    fireEvent.change(within(card).getByTestId('task-author-select'), { target: { value: '9' } });
+    fireEvent.click(within(card).getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledWith(101, expect.objectContaining({
+      authorUserId: 9,
+    })));
   });
 
   it('opens an existing task as a full page when the route is synced', async () => {
@@ -1476,6 +1501,48 @@ describe('TaskJournal', () => {
     }));
   });
 
+  it('opens the deadline change decision from a journal row without entering the task', async () => {
+    authState.isAdmin = false;
+    authState.user = { id: 8, fullName: 'Постановщик', email: 'author@example.com' };
+    const task = createTask({
+      id: 207,
+      title: 'Быстро рассмотреть перенос',
+      authorUserId: 8,
+      assigneeUserId: 7,
+      activeDeadlineChangeRequests: [{
+        id: 903,
+        taskJournalItemId: 207,
+        requestedByUserId: 7,
+        requestedByName: 'Исполнитель',
+        reviewerUserId: 8,
+        reviewerName: 'Постановщик',
+        currentDueAt: todayAt(18),
+        requestedDueAt: todayAt(20),
+        reason: 'Ожидаем документы',
+        status: 'pending',
+        decisionDueAt: null,
+        decisionComment: null,
+        decidedByUserId: null,
+        decidedByName: null,
+        decidedAt: null,
+        createdCommentId: 501,
+        decisionCommentId: null,
+        createdAt: todayAt(12),
+        updatedAt: todayAt(12),
+      }],
+    });
+
+    await renderJournal([task], { waitForTitle: task.title });
+
+    expect(apiMock.getTaskJournalItems).toHaveBeenCalledWith(expect.objectContaining({ includeDeadlineChangeRequests: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Рассмотреть запрос переноса срока' }));
+
+    const prompt = await screen.findByTestId('deadline-change-decision-prompt');
+    expect(within(prompt).getByText('Ожидаем документы')).toBeTruthy();
+    expect(within(prompt).getByRole('button', { name: 'Согласовать перенос' })).toBeTruthy();
+    expect(within(prompt).getByRole('button', { name: 'Отказать' })).toBeTruthy();
+  });
+
   it('lets the reviewer snooze a deadline change decision in the approvals journal', async () => {
     authState.isAdmin = false;
     authState.user = { id: 8, fullName: 'Постановщик', email: 'author@example.com' };
@@ -1537,6 +1604,27 @@ describe('TaskJournal', () => {
 
     expect(screen.queryByRole('button', { name: 'Согласовать' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'На доработку' })).toBeNull();
+  });
+
+  it('opens the work approval window from a journal row without entering the task', async () => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Согласующий', email: 'approver@example.com' };
+    permissionsState.taskCanEdit = false;
+    const task = createTask({
+      status: 'onApproval',
+      result: 'Работа сдана исполнителем.',
+      participants: [
+        { id: 78, userId: 7, role: 'approver', displayName: 'Согласующий', sortOrder: 0, approvalStatus: 'pending' },
+      ],
+    });
+
+    await renderJournal([task]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Рассмотреть согласование' }));
+    const prompt = await screen.findByTestId('task-approval-decision-prompt');
+    expect(within(prompt).getByText('Работа сдана исполнителем.')).toBeTruthy();
+    expect(within(prompt).getByRole('button', { name: 'Согласовать и завершить' })).toBeTruthy();
+    expect(within(prompt).getByRole('button', { name: 'Вернуть на доработку' })).toBeTruthy();
   });
 
   it('shows a forced approval decision prompt for the current approver in approvals mode', async () => {
@@ -1699,6 +1787,29 @@ describe('TaskJournal', () => {
       77,
       'complete',
     ));
+  });
+
+  it.each(['legacy', 'modern'] as const)('opens the shared approval window from the %s task card', async (taskCardWindowMode) => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Согласующий', email: 'approver@example.com' };
+    permissionsState.taskCanEdit = false;
+    await renderJournal([
+      createTask({
+        status: 'onApproval',
+        result: 'Итог работы передан на проверку.',
+        participants: [
+          { id: 79, userId: 7, role: 'approver', displayName: 'Согласующий', sortOrder: 0, approvalStatus: 'pending' },
+        ],
+      }),
+    ], { settings: { taskCardWindowMode } });
+
+    fireEvent.click(screen.getByTitle('Просмотр'));
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    const buttonName = taskCardWindowMode === 'modern' ? 'Открыть окно согласования' : 'Открыть окно решения';
+    fireEvent.click(within(card).getByRole('button', { name: buttonName }));
+
+    const prompt = await screen.findByTestId('task-approval-decision-prompt');
+    expect(within(prompt).getByText('Итог работы передан на проверку.')).toBeTruthy();
   });
 
   it('lets the current final approver choose whether to complete the task from view mode', async () => {
@@ -3706,6 +3817,42 @@ describe('TaskJournal', () => {
     expect(within(requestsSection).getByText('Исполнитель')).toBeTruthy();
     expect(within(requestsSection).getByText('Ожидает решения: Постановщик')).toBeTruthy();
     expect(within(requestsSection).getByText(/Нужно дождаться документы от клиента/)).toBeTruthy();
+  });
+
+  it.each(['legacy', 'modern'] as const)('opens the deadline decision window from the %s task card', async (taskCardWindowMode) => {
+    authState.isAdmin = false;
+    authState.user = { id: 8, fullName: 'Постановщик', email: 'author@example.com' };
+    apiMock.getTaskJournalDeadlineChangeRequests.mockResolvedValue([{
+      id: 904,
+      taskJournalItemId: 101,
+      requestedByUserId: 7,
+      requestedByName: 'Исполнитель',
+      reviewerUserId: 8,
+      reviewerName: 'Постановщик',
+      currentDueAt: todayAt(18),
+      requestedDueAt: todayAt(20),
+      reason: 'Нужно получить ответ суда',
+      status: 'pending',
+      decisionDueAt: null,
+      decisionComment: null,
+      decidedByUserId: null,
+      decidedByName: null,
+      decidedAt: null,
+      createdCommentId: 501,
+      decisionCommentId: null,
+      createdAt: todayAt(12),
+      updatedAt: todayAt(12),
+    }]);
+
+    await renderJournal([createTask({ authorUserId: 8, authorName: 'Постановщик' })], {
+      settings: { taskCardWindowMode },
+    });
+    fireEvent.click(screen.getByTitle('Просмотр'));
+    const section = await screen.findByTestId('task-deadline-change-requests');
+    fireEvent.click(within(section).getByRole('button', { name: 'Рассмотреть запрос: согласовать или отказать' }));
+
+    const prompt = await screen.findByTestId('deadline-change-decision-prompt');
+    expect(within(prompt).getByText('Нужно получить ответ суда')).toBeTruthy();
   });
 
   it('renders task calendar as a journal subgroup', async () => {

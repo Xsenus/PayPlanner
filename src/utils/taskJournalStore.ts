@@ -224,6 +224,7 @@ export interface TaskJournalAutomationCreateResult {
 export type TaskJournalUpsertPayload = Omit<TaskJournalItem, 'id' | 'createdAt' | 'updatedAt' | 'authorUserId' | 'authorName'> & {
   changeComment?: string | null;
   isInternal?: boolean;
+  authorUserId?: number | null;
 };
 
 export interface TaskJournalBulkUpdatePayload {
