@@ -78,4 +78,20 @@ public class QueryExtensionsSortTests
 
         Assert.Equal([1, 2], sorted.Select(payment => payment.Id).ToArray());
     }
+
+    [Fact]
+    public void ApplyPaymentSort_UsesAscendingIdForEqualDatesInDescendingJournal()
+    {
+        var sharedDate = new DateTime(2026, 7, 17);
+        var payments = new[]
+        {
+            new Payment { Id = 3, Date = sharedDate },
+            new Payment { Id = 1, Date = sharedDate },
+            new Payment { Id = 2, Date = sharedDate.AddDays(1) },
+        };
+
+        var sorted = payments.AsQueryable().ApplyPaymentSort("date", "desc").ToList();
+
+        Assert.Equal([2, 1, 3], sorted.Select(payment => payment.Id).ToArray());
+    }
 }

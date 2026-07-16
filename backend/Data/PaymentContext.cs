@@ -3055,6 +3055,14 @@ public class PaymentContext : DbContext
             ConfigureAudit<LegalEntity>(modelBuilder);
             ConfigureAudit<MoneyOperation>(modelBuilder);
             ConfigureAudit<Payment>(modelBuilder);
+            modelBuilder.Entity<Payment>()
+                .HasIndex("IsDeleted", nameof(Payment.Date), nameof(Payment.Id))
+                .IsDescending(false, true, false)
+                .HasDatabaseName("IX_Payments_IsDeleted_Date_Id");
+            modelBuilder.Entity<Payment>()
+                .HasIndex("IsDeleted", nameof(Payment.Status), nameof(Payment.Date), nameof(Payment.Id))
+                .IsDescending(false, false, true, false)
+                .HasDatabaseName("IX_Payments_IsDeleted_Status_Date_Id");
             ConfigureAudit<PowerOfAttorney>(modelBuilder);
             ConfigureAudit<CashOrder>(modelBuilder);
             ConfigureAudit<CashInventory>(modelBuilder);
