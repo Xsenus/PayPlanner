@@ -151,7 +151,7 @@ public class TasksController : ControllerBase
         }
 
         var query = ApplyTaskJournalFilters(
-            BuildVisibleTasksQuery(access),
+            BuildVisibleTasksQuery(access).AsNoTracking(),
             search,
             status,
             type,
@@ -205,14 +205,16 @@ public class TasksController : ControllerBase
 
         var now = DateTime.UtcNow;
         var soon = now.AddHours(1);
-        var dueTasks = await BuildVisibleTasksQuery(access)
+        var dueTasks = await BuildVisibleTaskBaseQuery(access)
+            .AsNoTracking()
             .Where(task => task.Status != "done" && task.Status != "cancelled" && task.DueAt <= soon)
             .OrderBy(task => task.DueAt)
             .Take(20)
             .ToListAsync(ct);
 
         var completedSince = now.AddDays(-7);
-        var completedTasks = await BuildVisibleTasksQuery(access)
+        var completedTasks = await BuildVisibleTaskBaseQuery(access)
+            .AsNoTracking()
             .Where(task =>
                 task.Status == "done"
                 && task.AuthorUserId == access.UserId
@@ -1395,7 +1397,9 @@ public class TasksController : ControllerBase
             return Forbid();
         }
 
-        var task = await BuildVisibleTasksQuery(access).FirstOrDefaultAsync(item => item.Id == id, ct);
+        var task = await BuildVisibleTasksQuery(access)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == id, ct);
         return task is null ? NotFound() : Ok(Map(task));
     }
 
@@ -3725,19 +3729,19 @@ public class TasksController : ControllerBase
 
     private IQueryable<TaskJournalItem> BuildVisibleTasksQuery(TaskAccess access)
     {
-        var query = _db.TaskJournalItems
+        return BuildVisibleTaskBaseQuery(access)
             .Include(task => task.Client)
             .Include(task => task.LegalEntity)
             .Include(task => task.ClientCase)
             .Include(task => task.BillingContract)
             .Include(task => task.BillingInvoice)
-            .Include(task => task.AssigneeUser)
             .Include(task => task.ContractorPayment)
             .Include(task => task.Participants)
-                .ThenInclude(participant => participant.User)
             .AsQueryable();
-        return query.ApplyTaskVisibility(access.Visibility);
     }
+
+    private IQueryable<TaskJournalItem> BuildVisibleTaskBaseQuery(TaskAccess access)
+        => _db.TaskJournalItems.ApplyTaskVisibility(access.Visibility);
 
     private async Task<TaskAccess?> GetTaskAccessAsync(CancellationToken ct, string section = RolePermissionCatalog.Tasks)
     {

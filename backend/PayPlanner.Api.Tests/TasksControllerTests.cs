@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
@@ -5,6 +6,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -2245,6 +2247,83 @@ public class TasksControllerTests
         Assert.Equal(task.Id, dto.Id);
         Assert.Equal(client.Id, dto.ClientId);
         Assert.Equal(clientCase.Id, dto.ClientCaseId);
+    }
+
+    [Fact]
+    public async Task TaskReadEndpoints_DoNotTrackEntitiesOrLoadUnusedUserProfiles()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var author = await CreateAdminUserAsync(db, "task-read-author@example.com", "Автор чтения");
+        var assignee = await CreateAdminUserAsync(db, "task-read-assignee@example.com", "Исполнитель чтения");
+        var observer = await CreateAdminUserAsync(db, "task-read-observer@example.com", "Наблюдатель чтения");
+        var client = await CreateClientAsync(db, "Клиент чтения");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id);
+        task.Participants.Add(new TaskJournalParticipant
+        {
+            UserId = observer.Id,
+            Role = "observer",
+            DisplayName = observer.FullName,
+            Email = observer.Email,
+            ApprovalStatus = "pending",
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        db.ChangeTracker.Clear();
+        interceptor.Commands.Clear();
+        var listResult = await controller.GetTasks(
+            search: null,
+            status: null,
+            type: null,
+            assigneeUserId: null,
+            from: null,
+            to: null,
+            page: 1,
+            pageSize: 50,
+            ct: CancellationToken.None);
+        var listPage = Assert.IsType<PagedResponse<TaskJournalItemDto>>(Assert.IsType<OkObjectResult>(listResult.Result).Value);
+        var listItem = Assert.Single(listPage.Items);
+
+        Assert.Equal(task.Id, listItem.Id);
+        Assert.Equal(assignee.Id, listItem.AssigneeUserId);
+        Assert.Equal(observer.Id, Assert.Single(listItem.Participants).UserId);
+        Assert.Empty(db.ChangeTracker.Entries<TaskJournalItem>());
+        Assert.Empty(db.ChangeTracker.Entries<TaskJournalParticipant>());
+        var listDataQueries = interceptor.Commands
+            .Where(command => command.Contains("TaskJournalItems", StringComparison.Ordinal) &&
+                              command.Contains("LIMIT", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        Assert.NotEmpty(listDataQueries);
+        Assert.All(listDataQueries, command => Assert.DoesNotContain("JOIN \"Users\"", command, StringComparison.Ordinal));
+
+        db.ChangeTracker.Clear();
+        interceptor.Commands.Clear();
+        var detailResult = await controller.GetTask(task.Id, CancellationToken.None);
+        var detail = Assert.IsType<TaskJournalItemDto>(Assert.IsType<OkObjectResult>(detailResult.Result).Value);
+        Assert.Equal(task.Id, detail.Id);
+        Assert.Equal(observer.Id, Assert.Single(detail.Participants).UserId);
+        Assert.Empty(db.ChangeTracker.Entries<TaskJournalItem>());
+        Assert.Empty(db.ChangeTracker.Entries<TaskJournalParticipant>());
+
+        db.ChangeTracker.Clear();
+        interceptor.Commands.Clear();
+        var notificationsResult = await controller.GetNotifications(CancellationToken.None);
+        var notifications = Assert.IsAssignableFrom<IReadOnlyList<TaskJournalNotificationDto>>(
+            Assert.IsType<OkObjectResult>(notificationsResult.Result).Value);
+        Assert.Contains(notifications, item => item.TaskId == task.Id);
+        Assert.Empty(db.ChangeTracker.Entries<TaskJournalItem>());
+        Assert.Empty(db.ChangeTracker.Entries<TaskJournalParticipant>());
+        var notificationTaskQueries = interceptor.Commands
+            .Where(command => command.Contains("FROM \"TaskJournalItems\"", StringComparison.Ordinal))
+            .ToList();
+        Assert.Equal(2, notificationTaskQueries.Count);
+        Assert.All(notificationTaskQueries, command =>
+        {
+            Assert.DoesNotContain("JOIN \"Users\"", command, StringComparison.Ordinal);
+            Assert.DoesNotContain("JOIN \"Clients\"", command, StringComparison.Ordinal);
+            Assert.DoesNotContain("JOIN \"TaskJournalParticipants\"", command, StringComparison.Ordinal);
+        });
     }
 
     [Fact]
@@ -5553,13 +5632,23 @@ public class TasksControllerTests
             },
         };
 
-    private static async Task<PaymentContext> CreateContextAsync()
+    private static async Task<PaymentContext> CreateContextAsync(DbCommandInterceptor? interceptor = null)
     {
         var connection = new SqliteConnection("DataSource=:memory:");
         await connection.OpenAsync();
-        var options = new DbContextOptionsBuilder<PaymentContext>()
-            .UseSqlite(connection)
-            .Options;
+        var optionsBuilder = new DbContextOptionsBuilder<PaymentContext>();
+        if (interceptor is null)
+        {
+            optionsBuilder.UseSqlite(connection);
+        }
+        else
+        {
+            optionsBuilder
+                .UseSqlite(connection, sqlite => sqlite.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery))
+                .AddInterceptors(interceptor);
+        }
+
+        var options = optionsBuilder.Options;
         var db = new PaymentContext(options);
         await db.Database.EnsureCreatedAsync();
         return db;
@@ -5799,6 +5888,21 @@ public class TasksControllerTests
         var property = value?.GetType().GetProperty(propertyName);
         Assert.NotNull(property);
         return Assert.IsType<int>(property.GetValue(value));
+    }
+
+    private sealed class RecordingCommandInterceptor : DbCommandInterceptor
+    {
+        public List<string> Commands { get; } = [];
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            Commands.Add(command.CommandText);
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
     }
 
     private sealed class FakeInvoiceDocumentPdfService : IInvoiceDocumentPdfService
