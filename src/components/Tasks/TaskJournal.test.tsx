@@ -3888,6 +3888,7 @@ describe('TaskJournal', () => {
       }),
     ], { settings: { taskCardWindowMode } });
 
+    expect(screen.queryByTitle('Принять в работу')).toBeNull();
     fireEvent.click(screen.getByTitle('Просмотр'));
     const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
 

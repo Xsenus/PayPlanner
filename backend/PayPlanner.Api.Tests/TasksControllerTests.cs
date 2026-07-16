@@ -1476,6 +1476,18 @@ public class TasksControllerTests
         }, CancellationToken.None);
         Assert.IsType<OkObjectResult>(update.Result);
 
+        var statusChange = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "inProgress",
+        }, CancellationToken.None);
+        Assert.IsType<OkObjectResult>(statusChange.Result);
+
+        var controlChange = await controller.UpdateControl(task.Id, new UpdateTaskJournalControlRequest
+        {
+            IsUnderControl = true,
+        }, CancellationToken.None);
+        Assert.IsType<OkObjectResult>(controlChange.Result);
+
         var completion = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
         {
             Status = "done",
@@ -1486,6 +1498,38 @@ public class TasksControllerTests
         var deletion = await controller.DeleteTask(task.Id, CancellationToken.None);
         Assert.IsType<ForbidResult>(deletion);
         Assert.True(await db.TaskJournalItems.AnyAsync(item => item.Id == task.Id));
+    }
+
+    [Fact]
+    public async Task OtherTaskPermissions_BaseEditDoesNotBypassForeignTaskRules()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateAdminUserAsync(db, "other-task-owner-base-edit@example.com", "Владелец задачи");
+        var specialist = await CreateTaskUserAsync(
+            db,
+            "other-task-base-editor@example.com",
+            "Специалист без прав на чужие задачи",
+            canEdit: true,
+            viewScope: DataVisibilityScope.All);
+        var client = await CreateClientAsync(db, "Клиент чужой задачи без специальных прав");
+        var task = await CreateTaskAsync(db, owner.Id, client.Id, owner.Id);
+        var controller = CreateController(db, new RecordingNotificationService(), specialist);
+
+        var statusChange = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "inProgress",
+        }, CancellationToken.None);
+        Assert.IsType<ForbidResult>(statusChange.Result);
+
+        var controlChange = await controller.UpdateControl(task.Id, new UpdateTaskJournalControlRequest
+        {
+            IsUnderControl = true,
+        }, CancellationToken.None);
+        Assert.IsType<ForbidResult>(controlChange.Result);
+
+        var stored = await db.TaskJournalItems.AsNoTracking().SingleAsync(item => item.Id == task.Id);
+        Assert.Equal("new", stored.Status);
+        Assert.False(stored.IsUnderControl);
     }
 
     [Fact]

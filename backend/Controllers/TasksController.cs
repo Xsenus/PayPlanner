@@ -2622,8 +2622,7 @@ public class TasksController : ControllerBase
 
         if (!access.IsAdmin
             && access.Permission?.CanEdit != true
-            && access.Permission?.CanEditOthers != true
-            && access.Permission?.CanCompleteOthers != true)
+            && access.Permission?.CanEditOthers != true)
         {
             return Forbid();
         }
@@ -2632,6 +2631,17 @@ public class TasksController : ControllerBase
         if (entity is null)
         {
             return NotFound();
+        }
+
+        var settings = await GetTaskJournalSettingsAsync(ct);
+        if (!CanFullyModifyTask(
+                entity,
+                access,
+                access.Permission?.CanEdit == true,
+                access.Permission?.CanEditOthers == true,
+                settings))
+        {
+            return Forbid();
         }
 
         var changed = ApplyTaskControlState(entity, request.IsUnderControl, access);
@@ -5800,9 +5810,11 @@ public class TasksController : ControllerBase
         }
 
         var isCompletionAction = IsCompletionStatus(nextStatus);
-        if (isCompletionAction && !IsTaskOwnedByUser(entity, access.UserId))
+        if (!IsTaskOwnedByUser(entity, access.UserId))
         {
-            return access.Permission?.CanCompleteOthers == true;
+            return isCompletionAction
+                ? access.Permission?.CanCompleteOthers == true
+                : access.Permission?.CanEditOthers == true;
         }
 
         if (CanFullyModifyTask(

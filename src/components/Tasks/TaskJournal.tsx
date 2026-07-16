@@ -5894,7 +5894,7 @@ function TaskTable({
                           <Scale className="h-4 w-4" />
                         </button>
                       ) : null}
-                      {isTaskJournalActive(task.status) && task.status !== 'inProgress' ? (
+                      {!isReadOnly && isTaskJournalActive(task.status) && task.status !== 'inProgress' ? (
                         <button type="button" onClick={() => onStatusChange(task, 'inProgress')} className="rounded-xl p-2 text-blue-600 transition hover:bg-blue-50 hover:text-blue-700" title="Принять в работу">
                           <Play className="h-4 w-4" />
                         </button>
