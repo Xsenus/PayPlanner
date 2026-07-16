@@ -120,7 +120,17 @@ public static class RolePermissionCatalog
         => new Dictionary<string, RolePermissionValues>(StringComparer.OrdinalIgnoreCase)
         {
             [Calendar] = new(true, true, true, true, true, true, GetDefaultViewScope(Calendar, allowRoleManagement)),
-            [Tasks] = new(true, true, true, true, true, false, GetDefaultViewScope(Tasks, allowRoleManagement)),
+            [Tasks] = new(
+                true,
+                true,
+                true,
+                true,
+                true,
+                false,
+                GetDefaultViewScope(Tasks, allowRoleManagement),
+                CanEditOthers: allowRoleManagement,
+                CanCompleteOthers: allowRoleManagement,
+                CanDeleteOthers: allowRoleManagement),
             [Notes] = new(true, true, true, true, false, false, GetDefaultViewScope(Notes, allowRoleManagement)),
             [Reports] = new(true, true, true, true, true, false, GetDefaultViewScope(Reports, allowRoleManagement)),
             [Calculator] = new(true, true, true, true, true, false, GetDefaultViewScope(Calculator, allowRoleManagement)),
@@ -189,7 +199,7 @@ public static class RolePermissionCatalog
         return new RolePermissionsDto
         {
             Calendar = ToCalendar(defaults[Calendar]),
-            Tasks = ToSection(defaults[Tasks]),
+            Tasks = ToTasks(defaults[Tasks]),
             Notes = ToSection(defaults[Notes]),
             Reports = ToSection(defaults[Reports]),
             Calculator = ToSection(defaults[Calculator]),
@@ -222,6 +232,9 @@ public static class RolePermissionCatalog
                 CanDelete = pair.Value.CanDelete,
                 CanExport = pair.Value.CanExport,
                 CanViewAnalytics = pair.Value.CanViewAnalytics,
+                CanEditOthers = pair.Value.CanEditOthers,
+                CanCompleteOthers = pair.Value.CanCompleteOthers,
+                CanDeleteOthers = pair.Value.CanDeleteOthers,
                 ViewScope = pair.Value.ViewScope
             })
             .ToList();
@@ -238,6 +251,9 @@ public static class RolePermissionCatalog
                 CanDelete = pair.Value.CanDelete,
                 CanExport = pair.Value.CanExport,
                 CanViewAnalytics = pair.Value.CanViewAnalytics,
+                CanEditOthers = pair.Value.CanEditOthers,
+                CanCompleteOthers = pair.Value.CanCompleteOthers,
+                CanDeleteOthers = pair.Value.CanDeleteOthers,
                 ViewScope = pair.Value.ViewScope
             })
             .ToList();
@@ -282,6 +298,20 @@ public static class RolePermissionCatalog
             ViewScope = values.ViewScope
         };
 
+    public static TaskSectionPermissionsDto ToTasks(RolePermissionValues values)
+        => new()
+        {
+            CanView = values.CanView,
+            CanCreate = values.CanCreate,
+            CanEdit = values.CanEdit,
+            CanDelete = values.CanDelete,
+            CanExport = values.CanExport,
+            ViewScope = values.ViewScope,
+            CanEditOthers = values.CanEditOthers,
+            CanCompleteOthers = values.CanCompleteOthers,
+            CanDeleteOthers = values.CanDeleteOthers,
+        };
+
     public static CalendarPermissionsDto ToCalendar(RolePermissionValues values)
         => new()
         {
@@ -303,4 +333,7 @@ public sealed record RolePermissionValues(
     bool CanDelete,
     bool CanExport,
     bool CanViewAnalytics,
-    string ViewScope);
+    string ViewScope,
+    bool CanEditOthers = false,
+    bool CanCompleteOthers = false,
+    bool CanDeleteOthers = false);

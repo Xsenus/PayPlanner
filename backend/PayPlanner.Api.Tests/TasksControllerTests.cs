@@ -1452,6 +1452,117 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task OtherTaskPermissions_EditDoesNotGrantCompletionOrDeletion()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateAdminUserAsync(db, "other-task-owner-edit@example.com", "Владелец задачи");
+        var specialist = await CreateTaskUserAsync(
+            db,
+            "other-task-editor@example.com",
+            "Редактор чужих задач",
+            canEdit: false,
+            viewScope: DataVisibilityScope.All,
+            canEditOthers: true);
+        var client = await CreateClientAsync(db, "Клиент чужой задачи для редактирования");
+        var task = await CreateTaskAsync(db, owner.Id, client.Id, owner.Id);
+        var controller = CreateController(db, new RecordingNotificationService(), specialist);
+
+        var update = await controller.UpdateTask(task.Id, new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            Title = "Чужая задача отредактирована",
+            DueAt = task.DueAt,
+            Status = "new",
+        }, CancellationToken.None);
+        Assert.IsType<OkObjectResult>(update.Result);
+
+        var completion = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "done",
+            Result = "Попытка завершить чужую задачу.",
+        }, CancellationToken.None);
+        Assert.IsType<ForbidResult>(completion.Result);
+
+        var deletion = await controller.DeleteTask(task.Id, CancellationToken.None);
+        Assert.IsType<ForbidResult>(deletion);
+        Assert.True(await db.TaskJournalItems.AnyAsync(item => item.Id == task.Id));
+    }
+
+    [Fact]
+    public async Task OtherTaskPermissions_CompletionDoesNotGrantEditingOrDeletion()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateAdminUserAsync(db, "other-task-owner-complete@example.com", "Владелец задачи");
+        var specialist = await CreateTaskUserAsync(
+            db,
+            "other-task-completer@example.com",
+            "Завершающий чужие задачи",
+            canEdit: false,
+            viewScope: DataVisibilityScope.All,
+            canCompleteOthers: true);
+        var client = await CreateClientAsync(db, "Клиент чужой задачи для завершения");
+        var task = await CreateTaskAsync(db, owner.Id, client.Id, owner.Id);
+        var controller = CreateController(db, new RecordingNotificationService(), specialist);
+
+        var update = await controller.UpdateTask(task.Id, new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            Title = "Недопустимое редактирование",
+            DueAt = task.DueAt,
+            Status = "new",
+        }, CancellationToken.None);
+        Assert.IsType<ForbidResult>(update.Result);
+
+        var completion = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "done",
+            Result = "Чужая задача завершена по отдельному праву.",
+        }, CancellationToken.None);
+        var completed = Assert.IsType<OkObjectResult>(completion.Result);
+        Assert.Equal("done", Assert.IsType<TaskJournalItemDto>(completed.Value).Status);
+
+        var deletion = await controller.DeleteTask(task.Id, CancellationToken.None);
+        Assert.IsType<ForbidResult>(deletion);
+    }
+
+    [Fact]
+    public async Task OtherTaskPermissions_DeletionDoesNotGrantEditingOrCompletion()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateAdminUserAsync(db, "other-task-owner-delete@example.com", "Владелец задачи");
+        var specialist = await CreateTaskUserAsync(
+            db,
+            "other-task-deleter@example.com",
+            "Удаляющий чужие задачи",
+            canEdit: false,
+            viewScope: DataVisibilityScope.All,
+            canDeleteOthers: true);
+        var client = await CreateClientAsync(db, "Клиент чужой задачи для удаления");
+        var task = await CreateTaskAsync(db, owner.Id, client.Id, owner.Id);
+        var controller = CreateController(db, new RecordingNotificationService(), specialist);
+
+        var update = await controller.UpdateTask(task.Id, new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            Title = "Недопустимое редактирование",
+            DueAt = task.DueAt,
+            Status = "new",
+        }, CancellationToken.None);
+        Assert.IsType<ForbidResult>(update.Result);
+
+        var completion = await controller.UpdateStatus(task.Id, new UpdateTaskJournalStatusRequest
+        {
+            Status = "done",
+            Result = "Недопустимое завершение.",
+        }, CancellationToken.None);
+        Assert.IsType<ForbidResult>(completion.Result);
+
+        var deletion = await controller.DeleteTask(task.Id, CancellationToken.None);
+        Assert.IsType<NoContentResult>(deletion);
+        Assert.False(await db.TaskJournalItems.AnyAsync(item => item.Id == task.Id));
+    }
+
+    [Fact]
     public async Task UpdateStatus_AllowsExecutorToSaveResultWithoutEditPermission()
     {
         await using var db = await CreateContextAsync();
@@ -5410,7 +5521,11 @@ public class TasksControllerTests
         string fullName,
         bool canEdit,
         bool canCreate = false,
-        bool canExport = true)
+        bool canExport = true,
+        string viewScope = DataVisibilityScope.Own,
+        bool canEditOthers = false,
+        bool canCompleteOthers = false,
+        bool canDeleteOthers = false)
     {
         var role = new Role
         {
@@ -5426,7 +5541,10 @@ public class TasksControllerTests
                     CanEdit = canEdit,
                     CanDelete = canEdit,
                     CanExport = canExport,
-                    ViewScope = DataVisibilityScope.Own,
+                    CanEditOthers = canEditOthers,
+                    CanCompleteOthers = canCompleteOthers,
+                    CanDeleteOthers = canDeleteOthers,
+                    ViewScope = viewScope,
                 },
             ],
         };

@@ -52,7 +52,7 @@ import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useToast } from '../../hooks/useToast';
 import { apiService, type TaskJournalSettingsDto } from '../../services/api';
 import type { CaseCalendarEvent, CaseCalendarSummary, Client, ClientCase, LegalEntitySummary } from '../../types';
-import type { MenuSectionPermissions } from '../../types/permissions';
+import type { MenuSectionPermissions, TaskSectionPermissions } from '../../types/permissions';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
 import {
@@ -1199,6 +1199,10 @@ function isTaskExecutorForUser(task: TaskJournalItem, userId: number | null) {
     getTaskParticipants(task, 'assignee').some((participant) => participant.userId === userId);
 }
 
+function isTaskOwnedByUser(task: TaskJournalItem, userId: number | null) {
+  return Boolean(userId && (task.authorUserId === userId || isTaskExecutorForUser(task, userId)));
+}
+
 function isTaskAuthoredByUser(task: TaskJournalItem, userId: number | null, userName: string) {
   if (!userId) return false;
   return task.authorUserId === userId || (!task.authorUserId && Boolean(userName) && task.authorName === userName);
@@ -1279,25 +1283,27 @@ function isTaskReadOnlyForCurrentUser(
   currentUserId: number | null,
   isAdminUser: boolean,
   settings: TaskJournalSettingsDto,
-  taskPermissions: MenuSectionPermissions,
+  taskPermissions: TaskSectionPermissions,
 ) {
   if (isAdminUser) {
     return false;
   }
 
-  if (!currentUserId || !taskPermissions.canEdit) {
+  if (!currentUserId) {
     return true;
   }
 
-  if (settings.restrictExecutorEditing && isTaskExecutorForUser(task, currentUserId) && task.authorUserId !== currentUserId) {
+  if (!isTaskOwnedByUser(task, currentUserId)) {
+    return !taskPermissions.canEditOthers;
+  }
+
+  if (!taskPermissions.canEdit) {
     return true;
   }
 
-  if (taskPermissions.viewScope === 'all' || taskPermissions.viewScope === 'department') {
-    return false;
-  }
-
-  return task.authorUserId !== currentUserId && !isTaskExecutorForUser(task, currentUserId);
+  return settings.restrictExecutorEditing
+    && isTaskExecutorForUser(task, currentUserId)
+    && task.authorUserId !== currentUserId;
 }
 
 function canCompleteTaskForCurrentUser(
@@ -1305,18 +1311,22 @@ function canCompleteTaskForCurrentUser(
   currentUserId: number | null,
   isAdminUser: boolean,
   settings: TaskJournalSettingsDto,
-  taskPermissions: MenuSectionPermissions,
+  taskPermissions: TaskSectionPermissions,
 ) {
   if (!isTaskJournalActive(task.status)) {
     return false;
   }
 
-  if (!isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, settings, taskPermissions)) {
-    return true;
-  }
-
   if (!currentUserId) {
     return false;
+  }
+
+  if (!isAdminUser && !isTaskOwnedByUser(task, currentUserId)) {
+    return taskPermissions.canCompleteOthers;
+  }
+
+  if (!isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, settings, taskPermissions)) {
+    return true;
   }
 
   if (task.authorUserId === currentUserId) {
@@ -1325,6 +1335,34 @@ function canCompleteTaskForCurrentUser(
 
   return isTaskExecutorForUser(task, currentUserId)
     && settings.executorCompletionAllowedUserIds.includes(currentUserId);
+}
+
+function canDeleteTaskForCurrentUser(
+  task: TaskJournalItem,
+  currentUserId: number | null,
+  isAdminUser: boolean,
+  settings: TaskJournalSettingsDto,
+  taskPermissions: TaskSectionPermissions,
+) {
+  if (isAdminUser) {
+    return true;
+  }
+
+  if (!currentUserId) {
+    return false;
+  }
+
+  if (!isTaskOwnedByUser(task, currentUserId)) {
+    return taskPermissions.canDeleteOthers;
+  }
+
+  if (!taskPermissions.canDelete) {
+    return false;
+  }
+
+  return !(settings.restrictExecutorEditing
+    && isTaskExecutorForUser(task, currentUserId)
+    && task.authorUserId !== currentUserId);
 }
 
 function canPostTaskCommentForCurrentUser(
@@ -1900,7 +1938,7 @@ export function TaskJournal({
   const { legalEntities } = useLegalEntities({ enabled: canViewLegalEntities });
   const canCreateTasks = isAdminUser || permissions.tasks.canCreate;
   const canEditTasks = isAdminUser || permissions.tasks.canEdit;
-  const canDeleteTasks = isAdminUser || permissions.tasks.canDelete;
+  const canDeleteTasks = isAdminUser || permissions.tasks.canDelete || permissions.tasks.canDeleteOthers;
   const canExportTasks = isAdminUser || permissions.tasks.canExport;
   const canExportCases = isAdminUser || permissions.cases.canExport;
   const canSendTaskFilesToYandexDisk = isAdminUser || (canExportTasks && permissions.yandexDisk?.canCreate === true);
@@ -2909,6 +2947,20 @@ export function TaskJournal({
     ),
     [currentUserId, isAdminUser, modal?.task, permissions.tasks, taskSettings],
   );
+  const canDeleteModalTask = useMemo(
+    () => Boolean(
+      modal?.task
+      && canDeleteTaskForCurrentUser(modal.task, currentUserId, isAdminUser, taskSettings, permissions.tasks),
+    ),
+    [currentUserId, isAdminUser, modal?.task, permissions.tasks, taskSettings],
+  );
+  const canCompleteModalTask = useMemo(
+    () => Boolean(
+      modal?.task
+      && canCompleteTaskForCurrentUser(modal.task, currentUserId, isAdminUser, taskSettings, permissions.tasks),
+    ),
+    [currentUserId, isAdminUser, modal?.task, permissions.tasks, taskSettings],
+  );
   const selectableTaskIds = useMemo(() => new Set(selectableTasks.map((task) => task.id)), [selectableTasks]);
   const selectedTasksForBulk = useMemo(
     () => selectableTasks.filter((task) => selectedTaskIds.has(task.id)),
@@ -3482,7 +3534,7 @@ export function TaskJournal({
   };
 
   const handleDelete = async (task: TaskJournalItem) => {
-    if (!canDeleteTasks) {
+    if (!canDeleteTaskForCurrentUser(task, currentUserId, isAdminUser, taskSettings, permissions.tasks)) {
       toast.error('У роли нет права на удаление задач.', 'Журнал задач');
       return false;
     }
@@ -3969,7 +4021,8 @@ export function TaskJournal({
             taskSettings={taskSettings}
             notificationDefaults={taskNotificationDefaults}
             canSwitchToEdit={canEditModalTask}
-            canDeleteTask={canDeleteTasks}
+            canCompleteTask={canCompleteModalTask}
+            canDeleteTask={canDeleteModalTask}
             canDuplicateTask={canCreateTasks}
             canSendFilesToYandexDisk={canSendTaskFilesToYandexDisk}
             onClose={closeTaskModal}
@@ -4649,7 +4702,8 @@ export function TaskJournal({
           taskSettings={taskSettings}
           notificationDefaults={taskNotificationDefaults}
           canSwitchToEdit={canEditModalTask}
-          canDeleteTask={canDeleteTasks}
+          canCompleteTask={canCompleteModalTask}
+          canDeleteTask={canDeleteModalTask}
           canDuplicateTask={canCreateTasks}
           canSendFilesToYandexDisk={canSendTaskFilesToYandexDisk}
           onClose={closeTaskModal}
@@ -5554,7 +5608,7 @@ function TaskTable({
   currentUserId: number | null;
   isAdminUser: boolean;
   taskSettings: TaskJournalSettingsDto;
-  taskPermissions: MenuSectionPermissions;
+  taskPermissions: TaskSectionPermissions;
   selectedTaskIds: Set<number>;
   selectableTaskIds: Set<number>;
   allVisibleSelected: boolean;
@@ -5863,7 +5917,7 @@ function TaskTable({
                       <button type="button" onClick={() => onEdit(task)} className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-900" title="Просмотр">
                         <Eye className="h-4 w-4" />
                       </button>
-                      {!isReadOnly && canDeleteTasks ? (
+                      {canDeleteTasks && canDeleteTaskForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions) ? (
                         <button type="button" onClick={() => onDelete(task)} className="rounded-xl p-2 text-rose-500 transition hover:bg-rose-50 hover:text-rose-700" title="Удалить">
                           <Trash2 className="h-4 w-4" />
                         </button>
@@ -6206,7 +6260,7 @@ function TaskTimelineCalendar({
   currentUserId: number | null;
   isAdminUser: boolean;
   taskSettings: TaskJournalSettingsDto;
-  taskPermissions: MenuSectionPermissions;
+  taskPermissions: TaskSectionPermissions;
   movingTaskId: number | null;
 }) {
   const visibleDays = useMemo(() => {
@@ -6617,7 +6671,7 @@ function TaskCalendar({
   currentUserId: number | null;
   isAdminUser: boolean;
   taskSettings: TaskJournalSettingsDto;
-  taskPermissions: MenuSectionPermissions;
+  taskPermissions: TaskSectionPermissions;
   movingTaskId: number | null;
   resizingTaskId: number | null;
 }) {
@@ -7492,6 +7546,7 @@ type TaskModalProps = {
   taskSettings: TaskJournalSettingsDto;
   notificationDefaults: TaskNotificationDefaults;
   canSwitchToEdit: boolean;
+  canCompleteTask: boolean;
   canDeleteTask: boolean;
   canDuplicateTask: boolean;
   canSendFilesToYandexDisk: boolean;
@@ -7533,6 +7588,7 @@ function TaskModal({
   taskSettings,
   notificationDefaults,
   canSwitchToEdit,
+  canCompleteTask,
   canDeleteTask,
   canDuplicateTask,
   canSendFilesToYandexDisk,
@@ -7756,14 +7812,7 @@ function TaskModal({
       && isReadOnly
       && !canSwitchToEdit
       && state?.task
-      && currentUserId
-      && (
-        state.task.authorUserId === currentUserId
-        || (
-          isTaskExecutorForUser(state.task, currentUserId)
-          && taskSettings.executorCompletionAllowedUserIds.includes(currentUserId)
-        )
-      ),
+      && canCompleteTask,
   );
   const canManageFiles = Boolean(taskId && !isReadOnly);
   const isCreationBillingBindingLocked = !taskId
@@ -8127,7 +8176,7 @@ function TaskModal({
 
   const handleDeleteTask = async () => {
     const task = state?.task;
-    if (!task || isReadOnly || !canDeleteTask) return;
+    if (!task || !canDeleteTask) return;
     const deleted = await onDelete(task);
     if (deleted) {
       onClose();
@@ -8489,7 +8538,9 @@ function TaskModal({
             className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-left text-sm font-semibold text-emerald-800 transition hover:bg-emerald-100"
           >
             Согласовать и завершить задачу
-            <span className="mt-1 block text-xs font-normal text-emerald-700">Задача сразу перейдет в статус «Готово».</span>
+            <span className="mt-1 block text-xs font-normal text-emerald-700">
+              Исполнитель получит уведомление о согласовании, а задача будет закрыта и перейдет в статус «Готово».
+            </span>
           </button>
           <button
             type="button"
@@ -8851,7 +8902,7 @@ function TaskModal({
                   <XCircle className="h-4 w-4" data-testid="task-cancel-icon" />
                 </button>
               ) : null}
-              {state?.task && !isReadOnly && canDeleteTask ? (
+              {state?.task && canDeleteTask ? (
                 <div className="relative">
                   <button
                     type="button"
@@ -9328,6 +9379,17 @@ function TaskModal({
                     {renderModernSelectedParticipantList('approver', visibleApprovers, 'task-modern-approver-list')}
                     {renderModernSelectedParticipantList('observer', visibleObservers, 'task-modern-observer-list')}
                   </div>
+                ) : null}
+                {isReadOnly && canDeleteTask ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteTask()}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-rose-200 text-rose-600 transition hover:bg-rose-50"
+                    aria-label="Удалить задачу"
+                    title="Удалить задачу безвозвратно"
+                  >
+                    <Trash2 className="h-5 w-5" />
+                  </button>
                 ) : null}
                 {!isReadOnly ? (
                   <div className="mt-2 grid gap-2">
@@ -10417,6 +10479,11 @@ function TaskModal({
 
         <div className="flex flex-col gap-3 border-t border-slate-200 px-6 py-4 sm:flex-row sm:justify-end">
           <button type="button" onClick={onClose} className="rounded-xl border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">{isPage ? 'К журналу задач' : 'Отмена'}</button>
+          {state?.task && canDeleteTask ? (
+            <button type="button" onClick={() => void handleDeleteTask()} className="rounded-xl border border-rose-200 px-5 py-2.5 text-sm font-semibold text-rose-600 transition hover:bg-rose-50">
+              Удалить задачу
+            </button>
+          ) : null}
           {isLockedViewWithEditAccess ? (
             <button type="button" onClick={onEnableEdit} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
               Редактировать задачу

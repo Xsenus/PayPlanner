@@ -1787,6 +1787,9 @@ public class PaymentContext : DbContext
             entity.Property(e => e.CanDelete).HasDefaultValue(false);
             entity.Property(e => e.CanExport).HasDefaultValue(false);
             entity.Property(e => e.CanViewAnalytics).HasDefaultValue(false);
+            entity.Property(e => e.CanEditOthers).HasDefaultValue(false);
+            entity.Property(e => e.CanCompleteOthers).HasDefaultValue(false);
+            entity.Property(e => e.CanDeleteOthers).HasDefaultValue(false);
             entity.Property(e => e.ViewScope)
                   .HasMaxLength(32)
                   .HasDefaultValue(DataVisibilityScope.All)

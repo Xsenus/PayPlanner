@@ -223,6 +223,9 @@ public class RolePermissionsController : ControllerBase
                     CanDelete = values.CanDelete,
                     CanExport = values.CanExport,
                     CanViewAnalytics = values.CanViewAnalytics,
+                    CanEditOthers = values.CanEditOthers,
+                    CanCompleteOthers = values.CanCompleteOthers,
+                    CanDeleteOthers = values.CanDeleteOthers,
                     ViewScope = values.ViewScope,
                 });
             }
@@ -322,6 +325,9 @@ public class RolePermissionsController : ControllerBase
                     CanDelete = values.CanDelete,
                     CanExport = values.CanExport,
                     CanViewAnalytics = values.CanViewAnalytics,
+                    CanEditOthers = values.CanEditOthers,
+                    CanCompleteOthers = values.CanCompleteOthers,
+                    CanDeleteOthers = values.CanDeleteOthers,
                     ViewScope = values.ViewScope,
                 });
             }
@@ -378,7 +384,7 @@ public class RolePermissionsController : ControllerBase
                     dto.Reports = ToSection(permission);
                     break;
                 case RolePermissionCatalog.Tasks:
-                    dto.Tasks = ToSection(permission);
+                    dto.Tasks = ToTasks(permission);
                     break;
                 case RolePermissionCatalog.Notes:
                     dto.Notes = ToSection(permission);
@@ -431,6 +437,13 @@ public class RolePermissionsController : ControllerBase
             }
         }
 
+        if (allowRoleManagement)
+        {
+            dto.Tasks.CanEditOthers = true;
+            dto.Tasks.CanCompleteOthers = true;
+            dto.Tasks.CanDeleteOthers = true;
+        }
+
         return dto;
     }
 
@@ -440,7 +453,7 @@ public class RolePermissionsController : ControllerBase
         return new RolePermissionsDto
         {
             Calendar = RolePermissionCatalog.ToCalendar(defaults[RolePermissionCatalog.Calendar]),
-            Tasks = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Tasks]),
+            Tasks = RolePermissionCatalog.ToTasks(defaults[RolePermissionCatalog.Tasks]),
             Notes = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Notes]),
             Reports = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Reports]),
             Calculator = RolePermissionCatalog.ToSection(defaults[RolePermissionCatalog.Calculator]),
@@ -698,7 +711,10 @@ public class RolePermissionsController : ControllerBase
             || permission.CanEdit
             || permission.CanDelete
             || permission.CanExport
-            || permission.CanViewAnalytics;
+            || permission.CanViewAnalytics
+            || permission.CanEditOthers
+            || permission.CanCompleteOthers
+            || permission.CanDeleteOthers;
 
     private static bool HasRestrictedCapability(RolePermission permission)
         => (!string.Equals(permission.Section, RolePermissionCatalog.Calendar, StringComparison.OrdinalIgnoreCase)
@@ -760,6 +776,9 @@ public class RolePermissionsController : ControllerBase
         entity.CanDelete = values.CanDelete;
         entity.CanExport = values.CanExport;
         entity.CanViewAnalytics = values.CanViewAnalytics;
+        entity.CanEditOthers = values.CanEditOthers;
+        entity.CanCompleteOthers = values.CanCompleteOthers;
+        entity.CanDeleteOthers = values.CanDeleteOthers;
         entity.ViewScope = values.ViewScope;
     }
 
@@ -836,6 +855,20 @@ public class RolePermissionsController : ControllerBase
             ViewScope = NormalizeViewScope(permission.Section, permission.ViewScope),
         };
 
+    private static TaskSectionPermissionsDto ToTasks(RolePermission permission)
+        => new()
+        {
+            CanView = permission.CanView,
+            CanCreate = permission.CanCreate,
+            CanEdit = permission.CanEdit,
+            CanDelete = permission.CanDelete,
+            CanExport = permission.CanExport,
+            ViewScope = NormalizeViewScope(permission.Section, permission.ViewScope),
+            CanEditOthers = permission.CanEditOthers,
+            CanCompleteOthers = permission.CanCompleteOthers,
+            CanDeleteOthers = permission.CanDeleteOthers,
+        };
+
     private static RolePermissionValues ToValues(CalendarPermissionsDto section)
         => new(
             section.CanView,
@@ -855,6 +888,19 @@ public class RolePermissionsController : ControllerBase
             section.CanExport,
             false,
             DataVisibilityScope.Normalize(section.ViewScope, DataVisibilityScope.Own));
+
+    private static RolePermissionValues ToValues(TaskSectionPermissionsDto section)
+        => new(
+            section.CanView,
+            section.CanCreate,
+            section.CanEdit,
+            section.CanDelete,
+            section.CanExport,
+            false,
+            DataVisibilityScope.Normalize(section.ViewScope, DataVisibilityScope.Own),
+            section.CanEditOthers,
+            section.CanCompleteOthers,
+            section.CanDeleteOthers);
 }
 
 public sealed class RoleCalendarVisibleUserOptionDto

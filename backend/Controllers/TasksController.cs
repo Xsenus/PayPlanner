@@ -2272,7 +2272,12 @@ public class TasksController : ControllerBase
         }
 
         var settings = await GetTaskJournalSettingsAsync(ct);
-        if (!CanFullyModifyTask(entity, access, access.Permission?.CanEdit == true, settings))
+        if (!CanFullyModifyTask(
+                entity,
+                access,
+                access.Permission?.CanEdit == true,
+                access.Permission?.CanEditOthers == true,
+                settings))
         {
             return Forbid();
         }
@@ -2329,6 +2334,12 @@ public class TasksController : ControllerBase
 
         var previousStatus = entity.Status;
         var nextStatus = NormalizeEnumValue(request.Status, AllowedStatuses, "new");
+        if (IsCompletionStatus(nextStatus)
+            && !string.Equals(previousStatus, nextStatus, StringComparison.OrdinalIgnoreCase)
+            && !CanCompleteTask(entity, access, settings))
+        {
+            return Forbid();
+        }
         var approvalQueueRestarted = ShouldRestartApprovalQueue(previousStatus, nextStatus);
         participants = ResetApprovalQueueIfStartingApproval(previousStatus, nextStatus, participants);
         var nextResult = NormalizeCompletionResult(nextStatus, request.Result);
@@ -2609,7 +2620,10 @@ public class TasksController : ControllerBase
             return Unauthorized();
         }
 
-        if (!access.IsAdmin && access.Permission?.CanEdit != true)
+        if (!access.IsAdmin
+            && access.Permission?.CanEdit != true
+            && access.Permission?.CanEditOthers != true
+            && access.Permission?.CanCompleteOthers != true)
         {
             return Forbid();
         }
@@ -2732,7 +2746,22 @@ public class TasksController : ControllerBase
         var now = DateTime.UtcNow;
         foreach (var entity in entities)
         {
-            if (!CanFullyModifyTask(entity, access, access.Permission?.CanEdit == true, settings))
+            var requiresFullEdit = hasAssigneeChange
+                || hasPriorityChange
+                || hasDueAtChange
+                || (hasStatusChange && !IsCompletionStatus(nextStatus));
+            if (requiresFullEdit
+                && !CanFullyModifyTask(
+                    entity,
+                    access,
+                    access.Permission?.CanEdit == true,
+                    access.Permission?.CanEditOthers == true,
+                    settings))
+            {
+                continue;
+            }
+
+            if (nextStatus is not null && !CanUpdateTaskStatus(entity, access, settings, nextStatus))
             {
                 continue;
             }
@@ -2896,7 +2925,9 @@ public class TasksController : ControllerBase
             return Unauthorized();
         }
 
-        if (!access.IsAdmin && access.Permission?.CanDelete != true)
+        if (!access.IsAdmin
+            && access.Permission?.CanDelete != true
+            && access.Permission?.CanDeleteOthers != true)
         {
             return Forbid();
         }
@@ -2919,7 +2950,7 @@ public class TasksController : ControllerBase
         var toDelete = new List<TaskJournalItem>();
         foreach (var entity in entities)
         {
-            if (!CanFullyModifyTask(entity, access, access.Permission?.CanDelete == true, settings))
+            if (!CanDeleteTask(entity, access, settings))
             {
                 continue;
             }
@@ -3123,7 +3154,9 @@ public class TasksController : ControllerBase
             return Unauthorized();
         }
 
-        if (!access.IsAdmin && access.Permission?.CanDelete != true)
+        if (!access.IsAdmin
+            && access.Permission?.CanDelete != true
+            && access.Permission?.CanDeleteOthers != true)
         {
             return Forbid();
         }
@@ -3134,7 +3167,7 @@ public class TasksController : ControllerBase
             return NotFound();
         }
 
-        if (!CanFullyModifyTask(entity, access, access.Permission?.CanDelete == true, await GetTaskJournalSettingsAsync(ct)))
+        if (!CanDeleteTask(entity, access, await GetTaskJournalSettingsAsync(ct)))
         {
             return Forbid();
         }
@@ -5677,6 +5710,9 @@ public class TasksController : ControllerBase
                participant.UserId == userId &&
                string.Equals(participant.Role, "assignee", StringComparison.OrdinalIgnoreCase));
 
+    private static bool IsTaskOwnedByUser(TaskJournalItem entity, int userId)
+        => IsTaskAuthor(entity, userId) || IsTaskExecutor(entity, userId);
+
     private static bool ShouldRestrictExecutorFullEdit(
         TaskJournalItem entity,
         TaskAccess access,
@@ -5689,7 +5725,8 @@ public class TasksController : ControllerBase
     private static bool CanFullyModifyTask(
         TaskJournalItem entity,
         TaskAccess access,
-        bool hasCapability,
+        bool hasOwnCapability,
+        bool hasOtherCapability,
         TaskJournalSettingsDto settings)
     {
         if (access.IsAdmin)
@@ -5697,19 +5734,59 @@ public class TasksController : ControllerBase
             return true;
         }
 
-        if (!hasCapability || ShouldRestrictExecutorFullEdit(entity, access, settings))
+        var isOwnTask = IsTaskOwnedByUser(entity, access.UserId);
+        var hasCapability = isOwnTask ? hasOwnCapability : hasOtherCapability;
+        if (!hasCapability || (isOwnTask && ShouldRestrictExecutorFullEdit(entity, access, settings)))
         {
             return false;
         }
 
-        if (access.Visibility.SeesAll
-            || string.Equals(access.Visibility.ViewScope, DataVisibilityScope.Department, StringComparison.OrdinalIgnoreCase))
+        return true;
+    }
+
+    private static bool CanCompleteTask(
+        TaskJournalItem entity,
+        TaskAccess access,
+        TaskJournalSettingsDto settings)
+    {
+        if (access.IsAdmin)
         {
             return true;
         }
 
-        return IsTaskAuthor(entity, access.UserId) || IsTaskExecutor(entity, access.UserId);
+        if (!IsTaskOwnedByUser(entity, access.UserId))
+        {
+            return access.Permission?.CanCompleteOthers == true;
+        }
+
+        if (CanFullyModifyTask(
+                entity,
+                access,
+                access.Permission?.CanEdit == true,
+                access.Permission?.CanEditOthers == true,
+                settings))
+        {
+            return true;
+        }
+
+        return IsTaskExecutor(entity, access.UserId)
+            && settings.ExecutorCompletionAllowedUserIds.Contains(access.UserId);
     }
+
+    private static bool CanDeleteTask(
+        TaskJournalItem entity,
+        TaskAccess access,
+        TaskJournalSettingsDto settings)
+        => CanFullyModifyTask(
+            entity,
+            access,
+            access.Permission?.CanDelete == true,
+            access.Permission?.CanDeleteOthers == true,
+            settings);
+
+    private static bool IsCompletionStatus(string? status)
+        => string.Equals(status, "done", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(status, "onApproval", StringComparison.OrdinalIgnoreCase);
 
     private static bool CanUpdateTaskStatus(
         TaskJournalItem entity,
@@ -5717,13 +5794,27 @@ public class TasksController : ControllerBase
         TaskJournalSettingsDto settings,
         string nextStatus)
     {
-        if (access.IsAdmin || CanFullyModifyTask(entity, access, access.Permission?.CanEdit == true, settings))
+        if (access.IsAdmin)
         {
             return true;
         }
 
-        var isCompletionAction = string.Equals(nextStatus, "done", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(nextStatus, "onApproval", StringComparison.OrdinalIgnoreCase);
+        var isCompletionAction = IsCompletionStatus(nextStatus);
+        if (isCompletionAction && !IsTaskOwnedByUser(entity, access.UserId))
+        {
+            return access.Permission?.CanCompleteOthers == true;
+        }
+
+        if (CanFullyModifyTask(
+                entity,
+                access,
+                access.Permission?.CanEdit == true,
+                access.Permission?.CanEditOthers == true,
+                settings))
+        {
+            return true;
+        }
+
         if (isCompletionAction && IsTaskExecutor(entity, access.UserId) && !IsTaskAuthor(entity, access.UserId))
         {
             return settings.ExecutorCompletionAllowedUserIds.Contains(access.UserId);

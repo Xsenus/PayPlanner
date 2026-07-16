@@ -302,6 +302,28 @@ const DEFAULT_PERMISSION_META: PermissionMeta[] = [
   },
 ];
 
+const TASK_OTHER_PERMISSION_META: Array<{
+  key: 'canEditOthers' | 'canCompleteOthers' | 'canDeleteOthers';
+  label: string;
+  description: string;
+}> = [
+  {
+    key: 'canEditOthers',
+    label: 'Редактирование чужих задач',
+    description: 'Изменять поля задач, в которых пользователь не является постановщиком или исполнителем.',
+  },
+  {
+    key: 'canCompleteOthers',
+    label: 'Завершение чужих задач',
+    description: 'Завершать чужие задачи или отправлять их на обязательное согласование.',
+  },
+  {
+    key: 'canDeleteOthers',
+    label: 'Удаление чужих задач',
+    description: 'Удалять задачи, в которых пользователь не является постановщиком или исполнителем.',
+  },
+];
+
 const STORAGE_PERMISSION_META: PermissionMeta[] = [
   {
     key: 'canView',
@@ -451,6 +473,10 @@ function getEnabledPermissionCount(sectionKey: MenuSectionKey, permissions: Role
 
   let count = MENU_PERMISSION_KEYS.filter((permissionKey) => section[permissionKey]).length;
 
+  if (sectionKey === 'tasks') {
+    count += TASK_OTHER_PERMISSION_META.filter((permission) => permissions.tasks[permission.key]).length;
+  }
+
   if (sectionKey === 'calendar' && permissions.calendar.canViewAnalytics) {
     count += 1;
   }
@@ -461,6 +487,10 @@ function getEnabledPermissionCount(sectionKey: MenuSectionKey, permissions: Role
 function getTotalPermissionCount(sectionKey: MenuSectionKey) {
   if (sectionKey === 'calendar') {
     return MENU_PERMISSION_KEYS.length + 1;
+  }
+
+  if (sectionKey === 'tasks') {
+    return MENU_PERMISSION_KEYS.length + TASK_OTHER_PERMISSION_META.length;
   }
 
   if (sectionKey === 'audit') {
@@ -609,6 +639,12 @@ export function RolePermissionsModal({
         if (sectionKey === 'calendar') {
           (updated as RolePermissions['calendar']).canViewAnalytics = false;
         }
+        if (sectionKey === 'tasks') {
+          const taskSection = updated as RolePermissions['tasks'];
+          taskSection.canEditOthers = false;
+          taskSection.canCompleteOthers = false;
+          taskSection.canDeleteOthers = false;
+        }
       }
 
       return updated;
@@ -619,6 +655,15 @@ export function RolePermissionsModal({
     updateSection('calendar', (section) => ({
       ...section,
       canViewAnalytics: !section.canViewAnalytics,
+    }));
+  };
+
+  const toggleTaskOtherPermission = (
+    permissionKey: 'canEditOthers' | 'canCompleteOthers' | 'canDeleteOthers',
+  ) => {
+    updateSection('tasks', (section) => ({
+      ...section,
+      [permissionKey]: !section[permissionKey],
     }));
   };
 
@@ -692,6 +737,12 @@ export function RolePermissionsModal({
 
       if (sectionKey === 'calendar') {
         (next as RolePermissions['calendar']).canViewAnalytics = value;
+      }
+      if (sectionKey === 'tasks') {
+        const taskSection = next as RolePermissions['tasks'];
+        taskSection.canEditOthers = value;
+        taskSection.canCompleteOthers = value;
+        taskSection.canDeleteOthers = value;
       }
 
       return next;
@@ -1063,6 +1114,19 @@ export function RolePermissionsModal({
                             }
                           />
                         ))}
+
+                        {sectionKey === 'tasks'
+                          ? TASK_OTHER_PERMISSION_META.map((permission) => (
+                              <PermissionToggle
+                                key={`tasks-${permission.key}`}
+                                label={permission.label}
+                                description={permission.description}
+                                checked={permissions.tasks[permission.key]}
+                                onChange={() => toggleTaskOtherPermission(permission.key)}
+                                disabled={isReadOnly || saving || resetting || !permissions.tasks.canView}
+                              />
+                            ))
+                          : null}
 
                         {sectionKey === 'calendar' ? (
                           <PermissionToggle

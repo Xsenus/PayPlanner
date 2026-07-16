@@ -42,10 +42,17 @@ export interface CalendarPermissions extends MenuSectionPermissions {
   visibleUserIds?: number[];
 }
 
-type OtherSectionKey = Exclude<MenuSectionKey, 'calendar'>;
+export interface TaskSectionPermissions extends MenuSectionPermissions {
+  canEditOthers: boolean;
+  canCompleteOthers: boolean;
+  canDeleteOthers: boolean;
+}
+
+type OtherSectionKey = Exclude<MenuSectionKey, 'calendar' | 'tasks'>;
 
 export type RolePermissions = {
   calendar: CalendarPermissions;
+  tasks: TaskSectionPermissions;
 } & {
   [K in OtherSectionKey]: MenuSectionPermissions;
 };
@@ -105,7 +112,12 @@ export const defaultRolePermissions: RolePermissions = {
     visibleUserIds: [],
   },
   reports: { ...defaultMenuPermissions },
-  tasks: { ...defaultMenuPermissions },
+  tasks: {
+    ...defaultMenuPermissions,
+    canEditOthers: true,
+    canCompleteOthers: true,
+    canDeleteOthers: true,
+  },
   notes: { ...defaultMenuPermissions, canExport: false },
   calculator: { ...defaultMenuPermissions },
   legalEntities: { ...defaultMenuPermissions },
@@ -131,7 +143,12 @@ export const defaultRestrictedRolePermissions: RolePermissions = {
     visibleUserIds: [],
   },
   reports: { ...defaultRestrictedMenuPermissions },
-  tasks: { ...defaultRestrictedMenuPermissions },
+  tasks: {
+    ...defaultRestrictedMenuPermissions,
+    canEditOthers: false,
+    canCompleteOthers: false,
+    canDeleteOthers: false,
+  },
   notes: { ...defaultRestrictedMenuPermissions },
   calculator: { ...defaultRestrictedMenuPermissions },
   legalEntities: { ...defaultRestrictedMenuPermissions },

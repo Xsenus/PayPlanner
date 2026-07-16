@@ -82,6 +82,9 @@ const permissionsState = vi.hoisted(() => ({
   taskCanCreate: true,
   taskCanEdit: true,
   taskCanDelete: true,
+  taskCanEditOthers: true,
+  taskCanCompleteOthers: true,
+  taskCanDeleteOthers: true,
   taskCanExport: true,
   caseCanExport: true,
   clientCanView: true,
@@ -156,6 +159,9 @@ vi.mock('../../hooks/useRolePermissions', () => ({
         canCreate: permissionsState.taskCanCreate,
         canEdit: permissionsState.taskCanEdit,
         canDelete: permissionsState.taskCanDelete,
+        canEditOthers: permissionsState.taskCanEditOthers,
+        canCompleteOthers: permissionsState.taskCanCompleteOthers,
+        canDeleteOthers: permissionsState.taskCanDeleteOthers,
         canExport: permissionsState.taskCanExport,
         viewScope: permissionsState.taskViewScope,
       },
@@ -405,6 +411,9 @@ describe('TaskJournal', () => {
     permissionsState.taskCanCreate = true;
     permissionsState.taskCanEdit = true;
     permissionsState.taskCanDelete = true;
+    permissionsState.taskCanEditOthers = true;
+    permissionsState.taskCanCompleteOthers = true;
+    permissionsState.taskCanDeleteOthers = true;
     permissionsState.taskCanExport = true;
     permissionsState.caseCanExport = true;
     permissionsState.clientCanView = true;
@@ -1011,6 +1020,7 @@ describe('TaskJournal', () => {
     authState.isAdmin = false;
     authState.user = { id: 8, fullName: 'Постановщик', email: 'author@example.com' };
     permissionsState.taskCanDelete = false;
+    permissionsState.taskCanDeleteOthers = false;
 
     await renderJournal([createTask({
       assigneeUserId: 8,
@@ -1937,6 +1947,9 @@ describe('TaskJournal', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Согласовать' }));
     expect(screen.getByText('Завершить согласование')).toBeTruthy();
+    expect(screen.getByText(
+      'Исполнитель получит уведомление о согласовании, а задача будет закрыта и перейдет в статус «Готово».',
+    )).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: /Согласовать и завершить задачу/ }));
 
@@ -3720,6 +3733,7 @@ describe('TaskJournal', () => {
     authState.isAdmin = false;
     authState.user = { id: 7, fullName: 'Observer', email: 'observer@example.com' };
     permissionsState.taskCanEdit = true;
+    permissionsState.taskCanEditOthers = false;
     permissionsState.taskViewScope = 'own';
     window.localStorage.setItem('pp.task_journal.filters.v1.user:7', JSON.stringify({ quickFilter: 'all', periodMode: 'all' }));
     await renderJournal([
@@ -3829,6 +3843,86 @@ describe('TaskJournal', () => {
 
     expect(within(card).queryByRole('button', { name: 'Завершить' })).toBeNull();
     expect(within(card).getAllByPlaceholderText(/комментарий/i).length).toBeGreaterThan(0);
+  });
+
+  it.each(['legacy', 'modern'] as const)('separately allows editing another user task in the %s task card', async (taskCardWindowMode) => {
+    authState.isAdmin = false;
+    permissionsState.taskCanEdit = false;
+    permissionsState.taskCanDelete = false;
+    permissionsState.taskCanEditOthers = true;
+    permissionsState.taskCanCompleteOthers = false;
+    permissionsState.taskCanDeleteOthers = false;
+    await renderJournal([
+      createTask({
+        assigneeUserId: 9,
+        assigneeName: 'Другой исполнитель',
+        authorUserId: 8,
+        authorName: 'Другой постановщик',
+        participants: [],
+        status: 'inProgress',
+      }),
+    ], { settings: { taskCardWindowMode } });
+
+    fireEvent.click(screen.getByTitle('Просмотр'));
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+
+    expect(within(card).getAllByRole('button', { name: 'Редактировать задачу' }).length).toBeGreaterThan(0);
+    expect(within(card).queryByRole('button', { name: 'Завершить' })).toBeNull();
+  });
+
+  it.each(['legacy', 'modern'] as const)('separately allows completing another user task in the %s task card', async (taskCardWindowMode) => {
+    authState.isAdmin = false;
+    permissionsState.taskCanEdit = false;
+    permissionsState.taskCanDelete = false;
+    permissionsState.taskCanEditOthers = false;
+    permissionsState.taskCanCompleteOthers = true;
+    permissionsState.taskCanDeleteOthers = false;
+    await renderJournal([
+      createTask({
+        assigneeUserId: 9,
+        assigneeName: 'Другой исполнитель',
+        authorUserId: 8,
+        authorName: 'Другой постановщик',
+        participants: [],
+        status: 'inProgress',
+      }),
+    ], { settings: { taskCardWindowMode } });
+
+    fireEvent.click(screen.getByTitle('Просмотр'));
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+
+    expect(within(card).queryByRole('button', { name: 'Редактировать задачу' })).toBeNull();
+    expect(within(card).getAllByRole('button', { name: 'Завершить' }).length).toBeGreaterThan(0);
+  });
+
+  it.each(['legacy', 'modern'] as const)('separately allows deleting another user task in the %s task card', async (taskCardWindowMode) => {
+    authState.isAdmin = false;
+    permissionsState.taskCanEdit = false;
+    permissionsState.taskCanDelete = false;
+    permissionsState.taskCanEditOthers = false;
+    permissionsState.taskCanCompleteOthers = false;
+    permissionsState.taskCanDeleteOthers = true;
+    await renderJournal([
+      createTask({
+        assigneeUserId: 9,
+        assigneeName: 'Другой исполнитель',
+        authorUserId: 8,
+        authorName: 'Другой постановщик',
+        participants: [],
+        status: 'inProgress',
+      }),
+    ], { settings: { taskCardWindowMode } });
+
+    fireEvent.click(screen.getByTitle('Просмотр'));
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+
+    expect(within(card).queryByRole('button', { name: 'Редактировать задачу' })).toBeNull();
+    expect(within(card).queryByRole('button', { name: 'Завершить' })).toBeNull();
+    const actionMenuButton = within(card).queryByRole('button', { name: 'Еще' });
+    if (actionMenuButton) {
+      fireEvent.click(actionMenuButton);
+    }
+    expect(within(card).getByRole('button', { name: 'Удалить задачу' })).toBeTruthy();
   });
 
   it.each(['legacy', 'modern'] as const)('allows executor to request deadline change from the %s task card without moving task directly', async (taskCardWindowMode) => {

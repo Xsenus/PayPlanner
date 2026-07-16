@@ -21,6 +21,9 @@ public class RolePermission
     public bool CanDelete { get; set; }
     public bool CanExport { get; set; }
     public bool CanViewAnalytics { get; set; }
+    public bool CanEditOthers { get; set; }
+    public bool CanCompleteOthers { get; set; }
+    public bool CanDeleteOthers { get; set; }
 
     [Required]
     [MaxLength(32)]

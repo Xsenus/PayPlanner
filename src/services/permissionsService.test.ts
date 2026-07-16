@@ -17,6 +17,9 @@ describe('permissionsService', () => {
     const permissions = getRolePermissions(undefined);
 
     expect(permissions.tasks.canView).toBe(false);
+    expect(permissions.tasks.canEditOthers).toBe(false);
+    expect(permissions.tasks.canCompleteOthers).toBe(false);
+    expect(permissions.tasks.canDeleteOthers).toBe(false);
     expect(permissions.clients.canView).toBe(false);
     expect(permissions.payments.canView).toBe(false);
     expect(hasLoadedRolePermissions(undefined)).toBe(true);
@@ -34,6 +37,9 @@ describe('permissionsService', () => {
         canDelete: false,
         canExport: false,
         viewScope: 'own',
+        canEditOthers: true,
+        canCompleteOthers: false,
+        canDeleteOthers: true,
       },
     } as never);
 
@@ -54,6 +60,9 @@ describe('permissionsService', () => {
     const loaded = getRolePermissions(42);
 
     expect(loaded.tasks.canView).toBe(true);
+    expect(loaded.tasks.canEditOthers).toBe(true);
+    expect(loaded.tasks.canCompleteOthers).toBe(false);
+    expect(loaded.tasks.canDeleteOthers).toBe(true);
     expect(loaded.payments.canView).toBe(false);
     expect(hasLoadedRolePermissions(42)).toBe(true);
   });

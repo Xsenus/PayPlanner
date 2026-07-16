@@ -16,10 +16,17 @@ public class CalendarPermissionsDto : MenuSectionPermissionsDto
     public List<int>? VisibleUserIds { get; set; }
 }
 
+public class TaskSectionPermissionsDto : MenuSectionPermissionsDto
+{
+    public bool CanEditOthers { get; set; }
+    public bool CanCompleteOthers { get; set; }
+    public bool CanDeleteOthers { get; set; }
+}
+
 public class RolePermissionsDto
 {
     public CalendarPermissionsDto Calendar { get; set; } = new();
-    public MenuSectionPermissionsDto Tasks { get; set; } = new();
+    public TaskSectionPermissionsDto Tasks { get; set; } = new();
     public MenuSectionPermissionsDto Notes { get; set; } = new();
     public MenuSectionPermissionsDto Reports { get; set; } = new();
     public MenuSectionPermissionsDto Calculator { get; set; } = new();

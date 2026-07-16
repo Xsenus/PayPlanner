@@ -364,6 +364,34 @@ public class RolePermissionsAuditTests
     }
 
     [Fact]
+    public async Task Update_PreservesIndependentOtherTaskPermissions()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "task-supervisor", Description = "Task supervisor" };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.AddRange(RolePermissionCatalog.CreateEntities(role.Id, allowRoleManagement: false));
+        await db.SaveChangesAsync();
+
+        var admin = await CreateAdminUserAsync(db);
+        var controller = CreateController(db, CreateAdminPrincipal(admin.Id));
+        var request = RolePermissionCatalog.CreateDto(allowRoleManagement: false);
+        request.Tasks.CanEditOthers = true;
+        request.Tasks.CanCompleteOthers = false;
+        request.Tasks.CanDeleteOthers = true;
+
+        var updateResult = await controller.Update(role.Id, request, CancellationToken.None);
+
+        Assert.IsType<NoContentResult>(updateResult);
+        var response = await controller.Get(role.Id, CancellationToken.None);
+        var dto = AssertOk<RolePermissionsDto>(response);
+        Assert.True(dto.Tasks.CanEditOthers);
+        Assert.False(dto.Tasks.CanCompleteOthers);
+        Assert.True(dto.Tasks.CanDeleteOthers);
+    }
+
+    [Fact]
     public async Task Update_NotifiesRoleUsersWhenSpecificCalendarVisibleUsersChanged()
     {
         await using var db = await CreateContextAsync();
