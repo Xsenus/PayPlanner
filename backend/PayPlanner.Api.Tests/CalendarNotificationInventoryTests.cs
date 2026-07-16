@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Xunit;
 
 namespace PayPlanner.Api.Tests;
@@ -92,10 +93,13 @@ public class CalendarNotificationInventoryTests
 
     private static string ExtractMethodBody(string source, string methodName)
     {
-        var methodNameIndex = source.IndexOf(methodName + "(", StringComparison.Ordinal);
-        Assert.True(methodNameIndex >= 0, $"Method {methodName} was not found.");
+        var methodMatch = Regex.Match(
+            source,
+            $@"\b{Regex.Escape(methodName)}\s*\(",
+            RegexOptions.CultureInvariant);
+        Assert.True(methodMatch.Success, $"Method {methodName} was not found.");
 
-        var bodyStart = source.IndexOf('{', methodNameIndex);
+        var bodyStart = source.IndexOf('{', methodMatch.Index);
         Assert.True(bodyStart >= 0, $"Method {methodName} body start was not found.");
 
         var depth = 0;
