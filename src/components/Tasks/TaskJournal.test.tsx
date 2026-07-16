@@ -2752,6 +2752,23 @@ describe('TaskJournal', () => {
     expect(apiMock.createTaskJournalItem).not.toHaveBeenCalled();
   });
 
+  it('opens the client directory above the new task wizard and allows selecting a client', async () => {
+    await renderJournal();
+
+    fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
+    await screen.findByRole('heading', { name: 'Выберите клиента и дело' });
+    fireEvent.click(screen.getByRole('button', { name: 'Справочник' }));
+
+    const directory = await screen.findByTestId('lookup-select-dialog');
+    expect(directory.className).toContain('z-[2500]');
+    expect(within(directory).getByRole('heading', { name: 'Клиент' })).toBeTruthy();
+
+    fireEvent.click(within(directory).getByRole('button', { name: /Иванов Иван Иванович/ }));
+
+    expect(screen.queryByTestId('lookup-select-dialog')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Иванов Иван Иванович' })).toBeTruthy();
+  });
+
   it('creates an internal task without a counterparty', async () => {
     await renderJournal();
 

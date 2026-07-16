@@ -7568,6 +7568,7 @@ function TaskBillingCreateWizard({
               }}
               placeholder="Выберите клиента или юридическое лицо"
               searchPlaceholder="Поиск по ФИО, названию, ИНН, телефону или email"
+              overlayClassName="z-[2500]"
               required
             />
             <label className="block text-sm font-semibold text-slate-700">

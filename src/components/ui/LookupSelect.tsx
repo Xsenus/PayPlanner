@@ -24,6 +24,7 @@ interface LookupSelectProps {
   required?: boolean;
   disabled?: boolean;
   buttonClassName?: string;
+  overlayClassName?: string;
   noOptionsText?: string;
 }
 
@@ -99,6 +100,7 @@ export function LookupSelect({
   required = false,
   disabled = false,
   buttonClassName = '',
+  overlayClassName = 'z-[2300]',
   noOptionsText = 'Ничего не найдено',
 }: LookupSelectProps) {
   const [open, setOpen] = useState(false);
@@ -189,7 +191,13 @@ export function LookupSelect({
 
       {open && typeof document !== 'undefined'
         ? createPortal(
-          <div className="fixed inset-0 z-[2300] flex items-center justify-center bg-slate-900/40 p-4">
+          <div
+            className={`fixed inset-0 flex items-center justify-center bg-slate-900/40 p-4 ${overlayClassName}`}
+            role="dialog"
+            aria-modal="true"
+            aria-label={modalTitle}
+            data-testid="lookup-select-dialog"
+          >
             <div className="w-full max-w-3xl rounded-2xl bg-white shadow-2xl">
               <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
                 <h2 className="text-xl font-semibold text-slate-900">{modalTitle}</h2>
