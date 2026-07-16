@@ -5267,6 +5267,44 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task DeleteTask_StopsPendingDeadlineChangeRequest()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "author-delete-deadline-request@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Клиент удалённой задачи");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, author.Id);
+        var deadlineRequest = new TaskJournalDeadlineChangeRequest
+        {
+            TaskJournalItemId = task.Id,
+            RequestedByUserId = author.Id,
+            RequestedByName = author.FullName,
+            ReviewerUserId = author.Id,
+            ReviewerName = author.FullName,
+            CurrentDueAt = task.DueAt,
+            RequestedDueAt = task.DueAt.AddDays(1),
+            Reason = "Нужно больше времени.",
+            Status = "pending",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        db.TaskJournalDeadlineChangeRequests.Add(deadlineRequest);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var deletion = await controller.DeleteTask(task.Id, CancellationToken.None);
+        var approval = await controller.ApproveDeadlineChangeRequest(task.Id, deadlineRequest.Id, new ApproveTaskJournalDeadlineChangeRequest
+        {
+            ApprovedDueAt = deadlineRequest.RequestedDueAt,
+        }, CancellationToken.None);
+
+        Assert.IsType<NoContentResult>(deletion);
+        Assert.False(await db.TaskJournalDeadlineChangeRequests.AnyAsync(item => item.Id == deadlineRequest.Id));
+        var notFound = Assert.IsType<NotFoundObjectResult>(approval.Result);
+        var message = notFound.Value?.GetType().GetProperty("message")?.GetValue(notFound.Value) as string;
+        Assert.Contains("Задача удалена", message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task DeleteTask_ReturnsNotFoundForHiddenTask()
     {
         await using var db = await CreateContextAsync();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractDisplayErrorMessage } from './errorUtils';
+import { extractDisplayErrorMessage, isHttpErrorStatus } from './errorUtils';
 
 describe('extractDisplayErrorMessage', () => {
   it('adds mapped missing field labels from validation payload', () => {
@@ -53,5 +53,11 @@ describe('extractDisplayErrorMessage', () => {
     const message = extractDisplayErrorMessage(error, 'Не удалось создать клиента');
 
     expect(message).toBe('Клиент с таким email уже существует');
+  });
+
+  it('recognizes an HTTP status in API errors', () => {
+    expect(isHttpErrorStatus(new Error('HTTP 404 Not Found at /api/tasks/15'), 404)).toBe(true);
+    expect(isHttpErrorStatus(new Error('HTTP 403 Forbidden at /api/tasks/15'), 404)).toBe(false);
+    expect(isHttpErrorStatus(new Error('Failed to fetch'), 404)).toBe(false);
   });
 });

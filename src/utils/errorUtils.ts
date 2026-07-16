@@ -71,3 +71,12 @@ export function extractDisplayErrorMessage(
 
   return stripped;
 }
+
+export function isHttpErrorStatus(error: unknown, status: number): boolean {
+  if (!Number.isInteger(status) || status < 100 || status > 599) {
+    return false;
+  }
+
+  const raw = error instanceof Error ? error.message : String(error ?? '');
+  return new RegExp(`(?:^|\\s)HTTP\\s+${status}(?:\\s|$)`, 'i').test(raw);
+}

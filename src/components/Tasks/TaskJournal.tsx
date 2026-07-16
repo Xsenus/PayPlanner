@@ -53,7 +53,7 @@ import { useToast } from '../../hooks/useToast';
 import { apiService, type TaskJournalSettingsDto } from '../../services/api';
 import type { CaseCalendarEvent, CaseCalendarSummary, Client, ClientCase, LegalEntitySummary } from '../../types';
 import type { MenuSectionPermissions, TaskSectionPermissions } from '../../types/permissions';
-import { extractDisplayErrorMessage } from '../../utils/errorUtils';
+import { extractDisplayErrorMessage, isHttpErrorStatus } from '../../utils/errorUtils';
 import { formatCurrencySmart } from '../../utils/formatters';
 import {
   formatDateTimeInTimeZone,
@@ -2795,6 +2795,23 @@ export function TaskJournal({
     return null;
   }, [currentUserId, forcedDecisionSnoozes, isAdminUser, isApprovalsMode, tasks]);
 
+  const dismissUnavailableDeadlineChangePrompt = useCallback(async (taskId: number, requestId: number) => {
+    processedDeadlineChangeRequestIdsRef.current.add(requestId);
+    setForcedDecisionSnoozeRevision((value) => value + 1);
+    setDeadlineChangeDecisionPrompt((current) => (
+      current?.task.id === taskId && current.request.id === requestId ? null : current
+    ));
+    setDeadlineChangeDecisionDueAt('');
+    setDeadlineChangeDecisionComment('');
+    setDeadlineChangeDecisionError(null);
+    setDeadlineChangeDecisionSaving(null);
+    toast.info(
+      'Задача уже удалена или больше недоступна. Запрос переноса срока закрыт и больше не будет показываться.',
+      'Согласования',
+    );
+    await refreshTasks();
+  }, [refreshTasks, toast]);
+
   const pendingApprovalDecision = useMemo<Exclude<ApprovalDecisionPromptState, null> | null>(() => {
     if (!isApprovalsMode) {
       return null;
@@ -2860,6 +2877,38 @@ export function TaskJournal({
     approvalDecisionSaving,
     tasks,
   ]);
+
+  useEffect(() => {
+    if (!deadlineChangeDecisionPrompt) {
+      return;
+    }
+
+    const { task, request } = deadlineChangeDecisionPrompt;
+    let cancelled = false;
+    let dismissing = false;
+
+    const verifyTaskStillExists = async () => {
+      try {
+        await apiService.getTaskJournalItem(task.id);
+      } catch (error) {
+        if (!cancelled && !dismissing && isHttpErrorStatus(error, 404)) {
+          dismissing = true;
+          await dismissUnavailableDeadlineChangePrompt(task.id, request.id);
+        }
+      }
+    };
+
+    void verifyTaskStillExists();
+    const intervalId = window.setInterval(() => void verifyTaskStillExists(), 15_000);
+    const handleWindowFocus = () => void verifyTaskStillExists();
+    window.addEventListener('focus', handleWindowFocus);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', handleWindowFocus);
+    };
+  }, [deadlineChangeDecisionPrompt, dismissUnavailableDeadlineChangePrompt]);
 
   useEffect(() => {
     if (!isApprovalsMode) {
@@ -3504,10 +3553,15 @@ export function TaskJournal({
       });
       toast.success('Перенос срока согласован.', 'Согласования');
       processedDeadlineChangeRequestIdsRef.current.add(request.id);
+      setForcedDecisionSnoozeRevision((value) => value + 1);
       resetDeadlineChangeDecisionPrompt();
       await refreshTasks();
       emitTaskChange();
     } catch (error) {
+      if (isHttpErrorStatus(error, 404)) {
+        await dismissUnavailableDeadlineChangePrompt(task.id, request.id);
+        return;
+      }
       setDeadlineChangeDecisionError(extractDisplayErrorMessage(error, 'Не удалось согласовать перенос срока.'));
       setDeadlineChangeDecisionSaving(null);
     }
@@ -3529,10 +3583,15 @@ export function TaskJournal({
       await apiService.rejectTaskJournalDeadlineChangeRequest(task.id, request.id, { comment });
       toast.success('Перенос срока отклонен.', 'Согласования');
       processedDeadlineChangeRequestIdsRef.current.add(request.id);
+      setForcedDecisionSnoozeRevision((value) => value + 1);
       resetDeadlineChangeDecisionPrompt();
       await refreshTasks();
       emitTaskChange();
     } catch (error) {
+      if (isHttpErrorStatus(error, 404)) {
+        await dismissUnavailableDeadlineChangePrompt(task.id, request.id);
+        return;
+      }
       setDeadlineChangeDecisionError(extractDisplayErrorMessage(error, 'Не удалось отклонить перенос срока.'));
       setDeadlineChangeDecisionSaving(null);
     }

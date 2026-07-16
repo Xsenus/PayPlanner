@@ -1622,14 +1622,14 @@ public class TasksController : ControllerBase
         var entity = await BuildVisibleTasksQuery(access).FirstOrDefaultAsync(item => item.Id == id, ct);
         if (entity is null)
         {
-            return NotFound();
+            return NotFound(new { message = "Задача удалена или больше недоступна. Запрос переноса срока закрыт." });
         }
 
         var deadlineRequest = await _db.TaskJournalDeadlineChangeRequests
             .FirstOrDefaultAsync(item => item.Id == requestId && item.TaskJournalItemId == entity.Id, ct);
         if (deadlineRequest is null)
         {
-            return NotFound();
+            return NotFound(new { message = "Запрос переноса срока уже закрыт или больше недоступен." });
         }
 
         if (!string.Equals(deadlineRequest.Status, "pending", StringComparison.OrdinalIgnoreCase))
@@ -1718,14 +1718,14 @@ public class TasksController : ControllerBase
         var entity = await BuildVisibleTasksQuery(access).FirstOrDefaultAsync(item => item.Id == id, ct);
         if (entity is null)
         {
-            return NotFound();
+            return NotFound(new { message = "Задача удалена или больше недоступна. Запрос переноса срока закрыт." });
         }
 
         var deadlineRequest = await _db.TaskJournalDeadlineChangeRequests
             .FirstOrDefaultAsync(item => item.Id == requestId && item.TaskJournalItemId == entity.Id, ct);
         if (deadlineRequest is null)
         {
-            return NotFound();
+            return NotFound(new { message = "Запрос переноса срока уже закрыт или больше недоступен." });
         }
 
         if (!string.Equals(deadlineRequest.Status, "pending", StringComparison.OrdinalIgnoreCase))

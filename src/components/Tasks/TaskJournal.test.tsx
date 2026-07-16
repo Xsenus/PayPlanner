@@ -53,6 +53,7 @@ const apiMock = vi.hoisted(() => ({
 
 const toastMock = vi.hoisted(() => ({
   error: vi.fn(),
+  info: vi.fn(),
   success: vi.fn(),
 }));
 
@@ -461,6 +462,8 @@ describe('TaskJournal', () => {
       clientCaseId: 100,
       contracts: [{ id: 501, number: '15/26', title: 'Юридические услуги', billingMode: 'Actual', status: 'Concluded' }],
     });
+    apiMock.getTaskJournalItem.mockReset();
+    apiMock.getTaskJournalItem.mockResolvedValue(createTask());
     apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([]);
     apiMock.createTaskJournalCaseAutomationTask.mockResolvedValue(createTask({
       type: 'control',
@@ -1652,6 +1655,50 @@ describe('TaskJournal', () => {
       approvedDueAt: expect.not.stringMatching(requestedDueAt),
       comment: null,
     }));
+  });
+
+  it('closes a forced deadline prompt when its task was deleted elsewhere', async () => {
+    authState.isAdmin = false;
+    authState.user = { id: 8, fullName: 'Постановщик', email: 'author@example.com' };
+    const deletedTask = createTask({
+      id: 208,
+      title: 'Удалённая задача с переносом срока',
+      authorUserId: 8,
+      assigneeUserId: 7,
+      activeDeadlineChangeRequests: [{
+        id: 904,
+        taskJournalItemId: 208,
+        requestedByUserId: 7,
+        requestedByName: 'Исполнитель',
+        reviewerUserId: 8,
+        reviewerName: 'Постановщик',
+        currentDueAt: todayAt(18),
+        requestedDueAt: todayAt(20),
+        reason: 'Ожидаем документы',
+        status: 'pending',
+        decisionDueAt: null,
+        decisionComment: null,
+        decidedByUserId: null,
+        decidedByName: null,
+        decidedAt: null,
+        createdCommentId: 501,
+        decisionCommentId: null,
+        createdAt: todayAt(12),
+        updatedAt: todayAt(12),
+      }],
+    });
+    apiMock.getTaskJournalItem.mockRejectedValueOnce(new Error('HTTP 404 Not Found at /api/tasks/208'));
+
+    await renderJournal([deletedTask], { mode: 'approvals' });
+
+    await screen.findByTestId('deadline-change-decision-prompt');
+    await waitFor(() => expect(screen.queryByTestId('deadline-change-decision-prompt')).toBeNull());
+    expect(toastMock.info).toHaveBeenCalledWith(
+      expect.stringContaining('Задача уже удалена'),
+      'Согласования',
+    );
+    expect(apiMock.approveTaskJournalDeadlineChangeRequest).not.toHaveBeenCalled();
+    expect(apiMock.rejectTaskJournalDeadlineChangeRequest).not.toHaveBeenCalled();
   });
 
   it('opens the deadline change decision from a journal row without entering the task', async () => {
