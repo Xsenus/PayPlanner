@@ -1695,6 +1695,7 @@ export interface TaskJournalSettingsDto {
   allowAdminCompleteAnyTask: boolean;
   approvalDueDays: number;
   taskCardWindowMode: 'legacy' | 'modern';
+  approvalQuickActionMode: 'completionButton' | 'separateButton';
   caseInactivityAutomationEnabled: boolean;
   caseInactivityDays: number;
   caseInactivityLimit: number;
@@ -1728,6 +1729,7 @@ export interface UpdateTaskJournalSettingsRequest {
   allowAdminCompleteAnyTask: boolean;
   approvalDueDays: number;
   taskCardWindowMode: 'legacy' | 'modern';
+  approvalQuickActionMode: 'completionButton' | 'separateButton';
   caseInactivityAutomationEnabled: boolean;
   caseInactivityDays: number;
   caseInactivityLimit: number;

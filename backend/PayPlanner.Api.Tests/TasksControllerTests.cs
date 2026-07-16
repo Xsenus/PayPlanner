@@ -450,6 +450,7 @@ public class TasksControllerTests
             AllowAdminCompleteAnyTask = true,
             ApprovalDueDays = 400,
             TaskCardWindowMode = "modern",
+            ApprovalQuickActionMode = "separateButton",
             CaseInactivityAutomationEnabled = false,
             CaseInactivityDays = 400,
             CaseInactivityLimit = 0,
@@ -469,6 +470,7 @@ public class TasksControllerTests
         Assert.True(dto.AllowAdminCompleteAnyTask);
         Assert.Equal(365, dto.ApprovalDueDays);
         Assert.Equal("modern", dto.TaskCardWindowMode);
+        Assert.Equal("separateButton", dto.ApprovalQuickActionMode);
         Assert.False(dto.CaseInactivityAutomationEnabled);
         Assert.Equal(365, dto.CaseInactivityDays);
         Assert.Equal(1, dto.CaseInactivityLimit);
@@ -480,10 +482,12 @@ public class TasksControllerTests
             .AsNoTracking()
             .Where(item => item.Key.StartsWith("tasks.automation.caseControl.")
                 || item.Key == "tasks.approvalDueDays"
+                || item.Key == "tasks.approvalQuickActionMode"
                 || item.Key == "tasks.executorCompletionAllowedUserIds")
             .ToDictionaryAsync(item => item.Key, item => item.Value);
 
         Assert.Equal("365", stored["tasks.approvalDueDays"]);
+        Assert.Equal("separateButton", stored["tasks.approvalQuickActionMode"]);
         Assert.Equal($"[{fallbackAssignee.Id}]", stored["tasks.executorCompletionAllowedUserIds"]);
         Assert.Equal("false", stored["tasks.automation.caseControl.enabled"]);
         Assert.Equal("365", stored["tasks.automation.caseControl.inactiveDays"]);

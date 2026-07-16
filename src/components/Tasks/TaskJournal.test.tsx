@@ -305,6 +305,7 @@ async function renderJournal(
     allowAdminCompleteAnyTask: true,
     approvalDueDays: 5,
     taskCardWindowMode: 'legacy',
+    approvalQuickActionMode: 'completionButton',
     caseInactivityAutomationEnabled: true,
     caseInactivityDays: 14,
     caseInactivityLimit: 25,
@@ -1735,7 +1736,7 @@ describe('TaskJournal', () => {
       ],
     });
 
-    await renderJournal([task]);
+    await renderJournal([task], { settings: { approvalQuickActionMode: 'separateButton' } });
 
     fireEvent.click(screen.getByRole('button', { name: 'Рассмотреть согласование' }));
     const prompt = await screen.findByTestId('task-approval-decision-prompt');
@@ -1918,7 +1919,7 @@ describe('TaskJournal', () => {
           { id: 79, userId: 7, role: 'approver', displayName: 'Согласующий', sortOrder: 0, approvalStatus: 'pending' },
         ],
       }),
-    ], { settings: { taskCardWindowMode } });
+    ], { settings: { taskCardWindowMode, approvalQuickActionMode: 'separateButton' } });
 
     fireEvent.click(screen.getByTitle('Просмотр'));
     const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
@@ -1927,6 +1928,89 @@ describe('TaskJournal', () => {
 
     const prompt = await screen.findByTestId('task-approval-decision-prompt');
     expect(within(prompt).getByText('Итог работы передан на проверку.')).toBeTruthy();
+  });
+
+  it('opens approval from the green action in completion-button mode', async () => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Согласующий', email: 'approver@example.com' };
+    permissionsState.taskCanEdit = false;
+    await renderJournal([
+      createTask({
+        status: 'onApproval',
+        participants: [
+          { id: 77, userId: 7, role: 'approver', displayName: 'Согласующий', sortOrder: 0, approvalStatus: 'pending' },
+        ],
+      }),
+    ], { settings: { approvalQuickActionMode: 'completionButton' } });
+
+    expect(screen.queryByRole('button', { name: 'Рассмотреть согласование' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Действие по согласованию' }));
+
+    expect(await screen.findByTestId('task-approval-decision-prompt')).toBeTruthy();
+    expect(apiMock.updateTaskJournalStatus).not.toHaveBeenCalled();
+  });
+
+  it('disables completion and shows a separate approval action in separate-button mode', async () => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Согласующий', email: 'approver@example.com' };
+    permissionsState.taskCanEdit = false;
+    await renderJournal([
+      createTask({
+        status: 'onApproval',
+        participants: [
+          { id: 77, userId: 7, role: 'approver', displayName: 'Согласующий', sortOrder: 0, approvalStatus: 'pending' },
+        ],
+      }),
+    ], { settings: { approvalQuickActionMode: 'separateButton' } });
+
+    const completion = screen.getByRole('button', { name: 'Действие по согласованию' });
+    expect((completion as HTMLButtonElement).disabled).toBe(true);
+    const approval = screen.getByRole('button', { name: 'Рассмотреть согласование' });
+    fireEvent.click(approval);
+
+    expect(await screen.findByTestId('task-approval-decision-prompt')).toBeTruthy();
+    expect(apiMock.updateTaskJournalStatus).not.toHaveBeenCalled();
+  });
+
+  it.each(['legacy', 'modern'] as const)('routes the completion action to approval in the %s task card', async (taskCardWindowMode) => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Согласующий', email: 'approver@example.com' };
+    permissionsState.taskCanEdit = false;
+    await renderJournal([
+      createTask({
+        status: 'onApproval',
+        participants: [
+          { id: 77, userId: 7, role: 'approver', displayName: 'Согласующий', sortOrder: 0, approvalStatus: 'pending' },
+        ],
+      }),
+    ], { settings: { taskCardWindowMode, approvalQuickActionMode: 'completionButton' } });
+
+    fireEvent.click(screen.getByTitle('Просмотр'));
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    fireEvent.click(within(card).getAllByRole('button', { name: 'Открыть окно согласования' })[0]);
+
+    expect(screen.getByText('Завершить согласование')).toBeTruthy();
+    expect(apiMock.updateTaskJournalStatus).not.toHaveBeenCalled();
+  });
+
+  it.each(['legacy', 'modern'] as const)('disables completion in the %s task card when a separate approval action is configured', async (taskCardWindowMode) => {
+    authState.isAdmin = false;
+    authState.user = { id: 7, fullName: 'Согласующий', email: 'approver@example.com' };
+    permissionsState.taskCanEdit = false;
+    await renderJournal([
+      createTask({
+        status: 'onApproval',
+        participants: [
+          { id: 77, userId: 7, role: 'approver', displayName: 'Согласующий', sortOrder: 0, approvalStatus: 'pending' },
+        ],
+      }),
+    ], { settings: { taskCardWindowMode, approvalQuickActionMode: 'separateButton' } });
+
+    fireEvent.click(screen.getByTitle('Просмотр'));
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    const completionButtons = within(card).getAllByRole('button', { name: 'Задача находится на согласовании' });
+    expect(completionButtons.length).toBeGreaterThan(0);
+    completionButtons.forEach((button) => expect((button as HTMLButtonElement).disabled).toBe(true));
   });
 
   it('lets the current final approver choose whether to complete the task from view mode', async () => {

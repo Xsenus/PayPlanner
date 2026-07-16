@@ -14,6 +14,7 @@ const DEFAULT_SETTINGS: TaskJournalSettingsDto = {
   allowAdminCompleteAnyTask: true,
   approvalDueDays: 5,
   taskCardWindowMode: 'legacy',
+  approvalQuickActionMode: 'completionButton',
   caseInactivityAutomationEnabled: true,
   caseInactivityDays: 14,
   caseInactivityLimit: 25,
@@ -146,6 +147,44 @@ export function TaskJournalSettings() {
                 </button>
               ))}
             </div>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-violet-200 bg-violet-50/50 p-3 text-sm text-gray-700">
+          <div className="font-semibold text-gray-900">Действие кнопки завершения при согласовании</div>
+          <div className="mt-1 text-gray-600">
+            Выберите, как сотрудник принимает решение по задаче со статусом «На согласовании». Обычное завершение такой задачи блокируется в обоих режимах.
+          </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-2" role="radiogroup" aria-label="Действие при согласовании задачи">
+            {([
+              {
+                value: 'completionButton',
+                title: 'Через кнопку «Завершить»',
+                description: 'Зелёная кнопка открывает окно согласования. Отдельный значок решения не показывается.',
+              },
+              {
+                value: 'separateButton',
+                title: 'Отдельным значком согласования',
+                description: 'Кнопка завершения неактивна, а решение открывается отдельным значком согласования.',
+              },
+            ] as const).map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={settings.approvalQuickActionMode === option.value}
+                onClick={() => setSettings((prev) => ({ ...prev, approvalQuickActionMode: option.value }))}
+                disabled={loading || saving}
+                className={`rounded-xl border p-3 text-left transition ${
+                  settings.approvalQuickActionMode === option.value
+                    ? 'border-violet-400 bg-white text-violet-950 shadow-sm ring-1 ring-violet-200'
+                    : 'border-violet-100 bg-white/70 text-slate-700 hover:border-violet-300'
+                } disabled:cursor-not-allowed disabled:opacity-60`}
+              >
+                <span className="block font-semibold">{option.title}</span>
+                <span className="mt-1 block text-xs font-normal text-slate-500">{option.description}</span>
+              </button>
+            ))}
           </div>
         </div>
 

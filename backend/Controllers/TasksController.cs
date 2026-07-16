@@ -82,6 +82,9 @@ public class TasksController : ControllerBase
     private const string TaskCardWindowModeSettingKey = "tasks.taskCardWindowMode";
     private const string TaskCardWindowModeLegacy = "legacy";
     private const string TaskCardWindowModeModern = "modern";
+    private const string ApprovalQuickActionModeSettingKey = "tasks.approvalQuickActionMode";
+    private const string ApprovalQuickActionModeCompletionButton = "completionButton";
+    private const string ApprovalQuickActionModeSeparateButton = "separateButton";
     private const string CaseInactivityAutomationEnabledSettingKey = "tasks.automation.caseControl.enabled";
     private const string CaseInactivityAutomationDaysSettingKey = "tasks.automation.caseControl.inactiveDays";
     private const string CaseInactivityAutomationLimitSettingKey = "tasks.automation.caseControl.limit";
@@ -376,6 +379,7 @@ public class TasksController : ControllerBase
             ? requestedEscalationUserId.ToString()
             : "0";
         var taskCardWindowMode = NormalizeTaskCardWindowMode(request.TaskCardWindowMode);
+        var approvalQuickActionMode = NormalizeApprovalQuickActionMode(request.ApprovalQuickActionMode);
         var approvalDueDays = Math.Clamp(request.ApprovalDueDays, 1, 365);
         var executorCompletionAllowedUserIds = request.ExecutorCompletionAllowedUserIds
             .Where(id => id > 0)
@@ -403,6 +407,7 @@ public class TasksController : ControllerBase
         await UpsertSystemSettingAsync(AllowAdminCompleteAnyTaskSettingKey, request.AllowAdminCompleteAnyTask ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(ApprovalDueDaysSettingKey, approvalDueDays.ToString(), now, ct);
         await UpsertSystemSettingAsync(TaskCardWindowModeSettingKey, taskCardWindowMode, now, ct);
+        await UpsertSystemSettingAsync(ApprovalQuickActionModeSettingKey, approvalQuickActionMode, now, ct);
         await UpsertSystemSettingAsync(CaseInactivityAutomationEnabledSettingKey, request.CaseInactivityAutomationEnabled ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(CaseInactivityAutomationDaysSettingKey, inactivityDays.ToString(), now, ct);
         await UpsertSystemSettingAsync(CaseInactivityAutomationLimitSettingKey, inactivityLimit.ToString(), now, ct);
@@ -3766,6 +3771,7 @@ public class TasksController : ControllerBase
                 item.Key == AllowAdminCompleteAnyTaskSettingKey ||
                 item.Key == ApprovalDueDaysSettingKey ||
                 item.Key == TaskCardWindowModeSettingKey ||
+                item.Key == ApprovalQuickActionModeSettingKey ||
                 item.Key == CaseInactivityAutomationEnabledSettingKey ||
                 item.Key == CaseInactivityAutomationDaysSettingKey ||
                 item.Key == CaseInactivityAutomationLimitSettingKey ||
@@ -3787,6 +3793,7 @@ public class TasksController : ControllerBase
             AllowAdminCompleteAnyTask = ParseBoolSetting(settings.GetValueOrDefault(AllowAdminCompleteAnyTaskSettingKey), true),
             ApprovalDueDays = Math.Clamp(ParseIntSetting(settings.GetValueOrDefault(ApprovalDueDaysSettingKey), DefaultApprovalDueDays), 1, 365),
             TaskCardWindowMode = NormalizeTaskCardWindowMode(settings.GetValueOrDefault(TaskCardWindowModeSettingKey)),
+            ApprovalQuickActionMode = NormalizeApprovalQuickActionMode(settings.GetValueOrDefault(ApprovalQuickActionModeSettingKey)),
             CaseInactivityAutomationEnabled = ParseBoolSetting(settings.GetValueOrDefault(CaseInactivityAutomationEnabledSettingKey), true),
             CaseInactivityDays = inactivityDays,
             CaseInactivityLimit = Math.Clamp(ParseIntSetting(settings.GetValueOrDefault(CaseInactivityAutomationLimitSettingKey), 25), 1, 100),
@@ -3801,6 +3808,13 @@ public class TasksController : ControllerBase
         return string.Equals(value, TaskCardWindowModeModern, StringComparison.OrdinalIgnoreCase)
             ? TaskCardWindowModeModern
             : TaskCardWindowModeLegacy;
+    }
+
+    private static string NormalizeApprovalQuickActionMode(string? value)
+    {
+        return string.Equals(value, ApprovalQuickActionModeSeparateButton, StringComparison.OrdinalIgnoreCase)
+            ? ApprovalQuickActionModeSeparateButton
+            : ApprovalQuickActionModeCompletionButton;
     }
 
     private static string NormalizeApprovalFinalAction(string? value)

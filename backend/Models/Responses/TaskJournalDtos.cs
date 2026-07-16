@@ -236,6 +236,7 @@ public class TaskJournalSettingsDto
     public bool AllowAdminCompleteAnyTask { get; set; } = true;
     public int ApprovalDueDays { get; set; } = 5;
     public string TaskCardWindowMode { get; set; } = "legacy";
+    public string ApprovalQuickActionMode { get; set; } = "completionButton";
     public bool CaseInactivityAutomationEnabled { get; set; } = true;
     public int CaseInactivityDays { get; set; } = 14;
     public int CaseInactivityLimit { get; set; } = 25;

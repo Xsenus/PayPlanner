@@ -26,6 +26,7 @@ const settings: TaskJournalSettingsDto = {
   allowAdminCompleteAnyTask: true,
   approvalDueDays: 5,
   taskCardWindowMode: 'modern',
+  approvalQuickActionMode: 'completionButton',
   caseInactivityAutomationEnabled: false,
   caseInactivityDays: 14,
   caseInactivityLimit: 25,
@@ -62,6 +63,21 @@ describe('TaskJournalSettings', () => {
 
     await waitFor(() => expect(apiMock.updateTaskJournalSettings).toHaveBeenCalledWith(
       expect.objectContaining({ executorCompletionAllowedUserIds: [7, 8] }),
+    ));
+  });
+
+  it('lets an administrator choose how approval quick actions work', async () => {
+    render(<TaskJournalSettings />);
+
+    const separateButton = await screen.findByRole('radio', { name: /Отдельным значком согласования/i });
+    expect(separateButton.getAttribute('aria-checked')).toBe('false');
+
+    fireEvent.click(separateButton);
+    expect(separateButton.getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ approvalQuickActionMode: 'separateButton' }),
     ));
   });
 });

@@ -198,6 +198,7 @@ const DEFAULT_TASK_JOURNAL_SETTINGS: TaskJournalSettingsDto = {
   allowAdminCompleteAnyTask: true,
   approvalDueDays: 5,
   taskCardWindowMode: 'legacy',
+  approvalQuickActionMode: 'completionButton',
   caseInactivityAutomationEnabled: true,
   caseInactivityDays: 14,
   caseInactivityLimit: 25,
@@ -1174,6 +1175,10 @@ function getReviewableApprovalParticipant(task: TaskJournalItem, userId: number 
 
   const participant = getCurrentPendingApprover(task);
   return userId !== null && participant?.userId === userId ? participant : null;
+}
+
+function isTaskAwaitingApproval(task: Pick<TaskJournalItem, 'status'>) {
+  return task.status === 'onApproval' || task.status === 'overdueApproval';
 }
 
 function isTaskInApprovalsScope(task: TaskJournalItem, userId: number | null, isAdminUser: boolean) {
@@ -3627,6 +3632,28 @@ export function TaskJournal({
     }
   };
 
+  const handleQuickTaskCompletion = (task: TaskJournalItem) => {
+    if (isTaskAwaitingApproval(task)) {
+      const participant = getReviewableApprovalParticipant(task, currentUserId);
+      if (taskSettings.approvalQuickActionMode === 'completionButton' && participant) {
+        openApprovalDecisionPrompt(task, participant);
+        return;
+      }
+
+      const currentApprover = getCurrentPendingApprover(task);
+      const currentApproverName = currentApprover ? getParticipantDisplayName(currentApprover) : '';
+      toast.error(
+        currentApproverName
+          ? `Задача находится на согласовании. Решение ожидается от: ${currentApproverName}.`
+          : 'Задача находится на согласовании. Используйте действие согласования.',
+        'Согласование задачи',
+      );
+      return;
+    }
+
+    void setTaskStatus(task, 'done');
+  };
+
   const toggleTaskControl = async (task: TaskJournalItem) => {
     try {
       await apiService.updateTaskJournalControl(task.id, !task.isUnderControl);
@@ -4575,7 +4602,7 @@ export function TaskJournal({
             canDeleteTasks={canDeleteTasks}
             onStatusChange={setTaskStatus}
             onToggleControl={toggleTaskControl}
-            onDone={(task) => setTaskStatus(task, 'done')}
+            onDone={handleQuickTaskCompletion}
             onReviewDeadlineChange={openDeadlineChangeDecisionPrompt}
             onReviewApproval={openApprovalDecisionPrompt}
             sortBy={sortBy}
@@ -4590,9 +4617,10 @@ export function TaskJournal({
             currentUserId={currentUserId}
             isAdminUser={isAdminUser}
             onEdit={openTaskEditor}
-            onDone={(task) => setTaskStatus(task, 'done')}
+            onDone={handleQuickTaskCompletion}
             onReviewDeadlineChange={openDeadlineChangeDecisionPrompt}
             onReviewApproval={openApprovalDecisionPrompt}
+            approvalQuickActionMode={taskSettings.approvalQuickActionMode}
             canCompleteTask={(task) => canCompleteTaskForCurrentUser(
               task,
               currentUserId,
@@ -4635,7 +4663,8 @@ export function TaskJournal({
               onMoveTask={handleCalendarTaskMove}
               onResizeTask={handleCalendarTaskResize}
               onEdit={openTaskEditor}
-              onDone={(task) => setTaskStatus(task, 'done')}
+              onDone={handleQuickTaskCompletion}
+              onReviewApproval={openApprovalDecisionPrompt}
               currentUserId={currentUserId}
               isAdminUser={isAdminUser}
               taskSettings={taskSettings}
@@ -4674,7 +4703,8 @@ export function TaskJournal({
               onCreateDate={canCreateTasks ? openTaskCreateForDate : undefined}
               onMoveTask={handleTimelineTaskMove}
               onEdit={openTaskEditor}
-              onDone={(task) => setTaskStatus(task, 'done')}
+              onDone={handleQuickTaskCompletion}
+              onReviewApproval={openApprovalDecisionPrompt}
               currentUserId={currentUserId}
               isAdminUser={isAdminUser}
               taskSettings={taskSettings}
@@ -5704,6 +5734,12 @@ function TaskTable({
               const pendingDeadlineRequest = pendingDeadlineRequests[0] ?? null;
               const reviewableDeadlineRequest = getReviewableDeadlineChangeRequest(task, currentUserId, isAdminUser);
               const reviewableApprovalParticipant = getReviewableApprovalParticipant(task, currentUserId);
+              const isAwaitingApproval = isTaskAwaitingApproval(task);
+              const useSeparateApprovalAction = isAwaitingApproval
+                && taskSettings.approvalQuickActionMode === 'separateButton';
+              const approvalActionDisabled = isAwaitingApproval && !reviewableApprovalParticipant;
+              const completionActionDisabled = isAwaitingApproval
+                && (taskSettings.approvalQuickActionMode === 'separateButton' || approvalActionDisabled);
               const taskObservers = getTaskParticipants(task, 'observer');
               const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
               const canCompleteTask = canCompleteTaskForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
@@ -5883,12 +5919,13 @@ function TaskTable({
                           <TimerReset className="h-4 w-4" />
                         </button>
                       ) : null}
-                      {reviewableApprovalParticipant ? (
+                      {useSeparateApprovalAction ? (
                         <button
                           type="button"
-                          onClick={() => onReviewApproval(task, reviewableApprovalParticipant)}
-                          className="rounded-xl p-2 text-violet-600 transition hover:bg-violet-50 hover:text-violet-700"
-                          title="Рассмотреть согласование"
+                          onClick={() => reviewableApprovalParticipant && onReviewApproval(task, reviewableApprovalParticipant)}
+                          disabled={!reviewableApprovalParticipant}
+                          className="rounded-xl p-2 text-violet-600 transition hover:bg-violet-50 hover:text-violet-700 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
+                          title={reviewableApprovalParticipant ? 'Рассмотреть согласование' : 'Задача находится на согласовании у другого сотрудника'}
                           aria-label="Рассмотреть согласование"
                         >
                           <Scale className="h-4 w-4" />
@@ -5909,8 +5946,21 @@ function TaskTable({
                           <ShieldAlert className="h-4 w-4" />
                         </button>
                       ) : null}
-                      {canCompleteTask ? (
-                        <button type="button" onClick={() => onDone(task)} className="rounded-xl p-2 text-emerald-600 transition hover:bg-emerald-50 hover:text-emerald-700" title="Завершить">
+                      {canCompleteTask || isAwaitingApproval ? (
+                        <button
+                          type="button"
+                          onClick={() => onDone(task)}
+                          disabled={completionActionDisabled}
+                          className="rounded-xl p-2 text-emerald-600 transition hover:bg-emerald-50 hover:text-emerald-700 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
+                          title={completionActionDisabled
+                            ? taskSettings.approvalQuickActionMode === 'separateButton'
+                              ? 'Задача находится на согласовании. Используйте отдельный значок согласования.'
+                              : 'Задача находится на согласовании у другого сотрудника.'
+                            : isAwaitingApproval
+                              ? 'Открыть окно согласования'
+                              : 'Завершить'}
+                          aria-label={isAwaitingApproval ? 'Действие по согласованию' : 'Завершить'}
+                        >
                           <CheckCircle2 className="h-4 w-4" />
                         </button>
                       ) : null}
@@ -5962,6 +6012,7 @@ function TaskBoard({
   onDone,
   onReviewDeadlineChange,
   onReviewApproval,
+  approvalQuickActionMode,
   canCompleteTask,
 }: {
   columns: Array<{ key: string; title: string; tone: string; items: TaskJournalItem[] }>;
@@ -5972,6 +6023,7 @@ function TaskBoard({
   onDone: (task: TaskJournalItem) => void;
   onReviewDeadlineChange: (task: TaskJournalItem, request: TaskJournalDeadlineChangeRequest) => void;
   onReviewApproval: (task: TaskJournalItem, participant: TaskJournalParticipant) => void;
+  approvalQuickActionMode: TaskJournalSettingsDto['approvalQuickActionMode'];
   canCompleteTask: (task: TaskJournalItem) => boolean;
 }) {
   return (
@@ -5994,6 +6046,10 @@ function TaskBoard({
               const isHighlighted = highlightedTaskId === task.id;
               const reviewableDeadlineRequest = getReviewableDeadlineChangeRequest(task, currentUserId, isAdminUser);
               const reviewableApprovalParticipant = getReviewableApprovalParticipant(task, currentUserId);
+              const isAwaitingApproval = isTaskAwaitingApproval(task);
+              const useSeparateApprovalAction = isAwaitingApproval && approvalQuickActionMode === 'separateButton';
+              const completionActionDisabled = isAwaitingApproval
+                && (useSeparateApprovalAction || !reviewableApprovalParticipant);
               return (
                 <article
                   key={task.id}
@@ -6041,21 +6097,31 @@ function TaskBoard({
                       Рассмотреть перенос срока
                     </button>
                   ) : null}
-                  {reviewableApprovalParticipant ? (
+                  {useSeparateApprovalAction ? (
                     <button
                       type="button"
-                      onClick={() => onReviewApproval(task, reviewableApprovalParticipant)}
-                      className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-violet-200 px-3 py-2 text-sm font-semibold text-violet-700 transition hover:bg-violet-50"
+                      onClick={() => reviewableApprovalParticipant && onReviewApproval(task, reviewableApprovalParticipant)}
+                      disabled={!reviewableApprovalParticipant}
+                      className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-violet-200 px-3 py-2 text-sm font-semibold text-violet-700 transition hover:bg-violet-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400 disabled:hover:bg-transparent"
+                      title={reviewableApprovalParticipant ? 'Рассмотреть согласование' : 'Задача находится на согласовании у другого сотрудника'}
                     >
                       <Scale className="h-4 w-4" />
                       Рассмотреть согласование
                     </button>
                   ) : null}
-                  {canCompleteTask(task) ? (
+                  {canCompleteTask(task) || isAwaitingApproval ? (
                     <button
                       type="button"
                       onClick={() => onDone(task)}
-                      className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-200 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50"
+                      disabled={completionActionDisabled}
+                      className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-200 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400 disabled:hover:bg-transparent"
+                      title={completionActionDisabled
+                        ? useSeparateApprovalAction
+                          ? 'Задача находится на согласовании. Используйте отдельный значок согласования.'
+                          : 'Задача находится на согласовании у другого сотрудника.'
+                        : isAwaitingApproval
+                          ? 'Открыть окно согласования'
+                          : 'Завершить'}
                     >
                       <CheckCircle2 className="h-4 w-4" />
                       Завершить
@@ -6236,6 +6302,7 @@ function TaskTimelineCalendar({
   onMoveTask,
   onEdit,
   onDone,
+  onReviewApproval,
   currentUserId,
   isAdminUser,
   taskSettings,
@@ -6257,6 +6324,7 @@ function TaskTimelineCalendar({
   onMoveTask: (task: TaskJournalItem, dueAt: Date) => void;
   onEdit: (task: TaskJournalItem) => void;
   onDone: (task: TaskJournalItem) => void;
+  onReviewApproval: (task: TaskJournalItem, participant: TaskJournalParticipant) => void;
   currentUserId: number | null;
   isAdminUser: boolean;
   taskSettings: TaskJournalSettingsDto;
@@ -6543,6 +6611,13 @@ function TaskTimelineCalendar({
                         const tone = getTimelineTaskTone(task, currentUserId, assigneeFilter, colorMode, completedTaskCalendarAction);
                         const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
                         const canCompleteTask = canCompleteTaskForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
+                        const isAwaitingApproval = isTaskAwaitingApproval(task);
+                        const reviewableApprovalParticipant = getReviewableApprovalParticipant(task, currentUserId);
+                        const useSeparateApprovalAction = isAwaitingApproval
+                          && taskSettings.approvalQuickActionMode === 'separateButton';
+                        const approvalCompletionDisabled = isAwaitingApproval
+                          && (taskSettings.approvalQuickActionMode === 'separateButton'
+                            || !reviewableApprovalParticipant);
                         const start = new Date(task.dueAt);
                         const end = new Date(start.getTime() + normalizeTaskDuration(task.plannedDurationMinutes) * 60 * 1000);
                         const width = `calc(${100 / laneCount}% - ${TIMELINE_TASK_LANE_GAP}px)`;
@@ -6577,16 +6652,34 @@ function TaskTimelineCalendar({
                                   <span className="mt-0.5 block truncate opacity-90">{getTaskAssigneeNames(task).join(', ')}</span>
                                 ) : null}
                               </button>
-                              {canCompleteTask ? (
+                              {useSeparateApprovalAction ? (
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    if (reviewableApprovalParticipant) {
+                                      onReviewApproval(task, reviewableApprovalParticipant);
+                                    }
+                                  }}
+                                  disabled={!reviewableApprovalParticipant}
+                                  className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-white/20 text-white transition hover:bg-white/30 disabled:cursor-not-allowed disabled:opacity-40"
+                                  title={reviewableApprovalParticipant ? 'Рассмотреть согласование' : 'Задача находится на согласовании у другого сотрудника'}
+                                  aria-label="Рассмотреть согласование"
+                                >
+                                  <Scale className="h-3.5 w-3.5" />
+                                </button>
+                              ) : null}
+                              {canCompleteTask || isAwaitingApproval ? (
                                 <button
                                   type="button"
                                   onClick={(event) => {
                                     event.stopPropagation();
                                     onDone(task);
                                   }}
-                                  className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-white/20 text-white transition hover:bg-white/30"
-                                  title="Завершить"
-                                  aria-label="Завершить задачу"
+                                  disabled={approvalCompletionDisabled}
+                                  className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-white/20 text-white transition hover:bg-white/30 disabled:cursor-not-allowed disabled:opacity-40"
+                                  title={approvalCompletionDisabled ? 'Задача находится на согласовании' : isAwaitingApproval ? 'Открыть окно согласования' : 'Завершить'}
+                                  aria-label={isAwaitingApproval ? 'Действие по согласованию' : 'Завершить задачу'}
                                 >
                                   <CheckCircle2 className="h-3.5 w-3.5" />
                                 </button>
@@ -6642,6 +6735,7 @@ function TaskCalendar({
   onResizeTask,
   onEdit,
   onDone,
+  onReviewApproval,
   currentUserId,
   isAdminUser,
   taskSettings,
@@ -6668,6 +6762,7 @@ function TaskCalendar({
   onResizeTask: (task: TaskJournalItem, deltaMinutes: -15 | 15) => void;
   onEdit: (task: TaskJournalItem) => void;
   onDone: (task: TaskJournalItem) => void;
+  onReviewApproval: (task: TaskJournalItem, participant: TaskJournalParticipant) => void;
   currentUserId: number | null;
   isAdminUser: boolean;
   taskSettings: TaskJournalSettingsDto;
@@ -7107,6 +7202,13 @@ function TaskCalendar({
                 const TypeIcon = getTypeMeta(task.type).icon;
                 const isReadOnly = isTaskReadOnlyForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
                 const canCompleteTask = canCompleteTaskForCurrentUser(task, currentUserId, isAdminUser, taskSettings, taskPermissions);
+                const isAwaitingApproval = isTaskAwaitingApproval(task);
+                const reviewableApprovalParticipant = getReviewableApprovalParticipant(task, currentUserId);
+                const useSeparateApprovalAction = isAwaitingApproval
+                  && taskSettings.approvalQuickActionMode === 'separateButton';
+                const approvalCompletionDisabled = isAwaitingApproval
+                  && (taskSettings.approvalQuickActionMode === 'separateButton'
+                    || !reviewableApprovalParticipant);
                 const isOverdue = isTaskOverdue(task);
                 return (
                   <article key={task.id} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
@@ -7157,11 +7259,25 @@ function TaskCalendar({
                         +15 мин
                       </button>
                     </div>
-                    {canCompleteTask ? (
+                    {useSeparateApprovalAction ? (
+                      <button
+                        type="button"
+                        onClick={() => reviewableApprovalParticipant && onReviewApproval(task, reviewableApprovalParticipant)}
+                        disabled={!reviewableApprovalParticipant}
+                        className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-violet-200 px-3 py-2 text-sm font-semibold text-violet-700 transition hover:bg-violet-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400 disabled:hover:bg-transparent"
+                        title={reviewableApprovalParticipant ? 'Рассмотреть согласование' : 'Задача находится на согласовании у другого сотрудника'}
+                      >
+                        <Scale className="h-4 w-4" />
+                        Рассмотреть согласование
+                      </button>
+                    ) : null}
+                    {canCompleteTask || isAwaitingApproval ? (
                       <button
                         type="button"
                         onClick={() => onDone(task)}
-                        className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-200 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50"
+                        disabled={approvalCompletionDisabled}
+                        className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-200 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400 disabled:hover:bg-transparent"
+                        title={approvalCompletionDisabled ? 'Задача находится на согласовании' : isAwaitingApproval ? 'Открыть окно согласования' : 'Завершить'}
                       >
                         <CheckCircle2 className="h-4 w-4" />
                         Завершить
@@ -8104,13 +8220,6 @@ function TaskModal({
     await onSave(nextForm, state?.task?.id);
   };
 
-  const handleCompletionAction = async () => {
-    const nextStatus: TaskJournalStatus = approverParticipants.some((participant) => participant.approvalStatus !== 'approved')
-      ? 'onApproval'
-      : 'done';
-    await saveWithStatus(nextStatus);
-  };
-
   const handleApproveParticipant = (participant: TaskJournalParticipant) => {
     const task = state?.task;
     if (!task) return;
@@ -8126,6 +8235,21 @@ function TaskModal({
     }
 
     void onApprovalDecision(task.id, 'approved', resolution, participant.id);
+  };
+
+  const handleCompletionAction = async () => {
+    const task = state?.task;
+    if (task && isTaskAwaitingApproval(task)) {
+      if (taskSettings.approvalQuickActionMode === 'completionButton' && currentApprovalParticipant) {
+        handleApproveParticipant(currentApprovalParticipant);
+      }
+      return;
+    }
+
+    const nextStatus: TaskJournalStatus = approverParticipants.some((participant) => participant.approvalStatus !== 'approved')
+      ? 'onApproval'
+      : 'done';
+    await saveWithStatus(nextStatus);
   };
 
   const confirmApprovalChoice = async (finalAction: TaskApprovalFinalAction) => {
@@ -8215,9 +8339,16 @@ function TaskModal({
   };
 
   const availableObservers = getAvailableAssigneesForRole('observer');
-  const completionButtonLabel = approverParticipants.some((participant) => participant.approvalStatus !== 'approved')
-    ? 'На согласование'
-    : 'Завершить';
+  const isAwaitingApproval = Boolean(state?.task && isTaskAwaitingApproval(state.task));
+  const approvalCompletionDisabled = isAwaitingApproval
+    && (taskSettings.approvalQuickActionMode === 'separateButton' || !currentApprovalParticipant);
+  const completionButtonLabel = isAwaitingApproval
+    ? approvalCompletionDisabled
+      ? 'Задача находится на согласовании'
+      : 'Открыть окно согласования'
+    : approverParticipants.some((participant) => participant.approvalStatus !== 'approved')
+      ? 'На согласование'
+      : 'Завершить';
 
   useEffect(() => {
     if (!taskId) {
@@ -9133,11 +9264,12 @@ function TaskModal({
                 >
                   {STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                 </select>
-                {!isReadOnly || canCompleteReadOnlyTask ? (
+                {!isReadOnly || canCompleteReadOnlyTask || isAwaitingApproval ? (
                   <button
                     type="button"
                     onClick={() => void handleCompletionAction()}
-                    className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700 transition hover:bg-emerald-100"
+                    disabled={approvalCompletionDisabled}
+                    className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
                     title={completionButtonLabel}
                     aria-label={completionButtonLabel}
                   >
@@ -9519,8 +9651,8 @@ function TaskModal({
                 <button type="button" onClick={onEnableEdit} className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800">
                   Редактировать задачу
                 </button>
-              ) : canCompleteReadOnlyTask ? (
-                <button type="button" onClick={() => void handleCompletionAction()} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700">
+              ) : canCompleteReadOnlyTask || isAwaitingApproval ? (
+                <button type="button" onClick={() => void handleCompletionAction()} disabled={approvalCompletionDisabled} title={completionButtonLabel} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500">
                   {completionButtonLabel}
                 </button>
               ) : !isReadOnly ? (
@@ -9577,11 +9709,13 @@ function TaskModal({
                     >
                       В работу
                     </button>
-                    {!isReadOnly || canCompleteReadOnlyTask ? (
+                    {!isReadOnly || canCompleteReadOnlyTask || isAwaitingApproval ? (
                       <button
                         type="button"
                         onClick={() => void handleCompletionAction()}
-                        className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700"
+                        disabled={approvalCompletionDisabled}
+                        title={completionButtonLabel}
+                        className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
                       >
                         {completionButtonLabel}
                       </button>
@@ -10488,8 +10622,8 @@ function TaskModal({
             <button type="button" onClick={onEnableEdit} className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800">
               Редактировать задачу
             </button>
-          ) : canCompleteReadOnlyTask ? (
-            <button type="button" onClick={() => void handleCompletionAction()} className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700">
+          ) : canCompleteReadOnlyTask || isAwaitingApproval ? (
+            <button type="button" onClick={() => void handleCompletionAction()} disabled={approvalCompletionDisabled} title={completionButtonLabel} className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500">
               {completionButtonLabel}
             </button>
           ) : (
