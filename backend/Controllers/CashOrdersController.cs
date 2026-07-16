@@ -166,7 +166,7 @@ public class CashOrdersController : ControllerBase
             .ThenByDescending(order => order.Id)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(order => Map(order))
+            .Select(CashOrderListProjection)
             .ToListAsync(ct);
 
         return Ok(new PagedResponse<CashOrderDto>
@@ -205,11 +205,11 @@ public class CashOrdersController : ControllerBase
         }
 
         var query = BuildFilteredQuery(from, to, type, status, search, accountName, visibility);
-        var total = await query.CountAsync(ct);
         var summary = await query
             .GroupBy(_ => 1)
             .Select(group => new
             {
+                Total = group.Count(),
                 IncomingCount = group.Count(order => order.Type == CashOrderType.Incoming),
                 OutgoingCount = group.Count(order => order.Type == CashOrderType.Outgoing),
                 DraftCount = group.Count(order => order.Status == CashOrderStatus.Draft),
@@ -229,13 +229,13 @@ public class CashOrdersController : ControllerBase
             .ThenByDescending(order => order.Id)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(order => Map(order))
+            .Select(CashOrderListProjection)
             .ToListAsync(ct);
 
         return Ok(new CashOrderRegisterResponseDto
         {
             Items = items,
-            Total = total,
+            Total = summary?.Total ?? 0,
             Page = page,
             PageSize = pageSize,
             IncomingCount = summary?.IncomingCount ?? 0,
@@ -270,11 +270,11 @@ public class CashOrdersController : ControllerBase
         }
 
         var query = BuildFilteredQuery(from, to, type, status, search, accountName, visibility);
-        var total = await query.CountAsync(ct);
         var summary = await query
             .GroupBy(_ => 1)
             .Select(group => new
             {
+                Total = group.Count(),
                 IncomingCount = group.Count(order => order.Type == CashOrderType.Incoming),
                 OutgoingCount = group.Count(order => order.Type == CashOrderType.Outgoing),
                 DraftCount = group.Count(order => order.Status == CashOrderStatus.Draft),
@@ -292,13 +292,13 @@ public class CashOrdersController : ControllerBase
             .OrderBy(order => order.Date)
             .ThenBy(order => order.Id)
             .Take(2_000)
-            .Select(order => Map(order))
+            .Select(CashOrderListProjection)
             .ToListAsync(ct);
 
         var register = new CashOrderRegisterResponseDto
         {
             Items = items,
-            Total = total,
+            Total = summary?.Total ?? 0,
             Page = 1,
             PageSize = items.Count,
             IncomingCount = summary?.IncomingCount ?? 0,
@@ -1191,9 +1191,6 @@ public class CashOrdersController : ControllerBase
         DataVisibilityAccess visibility)
     {
         var query = _db.CashOrders
-            .Include(order => order.Client)
-            .Include(order => order.Payment)
-            .Include(order => order.MoneyOperation)
             .AsNoTracking()
             .ApplyCashOrderVisibility(visibility)
             .AsQueryable();
@@ -1322,6 +1319,44 @@ public class CashOrdersController : ControllerBase
                 .Select(part => part.Length == 1
                     ? part.ToUpperInvariant()
                     : char.ToUpperInvariant(part[0]) + part[1..]));
+
+    private static readonly System.Linq.Expressions.Expression<Func<CashOrder, CashOrderDto>> CashOrderListProjection = order => new CashOrderDto
+    {
+        Id = order.Id,
+        Number = order.Number,
+        Type = order.Type,
+        Status = order.Status,
+        Date = order.Date,
+        Amount = order.Amount,
+        Currency = order.Currency,
+        ClientId = order.ClientId,
+        ClientName = order.Client != null ? order.Client.Name : null,
+        PaymentId = order.PaymentId,
+        MoneyOperationId = order.MoneyOperationId,
+        InvoiceId = order.InvoiceId,
+        OriginType = order.PaymentId.HasValue
+            ? "payment"
+            : order.MoneyOperationId.HasValue
+                ? "moneyOperation"
+                : (order.Basis ?? string.Empty).ToLower().Contains("inventory") ||
+                    (order.Comment ?? string.Empty).ToLower().Contains("inventory")
+                    ? "inventory"
+                    : "manual",
+        Account = order.Account,
+        PayerName = order.PayerName,
+        ReceiverName = order.ReceiverName,
+        Basis = order.Basis,
+        Appendix = order.Appendix,
+        Comment = order.Comment,
+        CancelledAt = order.CancelledAt,
+        CancelledReason = order.CancelledReason,
+        CreatedAt = order.CreatedAt,
+        CreatedByUserId = order.CreatedByUserId,
+        CreatedByUserName = order.CreatedByUserName,
+        UpdatedAt = order.UpdatedAt,
+        UpdatedByUserId = order.UpdatedByUserId,
+        UpdatedByUserName = order.UpdatedByUserName,
+    };
 
     private static CashOrderDto Map(CashOrder order)
         => new()

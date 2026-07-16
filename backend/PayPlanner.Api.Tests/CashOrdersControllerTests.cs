@@ -1,8 +1,10 @@
+using System.Data.Common;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
@@ -14,6 +16,132 @@ namespace PayPlanner.Api.Tests;
 
 public class CashOrdersControllerTests
 {
+    [Fact]
+    public async Task CashOrderLists_UseCompactProjectionAndTwoCashOrderQueries()
+    {
+        var recorder = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(recorder);
+        var userId = await CreateUserWithPaymentsPermissionAsync(
+            db,
+            canView: true,
+            canExport: true);
+        var client = new Client
+        {
+            Name = "Клиент кассового ордера",
+            Company = "Служебное полное название клиента",
+        };
+        var payment = new Payment
+        {
+            Date = new DateTime(2026, 7, 1),
+            PlannedDate = new DateTime(2026, 7, 1),
+            Amount = 1_000m,
+            PaidAmount = 1_000m,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Completed,
+            Description = "Служебное описание связанного платежа",
+            Notes = string.Empty,
+            SystemNotes = string.Empty,
+            CreatedAt = DateTime.UtcNow,
+        };
+        var operation = new MoneyOperation
+        {
+            Source = MoneyOperationSource.Cash,
+            Direction = MoneyOperationDirection.Expense,
+            AccountingType = MoneyOperationAccountingType.Fact,
+            Amount = 250m,
+            Date = new DateTime(2026, 7, 2),
+            Purpose = "Служебное назначение денежной операции",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Clients.Add(client);
+        db.Payments.Add(payment);
+        db.MoneyOperations.Add(operation);
+        await db.SaveChangesAsync();
+
+        db.CashOrders.AddRange(
+            new CashOrder
+            {
+                Number = "ПКО-2026-1001",
+                Type = CashOrderType.Incoming,
+                Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 7, 1),
+                Amount = payment.Amount,
+                ClientId = client.Id,
+                PaymentId = payment.Id,
+            },
+            new CashOrder
+            {
+                Number = "РКО-2026-1001",
+                Type = CashOrderType.Outgoing,
+                Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 7, 2),
+                Amount = operation.Amount,
+                MoneyOperationId = operation.Id,
+            },
+            new CashOrder
+            {
+                Number = "ПКО-2026-1002",
+                Type = CashOrderType.Incoming,
+                Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 7, 3),
+                Amount = 50m,
+                Basis = "INVENTORY correction",
+            });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var controller = CreateController(db, userId, isAdminClaim: false);
+
+        recorder.Commands.Clear();
+        var pagedAction = await controller.GetPaged(
+            from: null,
+            to: null,
+            type: null,
+            status: null,
+            search: null,
+            page: 1,
+            pageSize: 25,
+            accountName: null,
+            ct: CancellationToken.None);
+        var paged = Assert.IsType<PagedResponse<CashOrderDto>>(
+            Assert.IsType<OkObjectResult>(pagedAction.Result).Value);
+        Assert.Equal(3, paged.Total);
+        Assert.Contains(paged.Items, item => item.ClientName == client.Name && item.OriginType == "payment");
+        Assert.Contains(paged.Items, item => item.OriginType == "moneyOperation");
+        Assert.Contains(paged.Items, item => item.OriginType == "inventory");
+        AssertCompactCashOrderCommands(recorder.Commands);
+
+        recorder.Commands.Clear();
+        var registerAction = await controller.GetRegister(
+            from: null,
+            to: null,
+            type: null,
+            status: null,
+            search: null,
+            page: 1,
+            pageSize: 25,
+            accountName: null,
+            ct: CancellationToken.None);
+        var register = Assert.IsType<CashOrderRegisterResponseDto>(
+            Assert.IsType<OkObjectResult>(registerAction.Result).Value);
+        Assert.Equal(3, register.Total);
+        Assert.Equal(2, register.IncomingCount);
+        Assert.Equal(1, register.OutgoingCount);
+        AssertCompactCashOrderCommands(recorder.Commands);
+
+        recorder.Commands.Clear();
+        var printAction = await controller.PrintRegister(
+            from: null,
+            to: null,
+            type: null,
+            status: null,
+            search: null,
+            accountName: null,
+            ct: CancellationToken.None);
+        Assert.IsType<ContentResult>(printAction);
+        AssertCompactCashOrderCommands(recorder.Commands);
+    }
+
     [Fact]
     public async Task GetNextNumber_ReturnsNextUnusedCashOrderNumber()
     {
@@ -604,18 +732,51 @@ public class CashOrdersControllerTests
         Assert.Equal("Бухгалтер", dto.CreatedByUserName);
     }
 
-    private static async Task<PaymentContext> CreateContextAsync()
+    private static void AssertCompactCashOrderCommands(IReadOnlyCollection<string> commands)
+    {
+        var cashOrderCommands = commands
+            .Where(sql => sql.Contains("FROM \"CashOrders\"", StringComparison.Ordinal))
+            .ToArray();
+        Assert.Equal(2, cashOrderCommands.Length);
+
+        var itemsCommand = Assert.Single(cashOrderCommands, sql => sql.Contains("ORDER BY", StringComparison.Ordinal));
+        Assert.DoesNotContain("JOIN \"Payments\"", itemsCommand, StringComparison.Ordinal);
+        Assert.DoesNotContain("JOIN \"MoneyOperations\"", itemsCommand, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Company\"", itemsCommand, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Description\"", itemsCommand, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Purpose\"", itemsCommand, StringComparison.Ordinal);
+    }
+
+    private static async Task<PaymentContext> CreateContextAsync(DbCommandInterceptor? interceptor = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
 
-        var options = new DbContextOptionsBuilder<PaymentContext>()
-            .UseSqlite(connection)
-            .Options;
+        var optionsBuilder = new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite(connection);
+        if (interceptor is not null)
+        {
+            optionsBuilder.AddInterceptors(interceptor);
+        }
 
-        var db = new PaymentContext(options);
+        var db = new PaymentContext(optionsBuilder.Options);
         await db.Database.EnsureCreatedAsync();
         return db;
+    }
+
+    private sealed class RecordingCommandInterceptor : DbCommandInterceptor
+    {
+        public List<string> Commands { get; } = [];
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            Commands.Add(command.CommandText);
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
     }
 
     private static async Task<int> CreateUserWithTimeZoneAsync(PaymentContext db, string timeZoneId)
