@@ -22,6 +22,7 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
     private readonly IConfiguration _configuration;
     private readonly ILogger<TaskJournalReminderNotificationService> _logger;
     private readonly ISystemJobRunStateService? _jobRunState;
+    private readonly SemaphoreSlim _runLock = new(1, 1);
 
     public TaskJournalReminderNotificationService(
         IServiceScopeFactory scopeFactory,
@@ -63,22 +64,30 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
 
     public async Task<int> RunOnceAsync(CancellationToken cancellationToken = default)
     {
-        var startedAt = DateTime.UtcNow;
-        var sent = await ProcessDueRemindersAsync(cancellationToken);
-        if (_jobRunState is not null && sent >= 0)
+        await _runLock.WaitAsync(cancellationToken);
+        try
         {
-            await _jobRunState.RecordSuccessAsync(
-                SystemJobKeys.TaskReminders,
-                startedAt,
-                sent,
-                null,
-                sent > 0
-                    ? $"Отправлено напоминаний по задачам: {sent}."
-                    : "Проверка напоминаний выполнена, новых отправок не было.",
-                cancellationToken);
-        }
+            var startedAt = DateTime.UtcNow;
+            var sent = await ProcessDueRemindersAsync(cancellationToken);
+            if (_jobRunState is not null && sent >= 0)
+            {
+                await _jobRunState.RecordSuccessAsync(
+                    SystemJobKeys.TaskReminders,
+                    startedAt,
+                    sent,
+                    null,
+                    sent > 0
+                        ? $"Отправлено напоминаний по задачам: {sent}."
+                        : "Проверка напоминаний выполнена, новых отправок не было.",
+                    cancellationToken);
+            }
 
-        return sent;
+            return sent;
+        }
+        finally
+        {
+            _runLock.Release();
+        }
     }
 
     private async Task<int> ProcessDueRemindersAsync(CancellationToken cancellationToken)
@@ -112,15 +121,30 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
             }
 
             var notificationService = scope.ServiceProvider.GetRequiredService<INotificationService>();
-            var assigneeTimeZones = new Dictionary<int, TimeZoneInfo>();
-            foreach (var task in tasks)
+            var reminderTasks = tasks
+                .Where(task => DeserializeList(task.ChannelsJson).Any(channel => ReminderChannels.Contains(channel)))
+                .ToList();
+            var assigneeUserIds = reminderTasks
+                .Select(task => task.AssigneeUserId!.Value)
+                .Distinct()
+                .ToArray();
+            var assigneeTimeZoneIds = assigneeUserIds.Length == 0
+                ? new Dictionary<int, string?>()
+                : await context.UserSettings
+                    .AsNoTracking()
+                    .Where(setting =>
+                        assigneeUserIds.Contains(setting.UserId)
+                        && setting.Key == CalendarTimeZoneHelper.UserTimeZoneSettingKey)
+                    .Select(setting => new { setting.UserId, Value = (string?)setting.Value })
+                    .ToDictionaryAsync(setting => setting.UserId, setting => setting.Value, cancellationToken);
+            var fallbackTimeZone = CalendarTimeZoneHelper.ResolveTimeZone(null);
+            var assigneeTimeZones = assigneeUserIds.ToDictionary(
+                userId => userId,
+                userId => assigneeTimeZoneIds.TryGetValue(userId, out var timeZoneId)
+                    ? CalendarTimeZoneHelper.ResolveTimeZone(timeZoneId)
+                    : fallbackTimeZone);
+            foreach (var task in reminderTasks)
             {
-                var channels = DeserializeList(task.ChannelsJson);
-                if (!channels.Any(channel => ReminderChannels.Contains(channel)))
-                {
-                    continue;
-                }
-
                 var assigneeUserId = task.AssigneeUserId!.Value;
                 if (IsApprovalOverdueNotificationDue(task, nowUtc))
                 {
@@ -128,14 +152,7 @@ public sealed class TaskJournalReminderNotificationService : BackgroundService
                     sent += approvalDeliveries.Count;
                 }
 
-                if (!assigneeTimeZones.TryGetValue(assigneeUserId, out var assigneeTimeZone))
-                {
-                    assigneeTimeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(
-                        context,
-                        assigneeUserId,
-                        cancellationToken);
-                    assigneeTimeZones[assigneeUserId] = assigneeTimeZone;
-                }
+                var assigneeTimeZone = assigneeTimeZones[assigneeUserId];
 
                 foreach (var reminder in DeserializeList(task.RemindersJson))
                 {

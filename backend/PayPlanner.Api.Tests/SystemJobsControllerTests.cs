@@ -5,12 +5,14 @@ using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using System.Globalization;
+using System.Data.Common;
 using System.Security.Claims;
 using System.Text.Json;
 using PayPlanner.Api.Controllers;
@@ -1420,6 +1422,122 @@ public class SystemJobsControllerTests
     }
 
     [Fact]
+    public async Task TaskReminderService_LoadsAssigneeTimeZonesInSingleQuery()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var scope = await CreateDbScopeAsync(interceptor);
+        var role = new Role { Name = $"timezone-batch-role-{Guid.NewGuid():N}", Description = "Timezone batch role" };
+        scope.Db.Roles.Add(role);
+        await scope.Db.SaveChangesAsync();
+        var users = Enumerable.Range(1, 3)
+            .Select(index => new User
+            {
+                Email = $"timezone-batch-{index}-{Guid.NewGuid():N}@example.com",
+                FullName = $"Timezone Batch User {index}",
+                PasswordHash = "hash",
+                RoleId = role.Id,
+                IsApproved = true,
+                IsActive = true,
+            })
+            .ToList();
+        scope.Db.Users.AddRange(users);
+        await scope.Db.SaveChangesAsync();
+        var nowUtc = DateTime.UtcNow;
+        scope.Db.UserSettings.AddRange(users.Select(user => new UserSetting
+        {
+            UserId = user.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Europe/Moscow",
+            CreatedAt = nowUtc,
+            UpdatedAt = nowUtc,
+        }));
+        scope.Db.TaskJournalItems.AddRange(users.Select((user, index) => new TaskJournalItem
+        {
+            ObjectName = $"TIMEZONE-BATCH-{index}",
+            Title = $"Timezone batch task {index}",
+            AssigneeUserId = user.Id,
+            AssigneeName = user.FullName,
+            DueAt = nowUtc.AddDays(1),
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "new",
+        }));
+        await scope.Db.SaveChangesAsync();
+
+        var services = new ServiceCollection();
+        services.AddScoped(_ => new PaymentContext(scope.Options, useObjectAuditModel: false));
+        services.AddSingleton<INotificationService>(new RecordingTaskReminderNotificationService());
+        await using var provider = services.BuildServiceProvider();
+        var service = new TaskJournalReminderNotificationService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new ConfigurationBuilder().Build(),
+            NullLogger<TaskJournalReminderNotificationService>.Instance);
+        interceptor.Commands.Clear();
+
+        var sent = await service.RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal(0, sent);
+        Assert.Single(interceptor.Commands, command => command.Contains("UserSettings", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task TaskReminderService_SerializesConcurrentRuns()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var role = new Role { Name = $"serialized-reminders-role-{Guid.NewGuid():N}", Description = "Serialized reminders role" };
+        scope.Db.Roles.Add(role);
+        await scope.Db.SaveChangesAsync();
+        var user = new User
+        {
+            Email = $"serialized-reminders-{Guid.NewGuid():N}@example.com",
+            FullName = "Serialized Reminder User",
+            PasswordHash = "hash",
+            RoleId = role.Id,
+            IsApproved = true,
+            IsActive = true,
+        };
+        scope.Db.Users.Add(user);
+        await scope.Db.SaveChangesAsync();
+        scope.Db.TaskJournalItems.Add(new TaskJournalItem
+        {
+            ObjectName = "SERIALIZED-REMINDER",
+            Title = "Serialized reminder task",
+            AssigneeUserId = user.Id,
+            AssigneeName = user.FullName,
+            DueAt = DateTime.UtcNow.AddMinutes(10),
+            RemindersJson = "[\"before15m\"]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "new",
+        });
+        await scope.Db.SaveChangesAsync();
+
+        var notificationService = new RecordingTaskReminderNotificationService
+        {
+            ReminderEntered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously),
+            ReminderRelease = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously),
+        };
+        var services = new ServiceCollection();
+        services.AddScoped(_ => new PaymentContext(scope.Options, useObjectAuditModel: false));
+        services.AddSingleton<INotificationService>(notificationService);
+        await using var provider = services.BuildServiceProvider();
+        var service = new TaskJournalReminderNotificationService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new ConfigurationBuilder().Build(),
+            NullLogger<TaskJournalReminderNotificationService>.Instance);
+
+        var firstRun = service.RunOnceAsync(CancellationToken.None);
+        await notificationService.ReminderEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var secondRun = service.RunOnceAsync(CancellationToken.None);
+        await Task.Delay(100);
+
+        var maxConcurrentCallsWhileBlocked = notificationService.MaxConcurrentReminderCalls;
+        notificationService.ReminderRelease.SetResult(true);
+        await Task.WhenAll(firstRun, secondRun);
+        Assert.Equal(1, maxConcurrentCallsWhileBlocked);
+        Assert.Equal(1, notificationService.MaxConcurrentReminderCalls);
+    }
+
+    [Fact]
     public async Task SystemJobRunStateService_RoundTripsLastRunState()
     {
         await using var scope = await CreateDbScopeAsync();
@@ -1462,14 +1580,19 @@ public class SystemJobsControllerTests
         Assert.Equal(previousSuccessAt, state.LastSuccessAt);
     }
 
-    private static async Task<TestDbScope> CreateDbScopeAsync()
+    private static async Task<TestDbScope> CreateDbScopeAsync(DbCommandInterceptor? interceptor = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
 
-        var options = new DbContextOptionsBuilder<PaymentContext>()
-            .UseSqlite(connection)
-            .Options;
+        var optionsBuilder = new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite(connection);
+        if (interceptor is not null)
+        {
+            optionsBuilder.AddInterceptors(interceptor);
+        }
+
+        var options = optionsBuilder.Options;
         var db = new PaymentContext(options, useObjectAuditModel: false);
         await db.Database.EnsureCreatedAsync();
 
@@ -1639,10 +1762,38 @@ public class SystemJobsControllerTests
             => Task.FromResult(new TelegramNotificationSettingsDto());
     }
 
+    private sealed class RecordingCommandInterceptor : DbCommandInterceptor
+    {
+        public List<string> Commands { get; } = [];
+
+        public override InterceptionResult<DbDataReader> ReaderExecuting(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result)
+        {
+            Commands.Add(command.CommandText);
+            return base.ReaderExecuting(command, eventData, result);
+        }
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            Commands.Add(command.CommandText);
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
+    }
+
     private sealed class RecordingTaskReminderNotificationService : INotificationService
     {
+        private int _activeReminderCalls;
         public List<(int TaskId, string ReminderKey)> Reminders { get; } = [];
         public List<int> ApprovalOverdueTaskIds { get; } = [];
+        public TaskCompletionSource<bool>? ReminderEntered { get; init; }
+        public TaskCompletionSource<bool>? ReminderRelease { get; init; }
+        public int MaxConcurrentReminderCalls { get; private set; }
 
         public Task<NotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
@@ -1701,20 +1852,35 @@ public class SystemJobsControllerTests
         public Task<IReadOnlyList<NotificationDelivery>> NotifyPasswordIssuedAsync(User user, string password, IEnumerable<string>? channels = null, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
 
-        public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskReminderAsync(TaskJournalItem task, string reminderKey, DateTime nowUtc, CancellationToken cancellationToken = default)
+        public async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskReminderAsync(TaskJournalItem task, string reminderKey, DateTime nowUtc, CancellationToken cancellationToken = default)
         {
-            Reminders.Add((task.Id, reminderKey));
-            return Task.FromResult<IReadOnlyList<NotificationDelivery>>(
-            [
-                new NotificationDelivery
+            var activeCalls = Interlocked.Increment(ref _activeReminderCalls);
+            MaxConcurrentReminderCalls = Math.Max(MaxConcurrentReminderCalls, activeCalls);
+            try
+            {
+                ReminderEntered?.TrySetResult(true);
+                if (ReminderRelease is not null)
                 {
-                    EventKey = $"task:{task.Id}:reminder:{reminderKey}",
-                    Channel = NotificationChannels.InApp,
-                    Subject = "Reminder sent",
-                    CreatedAt = nowUtc,
-                    Status = NotificationDeliveryStatus.Sent,
+                    await ReminderRelease.Task.WaitAsync(cancellationToken);
                 }
-            ]);
+
+                Reminders.Add((task.Id, reminderKey));
+                return
+                [
+                    new NotificationDelivery
+                    {
+                        EventKey = $"task:{task.Id}:reminder:{reminderKey}",
+                        Channel = NotificationChannels.InApp,
+                        Subject = "Reminder sent",
+                        CreatedAt = nowUtc,
+                        Status = NotificationDeliveryStatus.Sent,
+                    }
+                ];
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _activeReminderCalls);
+            }
         }
 
         public Task<IReadOnlyList<NotificationDelivery>> NotifyTaskAssignedAsync(TaskJournalItem task, string actorName, int actorUserId, CancellationToken cancellationToken = default)
