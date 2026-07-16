@@ -151,7 +151,7 @@ public class TasksController : ControllerBase
         }
 
         var query = ApplyTaskJournalFilters(
-            BuildVisibleTasksQuery(access).AsNoTracking(),
+            BuildVisibleTaskBaseQuery(access).AsNoTracking(),
             search,
             status,
             type,
@@ -168,9 +168,10 @@ public class TasksController : ControllerBase
         pageSize = Math.Clamp(pageSize, 1, 200);
 
         var total = await query.CountAsync(ct);
-        var items = await ApplyTaskJournalSort(query, sortBy, sortDir)
+        var pageQuery = ApplyTaskJournalSort(query, sortBy, sortDir)
             .Skip((page - 1) * pageSize)
-            .Take(pageSize)
+            .Take(pageSize);
+        var items = await ProjectTaskReadItems(pageQuery)
             .ToListAsync(ct);
         var activeDeadlineChangeRequests = includeDeadlineChangeRequests
             ? await LoadActiveDeadlineChangeRequestsAsync(items.Select(item => item.Id).ToList(), ct)
@@ -1397,9 +1398,10 @@ public class TasksController : ControllerBase
             return Forbid();
         }
 
-        var task = await BuildVisibleTasksQuery(access)
+        var task = await ProjectTaskReadItems(BuildVisibleTaskBaseQuery(access)
             .AsNoTracking()
-            .FirstOrDefaultAsync(item => item.Id == id, ct);
+            .Where(item => item.Id == id))
+            .FirstOrDefaultAsync(ct);
         return task is null ? NotFound() : Ok(Map(task));
     }
 
@@ -3739,6 +3741,106 @@ public class TasksController : ControllerBase
             .Include(task => task.Participants)
             .AsQueryable();
     }
+
+    private static IQueryable<TaskJournalItem> ProjectTaskReadItems(IQueryable<TaskJournalItem> query)
+        => query.Select(task => new TaskJournalItem
+        {
+            Id = task.Id,
+            ClientId = task.ClientId,
+            Client = task.Client == null
+                ? null
+                : new Client
+                {
+                    Id = task.Client.Id,
+                    Name = task.Client.Name,
+                },
+            LegalEntityId = task.LegalEntityId,
+            LegalEntity = task.LegalEntity == null
+                ? null
+                : new LegalEntity
+                {
+                    Id = task.LegalEntity.Id,
+                    ShortName = task.LegalEntity.ShortName,
+                    FullName = task.LegalEntity.FullName,
+                },
+            ClientCaseId = task.ClientCaseId,
+            ClientCase = task.ClientCase == null
+                ? null
+                : new ClientCase
+                {
+                    Id = task.ClientCase.Id,
+                    Title = task.ClientCase.Title,
+                },
+            ClientBillingClassification = task.ClientBillingClassification,
+            BillingContractId = task.BillingContractId,
+            BillingContract = task.BillingContract == null
+                ? null
+                : new Contract
+                {
+                    Id = task.BillingContract.Id,
+                    Number = task.BillingContract.Number,
+                },
+            BillingModeSnapshot = task.BillingModeSnapshot,
+            BillingInvoiceId = task.BillingInvoiceId,
+            BillingInvoice = task.BillingInvoice == null
+                ? null
+                : new Payment
+                {
+                    Id = task.BillingInvoice.Id,
+                    Account = task.BillingInvoice.Account,
+                },
+            ObjectName = task.ObjectName,
+            Title = task.Title,
+            Description = task.Description,
+            AssigneeUserId = task.AssigneeUserId,
+            AssigneeName = task.AssigneeName,
+            AuthorUserId = task.AuthorUserId,
+            AuthorName = task.AuthorName,
+            DueAt = task.DueAt,
+            ApprovalDueAt = task.ApprovalDueAt,
+            PlannedDurationMinutes = task.PlannedDurationMinutes,
+            ContractorPaymentEnabled = task.ContractorPaymentEnabled,
+            ContractorPaymentAmount = task.ContractorPaymentAmount,
+            ContractorPaymentDueDate = task.ContractorPaymentDueDate,
+            ContractorPaymentOnResult = task.ContractorPaymentOnResult,
+            ContractorPaymentResultDelayDays = task.ContractorPaymentResultDelayDays,
+            ContractorPaymentId = task.ContractorPaymentId,
+            ContractorPayment = task.ContractorPayment == null
+                ? null
+                : new Payment
+                {
+                    Id = task.ContractorPayment.Id,
+                    Status = task.ContractorPayment.Status,
+                },
+            Type = task.Type,
+            Priority = task.Priority,
+            Status = task.Status,
+            IsUnderControl = task.IsUnderControl,
+            ControlMarkedAt = task.ControlMarkedAt,
+            ControlMarkedByUserId = task.ControlMarkedByUserId,
+            ControlMarkedByUserName = task.ControlMarkedByUserName,
+            Result = task.Result,
+            RemindersJson = task.RemindersJson,
+            ChannelsJson = task.ChannelsJson,
+            TagsJson = task.TagsJson,
+            CreatedAt = task.CreatedAt,
+            UpdatedAt = task.UpdatedAt,
+            Participants = task.Participants
+                .Select(participant => new TaskJournalParticipant
+                {
+                    Id = participant.Id,
+                    TaskJournalItemId = participant.TaskJournalItemId,
+                    UserId = participant.UserId,
+                    Role = participant.Role,
+                    DisplayName = participant.DisplayName,
+                    Email = participant.Email,
+                    SortOrder = participant.SortOrder,
+                    ApprovalStatus = participant.ApprovalStatus,
+                    Resolution = participant.Resolution,
+                    RespondedAt = participant.RespondedAt,
+                })
+                .ToList(),
+        });
 
     private IQueryable<TaskJournalItem> BuildVisibleTaskBaseQuery(TaskAccess access)
         => _db.TaskJournalItems.ApplyTaskVisibility(access.Visibility);

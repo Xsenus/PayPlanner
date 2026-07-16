@@ -2327,6 +2327,102 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task TaskReadEndpoints_ProjectOnlyFieldsRequiredByResponse()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var author = await CreateAdminUserAsync(db, "task-projection-author@example.com", "Projection author");
+        var client = await CreateClientAsync(db, "Projection client");
+        client.Notes = "unused client notes";
+        var legalEntity = await CreateLegalEntityAsync(db, "Projection LLC");
+        legalEntity.FullName = "Projection Limited Liability Company";
+        legalEntity.LogoDataUrl = "data:image/png;base64,unused";
+        var clientCase = await CreateCaseAsync(db, client.Id, "Projection case");
+        clientCase.CourtUrl = "https://example.test/unused";
+        var contract = new Contract
+        {
+            Number = "READ-42",
+            Date = DateTime.UtcNow.Date,
+            TerminationFinancialTerms = "unused contract terms",
+        };
+        var payment = new Payment
+        {
+            Account = "INV-42",
+            Date = DateTime.UtcNow.Date,
+            PlannedDate = DateTime.UtcNow.Date,
+            Status = PaymentStatus.Completed,
+            SystemNotes = "unused payment notes",
+        };
+        db.AddRange(contract, payment);
+        await db.SaveChangesAsync();
+        var task = await CreateTaskAsync(
+            db,
+            author.Id,
+            client.Id,
+            clientCaseId: clientCase.Id,
+            legalEntityId: legalEntity.Id);
+        task.BillingContractId = contract.Id;
+        task.BillingInvoiceId = payment.Id;
+        task.ContractorPaymentId = payment.Id;
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        db.ChangeTracker.Clear();
+        interceptor.Commands.Clear();
+        var listResult = await controller.GetTasks(
+            search: null,
+            status: null,
+            type: null,
+            assigneeUserId: null,
+            from: null,
+            to: null,
+            page: 1,
+            pageSize: 50,
+            ct: CancellationToken.None);
+        var listPage = Assert.IsType<PagedResponse<TaskJournalItemDto>>(
+            Assert.IsType<OkObjectResult>(listResult.Result).Value);
+        AssertProjectedTask(Assert.Single(listPage.Items));
+        AssertTaskReadQueriesAreMinimal(interceptor.Commands);
+
+        db.ChangeTracker.Clear();
+        interceptor.Commands.Clear();
+        var detailResult = await controller.GetTask(task.Id, CancellationToken.None);
+        AssertProjectedTask(Assert.IsType<TaskJournalItemDto>(
+            Assert.IsType<OkObjectResult>(detailResult.Result).Value));
+        AssertTaskReadQueriesAreMinimal(interceptor.Commands);
+        Assert.Empty(db.ChangeTracker.Entries<TaskJournalItem>());
+        Assert.Empty(db.ChangeTracker.Entries<TaskJournalParticipant>());
+
+        void AssertProjectedTask(TaskJournalItemDto dto)
+        {
+            Assert.Equal(task.Id, dto.Id);
+            Assert.Equal(client.Name, dto.ClientName);
+            Assert.Equal(legalEntity.ShortName, dto.LegalEntityName);
+            Assert.Equal(clientCase.Title, dto.ClientCaseTitle);
+            Assert.Equal(contract.Number, dto.BillingContractNumber);
+            Assert.Equal(payment.Account, dto.BillingInvoiceNumber);
+            Assert.Equal(payment.Status.ToString(), dto.ContractorPaymentStatus);
+        }
+    }
+
+    private static void AssertTaskReadQueriesAreMinimal(IEnumerable<string> commands)
+    {
+        var taskQueries = commands
+            .Where(command => command.Contains("TaskJournalItems", StringComparison.Ordinal))
+            .ToList();
+        Assert.NotEmpty(taskQueries);
+        Assert.All(taskQueries, command =>
+        {
+            Assert.DoesNotContain("JOIN \"Users\"", command, StringComparison.Ordinal);
+            Assert.DoesNotContain("\"Notes\"", command, StringComparison.Ordinal);
+            Assert.DoesNotContain("\"LogoDataUrl\"", command, StringComparison.Ordinal);
+            Assert.DoesNotContain("\"CourtUrl\"", command, StringComparison.Ordinal);
+            Assert.DoesNotContain("\"TerminationFinancialTerms\"", command, StringComparison.Ordinal);
+            Assert.DoesNotContain("\"SystemNotes\"", command, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
     public async Task GetTasks_SearchByClientNameDoesNotMatchHiddenTaskFields()
     {
         await using var db = await CreateContextAsync();
