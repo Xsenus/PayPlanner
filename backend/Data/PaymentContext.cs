@@ -3056,6 +3056,12 @@ public class PaymentContext : DbContext
             ConfigureAudit<CashOrder>(modelBuilder);
             ConfigureAudit<CashInventory>(modelBuilder);
             ConfigureAudit<TaskJournalItem>(modelBuilder);
+            modelBuilder.Entity<TaskJournalItem>()
+                .HasIndex("IsDeleted", nameof(TaskJournalItem.DueAt), nameof(TaskJournalItem.Id))
+                .HasDatabaseName("IX_TaskJournalItems_IsDeleted_DueAt_Id");
+            modelBuilder.Entity<TaskJournalItem>()
+                .HasIndex("IsDeleted", nameof(TaskJournalItem.Status), nameof(TaskJournalItem.DueAt), nameof(TaskJournalItem.Id))
+                .HasDatabaseName("IX_TaskJournalItems_IsDeleted_Status_DueAt_Id");
             ConfigureAudit<TaskJournalTemplate>(modelBuilder);
             ConfigureAudit<StickyNoteBoard>(modelBuilder);
             ConfigureAudit<StickyNote>(modelBuilder);

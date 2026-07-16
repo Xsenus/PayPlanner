@@ -7014,6 +7014,12 @@ namespace PayPlanner.Api.Migrations
                     b.HasIndex("UpdatedAt")
                         .HasDatabaseName("IX_TaskJournalItem_UpdatedAt_Audit");
 
+                    b.HasIndex("IsDeleted", "DueAt", "Id")
+                        .HasDatabaseName("IX_TaskJournalItems_IsDeleted_DueAt_Id");
+
+                    b.HasIndex("IsDeleted", "Status", "DueAt", "Id")
+                        .HasDatabaseName("IX_TaskJournalItems_IsDeleted_Status_DueAt_Id");
+
                     b.ToTable("TaskJournalItems");
                 });
 

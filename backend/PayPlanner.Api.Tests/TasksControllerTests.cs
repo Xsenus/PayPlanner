@@ -696,6 +696,66 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task GetTasks_StatusAndDueDateSortKeepStableOrderAcrossPages()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "stable-sort-author@example.com", "Автор сортировки");
+        var dueAt = DateTime.UtcNow.Date.AddDays(1);
+        var tasks = Enumerable.Range(1, 5)
+            .Select(number => new TaskJournalItem
+            {
+                ObjectName = "Внутренняя задача",
+                Title = $"Задача {number}",
+                AssigneeName = "Исполнитель",
+                AuthorUserId = author.Id,
+                AuthorName = author.FullName,
+                DueAt = dueAt,
+                Status = number == 5 ? "done" : "new",
+                Type = "task",
+                Priority = "normal",
+            })
+            .ToList();
+        db.TaskJournalItems.AddRange(tasks);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var firstResult = await controller.GetTasks(
+            search: null,
+            status: "new",
+            type: null,
+            assigneeUserId: null,
+            from: null,
+            to: null,
+            page: 1,
+            pageSize: 2,
+            sortBy: "dueAt",
+            sortDir: "asc",
+            ct: CancellationToken.None);
+        var secondResult = await controller.GetTasks(
+            search: null,
+            status: "new",
+            type: null,
+            assigneeUserId: null,
+            from: null,
+            to: null,
+            page: 2,
+            pageSize: 2,
+            sortBy: "dueAt",
+            sortDir: "asc",
+            ct: CancellationToken.None);
+
+        var firstPage = Assert.IsType<PagedResponse<TaskJournalItemDto>>(
+            Assert.IsType<OkObjectResult>(firstResult.Result).Value);
+        var secondPage = Assert.IsType<PagedResponse<TaskJournalItemDto>>(
+            Assert.IsType<OkObjectResult>(secondResult.Result).Value);
+        var expectedIds = tasks.Take(4).Select(task => task.Id).Order().ToArray();
+
+        Assert.Equal(4, firstPage.Total);
+        Assert.Equal(expectedIds[..2], firstPage.Items.Select(task => task.Id).ToArray());
+        Assert.Equal(expectedIds[2..], secondPage.Items.Select(task => task.Id).ToArray());
+    }
+
+    [Fact]
     public async Task CreateTask_BindsClientAndClientCase()
     {
         await using var db = await CreateContextAsync();
