@@ -246,7 +246,10 @@ function getCurrentApprovalParticipant(task: TaskJournalItem, notification: User
   const participantId = getApprovalParticipantId(notification);
   const approvers = getOrderedApprovers(task);
   if (participantId) {
-    return approvers.find((participant) => participant.id === participantId) ?? null;
+    const notificationParticipant = approvers.find((participant) => participant.id === participantId);
+    if (notificationParticipant) {
+      return notificationParticipant;
+    }
   }
 
   return approvers.find((participant) => participant.approvalStatus !== 'approved') ?? null;

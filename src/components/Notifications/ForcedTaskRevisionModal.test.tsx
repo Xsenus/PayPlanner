@@ -396,6 +396,44 @@ describe('ForcedTaskRevisionModal', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
+  it('uses the current pending approver when the notification participant is stale', async () => {
+    mockNotificationPages([], [], [], [createApprovalRequestNotification({
+      metadataJson: JSON.stringify({
+        actorUserId: 8,
+        actorName: 'Мария Юрист',
+        currentApproverId: 1643,
+      }),
+    })]);
+    apiMock.getTaskJournalItem.mockResolvedValue(createApprovalTask({
+      participants: [
+        {
+          id: 1699,
+          userId: 3,
+          role: 'approver',
+          displayName: 'Кожеваткин Андрей Владимирович',
+          sortOrder: 0,
+          approvalStatus: 'pending',
+        },
+      ],
+    }));
+
+    render(<ForcedTaskRevisionModal />);
+
+    expect(await screen.findByTestId('forced-task-approval-prompt')).toBeTruthy();
+    expect(screen.getByText('Кожеваткин Андрей Владимирович')).toBeTruthy();
+    expect(screen.queryByText('Не указан')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Согласовать и завершить' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalApproval).toHaveBeenCalledWith(
+      404,
+      'approved',
+      'Иск проверен, правки внесены, документы готовы.',
+      1699,
+      'complete',
+    ));
+  });
+
   it('requires a revision comment before returning an approval task to revision', async () => {
     mockNotificationPages([], [], [], [createApprovalRequestNotification({ id: 62 })]);
 
