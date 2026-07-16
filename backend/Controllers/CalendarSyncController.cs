@@ -156,118 +156,189 @@ public sealed class CalendarSyncController : ControllerBase
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 200);
 
-        var googleLogs = provider is null or "" or "google" or "google-calendar"
-            ? await _db.GoogleCalendarSyncLogs
-                .AsNoTracking()
-                .Select(item => new CalendarSyncLogRaw
-                {
-                    Provider = "google-calendar",
-                    ProviderLabel = "Google Calendar",
-                    Id = item.Id,
-                    ConnectionId = item.ConnectionId,
-                    UserId = item.Connection == null ? null : item.Connection.UserId,
-                    UserName = item.Connection == null || item.Connection.User == null ? string.Empty : item.Connection.User.FullName,
-                    UserEmail = item.Connection == null || item.Connection.User == null ? string.Empty : item.Connection.User.Email,
-                    TaskJournalItemId = item.TaskJournalItemId,
-                    TaskAssigneeUserId = item.TaskJournalItem == null ? null : item.TaskJournalItem.AssigneeUserId,
-                    TaskTitle = item.TaskJournalItem == null ? string.Empty : item.TaskJournalItem.Title,
-                    TaskObjectName = item.TaskJournalItem == null ? string.Empty : item.TaskJournalItem.ObjectName,
-                    TaskAssigneeName = item.TaskJournalItem == null ? string.Empty : item.TaskJournalItem.AssigneeName,
-                    CalendarName = item.CalendarSyncCalendar == null ? string.Empty : item.CalendarSyncCalendar.Name,
-                    CalendarOwnerUserId = item.CalendarSyncCalendar == null ? null : item.CalendarSyncCalendar.OwnerUserId,
-                    CalendarOwnerName = item.CalendarSyncCalendar == null || item.CalendarSyncCalendar.OwnerUser == null ? string.Empty : item.CalendarSyncCalendar.OwnerUser.FullName,
-                    CalendarOwnerEmail = item.CalendarSyncCalendar == null || item.CalendarSyncCalendar.OwnerUser == null ? string.Empty : item.CalendarSyncCalendar.OwnerUser.Email,
-                    Direction = item.Direction,
-                    Operation = item.Operation,
-                    Status = item.Status,
-                    Message = item.Message,
-                    DetailsJson = item.DetailsJson,
-                    CreatedAt = item.CreatedAt,
-                })
-                .ToListAsync(ct)
-            : [];
+        var normalizedStatus = string.IsNullOrWhiteSpace(status) ? null : status.Trim().ToLowerInvariant();
+        var normalizedOperation = string.IsNullOrWhiteSpace(operation) ? null : operation.Trim().ToLowerInvariant();
+        var normalizedCreatedFrom = createdFrom.HasValue ? NormalizeFilterDate(createdFrom.Value) : (DateTime?)null;
+        var normalizedCreatedTo = createdTo.HasValue ? NormalizeFilterDate(createdTo.Value) : (DateTime?)null;
+        var googleQuery = provider is null or "" or "google" or "google-calendar"
+            ? ApplyCalendarLogFilters(CreateGoogleLogQuery(), normalizedStatus, normalizedOperation, userId, normalizedCreatedFrom, normalizedCreatedTo)
+            : null;
+        var yandexQuery = provider is null or "" or "yandex" or "yandex-calendar"
+            ? ApplyCalendarLogFilters(CreateYandexLogQuery(), normalizedStatus, normalizedOperation, userId, normalizedCreatedFrom, normalizedCreatedTo)
+            : null;
 
-        var yandexLogs = provider is null or "" or "yandex" or "yandex-calendar"
-            ? await _db.YandexCalendarSyncLogs
-                .AsNoTracking()
-                .Select(item => new CalendarSyncLogRaw
-                {
-                    Provider = "yandex-calendar",
-                    ProviderLabel = "Яндекс Календарь",
-                    Id = item.Id,
-                    ConnectionId = item.ConnectionId,
-                    UserId = item.Connection == null ? null : item.Connection.UserId,
-                    UserName = item.Connection == null || item.Connection.User == null ? string.Empty : item.Connection.User.FullName,
-                    UserEmail = item.Connection == null || item.Connection.User == null ? string.Empty : item.Connection.User.Email,
-                    TaskJournalItemId = item.TaskJournalItemId,
-                    TaskAssigneeUserId = item.TaskJournalItem == null ? null : item.TaskJournalItem.AssigneeUserId,
-                    TaskTitle = item.TaskJournalItem == null ? string.Empty : item.TaskJournalItem.Title,
-                    TaskObjectName = item.TaskJournalItem == null ? string.Empty : item.TaskJournalItem.ObjectName,
-                    TaskAssigneeName = item.TaskJournalItem == null ? string.Empty : item.TaskJournalItem.AssigneeName,
-                    CalendarName = item.CalendarSyncCalendar == null ? string.Empty : item.CalendarSyncCalendar.Name,
-                    CalendarOwnerUserId = item.CalendarSyncCalendar == null ? null : item.CalendarSyncCalendar.OwnerUserId,
-                    CalendarOwnerName = item.CalendarSyncCalendar == null || item.CalendarSyncCalendar.OwnerUser == null ? string.Empty : item.CalendarSyncCalendar.OwnerUser.FullName,
-                    CalendarOwnerEmail = item.CalendarSyncCalendar == null || item.CalendarSyncCalendar.OwnerUser == null ? string.Empty : item.CalendarSyncCalendar.OwnerUser.Email,
-                    Direction = item.Direction,
-                    Operation = item.Operation,
-                    Status = item.Status,
-                    Message = item.Message,
-                    DetailsJson = item.DetailsJson,
-                    CreatedAt = item.CreatedAt,
-                })
-                .ToListAsync(ct)
-            : [];
-
-        var logs = googleLogs.Concat(yandexLogs).Select(MapCalendarSyncLog).AsEnumerable();
-        if (!string.IsNullOrWhiteSpace(status))
+        var rawLogs = new List<CalendarSyncLogRaw>();
+        var total = 0;
+        if (string.IsNullOrWhiteSpace(search))
         {
-            logs = logs.Where(item => string.Equals(item.Status, status.Trim(), StringComparison.OrdinalIgnoreCase));
+            var candidateCount = (int)Math.Min(int.MaxValue, (long)page * pageSize);
+            if (googleQuery is not null)
+            {
+                total = AddToTotal(total, await googleQuery.CountAsync(ct));
+                rawLogs.AddRange(await LoadRecentLogsAsync(googleQuery, candidateCount, ct));
+            }
+
+            if (yandexQuery is not null)
+            {
+                total = AddToTotal(total, await yandexQuery.CountAsync(ct));
+                rawLogs.AddRange(await LoadRecentLogsAsync(yandexQuery, candidateCount, ct));
+            }
+        }
+        else
+        {
+            if (googleQuery is not null)
+            {
+                rawLogs.AddRange(await googleQuery.ToListAsync(ct));
+            }
+
+            if (yandexQuery is not null)
+            {
+                rawLogs.AddRange(await yandexQuery.ToListAsync(ct));
+            }
         }
 
-        if (!string.IsNullOrWhiteSpace(operation))
-        {
-            logs = logs.Where(item => item.Operation.Contains(operation.Trim(), StringComparison.OrdinalIgnoreCase));
-        }
-
-        if (userId.HasValue)
-        {
-            logs = logs.Where(item => item.UserId == userId.Value || item.CalendarOwnerUserId == userId.Value || item.TaskAssigneeUserId == userId.Value);
-        }
-
-        if (createdFrom.HasValue)
-        {
-            logs = logs.Where(item => item.CreatedAt >= NormalizeFilterDate(createdFrom.Value));
-        }
-
-        if (createdTo.HasValue)
-        {
-            logs = logs.Where(item => item.CreatedAt <= NormalizeFilterDate(createdTo.Value));
-        }
-
+        var logs = rawLogs.Select(MapCalendarSyncLog).ToList();
         if (!string.IsNullOrWhiteSpace(search))
         {
-            var query = search.Trim();
-            logs = logs.Where(item =>
-                item.ProviderLabel.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                item.UserName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                item.UserEmail.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                item.CalendarName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                item.CalendarOwnerName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                item.TaskTitle.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                item.TaskObjectName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                item.Message.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                item.Details.Contains(query, StringComparison.OrdinalIgnoreCase));
+            var normalizedSearch = search.Trim();
+            logs = logs.Where(item => MatchesCalendarLogSearch(item, normalizedSearch)).ToList();
+            total = logs.Count;
         }
 
-        var orderedLogs = logs.OrderByDescending(item => item.CreatedAt).ToList();
+        var pageOffset = (int)Math.Min(int.MaxValue, ((long)page - 1) * pageSize);
+        var orderedLogs = logs
+            .OrderByDescending(item => item.CreatedAt)
+            .ThenBy(item => item.Provider, StringComparer.Ordinal)
+            .ThenByDescending(item => item.Id)
+            .Skip(pageOffset)
+            .Take(pageSize)
+            .ToList();
         return Ok(new CalendarSyncLogPageDto
         {
-            Items = orderedLogs.Skip((page - 1) * pageSize).Take(pageSize).ToList(),
-            Total = orderedLogs.Count,
+            Items = orderedLogs,
+            Total = total,
             Page = page,
             PageSize = pageSize,
         });
     }
+
+    private IQueryable<CalendarSyncLogRaw> CreateGoogleLogQuery()
+        => _db.GoogleCalendarSyncLogs
+            .AsNoTracking()
+            .Select(item => new CalendarSyncLogRaw
+            {
+                Provider = "google-calendar",
+                ProviderLabel = "Google Calendar",
+                Id = item.Id,
+                ConnectionId = item.ConnectionId,
+                UserId = item.Connection == null ? null : item.Connection.UserId,
+                UserName = item.Connection == null || item.Connection.User == null ? string.Empty : item.Connection.User.FullName,
+                UserEmail = item.Connection == null || item.Connection.User == null ? string.Empty : item.Connection.User.Email,
+                TaskJournalItemId = item.TaskJournalItemId,
+                TaskAssigneeUserId = item.TaskJournalItem == null ? null : item.TaskJournalItem.AssigneeUserId,
+                TaskTitle = item.TaskJournalItem == null ? string.Empty : item.TaskJournalItem.Title,
+                TaskObjectName = item.TaskJournalItem == null ? string.Empty : item.TaskJournalItem.ObjectName,
+                TaskAssigneeName = item.TaskJournalItem == null ? string.Empty : item.TaskJournalItem.AssigneeName,
+                CalendarName = item.CalendarSyncCalendar == null ? string.Empty : item.CalendarSyncCalendar.Name,
+                CalendarOwnerUserId = item.CalendarSyncCalendar == null ? null : item.CalendarSyncCalendar.OwnerUserId,
+                CalendarOwnerName = item.CalendarSyncCalendar == null || item.CalendarSyncCalendar.OwnerUser == null ? string.Empty : item.CalendarSyncCalendar.OwnerUser.FullName,
+                CalendarOwnerEmail = item.CalendarSyncCalendar == null || item.CalendarSyncCalendar.OwnerUser == null ? string.Empty : item.CalendarSyncCalendar.OwnerUser.Email,
+                Direction = item.Direction,
+                Operation = item.Operation,
+                Status = item.Status,
+                Message = item.Message,
+                DetailsJson = item.DetailsJson,
+                CreatedAt = item.CreatedAt,
+            });
+
+    private IQueryable<CalendarSyncLogRaw> CreateYandexLogQuery()
+        => _db.YandexCalendarSyncLogs
+            .AsNoTracking()
+            .Select(item => new CalendarSyncLogRaw
+            {
+                Provider = "yandex-calendar",
+                ProviderLabel = "Яндекс Календарь",
+                Id = item.Id,
+                ConnectionId = item.ConnectionId,
+                UserId = item.Connection == null ? null : item.Connection.UserId,
+                UserName = item.Connection == null || item.Connection.User == null ? string.Empty : item.Connection.User.FullName,
+                UserEmail = item.Connection == null || item.Connection.User == null ? string.Empty : item.Connection.User.Email,
+                TaskJournalItemId = item.TaskJournalItemId,
+                TaskAssigneeUserId = item.TaskJournalItem == null ? null : item.TaskJournalItem.AssigneeUserId,
+                TaskTitle = item.TaskJournalItem == null ? string.Empty : item.TaskJournalItem.Title,
+                TaskObjectName = item.TaskJournalItem == null ? string.Empty : item.TaskJournalItem.ObjectName,
+                TaskAssigneeName = item.TaskJournalItem == null ? string.Empty : item.TaskJournalItem.AssigneeName,
+                CalendarName = item.CalendarSyncCalendar == null ? string.Empty : item.CalendarSyncCalendar.Name,
+                CalendarOwnerUserId = item.CalendarSyncCalendar == null ? null : item.CalendarSyncCalendar.OwnerUserId,
+                CalendarOwnerName = item.CalendarSyncCalendar == null || item.CalendarSyncCalendar.OwnerUser == null ? string.Empty : item.CalendarSyncCalendar.OwnerUser.FullName,
+                CalendarOwnerEmail = item.CalendarSyncCalendar == null || item.CalendarSyncCalendar.OwnerUser == null ? string.Empty : item.CalendarSyncCalendar.OwnerUser.Email,
+                Direction = item.Direction,
+                Operation = item.Operation,
+                Status = item.Status,
+                Message = item.Message,
+                DetailsJson = item.DetailsJson,
+                CreatedAt = item.CreatedAt,
+            });
+
+    private static IQueryable<CalendarSyncLogRaw> ApplyCalendarLogFilters(
+        IQueryable<CalendarSyncLogRaw> query,
+        string? status,
+        string? operation,
+        int? userId,
+        DateTime? createdFrom,
+        DateTime? createdTo)
+    {
+        if (status is not null)
+        {
+            query = query.Where(item => item.Status.ToLower() == status);
+        }
+
+        if (operation is not null)
+        {
+            query = query.Where(item => item.Operation.ToLower().Contains(operation));
+        }
+
+        if (userId.HasValue)
+        {
+            query = query.Where(item => item.UserId == userId.Value || item.CalendarOwnerUserId == userId.Value || item.TaskAssigneeUserId == userId.Value);
+        }
+
+        if (createdFrom.HasValue)
+        {
+            query = query.Where(item => item.CreatedAt >= createdFrom.Value);
+        }
+
+        if (createdTo.HasValue)
+        {
+            query = query.Where(item => item.CreatedAt <= createdTo.Value);
+        }
+
+        return query;
+    }
+
+    private static Task<List<CalendarSyncLogRaw>> LoadRecentLogsAsync(
+        IQueryable<CalendarSyncLogRaw> query,
+        int candidateCount,
+        CancellationToken ct)
+        => query
+            .OrderByDescending(item => item.CreatedAt)
+            .ThenByDescending(item => item.Id)
+            .Take(candidateCount)
+            .ToListAsync(ct);
+
+    private static int AddToTotal(int current, int addition)
+        => (int)Math.Min(int.MaxValue, (long)current + addition);
+
+    private static bool MatchesCalendarLogSearch(CalendarSyncLogEntryDto item, string query)
+        => item.ProviderLabel.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+           item.UserName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+           item.UserEmail.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+           item.CalendarName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+           item.CalendarOwnerName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+           item.TaskTitle.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+           item.TaskObjectName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+           item.Message.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+           item.Details.Contains(query, StringComparison.OrdinalIgnoreCase);
 
     private static CalendarSyncLogEntryDto MapCalendarSyncLog(CalendarSyncLogRaw item)
     {

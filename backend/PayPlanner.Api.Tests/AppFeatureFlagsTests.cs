@@ -1,8 +1,10 @@
+using System.Data.Common;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Options;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
@@ -502,6 +504,18 @@ public class AppFeatureFlagsTests
         Assert.Equal($"Задача: {task.Title}", item.TargetLabel);
         Assert.Equal("dry-run verified", item.Details);
 
+        var databaseFilteredResult = await controller.GetLogs(
+            null,
+            "ERROR",
+            "UPDATE",
+            user.Id,
+            createdFrom: new DateTime(2026, 6, 2, 7, 1, 0, DateTimeKind.Utc),
+            createdTo: new DateTime(2026, 6, 2, 7, 10, 0, DateTimeKind.Utc),
+            pageSize: 10,
+            ct: CancellationToken.None);
+        var databaseFilteredPage = Assert.IsType<CalendarSyncLogPageDto>(Assert.IsType<OkObjectResult>(databaseFilteredResult.Result).Value);
+        Assert.Equal("yandex-calendar", Assert.Single(databaseFilteredPage.Items).Provider);
+
         var dateFilteredResult = await controller.GetLogs(
             null,
             null,
@@ -541,6 +555,51 @@ public class AppFeatureFlagsTests
         Assert.Equal("Иван Иванов", item.CalendarOwnerName);
         Assert.Equal("Иван Иванов", item.UserName);
         Assert.Equal("calendar", item.TargetType);
+    }
+
+    [Fact]
+    public async Task CalendarSyncController_GetLogs_LimitsProviderQueriesForLargePagedLog()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var scope = await CreateDbScopeAsync(interceptor);
+        var startedAt = new DateTime(2026, 7, 17, 0, 0, 0, DateTimeKind.Utc);
+        for (var index = 0; index < 300; index++)
+        {
+            scope.Db.GoogleCalendarSyncLogs.Add(new GoogleCalendarSyncLog
+            {
+                Direction = "crm-to-google",
+                Operation = "update-event",
+                Status = "success",
+                Message = $"google-{index}",
+                CreatedAt = startedAt.AddMinutes(index * 2),
+            });
+            scope.Db.YandexCalendarSyncLogs.Add(new YandexCalendarSyncLog
+            {
+                Direction = "crm-to-yandex",
+                Operation = "update-event",
+                Status = "success",
+                Message = $"yandex-{index}",
+                CreatedAt = startedAt.AddMinutes(index * 2 + 1),
+            });
+        }
+
+        await scope.Db.SaveChangesAsync();
+        interceptor.Commands.Clear();
+        var controller = new CalendarSyncController(new TestOptionsSnapshot<AppFeatureFlagsOptions>(new AppFeatureFlagsOptions()), scope.Db);
+
+        var result = await controller.GetLogs(null, null, null, null, page: 3, pageSize: 25, ct: CancellationToken.None);
+        var page = Assert.IsType<CalendarSyncLogPageDto>(Assert.IsType<OkObjectResult>(result.Result).Value);
+
+        Assert.Equal(600, page.Total);
+        Assert.Equal(25, page.Items.Count);
+        Assert.Equal("yandex-274", page.Items[0].Message);
+        Assert.Equal("yandex-262", page.Items[^1].Message);
+        var providerDataQueries = interceptor.Commands.Where(command =>
+            (command.Contains("GoogleCalendarSyncLogs", StringComparison.Ordinal) ||
+             command.Contains("YandexCalendarSyncLogs", StringComparison.Ordinal)) &&
+            !command.Contains("COUNT(", StringComparison.OrdinalIgnoreCase)).ToList();
+        Assert.Equal(2, providerDataQueries.Count);
+        Assert.All(providerDataQueries, command => Assert.Contains("LIMIT", command, StringComparison.OrdinalIgnoreCase));
     }
 
     private static CalendarSyncController CreateCalendarSyncControllerForUser(PaymentContext db, int userId)
@@ -600,14 +659,19 @@ public class AppFeatureFlagsTests
         public T Get(string? name) => Value;
     }
 
-    private static async Task<TestDbScope> CreateDbScopeAsync()
+    private static async Task<TestDbScope> CreateDbScopeAsync(DbCommandInterceptor? interceptor = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
 
-        var options = new DbContextOptionsBuilder<PaymentContext>()
-            .UseSqlite(connection)
-            .Options;
+        var optionsBuilder = new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite(connection);
+        if (interceptor is not null)
+        {
+            optionsBuilder.AddInterceptors(interceptor);
+        }
+
+        var options = optionsBuilder.Options;
         var db = new PaymentContext(options, useObjectAuditModel: false);
         await db.Database.EnsureCreatedAsync();
 
@@ -622,6 +686,21 @@ public class AppFeatureFlagsTests
         {
             await Db.DisposeAsync();
             await connection.DisposeAsync();
+        }
+    }
+
+    private sealed class RecordingCommandInterceptor : DbCommandInterceptor
+    {
+        public List<string> Commands { get; } = [];
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            Commands.Add(command.CommandText);
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
         }
     }
 }

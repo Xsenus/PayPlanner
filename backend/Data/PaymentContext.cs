@@ -2153,6 +2153,8 @@ public class PaymentContext : DbContext
 
             entity.HasIndex(e => new { e.ConnectionId, e.CreatedAt })
                 .HasDatabaseName("IX_GoogleCalendarSyncLogs_Connection_CreatedAt");
+            entity.HasIndex(e => e.CreatedAt)
+                .HasDatabaseName("IX_GoogleCalendarSyncLogs_CreatedAt");
             entity.HasIndex(e => e.TaskJournalItemId)
                 .HasDatabaseName("IX_GoogleCalendarSyncLogs_TaskJournalItemId");
         });
@@ -2300,6 +2302,8 @@ public class PaymentContext : DbContext
 
             entity.HasIndex(e => new { e.ConnectionId, e.CreatedAt })
                 .HasDatabaseName("IX_YandexCalendarSyncLogs_Connection_CreatedAt");
+            entity.HasIndex(e => e.CreatedAt)
+                .HasDatabaseName("IX_YandexCalendarSyncLogs_CreatedAt");
             entity.HasIndex(e => e.TaskJournalItemId)
                 .HasDatabaseName("IX_YandexCalendarSyncLogs_TaskJournalItemId");
         });

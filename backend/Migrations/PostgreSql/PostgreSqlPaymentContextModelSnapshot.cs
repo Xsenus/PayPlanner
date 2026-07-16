@@ -3775,6 +3775,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("CalendarSyncCalendarId");
 
+                    b.HasIndex("CreatedAt")
+                        .HasDatabaseName("IX_GoogleCalendarSyncLogs_CreatedAt");
+
                     b.HasIndex("TaskJournalItemId")
                         .HasDatabaseName("IX_GoogleCalendarSyncLogs_TaskJournalItemId");
 
@@ -8580,6 +8583,9 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasKey("Id");
 
                     b.HasIndex("CalendarSyncCalendarId");
+
+                    b.HasIndex("CreatedAt")
+                        .HasDatabaseName("IX_YandexCalendarSyncLogs_CreatedAt");
 
                     b.HasIndex("TaskJournalItemId")
                         .HasDatabaseName("IX_YandexCalendarSyncLogs_TaskJournalItemId");

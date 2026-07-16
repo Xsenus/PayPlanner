@@ -22,6 +22,18 @@ public sealed class CalendarMigrationTests
             typeof(PostgreSqlPaymentContext));
     }
 
+    [Fact]
+    public void CalendarSyncLogIndexMigrations_AreDiscoverableByEfCore()
+    {
+        AssertMigration<AddCalendarSyncLogCreatedAtIndexes>(
+            "20260716173515_AddCalendarSyncLogCreatedAtIndexes",
+            typeof(PaymentContext));
+
+        AssertMigration<AddCalendarSyncLogCreatedAtIndexesPostgres>(
+            "20260716173640_AddCalendarSyncLogCreatedAtIndexesPostgres",
+            typeof(PostgreSqlPaymentContext));
+    }
+
     private static void AssertMigration<TMigration>(string expectedId, Type expectedContext)
     {
         var migration = Assert.Single(typeof(TMigration).GetCustomAttributes(typeof(MigrationAttribute), inherit: false));
