@@ -803,6 +803,18 @@ export function RolePermissionsModal({
           continue;
         }
 
+        if (key === 'tasks') {
+          next.tasks = {
+            ...prev.tasks,
+            canView: value,
+            canCreate: value,
+            canEdit: value,
+            canDelete: value,
+            canExport: value,
+          };
+          continue;
+        }
+
         next[key] = {
           ...prev[key],
           canView: value,

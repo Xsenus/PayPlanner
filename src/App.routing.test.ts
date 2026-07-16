@@ -87,6 +87,20 @@ const readOnlySection = {
   viewScope: 'own',
 } as const;
 
+const deniedTaskSection = {
+  ...deniedSection,
+  canEditOthers: false,
+  canCompleteOthers: false,
+  canDeleteOthers: false,
+} as const;
+
+const workLimitedTaskSection = {
+  ...workLimitedSection,
+  canEditOthers: false,
+  canCompleteOthers: false,
+  canDeleteOthers: false,
+} as const;
+
 function createOperationalRolePermissions(role: 'secretary' | 'lawyer' | 'accountant'): RolePermissions {
   if (role === 'lawyer') {
     return createLawyerTemplatePermissions();
@@ -94,7 +108,7 @@ function createOperationalRolePermissions(role: 'secretary' | 'lawyer' | 'accoun
 
   const permissions = createPermissions({
     calendar: { ...workLimitedSection, canViewAnalytics: false },
-    tasks: role === 'accountant' ? deniedSection : workLimitedSection,
+    tasks: role === 'accountant' ? deniedTaskSection : workLimitedTaskSection,
     clients: role === 'accountant' ? readOnlySection : workLimitedSection,
     cases: role === 'accountant' ? readOnlySection : workLimitedSection,
     reports: deniedSection,
@@ -120,7 +134,7 @@ function createLawyerTemplatePermissions(): RolePermissions {
   return {
     ...defaultRestrictedRolePermissions,
     calendar: { ...workLimitedSection, canViewAnalytics: false, visibleUserIds: [] },
-    tasks: { ...workLimitedSection },
+    tasks: { ...workLimitedTaskSection },
     notifications: { ...readOnlySection, canEdit: true },
   };
 }

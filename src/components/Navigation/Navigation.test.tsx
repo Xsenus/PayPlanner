@@ -62,11 +62,18 @@ const lawyerWorkSection = {
   viewScope: 'own',
 } as const;
 
+const lawyerTaskSection = {
+  ...lawyerWorkSection,
+  canEditOthers: false,
+  canCompleteOthers: false,
+  canDeleteOthers: false,
+} as const;
+
 function createLawyerTemplatePermissions(): RolePermissions {
   return {
     ...defaultRestrictedRolePermissions,
     calendar: { ...lawyerWorkSection, canViewAnalytics: false, visibleUserIds: [] },
-    tasks: { ...lawyerWorkSection },
+    tasks: { ...lawyerTaskSection },
     clients: { ...lawyerWorkSection },
     cases: { ...lawyerWorkSection },
     notifications: {
