@@ -44,6 +44,7 @@ public class SqliteMigrationSmokeTests
                 Assert.Contains("20260716195731_AddActJournalReadIndex", appliedMigrations);
                 Assert.Contains("20260716201756_AddPaymentJournalReadIndexes", appliedMigrations);
                 Assert.Contains("20260716223446_AddCashOrderReadIndexes", appliedMigrations);
+                Assert.Contains("20260716234103_OptimizePaymentStatusUpdaterIndex", appliedMigrations);
                 Assert.True(await context.Database.CanConnectAsync());
 
                 _ = await context.Users.Take(1).ToListAsync();

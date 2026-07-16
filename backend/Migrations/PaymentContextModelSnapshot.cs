@@ -5443,15 +5443,15 @@ namespace PayPlanner.Api.Migrations
                     b.HasIndex("IsPaid", "Date")
                         .HasDatabaseName("IX_Payments_IsPaid_Date");
 
-                    b.HasIndex("IsPaid", "Status")
-                        .HasDatabaseName("IX_Payments_IsPaid_Status");
-
                     b.HasIndex("LegacyAccountNumber", "LegacyAccountDate")
                         .HasDatabaseName("IX_Payments_LegacyAccount_LegacyAccountDate");
 
                     b.HasIndex("IsDeleted", "Date", "Id")
                         .IsDescending(false, true, false)
                         .HasDatabaseName("IX_Payments_IsDeleted_Date_Id");
+
+                    b.HasIndex("IsPaid", "Status", "Date")
+                        .HasDatabaseName("IX_Payments_IsPaid_Status_Date");
 
                     b.HasIndex("Type", "Status", "Date")
                         .HasDatabaseName("IX_Payments_Type_Status_Date");
