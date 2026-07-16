@@ -975,12 +975,17 @@ describe('Payments integration', () => {
 
     paymentsPagedResult.payments = [invoiceManagedPayment];
     paymentsPagedResult.total = 1;
+    vi.mocked(apiService.getPayment).mockResolvedValueOnce({
+      ...invoiceManagedPayment,
+      notes: 'Полные данные карточки',
+    });
 
     render(<Payments />);
 
     fireEvent.click(await screen.findByRole('button', { name: 'edit-payment-551' }));
 
     await waitFor(() => {
+      expect(apiService.getPayment).toHaveBeenCalledWith(551);
       expect(screen.getByTestId('payments-edit-modal').textContent).toContain('551');
     });
   });

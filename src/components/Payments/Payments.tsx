@@ -1160,17 +1160,27 @@ export function Payments({
   ]);
 
   const handleEditPayment = useCallback(
-    (payment: Payment) => {
+    async (payment: Payment) => {
       if (!paymentsPermissions.canEdit) {
         showPermissionNotice(t('permissionNoEditPayment') ?? 'Недостаточно прав для редактирования платежей.');
         return false;
       }
-      setEditingPayment(payment);
-      setPaymentCreatePrefill(null);
-      setModalType(payment.type);
-      setIsModalOpen(true);
+      try {
+        const detailedPayment = await apiService.getPayment(payment.id);
+        setEditingPayment(detailedPayment);
+        setPaymentCreatePrefill(null);
+        setModalType(detailedPayment.type);
+        setIsModalOpen(true);
+      } catch (error) {
+        toast.error(
+          extractDisplayErrorMessage(error, 'Не удалось загрузить платеж для редактирования.'),
+          t('payments') ?? 'Платежи',
+        );
+        return false;
+      }
+      return true;
     },
-    [paymentsPermissions.canEdit, showPermissionNotice, t],
+    [paymentsPermissions.canEdit, showPermissionNotice, t, toast],
   );
 
   const handleDeletePayment = useCallback(

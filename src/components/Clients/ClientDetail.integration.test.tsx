@@ -352,6 +352,7 @@ vi.mock('../../services/api', () => ({
     getInvoices: vi.fn(),
     getActs: vi.fn(),
     getPaymentsV2: vi.fn(),
+    getPayment: vi.fn(),
     getClients: vi.fn(),
     getActResponsibles: vi.fn(),
     createClientPowerOfAttorney: vi.fn(),
@@ -613,6 +614,7 @@ describe('ClientDetail integration', () => {
         total: 0,
       },
     });
+    vi.mocked(apiService.getPayment).mockReset();
     vi.mocked(apiService.createClientPowerOfAttorney).mockResolvedValue(createPowerOfAttorney());
     vi.mocked(apiService.updateClientPowerOfAttorney).mockResolvedValue(createPowerOfAttorney());
     vi.mocked(apiService.deleteClientPowerOfAttorney).mockResolvedValue(undefined);
@@ -1262,6 +1264,51 @@ describe('ClientDetail integration', () => {
 
     expect(await screen.findByRole('button', { name: 'Свернуть' })).toBeTruthy();
     expect(noteCard?.querySelector('.max-h-20')).toBeFalsy();
+  });
+
+  it('loads full payment details before opening the client payment editor', async () => {
+    const user = userEvent.setup();
+    permissionsResult.payments.canEdit = true;
+    const compactPayment = {
+      id: 502,
+      date: '2026-04-28',
+      plannedDate: '2026-04-28',
+      amount: 16_250,
+      paidAmount: 0,
+      outstandingAmount: 16_250,
+      hasPartialPayment: false,
+      status: 'Pending',
+      description: 'Компактный платеж клиента',
+      isPaid: false,
+      notes: '',
+      systemNotes: '',
+      clientId: 1,
+      type: 'Income',
+      documentKind: 'Payment',
+      createdAt: '2026-04-28T00:00:00Z',
+      rescheduleCount: 0,
+    } as Payment;
+    const detailedPayment = { ...compactPayment, notes: 'Полные данные платежа' };
+    usePaymentsPagedMock.mockReturnValue({
+      ...emptyPaymentsResult,
+      total: 1,
+      payments: [compactPayment],
+    });
+    vi.mocked(apiService.getPayment).mockResolvedValueOnce(detailedPayment);
+
+    render(<ClientDetail clientId={1} onBack={vi.fn()} initialSection="payments" />);
+
+    const paymentRow = (await screen.findByText('Компактный платеж клиента')).closest('tr');
+    const editButton = paymentRow?.querySelector<HTMLButtonElement>('button[aria-label="Редактировать"]');
+    expect(editButton).toBeTruthy();
+    await user.click(editButton!);
+
+    await waitFor(() => {
+      expect(apiService.getPayment).toHaveBeenCalledWith(502);
+      expect(paymentModalPropsSpy).toHaveBeenLastCalledWith(
+        expect.objectContaining({ payment: detailedPayment, isOpen: true }),
+      );
+    });
   });
 
   it('passes payment client role to payments and stats hooks', async () => {

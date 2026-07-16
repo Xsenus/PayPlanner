@@ -123,8 +123,98 @@ public class PaymentsV2Controller : ControllerBase
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .AsNoTracking()
+            .Select(payment => new PaymentListItemDto
+            {
+                Id = payment.Id,
+                Date = payment.Date,
+                PlannedDate = payment.PlannedDate,
+                Amount = payment.Amount,
+                Type = payment.Type,
+                Status = payment.Status,
+                Description = payment.Description,
+                IsPaid = payment.IsPaid,
+                PaidDate = payment.PaidDate,
+                LastPaymentDate = payment.LastPaymentDate,
+                Notes = payment.Notes,
+                SystemNotes = payment.SystemNotes,
+                RescheduleCount = payment.RescheduleCount,
+                PaidAmount = payment.PaidAmount,
+                AdvanceReviewStatus = payment.AdvanceReviewStatus,
+                AdvanceReviewReason = payment.AdvanceReviewReason,
+                AdvanceReviewedAt = payment.AdvanceReviewedAt,
+                AdvanceReviewedByUserId = payment.AdvanceReviewedByUserId,
+                AdvanceReviewedByUserName = payment.AdvanceReviewedByUserName,
+                CreatedAt = payment.CreatedAt,
+                ClientId = payment.ClientId,
+                LegalEntityId = payment.LegalEntityId,
+                LegalEntityName = payment.LegalEntity != null ? payment.LegalEntity.ShortName : null,
+                LegalEntityInn = payment.LegalEntity != null ? payment.LegalEntity.Inn : null,
+                ExpenseClientId = payment.ExpenseClientId,
+                ExpenseLegalEntityId = payment.ExpenseLegalEntityId,
+                ExpenseLegalEntityName = payment.ExpenseLegalEntity != null ? payment.ExpenseLegalEntity.ShortName : null,
+                ExpenseLegalEntityInn = payment.ExpenseLegalEntity != null ? payment.ExpenseLegalEntity.Inn : null,
+                ContractId = payment.ContractId,
+                DocumentKind = payment.DocumentKind,
+                PaymentOrderNumber = payment.PaymentOrderNumber,
+                PaymentDocumentDate = payment.PaymentDocumentDate,
+                ClientCaseId = payment.ClientCaseId,
+                ClientCaseTitle = payment.ClientCase != null ? payment.ClientCase.Title : null,
+                ClientCaseReference = payment.ClientCaseReference,
+                IsNotForAccounting = payment.IsNotForAccounting,
+                CounterpartyName = payment.CounterpartyName,
+                DealTypeId = payment.DealTypeId,
+                IncomeTypeId = payment.IncomeTypeId,
+                ServiceId = payment.ServiceId,
+                PaymentSourceId = payment.PaymentSourceId,
+                PaymentStatusId = payment.PaymentStatusId,
+                InvoiceId = payment.InvoiceId,
+                Account = payment.Account,
+                AccountDate = payment.AccountDate,
+                Client = payment.Client == null
+                    ? null
+                    : new PaymentListReferenceDto { Id = payment.Client.Id, Name = payment.Client.Name },
+                ExpenseClient = payment.ExpenseClient == null
+                    ? null
+                    : new PaymentListReferenceDto { Id = payment.ExpenseClient.Id, Name = payment.ExpenseClient.Name },
+                ClientCase = payment.ClientCase == null
+                    ? null
+                    : new PaymentListCaseDto { Id = payment.ClientCase.Id, Title = payment.ClientCase.Title },
+                DealType = payment.DealType == null
+                    ? null
+                    : new PaymentListReferenceDto { Id = payment.DealType.Id, Name = payment.DealType.Name },
+                IncomeType = payment.IncomeType == null
+                    ? null
+                    : new PaymentListReferenceDto { Id = payment.IncomeType.Id, Name = payment.IncomeType.Name },
+                Service = payment.Service == null
+                    ? null
+                    : new PaymentListReferenceDto { Id = payment.Service.Id, Name = payment.Service.Name },
+                PaymentSource = payment.PaymentSource == null
+                    ? null
+                    : new PaymentListReferenceDto { Id = payment.PaymentSource.Id, Name = payment.PaymentSource.Name },
+                PaymentStatusEntity = payment.PaymentStatusEntity == null
+                    ? null
+                    : new PaymentListReferenceDto { Id = payment.PaymentStatusEntity.Id, Name = payment.PaymentStatusEntity.Name },
+                LegalEntity = payment.LegalEntity == null
+                    ? null
+                    : new PaymentListLegalEntityDto
+                    {
+                        Id = payment.LegalEntity.Id,
+                        ShortName = payment.LegalEntity.ShortName,
+                        FullName = payment.LegalEntity.FullName,
+                        Inn = payment.LegalEntity.Inn,
+                    },
+                ExpenseLegalEntity = payment.ExpenseLegalEntity == null
+                    ? null
+                    : new PaymentListLegalEntityDto
+                    {
+                        Id = payment.ExpenseLegalEntity.Id,
+                        ShortName = payment.ExpenseLegalEntity.ShortName,
+                        FullName = payment.ExpenseLegalEntity.FullName,
+                        Inn = payment.ExpenseLegalEntity.Inn,
+                    },
+            })
             .ToListAsync(ct);
-        PaymentDisplayNameService.FillCounterpartyNames(items);
+        FillPaymentListCounterpartyNames(items);
         await AttachContractorRecipientsAsync(items, ct);
 
         var summary = await query
@@ -152,7 +242,32 @@ public class PaymentsV2Controller : ControllerBase
         });
     }
 
-    private async Task AttachContractorRecipientsAsync(IReadOnlyCollection<Payment> payments, CancellationToken ct)
+    private static void FillPaymentListCounterpartyNames(IEnumerable<PaymentListItemDto> payments)
+    {
+        foreach (var payment in payments)
+        {
+            if (!string.IsNullOrWhiteSpace(payment.CounterpartyName))
+            {
+                payment.CounterpartyName = payment.CounterpartyName.Trim();
+                continue;
+            }
+
+            payment.CounterpartyName = payment.Type == PaymentType.Expense
+                ? FirstDisplayName(
+                    payment.Client?.Name,
+                    payment.LegalEntity?.ShortName,
+                    payment.LegalEntity?.FullName,
+                    payment.ExpenseClient?.Name,
+                    payment.ExpenseLegalEntity?.ShortName,
+                    payment.ExpenseLegalEntity?.FullName)
+                : FirstDisplayName(payment.Client?.Name, payment.LegalEntity?.ShortName, payment.LegalEntity?.FullName);
+        }
+    }
+
+    private static string? FirstDisplayName(params string?[] values)
+        => values.Select(value => string.IsNullOrWhiteSpace(value) ? null : value.Trim()).FirstOrDefault(value => value is not null);
+
+    private async Task AttachContractorRecipientsAsync(IReadOnlyCollection<PaymentListItemDto> payments, CancellationToken ct)
     {
         if (payments.Count == 0)
         {
@@ -619,7 +734,6 @@ public class PaymentsV2Controller : ControllerBase
         string? sortDir)
     {
         var query = _db.Payments.AsQueryable()
-            .WithPaymentIncludes()
             .ApplyPaymentVisibility(visibility)
             .ExcludeInstallmentParentInvoices(_db, excludeInstallmentParents)
             .ApplyPaymentFilters(from, to, clientId, caseId, search, clientRole, legalEntityId);
@@ -771,6 +885,7 @@ public class PaymentsV2Controller : ControllerBase
                 search,
                 sortBy,
                 sortDir)
+            .WithPaymentIncludes()
             .Take(MaxPaymentsExportRows)
             .AsNoTracking()
             .ToListAsync(ct);

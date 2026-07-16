@@ -59,6 +59,7 @@ import { usePaymentsPaged } from "../../hooks/usePaymentsPaged";
 import { useToast } from "../../hooks/useToast";
 import { useUserTimeZone } from "../../hooks/useUserTimeZone";
 import { formatCurrencySmart } from "../../utils/formatters";
+import { extractDisplayErrorMessage } from "../../utils/errorUtils";
 import { formatDateTimeInTimeZone } from "../../utils/timeZoneDate";
 import { ActModal } from "../Acts/ActModal";
 import { InvoiceModal } from "../Accounts/InvoiceModal";
@@ -2535,11 +2536,19 @@ export function LegalEntityModal({
     setPaymentModalOpen(true);
   };
 
-  const openEditPayment = (payment: Payment) => {
+  const openEditPayment = async (payment: Payment) => {
     if (!canViewPayments || readOnly) return;
-    setPaymentModalMode("edit");
-    setSelectedPayment(payment);
-    setPaymentModalOpen(true);
+    try {
+      const detailedPayment = await apiService.getPayment(payment.id);
+      setPaymentModalMode("edit");
+      setSelectedPayment(detailedPayment);
+      setPaymentModalOpen(true);
+    } catch (error) {
+      toast.error(
+        extractDisplayErrorMessage(error, "Не удалось загрузить платеж для редактирования."),
+        "Платежи",
+      );
+    }
   };
 
   const closePaymentModal = () => {

@@ -10,12 +10,14 @@ import type {
   LegalEntityDadataDetails,
   LegalEntityDetail,
   LegalEntitySuggestion,
+  Payment,
 } from '../../types';
 
 const {
   confirmMock,
   emptyActsSummary,
   emptyInvoiceSummary,
+  paymentModalPropsSpy,
   toastErrorMock,
   toastInfoMock,
   toastSuccessMock,
@@ -35,6 +37,7 @@ const {
     paid: { amount: 0, count: 0 },
     overdue: { amount: 0, count: 0 },
   } satisfies InvoiceSummary,
+  paymentModalPropsSpy: vi.fn(),
   toastErrorMock: vi.fn(),
   toastInfoMock: vi.fn(),
   toastSuccessMock: vi.fn(),
@@ -103,6 +106,7 @@ vi.mock('../../services/api', () => ({
         total: 0,
       },
     }),
+    getPayment: vi.fn(),
     suggestClientAddresses: vi.fn().mockResolvedValue([]),
     cleanAddress: vi.fn().mockResolvedValue({ result: '' }),
   },
@@ -118,6 +122,13 @@ vi.mock('../ui/TablePagination', () => ({
 
 vi.mock('../ui/ObjectAuditModal', () => ({
   ObjectAuditLauncher: () => null,
+}));
+
+vi.mock('../Calendar/PaymentModal', () => ({
+  PaymentModal: (props: unknown) => {
+    paymentModalPropsSpy(props);
+    return null;
+  },
 }));
 
 vi.mock('../Clients/ClientStatusBadge', () => ({
@@ -146,6 +157,7 @@ describe('LegalEntityModal integration', () => {
     toastErrorMock.mockReset();
     toastInfoMock.mockReset();
     toastSuccessMock.mockReset();
+    paymentModalPropsSpy.mockReset();
     vi.mocked(apiService.suggestClientAddresses).mockReset();
     vi.mocked(apiService.cleanAddress).mockReset();
     vi.mocked(apiService.getMainCompanySettings).mockReset();
@@ -155,6 +167,7 @@ describe('LegalEntityModal integration', () => {
     vi.mocked(apiService.getActs).mockReset();
     vi.mocked(apiService.getActsSummary).mockReset();
     vi.mocked(apiService.getPaymentsV2).mockReset();
+    vi.mocked(apiService.getPayment).mockReset();
     vi.mocked(apiService.getLegalEntityCaseFinanceSummaries).mockReset();
     vi.mocked(apiService.suggestClientAddresses).mockResolvedValue([]);
     vi.mocked(apiService.cleanAddress).mockResolvedValue({ result: '' });
@@ -182,6 +195,66 @@ describe('LegalEntityModal integration', () => {
       },
     });
     vi.mocked(apiService.getLegalEntityCaseFinanceSummaries).mockResolvedValue([]);
+  });
+
+  it('loads full payment details before opening the legal entity payment editor', async () => {
+    const initial = createInitialLegalEntity({ id: 9, shortName: 'Наша компания' });
+    const compactPayment = {
+      id: 701,
+      date: '2026-07-17',
+      plannedDate: '2026-07-17',
+      amount: 8_500,
+      paidAmount: 0,
+      type: 'Expense',
+      status: 'Pending',
+      description: 'Компактный платеж юрлица',
+      notes: '',
+      systemNotes: '',
+      isPaid: false,
+      rescheduleCount: 0,
+      createdAt: '2026-07-17T00:00:00Z',
+    } as Payment;
+    vi.mocked(apiService.getPaymentsV2).mockResolvedValueOnce({
+      items: [compactPayment],
+      total: 1,
+      page: 1,
+      pageSize: 5,
+      summary: {
+        income: 0,
+        expense: 8_500,
+        balance: -8_500,
+        incomeCount: 0,
+        expenseCount: 1,
+        total: 1,
+      },
+    });
+    vi.mocked(apiService.getPayment).mockResolvedValueOnce({
+      ...compactPayment,
+      notes: 'Полные данные платежа',
+    });
+
+    render(
+      <LegalEntityModal
+        isOpen
+        onClose={vi.fn()}
+        onSubmit={vi.fn().mockResolvedValue(initial)}
+        initial={initial}
+        suggest={vi.fn().mockResolvedValue([])}
+        findById={vi.fn()}
+        allowEdit
+        allowDelete={false}
+        canViewPayments
+      />,
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Компактный платеж юрлица' }));
+
+    await waitFor(() => {
+      expect(apiService.getPayment).toHaveBeenCalledWith(701);
+      expect(paymentModalPropsSpy).toHaveBeenLastCalledWith(
+        expect.objectContaining({ isOpen: true, payment: expect.objectContaining({ id: 701 }) }),
+      );
+    });
   });
 
   it('does not load legal entity payments or case finance summaries without payment permission', async () => {

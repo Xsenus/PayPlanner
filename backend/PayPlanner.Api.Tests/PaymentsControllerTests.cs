@@ -115,6 +115,61 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task PaymentsV2_Get_ReturnsCompactReferences_AndKeepsDetailEndpointComplete()
+    {
+        await using var db = await CreateContextAsync();
+
+        const string privateAddress = "Полный адрес не должен попадать в журнал платежей";
+        var client = new Client
+        {
+            Name = "Клиент компактного журнала",
+            Address = privateAddress,
+            Email = "compact-list@example.test",
+            CreatedAt = DateTime.UtcNow,
+        };
+        var dealType = new DealType { Name = "Судебная работа", Description = "Служебное описание" };
+        db.Clients.Add(client);
+        db.DealTypes.Add(dealType);
+        await db.SaveChangesAsync();
+
+        var payment = CreatePayment(new DateTime(2026, 7, 17), 12_500m, "Компактный платеж");
+        payment.ClientId = client.Id;
+        payment.DealTypeId = dealType.Id;
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var controller = new PaymentsV2Controller(db);
+        var listResult = await controller.Get(
+            from: null,
+            to: null,
+            clientId: null,
+            caseId: null,
+            excludeInstallmentParents: false,
+            sortBy: "date",
+            sortDir: "desc",
+            ct: CancellationToken.None);
+
+        var listOk = Assert.IsType<OkObjectResult>(listResult.Result);
+        var response = Assert.IsType<PaymentsPageResponse>(listOk.Value);
+        var item = Assert.Single(response.Items);
+        Assert.Equal(client.Id, item.Client?.Id);
+        Assert.Equal(client.Name, item.Client?.Name);
+        Assert.Equal(dealType.Name, item.DealType?.Name);
+
+        var listJson = JsonSerializer.Serialize(response);
+        Assert.DoesNotContain(privateAddress, listJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("compact-list@example.test", listJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("Служебное описание", listJson, StringComparison.Ordinal);
+
+        var detailResult = await controller.GetById(payment.Id, CancellationToken.None);
+        var detailOk = Assert.IsType<OkObjectResult>(detailResult);
+        var detailedPayment = Assert.IsType<Payment>(detailOk.Value);
+        Assert.Equal(privateAddress, detailedPayment.Client?.Address);
+        Assert.Equal("compact-list@example.test", detailedPayment.Client?.Email);
+    }
+
+    [Fact]
     public async Task Get_FiltersOnlyByPaymentDateRange_AndIgnoresAccountDate()
     {
         await using var db = await CreateContextAsync();

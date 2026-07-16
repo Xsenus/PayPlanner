@@ -4690,7 +4690,7 @@ export function ClientDetail({
     setEditingPayment(null);
     setPayModalOpen(true);
   };
-  const openEditPayment = (p: Payment) => {
+  const openEditPayment = async (p: Payment) => {
     if (!paymentPermissions.canEdit) {
       showPermissionWarning(
         t("permissionNoEditPayment") ??
@@ -4698,9 +4698,17 @@ export function ClientDetail({
       );
       return;
     }
-    setActiveSection("payments");
-    setEditingPayment(p);
-    setPayModalOpen(true);
+    try {
+      const detailedPayment = await apiService.getPayment(p.id);
+      setActiveSection("payments");
+      setEditingPayment(detailedPayment);
+      setPayModalOpen(true);
+    } catch (error) {
+      toast.error(
+        extractDisplayErrorMessage(error, "Не удалось загрузить платеж для редактирования."),
+        t("payments") ?? "Платежи",
+      );
+    }
   };
   const openAddAct = () => {
     if (!actPermissions.canCreate) {
