@@ -2720,6 +2720,7 @@ export function InvoiceModal({
       contractId: form.contractId ? Number(form.contractId) : undefined,
       clientCaseId: clientCaseIds[0] ?? null,
       clientCaseIds,
+      billingTaskIds: resumeDraft?.billingTaskIds,
       clientCaseReference: form.clientCaseReference.trim() ? form.clientCaseReference.trim() : undefined,
       description: form.description.trim() ? form.description.trim() : undefined,
       isNotForAccounting: form.isNotForAccounting,
@@ -2754,6 +2755,7 @@ export function InvoiceModal({
     mode,
     selectedActs,
     selectedClientCaseIds,
+    resumeDraft?.billingTaskIds,
   ]);
 
   const resolveInstallmentDueDateForSave = useCallback(async (
@@ -2799,8 +2801,9 @@ export function InvoiceModal({
     lineItems,
     selectedActs,
     selectedClientCaseIds,
+    billingTaskIds: resumeDraft?.billingTaskIds,
     installmentPlan,
-  }), [form, installmentPlan, invoice?.id, isPageMode, lineItems, mode, pageViewMode, selectedActs, selectedClientCaseIds]);
+  }), [form, installmentPlan, invoice?.id, isPageMode, lineItems, mode, pageViewMode, resumeDraft?.billingTaskIds, selectedActs, selectedClientCaseIds]);
 
   const openActCreatePage = useCallback(() => {
     if (!onCreateActPage) {

@@ -75,6 +75,7 @@ export interface InvoiceEditorDraftState {
   lineItems: InvoiceEditorLineItemDraft[];
   selectedActs: InvoiceEditorActDraft[];
   selectedClientCaseIds: number[];
+  billingTaskIds?: number[];
   installmentPlan?: InstallmentPlanInput | null;
 }
 
@@ -224,6 +225,7 @@ function normalizeInvoiceEditorDraft(raw: unknown): InvoiceEditorDraftState | nu
     lineItems,
     selectedActs,
     selectedClientCaseIds: readNumberArray(raw.selectedClientCaseIds),
+    billingTaskIds: readNumberArray(raw.billingTaskIds),
     installmentPlan: readInstallmentPlan(raw.installmentPlan),
   };
 }

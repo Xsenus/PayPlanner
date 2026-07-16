@@ -6,6 +6,7 @@ public class TaskJournalSettingsRequest
     public bool AllowExecutorDeadlineChangeRequests { get; set; } = true;
     public List<int> ExecutorCompletionAllowedUserIds { get; set; } = [];
     public bool RequireCompletionResult { get; set; } = true;
+    public bool DailyOverdueReminderEnabled { get; set; } = true;
     public bool AllowAdminCompleteAnyTask { get; set; } = true;
     public int ApprovalDueDays { get; set; } = 5;
     public string? TaskCardWindowMode { get; set; } = "legacy";

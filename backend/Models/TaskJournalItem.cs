@@ -15,6 +15,20 @@ public class TaskJournalItem
     public int? ClientCaseId { get; set; }
     public ClientCase? ClientCase { get; set; }
 
+    [MaxLength(32)]
+    public string ClientBillingClassification { get; set; } = TaskClientBillingClassification.Legacy;
+
+    public int? BillingContractId { get; set; }
+    public Contract? BillingContract { get; set; }
+
+    [MaxLength(32)]
+    public string? BillingModeSnapshot { get; set; }
+
+    public DateTime? BillingDecisionAt { get; set; }
+
+    public int? BillingInvoiceId { get; set; }
+    public Payment? BillingInvoice { get; set; }
+
     [Required]
     [MaxLength(300)]
     public string ObjectName { get; set; } = string.Empty;

@@ -75,6 +75,7 @@ public class TasksController : ControllerBase
     private const string AllowExecutorDeadlineChangeRequestsSettingKey = "tasks.allowExecutorDeadlineChangeRequests";
     private const string ExecutorCompletionAllowedUserIdsSettingKey = "tasks.executorCompletionAllowedUserIds";
     private const string RequireCompletionResultSettingKey = "tasks.requireCompletionResult";
+    private const string DailyOverdueReminderEnabledSettingKey = "tasks.dailyOverdueReminderEnabled";
     private const string AllowAdminCompleteAnyTaskSettingKey = "tasks.allowAdminCompleteAnyTask";
     private const string ApprovalDueDaysSettingKey = "tasks.approvalDueDays";
     private const int DefaultApprovalDueDays = 5;
@@ -250,6 +251,32 @@ public class TasksController : ControllerBase
         return Ok(dueNotifications.Concat(completedNotifications).Take(20).ToList());
     }
 
+    [HttpGet("overdue-summary")]
+    public async Task<ActionResult<TaskJournalOverdueSummaryDto>> GetOverdueSummary(CancellationToken ct)
+    {
+        var access = await GetTaskAccessAsync(ct);
+        if (access is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!access.IsAdmin && access.Permission?.CanView != true)
+        {
+            return Forbid();
+        }
+
+        var now = DateTime.UtcNow;
+        var count = await BuildVisibleTasksQuery(access)
+            .AsNoTracking()
+            .CountAsync(task =>
+                task.AssigneeUserId == access.UserId &&
+                ActiveTaskStatuses.Contains(task.Status) &&
+                task.DueAt < now,
+                ct);
+
+        return Ok(new TaskJournalOverdueSummaryDto { Count = count });
+    }
+
     [HttpGet("assignees")]
     public async Task<ActionResult<IReadOnlyList<TaskJournalAssigneeDto>>> GetAssignees([FromQuery] bool calendarView = false, CancellationToken ct = default)
     {
@@ -372,6 +399,7 @@ public class TasksController : ControllerBase
         await UpsertSystemSettingAsync(AllowExecutorDeadlineChangeRequestsSettingKey, request.AllowExecutorDeadlineChangeRequests ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(ExecutorCompletionAllowedUserIdsSettingKey, JsonSerializer.Serialize(executorCompletionAllowedUserIds, JsonOptions), now, ct);
         await UpsertSystemSettingAsync(RequireCompletionResultSettingKey, request.RequireCompletionResult ? "true" : "false", now, ct);
+        await UpsertSystemSettingAsync(DailyOverdueReminderEnabledSettingKey, request.DailyOverdueReminderEnabled ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(AllowAdminCompleteAnyTaskSettingKey, request.AllowAdminCompleteAnyTask ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(ApprovalDueDaysSettingKey, approvalDueDays.ToString(), now, ct);
         await UpsertSystemSettingAsync(TaskCardWindowModeSettingKey, taskCardWindowMode, now, ct);
@@ -2038,6 +2066,78 @@ public class TasksController : ControllerBase
         return NoContent();
     }
 
+    [HttpGet("billing-context")]
+    public async Task<ActionResult<TaskBillingContextDto>> GetBillingContext(
+        [FromQuery] int? clientId,
+        [FromQuery] int? legalEntityId,
+        [FromQuery] int clientCaseId,
+        CancellationToken ct)
+    {
+        var access = await GetTaskAccessAsync(ct);
+        if (access is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!access.IsAdmin && access.Permission?.CanCreate != true)
+        {
+            return Forbid();
+        }
+
+        if (clientCaseId <= 0 || (clientId is > 0) == (legalEntityId is > 0))
+        {
+            return BadRequest(new { message = "Укажите одного клиента или юридическое лицо и дело." });
+        }
+
+        var clientCase = await _db.ClientCases
+            .AsNoTracking()
+            .Where(item => item.Id == clientCaseId)
+            .Select(item => new { item.Id, item.ClientId, item.LegalEntityId, item.Title })
+            .FirstOrDefaultAsync(ct);
+        if (clientCase is null
+            || (clientId is > 0 && clientCase.ClientId != clientId)
+            || (legalEntityId is > 0 && clientCase.LegalEntityId != legalEntityId))
+        {
+            return BadRequest(new { message = "Выбранное дело не относится к указанному клиенту." });
+        }
+
+        var today = DateTime.UtcNow.Date;
+        var contractsQuery = _db.Contracts
+            .AsNoTracking()
+            .Where(contract => contract.Status != ContractStatus.Cancelled && contract.Status != ContractStatus.Terminated)
+            .Where(contract => contract.Date <= today)
+            .Where(contract => !contract.ValidUntil.HasValue || contract.ValidUntil.Value >= today);
+
+        contractsQuery = clientId is > 0
+            ? contractsQuery.Where(contract => contract.ClientContracts.Any(link => link.ClientId == clientId.Value))
+            : contractsQuery.Where(contract => contract.LegalEntityContracts.Any(link => link.LegalEntityId == legalEntityId!.Value));
+
+        var contracts = await contractsQuery
+            .OrderByDescending(contract => contract.Status == ContractStatus.Concluded)
+            .ThenByDescending(contract => contract.Date)
+            .ThenByDescending(contract => contract.Id)
+            .Select(contract => new TaskBillingContractOptionDto
+            {
+                Id = contract.Id,
+                Number = contract.Number,
+                Title = contract.Title ?? string.Empty,
+                BillingMode = contract.BillingMode,
+                Status = contract.Status,
+                Amount = contract.Amount,
+                Date = ToIso(contract.Date),
+            })
+            .ToListAsync(ct);
+
+        return Ok(new TaskBillingContextDto
+        {
+            ClientId = clientId,
+            LegalEntityId = legalEntityId,
+            ClientCaseId = clientCase.Id,
+            ClientCaseTitle = clientCase.Title,
+            Contracts = contracts,
+        });
+    }
+
     [HttpPost]
     public async Task<ActionResult<TaskJournalItemDto>> CreateTask([FromBody] UpsertTaskJournalItemRequest request, CancellationToken ct)
     {
@@ -2062,6 +2162,12 @@ public class TasksController : ControllerBase
         if (binding.Error is not null)
         {
             return BadRequest(new { message = binding.Error });
+        }
+
+        var billing = await ResolveTaskBillingDecisionAsync(request, binding, ct);
+        if (billing.Error is not null)
+        {
+            return BadRequest(new { message = billing.Error });
         }
 
         var participants = await ResolveParticipantsAsync(request, access.UserId, ct);
@@ -2100,6 +2206,10 @@ public class TasksController : ControllerBase
             ClientId = binding.ClientId,
             LegalEntityId = binding.LegalEntityId,
             ClientCaseId = binding.ClientCaseId,
+            ClientBillingClassification = billing.Classification,
+            BillingContractId = billing.ContractId,
+            BillingModeSnapshot = billing.BillingMode,
+            BillingDecisionAt = billing.DecisionAt,
             ObjectName = BuildObjectName(binding.OwnerName, binding.ClientCaseTitle),
             Title = request.Title.Trim(),
             Description = NormalizeOptional(request.Description),
@@ -3571,6 +3681,8 @@ public class TasksController : ControllerBase
             .Include(task => task.Client)
             .Include(task => task.LegalEntity)
             .Include(task => task.ClientCase)
+            .Include(task => task.BillingContract)
+            .Include(task => task.BillingInvoice)
             .Include(task => task.AssigneeUser)
             .Include(task => task.ContractorPayment)
             .Include(task => task.Participants)
@@ -3607,6 +3719,7 @@ public class TasksController : ControllerBase
                 item.Key == AllowExecutorDeadlineChangeRequestsSettingKey ||
                 item.Key == ExecutorCompletionAllowedUserIdsSettingKey ||
                 item.Key == RequireCompletionResultSettingKey ||
+                item.Key == DailyOverdueReminderEnabledSettingKey ||
                 item.Key == AllowAdminCompleteAnyTaskSettingKey ||
                 item.Key == ApprovalDueDaysSettingKey ||
                 item.Key == TaskCardWindowModeSettingKey ||
@@ -3627,6 +3740,7 @@ public class TasksController : ControllerBase
             AllowExecutorDeadlineChangeRequests = ParseBoolSetting(settings.GetValueOrDefault(AllowExecutorDeadlineChangeRequestsSettingKey), true),
             ExecutorCompletionAllowedUserIds = ParseUserIdListSetting(settings.GetValueOrDefault(ExecutorCompletionAllowedUserIdsSettingKey)),
             RequireCompletionResult = ParseBoolSetting(settings.GetValueOrDefault(RequireCompletionResultSettingKey), true),
+            DailyOverdueReminderEnabled = ParseBoolSetting(settings.GetValueOrDefault(DailyOverdueReminderEnabledSettingKey), true),
             AllowAdminCompleteAnyTask = ParseBoolSetting(settings.GetValueOrDefault(AllowAdminCompleteAnyTaskSettingKey), true),
             ApprovalDueDays = Math.Clamp(ParseIntSetting(settings.GetValueOrDefault(ApprovalDueDaysSettingKey), DefaultApprovalDueDays), 1, 365),
             TaskCardWindowMode = NormalizeTaskCardWindowMode(settings.GetValueOrDefault(TaskCardWindowModeSettingKey)),
@@ -4014,6 +4128,88 @@ public class TasksController : ControllerBase
                 ? clientName.Trim()
                 : $"{clientName.Trim()} - {caseTitle.Trim()}";
 
+    private async Task<TaskBillingDecision> ResolveTaskBillingDecisionAsync(
+        UpsertTaskJournalItemRequest request,
+        TaskClientBinding binding,
+        CancellationToken ct)
+    {
+        if (!TaskClientBillingClassification.IsDecision(request.ClientBillingClassification))
+        {
+            return TaskBillingDecision.Legacy();
+        }
+
+        var classification = TaskClientBillingClassification.NormalizeDecision(request.ClientBillingClassification);
+        if (classification == TaskClientBillingClassification.Internal || request.IsInternal)
+        {
+            return TaskBillingDecision.Valid(TaskClientBillingClassification.Internal, null, null);
+        }
+
+        if (!binding.ClientCaseId.HasValue)
+        {
+            return TaskBillingDecision.Invalid("Для клиентской платной задачи обязательно выберите дело.");
+        }
+
+        if (!request.BillingContractId.HasValue)
+        {
+            return TaskBillingDecision.Valid(TaskClientBillingClassification.Billable, null, null);
+        }
+
+        var contract = await _db.Contracts
+            .AsNoTracking()
+            .Where(item => item.Id == request.BillingContractId.Value)
+            .Select(item => new
+            {
+                item.Id,
+                item.BillingMode,
+                item.Status,
+                item.Date,
+                item.ValidUntil,
+                HasClient = binding.ClientId.HasValue && item.ClientContracts.Any(link => link.ClientId == binding.ClientId.Value),
+                HasLegalEntity = binding.LegalEntityId.HasValue && item.LegalEntityContracts.Any(link => link.LegalEntityId == binding.LegalEntityId.Value),
+            })
+            .FirstOrDefaultAsync(ct);
+        if (contract is null || (!contract.HasClient && !contract.HasLegalEntity))
+        {
+            return TaskBillingDecision.Invalid("Выбранный договор не относится к клиенту задачи.");
+        }
+
+        if (contract.Status is ContractStatus.Cancelled or ContractStatus.Terminated)
+        {
+            return TaskBillingDecision.Invalid("Нельзя использовать расторгнутый или отменённый договор.");
+        }
+
+        var today = DateTime.UtcNow.Date;
+        if (contract.Date.Date > today || (contract.ValidUntil.HasValue && contract.ValidUntil.Value.Date < today))
+        {
+            return TaskBillingDecision.Invalid("Нельзя использовать договор, который ещё не начал действовать или уже истёк.");
+        }
+
+        return TaskBillingDecision.Valid(
+            TaskClientBillingClassification.Billable,
+            contract.Id,
+            ContractBillingMode.Normalize(contract.BillingMode));
+    }
+
+    private static string ResolveTaskBillingStatus(TaskJournalItem entity)
+    {
+        if (entity.ClientBillingClassification == TaskClientBillingClassification.Legacy)
+        {
+            return "legacy";
+        }
+
+        if (entity.ClientBillingClassification == TaskClientBillingClassification.Internal)
+        {
+            return "internal";
+        }
+
+        if (entity.BillingInvoiceId.HasValue)
+        {
+            return "invoiced";
+        }
+
+        return entity.BillingModeSnapshot == ContractBillingMode.Fixed ? "fixed" : "unbilled";
+    }
+
     private static DateTime ResolveLastCaseActivity(ClientCase clientCase, params DateTime?[] activitySignals)
         => ResolveLastCaseActivity(
             clientCase.CreatedAt,
@@ -4238,6 +4434,13 @@ public class TasksController : ControllerBase
             IsInternal = !entity.ClientId.HasValue && !entity.LegalEntityId.HasValue,
             ClientCaseId = entity.ClientCaseId,
             ClientCaseTitle = binding?.ClientCaseTitle ?? entity.ClientCase?.Title ?? string.Empty,
+            ClientBillingClassification = entity.ClientBillingClassification,
+            BillingContractId = entity.BillingContractId,
+            BillingContractNumber = entity.BillingContract?.Number ?? string.Empty,
+            BillingMode = entity.BillingModeSnapshot ?? string.Empty,
+            BillingInvoiceId = entity.BillingInvoiceId,
+            BillingInvoiceNumber = entity.BillingInvoice?.Account ?? string.Empty,
+            BillingStatus = ResolveTaskBillingStatus(entity),
             ObjectName = entity.ObjectName,
             Title = entity.Title,
             Description = entity.Description ?? string.Empty,
@@ -6016,6 +6219,23 @@ public class TasksController : ControllerBase
 
         public static TaskClientBinding Invalid(string error)
             => new(null, string.Empty, null, string.Empty, null, null, error);
+    }
+
+    private sealed record TaskBillingDecision(
+        string Classification,
+        int? ContractId,
+        string? BillingMode,
+        DateTime? DecisionAt,
+        string? Error)
+    {
+        public static TaskBillingDecision Legacy()
+            => new(TaskClientBillingClassification.Legacy, null, null, null, null);
+
+        public static TaskBillingDecision Valid(string classification, int? contractId, string? billingMode)
+            => new(classification, contractId, billingMode, DateTime.UtcNow, null);
+
+        public static TaskBillingDecision Invalid(string error)
+            => new(TaskClientBillingClassification.Legacy, null, null, null, error);
     }
 }
 

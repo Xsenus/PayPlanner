@@ -29,6 +29,7 @@ const apiMock = vi.hoisted(() => ({
   getCaseCalendarEvents: vi.fn(),
   getCaseCalendarSummary: vi.fn(),
   getTaskJournalItem: vi.fn(),
+  getTaskBillingContext: vi.fn(),
   createTaskJournalItem: vi.fn(),
   updateTaskJournalItem: vi.fn(),
   updateTaskJournalStatus: vi.fn(),
@@ -274,8 +275,10 @@ async function renderJournal(
     onOpenClient?: (clientId: number, caseId?: number | null) => void;
     onOpenCase?: (caseId: number, clientId?: number | null) => void;
     onOpenLegalEntity?: (legalEntityId: number) => void;
+    onCreateInvoiceDraft?: (draft: unknown) => void;
     settings?: Partial<TaskJournalSettingsDto>;
     underControlOnly?: boolean;
+    overdueFilterSignal?: number;
   } = {},
 ) {
   apiMock.getTaskJournalItems.mockResolvedValue({
@@ -292,6 +295,7 @@ async function renderJournal(
     allowExecutorDeadlineChangeRequests: true,
     executorCompletionAllowedUserIds: [],
     requireCompletionResult: true,
+    dailyOverdueReminderEnabled: true,
     allowAdminCompleteAnyTask: true,
     approvalDueDays: 5,
     taskCardWindowMode: 'legacy',
@@ -329,7 +333,9 @@ async function renderJournal(
         onOpenClient={options.onOpenClient}
         onOpenCase={options.onOpenCase}
         onOpenLegalEntity={options.onOpenLegalEntity}
+        onCreateInvoiceDraft={options.onCreateInvoiceDraft}
         underControlOnly={options.underControlOnly}
+        overdueFilterSignal={options.overdueFilterSignal}
       />
     );
   }
@@ -345,7 +351,9 @@ async function renderJournal(
       onOpenClient={options.onOpenClient}
       onOpenCase={options.onOpenCase}
       onOpenLegalEntity={options.onOpenLegalEntity}
+      onCreateInvoiceDraft={options.onCreateInvoiceDraft}
       underControlOnly={options.underControlOnly}
+      overdueFilterSignal={options.overdueFilterSignal}
     />
   ));
   if (options.waitForTitle === null) {
@@ -364,6 +372,25 @@ async function openFirstTaskForEdit() {
   await screen.findByRole('heading', { name: 'Просмотр задачи' });
   fireEvent.click(screen.getAllByRole('button', { name: 'Редактировать задачу' })[0]);
   await screen.findByRole('heading', { name: 'Редактировать задачу' });
+}
+
+async function openNewTaskFormAsGlobalInternal() {
+  fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
+  await screen.findByRole('heading', { name: 'Выберите клиента и дело' });
+  fireEvent.click(screen.getByRole('button', { name: 'Создать общую внутреннюю задачу без клиента' }));
+  await screen.findByRole('heading', { name: 'Новая задача' });
+}
+
+async function continueTaskWizardForClient(options: { legalEntity?: boolean; classification?: 'billable' | 'internal' } = {}) {
+  const counterpartyName = options.legalEntity ? /ООО Ромашка/ : /Иванов Иван Иванович/;
+  const caseId = options.legalEntity ? '200' : '100';
+  fireEvent.click(screen.getByRole('button', { name: 'Выберите клиента или юридическое лицо' }));
+  fireEvent.click(await screen.findByRole('button', { name: counterpartyName }));
+  fireEvent.change(screen.getByTestId('task-billing-wizard-case'), { target: { value: caseId } });
+  fireEvent.click(screen.getByRole('button', { name: 'Проверить договор' }));
+  await screen.findByRole('heading', { name: 'Определите учёт задачи' });
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(options.classification === 'internal' ? 'Внутренняя задача' : 'Платная задача') }));
+  await screen.findByRole('heading', { name: 'Новая задача' });
 }
 
 describe('TaskJournal', () => {
@@ -416,6 +443,12 @@ describe('TaskJournal', () => {
       dryRunConfirmed: false,
       notes: '',
       updatedAt: null,
+    });
+    apiMock.getTaskBillingContext.mockResolvedValue({
+      clientId: 10,
+      legalEntityId: null,
+      clientCaseId: 100,
+      contracts: [{ id: 501, number: '15/26', title: 'Юридические услуги', billingMode: 'Actual', status: 'Concluded' }],
     });
     apiMock.getTaskJournalCaseAutomationCandidates.mockResolvedValue([]);
     apiMock.createTaskJournalCaseAutomationTask.mockResolvedValue(createTask({
@@ -595,6 +628,27 @@ describe('TaskJournal', () => {
     expect(screen.getByTitle('Просмотр').closest('td')?.className).toContain('sticky');
   });
 
+  it('opens the daily reminder target as current employees overdue task list', async () => {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    await renderJournal([
+      createTask({ id: 201, title: 'Моя просроченная задача', assigneeUserId: 7, dueAt: dateAt(yesterday, 10) }),
+      createTask({ id: 202, title: 'Чужая просроченная задача', assigneeUserId: 8, dueAt: dateAt(yesterday, 10) }),
+      createTask({ id: 203, title: 'Моя будущая задача', assigneeUserId: 7, dueAt: dateAt(tomorrow, 10) }),
+    ], { overdueFilterSignal: 1 });
+
+    expect(await screen.findByText('Моя просроченная задача')).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.queryByText('Чужая просроченная задача')).toBeNull();
+      expect(screen.queryByText('Моя будущая задача')).toBeNull();
+      expect(screen.getByTestId('task-quick-filter-assignedToMe').getAttribute('aria-pressed')).toBe('true');
+      expect((screen.getByLabelText('Статус') as HTMLSelectElement).value).toBe('overdue');
+    });
+  });
+
   it('passes selected table sorting to the backend task journal endpoint', async () => {
     await renderJournal([
       createTask({ id: 101, title: 'Первая задача', assigneeName: 'Анна' }),
@@ -698,7 +752,8 @@ describe('TaskJournal', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
-    await screen.findByRole('heading', { name: 'Новая задача' });
+    await screen.findByRole('heading', { name: 'Выберите клиента и дело' });
+    await continueTaskWizardForClient();
 
     fireEvent.change(screen.getByTestId('task-assignee-select'), { target: { value: '9' } });
     const contractorPaymentCheckbox = screen.getByTestId('task-contractor-payment-checkbox') as HTMLInputElement;
@@ -758,6 +813,11 @@ describe('TaskJournal', () => {
     expect(screen.queryByText('Проверка дел без задач')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
+    await screen.findByRole('heading', { name: 'Выберите клиента и дело' });
+    fireEvent.change(screen.getByTestId('task-billing-wizard-case'), { target: { value: '100' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Проверить договор' }));
+    await screen.findByRole('heading', { name: 'Определите учёт задачи' });
+    fireEvent.click(screen.getByRole('button', { name: /Платная задача/ }));
     await screen.findByRole('heading', { name: 'Новая задача' });
     fireEvent.change(screen.getByTestId('task-title-input'), { target: { value: 'Связаться с клиентом' } });
     fireEvent.click(screen.getAllByRole('button', { name: 'Создать задачу' }).at(-1)!);
@@ -766,7 +826,8 @@ describe('TaskJournal', () => {
     expect(apiMock.createTaskJournalItem).toHaveBeenCalledWith(expect.objectContaining({
       clientId: 10,
       legalEntityId: null,
-      objectName: 'Иванов Иван Иванович',
+      clientCaseId: 100,
+      clientBillingClassification: 'billable',
       title: 'Связаться с клиентом',
     }));
   });
@@ -786,8 +847,7 @@ describe('TaskJournal', () => {
       'Встреча',
     ]));
 
-    fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
-    await screen.findByRole('heading', { name: 'Новая задача' });
+    await openNewTaskFormAsGlobalInternal();
 
     const formTypeSelect = screen.getAllByRole('combobox')
       .map((element) => element as HTMLSelectElement)
@@ -802,7 +862,6 @@ describe('TaskJournal', () => {
       'Встреча',
     ]));
 
-    fireEvent.click(screen.getByTestId('task-internal-checkbox'));
     fireEvent.change(screen.getByTestId('task-title-input'), { target: { value: 'Подготовиться к заседанию' } });
     fireEvent.change(formTypeSelect!, { target: { value: 'courtHearing' } });
     fireEvent.click(screen.getAllByRole('button', { name: 'Создать задачу' }).at(-1)!);
@@ -811,6 +870,54 @@ describe('TaskJournal', () => {
     expect(apiMock.createTaskJournalItem).toHaveBeenCalledWith(expect.objectContaining({
       title: 'Подготовиться к заседанию',
       type: 'courtHearing',
+    }));
+  });
+
+  it('warns about a fixed-price contract before creating a client task', async () => {
+    apiMock.getTaskBillingContext.mockResolvedValueOnce({
+      clientId: 10,
+      legalEntityId: null,
+      clientCaseId: 100,
+      contracts: [{ id: 601, number: 'FIX-26', title: 'Абонентское обслуживание', billingMode: 'Fixed', status: 'Concluded' }],
+    });
+    await renderJournal([], { waitForTitle: null });
+
+    fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
+    await screen.findByRole('heading', { name: 'Выберите клиента и дело' });
+    fireEvent.click(screen.getByRole('button', { name: 'Выберите клиента или юридическое лицо' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Иванов Иван Иванович/ }));
+    fireEvent.change(screen.getByTestId('task-billing-wizard-case'), { target: { value: '100' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Проверить договор' }));
+
+    expect(await screen.findByText('Договор с фиксированной оплатой')).toBeTruthy();
+    expect(screen.getByText(/следите за объёмом услуг/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Клиентская задача/ }));
+
+    expect(await screen.findByText('Клиентская задача в рамках договора с фиксированной оплатой.')).toBeTruthy();
+  });
+
+  it('prepares one invoice draft from selected unbilled client tasks', async () => {
+    const onCreateInvoiceDraft = vi.fn();
+    const unbilledTask = createTask({
+      id: 321,
+      title: 'Подготовить иск',
+      clientBillingClassification: 'billable',
+      billingContractId: 501,
+      billingContractNumber: '15/26',
+      billingMode: 'Actual',
+      billingStatus: 'unbilled',
+    });
+    await renderJournal([unbilledTask], { onCreateInvoiceDraft });
+
+    expect(screen.getByTestId('task-unbilled-reminder').textContent).toContain('Платные задачи без счёта: 1');
+    expect(screen.getByText('ПЛАТНАЯ · НЕ ВЫСТАВЛЕН СЧЁТ')).toBeTruthy();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Выбрать задачу Подготовить иск' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Подготовить счёт (1)' }));
+
+    expect(onCreateInvoiceDraft).toHaveBeenCalledWith(expect.objectContaining({
+      billingTaskIds: [321],
+      selectedClientCaseIds: [100],
+      lineItems: [expect.objectContaining({ name: expect.stringMatching(/Подготовить иск \(задача №321 от/) })],
     }));
   });
 
@@ -2541,26 +2648,18 @@ describe('TaskJournal', () => {
     await renderJournal();
 
     fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
-    await screen.findByRole('heading', { name: 'Новая задача' });
+    await screen.findByRole('heading', { name: 'Выберите клиента и дело' });
 
-    expect(screen.getByText('Контрагент')).toBeTruthy();
-    expect(screen.getAllByText('Наименование задачи').length).toBeGreaterThan(0);
-    expect(screen.getByText('Дело')).toBeTruthy();
-
-    const submitButtons = screen.getAllByRole('button', { name: 'Создать задачу' });
-    fireEvent.click(submitButtons[submitButtons.length - 1]);
+    expect((screen.getByRole('button', { name: 'Проверить договор' }) as HTMLButtonElement).disabled).toBe(true);
 
     expect(apiMock.createTaskJournalItem).not.toHaveBeenCalled();
-    expect(toastMock.error).toHaveBeenCalledWith('Укажите контрагента задачи.', 'Журнал задач');
   });
 
   it('creates an internal task without a counterparty', async () => {
     await renderJournal();
 
-    fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
-    await screen.findByRole('heading', { name: 'Новая задача' });
+    await openNewTaskFormAsGlobalInternal();
 
-    fireEvent.click(screen.getByTestId('task-internal-checkbox'));
     fireEvent.change(screen.getByTestId('task-title-input'), { target: { value: 'Internal process' } });
     fireEvent.click(screen.getAllByRole('button', { name: 'Создать задачу' }).at(-1)!);
 
@@ -2616,8 +2715,7 @@ describe('TaskJournal', () => {
       }),
     ], { waitForTitle: null });
 
-    fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
-    await screen.findByRole('heading', { name: 'Новая задача' });
+    await openNewTaskFormAsGlobalInternal();
 
     fireEvent.change(screen.getByTestId('task-due-at-input'), {
       target: { value: toDatetimeLocalInputValue(selectedSlot) },
@@ -2635,8 +2733,7 @@ describe('TaskJournal', () => {
   it('stacks description and result fields vertically in the task form', async () => {
     await renderJournal();
 
-    fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
-    await screen.findByRole('heading', { name: 'Новая задача' });
+    await openNewTaskFormAsGlobalInternal();
 
     const textFields = screen.getByTestId('task-text-fields');
     const description = screen.getByTestId('task-description-field');
@@ -2654,13 +2751,9 @@ describe('TaskJournal', () => {
     await renderJournal();
 
     fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
-    await screen.findByRole('heading', { name: 'Новая задача' });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Выберите контрагента' }));
-    fireEvent.click(await screen.findByRole('button', { name: /Иванов Иван Иванович/ }));
+    await screen.findByRole('heading', { name: 'Выберите клиента и дело' });
+    await continueTaskWizardForClient();
     fireEvent.change(screen.getByPlaceholderText('Что нужно сделать'), { target: { value: 'Подготовить документы' } });
-
-    fireEvent.change(screen.getByRole('combobox', { name: 'Дело' }), { target: { value: '100' } });
     const submitButtons = screen.getAllByRole('button', { name: 'Создать задачу' });
     fireEvent.click(submitButtons[submitButtons.length - 1]);
 
@@ -2681,11 +2774,8 @@ describe('TaskJournal', () => {
     });
     await waitFor(() => expect(apiMock.getUserSetting).toHaveBeenCalledWith('profile.timeZoneId'));
 
-    fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
-    await screen.findByRole('heading', { name: 'Новая задача' });
+    await openNewTaskFormAsGlobalInternal();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Выберите контрагента' }));
-    fireEvent.click(await screen.findByRole('button', { name: /Иванов Иван Иванович/ }));
     fireEvent.change(screen.getByTestId('task-assignee-select'), { target: { value: '9' } });
     fireEvent.change(screen.getByPlaceholderText('Что нужно сделать'), { target: { value: 'Оплатить работу исполнителя' } });
 
@@ -2720,11 +2810,8 @@ describe('TaskJournal', () => {
       ],
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
-    await screen.findByRole('heading', { name: 'Новая задача' });
+    await openNewTaskFormAsGlobalInternal();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Выберите контрагента' }));
-    fireEvent.click(await screen.findByRole('button', { name: /Иванов Иван Иванович/ }));
     fireEvent.change(screen.getByTestId('task-assignee-select'), { target: { value: '9' } });
     fireEvent.change(screen.getByPlaceholderText('Что нужно сделать'), { target: { value: 'Оплатить работу исполнителя' } });
 
@@ -2756,11 +2843,8 @@ describe('TaskJournal', () => {
 
     await renderJournal();
 
-    fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
-    await screen.findByRole('heading', { name: 'Новая задача' });
+    await openNewTaskFormAsGlobalInternal();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Выберите контрагента' }));
-    fireEvent.click(await screen.findByRole('button', { name: /Иванов Иван Иванович/ }));
     fireEvent.change(screen.getByPlaceholderText('Что нужно сделать'), { target: { value: 'Созвониться с клиентом' } });
     fireEvent.click(screen.getAllByRole('button', { name: 'Создать задачу' }).at(-1)!);
 
@@ -2786,9 +2870,8 @@ describe('TaskJournal', () => {
     await renderJournal();
 
     fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
-    await screen.findByRole('heading', { name: 'Новая задача' });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Выберите контрагента' }));
+    await screen.findByRole('heading', { name: 'Выберите клиента и дело' });
+    fireEvent.click(screen.getByRole('button', { name: 'Выберите клиента или юридическое лицо' }));
     fireEvent.click(await screen.findByRole('button', { name: /Иванов Иван Иванович/ }));
 
     const caseSelect = screen.getByRole('combobox', { name: 'Дело' });
@@ -2808,13 +2891,15 @@ describe('TaskJournal', () => {
     await renderJournal();
 
     fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
-    await screen.findByRole('heading', { name: 'Новая задача' });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Выберите контрагента' }));
-    fireEvent.click(await screen.findByRole('button', { name: /ООО Ромашка/ }));
+    await screen.findByRole('heading', { name: 'Выберите клиента и дело' });
+    apiMock.getTaskBillingContext.mockResolvedValueOnce({
+      clientId: null,
+      legalEntityId: 20,
+      clientCaseId: 200,
+      contracts: [{ id: 502, number: '16/26', title: 'Фиксированные усулги', billingMode: 'Actual', status: 'Concluded' }],
+    });
+    await continueTaskWizardForClient({ legalEntity: true });
     fireEvent.change(screen.getByPlaceholderText('Что нужно сделать'), { target: { value: 'Проверить документы юрлица' } });
-
-    fireEvent.change(screen.getByRole('combobox', { name: 'Дело' }), { target: { value: '200' } });
     const submitButtons = screen.getAllByRole('button', { name: 'Создать задачу' });
     fireEvent.click(submitButtons[submitButtons.length - 1]);
 
@@ -2836,9 +2921,8 @@ describe('TaskJournal', () => {
     await renderJournal();
 
     fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
-    await screen.findByRole('heading', { name: 'Новая задача' });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Выберите контрагента' }));
+    await screen.findByRole('heading', { name: 'Выберите клиента и дело' });
+    fireEvent.click(screen.getByRole('button', { name: 'Выберите клиента или юридическое лицо' }));
     const searchInput = screen.getByPlaceholderText('Поиск по ФИО, названию, ИНН, телефону или email');
 
     fireEvent.change(searchInput, { target: { value: '5400000000' } });
@@ -3446,11 +3530,9 @@ describe('TaskJournal', () => {
       waitForTitle: null,
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
-    await screen.findByRole('heading', { name: 'Новая задача' });
+    await openNewTaskFormAsGlobalInternal();
     const createCard = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
 
-    fireEvent.click(within(createCard).getByTestId('task-internal-checkbox'));
     fireEvent.change(within(createCard).getByTestId('task-title-input'), { target: { value: createdTaskTitle } });
     fireEvent.change(within(createCard).getByLabelText(addApproverLabel), { target: { value: '8' } });
     fireEvent.change(within(createCard).getByLabelText(addObserverLabel), { target: { value: '10' } });
@@ -3546,6 +3628,13 @@ describe('TaskJournal', () => {
     expect(screen.getByTestId('task-duplicate-icon')).toBeTruthy();
     expect(screen.getByText('Создать отдельную копию с теми же данными')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Дублировать задачу' }));
+
+    await screen.findByRole('heading', { name: 'Выберите клиента и дело' });
+    fireEvent.click(screen.getByRole('button', { name: 'Проверить договор' }));
+    await screen.findByRole('heading', { name: 'Определите учёт задачи' });
+    fireEvent.click(screen.getByRole('button', { name: /Платная задача/ }));
+    await screen.findByRole('heading', { name: 'Новая задача' });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Создать задачу' }).at(-1)!);
 
     await waitFor(() => expect(apiMock.createTaskJournalItem).toHaveBeenCalledTimes(1));
     expect(apiMock.createTaskJournalItem).toHaveBeenCalledWith(expect.objectContaining({
@@ -3883,6 +3972,8 @@ describe('TaskJournal', () => {
 
     fireEvent.click(screen.getAllByTitle('Создать задачу на дату')[0]);
 
+    expect(await screen.findByRole('heading', { name: 'Выберите клиента и дело' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Создать общую внутреннюю задачу без клиента' }));
     expect(await screen.findByRole('heading', { name: 'Новая задача' })).toBeTruthy();
     const dueInput = document.querySelector('input[type="datetime-local"]') as HTMLInputElement | null;
     expect(dueInput?.value).toMatch(/T09:00$/);

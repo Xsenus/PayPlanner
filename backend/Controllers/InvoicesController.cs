@@ -1380,6 +1380,38 @@ public class InvoicesController : ControllerBase
             return clientCaseValidation.Error;
         }
 
+        var billingTaskIds = (request.BillingTaskIds ?? [])
+            .Where(id => id > 0)
+            .Distinct()
+            .ToList();
+        var billingTasks = billingTaskIds.Count == 0
+            ? []
+            : await _db.TaskJournalItems
+                .Where(task => billingTaskIds.Contains(task.Id))
+                .ToListAsync(ct);
+        if (billingTasks.Count != billingTaskIds.Count)
+        {
+            return BadRequest(new { message = "Одна или несколько платных задач не найдены." });
+        }
+
+        if (billingTasks.Any(task =>
+                task.ClientBillingClassification != TaskClientBillingClassification.Billable
+                || task.BillingModeSnapshot == ContractBillingMode.Fixed
+                || task.BillingInvoiceId.HasValue))
+        {
+            return BadRequest(new { message = "В счёт можно добавить только ещё не выставленные платные задачи по фактической оплате." });
+        }
+
+        if (billingTasks.Any(task => task.ClientId != request.ClientId || task.LegalEntityId != request.LegalEntityId))
+        {
+            return BadRequest(new { message = "Все выбранные задачи должны относиться к контрагенту счёта." });
+        }
+
+        if (billingTasks.Any(task => !task.ClientCaseId.HasValue || !clientCaseValidation.ClientCaseIds.Contains(task.ClientCaseId.Value)))
+        {
+            return BadRequest(new { message = "Добавьте в счёт все дела, к которым относятся выбранные задачи." });
+        }
+
         var actValidation = await ValidateInvoiceActsAsync(request.ClientId, request.LegalEntityId, request, null, null, ct);
         if (actValidation.Error is not null)
         {
@@ -1448,6 +1480,26 @@ public class InvoicesController : ControllerBase
 
         _db.Payments.Add(payment);
         await _db.SaveChangesAsync(ct);
+
+        if (billingTasks.Count > 0)
+        {
+            var linkedAt = DateTime.UtcNow;
+            var linkedByUserId = User.GetUserId();
+            var linkedByName = User.GetDisplayName();
+            foreach (var task in billingTasks)
+            {
+                task.BillingInvoiceId = payment.Id;
+                task.UpdatedAt = linkedAt;
+                task.Comments.Add(new TaskJournalComment
+                {
+                    Kind = "history",
+                    AuthorUserId = linkedByUserId,
+                    AuthorName = linkedByName,
+                    Text = $"Платная задача включена в счёт №{number}.",
+                    CreatedAt = linkedAt,
+                });
+            }
+        }
 
         var createdInvoiceEntityId = payment.InvoiceId ?? payment.Invoice?.Id;
         if (createdInvoiceEntityId.HasValue && createdInvoiceEntityId.Value > 0)

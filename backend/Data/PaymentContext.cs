@@ -2556,6 +2556,19 @@ public class PaymentContext : DbContext
                 .HasForeignKey(e => e.ClientCaseId)
                 .OnDelete(DeleteBehavior.SetNull);
 
+            entity.Property(e => e.ClientBillingClassification).HasMaxLength(32).HasDefaultValue(TaskClientBillingClassification.Legacy).IsRequired();
+            entity.Property(e => e.BillingModeSnapshot).HasMaxLength(32);
+
+            entity.HasOne(e => e.BillingContract)
+                .WithMany()
+                .HasForeignKey(e => e.BillingContractId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasOne(e => e.BillingInvoice)
+                .WithMany()
+                .HasForeignKey(e => e.BillingInvoiceId)
+                .OnDelete(DeleteBehavior.SetNull);
+
             entity.Property(e => e.ObjectName).HasMaxLength(300).IsRequired();
             entity.Property(e => e.Title).HasMaxLength(500).IsRequired();
             entity.Property(e => e.Description).HasMaxLength(4000);
@@ -2610,6 +2623,9 @@ public class PaymentContext : DbContext
             entity.HasIndex(e => e.ClientId).HasDatabaseName("IX_TaskJournalItems_ClientId");
             entity.HasIndex(e => e.LegalEntityId).HasDatabaseName("IX_TaskJournalItems_LegalEntityId");
             entity.HasIndex(e => e.ClientCaseId).HasDatabaseName("IX_TaskJournalItems_ClientCaseId");
+            entity.HasIndex(e => e.ClientBillingClassification).HasDatabaseName("IX_TaskJournalItems_ClientBillingClassification");
+            entity.HasIndex(e => e.BillingContractId).HasDatabaseName("IX_TaskJournalItems_BillingContractId");
+            entity.HasIndex(e => e.BillingInvoiceId).HasDatabaseName("IX_TaskJournalItems_BillingInvoiceId");
             entity.HasIndex(e => e.AssigneeUserId).HasDatabaseName("IX_TaskJournalItems_AssigneeUserId");
             entity.HasIndex(e => e.AuthorUserId).HasDatabaseName("IX_TaskJournalItems_AuthorUserId");
         });

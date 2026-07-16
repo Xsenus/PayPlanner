@@ -19,6 +19,7 @@ import { ToastProvider } from './contexts/ToastContext';
 import { AppVersionGate } from './components/AppVersion/AppVersionGate';
 import { RealtimeNotificationToasts } from './components/Notifications/RealtimeNotificationToasts';
 import { ForcedTaskRevisionModal } from './components/Notifications/ForcedTaskRevisionModal';
+import { DailyOverdueTaskReminder } from './components/Tasks/DailyOverdueTaskReminder';
 import type { User as AppUser } from './services/authService';
 import { apiService, type ContactScope } from './services/api';
 import { extractDisplayErrorMessage } from './utils/errorUtils';
@@ -284,6 +285,7 @@ function AppContent() {
   const [selectedInvoiceId, setSelectedInvoiceId] = useState<number | null>(getInitialInvoiceId);
   const [selectedPaymentId, setSelectedPaymentId] = useState<number | null>(getInitialPaymentId);
   const [selectedTaskId, setSelectedTaskId] = useState<number | null>(getInitialTaskId);
+  const [overdueTaskFilterSignal, setOverdueTaskFilterSignal] = useState(0);
   const [taskReturnTab, setTaskReturnTab] = useState<Tab | null>(null);
   const [selectedLegalEntityId, setSelectedLegalEntityId] = useState<number | null>(null);
   const [selectedCaseId, setSelectedCaseId] = useState<number | null>(() => {
@@ -613,6 +615,17 @@ function AppContent() {
       setTaskReturnTab(null);
     }
   }, [taskReturnTab]);
+
+  const openTaskBillingInvoiceDraft = useCallback((draft: InvoiceEditorDraftState) => {
+    if (!permissions.accounts.canCreate) {
+      toast.error('Недостаточно прав для создания доходного счёта.');
+      return;
+    }
+
+    setSelectedInvoiceId(null);
+    setCaseInvoiceCreateDraft({ key: Date.now(), draft });
+    setActiveTab('accountsIncome');
+  }, [permissions.accounts.canCreate, toast]);
 
   const applyActReturnContext = useCallback((context: ActReturnContext) => {
     setActReturnContext(context);
@@ -1069,11 +1082,13 @@ function AppContent() {
           ? (
               <TaskJournal
                 key="tasks-list"
+                overdueFilterSignal={overdueTaskFilterSignal}
                 routeTaskId={selectedTaskId}
                 onRouteTaskChange={handleRouteTaskChange}
                 onOpenClient={handleOpenTaskClient}
                 onOpenCase={openRelatedCase}
                 onOpenLegalEntity={handleOpenTaskLegalEntity}
+                onCreateInvoiceDraft={permissions.accounts.canCreate ? openTaskBillingInvoiceDraft : undefined}
               />
             )
           : renderNoAccess('Журнал задач недоступен для вашей роли.');
@@ -1088,6 +1103,7 @@ function AppContent() {
                 onOpenClient={handleOpenTaskClient}
                 onOpenCase={openRelatedCase}
                 onOpenLegalEntity={handleOpenTaskLegalEntity}
+                onCreateInvoiceDraft={permissions.accounts.canCreate ? openTaskBillingInvoiceDraft : undefined}
               />
             )
           : renderNoAccess('Журнал задач недоступен для вашей роли.');
@@ -1101,6 +1117,7 @@ function AppContent() {
                 onOpenClient={handleOpenTaskClient}
                 onOpenCase={openRelatedCase}
                 onOpenLegalEntity={handleOpenTaskLegalEntity}
+                onCreateInvoiceDraft={permissions.accounts.canCreate ? openTaskBillingInvoiceDraft : undefined}
               />
             )
           : renderNoAccess('Согласования задач недоступны для вашей роли.');
@@ -1115,6 +1132,7 @@ function AppContent() {
                 onOpenClient={handleOpenTaskClient}
                 onOpenCase={openRelatedCase}
                 onOpenLegalEntity={handleOpenTaskLegalEntity}
+                onCreateInvoiceDraft={permissions.accounts.canCreate ? openTaskBillingInvoiceDraft : undefined}
               />
             )
           : renderNoAccess('Журнал задач недоступен для вашей роли.');
@@ -1850,6 +1868,15 @@ function AppContent() {
         />
         <ForcedTaskRevisionModal
           onOpenTask={permissions.tasks.canView ? (taskId) => openTaskDetail(taskId, { returnTo: activeTab }) : undefined}
+        />
+        <DailyOverdueTaskReminder
+          userId={user.id}
+          enabled={permissionsLoaded && permissions.tasks.canView}
+          onOpenTasks={() => {
+            setSelectedTaskId(null);
+            setOverdueTaskFilterSignal((value) => value + 1);
+            handleTabChange('tasks');
+          }}
         />
         <DoubleHorizontalScrollbars />
         <Navigation activeTab={activeTab} onTabChange={handleTabChange} />

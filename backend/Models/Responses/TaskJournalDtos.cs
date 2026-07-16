@@ -10,6 +10,13 @@ public class TaskJournalItemDto
     public bool IsInternal { get; set; }
     public int? ClientCaseId { get; set; }
     public string ClientCaseTitle { get; set; } = string.Empty;
+    public string ClientBillingClassification { get; set; } = TaskClientBillingClassification.Legacy;
+    public int? BillingContractId { get; set; }
+    public string BillingContractNumber { get; set; } = string.Empty;
+    public string BillingMode { get; set; } = string.Empty;
+    public int? BillingInvoiceId { get; set; }
+    public string BillingInvoiceNumber { get; set; } = string.Empty;
+    public string BillingStatus { get; set; } = "legacy";
     public string ObjectName { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
@@ -42,6 +49,26 @@ public class TaskJournalItemDto
     public IReadOnlyList<TaskJournalDeadlineChangeRequestDto> ActiveDeadlineChangeRequests { get; set; } = Array.Empty<TaskJournalDeadlineChangeRequestDto>();
     public string CreatedAt { get; set; } = string.Empty;
     public string? UpdatedAt { get; set; }
+}
+
+public sealed class TaskBillingContextDto
+{
+    public int? ClientId { get; set; }
+    public int? LegalEntityId { get; set; }
+    public int ClientCaseId { get; set; }
+    public string ClientCaseTitle { get; set; } = string.Empty;
+    public IReadOnlyList<TaskBillingContractOptionDto> Contracts { get; set; } = Array.Empty<TaskBillingContractOptionDto>();
+}
+
+public sealed class TaskBillingContractOptionDto
+{
+    public int Id { get; set; }
+    public string Number { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string BillingMode { get; set; } = ContractBillingMode.Fixed;
+    public string Status { get; set; } = string.Empty;
+    public decimal? Amount { get; set; }
+    public string Date { get; set; } = string.Empty;
 }
 
 public class TaskJournalParticipantDto
@@ -205,6 +232,7 @@ public class TaskJournalSettingsDto
     public bool AllowExecutorDeadlineChangeRequests { get; set; } = true;
     public List<int> ExecutorCompletionAllowedUserIds { get; set; } = [];
     public bool RequireCompletionResult { get; set; } = true;
+    public bool DailyOverdueReminderEnabled { get; set; } = true;
     public bool AllowAdminCompleteAnyTask { get; set; } = true;
     public int ApprovalDueDays { get; set; } = 5;
     public string TaskCardWindowMode { get; set; } = "legacy";
@@ -214,4 +242,9 @@ public class TaskJournalSettingsDto
     public int? CaseInactivityDefaultAssigneeUserId { get; set; }
     public int CaseInactivityEscalationDays { get; set; } = 30;
     public int? CaseInactivityEscalationUserId { get; set; }
+}
+
+public class TaskJournalOverdueSummaryDto
+{
+    public int Count { get; set; }
 }

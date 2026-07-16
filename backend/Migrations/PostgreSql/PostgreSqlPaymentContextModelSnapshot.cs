@@ -6929,11 +6929,31 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Property<int?>("AuthorUserId")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("BillingContractId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("BillingDecisionAt")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<int?>("BillingInvoiceId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("BillingModeSnapshot")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
                     b.Property<string>("ChannelsJson")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
                         .HasColumnType("text")
                         .HasDefaultValue("[]");
+
+                    b.Property<string>("ClientBillingClassification")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("legacy");
 
                     b.Property<int?>("ClientCaseId")
                         .HasColumnType("integer");
@@ -7089,6 +7109,15 @@ namespace PayPlanner.Api.Migrations.PostgreSql
 
                     b.HasIndex("AuthorUserId")
                         .HasDatabaseName("IX_TaskJournalItems_AuthorUserId");
+
+                    b.HasIndex("BillingContractId")
+                        .HasDatabaseName("IX_TaskJournalItems_BillingContractId");
+
+                    b.HasIndex("BillingInvoiceId")
+                        .HasDatabaseName("IX_TaskJournalItems_BillingInvoiceId");
+
+                    b.HasIndex("ClientBillingClassification")
+                        .HasDatabaseName("IX_TaskJournalItems_ClientBillingClassification");
 
                     b.HasIndex("ClientCaseId")
                         .HasDatabaseName("IX_TaskJournalItems_ClientCaseId");
@@ -9860,6 +9889,16 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                         .HasForeignKey("AuthorUserId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("PayPlanner.Api.Models.Contract", "BillingContract")
+                        .WithMany()
+                        .HasForeignKey("BillingContractId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("PayPlanner.Api.Models.Payment", "BillingInvoice")
+                        .WithMany()
+                        .HasForeignKey("BillingInvoiceId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("PayPlanner.Api.Models.ClientCase", "ClientCase")
                         .WithMany()
                         .HasForeignKey("ClientCaseId")
@@ -9888,6 +9927,10 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.Navigation("AssigneeUser");
 
                     b.Navigation("AuthorUser");
+
+                    b.Navigation("BillingContract");
+
+                    b.Navigation("BillingInvoice");
 
                     b.Navigation("Client");
 

@@ -42,6 +42,8 @@ public class UpsertInvoiceRequest
 
     public List<int>? ClientCaseIds { get; set; }
 
+    public List<int>? BillingTaskIds { get; set; }
+
     [MaxLength(300)]
     public string? ClientCaseReference { get; set; }
 

@@ -3425,6 +3425,7 @@ export interface Invoice {
   clientCaseId?: number | null;
   clientCaseTitle?: string | null;
   clientCaseIds?: number[];
+  billingTaskIds?: number[];
   clientCases?: InvoiceClientCaseLink[];
   clientCaseReference?: string | null;
   description?: string | null;
@@ -3485,6 +3486,7 @@ export interface InvoiceInput {
   contractId?: number | null;
   clientCaseId?: number | null;
   clientCaseIds?: number[];
+  billingTaskIds?: number[];
   clientCaseReference?: string | null;
   description?: string | null;
   isNotForAccounting?: boolean | null;

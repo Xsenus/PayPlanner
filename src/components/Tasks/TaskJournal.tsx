@@ -68,6 +68,7 @@ import {
   TASK_JOURNAL_EVENT,
   type TaskJournalAssignee,
   type TaskJournalCaseAutomationCandidate,
+  type TaskBillingContext,
   type TaskJournalChannel,
   type TaskJournalComment,
   type TaskJournalDeadlineChangeRequest,
@@ -81,6 +82,7 @@ import {
   type TaskJournalType,
   type TaskJournalUpsertPayload,
 } from '../../utils/taskJournalStore';
+import type { InvoiceEditorDraftState } from '../../utils/invoiceEditorBridge';
 import {
   DEFAULT_TASK_NOTIFICATION_DEFAULTS,
   parseTaskNotificationDefaults,
@@ -145,7 +147,14 @@ type TaskJournalProps = {
   onOpenClient?: (clientId: number, caseId?: number | null) => void | Promise<void>;
   onOpenCase?: (caseId: number, clientId?: number | null) => void | Promise<void>;
   onOpenLegalEntity?: (legalEntityId: number) => void | Promise<void>;
+  onCreateInvoiceDraft?: (draft: InvoiceEditorDraftState) => void;
+  overdueFilterSignal?: number;
 };
+
+type TaskCreationWizardState = {
+  defaults: Partial<TaskJournalUpsertPayload>;
+  dueAt?: string;
+} | null;
 
 type TaskForm = TaskJournalUpsertPayload & { dueAt: string; approvalDueAt: string | null };
 
@@ -185,6 +194,7 @@ const DEFAULT_TASK_JOURNAL_SETTINGS: TaskJournalSettingsDto = {
   allowExecutorDeadlineChangeRequests: true,
   executorCompletionAllowedUserIds: [],
   requireCompletionResult: true,
+  dailyOverdueReminderEnabled: true,
   allowAdminCompleteAnyTask: true,
   approvalDueDays: 5,
   taskCardWindowMode: 'legacy',
@@ -1872,6 +1882,8 @@ export function TaskJournal({
   onOpenClient,
   onOpenCase,
   onOpenLegalEntity,
+  onCreateInvoiceDraft,
+  overdueFilterSignal = 0,
 }: TaskJournalProps) {
   const { user, isAdmin } = useAuth();
   const toast = useToast();
@@ -1923,7 +1935,25 @@ export function TaskJournal({
     initialPreferencesRef.current = readTaskJournalFilterPreferences(currentUserId, mode, initialView);
   }
 
-  const initialPreferences = initialPreferencesRef.current;
+  const initialPreferences = overdueFilterSignal > 0 && mode === 'journal'
+    ? {
+        ...initialPreferencesRef.current,
+        viewMode: 'list' as const,
+        quickFilter: 'assignedToMe' as const,
+        metricFilter: 'none' as const,
+        search: '',
+        dateFrom: '',
+        dateTo: '',
+        statusFilter: 'overdue' as const,
+        caseFilter: 'all',
+        assigneeFilter: 'all',
+        typeFilter: 'all' as const,
+        priorityFilter: 'all' as const,
+        periodMode: 'all' as const,
+        sortBy: 'dueAt' as const,
+        sortDir: 'asc' as const,
+      }
+    : initialPreferencesRef.current;
   const [tasks, setTasks] = useState<TaskJournalItem[]>([]);
   const [caseCalendarEvents, setCaseCalendarEvents] = useState<CaseCalendarEvent[]>([]);
   const [caseCalendarSummary, setCaseCalendarSummary] = useState<CaseCalendarSummary | null>(null);
@@ -1965,6 +1995,7 @@ export function TaskJournal({
   const [savedViews, setSavedViews] = useState<TaskJournalSavedView[]>(() => readTaskJournalSavedViews(currentUserId, mode, initialPreferences.viewMode));
   const [selectedSavedViewId, setSelectedSavedViewId] = useState('');
   const [modal, setModal] = useState<ModalState>(null);
+  const [creationWizard, setCreationWizard] = useState<TaskCreationWizardState>(null);
   const [completionPromptTask, setCompletionPromptTask] = useState<TaskJournalItem | null>(null);
   const [completionPromptResult, setCompletionPromptResult] = useState('');
   const [completionPromptError, setCompletionPromptError] = useState<string | null>(null);
@@ -2020,6 +2051,27 @@ export function TaskJournal({
     previousInitialViewRef.current = initialView;
     setViewMode(initialView);
   }, [initialView]);
+
+  useEffect(() => {
+    if (mode !== 'journal' || overdueFilterSignal <= 0) {
+      return;
+    }
+
+    setViewMode('list');
+    setQuickFilter('assignedToMe');
+    setMetricFilter('none');
+    setSearch('');
+    setDateFromFilter('');
+    setDateToFilter('');
+    setStatusFilter('overdue');
+    setCaseFilter('all');
+    setAssigneeFilter('all');
+    setTypeFilter('all');
+    setPriorityFilter('all');
+    setPeriodMode('all');
+    setSortBy('dueAt');
+    setSortDir('asc');
+  }, [mode, overdueFilterSignal]);
 
   useEffect(() => {
     const nextOwnerKey = getTaskJournalFilterStorageKey(currentUserId, mode);
@@ -2206,7 +2258,7 @@ export function TaskJournal({
       return;
     }
 
-    setModal({ mode: 'create', defaults: taskContextDefaults });
+    setCreationWizard({ defaults: taskContextDefaults });
     setHighlightedTaskId(null);
     onRouteTaskChange?.(null);
   }, [canCreateTasks, onRouteTaskChange, taskContextDefaults, toast]);
@@ -2217,7 +2269,7 @@ export function TaskJournal({
       return;
     }
 
-    setModal({ mode: 'create', defaults: { ...taskContextDefaults, ...defaults } });
+    setCreationWizard({ defaults: { ...taskContextDefaults, ...defaults } });
     setHighlightedTaskId(null);
     onRouteTaskChange?.(null);
   }, [canCreateTasks, onRouteTaskChange, taskContextDefaults, toast]);
@@ -2232,7 +2284,7 @@ export function TaskJournal({
     }
 
     setCalendarSelectedDate(date);
-    setModal({ mode: 'create', dueAt: buildDefaultDueAtForDate(date), defaults: taskContextDefaults });
+    setCreationWizard({ defaults: taskContextDefaults, dueAt: buildDefaultDueAtForDate(date) });
     setHighlightedTaskId(null);
     onRouteTaskChange?.(null);
   }, [canCreateTasks, isApprovalsMode, onRouteTaskChange, taskContextDefaults, toast]);
@@ -2862,6 +2914,10 @@ export function TaskJournal({
     () => selectableTasks.filter((task) => selectedTaskIds.has(task.id)),
     [selectableTasks, selectedTaskIds],
   );
+  const unbilledClientTasks = useMemo(
+    () => tasks.filter((task) => task.billingStatus === 'unbilled'),
+    [tasks],
+  );
   const allVisibleBulkSelected = selectableTasks.length > 0 && selectableTasks.every((task) => selectedTaskIds.has(task.id));
 
   const shiftCalendarPeriod = (direction: -1 | 1) => {
@@ -2987,6 +3043,71 @@ export function TaskJournal({
 
   const clearBulkSelection = () => {
     setSelectedTaskIds(new Set());
+  };
+
+  const handleCreateInvoiceFromSelectedTasks = () => {
+    if (!onCreateInvoiceDraft) {
+      toast.error('У роли нет права на создание доходного счёта.', 'Платные задачи');
+      return;
+    }
+
+    if (selectedTasksForBulk.length === 0 || selectedTasksForBulk.some((task) => task.billingStatus !== 'unbilled')) {
+      toast.error('Выберите только платные задачи с меткой «Не выставлен счёт».', 'Платные задачи');
+      return;
+    }
+
+    const first = selectedTasksForBulk[0];
+    if (selectedTasksForBulk.some((task) => task.clientId !== first.clientId || task.legalEntityId !== first.legalEntityId)) {
+      toast.error('В один счёт можно собрать задачи только одного клиента.', 'Платные задачи');
+      return;
+    }
+
+    const contractIds = unique(selectedTasksForBulk
+      .map((task) => task.billingContractId ? String(task.billingContractId) : '')
+      .filter(Boolean));
+    const caseIds = Array.from(new Set(selectedTasksForBulk
+      .map((task) => task.clientCaseId)
+      .filter((id): id is number => typeof id === 'number' && id > 0)));
+    const today = toLocalDateKey(new Date());
+
+    onCreateInvoiceDraft({
+      mode: 'create',
+      presentation: 'modal',
+      pageViewMode: false,
+      form: {
+        number: '',
+        date: today,
+        dueDate: '',
+        amount: '0',
+        type: 'Income',
+        status: 'Pending',
+        workflowStatus: 'Draft',
+        clientId: first.clientId ? String(first.clientId) : '',
+        legalEntityId: first.legalEntityId ? String(first.legalEntityId) : '',
+        expenseClientId: '',
+        expenseLegalEntityId: '',
+        contractId: contractIds.length === 1 ? contractIds[0] : '',
+        clientCaseReference: caseIds.length === 1 ? `Дело: ${first.clientCaseTitle || first.objectName}` : `${caseIds.length} дел(а) по платным задачам`,
+        description: `Счёт по платным задачам: ${selectedTasksForBulk.length}`,
+        isNotForAccounting: false,
+        actReference: '',
+        paidDate: '',
+        responsibleIds: [],
+      },
+      lineItems: selectedTasksForBulk.map((task) => ({
+        id: `billing-task-${task.id}`,
+        name: `${task.title} (задача №${task.id} от ${new Date(task.createdAt).toLocaleDateString('ru-RU')})`,
+        quantity: '1',
+        unit: 'шт',
+        price: '0',
+        serviceCategoryId: '',
+        serviceId: '',
+      })),
+      selectedActs: [],
+      selectedClientCaseIds: caseIds,
+      billingTaskIds: selectedTasksForBulk.map((task) => task.id),
+      installmentPlan: null,
+    });
   };
 
   const resetBulkFields = () => {
@@ -3404,23 +3525,19 @@ export function TaskJournal({
       respondedAt: null,
     }));
 
-    try {
-      const created = await apiService.createTaskJournalItem(taskToPayload(task, {
+    closeTaskModal();
+    setCreationWizard({
+      defaults: taskToPayload(task, {
         title: `${task.title} (копия)`,
         status: 'new',
         result: '',
         participants,
-      }));
-      toast.success('Задача продублирована.', 'Журнал задач');
-      closeTaskModal();
-      await refreshTasks();
-      openTaskEditor(created, { syncRoute: true });
-      emitTaskChange();
-      return true;
-    } catch (error) {
-      toast.error(extractDisplayErrorMessage(error, 'Не удалось продублировать задачу.'), 'Журнал задач');
-      return false;
-    }
+        clientBillingClassification: undefined,
+        billingContractId: null,
+        billingMode: '',
+      }),
+    });
+    return true;
   };
 
   const setTaskStatus = async (task: TaskJournalItem, status: TaskJournalStatus) => {
@@ -4327,6 +4444,27 @@ export function TaskJournal({
           </div>
         </section>
 
+        {!isApprovalsMode && unbilledClientTasks.length > 0 ? (
+          <section className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-200 bg-gradient-to-r from-rose-50 to-amber-50 p-3" data-testid="task-unbilled-reminder">
+            <div className="flex items-center gap-3">
+              <span className="rounded-xl bg-rose-600 p-2 text-white"><WalletCards className="h-5 w-5" /></span>
+              <div>
+                <div className="font-semibold text-rose-950">Платные задачи без счёта: {unbilledClientTasks.length}</div>
+                <div className="text-sm text-rose-700">Отметьте задачи одного клиента в таблице и подготовьте по ним единый счёт.</div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleCreateInvoiceFromSelectedTasks}
+              disabled={selectedTasksForBulk.length === 0 || !onCreateInvoiceDraft}
+              className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <WalletCards className="h-4 w-4" />
+              Подготовить счёт{selectedTasksForBulk.length > 0 ? ` (${selectedTasksForBulk.length})` : ''}
+            </button>
+          </section>
+        ) : null}
+
         {viewMode === 'list' && !isApprovalsMode && selectedTasksForBulk.length > 0 ? (
           <TaskBulkActionsPanel
             selectedCount={selectedTasksForBulk.length}
@@ -4529,6 +4667,21 @@ export function TaskJournal({
           }}
           onDelete={handleDelete}
           onDuplicate={handleDuplicateTask}
+        />
+      ) : null}
+
+      {creationWizard ? (
+        <TaskBillingCreateWizard
+          counterpartyOptions={counterpartyOptions}
+          initialDefaults={creationWizard.defaults}
+          canViewCases={canViewCases}
+          onCancel={() => setCreationWizard(null)}
+          onContinue={(defaults) => {
+            setCreationWizard(null);
+            setModal({ mode: 'create', dueAt: creationWizard.dueAt, defaults });
+            setHighlightedTaskId(null);
+            onRouteTaskChange?.(null);
+          }}
         />
       ) : null}
       {completionPromptTask ? (
@@ -5595,6 +5748,7 @@ function TaskTable({
                     <span className={`mt-3 inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${priorityClass(task.priority)}`}>
                       {getPriorityLabel(task.priority)}
                     </span>
+                    <TaskBillingBadge task={task} className="mt-2" />
                     {pendingDeadlineRequest ? (
                       <div
                         className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800"
@@ -5726,6 +5880,25 @@ function TaskTable({
   );
 }
 
+function TaskBillingBadge({ task, className = '' }: { task: TaskJournalItem; className?: string }) {
+  if (!task.billingStatus || task.billingStatus === 'legacy') return null;
+
+  const meta = task.billingStatus === 'unbilled'
+    ? { label: 'ПЛАТНАЯ · НЕ ВЫСТАВЛЕН СЧЁТ', className: 'border-rose-300 bg-rose-100 text-rose-800' }
+    : task.billingStatus === 'invoiced'
+      ? { label: `В СЧЁТЕ${task.billingInvoiceNumber ? ` №${task.billingInvoiceNumber}` : ''}`, className: 'border-emerald-300 bg-emerald-100 text-emerald-800' }
+      : task.billingStatus === 'fixed'
+        ? { label: 'КЛИЕНТСКАЯ · ФИКСИРОВАННЫЙ ДОГОВОР', className: 'border-violet-300 bg-violet-100 text-violet-800' }
+        : { label: 'ВНУТРЕННЯЯ · НЕ ДЛЯ СЧЁТА', className: 'border-slate-300 bg-slate-100 text-slate-700' };
+
+  return (
+    <span className={`${className} inline-flex max-w-full items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold tracking-wide ${meta.className}`} data-testid={`task-billing-badge-${task.id}`}>
+      <WalletCards className="h-3.5 w-3.5 shrink-0" />
+      <span className="truncate">{meta.label}</span>
+    </span>
+  );
+}
+
 function TaskBoard({
   columns,
   highlightedTaskId,
@@ -5787,6 +5960,7 @@ function TaskBoard({
                     <div className="mt-1 text-xs text-slate-500">{getTaskCaseTitle(task)}</div>
                   ) : null}
                   <h3 className="mt-2 text-sm font-semibold leading-5 text-slate-900">{task.title}</h3>
+                  <TaskBillingBadge task={task} className="mt-2" />
                   <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
                     <TypeIcon className="h-3.5 w-3.5" />
                     {getTypeMeta(task.type).label}
@@ -7106,6 +7280,202 @@ function TaskDaySchedulePanel({
 
 type TaskCardChrome = 'legacy' | 'modern';
 
+function TaskBillingCreateWizard({
+  counterpartyOptions,
+  initialDefaults,
+  canViewCases,
+  onCancel,
+  onContinue,
+}: {
+  counterpartyOptions: LookupSelectOption[];
+  initialDefaults: Partial<TaskJournalUpsertPayload>;
+  canViewCases: boolean;
+  onCancel: () => void;
+  onContinue: (defaults: Partial<TaskJournalUpsertPayload>) => void;
+}) {
+  const initialCounterparty = initialDefaults.clientId
+    ? `client:${initialDefaults.clientId}`
+    : initialDefaults.legalEntityId
+      ? `legal:${initialDefaults.legalEntityId}`
+      : '';
+  const [counterparty, setCounterparty] = useState(initialCounterparty);
+  const [clientCaseId, setClientCaseId] = useState(initialDefaults.clientCaseId ? String(initialDefaults.clientCaseId) : '');
+  const [step, setStep] = useState<'binding' | 'billing'>('binding');
+  const [billingContext, setBillingContext] = useState<TaskBillingContext | null>(null);
+  const [selectedContractId, setSelectedContractId] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [kind, rawId] = counterparty.split(':');
+  const ownerId = Number(rawId) || null;
+  const clientId = kind === 'client' ? ownerId : null;
+  const legalEntityId = kind === 'legal' ? ownerId : null;
+  const { cases, loading: casesLoading } = useClientCases(clientId ?? undefined, {
+    enabled: canViewCases && Boolean(ownerId),
+    legalEntityId: legalEntityId ?? undefined,
+  });
+  const availableCases = cases.filter((item) => !isClosedClientCase(item));
+  const selectedCase = availableCases.find((item) => String(item.id) === clientCaseId) ?? null;
+  const selectedCounterparty = counterpartyOptions.find((item) => item.value === counterparty) ?? null;
+  const selectedContract = billingContext?.contracts.find((item) => String(item.id) === selectedContractId)
+    ?? billingContext?.contracts[0]
+    ?? null;
+
+  const loadBilling = async () => {
+    if (!ownerId || !clientCaseId) {
+      setError('Сначала выберите клиента и дело.');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    try {
+      const context = await apiService.getTaskBillingContext({
+        clientId: clientId ?? undefined,
+        legalEntityId: legalEntityId ?? undefined,
+        clientCaseId: Number(clientCaseId),
+      });
+      setBillingContext(context);
+      setSelectedContractId(context.contracts[0] ? String(context.contracts[0].id) : '');
+      setStep('billing');
+    } catch (loadError) {
+      setError(extractDisplayErrorMessage(loadError, 'Не удалось проверить договор по делу.'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const complete = (classification: 'billable' | 'internal') => {
+    const contract = classification === 'billable' ? selectedContract : null;
+    const objectName = [selectedCounterparty?.label, selectedCase?.title].filter(Boolean).join(' - ');
+    onContinue({
+      ...initialDefaults,
+      isInternal: false,
+      clientId,
+      legalEntityId,
+      clientCaseId: Number(clientCaseId),
+      objectName,
+      clientBillingClassification: classification,
+      billingContractId: contract?.id ?? null,
+      billingMode: contract?.billingMode ?? '',
+    });
+  };
+
+  const mode = selectedContract?.billingMode;
+  const warningTitle = mode === 'Actual'
+    ? 'Договор с оплатой по факту'
+    : mode === 'Fixed'
+      ? 'Договор с фиксированной оплатой'
+      : 'Договор по клиенту не найден';
+  const warningText = mode === 'Actual'
+    ? 'Клиент оплачивает фактически выполненные задачи. Клиентская задача получит яркую метку и будет ожидать включения в счёт.'
+    : mode === 'Fixed'
+      ? 'Работа выполняется в рамках фиксированной суммы. Внимание: следите за объёмом услуг по этому делу.'
+      : 'Задачу можно отметить клиентской, но проверьте договор. До выставления счёта она останется в списке контроля.';
+
+  return (
+    <div className="fixed inset-0 z-[2400] flex items-center justify-center bg-slate-950/45 p-3" role="dialog" aria-modal="true" aria-labelledby="task-create-wizard-title">
+      <div className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl sm:p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-xs font-bold uppercase tracking-[0.16em] text-blue-600">Новая задача · шаг {step === 'binding' ? '1 из 2' : '2 из 2'}</div>
+            <h2 id="task-create-wizard-title" className="mt-1 text-xl font-bold text-slate-950">
+              {step === 'binding' ? 'Выберите клиента и дело' : 'Определите учёт задачи'}
+            </h2>
+          </div>
+          <button type="button" onClick={onCancel} className="rounded-xl p-2 text-slate-400 hover:bg-slate-100" aria-label="Закрыть"><X className="h-5 w-5" /></button>
+        </div>
+
+        {step === 'binding' ? (
+          <div className="mt-5 space-y-4">
+            <LookupSelect
+              label="Клиент"
+              value={counterparty}
+              options={counterpartyOptions}
+              onChange={(value) => {
+                setCounterparty(value);
+                setClientCaseId('');
+                setError(null);
+              }}
+              placeholder="Выберите клиента или юридическое лицо"
+              searchPlaceholder="Поиск по ФИО, названию, ИНН, телефону или email"
+              required
+            />
+            <label className="block text-sm font-semibold text-slate-700">
+              Дело
+              <select
+                value={clientCaseId}
+                onChange={(event) => { setClientCaseId(event.target.value); setError(null); }}
+                disabled={!ownerId || casesLoading}
+                className="mt-1.5 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-400 disabled:bg-slate-50"
+                data-testid="task-billing-wizard-case"
+              >
+                <option value="">{casesLoading ? 'Загрузка дел…' : 'Выберите дело'}</option>
+                {availableCases.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
+              </select>
+            </label>
+            {!casesLoading && ownerId && availableCases.length === 0 ? <div className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">У клиента нет активных дел. Сначала создайте дело, чтобы новая задача попала в финансовый учёт.</div> : null}
+            {error ? <div className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</div> : null}
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <button
+                type="button"
+                onClick={() => onContinue({
+                  ...initialDefaults,
+                  isInternal: true,
+                  clientId: null,
+                  legalEntityId: null,
+                  clientCaseId: null,
+                  objectName: 'Внутренняя задача',
+                  clientBillingClassification: 'internal',
+                  billingContractId: null,
+                  billingMode: '',
+                })}
+                className="rounded-xl px-3 py-2.5 text-left text-sm font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+              >
+                Создать общую внутреннюю задачу без клиента
+              </button>
+              <div className="flex justify-end gap-2">
+              <button type="button" onClick={onCancel} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600">Отмена</button>
+              <button type="button" onClick={() => void loadBilling()} disabled={loading || !ownerId || !clientCaseId} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Проверить договор
+              </button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-5">
+            {billingContext && billingContext.contracts.length > 1 ? (
+              <label className="mb-3 block text-sm font-semibold text-slate-700">
+                Договор
+                <select value={selectedContractId} onChange={(event) => setSelectedContractId(event.target.value)} className="mt-1.5 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm">
+                  {billingContext.contracts.map((contract) => <option key={contract.id} value={contract.id}>№{contract.number} · {contract.billingMode === 'Actual' ? 'по факту' : 'фиксированная сумма'}</option>)}
+                </select>
+              </label>
+            ) : null}
+            <div className={`rounded-xl border p-4 ${mode === 'Actual' ? 'border-rose-200 bg-rose-50' : mode === 'Fixed' ? 'border-violet-200 bg-violet-50' : 'border-amber-200 bg-amber-50'}`}>
+              <div className="font-bold text-slate-950">{warningTitle}</div>
+              {selectedContract ? <div className="mt-1 text-sm font-semibold text-slate-700">Договор №{selectedContract.number}{selectedContract.title ? ` · ${selectedContract.title}` : ''}</div> : null}
+              <p className="mt-2 text-sm leading-6 text-slate-700">{warningText}</p>
+            </div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <button type="button" onClick={() => complete('billable')} className="min-h-36 rounded-2xl border-2 border-rose-300 bg-rose-50 p-5 text-left transition hover:bg-rose-100">
+                <WalletCards className="h-7 w-7 text-rose-600" />
+                <span className="mt-3 block text-base font-bold text-rose-950">{mode === 'Fixed' ? 'Клиентская задача' : 'Платная задача'}</span>
+                <span className="mt-1 block text-sm text-rose-700">{mode === 'Fixed' ? 'Учесть объём в рамках фиксированного договора' : 'Добавить в контроль будущего счёта'}</span>
+              </button>
+              <button type="button" onClick={() => complete('internal')} className="min-h-36 rounded-2xl border-2 border-slate-300 bg-slate-50 p-5 text-left transition hover:bg-slate-100">
+                <ShieldAlert className="h-7 w-7 text-slate-600" />
+                <span className="mt-3 block text-base font-bold text-slate-950">Внутренняя задача</span>
+                <span className="mt-1 block text-sm text-slate-600">Не учитывать в системе оплаты с клиентом</span>
+              </button>
+            </div>
+            <button type="button" onClick={() => setStep('binding')} className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-slate-900"><ArrowLeft className="h-4 w-4" /> Назад</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 type TaskModalProps = {
   presentation?: 'modal' | 'page';
   chrome?: TaskCardChrome;
@@ -7230,6 +7600,14 @@ function TaskModal({
     const withDefaults = applyTaskTemplateDefaults(next, state?.defaults, {
       protectedFields,
       replaceFields: [
+        'isInternal',
+        'clientId',
+        'legalEntityId',
+        'clientCaseId',
+        'clientBillingClassification',
+        'billingContractId',
+        'billingMode',
+        'objectName',
         'assigneeUserId',
         'assigneeName',
         'type',
@@ -7388,6 +7766,8 @@ function TaskModal({
       ),
   );
   const canManageFiles = Boolean(taskId && !isReadOnly);
+  const isCreationBillingBindingLocked = !taskId
+    && (form.clientBillingClassification === 'billable' || form.clientBillingClassification === 'internal');
   const selectedTaskAuthor = assignees.find((assignee) => assignee.id === form.authorUserId);
   const taskAuthorLabel = selectedTaskAuthor?.name
     || (state?.task ? getTaskAuthorName(state.task) : currentUserName)
@@ -8525,6 +8905,14 @@ function TaskModal({
                     <span className="h-2 w-2 rounded-full bg-orange-500" />
                     {statusOption.label}
                   </span>
+                  {state?.task ? <TaskBillingBadge task={state.task} /> : form.clientBillingClassification ? (
+                    <span className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-bold ${form.clientBillingClassification === 'billable' ? 'border-rose-300 bg-rose-100 text-rose-800' : 'border-slate-300 bg-slate-100 text-slate-700'}`}>
+                      <WalletCards className="h-3.5 w-3.5" />
+                      {form.clientBillingClassification === 'billable'
+                        ? form.billingMode === 'Fixed' ? 'КЛИЕНТСКАЯ · ФИКСИРОВАННЫЙ ДОГОВОР' : 'ПЛАТНАЯ ЗАДАЧА'
+                        : 'ВНУТРЕННЯЯ · НЕ ДЛЯ СЧЁТА'}
+                    </span>
+                  ) : null}
                 </div>
                 <h2 className="sr-only">{titleText}</h2>
                 <input
@@ -8915,13 +9303,13 @@ function TaskModal({
                   searchPlaceholder="Поиск"
                   emptyOptionLabel="Контрагент не выбран"
                   buttonClassName="h-10 border-slate-200 text-sm"
-                  disabled={isReadOnly || form.isInternal}
+                  disabled={isReadOnly || form.isInternal || isCreationBillingBindingLocked}
                 />
                 <select
                   aria-label="Дело"
                   value={form.clientCaseId ?? ''}
                   onChange={(event) => handleCaseChange(event.target.value)}
-                  disabled={isReadOnly || form.isInternal || (!form.clientId && !form.legalEntityId) || casesLoading}
+                  disabled={isReadOnly || form.isInternal || isCreationBillingBindingLocked || (!form.clientId && !form.legalEntityId) || casesLoading}
                   className="mt-2 w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white disabled:text-slate-400"
                 >
                   <option value="">Без дела</option>
@@ -9233,6 +9621,16 @@ function TaskModal({
           </div>
         </div>
 
+        {state?.task ? (
+          <div className="px-6 pt-4"><TaskBillingBadge task={state.task} /></div>
+        ) : form.clientBillingClassification ? (
+          <div className={`mx-6 mt-4 rounded-xl border p-3 text-sm font-semibold ${form.clientBillingClassification === 'billable' ? 'border-rose-200 bg-rose-50 text-rose-800' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+            {form.clientBillingClassification === 'billable'
+              ? form.billingMode === 'Fixed' ? 'Клиентская задача в рамках договора с фиксированной оплатой.' : 'Платная задача: после выполнения она останется на контроле до включения в счёт.'
+              : 'Внутренняя задача: не будет учитываться при выставлении счёта клиенту.'}
+          </div>
+        ) : null}
+
         <div className={bodyClassName}>
           {quickPanel === 'assignee' ? (
             <section className="mb-5 rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
@@ -9306,7 +9704,7 @@ function TaskModal({
                 emptyOptionDescription="Контрагент обязателен для задачи"
                 buttonClassName="h-11 border-slate-200 focus:border-blue-400"
                 noOptionsText="Контрагенты не найдены"
-                disabled={isReadOnly || form.isInternal}
+                disabled={isReadOnly || form.isInternal || isCreationBillingBindingLocked}
               />
             </Field>
             <Field label="Исполнитель">
@@ -9359,7 +9757,7 @@ function TaskModal({
                 aria-label="Дело"
                 value={form.clientCaseId ?? ''}
                 onChange={(event) => handleCaseChange(event.target.value)}
-                disabled={isReadOnly || form.isInternal || (!form.clientId && !form.legalEntityId) || casesLoading}
+                disabled={isReadOnly || form.isInternal || isCreationBillingBindingLocked || (!form.clientId && !form.legalEntityId) || casesLoading}
                 className="form-input disabled:bg-slate-50 disabled:text-slate-400"
               >
                 <option value="">Без дела</option>

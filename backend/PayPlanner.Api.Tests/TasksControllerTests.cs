@@ -446,6 +446,7 @@ public class TasksControllerTests
             AllowExecutorDeadlineChangeRequests = false,
             ExecutorCompletionAllowedUserIds = [fallbackAssignee.Id],
             RequireCompletionResult = false,
+            DailyOverdueReminderEnabled = false,
             AllowAdminCompleteAnyTask = true,
             ApprovalDueDays = 400,
             TaskCardWindowMode = "modern",
@@ -464,6 +465,7 @@ public class TasksControllerTests
         Assert.False(dto.AllowExecutorDeadlineChangeRequests);
         Assert.Equal([fallbackAssignee.Id], dto.ExecutorCompletionAllowedUserIds);
         Assert.False(dto.RequireCompletionResult);
+        Assert.False(dto.DailyOverdueReminderEnabled);
         Assert.True(dto.AllowAdminCompleteAnyTask);
         Assert.Equal(365, dto.ApprovalDueDays);
         Assert.Equal("modern", dto.TaskCardWindowMode);
@@ -495,10 +497,40 @@ public class TasksControllerTests
             .SingleAsync(item => item.Key == "tasks.requireCompletionResult");
         Assert.Equal("false", requireCompletionResult.Value);
 
+        var dailyOverdueReminder = await db.SystemSettings
+            .AsNoTracking()
+            .SingleAsync(item => item.Key == "tasks.dailyOverdueReminderEnabled");
+        Assert.Equal("false", dailyOverdueReminder.Value);
+
         var taskCardWindowMode = await db.SystemSettings
             .AsNoTracking()
             .SingleAsync(item => item.Key == "tasks.taskCardWindowMode");
         Assert.Equal("modern", taskCardWindowMode.Value);
+    }
+
+    [Fact]
+    public async Task GetOverdueSummary_CountsOnlyCurrentEmployeesActiveOverdueTasks()
+    {
+        await using var db = await CreateContextAsync();
+        var employee = await CreateAdminUserAsync(db, "overdue-summary@example.com", "Сотрудник");
+        var otherEmployee = await CreateAdminUserAsync(db, "other-overdue-summary@example.com", "Другой сотрудник");
+
+        var overdue = await CreateTaskAsync(db, employee.Id, null, employee.Id);
+        overdue.DueAt = DateTime.UtcNow.AddHours(-2);
+        var completed = await CreateTaskAsync(db, employee.Id, null, employee.Id, status: "done");
+        completed.DueAt = DateTime.UtcNow.AddHours(-3);
+        var future = await CreateTaskAsync(db, employee.Id, null, employee.Id);
+        future.DueAt = DateTime.UtcNow.AddHours(2);
+        var other = await CreateTaskAsync(db, employee.Id, null, otherEmployee.Id);
+        other.DueAt = DateTime.UtcNow.AddHours(-4);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, new RecordingNotificationService(), employee);
+        var result = await controller.GetOverdueSummary(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var summary = Assert.IsType<TaskJournalOverdueSummaryDto>(ok.Value);
+        Assert.Equal(1, summary.Count);
     }
 
     [Fact]
@@ -684,6 +716,82 @@ public class TasksControllerTests
         Assert.Equal("Иванов Иван Иванович", dto.ClientName);
         Assert.Equal("БАНКРОТСТВО", dto.ClientCaseTitle);
         Assert.Equal("Иванов Иван Иванович - БАНКРОТСТВО", dto.ObjectName);
+    }
+
+    [Fact]
+    public async Task CreateTask_PersistsActualBillingDecisionAndReturnsContractContext()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "billing-author@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Клиент по факту");
+        var clientCase = await CreateCaseAsync(db, client.Id, "Дело с почасовой оплатой");
+        var contract = new Contract
+        {
+            Number = "ACTUAL-15",
+            Title = "Оплата фактических задач",
+            Date = DateTime.UtcNow.Date,
+            BillingMode = ContractBillingMode.Actual,
+            Status = ContractStatus.Concluded,
+        };
+        db.Contracts.Add(contract);
+        await db.SaveChangesAsync();
+        db.ClientContracts.Add(new ClientContract { ClientId = client.Id, ContractId = contract.Id });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var contextResult = await controller.GetBillingContext(client.Id, null, clientCase.Id, CancellationToken.None);
+        var contextOk = Assert.IsType<OkObjectResult>(contextResult.Result);
+        var context = Assert.IsType<TaskBillingContextDto>(contextOk.Value);
+        var contractOption = Assert.Single(context.Contracts);
+        Assert.Equal(contract.Id, contractOption.Id);
+        Assert.Equal(ContractBillingMode.Actual, contractOption.BillingMode);
+
+        var result = await controller.CreateTask(new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            ClientCaseId = clientCase.Id,
+            ClientBillingClassification = TaskClientBillingClassification.Billable,
+            BillingContractId = contract.Id,
+            Title = "Подготовить правовое заключение",
+            DueAt = DateTime.UtcNow.AddHours(2),
+        }, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(created.Value);
+        Assert.Equal(TaskClientBillingClassification.Billable, dto.ClientBillingClassification);
+        Assert.Equal(contract.Id, dto.BillingContractId);
+        Assert.Equal(ContractBillingMode.Actual, dto.BillingMode);
+        Assert.Equal("unbilled", dto.BillingStatus);
+
+        var stored = await db.TaskJournalItems.SingleAsync(item => item.Id == dto.Id);
+        Assert.NotNull(stored.BillingDecisionAt);
+        Assert.Null(stored.BillingInvoiceId);
+    }
+
+    [Fact]
+    public async Task CreateTask_InternalBillingDecisionKeepsClientCaseButDoesNotEnterInvoices()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "internal-billing-author@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Клиент внутренней задачи");
+        var clientCase = await CreateCaseAsync(db, client.Id, "Основное дело");
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.CreateTask(new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            ClientCaseId = clientCase.Id,
+            ClientBillingClassification = TaskClientBillingClassification.Internal,
+            Title = "Внутренняя проверка качества",
+            DueAt = DateTime.UtcNow.AddHours(2),
+        }, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(created.Value);
+        Assert.Equal(client.Id, dto.ClientId);
+        Assert.Equal(clientCase.Id, dto.ClientCaseId);
+        Assert.Equal(TaskClientBillingClassification.Internal, dto.ClientBillingClassification);
+        Assert.Equal("internal", dto.BillingStatus);
     }
 
     [Fact]

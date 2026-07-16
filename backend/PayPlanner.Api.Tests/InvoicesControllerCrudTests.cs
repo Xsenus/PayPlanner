@@ -271,6 +271,58 @@ public class InvoicesControllerCrudTests
     }
 
     [Fact]
+    public async Task Create_LinksBillableTasksAndMarksThemAsInvoiced()
+    {
+        await using var db = await CreateContextAsync();
+        var actorUserId = await CreateUserAsync(db, "Billing Admin", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Billing Client");
+        var caseId = await CreateClientCaseAsync(db, clientId, "Billing Case");
+        var task = new TaskJournalItem
+        {
+            ClientId = clientId,
+            ClientCaseId = caseId,
+            ObjectName = "Billing Client - Billing Case",
+            Title = "Prepare legal opinion",
+            AssigneeName = "Billing Admin",
+            AuthorUserId = actorUserId,
+            AuthorName = "Billing Admin",
+            DueAt = DateTime.UtcNow.AddDays(1),
+            ClientBillingClassification = TaskClientBillingClassification.Billable,
+            BillingModeSnapshot = ContractBillingMode.Actual,
+            BillingDecisionAt = DateTime.UtcNow,
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+        var request = CreateRequest("INV-TASK-1", clientId, new DateTime(2026, 7, 15), 0m);
+        request.ClientCaseId = caseId;
+        request.ClientCaseIds = [caseId];
+        request.BillingTaskIds = [task.Id];
+        request.LineItems =
+        [
+            new InvoiceLineItemRequest
+            {
+                Name = $"Prepare legal opinion (task #{task.Id})",
+                Quantity = 1,
+                Unit = "service",
+                Price = 0,
+            },
+        ];
+
+        var action = await controller.Create(request, CancellationToken.None);
+        var created = Assert.IsType<CreatedResult>(action.Result);
+        var dto = Assert.IsType<InvoiceDto>(created.Value);
+
+        db.ChangeTracker.Clear();
+        var linkedTask = await db.TaskJournalItems
+            .Include(item => item.Comments)
+            .SingleAsync(item => item.Id == task.Id);
+        Assert.Equal(dto.Id, linkedTask.BillingInvoiceId);
+        Assert.Contains(linkedTask.Comments, comment => comment.Kind == "history" && comment.Text.Contains("INV-TASK-1"));
+    }
+
+    [Fact]
     public async Task Create_RejectsInvoiceForTerminatedContract()
     {
         await using var db = await CreateContextAsync();

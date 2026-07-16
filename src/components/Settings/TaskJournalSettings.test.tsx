@@ -22,6 +22,7 @@ const settings: TaskJournalSettingsDto = {
   allowExecutorDeadlineChangeRequests: true,
   executorCompletionAllowedUserIds: [7],
   requireCompletionResult: true,
+  dailyOverdueReminderEnabled: true,
   allowAdminCompleteAnyTask: true,
   approvalDueDays: 5,
   taskCardWindowMode: 'modern',

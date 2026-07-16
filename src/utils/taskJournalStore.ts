@@ -23,6 +23,8 @@ export type TaskJournalChannel = 'inApp' | 'email' | 'telegram';
 export type TaskJournalParticipantRole = 'assignee' | 'observer' | 'approver';
 export type TaskJournalApprovalStatus = 'pending' | 'approved' | 'revisionRequested';
 export type TaskJournalCommentKind = 'comment' | 'system';
+export type TaskClientBillingClassification = 'legacy' | 'billable' | 'internal';
+export type TaskClientBillingStatus = 'legacy' | 'internal' | 'fixed' | 'unbilled' | 'invoiced';
 
 export interface TaskJournalParticipant {
   id?: number;
@@ -93,6 +95,13 @@ export interface TaskJournalItem {
   isInternal?: boolean;
   clientCaseId?: number | null;
   clientCaseTitle?: string;
+  clientBillingClassification?: TaskClientBillingClassification;
+  billingContractId?: number | null;
+  billingContractNumber?: string | null;
+  billingMode?: 'Fixed' | 'Actual' | '' | null;
+  billingInvoiceId?: number | null;
+  billingInvoiceNumber?: string | null;
+  billingStatus?: TaskClientBillingStatus;
   objectName: string;
   title: string;
   description: string;
@@ -219,6 +228,24 @@ export interface TaskJournalCaseAutomationCandidate {
 export interface TaskJournalAutomationCreateResult {
   createdTasks: TaskJournalItem[];
   skippedCount: number;
+}
+
+export interface TaskBillingContractOption {
+  id: number;
+  number: string;
+  title: string;
+  billingMode: 'Fixed' | 'Actual';
+  status: string;
+  amount?: number | null;
+  date: string;
+}
+
+export interface TaskBillingContext {
+  clientId?: number | null;
+  legalEntityId?: number | null;
+  clientCaseId: number;
+  clientCaseTitle: string;
+  contracts: TaskBillingContractOption[];
 }
 
 export type TaskJournalUpsertPayload = Omit<TaskJournalItem, 'id' | 'createdAt' | 'updatedAt' | 'authorUserId' | 'authorName'> & {

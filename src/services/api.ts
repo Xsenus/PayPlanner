@@ -1691,6 +1691,7 @@ export interface TaskJournalSettingsDto {
   allowExecutorDeadlineChangeRequests: boolean;
   executorCompletionAllowedUserIds: number[];
   requireCompletionResult: boolean;
+  dailyOverdueReminderEnabled: boolean;
   allowAdminCompleteAnyTask: boolean;
   approvalDueDays: number;
   taskCardWindowMode: 'legacy' | 'modern';
@@ -1723,6 +1724,7 @@ export interface UpdateTaskJournalSettingsRequest {
   allowExecutorDeadlineChangeRequests: boolean;
   executorCompletionAllowedUserIds: number[];
   requireCompletionResult: boolean;
+  dailyOverdueReminderEnabled: boolean;
   allowAdminCompleteAnyTask: boolean;
   approvalDueDays: number;
   taskCardWindowMode: 'legacy' | 'modern';
@@ -3957,8 +3959,17 @@ export class ApiService {
     return this.request<TaskJournalAssignee[]>(`/tasks/assignees${q}`);
   }
 
+  async getTaskBillingContext(params: { clientId?: number; legalEntityId?: number; clientCaseId: number }) {
+    const q = buildQuery(params);
+    return this.request<TaskBillingContext>(`/tasks/billing-context${q}`);
+  }
+
   async getTaskJournalSettings() {
     return this.request<TaskJournalSettingsDto>('/tasks/settings');
+  }
+
+  async getTaskJournalOverdueSummary() {
+    return this.request<{ count: number }>('/tasks/overdue-summary');
   }
 
   async updateTaskJournalSettings(payload: UpdateTaskJournalSettingsRequest) {
@@ -7340,6 +7351,7 @@ import type {
   TaskJournalAssignee,
   TaskJournalAutomationCreateResult,
   TaskJournalCaseAutomationCandidate,
+  TaskBillingContext,
   TaskJournalComment,
   TaskJournalDeadlineChangeRequest,
   TaskJournalFile,

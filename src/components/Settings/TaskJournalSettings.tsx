@@ -10,6 +10,7 @@ const DEFAULT_SETTINGS: TaskJournalSettingsDto = {
   allowExecutorDeadlineChangeRequests: true,
   executorCompletionAllowedUserIds: [],
   requireCompletionResult: true,
+  dailyOverdueReminderEnabled: true,
   allowAdminCompleteAnyTask: true,
   approvalDueDays: 5,
   taskCardWindowMode: 'legacy',
@@ -159,6 +160,20 @@ export function TaskJournalSettings() {
           <span>
             <span className="block font-semibold text-gray-900">Исполнитель открывает задачу только на просмотр</span>
             <span className="mt-1 block text-gray-500">Поля задачи, срок, участники, файлы и удаление доступны постановщику или администратору.</span>
+          </span>
+        </label>
+
+        <label className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-gray-700">
+          <input
+            type="checkbox"
+            checked={settings.dailyOverdueReminderEnabled}
+            onChange={(event) => setSettings((prev) => ({ ...prev, dailyOverdueReminderEnabled: event.target.checked }))}
+            disabled={loading || saving}
+            className="mt-0.5 h-4 w-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+          />
+          <span>
+            <span className="block font-semibold text-gray-900">Ежедневно напоминать сотрудникам о просроченных задачах</span>
+            <span className="mt-1 block text-gray-500">Один раз в день после входа CRM покажет сотруднику количество его просроченных задач и предложит сразу открыть их список.</span>
           </span>
         </label>
 
