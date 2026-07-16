@@ -118,7 +118,6 @@ public class PaymentsV2Controller : ControllerBase
             sortBy,
             sortDir);
 
-        var total = await query.CountAsync(ct);
         var items = await query
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
@@ -235,7 +234,7 @@ public class PaymentsV2Controller : ControllerBase
         return Ok(new PaymentsPageResponse
         {
             Items = items,
-            Total = total,
+            Total = summary.Total,
             Page = page,
             PageSize = pageSize,
             Summary = summary,
