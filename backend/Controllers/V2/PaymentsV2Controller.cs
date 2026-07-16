@@ -118,82 +118,84 @@ public class PaymentsV2Controller : ControllerBase
             sortBy,
             sortDir);
 
-        var items = await query
+        var pageRows = await query
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .AsNoTracking()
-            .Select(payment => new PaymentListItemDto
+            .Select(payment => new
             {
-                Id = payment.Id,
-                Date = payment.Date,
-                PlannedDate = payment.PlannedDate,
-                Amount = payment.Amount,
-                Type = payment.Type,
-                Status = payment.Status,
-                Description = payment.Description,
-                IsPaid = payment.IsPaid,
-                PaidDate = payment.PaidDate,
-                LastPaymentDate = payment.LastPaymentDate,
-                Notes = payment.Notes,
-                SystemNotes = payment.SystemNotes,
-                RescheduleCount = payment.RescheduleCount,
-                PaidAmount = payment.PaidAmount,
-                AdvanceReviewStatus = payment.AdvanceReviewStatus,
-                AdvanceReviewReason = payment.AdvanceReviewReason,
-                AdvanceReviewedAt = payment.AdvanceReviewedAt,
-                AdvanceReviewedByUserId = payment.AdvanceReviewedByUserId,
-                AdvanceReviewedByUserName = payment.AdvanceReviewedByUserName,
-                CreatedAt = payment.CreatedAt,
-                ClientId = payment.ClientId,
-                LegalEntityId = payment.LegalEntityId,
-                LegalEntityName = payment.LegalEntity != null ? payment.LegalEntity.ShortName : null,
-                LegalEntityInn = payment.LegalEntity != null ? payment.LegalEntity.Inn : null,
-                ExpenseClientId = payment.ExpenseClientId,
-                ExpenseLegalEntityId = payment.ExpenseLegalEntityId,
-                ExpenseLegalEntityName = payment.ExpenseLegalEntity != null ? payment.ExpenseLegalEntity.ShortName : null,
-                ExpenseLegalEntityInn = payment.ExpenseLegalEntity != null ? payment.ExpenseLegalEntity.Inn : null,
-                ContractId = payment.ContractId,
-                DocumentKind = payment.DocumentKind,
-                PaymentOrderNumber = payment.PaymentOrderNumber,
-                PaymentDocumentDate = payment.PaymentDocumentDate,
-                ClientCaseId = payment.ClientCaseId,
-                ClientCaseTitle = payment.ClientCase != null ? payment.ClientCase.Title : null,
-                ClientCaseReference = payment.ClientCaseReference,
-                IsNotForAccounting = payment.IsNotForAccounting,
-                CounterpartyName = payment.CounterpartyName,
-                DealTypeId = payment.DealTypeId,
-                IncomeTypeId = payment.IncomeTypeId,
-                ServiceId = payment.ServiceId,
-                PaymentSourceId = payment.PaymentSourceId,
-                PaymentStatusId = payment.PaymentStatusId,
-                InvoiceId = payment.InvoiceId,
-                Account = payment.Account,
-                AccountDate = payment.AccountDate,
-                Client = payment.Client == null
+                Item = new PaymentListItemDto
+                {
+                    Id = payment.Id,
+                    Date = payment.Date,
+                    PlannedDate = payment.PlannedDate,
+                    Amount = payment.Amount,
+                    Type = payment.Type,
+                    Status = payment.Status,
+                    Description = payment.Description,
+                    IsPaid = payment.IsPaid,
+                    PaidDate = payment.PaidDate,
+                    LastPaymentDate = payment.LastPaymentDate,
+                    Notes = payment.Notes,
+                    SystemNotes = payment.SystemNotes,
+                    RescheduleCount = payment.RescheduleCount,
+                    PaidAmount = payment.PaidAmount,
+                    AdvanceReviewStatus = payment.AdvanceReviewStatus,
+                    AdvanceReviewReason = payment.AdvanceReviewReason,
+                    AdvanceReviewedAt = payment.AdvanceReviewedAt,
+                    AdvanceReviewedByUserId = payment.AdvanceReviewedByUserId,
+                    AdvanceReviewedByUserName = payment.AdvanceReviewedByUserName,
+                    CreatedAt = payment.CreatedAt,
+                    ClientId = payment.ClientId,
+                    LegalEntityId = payment.LegalEntityId,
+                    LegalEntityName = payment.LegalEntity != null ? payment.LegalEntity.ShortName : null,
+                    LegalEntityInn = payment.LegalEntity != null ? payment.LegalEntity.Inn : null,
+                    ExpenseClientId = payment.ExpenseClientId,
+                    ExpenseLegalEntityId = payment.ExpenseLegalEntityId,
+                    ExpenseLegalEntityName = payment.ExpenseLegalEntity != null ? payment.ExpenseLegalEntity.ShortName : null,
+                    ExpenseLegalEntityInn = payment.ExpenseLegalEntity != null ? payment.ExpenseLegalEntity.Inn : null,
+                    ContractId = payment.ContractId,
+                    DocumentKind = payment.DocumentKind,
+                    PaymentOrderNumber = payment.PaymentOrderNumber,
+                    PaymentDocumentDate = payment.PaymentDocumentDate,
+                    ClientCaseId = payment.ClientCaseId,
+                    ClientCaseTitle = payment.ClientCase != null ? payment.ClientCase.Title : null,
+                    ClientCaseReference = payment.ClientCaseReference,
+                    IsNotForAccounting = payment.IsNotForAccounting,
+                    CounterpartyName = payment.CounterpartyName,
+                    DealTypeId = payment.DealTypeId,
+                    IncomeTypeId = payment.IncomeTypeId,
+                    ServiceId = payment.ServiceId,
+                    PaymentSourceId = payment.PaymentSourceId,
+                    PaymentStatusId = payment.PaymentStatusId,
+                    InvoiceId = payment.InvoiceId,
+                    Account = payment.Account,
+                    AccountDate = payment.AccountDate,
+                    Client = payment.Client == null
                     ? null
                     : new PaymentListReferenceDto { Id = payment.Client.Id, Name = payment.Client.Name },
-                ExpenseClient = payment.ExpenseClient == null
+                    ExpenseClient = payment.ExpenseClient == null
                     ? null
                     : new PaymentListReferenceDto { Id = payment.ExpenseClient.Id, Name = payment.ExpenseClient.Name },
-                ClientCase = payment.ClientCase == null
+                    ClientCase = payment.ClientCase == null
                     ? null
                     : new PaymentListCaseDto { Id = payment.ClientCase.Id, Title = payment.ClientCase.Title },
-                DealType = payment.DealType == null
+                    DealType = payment.DealType == null
                     ? null
                     : new PaymentListReferenceDto { Id = payment.DealType.Id, Name = payment.DealType.Name },
-                IncomeType = payment.IncomeType == null
+                    IncomeType = payment.IncomeType == null
                     ? null
                     : new PaymentListReferenceDto { Id = payment.IncomeType.Id, Name = payment.IncomeType.Name },
-                Service = payment.Service == null
+                    Service = payment.Service == null
                     ? null
                     : new PaymentListReferenceDto { Id = payment.Service.Id, Name = payment.Service.Name },
-                PaymentSource = payment.PaymentSource == null
+                    PaymentSource = payment.PaymentSource == null
                     ? null
                     : new PaymentListReferenceDto { Id = payment.PaymentSource.Id, Name = payment.PaymentSource.Name },
-                PaymentStatusEntity = payment.PaymentStatusEntity == null
+                    PaymentStatusEntity = payment.PaymentStatusEntity == null
                     ? null
                     : new PaymentListReferenceDto { Id = payment.PaymentStatusEntity.Id, Name = payment.PaymentStatusEntity.Name },
-                LegalEntity = payment.LegalEntity == null
+                    LegalEntity = payment.LegalEntity == null
                     ? null
                     : new PaymentListLegalEntityDto
                     {
@@ -202,19 +204,37 @@ public class PaymentsV2Controller : ControllerBase
                         FullName = payment.LegalEntity.FullName,
                         Inn = payment.LegalEntity.Inn,
                     },
-                ExpenseLegalEntity = payment.ExpenseLegalEntity == null
-                    ? null
-                    : new PaymentListLegalEntityDto
+                    ExpenseLegalEntity = payment.ExpenseLegalEntity == null
+                        ? null
+                        : new PaymentListLegalEntityDto
+                        {
+                            Id = payment.ExpenseLegalEntity.Id,
+                            ShortName = payment.ExpenseLegalEntity.ShortName,
+                            FullName = payment.ExpenseLegalEntity.FullName,
+                            Inn = payment.ExpenseLegalEntity.Inn,
+                        },
+                },
+                Contractor = _db.TaskJournalItems
+                    .Where(task => task.ContractorPaymentId == payment.Id)
+                    .OrderByDescending(task => task.AssigneeUserId.HasValue)
+                    .ThenBy(task => task.Id)
+                    .Select(task => new
                     {
-                        Id = payment.ExpenseLegalEntity.Id,
-                        ShortName = payment.ExpenseLegalEntity.ShortName,
-                        FullName = payment.ExpenseLegalEntity.FullName,
-                        Inn = payment.ExpenseLegalEntity.Inn,
-                    },
+                        UserId = task.AssigneeUserId,
+                        UserName = task.AssigneeName,
+                    })
+                    .FirstOrDefault(),
             })
             .ToListAsync(ct);
+        var items = pageRows.Select(row => row.Item).ToList();
         FillPaymentListCounterpartyNames(items);
-        await AttachContractorRecipientsAsync(items, ct);
+        foreach (var row in pageRows.Where(row => row.Contractor is not null))
+        {
+            row.Item.ContractorUserId = row.Contractor!.UserId;
+            row.Item.ContractorUserName = string.IsNullOrWhiteSpace(row.Contractor.UserName)
+                ? row.Item.CounterpartyName
+                : row.Contractor.UserName.Trim();
+        }
 
         var summary = await query
             .GroupBy(_ => 1)
@@ -265,52 +285,6 @@ public class PaymentsV2Controller : ControllerBase
 
     private static string? FirstDisplayName(params string?[] values)
         => values.Select(value => string.IsNullOrWhiteSpace(value) ? null : value.Trim()).FirstOrDefault(value => value is not null);
-
-    private async Task AttachContractorRecipientsAsync(IReadOnlyCollection<PaymentListItemDto> payments, CancellationToken ct)
-    {
-        if (payments.Count == 0)
-        {
-            return;
-        }
-
-        var paymentIds = payments
-            .Select(payment => payment.Id)
-            .Where(id => id > 0)
-            .Distinct()
-            .ToArray();
-        if (paymentIds.Length == 0)
-        {
-            return;
-        }
-
-        var contractorLinks = await _db.TaskJournalItems
-            .AsNoTracking()
-            .Where(task => task.ContractorPaymentId.HasValue && paymentIds.Contains(task.ContractorPaymentId.Value))
-            .Select(task => new
-            {
-                PaymentId = task.ContractorPaymentId!.Value,
-                UserId = task.AssigneeUserId,
-                UserName = task.AssigneeName,
-            })
-            .ToListAsync(ct);
-
-        var linksByPaymentId = contractorLinks
-            .GroupBy(link => link.PaymentId)
-            .ToDictionary(
-                group => group.Key,
-                group => group.FirstOrDefault(link => link.UserId.HasValue) ?? group.First());
-
-        foreach (var payment in payments)
-        {
-            if (!linksByPaymentId.TryGetValue(payment.Id, out var link))
-            {
-                continue;
-            }
-
-            payment.ContractorUserId = link.UserId;
-            payment.ContractorUserName = string.IsNullOrWhiteSpace(link.UserName) ? payment.CounterpartyName : link.UserName.Trim();
-        }
-    }
 
     [HttpGet("export.csv")]
     public async Task<IActionResult> ExportCsv(

@@ -433,6 +433,99 @@ public class PaymentsControllerTests
     }
 
     [Fact]
+    public async Task PaymentsV2_SelectsContractorWithUserAndFallsBackToCounterpartyName()
+    {
+        await using var db = await CreateContextAsync();
+
+        var role = new Role { Name = "contractor-v2" };
+        var contractor = new User
+        {
+            Email = "contractor-v2@example.test",
+            FullName = "Выбранный исполнитель",
+            IsExternalContractor = true,
+            IsApproved = true,
+            Role = role,
+        };
+        var assignedPayment = CreatePayment(new DateTime(2026, 7, 1), 2_000m, "Оплата выбранному исполнителю");
+        assignedPayment.Type = PaymentType.Expense;
+        assignedPayment.CounterpartyName = "Резервное имя исполнителя";
+        var fallbackPayment = CreatePayment(new DateTime(2026, 7, 2), 3_000m, "Оплата исполнителю без пользователя");
+        fallbackPayment.Type = PaymentType.Expense;
+        fallbackPayment.CounterpartyName = "Исполнитель из платежа";
+
+        db.Users.Add(contractor);
+        db.Payments.AddRange(assignedPayment, fallbackPayment);
+        await db.SaveChangesAsync();
+
+        db.TaskJournalItems.AddRange(
+            new TaskJournalItem
+            {
+                Title = "Задача без привязанного пользователя",
+                ObjectName = "Объект 1",
+                AssigneeName = "Исполнитель без пользователя",
+                AuthorName = "Администратор",
+                DueAt = new DateTime(2026, 7, 1, 10, 0, 0, DateTimeKind.Utc),
+                ContractorPaymentEnabled = true,
+                ContractorPaymentAmount = assignedPayment.Amount,
+                ContractorPaymentId = assignedPayment.Id,
+            },
+            new TaskJournalItem
+            {
+                Title = "Задача с привязанным пользователем",
+                ObjectName = "Объект 1",
+                AssigneeUserId = contractor.Id,
+                AssigneeName = "  Выбранный исполнитель  ",
+                AuthorName = "Администратор",
+                DueAt = new DateTime(2026, 7, 1, 11, 0, 0, DateTimeKind.Utc),
+                ContractorPaymentEnabled = true,
+                ContractorPaymentAmount = assignedPayment.Amount,
+                ContractorPaymentId = assignedPayment.Id,
+            },
+            new TaskJournalItem
+            {
+                Title = "Задача с пустым именем исполнителя",
+                ObjectName = "Объект 2",
+                AssigneeName = "   ",
+                AuthorName = "Администратор",
+                DueAt = new DateTime(2026, 7, 2, 10, 0, 0, DateTimeKind.Utc),
+                ContractorPaymentEnabled = true,
+                ContractorPaymentAmount = fallbackPayment.Amount,
+                ContractorPaymentId = fallbackPayment.Id,
+            });
+        await db.SaveChangesAsync();
+
+        var controller = new PaymentsV2Controller(db);
+        var actionResult = await controller.Get(
+            from: new DateTime(2026, 7, 1),
+            to: new DateTime(2026, 7, 31),
+            clientId: null,
+            caseId: null,
+            excludeInstallmentParents: false,
+            sortBy: "date",
+            sortDir: "asc",
+            page: 1,
+            pageSize: 50,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(actionResult.Result);
+        var response = Assert.IsType<PaymentsPageResponse>(ok.Value);
+        Assert.Collection(
+            response.Items,
+            item =>
+            {
+                Assert.Equal(assignedPayment.Id, item.Id);
+                Assert.Equal(contractor.Id, item.ContractorUserId);
+                Assert.Equal("Выбранный исполнитель", item.ContractorUserName);
+            },
+            item =>
+            {
+                Assert.Equal(fallbackPayment.Id, item.Id);
+                Assert.Null(item.ContractorUserId);
+                Assert.Equal(fallbackPayment.CounterpartyName, item.ContractorUserName);
+            });
+    }
+
+    [Fact]
     public async Task PaymentsV2_FiltersByContractId_UsingCanonicalAndLegacyLinks_AndExcludesInvoiceDocuments()
     {
         await using var db = await CreateContextAsync();

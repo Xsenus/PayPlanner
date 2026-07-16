@@ -58,6 +58,10 @@ public sealed class PaymentSummaryQueryTests
             .Where(sql => sql.Contains("FROM \"Payments\"", StringComparison.Ordinal))
             .ToArray();
         Assert.Equal(2, paymentCommands.Length);
+        Assert.DoesNotContain(
+            recorder.Commands,
+            sql => sql.Contains("FROM \"TaskJournalItems\"", StringComparison.Ordinal)
+                && !sql.Contains("FROM \"Payments\"", StringComparison.Ordinal));
     }
 
     private static Payment CreatePayment(int day, PaymentType type, decimal amount)
