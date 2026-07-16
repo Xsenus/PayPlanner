@@ -41,6 +41,7 @@ public class SqliteMigrationSmokeTests
                 Assert.Contains("20260521162000_AddClientCaseCourtDirectory", appliedMigrations);
                 Assert.Contains("20260716173515_AddCalendarSyncLogCreatedAtIndexes", appliedMigrations);
                 Assert.Contains("20260716185515_AddTaskJournalReadIndexes", appliedMigrations);
+                Assert.Contains("20260716195731_AddActJournalReadIndex", appliedMigrations);
                 Assert.True(await context.Database.CanConnectAsync());
 
                 _ = await context.Users.Take(1).ToListAsync();

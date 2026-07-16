@@ -3037,6 +3037,9 @@ public class PaymentContext : DbContext
         if (UseObjectAuditModel)
         {
             ConfigureAudit<Act>(modelBuilder);
+            modelBuilder.Entity<Act>()
+                .HasIndex("IsDeleted", nameof(Act.Date), nameof(Act.Id))
+                .HasDatabaseName("IX_Acts_IsDeleted_Date_Id");
             ConfigureAudit<AddressRecord>(modelBuilder);
             ConfigureAudit<Client>(modelBuilder);
             ConfigureAudit<ClientCase>(modelBuilder);

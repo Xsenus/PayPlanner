@@ -174,6 +174,9 @@ namespace PayPlanner.Api.Migrations
                     b.HasIndex("WorkflowStatus")
                         .HasDatabaseName("IX_Acts_WorkflowStatus");
 
+                    b.HasIndex("IsDeleted", "Date", "Id")
+                        .HasDatabaseName("IX_Acts_IsDeleted_Date_Id");
+
                     b.ToTable("Acts");
                 });
 

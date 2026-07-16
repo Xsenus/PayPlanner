@@ -56,23 +56,35 @@ namespace PayPlanner.Api.Extensions
             bool desc = string.Equals(sortDir, "desc", StringComparison.OrdinalIgnoreCase);
             return (sortBy?.ToLowerInvariant()) switch
             {
-                "number" => desc ? q.OrderByDescending(a => a.Number) : q.OrderBy(a => a.Number),
-                "amount" => desc ? q.OrderByDescending(a => a.Amount) : q.OrderBy(a => a.Amount),
+                "number" => desc
+                    ? q.OrderByDescending(a => a.Number).ThenByDescending(a => a.Id)
+                    : q.OrderBy(a => a.Number).ThenBy(a => a.Id),
+                "amount" => desc
+                    ? q.OrderByDescending(a => a.Amount).ThenByDescending(a => a.Id)
+                    : q.OrderBy(a => a.Amount).ThenBy(a => a.Id),
                 "invoicenumber" => desc
-                    ? q.OrderByDescending(a => a.InvoiceNumber ?? string.Empty)
-                    : q.OrderBy(a => a.InvoiceNumber ?? string.Empty),
-                "status" => desc ? q.OrderByDescending(a => a.Status) : q.OrderBy(a => a.Status),
+                    ? q.OrderByDescending(a => a.InvoiceNumber ?? string.Empty).ThenByDescending(a => a.Id)
+                    : q.OrderBy(a => a.InvoiceNumber ?? string.Empty).ThenBy(a => a.Id),
+                "status" => desc
+                    ? q.OrderByDescending(a => a.Status).ThenByDescending(a => a.Id)
+                    : q.OrderBy(a => a.Status).ThenBy(a => a.Id),
                 "client" => desc
                     ? q.OrderByDescending(a => a.Client != null ? a.Client.Name : a.LegalEntity != null ? a.LegalEntity.ShortName : string.Empty)
-                    : q.OrderBy(a => a.Client != null ? a.Client.Name : a.LegalEntity != null ? a.LegalEntity.ShortName : string.Empty),
+                        .ThenByDescending(a => a.Id)
+                    : q.OrderBy(a => a.Client != null ? a.Client.Name : a.LegalEntity != null ? a.LegalEntity.ShortName : string.Empty)
+                        .ThenBy(a => a.Id),
                 "inn" or "counterpartyinn" => desc
-                    ? q.OrderByDescending(a => a.CounterpartyInn ?? string.Empty)
-                    : q.OrderBy(a => a.CounterpartyInn ?? string.Empty),
+                    ? q.OrderByDescending(a => a.CounterpartyInn ?? string.Empty).ThenByDescending(a => a.Id)
+                    : q.OrderBy(a => a.CounterpartyInn ?? string.Empty).ThenBy(a => a.Id),
                 "responsible" => desc
-                    ? q.OrderByDescending(a => a.Responsible != null ? a.Responsible.FullName : string.Empty)
-                    : q.OrderBy(a => a.Responsible != null ? a.Responsible.FullName : string.Empty),
-                "createdat" => desc ? q.OrderByDescending(a => a.CreatedAt) : q.OrderBy(a => a.CreatedAt),
-                _ => desc ? q.OrderByDescending(a => a.Date) : q.OrderBy(a => a.Date),
+                    ? q.OrderByDescending(a => a.Responsible != null ? a.Responsible.FullName : string.Empty).ThenByDescending(a => a.Id)
+                    : q.OrderBy(a => a.Responsible != null ? a.Responsible.FullName : string.Empty).ThenBy(a => a.Id),
+                "createdat" => desc
+                    ? q.OrderByDescending(a => a.CreatedAt).ThenByDescending(a => a.Id)
+                    : q.OrderBy(a => a.CreatedAt).ThenBy(a => a.Id),
+                _ => desc
+                    ? q.OrderByDescending(a => a.Date).ThenByDescending(a => a.Id)
+                    : q.OrderBy(a => a.Date).ThenBy(a => a.Id),
             };
         }
 

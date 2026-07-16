@@ -1746,6 +1746,90 @@ public class ActsControllerTests
     }
 
     [Fact]
+    public async Task Get_UsesActIdAsStableTieBreakerBetweenPages()
+    {
+        await using var db = await CreateContextAsync();
+        var sharedDate = new DateTime(2026, 7, 17);
+        var acts = Enumerable.Range(1, 5)
+            .Select(number => new Act
+            {
+                Number = $"ACT-STABLE-{number}",
+                Date = sharedDate,
+                Amount = number * 1_000m,
+                Status = ActStatus.Created,
+            })
+            .ToList();
+        db.Acts.AddRange(acts);
+        await db.SaveChangesAsync();
+
+        var controller = new ActsController(db, new NoopFormRequirementsService());
+        var firstPage = await controller.Get(
+            from: null,
+            to: null,
+            status: null,
+            type: null,
+            clientId: null,
+            contractId: null,
+            clientIds: null,
+            responsibleId: null,
+            search: null,
+            sortBy: null,
+            sortDir: "asc",
+            page: 1,
+            pageSize: 2,
+            ct: CancellationToken.None);
+        var secondPage = await controller.Get(
+            from: null,
+            to: null,
+            status: null,
+            type: null,
+            clientId: null,
+            contractId: null,
+            clientIds: null,
+            responsibleId: null,
+            search: null,
+            sortBy: null,
+            sortDir: "asc",
+            page: 2,
+            pageSize: 2,
+            ct: CancellationToken.None);
+        var descendingPage = await controller.Get(
+            from: null,
+            to: null,
+            status: null,
+            type: null,
+            clientId: null,
+            contractId: null,
+            clientIds: null,
+            responsibleId: null,
+            search: null,
+            sortBy: null,
+            sortDir: "desc",
+            page: 1,
+            pageSize: 2,
+            ct: CancellationToken.None);
+
+        Assert.Equal(
+            acts.Take(2).Select(act => act.Id),
+            ExtractActItems(firstPage).Select(act => act.Id));
+        Assert.Equal(
+            acts.Skip(2).Take(2).Select(act => act.Id),
+            ExtractActItems(secondPage).Select(act => act.Id));
+        Assert.Equal(
+            acts.AsEnumerable().Reverse().Take(2).Select(act => act.Id),
+            ExtractActItems(descendingPage).Select(act => act.Id));
+    }
+
+    private static List<ActDto> ExtractActItems(IActionResult action)
+    {
+        var ok = Assert.IsType<OkObjectResult>(action);
+        Assert.NotNull(ok.Value);
+        var response = ok.Value;
+        var items = response.GetType().GetProperty("items")?.GetValue(response);
+        return Assert.IsAssignableFrom<IEnumerable<ActDto>>(items).ToList();
+    }
+
+    [Fact]
     public async Task Get_FiltersByContractId_UsingManualAndInvoiceLinks()
     {
         await using var db = await CreateContextAsync();
