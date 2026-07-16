@@ -17,6 +17,63 @@ namespace PayPlanner.Api.Tests;
 public class CashOrdersControllerTests
 {
     [Fact]
+    public async Task CashBook_UsesOneAggregateQueryAndSkipsTimeZoneForExplicitPeriod()
+    {
+        var recorder = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(recorder);
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true);
+        db.CashOrders.AddRange(
+            new CashOrder
+            {
+                Number = "ПКО-2026-2001",
+                Type = CashOrderType.Incoming,
+                Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 7, 1),
+                Amount = 1_000m,
+                Account = "Основная касса",
+            },
+            new CashOrder
+            {
+                Number = "РКО-2026-2001",
+                Type = CashOrderType.Outgoing,
+                Status = CashOrderStatus.Posted,
+                Date = new DateTime(2026, 7, 2),
+                Amount = 250m,
+                Account = "Основная касса",
+            });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var controller = CreateController(db, userId, isAdminClaim: false);
+
+        recorder.Commands.Clear();
+        var action = await controller.GetCashBook(
+            from: new DateTime(2026, 7, 2),
+            to: new DateTime(2026, 7, 3),
+            accountName: "Основная касса",
+            ct: CancellationToken.None);
+
+        var response = Assert.IsType<CashBookResponseDto>(
+            Assert.IsType<OkObjectResult>(action.Result).Value);
+        Assert.Equal(1_000m, response.OpeningBalance);
+        Assert.Equal(0m, response.Income);
+        Assert.Equal(250m, response.Expense);
+        Assert.Equal(750m, response.ClosingBalance);
+        Assert.Equal(2, response.Days.Count);
+        Assert.Single(recorder.Commands, sql => sql.Contains("FROM \"CashOrders\"", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            recorder.Commands,
+            sql => sql.Contains("FROM \"UserSettings\"", StringComparison.Ordinal));
+
+        recorder.Commands.Clear();
+        await controller.GetCashBook(
+            from: null,
+            to: null,
+            accountName: "Основная касса",
+            ct: CancellationToken.None);
+        Assert.Single(recorder.Commands, sql => sql.Contains("FROM \"UserSettings\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task CashOrderRegister_KeepsStableOrderAcrossPagesWithSameDate()
     {
         await using var db = await CreateContextAsync();

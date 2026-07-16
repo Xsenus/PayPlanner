@@ -1003,8 +1003,7 @@ public class CashOrdersController : ControllerBase
         DataVisibilityAccess visibility,
         CancellationToken ct)
     {
-        var today = await ResolveCashOrderTodayAsync(ct);
-        var fromDate = (from ?? today).Date;
+        var fromDate = from?.Date ?? await ResolveCashOrderTodayAsync(ct);
         var toDate = (to ?? fromDate).Date;
         if (toDate < fromDate)
         {
@@ -1022,16 +1021,18 @@ public class CashOrdersController : ControllerBase
         }
         postedOrders = ApplyCashBookFilters(postedOrders, counterpartyName, clientId, caseId, contractId, incomeTypeId);
 
-        var openingBalance = await postedOrders
-            .Where(order => order.Date < fromDate)
-            .SumAsync(order => order.Type == CashOrderType.Incoming ? order.Amount : -order.Amount, ct);
-
-        var periodGroups = await postedOrders
-            .Where(order => order.Date >= fromDate && order.Date <= toDate)
-            .GroupBy(order => order.Date.Date)
+        var aggregateGroups = await postedOrders
+            .Where(order => order.Date <= toDate)
+            .GroupBy(order => new
+            {
+                IsOpening = order.Date < fromDate,
+                Date = order.Date < fromDate ? fromDate : order.Date.Date,
+            })
             .Select(group => new
             {
-                Date = group.Key,
+                group.Key.IsOpening,
+                group.Key.Date,
+                BalanceChange = group.Sum(order => order.Type == CashOrderType.Incoming ? order.Amount : -order.Amount),
                 Income = group.Where(order => order.Type == CashOrderType.Incoming).Sum(order => order.Amount),
                 Expense = group.Where(order => order.Type == CashOrderType.Outgoing).Sum(order => order.Amount),
                 IncomingCount = group.Count(order => order.Type == CashOrderType.Incoming),
@@ -1039,6 +1040,12 @@ public class CashOrdersController : ControllerBase
             })
             .OrderBy(group => group.Date)
             .ToListAsync(ct);
+        var openingBalance = aggregateGroups
+            .Where(group => group.IsOpening)
+            .Sum(group => group.BalanceChange);
+        var periodGroups = aggregateGroups
+            .Where(group => !group.IsOpening)
+            .ToArray();
         var periodGroupsByDate = periodGroups.ToDictionary(group => group.Date);
 
         var runningBalance = openingBalance;
