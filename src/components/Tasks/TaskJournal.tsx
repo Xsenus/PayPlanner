@@ -7535,12 +7535,12 @@ function TaskBillingCreateWizard({
     ? 'Договор с оплатой по факту'
     : mode === 'Fixed'
       ? 'Договор с фиксированной оплатой'
-      : 'Договор по клиенту не найден';
+      : 'По делу нет договора — задача платная';
   const warningText = mode === 'Actual'
     ? 'Клиент оплачивает фактически выполненные задачи. Клиентская задача получит яркую метку и будет ожидать включения в счёт.'
     : mode === 'Fixed'
       ? 'Работа выполняется в рамках фиксированной суммы. Внимание: следите за объёмом услуг по этому делу.'
-      : 'Задачу можно отметить клиентской, но проверьте договор. До выставления счёта она останется в списке контроля.';
+      : 'Новая клиентская задача без договора учитывается как платная и попадёт в контроль выставления счёта. Если работа не должна оплачиваться клиентом, выберите внутреннюю задачу.';
 
   return (
     <div className="fixed inset-0 z-[2400] flex items-center justify-center bg-slate-950/45 p-3" role="dialog" aria-modal="true" aria-labelledby="task-create-wizard-title">
@@ -7568,7 +7568,8 @@ function TaskBillingCreateWizard({
               }}
               placeholder="Выберите клиента или юридическое лицо"
               searchPlaceholder="Поиск по ФИО, названию, ИНН, телефону или email"
-              overlayClassName="z-[2500]"
+              helperText="Начните вводить ФИО, название, ИНН, телефон или email."
+              presentation="inline-search"
               required
             />
             <label className="block text-sm font-semibold text-slate-700">
@@ -7630,7 +7631,7 @@ function TaskBillingCreateWizard({
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               <button type="button" onClick={() => complete('billable')} className="min-h-36 rounded-2xl border-2 border-rose-300 bg-rose-50 p-5 text-left transition hover:bg-rose-100">
                 <WalletCards className="h-7 w-7 text-rose-600" />
-                <span className="mt-3 block text-base font-bold text-rose-950">{mode === 'Fixed' ? 'Клиентская задача' : 'Платная задача'}</span>
+                <span className="mt-3 block text-base font-bold text-rose-950">{mode === 'Fixed' ? 'Клиентская задача' : mode === 'Actual' ? 'Платная задача' : 'Платная задача без договора'}</span>
                 <span className="mt-1 block text-sm text-rose-700">{mode === 'Fixed' ? 'Учесть объём в рамках фиксированного договора' : 'Добавить в контроль будущего счёта'}</span>
               </button>
               <button type="button" onClick={() => complete('internal')} className="min-h-36 rounded-2xl border-2 border-slate-300 bg-slate-50 p-5 text-left transition hover:bg-slate-100">

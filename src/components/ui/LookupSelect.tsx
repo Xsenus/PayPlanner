@@ -1,5 +1,5 @@
 import { Check, ChevronDown, Search, X } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 export interface LookupSelectOption {
@@ -25,6 +25,8 @@ interface LookupSelectProps {
   disabled?: boolean;
   buttonClassName?: string;
   overlayClassName?: string;
+  presentation?: 'dialog' | 'inline-search';
+  inlineResultLimit?: number;
   noOptionsText?: string;
 }
 
@@ -101,10 +103,13 @@ export function LookupSelect({
   disabled = false,
   buttonClassName = '',
   overlayClassName = 'z-[2300]',
+  presentation = 'dialog',
+  inlineResultLimit = 10,
   noOptionsText = 'Ничего не найдено',
 }: LookupSelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const inlineListboxId = useId();
 
   const selectedOption = useMemo(
     () => options.find((option) => option.value === value) ?? null,
@@ -151,6 +156,114 @@ export function LookupSelect({
 
   const triggerLabel = selectedOption?.label ?? placeholder;
   const modalTitle = title ?? label ?? 'Справочник';
+
+  if (presentation === 'inline-search') {
+    const visibleOptions = filteredOptions.slice(0, inlineResultLimit);
+    const inputValue = open ? query : selectedOption?.label ?? query;
+
+    return (
+      <div
+        className="relative space-y-1"
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+            handleClose();
+          }
+        }}
+      >
+        {label ? (
+          <label htmlFor={`${inlineListboxId}-input`} className="block text-sm font-medium text-slate-700">
+            {label}{required ? ' *' : ''}
+          </label>
+        ) : null}
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            id={`${inlineListboxId}-input`}
+            type="text"
+            role="combobox"
+            aria-label={label ?? modalTitle}
+            aria-expanded={open}
+            aria-controls={inlineListboxId}
+            aria-autocomplete="list"
+            autoComplete="off"
+            disabled={disabled}
+            value={inputValue}
+            placeholder={placeholder}
+            onFocus={() => {
+              setQuery('');
+              setOpen(true);
+            }}
+            onChange={(event) => {
+              if (selectedOption) {
+                onChange('');
+              }
+              setQuery(event.target.value);
+              setOpen(true);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                handleClose();
+              } else if (event.key === 'Enter' && visibleOptions[0]) {
+                event.preventDefault();
+                handleSelect(visibleOptions[0].value);
+              }
+            }}
+            className={`min-h-[42px] w-full rounded-lg border border-slate-300 bg-white py-2 pl-10 pr-9 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100 ${buttonClassName}`}
+          />
+          {selectedOption && !open ? (
+            <button
+              type="button"
+              onClick={() => {
+                onChange('');
+                setQuery('');
+              }}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+              aria-label={`Очистить ${label ?? 'значение'}`}
+            >
+              <X className="h-4 w-4" />
+            </button>
+          ) : null}
+        </div>
+
+        {helperText ? <p className="text-xs text-slate-500">{helperText}</p> : null}
+
+        {open ? (
+          <div
+            id={inlineListboxId}
+            role="listbox"
+            aria-label={modalTitle}
+            className="absolute left-0 right-0 top-full z-30 mt-2 max-h-72 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-2xl"
+          >
+            {visibleOptions.length === 0 ? (
+              <div className="px-3 py-6 text-center text-sm text-slate-500">{noOptionsText}</div>
+            ) : (
+              visibleOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="option"
+                  aria-selected={option.value === value}
+                  onClick={() => handleSelect(option.value)}
+                  className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left transition hover:bg-blue-50 focus:bg-blue-50 focus:outline-none"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-semibold text-slate-900">{option.label}</span>
+                    {option.description ? <span className="mt-0.5 block truncate text-xs text-slate-500">{option.description}</span> : null}
+                  </span>
+                  {option.value === value ? <Check className="h-4 w-4 shrink-0 text-blue-600" /> : null}
+                </button>
+              ))
+            )}
+            {filteredOptions.length > visibleOptions.length ? (
+              <div className="border-t border-slate-100 px-3 py-2 text-xs text-slate-500">
+                Показано {visibleOptions.length} из {filteredOptions.length}. Продолжайте ввод для уточнения.
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <>

@@ -773,6 +773,42 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task CreateTask_PersistsBillableDecisionWithoutContract()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "billing-without-contract-author@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Клиент без договора");
+        var clientCase = await CreateCaseAsync(db, client.Id, "Дело без договора");
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var contextResult = await controller.GetBillingContext(client.Id, null, clientCase.Id, CancellationToken.None);
+        var contextOk = Assert.IsType<OkObjectResult>(contextResult.Result);
+        var context = Assert.IsType<TaskBillingContextDto>(contextOk.Value);
+        Assert.Empty(context.Contracts);
+
+        var result = await controller.CreateTask(new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            ClientCaseId = clientCase.Id,
+            ClientBillingClassification = TaskClientBillingClassification.Billable,
+            BillingContractId = null,
+            Title = "Платная работа без договора",
+            DueAt = DateTime.UtcNow.AddHours(2),
+        }, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(created.Value);
+        Assert.Equal(TaskClientBillingClassification.Billable, dto.ClientBillingClassification);
+        Assert.Null(dto.BillingContractId);
+        Assert.Equal("unbilled", dto.BillingStatus);
+
+        var stored = await db.TaskJournalItems.SingleAsync(item => item.Id == dto.Id);
+        Assert.Equal(TaskClientBillingClassification.Billable, stored.ClientBillingClassification);
+        Assert.Null(stored.BillingContractId);
+        Assert.NotNull(stored.BillingDecisionAt);
+    }
+
+    [Fact]
     public async Task CreateTask_InternalBillingDecisionKeepsClientCaseButDoesNotEnterInvoices()
     {
         await using var db = await CreateContextAsync();

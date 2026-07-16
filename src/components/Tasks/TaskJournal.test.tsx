@@ -391,8 +391,9 @@ async function openNewTaskFormAsGlobalInternal() {
 async function continueTaskWizardForClient(options: { legalEntity?: boolean; classification?: 'billable' | 'internal' } = {}) {
   const counterpartyName = options.legalEntity ? /ООО Ромашка/ : /Иванов Иван Иванович/;
   const caseId = options.legalEntity ? '200' : '100';
-  fireEvent.click(screen.getByRole('button', { name: 'Выберите клиента или юридическое лицо' }));
-  fireEvent.click(await screen.findByRole('button', { name: counterpartyName }));
+  fireEvent.focus(screen.getByRole('combobox', { name: 'Клиент' }));
+  const listbox = await screen.findByRole('listbox', { name: 'Клиент' });
+  fireEvent.click(within(listbox).getByRole('option', { name: counterpartyName }));
   fireEvent.change(screen.getByTestId('task-billing-wizard-case'), { target: { value: caseId } });
   fireEvent.click(screen.getByRole('button', { name: 'Проверить договор' }));
   await screen.findByRole('heading', { name: 'Определите учёт задачи' });
@@ -894,8 +895,8 @@ describe('TaskJournal', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
     await screen.findByRole('heading', { name: 'Выберите клиента и дело' });
-    fireEvent.click(screen.getByRole('button', { name: 'Выберите клиента или юридическое лицо' }));
-    fireEvent.click(await screen.findByRole('button', { name: /Иванов Иван Иванович/ }));
+    fireEvent.focus(screen.getByRole('combobox', { name: 'Клиент' }));
+    fireEvent.click(within(await screen.findByRole('listbox', { name: 'Клиент' })).getByRole('option', { name: /Иванов Иван Иванович/ }));
     fireEvent.change(screen.getByTestId('task-billing-wizard-case'), { target: { value: '100' } });
     fireEvent.click(screen.getByRole('button', { name: 'Проверить договор' }));
 
@@ -904,6 +905,40 @@ describe('TaskJournal', () => {
     fireEvent.click(screen.getByRole('button', { name: /Клиентская задача/ }));
 
     expect(await screen.findByText('Клиентская задача в рамках договора с фиксированной оплатой.')).toBeTruthy();
+  });
+
+  it('treats a new client task without a contract as billable', async () => {
+    apiMock.getTaskBillingContext.mockResolvedValueOnce({
+      clientId: 10,
+      legalEntityId: null,
+      clientCaseId: 100,
+      contracts: [],
+    });
+    await renderJournal([], { waitForTitle: null });
+
+    fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
+    await screen.findByRole('heading', { name: 'Выберите клиента и дело' });
+    fireEvent.focus(screen.getByRole('combobox', { name: 'Клиент' }));
+    fireEvent.click(within(await screen.findByRole('listbox', { name: 'Клиент' })).getByRole('option', { name: /Иванов Иван Иванович/ }));
+    fireEvent.change(screen.getByTestId('task-billing-wizard-case'), { target: { value: '100' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Проверить договор' }));
+
+    expect(await screen.findByText('По делу нет договора — задача платная')).toBeTruthy();
+    expect(screen.getByText(/попадёт в контроль выставления счёта/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Платная задача без договора/ }));
+
+    await screen.findByRole('heading', { name: 'Новая задача' });
+    fireEvent.change(screen.getByTestId('task-title-input'), { target: { value: 'Платная работа без договора' } });
+    fireEvent.click(screen.getAllByRole('button', { name: 'Создать задачу' }).at(-1)!);
+
+    await waitFor(() => expect(apiMock.createTaskJournalItem).toHaveBeenCalledTimes(1));
+    expect(apiMock.createTaskJournalItem).toHaveBeenCalledWith(expect.objectContaining({
+      clientId: 10,
+      clientCaseId: 100,
+      clientBillingClassification: 'billable',
+      title: 'Платная работа без договора',
+    }));
+    expect(apiMock.createTaskJournalItem.mock.calls[0][0]).not.toHaveProperty('billingContractId');
   });
 
   it('prepares one invoice draft from selected unbilled client tasks', async () => {
@@ -2752,21 +2787,19 @@ describe('TaskJournal', () => {
     expect(apiMock.createTaskJournalItem).not.toHaveBeenCalled();
   });
 
-  it('opens the client directory above the new task wizard and allows selecting a client', async () => {
+  it('finds and selects a client directly in the new task wizard', async () => {
     await renderJournal();
 
     fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
     await screen.findByRole('heading', { name: 'Выберите клиента и дело' });
-    fireEvent.click(screen.getByRole('button', { name: 'Справочник' }));
+    const search = screen.getByRole('combobox', { name: 'Клиент' });
+    fireEvent.focus(search);
+    fireEvent.change(search, { target: { value: 'Иванов' } });
+    const listbox = await screen.findByRole('listbox', { name: 'Клиент' });
+    fireEvent.click(within(listbox).getByRole('option', { name: /Иванов Иван Иванович/ }));
 
-    const directory = await screen.findByTestId('lookup-select-dialog');
-    expect(directory.className).toContain('z-[2500]');
-    expect(within(directory).getByRole('heading', { name: 'Клиент' })).toBeTruthy();
-
-    fireEvent.click(within(directory).getByRole('button', { name: /Иванов Иван Иванович/ }));
-
-    expect(screen.queryByTestId('lookup-select-dialog')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Иванов Иван Иванович' })).toBeTruthy();
+    expect((search as HTMLInputElement).value).toBe('Иванов Иван Иванович');
+    expect(screen.queryByRole('listbox', { name: 'Клиент' })).toBeNull();
   });
 
   it('creates an internal task without a counterparty', async () => {
@@ -2985,8 +3018,8 @@ describe('TaskJournal', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
     await screen.findByRole('heading', { name: 'Выберите клиента и дело' });
-    fireEvent.click(screen.getByRole('button', { name: 'Выберите клиента или юридическое лицо' }));
-    fireEvent.click(await screen.findByRole('button', { name: /Иванов Иван Иванович/ }));
+    fireEvent.focus(screen.getByRole('combobox', { name: 'Клиент' }));
+    fireEvent.click(within(await screen.findByRole('listbox', { name: 'Клиент' })).getByRole('option', { name: /Иванов Иван Иванович/ }));
 
     const caseSelect = screen.getByRole('combobox', { name: 'Дело' });
     const options = Array.from(caseSelect.querySelectorAll('option')).map((option) => option.textContent);
@@ -3036,18 +3069,19 @@ describe('TaskJournal', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
     await screen.findByRole('heading', { name: 'Выберите клиента и дело' });
-    fireEvent.click(screen.getByRole('button', { name: 'Выберите клиента или юридическое лицо' }));
-    const searchInput = screen.getByPlaceholderText('Поиск по ФИО, названию, ИНН, телефону или email');
+    const searchInput = screen.getByRole('combobox', { name: 'Клиент' });
+    fireEvent.focus(searchInput);
+    const listbox = await screen.findByRole('listbox', { name: 'Клиент' });
 
     fireEvent.change(searchInput, { target: { value: '5400000000' } });
 
-    expect(await screen.findByRole('button', { name: /ООО Ромашка/ })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /АО Василек/ })).toBeNull();
+    expect(await within(listbox).findByRole('option', { name: /ООО Ромашка/ })).toBeTruthy();
+    expect(within(listbox).queryByRole('option', { name: /АО Василек/ })).toBeNull();
 
     fireEvent.change(searchInput, { target: { value: 'ooo' } });
 
-    expect(await screen.findByRole('button', { name: /ООО Ромашка/ })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /АО Василек/ })).toBeNull();
+    expect(await within(listbox).findByRole('option', { name: /ООО Ромашка/ })).toBeTruthy();
+    expect(within(listbox).queryByRole('option', { name: /АО Василек/ })).toBeNull();
   });
 
   it('creates a control task from case automation candidate', async () => {
