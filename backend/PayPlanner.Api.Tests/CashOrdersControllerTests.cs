@@ -17,6 +17,49 @@ namespace PayPlanner.Api.Tests;
 public class CashOrdersControllerTests
 {
     [Fact]
+    public async Task CashOrderRegister_KeepsStableOrderAcrossPagesWithSameDate()
+    {
+        await using var db = await CreateContextAsync();
+        var userId = await CreateUserWithPaymentsPermissionAsync(db, canView: true);
+        var date = new DateTime(2026, 7, 10);
+        var orders = Enumerable.Range(1, 12)
+            .Select(number => new CashOrder
+            {
+                Number = $"ПКО-2026-{number:0000}",
+                Type = CashOrderType.Incoming,
+                Status = CashOrderStatus.Posted,
+                Date = date,
+                Amount = number,
+            })
+            .ToArray();
+        db.CashOrders.AddRange(orders);
+        await db.SaveChangesAsync();
+        var expectedIds = orders.Select(order => order.Id).OrderByDescending(id => id).ToArray();
+        var controller = CreateController(db, userId, isAdminClaim: false);
+
+        var actualIds = new List<int>();
+        for (var page = 1; page <= 3; page++)
+        {
+            var action = await controller.GetRegister(
+                from: date,
+                to: date,
+                type: null,
+                status: null,
+                search: null,
+                page: page,
+                pageSize: 5,
+                accountName: null,
+                ct: CancellationToken.None);
+            var response = Assert.IsType<CashOrderRegisterResponseDto>(
+                Assert.IsType<OkObjectResult>(action.Result).Value);
+            actualIds.AddRange(response.Items.Select(item => item.Id));
+        }
+
+        Assert.Equal(expectedIds, actualIds);
+        Assert.Equal(expectedIds.Length, actualIds.Distinct().Count());
+    }
+
+    [Fact]
     public async Task CashOrderLists_UseCompactProjectionAndTwoCashOrderQueries()
     {
         var recorder = new RecordingCommandInterceptor();

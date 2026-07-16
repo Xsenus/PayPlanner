@@ -1026,9 +1026,18 @@ public class PaymentContext : DbContext
                   .OnDelete(DeleteBehavior.SetNull);
 
             entity.HasIndex(e => e.Number).IsUnique().HasDatabaseName("IX_CashOrders_Number");
-            entity.HasIndex(e => e.Date).HasDatabaseName("IX_CashOrders_Date");
-            entity.HasIndex(e => e.Type).HasDatabaseName("IX_CashOrders_Type");
-            entity.HasIndex(e => e.Status).HasDatabaseName("IX_CashOrders_Status");
+            entity.HasIndex(e => new { e.Date, e.Id })
+                  .IsDescending(true, true)
+                  .HasDatabaseName("IX_CashOrders_Date_Id");
+            entity.HasIndex(e => new { e.Account, e.Date, e.Id })
+                  .IsDescending(false, true, true)
+                  .HasDatabaseName("IX_CashOrders_Account_Date_Id");
+            entity.HasIndex(e => new { e.Type, e.Date, e.Id })
+                  .IsDescending(false, true, true)
+                  .HasDatabaseName("IX_CashOrders_Type_Date_Id");
+            entity.HasIndex(e => new { e.Status, e.Date, e.Id })
+                  .IsDescending(false, true, true)
+                  .HasDatabaseName("IX_CashOrders_Status_Date_Id");
             entity.HasIndex(e => e.ClientId).HasDatabaseName("IX_CashOrders_ClientId");
             entity.HasIndex(e => e.PaymentId).HasDatabaseName("IX_CashOrders_PaymentId");
             entity.HasIndex(e => e.MoneyOperationId).HasDatabaseName("IX_CashOrders_MoneyOperationId");

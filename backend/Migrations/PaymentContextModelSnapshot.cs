@@ -974,9 +974,6 @@ namespace PayPlanner.Api.Migrations
                     b.HasIndex("ClientId")
                         .HasDatabaseName("IX_CashOrders_ClientId");
 
-                    b.HasIndex("Date")
-                        .HasDatabaseName("IX_CashOrders_Date");
-
                     b.HasIndex("DeletedAt")
                         .HasDatabaseName("IX_CashOrder_DeletedAt_Audit");
 
@@ -996,14 +993,24 @@ namespace PayPlanner.Api.Migrations
                     b.HasIndex("PaymentId")
                         .HasDatabaseName("IX_CashOrders_PaymentId");
 
-                    b.HasIndex("Status")
-                        .HasDatabaseName("IX_CashOrders_Status");
-
-                    b.HasIndex("Type")
-                        .HasDatabaseName("IX_CashOrders_Type");
-
                     b.HasIndex("UpdatedAt")
                         .HasDatabaseName("IX_CashOrder_UpdatedAt_Audit");
+
+                    b.HasIndex("Date", "Id")
+                        .IsDescending()
+                        .HasDatabaseName("IX_CashOrders_Date_Id");
+
+                    b.HasIndex("Account", "Date", "Id")
+                        .IsDescending(false, true, true)
+                        .HasDatabaseName("IX_CashOrders_Account_Date_Id");
+
+                    b.HasIndex("Status", "Date", "Id")
+                        .IsDescending(false, true, true)
+                        .HasDatabaseName("IX_CashOrders_Status_Date_Id");
+
+                    b.HasIndex("Type", "Date", "Id")
+                        .IsDescending(false, true, true)
+                        .HasDatabaseName("IX_CashOrders_Type_Date_Id");
 
                     b.ToTable("CashOrders");
                 });
