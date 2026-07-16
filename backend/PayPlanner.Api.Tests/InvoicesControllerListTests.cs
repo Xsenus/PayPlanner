@@ -2,11 +2,13 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Models.Responses;
 using PayPlanner.Api.Services;
+using System.Data.Common;
 using System.Security.Claims;
 using Xunit;
 
@@ -349,6 +351,106 @@ public class InvoicesControllerListTests
         Assert.Collection(expenseClientItems, item => Assert.Equal("LE-EXPENSE", item.Number));
     }
 
+    [Fact]
+    public async Task Get_WithStatus_LoadsMetadataOnlyForRequestedPage()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+
+        var firstInvoice = await CreateInvoiceDocumentAsync(db, "INV-PAGE-1", new DateTime(2027, 5, 1), 10_000m);
+        var secondInvoice = await CreateInvoiceDocumentAsync(db, "INV-PAGE-2", new DateTime(2027, 5, 2), 20_000m);
+        var thirdInvoice = await CreateInvoiceDocumentAsync(db, "INV-PAGE-3", new DateTime(2027, 5, 3), 30_000m);
+        db.InvoiceLineItems.AddRange(
+            CreateInvoiceLineItem(firstInvoice, "Первая услуга"),
+            CreateInvoiceLineItem(secondInvoice, "Вторая услуга"),
+            CreateInvoiceLineItem(thirdInvoice, "Третья услуга"));
+        await db.SaveChangesAsync();
+        interceptor.Commands.Clear();
+
+        var controller = CreateController(db);
+        var result = await controller.Get(
+            from: null,
+            to: null,
+            status: PaymentStatus.Pending,
+            clientId: null,
+            clientIds: null,
+            contractId: null,
+            caseId: null,
+            responsibleId: null,
+            search: null,
+            type: null,
+            sortBy: "number",
+            sortDir: "asc",
+            page: 1,
+            pageSize: 1,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var invoice = Assert.Single(ExtractInvoiceItems(ok));
+        Assert.Equal(firstInvoice.Id, invoice.Id);
+        Assert.Collection(invoice.LineItems, item => Assert.Equal("Первая услуга", item.Name));
+
+        var lineItemsCommand = Assert.Single(interceptor.Commands, command =>
+            command.CommandText.Contains("FROM \"InvoiceLineItems\"", StringComparison.Ordinal));
+        Assert.Contains(
+            lineItemsCommand.ParameterValues,
+            value => string.Equals(value, $"[{firstInvoice.Id}]", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            lineItemsCommand.ParameterValues,
+            value => value?.Contains(secondInvoice.Id.ToString(), StringComparison.Ordinal) == true
+                || value?.Contains(thirdInvoice.Id.ToString(), StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
+    public async Task Get_WithStatusAndResponsibleSort_PreservesMetadataBasedOrder()
+    {
+        await using var db = await CreateContextAsync();
+        var role = new Role { Name = "invoice-sort", Description = "Invoice sort test" };
+        var responsibleZ = new User
+        {
+            Email = "z@example.test",
+            PasswordHash = "test",
+            FullName = "Яков",
+            Role = role,
+        };
+        var responsibleA = new User
+        {
+            Email = "a@example.test",
+            PasswordHash = "test",
+            FullName = "Анна",
+            Role = role,
+        };
+        var firstInvoice = await CreateInvoiceDocumentAsync(db, "INV-RESP-1", new DateTime(2027, 6, 1), 10_000m);
+        var secondInvoice = await CreateInvoiceDocumentAsync(db, "INV-RESP-2", new DateTime(2027, 6, 2), 20_000m);
+        db.Users.AddRange(responsibleZ, responsibleA);
+        db.PaymentResponsibles.AddRange(
+            new PaymentResponsible { Payment = firstInvoice, User = responsibleZ },
+            new PaymentResponsible { Payment = secondInvoice, User = responsibleA });
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db);
+        var result = await controller.Get(
+            from: null,
+            to: null,
+            status: PaymentStatus.Pending,
+            clientId: null,
+            clientIds: null,
+            contractId: null,
+            caseId: null,
+            responsibleId: null,
+            search: null,
+            type: null,
+            sortBy: "responsible",
+            sortDir: "asc",
+            page: 1,
+            pageSize: 1,
+            ct: CancellationToken.None);
+
+        var invoice = Assert.Single(ExtractInvoiceItems(Assert.IsType<OkObjectResult>(result)));
+        Assert.Equal(secondInvoice.Id, invoice.Id);
+        Assert.Equal("Анна", invoice.ResponsibleName);
+    }
+
     private static List<InvoiceDto> ExtractInvoiceItems(OkObjectResult ok)
     {
         var itemsProperty = ok.Value?.GetType().GetProperty("items");
@@ -359,16 +461,19 @@ public class InvoicesControllerListTests
         return items.ToList();
     }
 
-    private static async Task<PaymentContext> CreateContextAsync()
+    private static async Task<PaymentContext> CreateContextAsync(DbCommandInterceptor? interceptor = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
 
-        var options = new DbContextOptionsBuilder<PaymentContext>()
-            .UseSqlite(connection)
-            .Options;
+        var optionsBuilder = new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite(connection);
+        if (interceptor is not null)
+        {
+            optionsBuilder.AddInterceptors(interceptor);
+        }
 
-        var db = new PaymentContext(options);
+        var db = new PaymentContext(optionsBuilder.Options);
         await db.Database.EnsureCreatedAsync();
         return db;
     }
@@ -527,6 +632,37 @@ public class InvoicesControllerListTests
             Type = PaymentType.Income,
         };
     }
+
+    private static InvoiceLineItem CreateInvoiceLineItem(Payment payment, string name)
+    {
+        return new InvoiceLineItem
+        {
+            PaymentId = payment.Id,
+            Name = name,
+            Quantity = 1,
+            Unit = "шт",
+            Price = payment.Amount,
+        };
+    }
+
+    private sealed class RecordingCommandInterceptor : DbCommandInterceptor
+    {
+        public List<RecordedCommand> Commands { get; } = [];
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            Commands.Add(new RecordedCommand(
+                command.CommandText,
+                command.Parameters.Cast<DbParameter>().Select(parameter => parameter.Value?.ToString()).ToList()));
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
+    }
+
+    private sealed record RecordedCommand(string CommandText, IReadOnlyList<string?> ParameterValues);
 
     private sealed class NoopEmailService : IEmailService
     {

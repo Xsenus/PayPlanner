@@ -304,6 +304,7 @@ public class InvoicesController : ControllerBase
 
         if (status.HasValue)
         {
+            var requiresMetadataBeforePagination = string.Equals(sortBy, "responsible", StringComparison.OrdinalIgnoreCase);
             var statusItems = await QueryInvoiceDtosAsync(
                 from,
                 to,
@@ -319,7 +320,7 @@ public class InvoicesController : ControllerBase
                 type,
                 normalizedWorkflowStatus,
                 clientRole,
-                includeMetadata: true,
+                includeMetadata: requiresMetadataBeforePagination,
                 ct,
                 visibility);
 
@@ -339,6 +340,10 @@ public class InvoicesController : ControllerBase
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)
                 .ToList();
+            if (!requiresMetadataBeforePagination)
+            {
+                await EnrichInvoiceMetadataAsync(statusPageItems, ct);
+            }
 
             return Ok(new { items = statusPageItems, total = statusTotal, page, pageSize });
         }
@@ -4369,6 +4374,12 @@ public class InvoicesController : ControllerBase
 
     private async Task EnrichInvoiceDtosAsync(List<InvoiceDto> items, CancellationToken ct)
     {
+        await EnrichInvoiceMetadataAsync(items, ct);
+        await ApplyEffectiveInvoiceStateAsync(items, ct);
+    }
+
+    private async Task EnrichInvoiceMetadataAsync(List<InvoiceDto> items, CancellationToken ct)
+    {
         if (items.Count == 0)
         {
             return;
@@ -4414,8 +4425,6 @@ public class InvoicesController : ControllerBase
                 item.LineItems = storedLineItems;
             }
         }
-
-        await ApplyEffectiveInvoiceStateAsync(items, ct);
     }
 
     private async Task ApplyEffectiveInvoiceStateAsync(List<InvoiceDto> items, CancellationToken ct)
