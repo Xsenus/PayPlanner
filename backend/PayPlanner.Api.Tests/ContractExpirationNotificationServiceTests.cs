@@ -1,5 +1,8 @@
+using System.Data.Common;
+using System.Reflection;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -14,6 +17,128 @@ namespace PayPlanner.Api.Tests;
 
 public class ContractExpirationNotificationServiceTests
 {
+    [Fact]
+    public async Task RunOnceAsync_LoadsRecipientsInFixedNumberOfQueriesForMultipleContracts()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        var notificationService = DispatchProxy.Create<INotificationService, RecordingNotificationServiceProxy>();
+        var notificationRecorder = (RecordingNotificationServiceProxy)(object)notificationService;
+        var services = new ServiceCollection();
+        services.AddDbContext<PaymentContext>(options => options
+            .UseSqlite(connection)
+            .AddInterceptors(interceptor));
+        services.AddSingleton(notificationService);
+        await using var provider = services.BuildServiceProvider();
+
+        await using (var scope = provider.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
+            await db.Database.EnsureCreatedAsync();
+            var role = new Role { Name = $"contracts-batch-{Guid.NewGuid():N}", CreatedAt = DateTime.UtcNow };
+            db.Roles.Add(role);
+            await db.SaveChangesAsync();
+            db.RolePermissions.Add(new RolePermission
+            {
+                RoleId = role.Id,
+                Section = RolePermissionCatalog.Contracts,
+                CanView = true,
+                ViewScope = DataVisibilityScope.Own
+            });
+            var user = new User
+            {
+                Email = "contract-batch@example.com",
+                FullName = "Ответственный по договорам",
+                PasswordHash = "hash",
+                RoleId = role.Id,
+                IsActive = true,
+                IsApproved = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            db.Users.Add(user);
+            await db.SaveChangesAsync();
+            var client = new Client
+            {
+                Name = "Клиент с несколькими договорами",
+                ResponsibleUserId = user.Id
+            };
+            db.Clients.Add(client);
+            await db.SaveChangesAsync();
+
+            for (var index = 1; index <= 12; index++)
+            {
+                db.Contracts.Add(new Contract
+                {
+                    Number = $"BATCH-{index}",
+                    Title = $"Договор {index}",
+                    Date = DateTime.UtcNow.Date.AddMonths(-1),
+                    ValidUntil = DateTime.UtcNow.Date.AddDays(3),
+                    BillingMode = ContractBillingMode.Fixed,
+                    Amount = 10000m,
+                    Status = ContractStatus.Concluded,
+                    ClientContracts =
+                    {
+                        new ClientContract { ClientId = client.Id }
+                    }
+                });
+            }
+
+            var deniedRole = new Role { Name = $"contracts-denied-{Guid.NewGuid():N}", CreatedAt = DateTime.UtcNow };
+            db.Roles.Add(deniedRole);
+            await db.SaveChangesAsync();
+            var deniedUser = new User
+            {
+                Email = "contract-denied@example.com",
+                FullName = "Сотрудник без доступа к договорам",
+                PasswordHash = "hash",
+                RoleId = deniedRole.Id,
+                IsActive = true,
+                IsApproved = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            db.Users.Add(deniedUser);
+            await db.SaveChangesAsync();
+            var deniedClient = new Client
+            {
+                Name = "Клиент закрытого договора",
+                ResponsibleUserId = deniedUser.Id
+            };
+            db.Clients.Add(deniedClient);
+            await db.SaveChangesAsync();
+            db.Contracts.Add(new Contract
+            {
+                Number = "DENIED-1",
+                Title = "Недоступный договор",
+                Date = DateTime.UtcNow.Date.AddMonths(-1),
+                ValidUntil = DateTime.UtcNow.Date.AddDays(3),
+                BillingMode = ContractBillingMode.Fixed,
+                Amount = 10000m,
+                Status = ContractStatus.Concluded,
+                ClientContracts =
+                {
+                    new ClientContract { ClientId = deniedClient.Id }
+                }
+            });
+
+            await db.SaveChangesAsync();
+        }
+
+        interceptor.ReaderCommands.Clear();
+        var service = new ContractExpirationNotificationService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<ContractExpirationNotificationService>.Instance);
+
+        var affected = await service.RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal(12, affected);
+        Assert.Equal(12, notificationRecorder.Calls.Count);
+        Assert.All(notificationRecorder.Calls, call => Assert.Single(call.RecipientUserIds));
+        Assert.Equal(8, interceptor.ReaderCommands.Count);
+    }
+
     [Fact]
     public async Task RunOnceAsync_NotifiesResponsibleWhenContractExpiresSoon()
     {
@@ -130,4 +255,40 @@ public class ContractExpirationNotificationServiceTests
         public Task<TelegramNotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(new TelegramNotificationSettingsDto());
     }
+
+    private sealed class RecordingCommandInterceptor : DbCommandInterceptor
+    {
+        public List<string> ReaderCommands { get; } = [];
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            ReaderCommands.Add(command.CommandText);
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    private class RecordingNotificationServiceProxy : DispatchProxy
+    {
+        public List<ContractNotificationCall> Calls { get; } = [];
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            if (targetMethod?.Name == nameof(INotificationService.NotifyContractExpiringAsync)
+                && args is { Length: 4 })
+            {
+                var contract = Assert.IsType<Contract>(args[0]);
+                var recipientUserIds = Assert.IsAssignableFrom<IReadOnlyCollection<int>>(args[2]);
+                Calls.Add(new ContractNotificationCall(contract.Id, recipientUserIds.ToArray()));
+                return Task.CompletedTask;
+            }
+
+            throw new NotSupportedException($"Unexpected notification call: {targetMethod?.Name}.");
+        }
+    }
+
+    private sealed record ContractNotificationCall(int ContractId, IReadOnlyCollection<int> RecipientUserIds);
 }

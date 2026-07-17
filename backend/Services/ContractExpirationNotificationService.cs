@@ -1,8 +1,5 @@
-using System.Globalization;
-using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
-using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services.Notifications;
 
@@ -74,11 +71,16 @@ public sealed class ContractExpirationNotificationService : BackgroundService
                 && contract.Status != ContractStatus.Cancelled)
             .ToListAsync(ct);
 
+        var recipientsByContractId = await ResolveContractNotificationRecipientsAsync(
+            db,
+            contracts.Select(contract => contract.Id).ToArray(),
+            ct);
+
         var notified = 0;
         foreach (var contract in contracts)
         {
-            var recipients = await ResolveContractNotificationRecipientsAsync(db, contract.Id, ct);
-            if (recipients.Count == 0)
+            if (!recipientsByContractId.TryGetValue(contract.Id, out var recipients)
+                || recipients.Count == 0)
             {
                 continue;
             }
@@ -91,53 +93,65 @@ public sealed class ContractExpirationNotificationService : BackgroundService
         return notified;
     }
 
-    private static async Task<IReadOnlyCollection<int>> ResolveContractNotificationRecipientsAsync(
+    private static async Task<IReadOnlyDictionary<int, IReadOnlyCollection<int>>> ResolveContractNotificationRecipientsAsync(
         PaymentContext db,
-        int contractId,
+        IReadOnlyCollection<int> contractIds,
         CancellationToken ct)
     {
-        var candidateUserIds = new List<int>();
-        candidateUserIds.AddRange(await db.ClientContracts
+        if (contractIds.Count == 0)
+        {
+            return new Dictionary<int, IReadOnlyCollection<int>>();
+        }
+
+        var candidates = new List<ContractRecipientCandidate>();
+        candidates.AddRange(await db.ClientContracts
             .AsNoTracking()
-            .Where(link => link.ContractId == contractId
+            .Where(link => contractIds.Contains(link.ContractId)
                 && link.Client.ResponsibleUserId.HasValue)
-            .Select(link => link.Client.ResponsibleUserId!.Value)
+            .Select(link => new ContractRecipientCandidate(link.ContractId, link.Client.ResponsibleUserId!.Value))
             .ToListAsync(ct));
-        candidateUserIds.AddRange(await db.LegalEntityContracts
+        candidates.AddRange(await db.LegalEntityContracts
             .AsNoTracking()
-            .Where(link => link.ContractId == contractId
+            .Where(link => contractIds.Contains(link.ContractId)
                 && link.LegalEntity.ResponsibleUserId.HasValue)
-            .Select(link => link.LegalEntity.ResponsibleUserId!.Value)
+            .Select(link => new ContractRecipientCandidate(link.ContractId, link.LegalEntity.ResponsibleUserId!.Value))
             .ToListAsync(ct));
-        candidateUserIds.AddRange(await db.ContractInvoices
-            .AsNoTracking()
-            .Where(link => link.ContractId == contractId)
-            .SelectMany(link => link.Invoice.Responsibles.Select(responsible => responsible.UserId))
+        candidates.AddRange(await (
+            from link in db.ContractInvoices.AsNoTracking()
+            join responsible in db.PaymentResponsibles.AsNoTracking()
+                on link.InvoiceId equals responsible.PaymentId
+            where contractIds.Contains(link.ContractId)
+            select new ContractRecipientCandidate(link.ContractId, responsible.UserId))
             .ToListAsync(ct));
-        candidateUserIds.AddRange(await db.ContractPayments
-            .AsNoTracking()
-            .Where(link => link.ContractId == contractId)
-            .SelectMany(link => link.Payment.Responsibles.Select(responsible => responsible.UserId))
+        candidates.AddRange(await (
+            from link in db.ContractPayments.AsNoTracking()
+            join responsible in db.PaymentResponsibles.AsNoTracking()
+                on link.PaymentId equals responsible.PaymentId
+            where contractIds.Contains(link.ContractId)
+            select new ContractRecipientCandidate(link.ContractId, responsible.UserId))
             .ToListAsync(ct));
-        candidateUserIds.AddRange(await db.ContractActs
+        candidates.AddRange(await db.ContractActs
             .AsNoTracking()
-            .Where(link => link.ContractId == contractId
+            .Where(link => contractIds.Contains(link.ContractId)
                 && link.Act.ResponsibleId.HasValue)
-            .Select(link => link.Act.ResponsibleId!.Value)
+            .Select(link => new ContractRecipientCandidate(link.ContractId, link.Act.ResponsibleId!.Value))
             .ToListAsync(ct));
-        candidateUserIds.AddRange(await db.Payments
-            .AsNoTracking()
-            .Where(payment => payment.ContractId == contractId)
-            .SelectMany(payment => payment.Responsibles.Select(responsible => responsible.UserId))
+        candidates.AddRange(await (
+            from payment in db.Payments.AsNoTracking()
+            join responsible in db.PaymentResponsibles.AsNoTracking()
+                on payment.Id equals responsible.PaymentId
+            where payment.ContractId.HasValue && contractIds.Contains(payment.ContractId.Value)
+            select new ContractRecipientCandidate(payment.ContractId!.Value, responsible.UserId))
+            .Distinct()
             .ToListAsync(ct));
 
-        var userIds = candidateUserIds
-            .Where(userId => userId > 0)
+        var userIds = candidates
+            .Select(candidate => candidate.UserId)
             .Distinct()
             .ToArray();
         if (userIds.Length == 0)
         {
-            return Array.Empty<int>();
+            return new Dictionary<int, IReadOnlyCollection<int>>();
         }
 
         var allowedUserIds = await db.Users
@@ -153,29 +167,17 @@ public sealed class ContractExpirationNotificationService : BackgroundService
             .Select(user => user.Id)
             .ToListAsync(ct);
 
-        var result = new List<int>();
-        foreach (var userId in allowedUserIds)
-        {
-            var principal = new ClaimsPrincipal(new ClaimsIdentity(
-                new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture)) },
-                authenticationType: "ContractExpirationAccessCheck"));
-            var visibility = await db.ResolveDataVisibilityAsync(principal, RolePermissionCatalog.Contracts, ct);
-            if (visibility is null)
-            {
-                continue;
-            }
-
-            var canOpenContract = await db.Contracts
-                .AsNoTracking()
-                .Where(contract => contract.Id == contractId)
-                .ApplyContractVisibility(visibility)
-                .AnyAsync(ct);
-            if (canOpenContract)
-            {
-                result.Add(userId);
-            }
-        }
-
-        return result;
+        var allowedUserIdSet = allowedUserIds.ToHashSet();
+        return candidates
+            .Where(candidate => candidate.UserId > 0 && allowedUserIdSet.Contains(candidate.UserId))
+            .GroupBy(candidate => candidate.ContractId)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyCollection<int>)group
+                    .Select(candidate => candidate.UserId)
+                    .Distinct()
+                    .ToArray());
     }
+
+    private sealed record ContractRecipientCandidate(int ContractId, int UserId);
 }
