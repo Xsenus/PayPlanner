@@ -4721,6 +4721,14 @@ public class NotificationServiceTests
             "Polling bot",
             NotificationPurposes.TaskReminder,
             updateMode: TelegramBotUpdateModes.Polling);
+        var recentPollingAt = DateTime.UtcNow.AddMinutes(-1);
+        sender.ConfigJson = JsonSerializer.Serialize(new
+        {
+            botToken = "token",
+            botUsername = "payplanner_bot",
+            updateMode = TelegramBotUpdateModes.Polling,
+            lastPollingAt = recentPollingAt
+        });
         db.NotificationSenders.Add(sender);
         await db.SaveChangesAsync();
 
@@ -4741,7 +4749,78 @@ public class NotificationServiceTests
         await db.Entry(sender).ReloadAsync();
         using var config = JsonDocument.Parse(sender.ConfigJson);
         Assert.Equal(25, config.RootElement.GetProperty("lastUpdateId").GetInt64());
-        Assert.Equal(JsonValueKind.String, config.RootElement.GetProperty("lastPollingAt").ValueKind);
+        Assert.True(config.RootElement.GetProperty("lastPollingAt").GetDateTime() > recentPollingAt);
+    }
+
+    [Fact]
+    public async Task PollEnabledSendersAsync_RecentEmptyPollDoesNotRewriteSender()
+    {
+        await using var db = await CreateContextAsync();
+        var recentPollingAt = DateTime.UtcNow.AddMinutes(-1);
+        var originalUpdatedAt = DateTime.UtcNow.AddHours(-1);
+        var sender = CreateTelegramSender(
+            "Idle polling bot",
+            NotificationPurposes.TaskReminder,
+            updateMode: TelegramBotUpdateModes.Polling);
+        sender.ConfigJson = JsonSerializer.Serialize(new
+        {
+            botToken = "token",
+            botUsername = "payplanner_bot",
+            updateMode = TelegramBotUpdateModes.Polling,
+            lastUpdateId = 25,
+            lastPollingAt = recentPollingAt
+        });
+        sender.UpdatedAt = originalUpdatedAt;
+        db.NotificationSenders.Add(sender);
+        await db.SaveChangesAsync();
+        var originalConfig = sender.ConfigJson;
+        db.ChangeTracker.Clear();
+
+        var httpFactory = new StaticHttpClientFactory(new HttpClient(new TelegramEmptyPollingHandler()));
+        var updateService = new TelegramBotUpdateService(
+            db,
+            httpFactory,
+            NullLogger<TelegramBotUpdateService>.Instance);
+
+        await updateService.PollEnabledSendersAsync();
+
+        var persisted = await db.NotificationSenders.AsNoTracking().SingleAsync();
+        Assert.Equal(originalConfig, persisted.ConfigJson);
+        Assert.Equal(originalUpdatedAt, persisted.UpdatedAt);
+    }
+
+    [Fact]
+    public async Task PollEnabledSendersAsync_StaleEmptyPollRefreshesHeartbeat()
+    {
+        await using var db = await CreateContextAsync();
+        var stalePollingAt = DateTime.UtcNow.AddMinutes(-6);
+        var sender = CreateTelegramSender(
+            "Idle polling bot",
+            NotificationPurposes.TaskReminder,
+            updateMode: TelegramBotUpdateModes.Polling);
+        sender.ConfigJson = JsonSerializer.Serialize(new
+        {
+            botToken = "token",
+            botUsername = "payplanner_bot",
+            updateMode = TelegramBotUpdateModes.Polling,
+            lastUpdateId = 25,
+            lastPollingAt = stalePollingAt
+        });
+        db.NotificationSenders.Add(sender);
+        await db.SaveChangesAsync();
+
+        var httpFactory = new StaticHttpClientFactory(new HttpClient(new TelegramEmptyPollingHandler()));
+        var updateService = new TelegramBotUpdateService(
+            db,
+            httpFactory,
+            NullLogger<TelegramBotUpdateService>.Instance);
+
+        await updateService.PollEnabledSendersAsync();
+
+        await db.Entry(sender).ReloadAsync();
+        using var config = JsonDocument.Parse(sender.ConfigJson);
+        Assert.True(config.RootElement.GetProperty("lastPollingAt").GetDateTime() > stalePollingAt);
+        Assert.NotNull(sender.UpdatedAt);
     }
 
     [Fact]
@@ -5601,6 +5680,15 @@ public class NotificationServiceTests
                 Content = new StringContent(payload)
             });
         }
+    }
+
+    private sealed class TelegramEmptyPollingHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"ok":true,"result":[]}""")
+            });
     }
 
     private sealed class TelegramProfileHandler : HttpMessageHandler

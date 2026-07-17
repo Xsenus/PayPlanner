@@ -13,6 +13,7 @@ namespace PayPlanner.Api.Services.Notifications;
 public sealed class TelegramBotUpdateService : ITelegramBotUpdateService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly TimeSpan PollingHeartbeatPersistenceInterval = TimeSpan.FromMinutes(5);
 
     private readonly PaymentContext _context;
     private readonly IHttpClientFactory _httpClientFactory;
@@ -186,14 +187,15 @@ public sealed class TelegramBotUpdateService : ITelegramBotUpdateService
 
             try
             {
-                if (!string.IsNullOrWhiteSpace(config.WebhookUrl))
+                var webhookConfigurationChanged = !string.IsNullOrWhiteSpace(config.WebhookUrl);
+                if (webhookConfigurationChanged)
                 {
                     await DeleteWebhookCoreAsync(config, cancellationToken);
                     config.WebhookUrl = string.Empty;
                     config.WebhookSyncedAt = null;
                 }
 
-                await PollSenderAsync(sender, config, cancellationToken);
+                await PollSenderAsync(sender, config, webhookConfigurationChanged, cancellationToken);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -404,8 +406,10 @@ public sealed class TelegramBotUpdateService : ITelegramBotUpdateService
     private async Task PollSenderAsync(
         NotificationSender sender,
         TelegramSenderConfig config,
+        bool forceConfigurationSave,
         CancellationToken cancellationToken)
     {
+        var previousLastUpdateId = config.LastUpdateId;
         using var client = TelegramBotApiHttpClientFactory.Create(_httpClientFactory, config.ToConnectionSettings());
         var query = new Dictionary<string, string>
         {
@@ -448,9 +452,20 @@ public sealed class TelegramBotUpdateService : ITelegramBotUpdateService
             await ProcessUpdateAsync(sender, config, update, cancellationToken);
         }
 
-        config.LastPollingAt = DateTime.UtcNow;
+        var polledAt = DateTime.UtcNow;
+        var heartbeatIsDue = !config.LastPollingAt.HasValue
+                             || config.LastPollingAt.Value > polledAt
+                             || polledAt - config.LastPollingAt.Value >= PollingHeartbeatPersistenceInterval;
+        if (!forceConfigurationSave
+            && config.LastUpdateId == previousLastUpdateId
+            && !heartbeatIsDue)
+        {
+            return;
+        }
+
+        config.LastPollingAt = polledAt;
         sender.ConfigJson = JsonSerializer.Serialize(config, JsonOptions);
-        sender.UpdatedAt = DateTime.UtcNow;
+        sender.UpdatedAt = polledAt;
     }
 
     private async Task ProcessUpdateAsync(
