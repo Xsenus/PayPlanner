@@ -52,6 +52,8 @@ if (!string.IsNullOrWhiteSpace(dataProtectionKeysPath))
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.Configure<SlowRequestLoggingOptions>(
+    builder.Configuration.GetSection(SlowRequestLoggingOptions.SectionName));
 
 void ConfigureSqlite(DbContextOptionsBuilder options) => options
     .UseSqlite(
@@ -297,6 +299,8 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseApiErrorContract(app.Environment);
+app.UseRouting();
+app.UseMiddleware<SlowRequestLoggingMiddleware>();
 app.UseCors();
 app.UseResponseCompression();
 app.UseAuthentication();
