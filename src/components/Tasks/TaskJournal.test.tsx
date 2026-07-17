@@ -6,7 +6,7 @@ import { TaskJournal } from './TaskJournal';
 import type { TaskJournalSettingsDto } from '../../services/api';
 import type { Client, ClientCase, LegalEntitySummary } from '../../types';
 import { fromTimeZoneDateTimeInput, getZonedParts, toTimeZoneDateKey } from '../../utils/timeZoneDate';
-import type { TaskJournalAssignee, TaskJournalItem } from '../../utils/taskJournalStore';
+import { TASK_JOURNAL_EVENT, type TaskJournalAssignee, type TaskJournalItem } from '../../utils/taskJournalStore';
 import {
   FORCED_TASK_SNOOZE_STORAGE_KEY,
   getForcedTaskApprovalSnoozeKey,
@@ -3225,11 +3225,33 @@ describe('TaskJournal', () => {
   it('completes an active task with an existing result from the quick action', async () => {
     await renderJournal([createTask({ result: 'Результат уже заполнен.' })]);
 
+    apiMock.getTaskJournalItems.mockClear();
+    apiMock.getTaskJournalAssignees.mockClear();
+    apiMock.getTaskJournalSettings.mockClear();
+    apiMock.getCalendarSyncSettings.mockClear();
+    apiMock.getUserSetting.mockClear();
+
     fireEvent.click(screen.getAllByTitle('Завершить')[0]);
 
     await waitFor(() => expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(1));
     expect(apiMock.updateTaskJournalStatus).toHaveBeenCalledWith(101, 'done', undefined);
+    expect(apiMock.getTaskJournalAssignees).toHaveBeenCalledTimes(1);
+    expect(apiMock.getTaskJournalSettings).toHaveBeenCalledTimes(1);
+    expect(apiMock.getCalendarSyncSettings).toHaveBeenCalledTimes(1);
+    expect(apiMock.getUserSetting).toHaveBeenCalledTimes(2);
     expect(toastMock.error).not.toHaveBeenCalledWith('Добавьте результат по задаче перед завершением.', 'Журнал задач');
+  });
+
+  it('refreshes once when another task journal instance reports a change', async () => {
+    await renderJournal();
+    apiMock.getTaskJournalItems.mockClear();
+
+    window.dispatchEvent(new CustomEvent(TASK_JOURNAL_EVENT, {
+      detail: { source: {} },
+    }));
+
+    await waitFor(() => expect(apiMock.getTaskJournalItems).toHaveBeenCalledTimes(1));
   });
 
   it('asks for task result before quick completion sends a task to approval', async () => {

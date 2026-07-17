@@ -2011,6 +2011,7 @@ export function TaskJournal({
   const [creatingAutomationCaseId, setCreatingAutomationCaseId] = useState<number | null>(null);
   const [creatingAutomationAll, setCreatingAutomationAll] = useState(false);
   const automationCandidatesRequestRef = useRef(0);
+  const taskJournalEventSourceRef = useRef<object>({});
   const [loading, setLoading] = useState(true);
   const [filterOwnerKey, setFilterOwnerKey] = useState(() => getTaskJournalFilterStorageKey(currentUserId, mode));
   const [savedViewOwnerKey, setSavedViewOwnerKey] = useState(() => getTaskJournalSavedViewsStorageKey(currentUserId, mode));
@@ -2338,7 +2339,9 @@ export function TaskJournal({
   }, [onRouteTaskChange]);
 
   const emitTaskChange = useCallback(() => {
-    window.dispatchEvent(new CustomEvent(TASK_JOURNAL_EVENT));
+    window.dispatchEvent(new CustomEvent(TASK_JOURNAL_EVENT, {
+      detail: { source: taskJournalEventSourceRef.current },
+    }));
   }, []);
 
   const loadAutomationCandidates = useCallback(async (
@@ -2387,7 +2390,16 @@ export function TaskJournal({
 
   useEffect(() => {
     void refreshTasks();
-    const refresh = () => void refreshTasks();
+    const refresh = (event: Event) => {
+      const source = event instanceof CustomEvent
+        ? (event.detail as { source?: object } | null)?.source
+        : null;
+      if (source === taskJournalEventSourceRef.current) {
+        return;
+      }
+
+      void refreshTasks();
+    };
     window.addEventListener(TASK_JOURNAL_EVENT, refresh);
     return () => window.removeEventListener(TASK_JOURNAL_EVENT, refresh);
   }, [refreshTasks]);
