@@ -2079,54 +2079,18 @@ public class InvoicesControllerInternalCoverageTests
     }
 
     [Fact]
-    public async Task ResolveInvoiceNumberForSaveAsync_ReturnsNull_WhenAllImportSuffixesAreReserved()
+    public void ResolveAvailableImportInvoiceNumber_ReturnsNull_WhenAllImportSuffixesAreReserved()
     {
-        await using var db = await CreateContextAsync();
-        var controller = CreateController(db, isAdmin: true, userId: null);
-        var client = new Client
+        var reservedNumbers = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            Name = "Reserved invoice client",
-            Email = "reserved-invoice-client@example.com",
-            IsActive = true,
-        };
-        var invoiceDate = new DateTime(2026, 5, 3);
-        var reservedNumbers = new List<string>(10_000) { "INV-LOCKED" };
-        reservedNumbers.AddRange(Enumerable.Range(1, 9_999).Select(i => $"INV-LOCKED-IMP{i}"));
-
-        db.Clients.Add(client);
-        foreach (var reservedNumber in reservedNumbers)
-        {
-            var invoice = new Invoice
-            {
-                Number = reservedNumber,
-                Date = invoiceDate,
-            };
-
-            db.Payments.Add(new Payment
-            {
-                Account = reservedNumber,
-                AccountDate = invoiceDate,
-                Amount = 100m,
-                Date = invoiceDate,
-                PlannedDate = invoiceDate,
-                Status = PaymentStatus.Pending,
-                Type = PaymentType.Income,
-                DocumentKind = DocumentKind.Invoice,
-                Client = client,
-                Invoice = invoice,
-            });
-        }
-
-        await db.SaveChangesAsync();
-
-        var resolved = await InvokePrivateAsync<string?>(
-            controller,
-            "ResolveInvoiceNumberForSaveAsync",
             "INV-LOCKED",
-            invoiceDate,
-            null,
-            true,
-            CancellationToken.None);
+        };
+        reservedNumbers.UnionWith(Enumerable.Range(1, 9_999).Select(i => $"INV-LOCKED-IMP{i}"));
+
+        var resolved = InvokePrivateStatic(
+            "ResolveAvailableImportInvoiceNumber",
+            "INV-LOCKED",
+            reservedNumbers);
 
         Assert.Null(resolved);
     }

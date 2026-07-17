@@ -5977,31 +5977,35 @@ public class InvoicesController : ControllerBase
         if (allowDuplicateOnImport)
         {
             var reservedNumbers = await LoadReservedInvoiceNumberLookupAsync(accountDate, excludeId, ct);
-            if (!reservedNumbers.Contains(BuildInvoiceNumberLookupKey(number)))
-            {
-                return number;
-            }
-
-            var baseNumber = number;
-            for (var i = 1; i <= 9999; i++)
-            {
-                var suffix = $"-IMP{i}";
-                var maxBaseLength = Math.Max(1, 120 - suffix.Length);
-                var truncatedBase = baseNumber.Length > maxBaseLength
-                    ? baseNumber[..maxBaseLength]
-                    : baseNumber;
-                var candidate = $"{truncatedBase}{suffix}";
-                if (!reservedNumbers.Contains(BuildInvoiceNumberLookupKey(candidate)))
-                {
-                    return candidate;
-                }
-            }
-
-            return null;
+            return ResolveAvailableImportInvoiceNumber(number, reservedNumbers);
         }
 
         var duplicateError = await EnsureInvoiceNumberIsUniqueAsync(number, accountDate, excludeId, ct);
         return duplicateError is null ? number : null;
+    }
+
+    private static string? ResolveAvailableImportInvoiceNumber(string number, IReadOnlySet<string> reservedNumbers)
+    {
+        if (!reservedNumbers.Contains(BuildInvoiceNumberLookupKey(number)))
+        {
+            return number;
+        }
+
+        for (var i = 1; i <= 9999; i++)
+        {
+            var suffix = $"-IMP{i}";
+            var maxBaseLength = Math.Max(1, 120 - suffix.Length);
+            var truncatedBase = number.Length > maxBaseLength
+                ? number[..maxBaseLength]
+                : number;
+            var candidate = $"{truncatedBase}{suffix}";
+            if (!reservedNumbers.Contains(BuildInvoiceNumberLookupKey(candidate)))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
     }
 
     private async Task<HashSet<string>> LoadReservedInvoiceNumberLookupAsync(DateTime accountDate, int? excludeId, CancellationToken ct)
