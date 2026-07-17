@@ -5960,15 +5960,18 @@ services.Id,
     [Fact]
     public async Task PaymentOrders_GroupsFactOperationsByPaymentOrderNumber()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await SqliteTestContextFactory.CreateAsync(interceptor: interceptor);
         db.MoneyOperations.AddRange(
-            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 6_000m, new DateTime(2026, 5, 1), "Основной банк", paymentOrderNumber: "PO-1"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 2_500m, new DateTime(2026, 5, 1, 9, 0, 0), "Основной банк", paymentOrderNumber: "PO-1"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 3_500m, new DateTime(2026, 5, 1, 15, 0, 0), "Основной банк", paymentOrderNumber: "PO-1"),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 2_000m, new DateTime(2026, 5, 2), "Основной банк", paymentOrderNumber: " po-1 "),
             Operation(MoneyOperationSource.Cash, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 1_500m, new DateTime(2026, 5, 3), "Касса", paymentOrderNumber: "PO-2"),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 500m, new DateTime(2026, 5, 4), "Основной банк"),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Plan, 99_999m, new DateTime(2026, 5, 5), "Основной банк", paymentOrderNumber: "PO-1"),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Transfer, MoneyOperationAccountingType.Fact, 50_000m, new DateTime(2026, 5, 6), "Основной банк", paymentOrderNumber: "PO-1"));
         await db.SaveChangesAsync();
+        interceptor.Commands.Clear();
         var controller = CreateController(db);
 
         var action = await controller.PaymentOrders(
@@ -5998,6 +6001,8 @@ services.Id,
                 Assert.Equal(2_000m, item.Expense);
                 Assert.Equal(4_000m, item.NetTotal);
                 Assert.Equal(8_000m, item.TotalAmount);
+                Assert.Equal(2, item.IncomeCount);
+                Assert.Equal(1, item.ExpenseCount);
                 Assert.Equal(80m, item.Share);
             },
             item =>
@@ -6014,6 +6019,13 @@ services.Id,
                 Assert.Equal(0m, item.Expense);
                 Assert.Equal(5m, item.Share);
             });
+
+        var paymentOrderQuery = Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"MoneyOperations\"", StringComparison.Ordinal));
+        Assert.Contains("GROUP BY", paymentOrderQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SUM", paymentOrderQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("COUNT", paymentOrderQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("MIN", paymentOrderQuery, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
