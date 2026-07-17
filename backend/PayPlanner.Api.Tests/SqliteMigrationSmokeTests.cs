@@ -26,8 +26,12 @@ public class SqliteMigrationSmokeTests
 
         try
         {
+            await using var connection = new SqliteConnection($"Data Source={databasePath};Pooling=False");
+            await connection.OpenAsync();
+            await ConfigureFastTemporaryDatabaseAsync(connection);
+
             var options = new DbContextOptionsBuilder<PaymentContext>()
-                .UseSqlite($"Data Source={databasePath}")
+                .UseSqlite(connection)
                 .UsePayPlannerSqliteMigrations()
                 .ConfigureWarnings(warnings => warnings.Ignore(RelationalEventId.PendingModelChangesWarning))
                 .Options;
@@ -172,6 +176,10 @@ public class SqliteMigrationSmokeTests
                 Assert.StartsWith("ИНВК-2026-", inventory.Number);
             }
 
+            await connection.CloseAsync();
+            await connection.OpenAsync();
+            await ConfigureFastTemporaryDatabaseAsync(connection);
+
             await using (var verificationContext = new PaymentContext(options))
             {
                 var storedSubscription = await verificationContext.UserPushSubscriptions.SingleAsync();
@@ -200,6 +208,13 @@ public class SqliteMigrationSmokeTests
             DeleteIfExists(databasePath + "-shm");
             DeleteIfExists(databasePath + "-wal");
         }
+    }
+
+    private static async Task ConfigureFastTemporaryDatabaseAsync(SqliteConnection connection)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "PRAGMA journal_mode=MEMORY; PRAGMA synchronous=OFF; PRAGMA temp_store=MEMORY;";
+        await command.ExecuteNonQueryAsync();
     }
 
     private static BanksController CreateBanksController(PaymentContext context, int userId)
