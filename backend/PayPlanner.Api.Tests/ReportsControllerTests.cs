@@ -4789,15 +4789,18 @@ services.Id,
     [Fact]
     public async Task Vat_GroupsFactOperationsByVatRate()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await SqliteTestContextFactory.CreateAsync(interceptor: interceptor);
         db.MoneyOperations.AddRange(
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 12_000m, new DateTime(2026, 5, 1), "Основной банк", vatRate: 20m, vatAmount: 2_000m),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 1_200m, new DateTime(2026, 5, 1), "Основной банк", vatRate: 20.004m, vatAmount: 200m),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 5_500m, new DateTime(2026, 5, 2), "Основной банк", vatRate: 10m, vatAmount: 500m),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 6_000m, new DateTime(2026, 5, 3), "Основной банк", vatRate: 20m, vatAmount: 1_000m),
             Operation(MoneyOperationSource.Cash, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 3_000m, new DateTime(2026, 5, 4), "Касса"),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Plan, 99_999m, new DateTime(2026, 5, 5), "Основной банк", vatRate: 20m, vatAmount: 16_666.50m),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Transfer, MoneyOperationAccountingType.Fact, 50_000m, new DateTime(2026, 5, 6), "Основной банк", vatRate: 20m, vatAmount: 8_333.33m));
         await db.SaveChangesAsync();
+        interceptor.Commands.Clear();
         var controller = CreateController(db);
 
         var action = await controller.Vat(
@@ -4814,11 +4817,11 @@ services.Id,
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
         var report = Assert.IsType<VatReportDto>(ok.Value);
-        Assert.Equal(17_500m, report.IncomeAmountTotal);
-        Assert.Equal(2_500m, report.IncomeVatTotal);
+        Assert.Equal(18_700m, report.IncomeAmountTotal);
+        Assert.Equal(2_700m, report.IncomeVatTotal);
         Assert.Equal(9_000m, report.ExpenseAmountTotal);
         Assert.Equal(1_000m, report.ExpenseVatTotal);
-        Assert.Equal(1_500m, report.VatBalance);
+        Assert.Equal(1_700m, report.VatBalance);
 
         Assert.Collection(
             report.Rates,
@@ -4826,13 +4829,14 @@ services.Id,
             {
                 Assert.Equal(20m, item.VatRate);
                 Assert.Equal("20%", item.VatRateLabel);
-                Assert.Equal(10_000m, item.IncomeBase);
-                Assert.Equal(2_000m, item.IncomeVat);
-                Assert.Equal(12_000m, item.IncomeGross);
+                Assert.Equal(11_000m, item.IncomeBase);
+                Assert.Equal(2_200m, item.IncomeVat);
+                Assert.Equal(13_200m, item.IncomeGross);
                 Assert.Equal(5_000m, item.ExpenseBase);
                 Assert.Equal(1_000m, item.ExpenseVat);
                 Assert.Equal(6_000m, item.ExpenseGross);
-                Assert.Equal(1_000m, item.NetVat);
+                Assert.Equal(1_200m, item.NetVat);
+                Assert.Equal(2, item.IncomeCount);
             },
             item =>
             {
@@ -4851,6 +4855,11 @@ services.Id,
                 Assert.Equal(0m, item.ExpenseVat);
                 Assert.Equal(-0m, item.NetVat);
             });
+
+        var vatQuery = Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"MoneyOperations\"", StringComparison.Ordinal));
+        Assert.Contains("GROUP BY", vatQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("COUNT", vatQuery, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

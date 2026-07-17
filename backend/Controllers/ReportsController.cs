@@ -6498,20 +6498,22 @@ public class ReportsController : ControllerBase
         CancellationToken ct)
     {
         var rows = await BuildFactQuery(from, to, source, accountName, counterpartyName, clientId, caseId, contractId, incomeTypeId, paymentsVisibility)
-            .Select(item => new
+            .GroupBy(item => new { item.Direction, item.VatRate })
+            .Select(group => new VatAggregateQueryRow
             {
-                item.Direction,
-                item.Amount,
-                item.VatRate,
-                item.VatAmount,
+                Direction = group.Key.Direction,
+                VatRate = group.Key.VatRate,
+                GrossAmount = group.Sum(item => item.Amount),
+                VatAmount = group.Sum(item => item.VatAmount ?? 0m),
+                Count = group.Count(),
             })
             .ToListAsync(ct);
 
         var incomeRows = rows.Where(item => item.Direction == MoneyOperationDirection.Income).ToList();
         var expenseRows = rows.Where(item => item.Direction == MoneyOperationDirection.Expense).ToList();
 
-        var incomeVatTotal = incomeRows.Sum(item => item.VatAmount ?? 0m);
-        var expenseVatTotal = expenseRows.Sum(item => item.VatAmount ?? 0m);
+        var incomeVatTotal = incomeRows.Sum(item => item.VatAmount);
+        var expenseVatTotal = expenseRows.Sum(item => item.VatAmount);
 
         var rates = rows
             .GroupBy(item => NormalizeVatRate(item.VatRate))
@@ -6519,16 +6521,16 @@ public class ReportsController : ControllerBase
             {
                 var incomeGross = group
                     .Where(item => item.Direction == MoneyOperationDirection.Income)
-                    .Sum(item => item.Amount);
+                    .Sum(item => item.GrossAmount);
                 var incomeVat = group
                     .Where(item => item.Direction == MoneyOperationDirection.Income)
-                    .Sum(item => item.VatAmount ?? 0m);
+                    .Sum(item => item.VatAmount);
                 var expenseGross = group
                     .Where(item => item.Direction == MoneyOperationDirection.Expense)
-                    .Sum(item => item.Amount);
+                    .Sum(item => item.GrossAmount);
                 var expenseVat = group
                     .Where(item => item.Direction == MoneyOperationDirection.Expense)
-                    .Sum(item => item.VatAmount ?? 0m);
+                    .Sum(item => item.VatAmount);
 
                 return new VatReportItemDto
                 {
@@ -6541,8 +6543,12 @@ public class ReportsController : ControllerBase
                     ExpenseVat = expenseVat,
                     ExpenseGross = expenseGross,
                     NetVat = incomeVat - expenseVat,
-                    IncomeCount = group.Count(item => item.Direction == MoneyOperationDirection.Income),
-                    ExpenseCount = group.Count(item => item.Direction == MoneyOperationDirection.Expense),
+                    IncomeCount = group
+                        .Where(item => item.Direction == MoneyOperationDirection.Income)
+                        .Sum(item => item.Count),
+                    ExpenseCount = group
+                        .Where(item => item.Direction == MoneyOperationDirection.Expense)
+                        .Sum(item => item.Count),
                 };
             })
             .OrderBy(item => item.VatRate.HasValue ? 0 : 1)
@@ -6554,9 +6560,9 @@ public class ReportsController : ControllerBase
             From = from,
             To = to,
             Source = source,
-            IncomeAmountTotal = incomeRows.Sum(item => item.Amount),
+            IncomeAmountTotal = incomeRows.Sum(item => item.GrossAmount),
             IncomeVatTotal = incomeVatTotal,
-            ExpenseAmountTotal = expenseRows.Sum(item => item.Amount),
+            ExpenseAmountTotal = expenseRows.Sum(item => item.GrossAmount),
             ExpenseVatTotal = expenseVatTotal,
             VatBalance = incomeVatTotal - expenseVatTotal,
             Rates = rates,
@@ -9217,5 +9223,14 @@ public class ReportsController : ControllerBase
         public MoneyOperationDirection Direction { get; init; }
         public MoneyOperationAccountingType AccountingType { get; init; }
         public decimal Amount { get; init; }
+    }
+
+    private sealed class VatAggregateQueryRow
+    {
+        public MoneyOperationDirection Direction { get; init; }
+        public decimal? VatRate { get; init; }
+        public decimal GrossAmount { get; init; }
+        public decimal VatAmount { get; init; }
+        public int Count { get; init; }
     }
 }

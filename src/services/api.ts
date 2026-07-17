@@ -6411,9 +6411,9 @@ export class ApiService {
     caseId?: number;
     contractId?: number;
     incomeTypeId?: number;
-  }) {
+  }, options?: { signal?: AbortSignal }) {
     const q = buildQuery(params ?? {});
-    return this.request<VatReport>(`/reports/vat${q}`);
+    return this.request<VatReport>(`/reports/vat${q}`, { signal: options?.signal });
   }
 
   async getPlanFactReport(params?: {
