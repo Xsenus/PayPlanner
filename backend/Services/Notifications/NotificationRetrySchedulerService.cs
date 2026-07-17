@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
+using System.Linq.Expressions;
 
 namespace PayPlanner.Api.Services.Notifications;
 
@@ -18,11 +19,13 @@ public sealed class NotificationRetrySchedulerService : BackgroundService
     public const int DefaultMaxAttempts = 3;
 
     private static readonly TimeSpan StartupDelay = TimeSpan.FromMinutes(2);
+    private const int PrefixQueryBatchSize = 200;
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IConfiguration _configuration;
     private readonly ILogger<NotificationRetrySchedulerService> _logger;
     private readonly ISystemJobRunStateService? _jobRunState;
+    private readonly SemaphoreSlim _runLock = new(1, 1);
 
     public NotificationRetrySchedulerService(
         IServiceScopeFactory scopeFactory,
@@ -83,66 +86,74 @@ public sealed class NotificationRetrySchedulerService : BackgroundService
 
     public async Task<NotificationRetrySchedulerResult> RunOnceAsync(CancellationToken cancellationToken = default)
     {
-        var startedAt = DateTime.UtcNow;
-        var settings = await ResolveSettingsAsync(cancellationToken);
-        if (!settings.Enabled)
+        await _runLock.WaitAsync(cancellationToken);
+        try
         {
-            await RecordSuccessAsync(startedAt, 0, 0, "Повторная отправка уведомлений выключена в настройках.", cancellationToken);
-            return new NotificationRetrySchedulerResult(0, 0, false, null);
-        }
-
-        var candidates = await LoadRetryCandidatesAsync(settings, cancellationToken);
-        var retried = 0;
-        var skipped = 0;
-        string? lastError = null;
-
-        using var scope = _scopeFactory.CreateScope();
-        var notificationService = scope.ServiceProvider.GetRequiredService<INotificationService>();
-        var webPushNotificationService = scope.ServiceProvider.GetService<IWebPushNotificationService>();
-
-        foreach (var delivery in candidates)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            try
+            var startedAt = DateTime.UtcNow;
+            var settings = await ResolveSettingsAsync(cancellationToken);
+            if (!settings.Enabled)
             {
-                var wasRetried = false;
-                if (string.Equals(delivery.Channel, NotificationChannels.WebPush, StringComparison.OrdinalIgnoreCase))
+                await RecordSuccessAsync(startedAt, 0, 0, "Повторная отправка уведомлений выключена в настройках.", cancellationToken);
+                return new NotificationRetrySchedulerResult(0, 0, false, null);
+            }
+
+            var candidates = await LoadRetryCandidatesAsync(settings, cancellationToken);
+            var retried = 0;
+            var skipped = 0;
+            string? lastError = null;
+
+            using var scope = _scopeFactory.CreateScope();
+            var notificationService = scope.ServiceProvider.GetRequiredService<INotificationService>();
+            var webPushNotificationService = scope.ServiceProvider.GetService<IWebPushNotificationService>();
+
+            foreach (var delivery in candidates)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                try
                 {
-                    if (webPushNotificationService is null)
+                    var wasRetried = false;
+                    if (string.Equals(delivery.Channel, NotificationChannels.WebPush, StringComparison.OrdinalIgnoreCase))
                     {
-                        throw new InvalidOperationException("WebPushNotificationServiceMissing");
+                        if (webPushNotificationService is null)
+                        {
+                            throw new InvalidOperationException("WebPushNotificationServiceMissing");
+                        }
+
+                        wasRetried = await webPushNotificationService.RetryDeliveryAsync(delivery.Id, cancellationToken) is not null;
+                    }
+                    else
+                    {
+                        var retryDeliveries = await notificationService.RetryDeliveryAsync(delivery.Id, cancellationToken);
+                        wasRetried = retryDeliveries.Count > 0;
                     }
 
-                    wasRetried = await webPushNotificationService.RetryDeliveryAsync(delivery.Id, cancellationToken) is not null;
+                    if (wasRetried)
+                    {
+                        retried++;
+                    }
+                    else
+                    {
+                        skipped++;
+                    }
                 }
-                else
-                {
-                    var retryDeliveries = await notificationService.RetryDeliveryAsync(delivery.Id, cancellationToken);
-                    wasRetried = retryDeliveries.Count > 0;
-                }
-
-                if (wasRetried)
-                {
-                    retried++;
-                }
-                else
+                catch (InvalidOperationException ex)
                 {
                     skipped++;
+                    lastError = ex.Message;
+                    _logger.LogInformation(ex, "Notification delivery {DeliveryId} was skipped by retry scheduler.", delivery.Id);
                 }
             }
-            catch (InvalidOperationException ex)
-            {
-                skipped++;
-                lastError = ex.Message;
-                _logger.LogInformation(ex, "Notification delivery {DeliveryId} was skipped by retry scheduler.", delivery.Id);
-            }
-        }
 
-        var summary = retried > 0
-            ? $"Повторно отправлены уведомления: {retried}, пропущено: {skipped}."
-            : "Проверка ошибок доставки выполнена, уведомлений для повтора не найдено.";
-        await RecordSuccessAsync(startedAt, retried, skipped, summary, cancellationToken);
-        return new NotificationRetrySchedulerResult(retried, skipped, true, lastError);
+            var summary = retried > 0
+                ? $"Повторно отправлены уведомления: {retried}, пропущено: {skipped}."
+                : "Проверка ошибок доставки выполнена, уведомлений для повтора не найдено.";
+            await RecordSuccessAsync(startedAt, retried, skipped, summary, cancellationToken);
+            return new NotificationRetrySchedulerResult(retried, skipped, true, lastError);
+        }
+        finally
+        {
+            _runLock.Release();
+        }
     }
 
     public async Task<int> CountEligibleRetriesAsync(CancellationToken cancellationToken = default)
@@ -176,26 +187,71 @@ public sealed class NotificationRetrySchedulerService : BackgroundService
             .Take(settings.BatchSize * 5)
             .ToListAsync(cancellationToken);
 
+        var eligibleByAttempt = failed
+            .Where(delivery => CountRetryAttempts(delivery.EventKey) < settings.MaxAttempts)
+            .ToList();
+        var childPrefixes = eligibleByAttempt
+            .Select(delivery => $"{delivery.EventKey}:retry:")
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var childEventKeys = await LoadChildEventKeysAsync(context, childPrefixes, cancellationToken);
+        var retriedEventKeys = childEventKeys
+            .Select(ResolveParentEventKey)
+            .ToHashSet(StringComparer.Ordinal);
+        var candidatesWithoutRetries = eligibleByAttempt
+            .Where(delivery => !retriedEventKeys.Contains(delivery.EventKey))
+            .ToList();
+
+        var webPushCandidates = candidatesWithoutRetries
+            .Where(delivery => string.Equals(delivery.Channel, NotificationChannels.WebPush, StringComparison.OrdinalIgnoreCase))
+            .Where(delivery => !WebPushSubscriptionHealth.IsNonRetryableDeliveryError(delivery.Error))
+            .Where(delivery => delivery.RecipientUserId.HasValue && !string.IsNullOrWhiteSpace(delivery.RecipientAddress))
+            .ToList();
+        var webPushUserIds = webPushCandidates
+            .Select(delivery => delivery.RecipientUserId!.Value)
+            .Distinct()
+            .ToArray();
+        var webPushEndpoints = webPushCandidates
+            .Select(delivery => delivery.RecipientAddress)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var activeSubscriptions = webPushCandidates.Count == 0
+            ? []
+            : await context.UserPushSubscriptions
+                .AsNoTracking()
+                .Where(item =>
+                    webPushUserIds.Contains(item.UserId)
+                    && webPushEndpoints.Contains(item.Endpoint)
+                    && item.IsActive
+                    && item.RevokedAt == null)
+                .Select(item => new { item.UserId, item.Endpoint })
+                .ToListAsync(cancellationToken);
+        var activeSubscriptionKeys = activeSubscriptions
+            .Select(item => (item.UserId, item.Endpoint))
+            .ToHashSet();
+        var baseEventKeys = webPushCandidates
+            .Select(delivery => ResolveBaseEventKey(delivery.EventKey))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var sourceNotifications = webPushCandidates.Count == 0
+            ? []
+            : await context.UserNotifications
+                .AsNoTracking()
+                .Where(item =>
+                    webPushUserIds.Contains(item.RecipientUserId)
+                    && baseEventKeys.Contains(item.EventKey))
+                .Select(item => new { item.RecipientUserId, item.EventKey })
+                .ToListAsync(cancellationToken);
+        var sourceNotificationKeys = sourceNotifications
+            .Select(item => (item.RecipientUserId, item.EventKey))
+            .ToHashSet();
+
         var result = new List<NotificationDelivery>();
-        foreach (var delivery in failed)
+        foreach (var delivery in candidatesWithoutRetries)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (string.Equals(delivery.Channel, NotificationChannels.WebPush, StringComparison.OrdinalIgnoreCase)
-                && !await IsRetryableWebPushDeliveryAsync(context, delivery, cancellationToken))
-            {
-                continue;
-            }
-
-            if (CountRetryAttempts(delivery.EventKey) >= settings.MaxAttempts)
-            {
-                continue;
-            }
-
-            var childPrefix = $"{delivery.EventKey}:retry:";
-            var alreadyRetried = await context.NotificationDeliveries
-                .AsNoTracking()
-                .AnyAsync(item => item.EventKey.StartsWith(childPrefix), cancellationToken);
-            if (alreadyRetried)
+                && !IsRetryableWebPushDelivery(delivery, activeSubscriptionKeys, sourceNotificationKeys))
             {
                 continue;
             }
@@ -210,10 +266,10 @@ public sealed class NotificationRetrySchedulerService : BackgroundService
         return result;
     }
 
-    private static async Task<bool> IsRetryableWebPushDeliveryAsync(
-        PaymentContext context,
+    private static bool IsRetryableWebPushDelivery(
         NotificationDelivery delivery,
-        CancellationToken cancellationToken)
+        IReadOnlySet<(int UserId, string Endpoint)> activeSubscriptionKeys,
+        IReadOnlySet<(int RecipientUserId, string EventKey)> sourceNotificationKeys)
     {
         if (WebPushSubscriptionHealth.IsNonRetryableDeliveryError(delivery.Error))
         {
@@ -225,26 +281,52 @@ public sealed class NotificationRetrySchedulerService : BackgroundService
             return false;
         }
 
-        var hasActiveSubscription = await context.UserPushSubscriptions
-            .AsNoTracking()
-            .AnyAsync(item =>
-                item.UserId == delivery.RecipientUserId.Value
-                && item.Endpoint == delivery.RecipientAddress
-                && item.IsActive
-                && item.RevokedAt == null,
-                cancellationToken);
-        if (!hasActiveSubscription)
+        if (!activeSubscriptionKeys.Contains((delivery.RecipientUserId.Value, delivery.RecipientAddress)))
         {
             return false;
         }
 
         var baseEventKey = ResolveBaseEventKey(delivery.EventKey);
-        return await context.UserNotifications
-            .AsNoTracking()
-            .AnyAsync(item =>
-                item.EventKey == baseEventKey
-                && item.RecipientUserId == delivery.RecipientUserId.Value,
-                cancellationToken);
+        return sourceNotificationKeys.Contains((delivery.RecipientUserId.Value, baseEventKey));
+    }
+
+    private static Expression<Func<NotificationDelivery, bool>> BuildEventKeyPrefixPredicate(
+        IReadOnlyCollection<string> prefixes)
+    {
+        var delivery = Expression.Parameter(typeof(NotificationDelivery), "delivery");
+        var eventKey = Expression.Property(delivery, nameof(NotificationDelivery.EventKey));
+        var startsWith = typeof(string).GetMethod(nameof(string.StartsWith), [typeof(string)])!;
+        Expression body = Expression.Constant(false);
+        foreach (var prefix in prefixes)
+        {
+            body = Expression.OrElse(body, Expression.Call(eventKey, startsWith, Expression.Constant(prefix)));
+        }
+
+        return Expression.Lambda<Func<NotificationDelivery, bool>>(body, delivery);
+    }
+
+    private static async Task<IReadOnlyList<string>> LoadChildEventKeysAsync(
+        PaymentContext context,
+        IReadOnlyList<string> prefixes,
+        CancellationToken cancellationToken)
+    {
+        if (prefixes.Count == 0)
+        {
+            return [];
+        }
+
+        var result = new List<string>();
+        for (var offset = 0; offset < prefixes.Count; offset += PrefixQueryBatchSize)
+        {
+            var batch = prefixes.Skip(offset).Take(PrefixQueryBatchSize).ToArray();
+            result.AddRange(await context.NotificationDeliveries
+                .AsNoTracking()
+                .Where(BuildEventKeyPrefixPredicate(batch))
+                .Select(item => item.EventKey)
+                .ToListAsync(cancellationToken));
+        }
+
+        return result;
     }
 
     private async Task<NotificationRetrySettings> ResolveSettingsAsync(CancellationToken cancellationToken)
@@ -294,6 +376,12 @@ public sealed class NotificationRetrySchedulerService : BackgroundService
     private static string ResolveBaseEventKey(string eventKey)
     {
         var retryIndex = eventKey.IndexOf(":retry:", StringComparison.Ordinal);
+        return retryIndex < 0 ? eventKey : eventKey[..retryIndex];
+    }
+
+    private static string ResolveParentEventKey(string eventKey)
+    {
+        var retryIndex = eventKey.LastIndexOf(":retry:", StringComparison.Ordinal);
         return retryIndex < 0 ? eventKey : eventKey[..retryIndex];
     }
 

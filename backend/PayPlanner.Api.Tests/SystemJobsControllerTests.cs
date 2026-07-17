@@ -965,6 +965,202 @@ public class SystemJobsControllerTests
     }
 
     [Fact]
+    public async Task NotificationRetrySchedulerService_LoadsEligibilityInBatches()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var scope = await CreateDbScopeAsync(interceptor);
+        var now = DateTime.UtcNow;
+        scope.Db.SystemSettings.AddRange(
+            new SystemSetting { Key = NotificationRetrySchedulerService.EnabledSettingKey, Value = "true", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = NotificationRetrySchedulerService.DelayMinutesSettingKey, Value = "1", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = NotificationRetrySchedulerService.BatchSizeSettingKey, Value = "10", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = NotificationRetrySchedulerService.MaxAttemptsSettingKey, Value = "3", CreatedAt = now, UpdatedAt = now });
+        var role = new Role { Name = $"webpush-batch-role-{Guid.NewGuid():N}", Description = "Web push batch role" };
+        scope.Db.Roles.Add(role);
+        await scope.Db.SaveChangesAsync();
+        var user = new User
+        {
+            Email = $"webpush-batch-{Guid.NewGuid():N}@example.com",
+            FullName = "Web Push Batch User",
+            PasswordHash = "hash",
+            RoleId = role.Id,
+            IsApproved = true,
+            IsActive = true,
+        };
+        scope.Db.Users.Add(user);
+        await scope.Db.SaveChangesAsync();
+        var eventKeys = new[] { "task:webpush-batch-a", "task:webpush-batch-b", "task:webpush-batch-c" };
+        for (var index = 0; index < eventKeys.Length; index++)
+        {
+            var endpoint = $"https://push.example/batch-{index}";
+            scope.Db.NotificationDeliveries.Add(new NotificationDelivery
+            {
+                EventKey = eventKeys[index],
+                Channel = NotificationChannels.WebPush,
+                SenderName = "Web Push",
+                RecipientUserId = user.Id,
+                RecipientAddress = endpoint,
+                Subject = $"Retry Web Push {index}",
+                BodyPreview = "Retry delivery",
+                Status = NotificationDeliveryStatus.Failed,
+                Error = "Bad Request. Details: binary data passed in the request must be less than 4096 bytes.",
+                CreatedAt = now.AddMinutes(-30).AddSeconds(index),
+            });
+            scope.Db.UserPushSubscriptions.Add(new UserPushSubscription
+            {
+                UserId = user.Id,
+                Endpoint = endpoint,
+                P256dh = $"p256dh-{index}",
+                Auth = $"auth-{index}",
+                Browser = "Chrome",
+                Platform = "Windows",
+                DeviceName = $"Chrome Windows {index}",
+                UserAgent = "Test",
+                IsActive = true,
+                CreatedAt = now.AddMinutes(-40),
+                UpdatedAt = now.AddMinutes(-30),
+                LastSeenAt = now.AddMinutes(-30),
+            });
+            scope.Db.UserNotifications.Add(new UserNotification
+            {
+                RecipientUserId = user.Id,
+                EventKey = eventKeys[index],
+                Type = UserNotificationTypes.TaskChanged,
+                Title = $"Retry Web Push {index}",
+                BodyPreview = "Retry delivery",
+                Tone = "amber",
+                ObjectType = "task",
+                ObjectId = 100 + index,
+                MetadataJson = "{}",
+                CreatedAt = now.AddMinutes(-30),
+            });
+        }
+
+        scope.Db.NotificationDeliveries.Add(new NotificationDelivery
+        {
+            EventKey = $"{eventKeys[1]}:retry:already-sent",
+            Channel = NotificationChannels.WebPush,
+            SenderName = "Web Push",
+            RecipientUserId = user.Id,
+            RecipientAddress = "https://push.example/batch-1",
+            Subject = "Existing retry",
+            BodyPreview = "Existing retry delivery",
+            Status = NotificationDeliveryStatus.Sent,
+            CreatedAt = now.AddMinutes(-20),
+        });
+        await scope.Db.SaveChangesAsync();
+
+        var services = new ServiceCollection();
+        services.AddScoped(_ => new PaymentContext(scope.Options, useObjectAuditModel: false));
+        await using var provider = services.BuildServiceProvider();
+        var service = new NotificationRetrySchedulerService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new ConfigurationBuilder().Build(),
+            NullLogger<NotificationRetrySchedulerService>.Instance);
+        interceptor.Commands.Clear();
+
+        var eligible = await service.CountEligibleRetriesAsync(CancellationToken.None);
+
+        Assert.Equal(2, eligible);
+        Assert.Equal(5, interceptor.Commands.Count);
+        Assert.Equal(2, interceptor.Commands.Count(command => command.Contains("NotificationDeliveries", StringComparison.Ordinal)));
+        Assert.Single(interceptor.Commands, command => command.Contains("UserPushSubscriptions", StringComparison.Ordinal));
+        Assert.Single(interceptor.Commands, command => command.Contains("UserNotifications", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task NotificationRetrySchedulerService_ChunksMaximumCandidateWindow()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var scope = await CreateDbScopeAsync(interceptor);
+        var now = DateTime.UtcNow;
+        scope.Db.SystemSettings.AddRange(
+            new SystemSetting { Key = NotificationRetrySchedulerService.EnabledSettingKey, Value = "true", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = NotificationRetrySchedulerService.DelayMinutesSettingKey, Value = "1", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = NotificationRetrySchedulerService.BatchSizeSettingKey, Value = "100", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = NotificationRetrySchedulerService.MaxAttemptsSettingKey, Value = "3", CreatedAt = now, UpdatedAt = now });
+        scope.Db.NotificationDeliveries.AddRange(Enumerable.Range(1, 1000).Select(index => new NotificationDelivery
+        {
+            EventKey = $"email:maximum-window:{index}",
+            Channel = NotificationChannels.Email,
+            SenderName = "Email",
+            RecipientAddress = $"maximum-window-{index}@example.com",
+            Subject = $"Maximum retry {index}",
+            BodyPreview = "Maximum retry delivery",
+            Status = NotificationDeliveryStatus.Failed,
+            Error = "SMTP unavailable",
+            CreatedAt = now.AddMinutes(-30).AddMilliseconds(index),
+        }));
+        await scope.Db.SaveChangesAsync();
+
+        var services = new ServiceCollection();
+        services.AddScoped(_ => new PaymentContext(scope.Options, useObjectAuditModel: false));
+        await using var provider = services.BuildServiceProvider();
+        var service = new NotificationRetrySchedulerService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new ConfigurationBuilder().Build(),
+            NullLogger<NotificationRetrySchedulerService>.Instance);
+        interceptor.Commands.Clear();
+
+        var eligible = await service.CountEligibleRetriesAsync(CancellationToken.None);
+
+        Assert.Equal(200, eligible);
+        Assert.Equal(7, interceptor.Commands.Count);
+        Assert.Equal(6, interceptor.Commands.Count(command => command.Contains("NotificationDeliveries", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public async Task NotificationRetrySchedulerService_SerializesConcurrentRuns()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var now = DateTime.UtcNow;
+        scope.Db.SystemSettings.AddRange(
+            new SystemSetting { Key = NotificationRetrySchedulerService.EnabledSettingKey, Value = "true", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = NotificationRetrySchedulerService.DelayMinutesSettingKey, Value = "1", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = NotificationRetrySchedulerService.BatchSizeSettingKey, Value = "10", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = NotificationRetrySchedulerService.MaxAttemptsSettingKey, Value = "3", CreatedAt = now, UpdatedAt = now });
+        scope.Db.NotificationDeliveries.Add(new NotificationDelivery
+        {
+            EventKey = "email:serialized-retry",
+            Channel = NotificationChannels.Email,
+            SenderName = "Email",
+            RecipientAddress = "serialized-retry@example.com",
+            Subject = "Serialized retry",
+            BodyPreview = "Serialized retry delivery",
+            Status = NotificationDeliveryStatus.Failed,
+            Error = "SMTP unavailable",
+            CreatedAt = now.AddMinutes(-30),
+        });
+        await scope.Db.SaveChangesAsync();
+
+        var notificationService = new RecordingTaskReminderNotificationService
+        {
+            RetrySucceeds = true,
+            RetryEntered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously),
+            RetryRelease = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously),
+        };
+        var services = new ServiceCollection();
+        services.AddScoped(_ => new PaymentContext(scope.Options, useObjectAuditModel: false));
+        services.AddSingleton<INotificationService>(notificationService);
+        await using var provider = services.BuildServiceProvider();
+        var service = new NotificationRetrySchedulerService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new ConfigurationBuilder().Build(),
+            NullLogger<NotificationRetrySchedulerService>.Instance);
+
+        var firstRun = service.RunOnceAsync(CancellationToken.None);
+        await notificationService.RetryEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var secondRun = service.RunOnceAsync(CancellationToken.None);
+        await Task.Delay(100);
+
+        var maxConcurrentCallsWhileBlocked = notificationService.MaxConcurrentRetryCalls;
+        notificationService.RetryRelease.SetResult(true);
+        await Task.WhenAll(firstRun, secondRun);
+        Assert.Equal(1, maxConcurrentCallsWhileBlocked);
+        Assert.Equal(1, notificationService.MaxConcurrentRetryCalls);
+    }
+
+    [Fact]
     public async Task YandexDiskCrmSyncSchedulerService_CountsOnlyDueRetryItems()
     {
         await using var scope = await CreateDbScopeAsync();
@@ -1789,11 +1985,16 @@ public class SystemJobsControllerTests
     private sealed class RecordingTaskReminderNotificationService : INotificationService
     {
         private int _activeReminderCalls;
+        private int _activeRetryCalls;
         public List<(int TaskId, string ReminderKey)> Reminders { get; } = [];
         public List<int> ApprovalOverdueTaskIds { get; } = [];
         public TaskCompletionSource<bool>? ReminderEntered { get; init; }
         public TaskCompletionSource<bool>? ReminderRelease { get; init; }
         public int MaxConcurrentReminderCalls { get; private set; }
+        public TaskCompletionSource<bool>? RetryEntered { get; init; }
+        public TaskCompletionSource<bool>? RetryRelease { get; init; }
+        public bool RetrySucceeds { get; init; }
+        public int MaxConcurrentRetryCalls { get; private set; }
 
         public Task<NotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
@@ -1828,8 +2029,37 @@ public class SystemJobsControllerTests
         public Task<IReadOnlyList<NotificationDelivery>> SendAsync(NotificationRecipient recipient, NotificationMessage message, IEnumerable<string>? channels = null, string? eventKey = null, CancellationToken cancellationToken = default, int? senderId = null)
             => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
 
-        public Task<IReadOnlyList<NotificationDelivery>> RetryDeliveryAsync(int deliveryId, CancellationToken cancellationToken = default)
-            => Task.FromResult<IReadOnlyList<NotificationDelivery>>(Array.Empty<NotificationDelivery>());
+        public async Task<IReadOnlyList<NotificationDelivery>> RetryDeliveryAsync(int deliveryId, CancellationToken cancellationToken = default)
+        {
+            var activeCalls = Interlocked.Increment(ref _activeRetryCalls);
+            MaxConcurrentRetryCalls = Math.Max(MaxConcurrentRetryCalls, activeCalls);
+            try
+            {
+                RetryEntered?.TrySetResult(true);
+                if (RetryRelease is not null)
+                {
+                    await RetryRelease.Task.WaitAsync(cancellationToken);
+                }
+
+                return RetrySucceeds
+                    ?
+                    [
+                        new NotificationDelivery
+                        {
+                            Id = deliveryId + 1000,
+                            EventKey = $"retry:{deliveryId}",
+                            Channel = NotificationChannels.Email,
+                            Status = NotificationDeliveryStatus.Sent,
+                            CreatedAt = DateTime.UtcNow,
+                        }
+                    ]
+                    : Array.Empty<NotificationDelivery>();
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _activeRetryCalls);
+            }
+        }
 
         public Task<bool> NotifyAsync(NotificationEventEnvelope notificationEvent, CancellationToken cancellationToken = default)
             => Task.FromResult(false);
