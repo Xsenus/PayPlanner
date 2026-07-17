@@ -185,6 +185,10 @@ dotnet ef migrations add Init
 - `npm run build` — прод сборка
 - `npm run preview` — предпросмотр прод-сборки
 - `npm run lint` — линтинг
+- `npm test` — полный набор frontend unit-тестов с ограничением до трёх worker-процессов
+- `npm run test:watch` — интерактивный режим разработки с ограничением до двух worker-процессов
+- `npm run test:unit:serial` — последовательный прогон для диагностики нестабильного теста
+- `npm run test:integration` — последовательный набор интеграционных frontend-тестов
 
 ### Backend скрипты
 
