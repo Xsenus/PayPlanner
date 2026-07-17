@@ -64,16 +64,13 @@ public class StickyNoteNotificationInventoryTests
         AssertMethodContains(
             serviceSource,
             "ProcessDueRemindersAsync",
-            "CanAssignedUserViewNote",
-            "NotifyStickyNoteReminderAsync",
-            "ReminderSentAt");
-        AssertMethodContains(
-            serviceSource,
-            "CanAssignedUserViewNote",
+            "CanAssignedUserView",
             "RolePermissionCatalog.Notes",
             "StickyNoteBoardVisibility.Shared",
             "OwnerUserId",
-            "Members");
+            "Members.Any",
+            "NotifyStickyNoteReminderAsync",
+            "ReminderSentAt");
     }
 
     [Fact]

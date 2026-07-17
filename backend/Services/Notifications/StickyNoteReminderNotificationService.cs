@@ -64,13 +64,7 @@ public sealed class StickyNoteReminderNotificationService : BackgroundService
         var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
         var notificationService = scope.ServiceProvider.GetRequiredService<INotificationService>();
         var now = DateTime.UtcNow;
-        var dueNotes = await db.StickyNotes
-            .Include(note => note.Board)
-            .ThenInclude(board => board!.Members)
-            .Include(note => note.AssignedUser)
-            .ThenInclude(user => user!.Role)
-            .ThenInclude(role => role!.Permissions)
-            .AsSplitQuery()
+        var dueReminders = await db.StickyNotes
             .Where(note =>
                 note.AssignedUserId.HasValue
                 && note.ReminderAt.HasValue
@@ -81,12 +75,29 @@ public sealed class StickyNoteReminderNotificationService : BackgroundService
             .OrderBy(note => note.ReminderAt)
             .ThenBy(note => note.Id)
             .Take(ResolveBatchSize())
+            .Select(note => new
+            {
+                Note = note,
+                Board = note.Board!,
+                CanAssignedUserView = note.AssignedUser != null
+                    && note.AssignedUser.IsActive
+                    && note.AssignedUser.IsApproved
+                    && note.AssignedUser.Role != null
+                    && (note.AssignedUser.Role.Name.ToLower() == "admin"
+                        || note.AssignedUser.Role.Permissions.Any(permission =>
+                            permission.Section == RolePermissionCatalog.Notes
+                            && permission.CanView))
+                    && (note.Board!.Visibility == StickyNoteBoardVisibility.Shared
+                        || note.Board.OwnerUserId == note.AssignedUserId
+                        || note.Board.Members.Any(member => member.UserId == note.AssignedUserId))
+            })
             .ToListAsync(cancellationToken);
 
         var sent = 0;
-        foreach (var note in dueNotes)
+        foreach (var reminder in dueReminders)
         {
-            if (note.AssignedUser is null || !CanAssignedUserViewNote(note))
+            var note = reminder.Note;
+            if (!reminder.CanAssignedUserView)
             {
                 note.ReminderSentAt = now;
                 continue;
@@ -97,38 +108,11 @@ public sealed class StickyNoteReminderNotificationService : BackgroundService
             sent++;
         }
 
-        if (dueNotes.Count > 0)
+        if (dueReminders.Count > 0)
         {
             await db.SaveChangesAsync(cancellationToken);
         }
 
         return sent;
-    }
-
-    private static bool CanAssignedUserViewNote(StickyNote note)
-    {
-        if (!note.AssignedUserId.HasValue || note.Board is null || note.AssignedUser is null)
-        {
-            return false;
-        }
-
-        var user = note.AssignedUser;
-        if (!user.IsActive || !user.IsApproved)
-        {
-            return false;
-        }
-
-        var canViewNotes = string.Equals(user.Role?.Name, "admin", StringComparison.OrdinalIgnoreCase)
-            || user.Role?.Permissions.Any(permission =>
-                permission.Section == RolePermissionCatalog.Notes
-                && permission.CanView) == true;
-        if (!canViewNotes)
-        {
-            return false;
-        }
-
-        return note.Board.Visibility == StickyNoteBoardVisibility.Shared
-            || note.Board.OwnerUserId == user.Id
-            || note.Board.Members.Any(member => member.UserId == user.Id);
     }
 }

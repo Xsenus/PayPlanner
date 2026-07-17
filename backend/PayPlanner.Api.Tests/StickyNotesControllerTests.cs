@@ -1,9 +1,11 @@
 using System.Security.Claims;
+using System.Data.Common;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -544,6 +546,157 @@ public sealed class StickyNotesControllerTests
             .Where(item => item.Id == dueNote.Id)
             .Select(item => item.ReminderSentAt)
             .SingleAsync());
+    }
+
+    [Fact]
+    public async Task StickyNoteReminderNotificationService_RunOnce_UsesSingleCandidateQueryForDeniedReminder()
+    {
+        var commandInterceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(commandInterceptor);
+        var assignee = await CreateUserAsync(db, canView: false);
+        var board = new StickyNoteBoard
+        {
+            Title = "Общее",
+            Visibility = StickyNoteBoardVisibility.Shared,
+            Background = "cork",
+        };
+        var dueNote = new StickyNote
+        {
+            Board = board,
+            Text = "Недоступное напоминание",
+            Color = "yellow",
+            Version = 1,
+            Width = 220,
+            Height = 180,
+            AssignedUserId = assignee.Id,
+            AssignedUserName = assignee.FullName,
+            ReminderAt = DateTime.UtcNow.AddMinutes(-1),
+        };
+        db.StickyNotes.Add(dueNote);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        commandInterceptor.ReaderCommands.Clear();
+
+        var services = new ServiceCollection();
+        services.AddSingleton(db);
+        services.AddSingleton<INotificationService>(CreateNotificationService(db));
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        using var provider = services.BuildServiceProvider();
+        var service = new StickyNoteReminderNotificationService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            provider.GetRequiredService<IConfiguration>(),
+            NullLogger<StickyNoteReminderNotificationService>.Instance);
+
+        var sent = await service.RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal(0, sent);
+        var candidateCommand = Assert.Single(
+            commandInterceptor.ReaderCommands,
+            command => command.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("RolePermissions", candidateCommand, StringComparison.Ordinal);
+        Assert.Contains("StickyNoteBoardMembers", candidateCommand, StringComparison.Ordinal);
+        Assert.Contains("EXISTS", candidateCommand, StringComparison.OrdinalIgnoreCase);
+        var trackedNote = Assert.Single(db.ChangeTracker.Entries<StickyNote>(), entry => entry.Entity.Id == dueNote.Id);
+        Assert.NotNull(trackedNote.Entity.ReminderSentAt);
+        Assert.Empty(db.UserNotifications.Local);
+    }
+
+    [Fact]
+    public async Task StickyNoteReminderNotificationService_RunOnce_NotifiesPersonalBoardMember()
+    {
+        await using var db = await CreateContextAsync();
+        var owner = await CreateUserAsync(db);
+        var assignee = await CreateUserAsync(db);
+        var board = new StickyNoteBoard
+        {
+            Title = "Личная доска",
+            Visibility = StickyNoteBoardVisibility.Personal,
+            OwnerUserId = owner.Id,
+            OwnerUserName = owner.FullName,
+            Background = "cork",
+            Members =
+            [
+                new StickyNoteBoardMember
+                {
+                    UserId = assignee.Id,
+                    Role = "editor",
+                },
+            ],
+        };
+        var dueNote = new StickyNote
+        {
+            Board = board,
+            Text = "Напоминание участнику",
+            Color = "yellow",
+            Version = 1,
+            Width = 220,
+            Height = 180,
+            AssignedUserId = assignee.Id,
+            AssignedUserName = assignee.FullName,
+            ReminderAt = DateTime.UtcNow.AddMinutes(-1),
+        };
+        db.StickyNotes.Add(dueNote);
+        await db.SaveChangesAsync();
+
+        var services = new ServiceCollection();
+        services.AddSingleton(db);
+        services.AddSingleton<INotificationService>(CreateNotificationService(db));
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        using var provider = services.BuildServiceProvider();
+        var service = new StickyNoteReminderNotificationService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            provider.GetRequiredService<IConfiguration>(),
+            NullLogger<StickyNoteReminderNotificationService>.Instance);
+
+        var sent = await service.RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal(1, sent);
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(assignee.Id, notification.RecipientUserId);
+        Assert.Equal(UserNotificationTypes.NoteReminder, notification.Type);
+    }
+
+    [Fact]
+    public async Task StickyNoteReminderNotificationService_RunOnce_AdminBypassesSectionPermission()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateUserAsync(db, canView: false);
+        admin.Role!.Name = "ADMIN";
+        var dueNote = new StickyNote
+        {
+            Board = new StickyNoteBoard
+            {
+                Title = "Общее",
+                Visibility = StickyNoteBoardVisibility.Shared,
+                Background = "cork",
+            },
+            Text = "Напоминание администратору",
+            Color = "yellow",
+            Version = 1,
+            Width = 220,
+            Height = 180,
+            AssignedUserId = admin.Id,
+            AssignedUserName = admin.FullName,
+            ReminderAt = DateTime.UtcNow.AddMinutes(-1),
+        };
+        db.StickyNotes.Add(dueNote);
+        await db.SaveChangesAsync();
+
+        var services = new ServiceCollection();
+        services.AddSingleton(db);
+        services.AddSingleton<INotificationService>(CreateNotificationService(db));
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+        using var provider = services.BuildServiceProvider();
+        var service = new StickyNoteReminderNotificationService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            provider.GetRequiredService<IConfiguration>(),
+            NullLogger<StickyNoteReminderNotificationService>.Instance);
+
+        var sent = await service.RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal(1, sent);
+        var notification = await db.UserNotifications.SingleAsync();
+        Assert.Equal(admin.Id, notification.RecipientUserId);
     }
 
     [Fact]
@@ -1193,18 +1346,45 @@ public sealed class StickyNotesControllerTests
         Assert.Equal("cork", unchangedBoard.Background);
     }
 
-    private static async Task<PaymentContext> CreateContextAsync()
+    private static async Task<PaymentContext> CreateContextAsync(DbCommandInterceptor? commandInterceptor = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
 
-        var options = new DbContextOptionsBuilder<PaymentContext>()
-            .UseSqlite(connection)
-            .Options;
+        var optionsBuilder = new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite(connection);
+        if (commandInterceptor is not null)
+        {
+            optionsBuilder.AddInterceptors(commandInterceptor);
+        }
 
-        var db = new PaymentContext(options);
+        var db = new PaymentContext(optionsBuilder.Options);
         await db.Database.EnsureCreatedAsync();
         return db;
+    }
+
+    private sealed class RecordingCommandInterceptor : DbCommandInterceptor
+    {
+        public List<string> ReaderCommands { get; } = [];
+
+        public override InterceptionResult<DbDataReader> ReaderExecuting(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result)
+        {
+            ReaderCommands.Add(command.CommandText);
+            return base.ReaderExecuting(command, eventData, result);
+        }
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            ReaderCommands.Add(command.CommandText);
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
     }
 
     private static async Task<User> CreateUserAsync(
