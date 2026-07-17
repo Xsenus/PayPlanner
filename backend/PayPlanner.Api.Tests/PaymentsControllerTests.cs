@@ -6242,19 +6242,8 @@ public class PaymentsControllerTests
         Assert.Contains("Источник", notification.BodyPreview);
     }
 
-    private static async Task<PaymentContext> CreateContextAsync(bool useObjectAuditModel = true)
-    {
-        var connection = new SqliteConnection("Data Source=:memory:");
-        await connection.OpenAsync();
-
-        var options = new DbContextOptionsBuilder<PaymentContext>()
-            .UseSqlite(connection)
-            .Options;
-
-        var db = new PaymentContext(options, useObjectAuditModel: useObjectAuditModel);
-        await db.Database.EnsureCreatedAsync();
-        return db;
-    }
+    private static Task<PaymentContext> CreateContextAsync(bool useObjectAuditModel = true)
+        => SqliteTestContextFactory.CreateAsync(useObjectAuditModel);
 
     private static async Task ClearSystemNotesAsync(PaymentContext db, params int[] paymentIds)
     {
