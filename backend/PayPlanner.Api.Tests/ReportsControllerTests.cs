@@ -3,7 +3,6 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Controllers;
@@ -7182,17 +7181,6 @@ services.Id,
         throw new InvalidOperationException("No test timezone with a local date different from UTC was found.");
     }
 
-    private static async Task<PaymentContext> CreateContextAsync()
-    {
-        var connection = new SqliteConnection("Data Source=:memory:");
-        await connection.OpenAsync();
-
-        var options = new DbContextOptionsBuilder<PaymentContext>()
-            .UseSqlite(connection)
-            .Options;
-
-        var db = new PaymentContext(options);
-        await db.Database.EnsureCreatedAsync();
-        return db;
-    }
+    private static Task<PaymentContext> CreateContextAsync()
+        => SqliteTestContextFactory.CreateAsync();
 }
