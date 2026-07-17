@@ -99,6 +99,29 @@ describe('apiService money operations', () => {
   });
 });
 
+describe('apiService paged payments', () => {
+  it('passes the abort signal to the v2 payments request', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      items: [], total: 0, page: 4, pageSize: 25, summary: {},
+    }), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+
+    await apiService.getPaymentsV2(
+      { status: 'Pending', type: 'Income', search: 'аванс', page: 4, pageSize: 25 },
+      { signal: controller.signal },
+    );
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/v2/payments?');
+    expect(String(url)).toContain('status=Pending');
+    expect(String(url)).toContain('page=4');
+    expect(options?.signal).toBe(controller.signal);
+  });
+});
+
 describe('extractResponseErrorMessage', () => {
   it('prefers problem details detail field for API errors', async () => {
     const response = new Response(

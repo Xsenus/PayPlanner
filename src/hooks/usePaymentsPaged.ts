@@ -121,7 +121,10 @@ export function usePaymentsPaged(params: UsePaymentsPagedParams) {
       }
 
       try {
-        const data = await apiService.getPaymentsV2(requestParams);
+        const data = await apiService.getPaymentsV2(
+          requestParams,
+          { signal: controller.signal },
+        );
         if (controller.signal.aborted) return;
         setPayments(data.items ?? []);
         setTotal(data.total ?? 0);
@@ -133,6 +136,9 @@ export function usePaymentsPaged(params: UsePaymentsPagedParams) {
         setSummary(EMPTY_SUMMARY);
         setError(err instanceof Error ? err.message : 'Не удалось загрузить платежи.');
       } finally {
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+        }
         if (!controller.signal.aborted) {
           if (mode === 'initial') {
             setLoadingInitial(false);

@@ -4602,36 +4602,42 @@ export class ApiService {
   }
 
   // V2: пагинация
-  async getPaymentsV2(params?: {
-    from?: string;
-    to?: string;
-    clientId?: number;
-    legalEntityId?: number;
-    caseId?: number;
-    contractId?: number;
-    invoiceId?: number;
-    actId?: number;
-    clientIds?: string;
-    clientRole?: ClientRole;
-    excludeInvoiceDocuments?: boolean;
-    categoryTokens?: string;
-    type?: PaymentKind;
-    status?: PaymentStatus;
-    advanceReviewStatus?: PaymentAdvanceReviewStatus;
-    minAmount?: number;
-    maxAmount?: number;
-    search?: string;
-    sortBy?: 'date' | 'amount' | 'createdAt';
-    sortDir?: SortDir;
-    page?: number;
-    pageSize?: number;
-  }) {
+  async getPaymentsV2(
+    params?: {
+      from?: string;
+      to?: string;
+      clientId?: number;
+      legalEntityId?: number;
+      caseId?: number;
+      contractId?: number;
+      invoiceId?: number;
+      actId?: number;
+      clientIds?: string;
+      clientRole?: ClientRole;
+      excludeInvoiceDocuments?: boolean;
+      categoryTokens?: string;
+      type?: PaymentKind;
+      status?: PaymentStatus;
+      advanceReviewStatus?: PaymentAdvanceReviewStatus;
+      minAmount?: number;
+      maxAmount?: number;
+      search?: string;
+      sortBy?: 'date' | 'amount' | 'createdAt';
+      sortDir?: SortDir;
+      page?: number;
+      pageSize?: number;
+    },
+    options?: { signal?: AbortSignal },
+  ) {
     const q = buildQuery({
       ...(params ?? {}),
       page: params?.page ?? 1,
       pageSize: params?.pageSize ?? 50,
     });
-    return this.request<PagedResult<Payment> & { summary: PaymentsListSummary }>(`/v2/payments${q}`);
+    return this.request<PagedResult<Payment> & { summary: PaymentsListSummary }>(
+      `/v2/payments${q}`,
+      { signal: options?.signal },
+    );
   }
 
   async exportPaymentsCsv(params?: PaymentsExportParams) {
