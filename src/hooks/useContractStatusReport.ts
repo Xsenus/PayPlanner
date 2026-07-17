@@ -24,6 +24,7 @@ export function useContractStatusReport(filters: ContractStatusReportFilters, op
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
 
   const stableFilters = useMemo(
     () => ({
@@ -41,6 +42,8 @@ export function useContractStatusReport(filters: ContractStatusReportFilters, op
   );
 
   const load = useCallback(async () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
     if (!enabled) {
       requestIdRef.current += 1;
       setReport(null);
@@ -51,25 +54,30 @@ export function useContractStatusReport(filters: ContractStatusReportFilters, op
 
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
+    const controller = new AbortController();
+    abortRef.current = controller;
     setLoading(true);
     setError(null);
 
     try {
-      const data = await apiService.getContractStatusReport(stableFilters);
-      if (requestId !== requestIdRef.current) {
+      const data = await apiService.getContractStatusReport(stableFilters, { signal: controller.signal });
+      if (controller.signal.aborted || requestId !== requestIdRef.current) {
         return;
       }
 
       setReport(data);
     } catch (err) {
-      if (requestId !== requestIdRef.current) {
+      if (controller.signal.aborted || requestId !== requestIdRef.current) {
         return;
       }
 
       setReport(null);
       setError(err instanceof Error ? err.message : 'Не удалось загрузить отчет по статусам договоров.');
     } finally {
-      if (requestId === requestIdRef.current) {
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+      }
+      if (!controller.signal.aborted && requestId === requestIdRef.current) {
         setLoading(false);
       }
     }
@@ -80,6 +88,8 @@ export function useContractStatusReport(filters: ContractStatusReportFilters, op
   }, [load]);
 
   useEffect(() => () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
     requestIdRef.current += 1;
   }, []);
 

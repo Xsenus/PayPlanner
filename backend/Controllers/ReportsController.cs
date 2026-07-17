@@ -7799,12 +7799,22 @@ public class ReportsController : ControllerBase
         }
 
         var rows = await query
-            .Select(item => new
+            .GroupBy(item => new
             {
                 item.Status,
-                item.Amount,
                 item.IsOpenEnded,
-                item.ValidUntil,
+                IsExpiring = !item.IsOpenEnded &&
+                    item.ValidUntil.HasValue &&
+                    item.ValidUntil.Value >= periodStart &&
+                    item.ValidUntil.Value < periodEndExclusive,
+            })
+            .Select(group => new ContractStatusQueryRow
+            {
+                Status = group.Key.Status,
+                IsOpenEnded = group.Key.IsOpenEnded,
+                IsExpiring = group.Key.IsExpiring,
+                Amount = group.Sum(item => item.Amount ?? 0m),
+                Count = group.Count(),
             })
             .ToListAsync(ct);
 
@@ -7812,9 +7822,10 @@ public class ReportsController : ControllerBase
             .Select(item => new
             {
                 Status = NormalizeContractReportStatus(item.Status),
-                Amount = item.Amount ?? 0m,
+                item.Amount,
                 item.IsOpenEnded,
-                item.ValidUntil,
+                item.IsExpiring,
+                item.Count,
             })
             .ToList();
 
@@ -7829,13 +7840,9 @@ public class ReportsController : ControllerBase
                 {
                     Status = group.First().Status,
                     StatusLabel = FormatContractStatusLabel(group.First().Status),
-                    ContractCount = group.Count(),
-                    OpenEndedCount = group.Count(item => item.IsOpenEnded),
-                    ExpiringCount = group.Count(item =>
-                        !item.IsOpenEnded &&
-                        item.ValidUntil.HasValue &&
-                        item.ValidUntil.Value >= periodStart &&
-                        item.ValidUntil.Value < periodEndExclusive),
+                    ContractCount = group.Sum(item => item.Count),
+                    OpenEndedCount = group.Where(item => item.IsOpenEnded).Sum(item => item.Count),
+                    ExpiringCount = group.Where(item => item.IsExpiring).Sum(item => item.Count),
                     TotalAmount = statusTotal,
                     Share = totalAmount > 0m
                         ? Math.Round(statusTotal / totalAmount * 100m, 1, MidpointRounding.AwayFromZero)
@@ -7862,14 +7869,14 @@ public class ReportsController : ControllerBase
         {
             From = periodStart,
             To = periodEnd,
-            ContractCount = normalizedRows.Count,
-            DraftCount = normalizedRows.Count(item => item.Status == ContractStatus.Draft),
-            NotSignedCount = normalizedRows.Count(item => item.Status == ContractStatus.NotSigned),
-            OnSigningCount = normalizedRows.Count(item => item.Status == ContractStatus.OnSigning),
-            ConcludedCount = normalizedRows.Count(item => item.Status == ContractStatus.Concluded),
-            TerminatedCount = normalizedRows.Count(item => item.Status == ContractStatus.Terminated),
-            CancelledCount = normalizedRows.Count(item => item.Status == ContractStatus.Cancelled),
-            OpenEndedCount = normalizedRows.Count(item => item.IsOpenEnded),
+            ContractCount = normalizedRows.Sum(item => item.Count),
+            DraftCount = normalizedRows.Where(item => item.Status == ContractStatus.Draft).Sum(item => item.Count),
+            NotSignedCount = normalizedRows.Where(item => item.Status == ContractStatus.NotSigned).Sum(item => item.Count),
+            OnSigningCount = normalizedRows.Where(item => item.Status == ContractStatus.OnSigning).Sum(item => item.Count),
+            ConcludedCount = normalizedRows.Where(item => item.Status == ContractStatus.Concluded).Sum(item => item.Count),
+            TerminatedCount = normalizedRows.Where(item => item.Status == ContractStatus.Terminated).Sum(item => item.Count),
+            CancelledCount = normalizedRows.Where(item => item.Status == ContractStatus.Cancelled).Sum(item => item.Count),
+            OpenEndedCount = normalizedRows.Where(item => item.IsOpenEnded).Sum(item => item.Count),
             TotalAmount = totalAmount,
             ActiveAmount = normalizedRows
                 .Where(item => activeStatuses.Contains(item.Status))
@@ -9327,6 +9334,15 @@ public class ReportsController : ControllerBase
     {
         public ActStatus Status { get; init; }
         public string? WorkflowStatus { get; init; }
+        public decimal Amount { get; init; }
+        public int Count { get; init; }
+    }
+
+    private sealed class ContractStatusQueryRow
+    {
+        public string? Status { get; init; }
+        public bool IsOpenEnded { get; init; }
+        public bool IsExpiring { get; init; }
         public decimal Amount { get; init; }
         public int Count { get; init; }
     }

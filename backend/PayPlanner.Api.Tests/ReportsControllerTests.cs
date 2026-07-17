@@ -5719,9 +5719,11 @@ services.Id,
     [Fact]
     public async Task ContractStatuses_GroupsContractsByStatus()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await SqliteTestContextFactory.CreateAsync(interceptor: interceptor);
         db.Contracts.AddRange(
-            Contract("C-1", ContractStatus.Draft, 1_000m, new DateTime(2026, 5, 1), false, new DateTime(2026, 5, 20)),
+            Contract("C-1A", ContractStatus.Draft, 400m, new DateTime(2026, 5, 1, 9, 0, 0), false, new DateTime(2026, 5, 20)),
+            Contract("C-1B", ContractStatus.Draft, 600m, new DateTime(2026, 5, 1, 15, 0, 0), false, new DateTime(2026, 5, 20)),
             Contract("C-2", ContractStatus.OnSigning, 2_000m, new DateTime(2026, 5, 2), false, new DateTime(2026, 6, 20)),
             Contract("C-3", ContractStatus.Concluded, 3_000m, new DateTime(2026, 5, 3), true, null),
             Contract("C-4", ContractStatus.Terminated, 4_000m, new DateTime(2026, 5, 4), false, new DateTime(2026, 5, 25)),
@@ -5729,6 +5731,7 @@ services.Id,
             Contract("C-6", ContractStatus.NotSigned, 6_000m, new DateTime(2026, 5, 6), false, new DateTime(2026, 5, 28)),
             Contract("C-OLD", ContractStatus.Concluded, 99_999m, new DateTime(2026, 4, 30), false, null));
         await db.SaveChangesAsync();
+        interceptor.Commands.Clear();
         var controller = CreateController(db);
 
         var action = await controller.ContractStatuses(
@@ -5738,8 +5741,8 @@ services.Id,
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
         var report = Assert.IsType<ContractStatusReportDto>(ok.Value);
-        Assert.Equal(6, report.ContractCount);
-        Assert.Equal(1, report.DraftCount);
+        Assert.Equal(7, report.ContractCount);
+        Assert.Equal(2, report.DraftCount);
         Assert.Equal(1, report.NotSignedCount);
         Assert.Equal(1, report.OnSigningCount);
         Assert.Equal(1, report.ConcludedCount);
@@ -5773,7 +5776,8 @@ services.Id,
                 Assert.Equal(ContractStatus.Draft, item.Status);
                 Assert.Equal("Черновик", item.StatusLabel);
                 Assert.Equal(1_000m, item.TotalAmount);
-                Assert.Equal(1, item.ExpiringCount);
+                Assert.Equal(2, item.ExpiringCount);
+                Assert.Equal(2, item.ContractCount);
                 Assert.Equal(4.8m, item.Share);
             },
             item =>
@@ -5799,6 +5803,12 @@ services.Id,
                 Assert.Equal(5_000m, item.TotalAmount);
                 Assert.Equal(23.8m, item.Share);
             });
+
+        var contractStatusQuery = Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"Contracts\"", StringComparison.Ordinal));
+        Assert.Contains("GROUP BY", contractStatusQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SUM", contractStatusQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("COUNT", contractStatusQuery, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
