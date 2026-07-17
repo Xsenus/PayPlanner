@@ -4813,14 +4813,19 @@ export class ApiService {
     return this.request<LegalEntitySummary[]>(`/legal-entities${q}`);
   }
 
-  async getLegalEntitiesPaged(params?: { search?: string; page?: number; pageSize?: number; counterpartyRole?: 'client' | 'supplier' }) {
+  async getLegalEntitiesPaged(
+    params?: { search?: string; page?: number; pageSize?: number; counterpartyRole?: 'client' | 'supplier' },
+    options?: { signal?: AbortSignal },
+  ) {
     const q = buildQuery({
       search: params?.search,
       page: params?.page ?? 1,
       pageSize: params?.pageSize ?? 20,
       counterpartyRole: params?.counterpartyRole,
     });
-    return this.request<PagedResult<LegalEntitySummary>>(`/legal-entities/paged${q}`);
+    return this.request<PagedResult<LegalEntitySummary>>(`/legal-entities/paged${q}`, {
+      signal: options?.signal,
+    });
   }
 
   async getLegalEntity(id: number) {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   Building2,
@@ -158,18 +158,24 @@ export function LegalEntities({
     maxPageSize: 96,
     minColumnWidth: 140,
   });
+  const legalEntitiesQueryScopeKey = `${debouncedSearch.trim()}\u001f${pageSize}`;
+  const previousLegalEntitiesQueryScopeRef = useRef(legalEntitiesQueryScopeKey);
 
   const fetchLegalEntities = useCallback(
-    async (targetPage = page, withLoading = true) => {
+    async (targetPage = page, withLoading = true, signal?: AbortSignal) => {
       try {
         if (withLoading) setLoading(true);
         setError(null);
 
-        const response = await apiService.getLegalEntitiesPaged({
+        const params = {
           search: debouncedSearch.trim() || undefined,
           page: targetPage,
           pageSize,
-        });
+        };
+        const response = signal
+          ? await apiService.getLegalEntitiesPaged(params, { signal })
+          : await apiService.getLegalEntitiesPaged(params);
+        if (signal?.aborted) return;
 
         if (targetPage > 1 && response.items.length === 0 && response.total > 0) {
           setPage(targetPage - 1);
@@ -179,23 +185,34 @@ export function LegalEntities({
         setItems(response.items ?? []);
         setTotal(response.total ?? 0);
       } catch (err) {
+        if (signal?.aborted) return;
         const message = extractDisplayErrorMessage(err, 'Не удалось загрузить юридические лица');
         setItems([]);
         setTotal(0);
         setError(message);
         toast.error(message);
       } finally {
-        if (withLoading) setLoading(false);
+        if (withLoading && !signal?.aborted) setLoading(false);
       }
     },
     [debouncedSearch, page, pageSize, toast],
   );
 
   useEffect(() => {
-    if (!detailPageOpen) {
-      void fetchLegalEntities(page);
+    if (detailPageOpen) {
+      return undefined;
     }
-  }, [detailPageOpen, fetchLegalEntities, page]);
+    if (page !== 1 && previousLegalEntitiesQueryScopeRef.current !== legalEntitiesQueryScopeKey) {
+      return undefined;
+    }
+    previousLegalEntitiesQueryScopeRef.current = legalEntitiesQueryScopeKey;
+    const controller = new AbortController();
+    void fetchLegalEntities(page, true, controller.signal);
+
+    return () => {
+      controller.abort();
+    };
+  }, [detailPageOpen, fetchLegalEntities, legalEntitiesQueryScopeKey, page]);
 
   useEffect(() => {
     setPage(1);

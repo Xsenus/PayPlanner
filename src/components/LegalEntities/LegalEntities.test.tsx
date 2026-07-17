@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LegalEntities } from './LegalEntities';
@@ -10,6 +10,11 @@ const apiMocks = vi.hoisted(() => ({
 
 const permissionMocks = vi.hoisted(() => ({
   useRolePermissions: vi.fn(),
+}));
+
+const toastMocks = vi.hoisted(() => ({
+  error: vi.fn(),
+  success: vi.fn(),
 }));
 
 vi.mock('../../services/api', () => ({
@@ -45,14 +50,19 @@ vi.mock('../../hooks/useDialog', () => ({
 }));
 
 vi.mock('../../hooks/useToast', () => ({
-  useToast: () => ({
-    error: vi.fn(),
-    success: vi.fn(),
-  }),
+  useToast: () => toastMocks,
 }));
 
 vi.mock('../ui/TablePagination', () => ({
-  TablePagination: () => null,
+  TablePagination: ({ page, totalPages, onPageChange }: {
+    page: number;
+    totalPages: number;
+    onPageChange: (page: number) => void;
+  }) => (
+    <button type="button" disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>
+      Вперед
+    </button>
+  ),
 }));
 
 vi.mock('../ui/TableColumnSettings', () => ({
@@ -146,5 +156,80 @@ describe('LegalEntities permissions', () => {
     expect(columnSettings.textContent).not.toContain('Счета');
     expect(columnSettings.textContent).not.toContain('Акты');
     expect(columnSettings.textContent).not.toContain('Платежи');
+  });
+
+  it('combines rapid search input into one request with an abort signal', async () => {
+    render(<LegalEntities />);
+    await waitFor(() => expect(apiMocks.getLegalEntitiesPaged).toHaveBeenCalledTimes(1));
+    apiMocks.getLegalEntitiesPaged.mockClear();
+
+    const searchInput = screen.getByPlaceholderText('Поиск по названию, ИНН, директору');
+    fireEvent.change(searchInput, { target: { value: 'ро' } });
+    fireEvent.change(searchInput, { target: { value: 'рома' } });
+    fireEvent.change(searchInput, { target: { value: 'ромашка' } });
+
+    expect(apiMocks.getLegalEntitiesPaged).not.toHaveBeenCalled();
+    await waitFor(() => expect(apiMocks.getLegalEntitiesPaged).toHaveBeenCalledTimes(1));
+    expect(apiMocks.getLegalEntitiesPaged).toHaveBeenCalledWith(
+      expect.objectContaining({ search: 'ромашка', page: 1, pageSize: 12 }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it('aborts an active request when the search changes', async () => {
+    render(<LegalEntities />);
+    await waitFor(() => expect(apiMocks.getLegalEntitiesPaged).toHaveBeenCalledTimes(1));
+    apiMocks.getLegalEntitiesPaged.mockClear();
+    const signals: AbortSignal[] = [];
+    const resolvePending: Array<(response: {
+      items: Array<typeof legalEntity>;
+      total: number;
+      page: number;
+      pageSize: number;
+    }) => void> = [];
+    apiMocks.getLegalEntitiesPaged.mockImplementation((_params, options) => {
+      if (options?.signal) signals.push(options.signal);
+      return new Promise((resolve) => resolvePending.push(resolve));
+    });
+
+    const searchInput = screen.getByPlaceholderText('Поиск по названию, ИНН, директору');
+    fireEvent.change(searchInput, { target: { value: 'ромашка' } });
+    await waitFor(() => expect(apiMocks.getLegalEntitiesPaged).toHaveBeenCalledTimes(1));
+    expect(signals[0]?.aborted).toBe(false);
+
+    fireEvent.change(searchInput, { target: { value: 'ромашка сибирь' } });
+
+    await waitFor(() => expect(signals[0]?.aborted).toBe(true));
+    await waitFor(() => expect(apiMocks.getLegalEntitiesPaged).toHaveBeenCalledTimes(2));
+    resolvePending.forEach((resolve) => resolve({ items: [], total: 0, page: 1, pageSize: 12 }));
+  });
+
+  it('loads a changed search directly on the first page', async () => {
+    apiMocks.getLegalEntitiesPaged.mockResolvedValue({
+      items: [legalEntity],
+      total: 24,
+      page: 1,
+      pageSize: 12,
+    });
+    render(<LegalEntities />);
+    await waitFor(() => expect(apiMocks.getLegalEntitiesPaged).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Вперед' }));
+    await waitFor(() => expect(apiMocks.getLegalEntitiesPaged).toHaveBeenCalledTimes(2));
+    expect(apiMocks.getLegalEntitiesPaged).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 2 }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    apiMocks.getLegalEntitiesPaged.mockClear();
+
+    fireEvent.change(screen.getByPlaceholderText('Поиск по названию, ИНН, директору'), {
+      target: { value: 'новое юрлицо' },
+    });
+
+    await waitFor(() => expect(apiMocks.getLegalEntitiesPaged).toHaveBeenCalledTimes(1));
+    expect(apiMocks.getLegalEntitiesPaged).toHaveBeenCalledWith(
+      expect.objectContaining({ search: 'новое юрлицо', page: 1 }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 });

@@ -1561,6 +1561,26 @@ describe('apiService case calendar', () => {
     expect(String(url)).toContain('search=');
     expect(options?.signal).toBe(controller.signal);
   });
+
+  it('passes an abort signal to the paged legal entities request', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      items: [], total: 0, page: 1, pageSize: 12,
+    }), {
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+
+    await apiService.getLegalEntitiesPaged(
+      { search: 'ромашка', page: 1, pageSize: 12 },
+      { signal: controller.signal },
+    );
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/legal-entities/paged?');
+    expect(String(url)).toContain('search=');
+    expect(options?.signal).toBe(controller.signal);
+  });
 });
 
 describe('apiService reports', () => {
