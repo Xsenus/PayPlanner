@@ -10,11 +10,6 @@ const DEFAULT_P95_THRESHOLD_MS = 3_000;
 
 const args = parseArgs(process.argv.slice(2));
 
-if (args.help) {
-  printHelp();
-  process.exit(0);
-}
-
 const apiUrl = trimTrailingSlash(args.apiUrl ?? process.env.PAYPLANNER_LOAD_API_URL ?? DEFAULT_API_URL);
 const token = args.token ?? process.env.PAYPLANNER_LOAD_TOKEN ?? '';
 const iterations = readPositiveInt(args.iterations ?? process.env.PAYPLANNER_LOAD_ITERATIONS, DEFAULT_ITERATIONS);
@@ -27,7 +22,7 @@ const today = new Date();
 const from = formatDate(new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)));
 const to = formatDate(new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 0)));
 
-const scenarios = [
+const scenarioCatalog = [
   {
     name: 'features',
     path: '/features',
@@ -131,7 +126,15 @@ const scenarios = [
     auth: true,
     description: 'case inactivity automation candidates',
   },
-].filter((scenario) => selectedScenarioNames.size === 0 || selectedScenarioNames.has(scenario.name));
+];
+
+if (args.help) {
+  printHelp();
+  process.exit(0);
+}
+
+const scenarios = scenarioCatalog
+  .filter((scenario) => selectedScenarioNames.size === 0 || selectedScenarioNames.has(scenario.name));
 
 const unknownScenarioNames = [...selectedScenarioNames]
   .filter((name) => !knownScenarioNames().includes(name));
@@ -301,20 +304,7 @@ function printRows(rows) {
 }
 
 function knownScenarioNames() {
-  return [
-    'features',
-    'cases-registry',
-    'legacy-clients',
-    'legacy-invoices',
-    'legacy-payments',
-    'legacy-tasks',
-    'role-permissions-audit',
-    'role-permissions-audit-csv',
-    'cases-inactive',
-    'legal-work-report',
-    'case-activity-report',
-    'case-automation-candidates',
-  ];
+  return scenarioCatalog.map((scenario) => scenario.name);
 }
 
 function readPositiveInt(value, fallback) {

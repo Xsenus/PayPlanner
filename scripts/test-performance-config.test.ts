@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import { readFileSync, readdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -56,5 +57,21 @@ describe('frontend test performance configuration', () => {
     expect(nodeTestCount).toBeGreaterThanOrEqual(25);
     expect(setup).toContain("typeof window !== 'undefined' && typeof document !== 'undefined'");
     expect(setup).toContain('if (!hasDom) return;');
+  });
+});
+
+describe('load-check scenario catalog', () => {
+  it('lists every selectable scenario in command help', () => {
+    const help = execFileSync(
+      process.execPath,
+      [resolve(process.cwd(), 'scripts/run-legal-load-check.mjs'), '--help'],
+      { encoding: 'utf8' },
+    );
+
+    expect(help).toContain('case-document-types');
+    expect(help).toContain('case-document-templates');
+    expect(help).toContain('case-document-template-tokens');
+    expect(help).toContain('case-calendar-events');
+    expect(help).toContain('case-calendar-summary');
   });
 });
