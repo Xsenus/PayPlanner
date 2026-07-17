@@ -6102,9 +6102,11 @@ services.Id,
     [Fact]
     public async Task MatchStatuses_GroupsFactOperationsByMatchStatus()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await SqliteTestContextFactory.CreateAsync(interceptor: interceptor);
         db.MoneyOperations.AddRange(
-            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 6_000m, new DateTime(2026, 5, 1), "Основной банк", matchStatus: MoneyOperationMatchStatus.Matched),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 2_500m, new DateTime(2026, 5, 1, 9, 0, 0), "Основной банк", matchStatus: MoneyOperationMatchStatus.Matched),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 3_500m, new DateTime(2026, 5, 1, 15, 0, 0), "Основной банк", matchStatus: MoneyOperationMatchStatus.Matched),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 2_000m, new DateTime(2026, 5, 2), "Основной банк", matchStatus: MoneyOperationMatchStatus.Matched),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 3_000m, new DateTime(2026, 5, 3), "Основной банк", matchStatus: MoneyOperationMatchStatus.ClarificationRequired),
             Operation(MoneyOperationSource.Cash, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 1_000m, new DateTime(2026, 5, 4), "Касса"),
@@ -6112,6 +6114,7 @@ services.Id,
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Plan, 99_999m, new DateTime(2026, 5, 6), "Основной банк", matchStatus: MoneyOperationMatchStatus.Matched),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Transfer, MoneyOperationAccountingType.Fact, 50_000m, new DateTime(2026, 5, 7), "Основной банк", matchStatus: MoneyOperationMatchStatus.Matched));
         await db.SaveChangesAsync();
+        interceptor.Commands.Clear();
         var controller = CreateController(db);
 
         var action = await controller.MatchStatuses(
@@ -6131,8 +6134,8 @@ services.Id,
         Assert.Equal(7_000m, report.IncomeTotal);
         Assert.Equal(5_500m, report.ExpenseTotal);
         Assert.Equal(1_500m, report.NetTotal);
-        Assert.Equal(5, report.OperationCount);
-        Assert.Equal(2, report.MatchedCount);
+        Assert.Equal(6, report.OperationCount);
+        Assert.Equal(3, report.MatchedCount);
         Assert.Equal(2, report.NeedsAttentionCount);
 
         Assert.Collection(
@@ -6160,6 +6163,9 @@ services.Id,
                 Assert.Equal(6_000m, item.Income);
                 Assert.Equal(2_000m, item.Expense);
                 Assert.Equal(8_000m, item.TotalAmount);
+                Assert.Equal(2, item.IncomeCount);
+                Assert.Equal(1, item.ExpenseCount);
+                Assert.Equal(3, item.OperationCount);
                 Assert.Equal(64m, item.Share);
             },
             item =>
@@ -6170,6 +6176,12 @@ services.Id,
                 Assert.Equal(500m, item.Expense);
                 Assert.Equal(4m, item.Share);
             });
+
+        var matchStatusQuery = Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"MoneyOperations\"", StringComparison.Ordinal));
+        Assert.Contains("GROUP BY", matchStatusQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SUM", matchStatusQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("COUNT", matchStatusQuery, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
