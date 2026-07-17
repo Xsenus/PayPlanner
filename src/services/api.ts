@@ -3494,13 +3494,13 @@ export class ApiService {
     sortDir?: SortDir;
     page?: number;
     pageSize?: number;
-  }) {
+  }, options?: { signal?: AbortSignal }) {
     const q = buildQuery({
       ...(params ?? {}),
       page: params?.page ?? 1,
       pageSize: params?.pageSize ?? 20,
     });
-    return this.request<PagedResult<Invoice>>(`/invoices${q}`);
+    return this.request<PagedResult<Invoice>>(`/invoices${q}`, { signal: options?.signal });
   }
 
   async getInvoice(id: number) {
@@ -3522,9 +3522,9 @@ export class ApiService {
     responsibleId?: number;
     search?: string;
     type?: 'Income' | 'Expense';
-  }) {
+  }, options?: { signal?: AbortSignal }) {
     const q = buildQuery(params ?? {});
-    return this.request<InvoiceSummary>(`/invoices/summary${q}`);
+    return this.request<InvoiceSummary>(`/invoices/summary${q}`, { signal: options?.signal });
   }
 
   async getInvoiceNumberingSettings() {

@@ -76,6 +76,35 @@ describe('apiService accounts registry', () => {
   });
 });
 
+describe('apiService invoices', () => {
+  it('passes abort signals to the invoice list and summary requests', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (url) => new Response(JSON.stringify(
+      String(url).includes('/summary')
+        ? { totalAmount: 0 }
+        : { items: [], total: 0, page: 2, pageSize: 20 },
+    ), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const listController = new AbortController();
+    const summaryController = new AbortController();
+
+    await apiService.getInvoices(
+      { search: 'счёт', page: 2, pageSize: 20 },
+      { signal: listController.signal },
+    );
+    await apiService.getInvoicesSummary(
+      { search: 'счёт' },
+      { signal: summaryController.signal },
+    );
+
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/invoices?');
+    expect(fetchMock.mock.calls[0][1]?.signal).toBe(listController.signal);
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/invoices/summary?');
+    expect(fetchMock.mock.calls[1][1]?.signal).toBe(summaryController.signal);
+  });
+});
+
 describe('apiService money operations', () => {
   it('passes the abort signal to the paged money operations request', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({

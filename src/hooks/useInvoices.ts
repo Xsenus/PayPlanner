@@ -89,6 +89,8 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
 
   const hasLoadedRef = useRef(false);
   const hasSummaryLoadedRef = useRef(false);
+  const invoicesAbortRef = useRef<AbortController | null>(null);
+  const summaryAbortRef = useRef<AbortController | null>(null);
   const enabled = filters.enabled ?? true;
 
   const filtersKey = useMemo(() => JSON.stringify(filters), [filters]);
@@ -96,6 +98,8 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
 
   const fetchInvoices = useCallback(
     async (mode: 'auto' | 'refresh' = 'auto') => {
+      invoicesAbortRef.current?.abort();
+      invoicesAbortRef.current = null;
       if (!enabled) {
         setInvoices([]);
         setPagination({ page: filters.page ?? 1, pageSize: filters.pageSize ?? 20, total: 0 });
@@ -105,6 +109,9 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
         return;
       }
 
+      const controller = new AbortController();
+      invoicesAbortRef.current = controller;
+
       const isInitial = mode === 'refresh' ? false : !hasLoadedRef.current;
       if (isInitial) {
         setLoading(true);
@@ -113,25 +120,29 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
       }
       setError(null);
       try {
-        const response = await apiService.getInvoices({
-          from: filters.from,
-          to: filters.to,
-          status: filters.status,
-          clientId: filters.clientId,
-          legalEntityId: filters.legalEntityId,
-          contractId: filters.contractId,
-          actId: filters.actId,
-          paymentId: filters.paymentId,
-          caseId: filters.caseId,
-          clientRole: filters.clientRole,
-          responsibleId: filters.responsibleId,
-          search: filters.search,
-          type: filters.type,
-          sortBy: filters.sortBy,
-          sortDir: filters.sortDir,
-          page: filters.page,
-          pageSize: filters.pageSize,
-        });
+        const response = await apiService.getInvoices(
+          {
+            from: filters.from,
+            to: filters.to,
+            status: filters.status,
+            clientId: filters.clientId,
+            legalEntityId: filters.legalEntityId,
+            contractId: filters.contractId,
+            actId: filters.actId,
+            paymentId: filters.paymentId,
+            caseId: filters.caseId,
+            clientRole: filters.clientRole,
+            responsibleId: filters.responsibleId,
+            search: filters.search,
+            type: filters.type,
+            sortBy: filters.sortBy,
+            sortDir: filters.sortDir,
+            page: filters.page,
+            pageSize: filters.pageSize,
+          },
+          { signal: controller.signal },
+        );
+        if (controller.signal.aborted) return;
         setInvoices(response.items ?? []);
         setPagination({
           page: response.page ?? filters.page ?? 1,
@@ -140,6 +151,7 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
         });
         hasLoadedRef.current = true;
       } catch (err) {
+        if (controller.signal.aborted) return;
         const message = extractDisplayErrorMessage(err, 'Не удалось загрузить счета');
         setError(message);
         if (!hasLoadedRef.current) {
@@ -147,9 +159,11 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
           setPagination({ page: filters.page ?? 1, pageSize: filters.pageSize ?? 20, total: 0 });
         }
       } finally {
-        if (isInitial) {
+        if (invoicesAbortRef.current === controller) {
+          invoicesAbortRef.current = null;
+        }
+        if (!controller.signal.aborted) {
           setLoading(false);
-        } else {
           setRefreshing(false);
         }
       }
@@ -178,40 +192,53 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
 
   const fetchSummary = useCallback(
     async (mode: 'auto' | 'refresh' = 'auto') => {
+      summaryAbortRef.current?.abort();
+      summaryAbortRef.current = null;
       if (!enabled) {
         setSummary(null);
         setSummaryLoading(false);
         return;
       }
 
+      const controller = new AbortController();
+      summaryAbortRef.current = controller;
+
       const isInitial = mode === 'refresh' ? false : !hasSummaryLoadedRef.current;
       if (isInitial) {
         setSummaryLoading(true);
       }
       try {
-        const response = await apiService.getInvoicesSummary({
-          from: filters.from,
-          to: filters.to,
-          status: filters.status,
-          clientId: filters.clientId,
-          legalEntityId: filters.legalEntityId,
-          contractId: filters.contractId,
-          actId: filters.actId,
-          paymentId: filters.paymentId,
-          caseId: filters.caseId,
-          clientRole: filters.clientRole,
-          responsibleId: filters.responsibleId,
-          search: filters.search,
-          type: filters.type,
-        });
+        const response = await apiService.getInvoicesSummary(
+          {
+            from: filters.from,
+            to: filters.to,
+            status: filters.status,
+            clientId: filters.clientId,
+            legalEntityId: filters.legalEntityId,
+            contractId: filters.contractId,
+            actId: filters.actId,
+            paymentId: filters.paymentId,
+            caseId: filters.caseId,
+            clientRole: filters.clientRole,
+            responsibleId: filters.responsibleId,
+            search: filters.search,
+            type: filters.type,
+          },
+          { signal: controller.signal },
+        );
+        if (controller.signal.aborted) return;
         setSummary(response);
         hasSummaryLoadedRef.current = true;
       } catch {
+        if (controller.signal.aborted) return;
         if (!hasSummaryLoadedRef.current) {
           setSummary(null);
         }
       } finally {
-        if (isInitial) {
+        if (summaryAbortRef.current === controller) {
+          summaryAbortRef.current = null;
+        }
+        if (!controller.signal.aborted) {
           setSummaryLoading(false);
         }
       }
@@ -238,11 +265,17 @@ export function useInvoices(filters: InvoicesFilters): UseInvoicesResult {
     hasLoadedRef.current = false;
     setLoading(true);
     void fetchInvoices('auto');
+    return () => {
+      invoicesAbortRef.current?.abort();
+    };
   }, [filtersKey, fetchInvoices]);
 
   useEffect(() => {
     hasSummaryLoadedRef.current = false;
     void fetchSummary('auto');
+    return () => {
+      summaryAbortRef.current?.abort();
+    };
   }, [summaryKey, fetchSummary]);
 
   const refresh = useCallback(async () => {

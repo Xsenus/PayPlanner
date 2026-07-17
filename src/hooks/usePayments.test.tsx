@@ -20,8 +20,15 @@ const payment = (id: number): Payment => ({
   status: 'Pending',
   type: 'Income',
   date: `2026-07-${String(id).padStart(2, '0')}`,
-  plannedDate: null,
-} as Payment);
+  plannedDate: `2026-07-${String(id).padStart(2, '0')}`,
+  description: '',
+  isPaid: false,
+  notes: '',
+  systemNotes: '',
+  rescheduleCount: 0,
+  hasPartialPayment: false,
+  createdAt: '2026-07-01T00:00:00Z',
+});
 
 describe('usePayments', () => {
   beforeEach(() => {
