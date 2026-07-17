@@ -3163,6 +3163,51 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task TaskJournalAutomationScheduler_RechecksCandidateCasesInSingleQuery()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var author = await CreateAdminUserAsync(db, "automation-batch@example.com", "Ответственный автоконтроля");
+        var client = await CreateClientAsync(db, "Клиент пакетного автоконтроля");
+        client.ResponsibleUserId = author.Id;
+        var cases = new List<ClientCase>();
+        for (var index = 1; index <= 12; index++)
+        {
+            var clientCase = await CreateCaseAsync(db, client.Id, $"НЕАКТИВНОЕ ДЕЛО {index}");
+            clientCase.CreatedAt = DateTime.UtcNow.AddDays(-20);
+            cases.Add(clientCase);
+        }
+
+        await db.SaveChangesAsync();
+        interceptor.Commands.Clear();
+        var (scheduler, provider) = CreateAutomationScheduler(db, new Dictionary<string, string?>
+        {
+            ["TaskJournal:Automation:Enabled"] = "true",
+            ["TaskJournal:Automation:InactiveDays"] = "14",
+            ["TaskJournal:Automation:Limit"] = "20",
+        });
+
+        using (provider)
+        {
+            var result = await scheduler.RunOnceAsync(CancellationToken.None);
+
+            Assert.Null(result.Error);
+            Assert.Equal(cases.Count, result.CreatedCount);
+        }
+
+        var candidateRecheckCommands = interceptor.Commands
+            .Where(command =>
+                command.Contains("SELECT DISTINCT", StringComparison.OrdinalIgnoreCase)
+                && command.Contains("FROM \"TaskJournalItems\"", StringComparison.Ordinal)
+                && command.Contains("\"ClientCaseId\"", StringComparison.Ordinal))
+            .ToArray();
+        Assert.Single(candidateRecheckCommands);
+        var caseIds = cases.Select(clientCase => clientCase.Id).ToArray();
+        Assert.Equal(cases.Count, await db.TaskJournalItems.CountAsync(task =>
+            task.ClientCaseId.HasValue && caseIds.Contains(task.ClientCaseId.Value)));
+    }
+
+    [Fact]
     public async Task TaskJournalAutomationScheduler_EscalatesLongInactiveCase()
     {
         await using var db = await CreateContextAsync();

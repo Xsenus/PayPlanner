@@ -1262,6 +1262,40 @@ public class SystemJobsControllerTests
     }
 
     [Fact]
+    public async Task TaskJournalAutomationSchedulerService_SerializesConcurrentRuns()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var services = new ServiceCollection();
+        services.AddScoped(_ => new PaymentContext(scope.Options, useObjectAuditModel: false));
+        await using var provider = services.BuildServiceProvider();
+        var jobRunState = new BlockingSystemJobRunStateService();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["TaskJournal:Automation:Enabled"] = "false",
+            })
+            .Build();
+        var service = new TaskJournalAutomationSchedulerService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            configuration,
+            NullLogger<TaskJournalAutomationSchedulerService>.Instance,
+            jobRunState);
+
+        var firstRun = service.RunOnceAsync(CancellationToken.None);
+        await jobRunState.SuccessEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var secondRun = service.RunOnceAsync(CancellationToken.None);
+        await Task.Delay(100);
+
+        var maxConcurrentCallsWhileBlocked = jobRunState.MaxConcurrentSuccessCalls;
+        jobRunState.SuccessRelease.SetResult(true);
+        await Task.WhenAll(firstRun, secondRun);
+
+        Assert.Equal(1, maxConcurrentCallsWhileBlocked);
+        Assert.Equal(1, jobRunState.MaxConcurrentSuccessCalls);
+        Assert.Equal(2, jobRunState.SuccessCalls);
+    }
+
+    [Fact]
     public async Task YandexDiskCrmSyncStateRecorder_RecordFailureUpsertsRetryState()
     {
         await using var scope = await CreateDbScopeAsync();

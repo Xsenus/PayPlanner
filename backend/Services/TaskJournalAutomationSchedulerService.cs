@@ -35,6 +35,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
     private readonly IConfiguration _configuration;
     private readonly ILogger<TaskJournalAutomationSchedulerService> _logger;
     private readonly ISystemJobRunStateService? _jobRunState;
+    private readonly SemaphoreSlim _runLock = new(1, 1);
 
     public TaskJournalAutomationSchedulerService(
         IServiceScopeFactory scopeFactory,
@@ -83,6 +84,19 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
     }
 
     public async Task<TaskJournalAutomationSchedulerResult> RunOnceAsync(CancellationToken cancellationToken = default)
+    {
+        await _runLock.WaitAsync(cancellationToken);
+        try
+        {
+            return await RunOnceCoreAsync(cancellationToken);
+        }
+        finally
+        {
+            _runLock.Release();
+        }
+    }
+
+    private async Task<TaskJournalAutomationSchedulerResult> RunOnceCoreAsync(CancellationToken cancellationToken)
     {
         var startedAt = DateTime.UtcNow;
         try
@@ -158,6 +172,21 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                 .Take(settings.Limit)
                 .ToListAsync(cancellationToken);
 
+            var candidateCaseIds = candidates
+                .Select(candidate => candidate.Case.Id)
+                .ToArray();
+            var activeTaskCaseIds = candidateCaseIds.Length == 0
+                ? []
+                : await context.TaskJournalItems
+                    .AsNoTracking()
+                    .Where(task =>
+                        task.ClientCaseId.HasValue
+                        && candidateCaseIds.Contains(task.ClientCaseId.Value)
+                        && ActiveTaskStatuses.Contains(task.Status))
+                    .Select(task => task.ClientCaseId!.Value)
+                    .Distinct()
+                    .ToHashSetAsync(cancellationToken);
+
             var created = 0;
             var createdTasks = new List<CreatedAutomationTask>();
             foreach (var candidate in candidates)
@@ -168,13 +197,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                     continue;
                 }
 
-                var stillHasActiveTask = await context.TaskJournalItems
-                    .AsNoTracking()
-                    .AnyAsync(task =>
-                        task.ClientCaseId == candidate.Case.Id &&
-                        ActiveTaskStatuses.Contains(task.Status),
-                        cancellationToken);
-                if (stillHasActiveTask)
+                if (activeTaskCaseIds.Contains(candidate.Case.Id))
                 {
                     continue;
                 }
