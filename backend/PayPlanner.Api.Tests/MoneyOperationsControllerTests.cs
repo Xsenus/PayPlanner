@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -5329,19 +5328,8 @@ public class MoneyOperationsControllerTests
         Assert.Equal(1, await db.MoneyAccounts.CountAsync());
     }
 
-    private static async Task<PaymentContext> CreateContextAsync()
-    {
-        var connection = new SqliteConnection("Data Source=:memory:");
-        await connection.OpenAsync();
-
-        var options = new DbContextOptionsBuilder<PaymentContext>()
-            .UseSqlite(connection)
-            .Options;
-
-        var db = new PaymentContext(options);
-        await db.Database.EnsureCreatedAsync();
-        return db;
-    }
+    private static Task<PaymentContext> CreateContextAsync()
+        => SqliteTestContextFactory.CreateAsync();
 
     private static async Task<User> CreateUserAsync(
         PaymentContext db,
