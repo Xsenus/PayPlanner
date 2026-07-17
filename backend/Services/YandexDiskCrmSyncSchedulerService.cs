@@ -28,6 +28,7 @@ public sealed class YandexDiskCrmSyncSchedulerService : BackgroundService
     private readonly IConfiguration _configuration;
     private readonly ILogger<YandexDiskCrmSyncSchedulerService> _logger;
     private readonly ISystemJobRunStateService? _jobRunState;
+    private readonly SemaphoreSlim _runLock = new(1, 1);
 
     public YandexDiskCrmSyncSchedulerService(
         IServiceScopeFactory scopeFactory,
@@ -59,7 +60,7 @@ public sealed class YandexDiskCrmSyncSchedulerService : BackgroundService
             {
                 try
                 {
-                    await RunOnceAsync(stoppingToken);
+                    await RunOnceAsync(settings, stoppingToken);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -88,8 +89,38 @@ public sealed class YandexDiskCrmSyncSchedulerService : BackgroundService
 
     public async Task<YandexDiskCrmSyncSchedulerResult> RunOnceAsync(CancellationToken cancellationToken = default)
     {
+        await _runLock.WaitAsync(cancellationToken);
+        try
+        {
+            var settings = await ResolveSettingsAsync(cancellationToken);
+            return await RunOnceCoreAsync(settings, cancellationToken);
+        }
+        finally
+        {
+            _runLock.Release();
+        }
+    }
+
+    private async Task<YandexDiskCrmSyncSchedulerResult> RunOnceAsync(
+        YandexDiskCrmSyncSchedulerSettings settings,
+        CancellationToken cancellationToken)
+    {
+        await _runLock.WaitAsync(cancellationToken);
+        try
+        {
+            return await RunOnceCoreAsync(settings, cancellationToken);
+        }
+        finally
+        {
+            _runLock.Release();
+        }
+    }
+
+    private async Task<YandexDiskCrmSyncSchedulerResult> RunOnceCoreAsync(
+        YandexDiskCrmSyncSchedulerSettings settings,
+        CancellationToken cancellationToken)
+    {
         var startedAt = DateTime.UtcNow;
-        var settings = await ResolveSettingsAsync(cancellationToken);
         if (!settings.Enabled)
         {
             await RecordSuccessAsync(startedAt, 0, 0, "Фоновая синхронизация CRM с Я.Диском выключена в настройках.", cancellationToken);

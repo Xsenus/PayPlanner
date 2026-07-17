@@ -1224,6 +1224,44 @@ public class SystemJobsControllerTests
     }
 
     [Fact]
+    public async Task YandexDiskCrmSyncSchedulerService_SerializesConcurrentRuns()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var now = DateTime.UtcNow;
+        scope.Db.SystemSettings.Add(new SystemSetting
+        {
+            Key = YandexDiskCrmSyncSchedulerService.EnabledSettingKey,
+            Value = "true",
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        await scope.Db.SaveChangesAsync();
+
+        var services = new ServiceCollection();
+        services.AddScoped(_ => new PaymentContext(scope.Options, useObjectAuditModel: false));
+        await using var provider = services.BuildServiceProvider();
+        var jobRunState = new BlockingSystemJobRunStateService();
+        var service = new YandexDiskCrmSyncSchedulerService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new ConfigurationBuilder().Build(),
+            NullLogger<YandexDiskCrmSyncSchedulerService>.Instance,
+            jobRunState);
+
+        var firstRun = service.RunOnceAsync(CancellationToken.None);
+        await jobRunState.SuccessEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var secondRun = service.RunOnceAsync(CancellationToken.None);
+        await Task.Delay(100);
+
+        var maxConcurrentCallsWhileBlocked = jobRunState.MaxConcurrentSuccessCalls;
+        jobRunState.SuccessRelease.SetResult(true);
+        await Task.WhenAll(firstRun, secondRun);
+
+        Assert.Equal(1, maxConcurrentCallsWhileBlocked);
+        Assert.Equal(1, jobRunState.MaxConcurrentSuccessCalls);
+        Assert.Equal(2, jobRunState.SuccessCalls);
+    }
+
+    [Fact]
     public async Task YandexDiskCrmSyncStateRecorder_RecordFailureUpsertsRetryState()
     {
         await using var scope = await CreateDbScopeAsync();
@@ -1918,6 +1956,69 @@ public class SystemJobsControllerTests
                 states
                     .Where(item => requested.Contains(item.Key))
                     .ToDictionary(item => item.Key, item => item.Value, StringComparer.OrdinalIgnoreCase));
+        }
+    }
+
+    private sealed class BlockingSystemJobRunStateService : ISystemJobRunStateService
+    {
+        private int _activeSuccessCalls;
+        private int _maxConcurrentSuccessCalls;
+        private int _successCalls;
+
+        public TaskCompletionSource<bool> SuccessEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<bool> SuccessRelease { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int SuccessCalls => Volatile.Read(ref _successCalls);
+        public int MaxConcurrentSuccessCalls => Volatile.Read(ref _maxConcurrentSuccessCalls);
+
+        public async Task RecordSuccessAsync(
+            string jobKey,
+            DateTime startedAt,
+            int? processedCount,
+            int? skippedCount,
+            string summary,
+            CancellationToken cancellationToken = default)
+        {
+            var activeCalls = Interlocked.Increment(ref _activeSuccessCalls);
+            Interlocked.Increment(ref _successCalls);
+            UpdateMaximum(activeCalls);
+            SuccessEntered.TrySetResult(true);
+            try
+            {
+                await SuccessRelease.Task.WaitAsync(cancellationToken);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref _activeSuccessCalls);
+            }
+        }
+
+        public Task RecordFailureAsync(
+            string jobKey,
+            DateTime startedAt,
+            Exception exception,
+            string? summary = null,
+            CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task<IReadOnlyDictionary<string, SystemJobRunState>> GetLastRunsAsync(
+            IEnumerable<string> jobKeys,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<IReadOnlyDictionary<string, SystemJobRunState>>(
+                new Dictionary<string, SystemJobRunState>(StringComparer.OrdinalIgnoreCase));
+
+        private void UpdateMaximum(int value)
+        {
+            var current = Volatile.Read(ref _maxConcurrentSuccessCalls);
+            while (value > current)
+            {
+                var observed = Interlocked.CompareExchange(ref _maxConcurrentSuccessCalls, value, current);
+                if (observed == current)
+                {
+                    return;
+                }
+
+                current = observed;
+            }
         }
     }
 
