@@ -6589,12 +6589,18 @@ public class ReportsController : ControllerBase
         CancellationToken ct)
     {
         var rows = await BuildPlanFactQuery(from, to, source, accountName, counterpartyName, clientId, caseId, contractId, incomeTypeId, paymentsVisibility)
-            .Select(item => new PlanFactQueryRow
+            .GroupBy(item => new
             {
-                Date = item.Date,
-                Direction = item.Direction,
-                AccountingType = item.AccountingType,
-                Amount = item.Amount,
+                Date = item.Date.Date,
+                item.Direction,
+                item.AccountingType,
+            })
+            .Select(group => new PlanFactQueryRow
+            {
+                Date = group.Key.Date,
+                Direction = group.Key.Direction,
+                AccountingType = group.Key.AccountingType,
+                Amount = group.Sum(item => item.Amount),
             })
             .ToListAsync(ct);
 

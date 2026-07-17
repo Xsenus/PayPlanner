@@ -4865,15 +4865,18 @@ services.Id,
     [Fact]
     public async Task PlanFact_ComparesPlanAndFactOperations()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await SqliteTestContextFactory.CreateAsync(interceptor: interceptor);
         db.MoneyOperations.AddRange(
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Plan, 10_000m, new DateTime(2026, 5, 1), "Основной банк"),
-            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 8_000m, new DateTime(2026, 5, 1), "Основной банк"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 5_000m, new DateTime(2026, 5, 1, 9, 0, 0), "Основной банк"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 3_000m, new DateTime(2026, 5, 1, 15, 0, 0), "Основной банк"),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Plan, 4_000m, new DateTime(2026, 5, 2), "Основной банк"),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 5_000m, new DateTime(2026, 5, 2), "Основной банк"),
             Operation(MoneyOperationSource.Cash, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 2_000m, new DateTime(2026, 5, 3), "Касса"),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Transfer, MoneyOperationAccountingType.Fact, 50_000m, new DateTime(2026, 5, 3), "Основной банк"));
         await db.SaveChangesAsync();
+        interceptor.Commands.Clear();
         var controller = CreateController(db);
 
         var action = await controller.PlanFact(
@@ -4923,6 +4926,11 @@ services.Id,
                 Assert.Equal(-4_000m, day.PlanNetTotal);
                 Assert.Equal(-5_000m, day.FactNetTotal);
             });
+
+        var planFactQuery = Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"MoneyOperations\"", StringComparison.Ordinal));
+        Assert.Contains("GROUP BY", planFactQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SUM", planFactQuery, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
