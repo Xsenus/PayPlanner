@@ -6366,9 +6366,9 @@ export class ApiService {
     scope?: 'open' | 'closed' | 'all';
     assigneeUserId?: number;
     limit?: number;
-  }) {
+  }, options?: { signal?: AbortSignal }) {
     const q = buildQuery(params ?? {});
-    return this.request<TaskReport>(`/reports/tasks${q}`);
+    return this.request<TaskReport>(`/reports/tasks${q}`, { signal: options?.signal });
   }
 
   async getDirectionReport(params?: {

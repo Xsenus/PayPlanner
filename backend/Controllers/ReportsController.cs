@@ -4793,10 +4793,6 @@ public class ReportsController : ControllerBase
     {
         var query = _db.TaskJournalItems
             .AsNoTracking()
-            .Include(task => task.Client)
-            .Include(task => task.LegalEntity)
-            .Include(task => task.ClientCase)
-            .Include(task => task.Participants)
             .ApplyTaskVisibility(tasksVisibility);
 
         if (assigneeUserId.HasValue)
@@ -4808,7 +4804,38 @@ public class ReportsController : ControllerBase
                     participant.UserId == assigneeUserId.Value));
         }
 
-        var rows = (await query.ToListAsync(ct))
+        var taskRows = await query
+            .Select(task => new TaskReportRow(
+                task.Id,
+                task.ClientId,
+                task.Client != null ? task.Client.Name : string.Empty,
+                task.LegalEntityId,
+                task.LegalEntity != null ? task.LegalEntity.ShortName : null,
+                task.LegalEntity != null ? task.LegalEntity.FullName : null,
+                task.ClientCaseId,
+                task.ClientCase != null ? task.ClientCase.Title : string.Empty,
+                task.ObjectName,
+                task.Title,
+                task.AssigneeUserId,
+                task.AssigneeName,
+                task.Participants
+                    .Where(participant =>
+                        participant.Role.ToLower() == "assignee" &&
+                        participant.DisplayName.Trim() != string.Empty)
+                    .Select(participant => participant.DisplayName)
+                    .FirstOrDefault(),
+                task.AuthorName,
+                task.DueAt,
+                task.PlannedDurationMinutes,
+                task.Type,
+                task.Priority,
+                task.Status,
+                task.Result,
+                task.CreatedAt,
+                task.UpdatedAt))
+            .ToListAsync(ct);
+
+        var rows = taskRows
             .Select(task => MapTaskReportItem(task, asOf))
             .ToList();
 
@@ -4884,7 +4911,7 @@ public class ReportsController : ControllerBase
         };
     }
 
-    private static TaskReportItemDto MapTaskReportItem(TaskJournalItem task, DateTime asOf)
+    private static TaskReportItemDto MapTaskReportItem(TaskReportRow task, DateTime asOf)
     {
         var status = NormalizeReportText(task.Status, "new");
         var isClosed = IsClosedTaskStatus(status);
@@ -4894,17 +4921,17 @@ public class ReportsController : ControllerBase
         {
             TaskId = task.Id,
             ClientId = task.ClientId,
-            ClientName = task.Client?.Name ?? string.Empty,
+            ClientName = task.ClientName,
             LegalEntityId = task.LegalEntityId,
-            LegalEntityName = task.LegalEntity is null
-                ? string.Empty
-                : NormalizeReportText(task.LegalEntity.ShortName, task.LegalEntity.FullName ?? string.Empty),
+            LegalEntityName = NormalizeReportText(task.LegalEntityShortName, task.LegalEntityFullName ?? string.Empty),
             ClientCaseId = task.ClientCaseId,
-            ClientCaseTitle = task.ClientCase?.Title ?? string.Empty,
+            ClientCaseTitle = task.ClientCaseTitle,
             ObjectName = NormalizeReportText(task.ObjectName, "Без объекта"),
             Title = NormalizeReportText(task.Title, "Без названия"),
             AssigneeUserId = task.AssigneeUserId,
-            AssigneeName = NormalizeReportText(ResolveTaskAssigneeName(task), "Без исполнителя"),
+            AssigneeName = NormalizeReportText(
+                task.AssigneeName,
+                NormalizeReportText(task.FallbackAssigneeName, "Без исполнителя")),
             AuthorName = task.AuthorName ?? string.Empty,
             DueAt = NormalizeReportInstant(task.DueAt),
             PlannedDurationMinutes = task.PlannedDurationMinutes,
@@ -5296,19 +5323,6 @@ public class ReportsController : ControllerBase
             "all" => "Все",
             _ => "Открытые",
         };
-
-    private static string ResolveTaskAssigneeName(TaskJournalItem task)
-    {
-        if (!string.IsNullOrWhiteSpace(task.AssigneeName))
-        {
-            return task.AssigneeName.Trim();
-        }
-
-        return task.Participants
-            .Where(participant => string.Equals(participant.Role, "assignee", StringComparison.OrdinalIgnoreCase))
-            .Select(participant => participant.DisplayName)
-            .FirstOrDefault(name => !string.IsNullOrWhiteSpace(name)) ?? string.Empty;
-    }
 
     private static int TaskStatusSortOrder(string? status)
         => status switch
@@ -9055,6 +9069,30 @@ public class ReportsController : ControllerBase
         string Priority,
         DateTime DueAt,
         int PlannedDurationMinutes);
+
+    private sealed record TaskReportRow(
+        int Id,
+        int? ClientId,
+        string ClientName,
+        int? LegalEntityId,
+        string? LegalEntityShortName,
+        string? LegalEntityFullName,
+        int? ClientCaseId,
+        string ClientCaseTitle,
+        string ObjectName,
+        string Title,
+        int? AssigneeUserId,
+        string AssigneeName,
+        string? FallbackAssigneeName,
+        string AuthorName,
+        DateTime DueAt,
+        int PlannedDurationMinutes,
+        string Type,
+        string Priority,
+        string Status,
+        string? Result,
+        DateTime CreatedAt,
+        DateTime? UpdatedAt);
 
     private sealed record LegalWorkPaymentRow(
         int PaymentId,

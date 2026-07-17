@@ -1,5 +1,6 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using PayPlanner.Api.Data;
 
 namespace PayPlanner.Api.Tests;
@@ -9,7 +10,9 @@ internal static class SqliteTestContextFactory
     private static readonly SemaphoreSlim TemplateGate = new(1, 1);
     private static readonly Dictionary<bool, SqliteConnection> Templates = [];
 
-    public static async Task<PaymentContext> CreateAsync(bool useObjectAuditModel = true)
+    public static async Task<PaymentContext> CreateAsync(
+        bool useObjectAuditModel = true,
+        IInterceptor? interceptor = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -27,11 +30,14 @@ internal static class SqliteTestContextFactory
                 TemplateGate.Release();
             }
 
-            var options = new DbContextOptionsBuilder<PaymentContext>()
-                .UseSqlite(connection, contextOwnsConnection: true)
-                .Options;
+            var optionsBuilder = new DbContextOptionsBuilder<PaymentContext>()
+                .UseSqlite(connection, contextOwnsConnection: true);
+            if (interceptor is not null)
+            {
+                optionsBuilder.AddInterceptors(interceptor);
+            }
 
-            return new PaymentContext(options, useObjectAuditModel: useObjectAuditModel);
+            return new PaymentContext(optionsBuilder.Options, useObjectAuditModel: useObjectAuditModel);
         }
         catch
         {

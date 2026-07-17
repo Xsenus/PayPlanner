@@ -2400,22 +2400,27 @@ describe('apiService reports', () => {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
 
-    const result = await apiService.getTaskReport({
-      asOf: '2026-05-26',
-      scope: 'closed',
-      assigneeUserId: 7,
-      limit: 50,
-    });
+    const result = await apiService.getTaskReport(
+      {
+        asOf: '2026-05-26',
+        scope: 'closed',
+        assigneeUserId: 7,
+        limit: 50,
+      },
+      { signal: controller.signal },
+    );
 
     expect(result).toEqual(payload);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url] = fetchMock.mock.calls[0];
+    const [url, options] = fetchMock.mock.calls[0];
     expect(String(url)).toContain('/reports/tasks?');
     expect(String(url)).toContain('asOf=2026-05-26');
     expect(String(url)).toContain('scope=closed');
     expect(String(url)).toContain('assigneeUserId=7');
     expect(String(url)).toContain('limit=50');
+    expect(options?.signal).toBe(controller.signal);
   });
 
   it('loads case finance report with filters', async () => {

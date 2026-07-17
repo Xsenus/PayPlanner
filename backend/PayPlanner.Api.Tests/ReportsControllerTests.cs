@@ -1,9 +1,11 @@
+using System.Data.Common;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
@@ -2121,6 +2123,108 @@ public class ReportsControllerTests
         Assert.Equal(selectedZone.ProfileToday, report.AsOf);
         Assert.Equal(selectedZone.ProfileToday > selectedZone.UtcToday ? 1 : 0, report.OverdueTaskCount);
         Assert.Equal(selectedZone.ProfileToday < selectedZone.UtcToday ? 1 : 0, report.DueTodayTaskCount);
+    }
+
+    [Fact]
+    public async Task TasksReport_ProjectsOnlyRequiredColumnsAndKeepsParticipantAssigneeFallback()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await SqliteTestContextFactory.CreateAsync(interceptor: interceptor);
+        var role = new Role { Name = "task-report-projection-role", Description = "Task reporter" };
+        var user = new User
+        {
+            Email = "task-report-projection@example.test",
+            FullName = "Task Report Projection User",
+            IsActive = true,
+            Role = role,
+        };
+        var client = new Client { Name = "Projection client" };
+        var legalEntity = new LegalEntity { ShortName = "Projection entity" };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            Title = "Projection case",
+            Status = ClientCaseStatus.Open,
+            CreatedAt = new DateTime(2026, 5, 1),
+        };
+
+        db.Roles.Add(role);
+        db.Users.Add(user);
+        db.Clients.Add(client);
+        db.LegalEntities.Add(legalEntity);
+        db.ClientCases.Add(clientCase);
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                Role = role,
+                Section = RolePermissionCatalog.Reports,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                Role = role,
+                Section = RolePermissionCatalog.Tasks,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            });
+        var task = new TaskJournalItem
+        {
+            Client = client,
+            LegalEntity = legalEntity,
+            ClientCase = clientCase,
+            ObjectName = "Projection object",
+            Title = "Projection task",
+            Description = new string('x', 4_000),
+            AssigneeName = string.Empty,
+            AuthorName = "Projection author",
+            DueAt = new DateTime(2026, 5, 20, 9, 0, 0),
+            Status = "new",
+            Priority = "high",
+            Type = "task",
+            RemindersJson = "[{\"offsetMinutes\":60}]",
+            ChannelsJson = "[\"inApp\"]",
+            TagsJson = "[\"projection\"]",
+            CreatedAt = new DateTime(2026, 5, 10, 9, 0, 0),
+            Participants =
+            [
+                new TaskJournalParticipant
+                {
+                    Role = "ASSIGNEE",
+                    DisplayName = "  Participant assignee  ",
+                    Email = "participant@example.test",
+                    Resolution = new string('y', 4_000),
+                },
+            ],
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+        interceptor.Commands.Clear();
+
+        var controller = CreateController(db, CreateUserPrincipal(user.Id));
+        var action = await controller.Tasks(
+            new DateTime(2026, 5, 21),
+            "all",
+            null,
+            50,
+            CancellationToken.None);
+
+        var report = Assert.IsType<TaskReportDto>(Assert.IsType<OkObjectResult>(action.Result).Value);
+        var item = Assert.Single(report.Items);
+        Assert.Equal("Projection client", item.ClientName);
+        Assert.Equal("Projection entity", item.LegalEntityName);
+        Assert.Equal("Projection case", item.ClientCaseTitle);
+        Assert.Equal("Participant assignee", item.AssigneeName);
+
+        var taskQuery = Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"TaskJournalItems\"", StringComparison.Ordinal));
+        Assert.Contains("TaskJournalParticipants", taskQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Description\"", taskQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"RemindersJson\"", taskQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"ChannelsJson\"", taskQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"TagsJson\"", taskQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Resolution\"", taskQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Email\"", taskQuery, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -7179,6 +7283,21 @@ services.Id,
         }
 
         throw new InvalidOperationException("No test timezone with a local date different from UTC was found.");
+    }
+
+    private sealed class RecordingCommandInterceptor : DbCommandInterceptor
+    {
+        public List<string> Commands { get; } = [];
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            Commands.Add(command.CommandText);
+            return ValueTask.FromResult(result);
+        }
     }
 
     private static Task<PaymentContext> CreateContextAsync()
