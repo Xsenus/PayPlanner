@@ -297,12 +297,15 @@ describe('CasesRegistry', () => {
     fireEvent.click(screen.getByRole('button', { name: '2026-001' }));
 
     expect(onOpenClient).toHaveBeenCalledWith(12, 1);
-    expect(apiService.getCasesV2).toHaveBeenCalledWith(expect.objectContaining({
-      page: 1,
-      pageSize: 25,
-      sortBy: 'createdAt',
-      sortDir: 'desc',
-    }));
+    expect(apiService.getCasesV2).toHaveBeenCalledWith(
+      expect.objectContaining({
+        page: 1,
+        pageSize: 25,
+        sortBy: 'createdAt',
+        sortDir: 'desc',
+      }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it('keeps case owners closed when clients and legal entities are hidden', async () => {
@@ -347,12 +350,62 @@ describe('CasesRegistry', () => {
     });
 
     await waitFor(() => {
-      expect(apiService.getCasesV2).toHaveBeenLastCalledWith(expect.objectContaining({
-        search: 'земцов',
-        status: 'Open',
-        responsibleUserId: 7,
-      }));
+      expect(apiService.getCasesV2).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          search: 'земцов',
+          status: 'Open',
+          responsibleUserId: 7,
+        }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
     });
+  });
+
+  it('combines rapid registry search input and does not reload auxiliary data', async () => {
+    render(<CasesRegistry />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    vi.mocked(apiService.getCasesV2).mockClear();
+    vi.mocked(apiService.getActResponsibles).mockClear();
+    vi.mocked(apiService.getCaseAccessRequests).mockClear();
+
+    const searchInput = screen.getByPlaceholderText('Поиск по делу, клиенту, суду');
+    fireEvent.change(searchInput, { target: { value: 'зе' } });
+    fireEvent.change(searchInput, { target: { value: 'земц' } });
+    fireEvent.change(searchInput, { target: { value: 'земцов' } });
+
+    expect(apiService.getCasesV2).not.toHaveBeenCalled();
+    await waitFor(() => expect(apiService.getCasesV2).toHaveBeenCalledTimes(1));
+    expect(apiService.getCasesV2).toHaveBeenCalledWith(
+      expect.objectContaining({ search: 'земцов', page: 1 }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(apiService.getActResponsibles).not.toHaveBeenCalled();
+    expect(apiService.getCaseAccessRequests).not.toHaveBeenCalled();
+  });
+
+  it('aborts an obsolete active registry request', async () => {
+    render(<CasesRegistry />);
+
+    await screen.findByText('ЗЕМЦОВ - банкротство');
+    vi.mocked(apiService.getCasesV2).mockClear();
+    const signals: AbortSignal[] = [];
+    const resolvePending: Array<(result: { items: ClientCase[]; total: number; page: number; pageSize: number }) => void> = [];
+    vi.mocked(apiService.getCasesV2).mockImplementation((_params, options) => {
+      if (options?.signal) signals.push(options.signal);
+      return new Promise((resolve) => resolvePending.push(resolve));
+    });
+
+    const searchInput = screen.getByPlaceholderText('Поиск по делу, клиенту, суду');
+    fireEvent.change(searchInput, { target: { value: 'иван' } });
+    await waitFor(() => expect(apiService.getCasesV2).toHaveBeenCalledTimes(1));
+    expect(signals[0]?.aborted).toBe(false);
+
+    fireEvent.change(searchInput, { target: { value: 'иванов' } });
+
+    await waitFor(() => expect(signals[0]?.aborted).toBe(true));
+    await waitFor(() => expect(apiService.getCasesV2).toHaveBeenCalledTimes(2));
+    resolvePending.forEach((resolve) => resolve({ items: [], total: 0, page: 1, pageSize: 25 }));
   });
 
   it('passes registry scope to the cases api', async () => {
@@ -363,11 +416,10 @@ describe('CasesRegistry', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Архив' }));
 
     await waitFor(() => {
-      expect(apiService.getCasesV2).toHaveBeenLastCalledWith(expect.objectContaining({
-        scope: 'archive',
-        status: undefined,
-        page: 1,
-      }));
+      expect(apiService.getCasesV2).toHaveBeenLastCalledWith(
+        expect.objectContaining({ scope: 'archive', status: undefined, page: 1 }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
     });
   });
 
@@ -381,11 +433,10 @@ describe('CasesRegistry', () => {
     fireEvent.click(screen.getByRole('button', { name: 'На контроле' }));
 
     await waitFor(() => {
-      expect(apiService.getCasesV2).toHaveBeenLastCalledWith(expect.objectContaining({
-        scope: 'control',
-        status: undefined,
-        page: 1,
-      }));
+      expect(apiService.getCasesV2).toHaveBeenLastCalledWith(
+        expect.objectContaining({ scope: 'control', status: undefined, page: 1 }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
     });
   });
 
@@ -417,10 +468,10 @@ describe('CasesRegistry', () => {
     });
 
     await waitFor(() => {
-      expect(apiService.getCasesV2).toHaveBeenLastCalledWith(expect.objectContaining({
-        search: 'земцов',
-        status: 'Open',
-      }));
+      expect(apiService.getCasesV2).toHaveBeenLastCalledWith(
+        expect.objectContaining({ search: 'земцов', status: 'Open' }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
     });
 
     fireEvent.click(screen.getByRole('button', { name: /^CSV$/u }));
@@ -519,11 +570,10 @@ describe('CasesRegistry', () => {
     expect(screen.queryByText(/35\s*000\s*₽/u)).toBeNull();
     expect(screen.queryByText(/15\s*000\s*₽/u)).toBeNull();
 
-    expect(apiService.getCasesV2).toHaveBeenCalledWith(expect.objectContaining({
-      sortBy: 'createdAt',
-      minFee: undefined,
-      maxFee: undefined,
-    }));
+    expect(apiService.getCasesV2).toHaveBeenCalledWith(
+      expect.objectContaining({ sortBy: 'createdAt', minFee: undefined, maxFee: undefined }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     expect(onOpenCaseFinance).not.toHaveBeenCalled();
   });
 
@@ -729,10 +779,10 @@ describe('CasesRegistry', () => {
     });
 
     await waitFor(() => {
-      expect(apiService.getCasesV2).toHaveBeenLastCalledWith(expect.objectContaining({
-        search: 'земцов',
-        status: 'Open',
-      }));
+      expect(apiService.getCasesV2).toHaveBeenLastCalledWith(
+        expect.objectContaining({ search: 'земцов', status: 'Open' }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Сохранить вид' }));
@@ -759,11 +809,10 @@ describe('CasesRegistry', () => {
     });
 
     await waitFor(() => {
-      expect(apiService.getCasesV2).toHaveBeenLastCalledWith(expect.objectContaining({
-        search: 'земцов',
-        status: 'Open',
-        page: 1,
-      }));
+      expect(apiService.getCasesV2).toHaveBeenLastCalledWith(
+        expect.objectContaining({ search: 'земцов', status: 'Open', page: 1 }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Удалить сохраненное представление' }));

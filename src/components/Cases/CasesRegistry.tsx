@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type MouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { Archive, ArrowUpDown, Bookmark, Briefcase, ClipboardPlus, Download, Loader2, LockKeyhole, Pencil, Plus, Printer, RefreshCw, Search, Settings2, ShieldAlert, Trash2, UserRound, WalletCards } from 'lucide-react';
 
 import { useAuth } from '../../contexts/AuthContext';
@@ -6,6 +6,7 @@ import { apiService } from '../../services/api';
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { useDialog } from '../../hooks/useDialog';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
+import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { usePersistedTableSettings } from '../../hooks/usePersistedTableSettings';
 import type { ActResponsible, ClientCase, ClientCaseAccessRequest } from '../../types';
 import { buildCaseTaskPayload } from '../../utils/caseTaskPayload';
@@ -405,6 +406,8 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebouncedValue(search.trim(), 300);
+  const previousRegistrySearchRef = useRef(debouncedSearch);
   const [status, setStatus] = useState('');
   const [caseScope, setCaseScope] = useState<CaseScope>('all');
   const [activityFilter, setActivityFilter] = useState<CaseActivityFilter>('all');
@@ -481,51 +484,45 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setAccessRequestsLoading(canManageCaseAccess);
-    setError(null);
-
-    Promise.all([
-      apiService.getCasesV2({
-        search: search.trim() || undefined,
-        status: status || undefined,
-        caseType: caseType.trim() || undefined,
-        responsibleUserId: responsibleUserId ? Number(responsibleUserId) : undefined,
-        priority: priority || undefined,
-        from: from || undefined,
-        to: to || undefined,
-        minFee: canViewFinance && minFee ? Number(minFee) : undefined,
-        maxFee: canViewFinance && maxFee ? Number(maxFee) : undefined,
-        scope: caseScope === 'all' ? undefined : caseScope,
-        activity: activityFilter === 'all' ? undefined : activityFilter,
-        inactiveDays: INACTIVE_CASE_DAYS,
-        sortBy,
-        sortDir,
-        page,
-        pageSize,
-      }),
-      apiService.getActResponsibles().catch(() => [] as ActResponsible[]),
-      canManageCaseAccess
-        ? apiService.getCaseAccessRequests().catch(() => [] as ClientCaseAccessRequest[])
-        : Promise.resolve([] as ClientCaseAccessRequest[]),
-    ])
-      .then(([casesResult, responsibleResult, accessRequestResult]) => {
-        if (cancelled) return;
-        setItems(casesResult.items ?? []);
-        setTotal(casesResult.total ?? 0);
-        setResponsibles(responsibleResult ?? []);
-        setAccessRequests(accessRequestResult ?? []);
+    void apiService.getActResponsibles()
+      .then((result) => {
+        if (!cancelled) {
+          setResponsibles(result ?? []);
+        }
       })
-      .catch((err) => {
-        if (cancelled) return;
-        setItems([]);
-        setTotal(0);
-        setAccessRequests([]);
-        setError(err instanceof Error ? err.message : 'Не удалось загрузить реестр дел.');
+      .catch(() => {
+        if (!cancelled) {
+          setResponsibles([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadToken]);
+
+  useEffect(() => {
+    if (!canManageCaseAccess) {
+      setAccessRequests([]);
+      setAccessRequestsLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setAccessRequestsLoading(true);
+    void apiService.getCaseAccessRequests()
+      .then((result) => {
+        if (!cancelled) {
+          setAccessRequests(result ?? []);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAccessRequests([]);
+        }
       })
       .finally(() => {
         if (!cancelled) {
-          setLoading(false);
           setAccessRequestsLoading(false);
         }
       });
@@ -533,11 +530,60 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
     return () => {
       cancelled = true;
     };
-  }, [activityFilter, canManageCaseAccess, canViewFinance, caseScope, caseType, from, maxFee, minFee, page, pageSize, priority, reloadToken, responsibleUserId, search, sortBy, sortDir, status, to]);
+  }, [canManageCaseAccess, reloadToken]);
+
+  useEffect(() => {
+    if (page !== 1 && previousRegistrySearchRef.current !== debouncedSearch) {
+      return undefined;
+    }
+    previousRegistrySearchRef.current = debouncedSearch;
+    const controller = new AbortController();
+    setLoading(true);
+    setError(null);
+
+    void apiService.getCasesV2({
+      search: debouncedSearch || undefined,
+      status: status || undefined,
+      caseType: caseType.trim() || undefined,
+      responsibleUserId: responsibleUserId ? Number(responsibleUserId) : undefined,
+      priority: priority || undefined,
+      from: from || undefined,
+      to: to || undefined,
+      minFee: canViewFinance && minFee ? Number(minFee) : undefined,
+      maxFee: canViewFinance && maxFee ? Number(maxFee) : undefined,
+      scope: caseScope === 'all' ? undefined : caseScope,
+      activity: activityFilter === 'all' ? undefined : activityFilter,
+      inactiveDays: INACTIVE_CASE_DAYS,
+      sortBy,
+      sortDir,
+      page,
+      pageSize,
+    }, { signal: controller.signal })
+      .then((casesResult) => {
+        if (controller.signal.aborted) return;
+        setItems(casesResult.items ?? []);
+        setTotal(casesResult.total ?? 0);
+      })
+      .catch((err) => {
+        if (controller.signal.aborted) return;
+        setItems([]);
+        setTotal(0);
+        setError(err instanceof Error ? err.message : 'Не удалось загрузить реестр дел.');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [activityFilter, canViewFinance, caseScope, caseType, debouncedSearch, from, maxFee, minFee, page, pageSize, priority, reloadToken, responsibleUserId, sortBy, sortDir, status, to]);
 
   useEffect(() => {
     setPage(1);
-  }, [activityFilter, caseScope, caseType, from, maxFee, minFee, pageSize, priority, responsibleUserId, search, status, to]);
+  }, [activityFilter, caseScope, caseType, debouncedSearch, from, maxFee, minFee, pageSize, priority, responsibleUserId, status, to]);
 
   useEffect(() => {
     setSelectedIds((current) => current.filter((id) => items.some((item) => item.id === id)));
