@@ -4430,7 +4430,7 @@ export class ApiService {
     excludeInstallmentParents?: boolean;
     sortBy?: PaymentSortKey;
     sortDir?: SortDir;
-  }): Promise<Payment[]>;
+  }, options?: { signal?: AbortSignal }): Promise<Payment[]>;
   async getPayments(
     a?: string | {
       from?: string;
@@ -4443,10 +4443,11 @@ export class ApiService {
       sortBy?: PaymentSortKey;
       sortDir?: SortDir;
     },
-    b?: string,
+    b?: string | { signal?: AbortSignal },
     c?: number,
   ): Promise<Payment[]> {
     let q = '';
+    let signal: AbortSignal | undefined;
     if (typeof a === 'object') {
       q = buildQuery({
         from: a?.from,
@@ -4459,11 +4460,12 @@ export class ApiService {
         sortBy: a?.sortBy,
         sortDir: a?.sortDir,
       });
+      signal = typeof b === 'object' ? b.signal : undefined;
     } else {
       // старый сигнатурный стиль: (from?, to?, clientId?)
-      q = buildQuery({ from: a, to: b, clientId: c });
+      q = buildQuery({ from: a, to: typeof b === 'string' ? b : undefined, clientId: c });
     }
-    return this.request<Payment[]>(`/payments${q}`);
+    return this.request<Payment[]>(`/payments${q}`, { signal });
   }
 
   async getPayment(id: number) {

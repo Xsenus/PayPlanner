@@ -73,15 +73,18 @@ export function usePayments(from?: string, to?: string, opts?: UsePaymentsOption
       else setRefreshing(true);
 
       try {
-        const res = await apiService.getPayments({
-          from,
-          to,
-          clientId: opts?.clientId,
-          caseId: opts?.caseId,
-          excludeInstallmentParents: opts?.excludeInstallmentParents,
-          sortBy: opts?.sortBy,
-          sortDir: opts?.sortDir,
-        });
+        const res = await apiService.getPayments(
+          {
+            from,
+            to,
+            clientId: opts?.clientId,
+            caseId: opts?.caseId,
+            excludeInstallmentParents: opts?.excludeInstallmentParents,
+            sortBy: opts?.sortBy,
+            sortDir: opts?.sortDir,
+          },
+          { signal: ac.signal },
+        );
 
         if (!ac.signal.aborted) {
           const next = res ?? [];

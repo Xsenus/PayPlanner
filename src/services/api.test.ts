@@ -122,6 +122,43 @@ describe('apiService paged payments', () => {
   });
 });
 
+describe('apiService legacy payments', () => {
+  it('passes the abort signal without changing the object-style payments query', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify([]), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+
+    await apiService.getPayments(
+      { from: '2026-07-01', to: '2026-07-31', clientId: 17, sortBy: 'date', sortDir: 'desc' },
+      { signal: controller.signal },
+    );
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/payments?');
+    expect(String(url)).toContain('from=2026-07-01');
+    expect(String(url)).toContain('clientId=17');
+    expect(String(url)).toContain('sortDir=desc');
+    expect(options?.signal).toBe(controller.signal);
+  });
+
+  it('keeps the positional payments signature unchanged', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify([]), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiService.getPayments('2026-06-01', '2026-06-30', 23);
+
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/payments?');
+    expect(String(url)).toContain('from=2026-06-01');
+    expect(String(url)).toContain('to=2026-06-30');
+    expect(String(url)).toContain('clientId=23');
+  });
+});
+
 describe('extractResponseErrorMessage', () => {
   it('prefers problem details detail field for API errors', async () => {
     const response = new Response(
