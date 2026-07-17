@@ -1269,6 +1269,8 @@ function CashOrdersPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pageSize = 10;
+  const queryScopeKey = JSON.stringify([accountName, from, search, statusFilter, to, typeFilter]);
+  const queryScopeKeyRef = useRef(queryScopeKey);
 
   const openPrintHtml = (html: string) => {
     const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
@@ -1303,7 +1305,15 @@ function CashOrdersPanel({
   };
 
   useEffect(() => {
-    let cancelled = false;
+    if (queryScopeKeyRef.current !== queryScopeKey) {
+      queryScopeKeyRef.current = queryScopeKey;
+      if (page !== 1) {
+        setPage(1);
+        return;
+      }
+    }
+
+    const controller = new AbortController();
     setLoading(true);
     setError(null);
 
@@ -1317,18 +1327,21 @@ function CashOrdersPanel({
         accountName: accountName || undefined,
         page,
         pageSize,
-      }),
-      apiService.getCashBook({ from, to, accountName: accountName || undefined }),
+      }, { signal: controller.signal }),
+      apiService.getCashBook(
+        { from, to, accountName: accountName || undefined },
+        { signal: controller.signal },
+      ),
     ])
       .then(([data, book]) => {
-        if (cancelled) return;
+        if (controller.signal.aborted) return;
         setOrders(data.items);
         setTotal(data.total);
         setRegisterSummary(data);
         setCashBook(book);
       })
       .catch((err) => {
-        if (cancelled) return;
+        if (controller.signal.aborted) return;
         setOrders([]);
         setTotal(0);
         setRegisterSummary(null);
@@ -1336,17 +1349,13 @@ function CashOrdersPanel({
         setError(extractDisplayErrorMessage(err, 'Не удалось загрузить кассовые ордера.'));
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       });
 
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, [accountName, from, page, refreshKey, search, statusFilter, to, typeFilter]);
-
-  useEffect(() => {
-    setPage(1);
-  }, [accountName, from, search, statusFilter, to, typeFilter]);
+  }, [accountName, from, page, queryScopeKey, refreshKey, search, statusFilter, to, typeFilter]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 

@@ -159,6 +159,48 @@ describe('apiService legacy payments', () => {
   });
 });
 
+describe('apiService cash order reads', () => {
+  it('passes the abort signal to the cash order register request', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      items: [], total: 0, page: 2, pageSize: 10,
+    }), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+
+    await apiService.getCashOrderRegister(
+      { type: 'Incoming', status: 'Posted', accountName: 'Основная касса', page: 2, pageSize: 10 },
+      { signal: controller.signal },
+    );
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/cash-orders/register?');
+    expect(String(url)).toContain('type=Incoming');
+    expect(String(url)).toContain('page=2');
+    expect(options?.signal).toBe(controller.signal);
+  });
+
+  it('passes the abort signal to the cash book request', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ days: [] }), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+
+    await apiService.getCashBook(
+      { from: '2026-07-01', to: '2026-07-31', accountName: 'Основная касса' },
+      { signal: controller.signal },
+    );
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/cash-orders/cashbook?');
+    expect(String(url)).toContain('from=2026-07-01');
+    expect(String(url)).toContain('accountName=');
+    expect(options?.signal).toBe(controller.signal);
+  });
+});
+
 describe('extractResponseErrorMessage', () => {
   it('prefers problem details detail field for API errors', async () => {
     const response = new Response(

@@ -7028,18 +7028,21 @@ export class ApiService {
     return this.request<PagedResult<CashOrder>>(`/cash-orders/paged${q}`);
   }
 
-  async getCashBook(params?: {
-    from?: string;
-    to?: string;
-    accountName?: string;
-    counterpartyName?: string;
-    clientId?: number;
-    caseId?: number;
-    contractId?: number;
-    incomeTypeId?: number;
-  }) {
+  async getCashBook(
+    params?: {
+      from?: string;
+      to?: string;
+      accountName?: string;
+      counterpartyName?: string;
+      clientId?: number;
+      caseId?: number;
+      contractId?: number;
+      incomeTypeId?: number;
+    },
+    options?: { signal?: AbortSignal },
+  ) {
     const q = buildQuery(params ?? {});
-    return this.request<CashBookSummary>(`/cash-orders/cashbook${q}`);
+    return this.request<CashBookSummary>(`/cash-orders/cashbook${q}`, { signal: options?.signal });
   }
 
   async getCashBookPrintHtml(params?: { from?: string; to?: string; accountName?: string }) {
@@ -7047,22 +7050,25 @@ export class ApiService {
     return this.request<string>(`/cash-orders/cashbook/print${q}`);
   }
 
-  async getCashOrderRegister(params?: {
-    from?: string;
-    to?: string;
-    type?: 'Incoming' | 'Outgoing';
-    status?: 'Draft' | 'Posted' | 'Cancelled';
-    search?: string;
-    accountName?: string;
-    page?: number;
-    pageSize?: number;
-  }) {
+  async getCashOrderRegister(
+    params?: {
+      from?: string;
+      to?: string;
+      type?: 'Incoming' | 'Outgoing';
+      status?: 'Draft' | 'Posted' | 'Cancelled';
+      search?: string;
+      accountName?: string;
+      page?: number;
+      pageSize?: number;
+    },
+    options?: { signal?: AbortSignal },
+  ) {
     const q = buildQuery({
       ...(params ?? {}),
       page: params?.page ?? 1,
       pageSize: params?.pageSize ?? 25,
     });
-    return this.request<CashOrderRegister>(`/cash-orders/register${q}`);
+    return this.request<CashOrderRegister>(`/cash-orders/register${q}`, { signal: options?.signal });
   }
 
   async getCashOrderRegisterPrintHtml(params?: {

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -122,6 +122,8 @@ const permissionsState = vi.hoisted(() => ({
   paymentsCanDelete: true,
   paymentsCanExport: true,
 }));
+
+const expectAbortOptions = () => expect.objectContaining({ signal: expect.any(AbortSignal) });
 
 vi.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({ user: { id: 7 } }),
@@ -1286,7 +1288,10 @@ describe('MoneyOperations integration', () => {
     await user.click(screen.getByRole('button', { name: 'Найти' }));
 
     await waitFor(() =>
-      expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(expect.objectContaining({ search: 'Ахмедова' })),
+      expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ search: 'Ахмедова' }),
+        expectAbortOptions(),
+      ),
     );
   }, 15000);
 
@@ -1543,6 +1548,7 @@ describe('MoneyOperations integration', () => {
     await waitFor(() =>
       expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
         expect.objectContaining({ moneyAccountId: 102, accountName: 'Резервный счёт' }),
+        expectAbortOptions(),
       ),
     );
     expect(await screen.findByText('Поставщик Б')).toBeTruthy();
@@ -1628,6 +1634,7 @@ describe('MoneyOperations integration', () => {
     expect(screen.getByText('Поставщик наличными')).toBeTruthy();
     expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
       expect.objectContaining({ source: undefined, page: 1, pageSize: 25 }),
+      expectAbortOptions(),
     );
 
     await user.selectOptions(screen.getAllByRole('combobox')[0], 'Cash');
@@ -1635,6 +1642,7 @@ describe('MoneyOperations integration', () => {
     await waitFor(() =>
       expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
         expect.objectContaining({ source: 'Cash' }),
+        expectAbortOptions(),
       ),
     );
 
@@ -1643,6 +1651,7 @@ describe('MoneyOperations integration', () => {
     await waitFor(() =>
       expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
         expect.objectContaining({ source: 'Cash', direction: 'Income' }),
+        expectAbortOptions(),
       ),
     );
   });
@@ -1709,6 +1718,7 @@ describe('MoneyOperations integration', () => {
     await waitFor(() =>
       expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
         expect.objectContaining({ source: 'EMoney', moneyAccountId: 302, accountName: 'CloudPayments' }),
+        expectAbortOptions(),
       ),
     );
     expect(await screen.findByText('Другой клиент')).toBeTruthy();
@@ -1754,6 +1764,7 @@ describe('MoneyOperations integration', () => {
     await waitFor(() =>
       expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
         expect.objectContaining({ direction: 'Income', accountingType: 'Fact' }),
+        expectAbortOptions(),
       ),
     );
     expect(await screen.findByText('Клиент факт')).toBeTruthy();
@@ -1768,10 +1779,12 @@ describe('MoneyOperations integration', () => {
     await waitFor(() =>
       expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
         expect.objectContaining({ accountingType: 'Fact' }),
+        expectAbortOptions(),
       ),
     );
     expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
       expect.not.objectContaining({ direction: 'Income' }),
+      expectAbortOptions(),
     );
     expect(await screen.findByText('Расход факт')).toBeTruthy();
     expect(screen.queryByText('Клиент план')).toBeNull();
@@ -1782,6 +1795,7 @@ describe('MoneyOperations integration', () => {
     await waitFor(() =>
       expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
         expect.not.objectContaining({ direction: 'Income', accountingType: 'Fact' }),
+        expectAbortOptions(),
       ),
     );
   }, 15000);
@@ -1803,6 +1817,7 @@ describe('MoneyOperations integration', () => {
     await waitFor(() =>
       expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
         expect.objectContaining({ categoryName: 'Юридические' }),
+        expectAbortOptions(),
       ),
     );
     expect(await screen.findByText('Поставщик услуг')).toBeTruthy();
@@ -2297,6 +2312,7 @@ describe('MoneyOperations integration', () => {
         page: 1,
         pageSize: 10,
       }),
+      expectAbortOptions(),
     );
 
     await user.click(screen.getByRole('button', { name: 'Кассовая книга' }));
@@ -2348,10 +2364,114 @@ describe('MoneyOperations integration', () => {
           page: 1,
           pageSize: 10,
         }),
+        expectAbortOptions(),
       ),
     );
-    expect(getCashBookMock).toHaveBeenLastCalledWith(expect.objectContaining({ accountName: 'Резервная касса' }));
+    expect(getCashBookMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ accountName: 'Резервная касса' }),
+      expectAbortOptions(),
+    );
     await screen.findByText('Касса: Резервная касса');
+  }, 15000);
+
+  it('aborts both obsolete cash journal requests and aborts the active pair on unmount', async () => {
+    const user = userEvent.setup();
+    operations = [];
+    const registerSignals: AbortSignal[] = [];
+    const bookSignals: AbortSignal[] = [];
+    const registerResolvers: Array<(value: Record<string, unknown>) => void> = [];
+    const bookResolvers: Array<(value: Record<string, unknown>) => void> = [];
+    getCashOrderRegisterMock.mockImplementation((_params, options) => {
+      registerSignals.push(options.signal);
+      return new Promise((resolve) => registerResolvers.push(resolve));
+    });
+    getCashBookMock.mockImplementation((_params, options) => {
+      bookSignals.push(options.signal);
+      return new Promise((resolve) => bookResolvers.push(resolve));
+    });
+
+    const { unmount } = render(<MoneyOperations source="Cash" />);
+
+    await waitFor(() => expect(getCashOrderRegisterMock).toHaveBeenCalledTimes(1));
+    expect(registerSignals[0]).toBe(bookSignals[0]);
+    expect(registerSignals[0].aborted).toBe(false);
+
+    await user.click(screen.getByRole('button', { name: 'ПКО' }));
+
+    await waitFor(() => expect(getCashOrderRegisterMock).toHaveBeenCalledTimes(2));
+    expect(registerSignals[0].aborted).toBe(true);
+    expect(bookSignals[0].aborted).toBe(true);
+    expect(registerSignals[1]).toBe(bookSignals[1]);
+    expect(registerSignals[1].aborted).toBe(false);
+
+    await act(async () => {
+      registerResolvers[1]({
+        items: [], total: 2, page: 1, pageSize: 10,
+        incomingCount: 2, outgoingCount: 0, draftCount: 0, postedCount: 2, cancelledCount: 0,
+        incomingAmount: 3000, outgoingAmount: 0,
+      });
+      bookResolvers[1]({
+        from: '2026-01-01', to: '2026-12-31', openingBalance: 0,
+        income: 3000, expense: 0, closingBalance: 3000, incomingCount: 2, outgoingCount: 0, days: [],
+      });
+    });
+    await screen.findByText('Всего: 2');
+
+    await act(async () => {
+      registerResolvers[0]({
+        items: [], total: 99, page: 1, pageSize: 10,
+        incomingCount: 99, outgoingCount: 0, draftCount: 0, postedCount: 99, cancelledCount: 0,
+        incomingAmount: 99000, outgoingAmount: 0,
+      });
+      bookResolvers[0]({
+        from: '2026-01-01', to: '2026-12-31', openingBalance: 0,
+        income: 99000, expense: 0, closingBalance: 99000, incomingCount: 99, outgoingCount: 0, days: [],
+      });
+    });
+    expect(screen.getByText('Всего: 2')).toBeTruthy();
+
+    unmount();
+
+    expect(registerSignals[1].aborted).toBe(true);
+    expect(bookSignals[1].aborted).toBe(true);
+  }, 15000);
+
+  it('loads the first cash journal page directly when filters change on a later page', async () => {
+    const user = userEvent.setup();
+    operations = [];
+    getCashOrderRegisterMock.mockImplementation(async (params) => ({
+      items: [], total: 25, page: params.page, pageSize: 10,
+      incomingCount: 15, outgoingCount: 10, draftCount: 0, postedCount: 25, cancelledCount: 0,
+      incomingAmount: 15000, outgoingAmount: 10000,
+    }));
+
+    render(<MoneyOperations source="Cash" />);
+
+    await screen.findByText('Кассовые ордера');
+    await waitFor(() => expect(getCashOrderRegisterMock).toHaveBeenCalledTimes(1));
+    const nextButton = screen.getAllByRole<HTMLButtonElement>('button', { name: 'Вперед' })
+      .find((button) => !button.disabled);
+    expect(nextButton).toBeTruthy();
+    await user.click(nextButton!);
+    await waitFor(() =>
+      expect(getCashOrderRegisterMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ page: 2 }),
+        expectAbortOptions(),
+      ),
+    );
+    const registerCallsBeforeFilter = getCashOrderRegisterMock.mock.calls.length;
+    const bookCallsBeforeFilter = getCashBookMock.mock.calls.length;
+
+    await user.click(screen.getByRole('button', { name: 'РКО' }));
+
+    await waitFor(() =>
+      expect(getCashOrderRegisterMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ type: 'Outgoing', page: 1 }),
+        expectAbortOptions(),
+      ),
+    );
+    expect(getCashOrderRegisterMock).toHaveBeenCalledTimes(registerCallsBeforeFilter + 1);
+    expect(getCashBookMock).toHaveBeenCalledTimes(bookCallsBeforeFilter + 1);
   }, 15000);
 
   it('opens and manages a cash order card from the cash journal', async () => {
@@ -2529,6 +2649,7 @@ describe('MoneyOperations integration', () => {
           page: 1,
           pageSize: 10,
         }),
+        expectAbortOptions(),
       ),
     );
   }, 15000);
@@ -2669,6 +2790,7 @@ describe('MoneyOperations integration', () => {
           page: 1,
           pageSize: 10,
         }),
+        expectAbortOptions(),
       ),
     );
   }, 15000);
@@ -2689,6 +2811,7 @@ describe('MoneyOperations integration', () => {
           page: 1,
           pageSize: 10,
         }),
+        expectAbortOptions(),
       ),
     );
   }, 15000);
