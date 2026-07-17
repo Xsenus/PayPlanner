@@ -7122,7 +7122,7 @@ export class ApiService {
     httpMethod?: string;
     status?: UserActivityStatus;
     search?: string;
-  }) {
+  }, options?: { signal?: AbortSignal }) {
     const q = buildQuery({
       page: params?.page ?? 1,
       pageSize: params?.pageSize ?? 50,
@@ -7136,7 +7136,9 @@ export class ApiService {
       status: params?.status,
       search: params?.search,
     });
-    return this.request<UserActivityLogResponse>(`/user-activity${q}`);
+    return this.request<UserActivityLogResponse>(`/user-activity${q}`, {
+      signal: options?.signal,
+    });
   }
 
   async getUserActivityFilters() {

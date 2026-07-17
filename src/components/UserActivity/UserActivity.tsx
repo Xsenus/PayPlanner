@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Shield, RefreshCw, Search, Trash2, Filter, GripVertical } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useDialog } from '../../hooks/useDialog';
@@ -125,6 +125,19 @@ export const UserActivity = () => {
   });
 
   const debouncedSearch = useDebouncedValue(search, 500);
+  const activityQueryScopeKey = [
+    debouncedSearch,
+    status,
+    category,
+    action,
+    section,
+    method,
+    actor,
+    from,
+    to,
+    pageSize,
+  ].join('\u001f');
+  const previousActivityQueryScopeRef = useRef(activityQueryScopeKey);
 
   const hasActiveFilters = useMemo(
     () =>
@@ -221,41 +234,56 @@ export const UserActivity = () => {
 
   useEffect(() => {
     if (!isAdmin()) {
-      return;
+      return undefined;
     }
+    if (page !== 1 && previousActivityQueryScopeRef.current !== activityQueryScopeKey) {
+      return undefined;
+    }
+    previousActivityQueryScopeRef.current = activityQueryScopeKey;
+    const controller = new AbortController();
 
     const load = async () => {
       try {
         setLoading(true);
         setError(null);
-        const response = await apiService.getUserActivityLogs({
-          page,
-          pageSize,
-          search: debouncedSearch || undefined,
-          status: status === 'all' ? undefined : status,
-          category: category === 'all' ? undefined : category,
-          action: action === 'all' ? undefined : action,
-          section: section === 'all' ? undefined : section,
-          httpMethod: method === 'all' ? undefined : method,
-          userId: actor === 'all' ? undefined : actor,
-          from: from || undefined,
-          to: to || undefined,
-        });
+        const response = await apiService.getUserActivityLogs(
+          {
+            page,
+            pageSize,
+            search: debouncedSearch || undefined,
+            status: status === 'all' ? undefined : status,
+            category: category === 'all' ? undefined : category,
+            action: action === 'all' ? undefined : action,
+            section: section === 'all' ? undefined : section,
+            httpMethod: method === 'all' ? undefined : method,
+            userId: actor === 'all' ? undefined : actor,
+            from: from || undefined,
+            to: to || undefined,
+          },
+          { signal: controller.signal },
+        );
+        if (controller.signal.aborted) return;
         setLogs(response.items);
         setTotal(response.total);
         if (page > 1 && response.items.length === 0 && response.total > 0) {
           setPage(1);
         }
       } catch (err) {
+        if (controller.signal.aborted) return;
         const message = err instanceof Error ? err.message : 'Не удалось загрузить активность пользователей';
         setError(message);
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
       }
     };
 
     void load();
-  }, [actor, action, category, debouncedSearch, from, isAdmin, method, page, pageSize, refreshToken, section, status, to]);
+    return () => {
+      controller.abort();
+    };
+  }, [actor, action, activityQueryScopeKey, category, debouncedSearch, from, isAdmin, method, page, pageSize, refreshToken, section, status, to]);
 
   const totalPages = useMemo(() => (pageSize > 0 ? Math.max(1, Math.ceil(total / pageSize)) : 1), [total, pageSize]);
 
