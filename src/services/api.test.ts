@@ -178,6 +178,27 @@ describe('apiService client cases', () => {
   });
 });
 
+describe('apiService summary stats', () => {
+  it('passes the abort signal to the summary request', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({}), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+
+    await apiService.getSummaryStats(
+      { clientId: 17, from: '2026-07-01', to: '2026-07-31', r: 3 },
+      { signal: controller.signal },
+    );
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/v2/stats/summary?');
+    expect(String(url)).toContain('clientId=17');
+    expect(String(url)).toContain('r=3');
+    expect(options?.signal).toBe(controller.signal);
+  });
+});
+
 describe('apiService money operations', () => {
   it('passes the abort signal to the paged money operations request', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({

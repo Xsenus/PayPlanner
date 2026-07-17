@@ -86,10 +86,13 @@ export function usePeriodStats(fromYM: YM, toYM: YM, options: PeriodStatsOptions
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const timerRef = useRef<number | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const fetchAll = useCallback(
     async (silent = false) => {
       if (!enabled) {
+        abortRef.current?.abort();
+        abortRef.current = null;
         setStats(null);
         setTypes(null);
         setError(null);
@@ -97,12 +100,21 @@ export function usePeriodStats(fromYM: YM, toYM: YM, options: PeriodStatsOptions
         return;
       }
 
+      if (silent && abortRef.current) {
+        return;
+      }
+
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+
       try {
         if (!silent) setLoading(true);
         setError(null);
 
         const range = monthRangeToApiDates(fromYM, toYM);
-        const summary: SummaryStats = await apiService.getSummaryStats(range);
+        const summary: SummaryStats = await apiService.getSummaryStats(range, { signal: controller.signal });
+        if (controller.signal.aborted) return;
 
         setStats(toMonthlyStats(summary));
         setTypes({
@@ -110,11 +122,17 @@ export function usePeriodStats(fromYM: YM, toYM: YM, options: PeriodStatsOptions
           expense: buildTypeBucket(summary.expense, 'Expense'),
         });
       } catch (e) {
+        if (controller.signal.aborted) return;
         setError(e instanceof Error ? e.message : 'Failed to fetch period stats');
         setStats(null);
         setTypes(null);
       } finally {
-        if (!silent) setLoading(false);
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+        }
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
       }
     },
     [enabled, fromYM, toYM],
@@ -122,6 +140,9 @@ export function usePeriodStats(fromYM: YM, toYM: YM, options: PeriodStatsOptions
 
   useEffect(() => {
     void fetchAll(false);
+    return () => {
+      abortRef.current?.abort();
+    };
   }, [fetchAll]);
 
   useEffect(() => {

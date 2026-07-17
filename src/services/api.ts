@@ -6099,9 +6099,9 @@ export class ApiService {
     clientRole?: ClientRole;
     q?: string;
     r?: number;
-  }) {
+  }, options?: { signal?: AbortSignal }) {
     const q = buildQuery(params ?? {});
-    return this.request<SummaryStats>(`/v2/stats/summary${q}`);
+    return this.request<SummaryStats>(`/v2/stats/summary${q}`, { signal: options?.signal });
   }
 
   async getCashFlowReport(params?: {
