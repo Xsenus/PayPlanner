@@ -157,6 +157,27 @@ describe('apiService contracts', () => {
   });
 });
 
+describe('apiService client cases', () => {
+  it('passes the abort signal to the v1 cases request', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify([]), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+
+    await apiService.getCasesV1(
+      { clientId: 17, search: 'дело', sortBy: 'createdAt', sortDir: 'desc' },
+      { signal: controller.signal },
+    );
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/v1/cases?');
+    expect(String(url)).toContain('clientId=17');
+    expect(String(url)).toContain('sortDir=desc');
+    expect(options?.signal).toBe(controller.signal);
+  });
+});
+
 describe('apiService money operations', () => {
   it('passes the abort signal to the paged money operations request', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({

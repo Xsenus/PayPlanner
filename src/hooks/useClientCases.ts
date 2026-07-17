@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiService } from '../services/api';
 import type { ClientCase } from '../types';
 
@@ -8,31 +8,51 @@ export function useClientCases(clientId?: number | string, options: { enabled?: 
   const [cases, setCases] = useState<ClientCase[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const cid = clientId != null ? Number(clientId) : undefined;
   const legalEntityId = options.legalEntityId != null ? Number(options.legalEntityId) : undefined;
   const enabled = options.enabled ?? true;
 
   const refresh = useCallback(async () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
     if (!enabled || (!cid && !legalEntityId)) {
       setCases([]);
       setLoading(false);
+      setError(null);
       return;
     }
+
+    const controller = new AbortController();
+    abortRef.current = controller;
     setLoading(true);
     setError(null);
     try {
-      const data = await apiService.getCasesV1({ clientId: cid, legalEntityId });
+      const data = await apiService.getCasesV1(
+        { clientId: cid, legalEntityId },
+        { signal: controller.signal },
+      );
+      if (controller.signal.aborted) return;
       setCases(data);
     } catch (e) {
+      if (controller.signal.aborted) return;
       setError(e);
     } finally {
-      setLoading(false);
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+      }
+      if (!controller.signal.aborted) {
+        setLoading(false);
+      }
     }
   }, [cid, enabled, legalEntityId]);
 
   useEffect(() => {
     void refresh();
+    return () => {
+      abortRef.current?.abort();
+    };
   }, [refresh]);
 
   const createCase = useCallback(

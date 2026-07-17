@@ -5087,9 +5087,9 @@ export class ApiService {
     search?: string;
     sortBy?: 'createdAt' | 'title' | 'status';
     sortDir?: SortDir;
-  }) {
+  }, options?: { signal?: AbortSignal }) {
     const q = buildQuery(params ?? {});
-    return this.request<ClientCase[]>(`/v1/cases${q}`);
+    return this.request<ClientCase[]>(`/v1/cases${q}`, { signal: options?.signal });
   }
 
   async getCasesV2(params?: {
