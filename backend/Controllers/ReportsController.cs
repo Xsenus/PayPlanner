@@ -6758,14 +6758,22 @@ public class ReportsController : ControllerBase
         DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
+        var recognitionCutoff = to.Date.AddDays(1);
         var rows = await BuildFactQuery(from, to, source, accountName, counterpartyName, clientId, caseId, contractId, incomeTypeId, paymentsVisibility)
             .Where(item => item.IsAdvancePayment)
-            .Select(item => new
+            .GroupBy(item => new
             {
-                item.Direction,
-                item.Amount,
                 item.CounterpartyName,
-                item.RecognitionDate,
+                item.Direction,
+                IsRecognized = item.RecognitionDate.HasValue && item.RecognitionDate.Value < recognitionCutoff,
+            })
+            .Select(group => new AdvanceReportQueryRow
+            {
+                CounterpartyName = group.Key.CounterpartyName,
+                Direction = group.Key.Direction,
+                IsRecognized = group.Key.IsRecognized,
+                Amount = group.Sum(item => item.Amount),
+                Count = group.Count(),
             })
             .ToListAsync(ct);
 
@@ -6774,8 +6782,9 @@ public class ReportsController : ControllerBase
             {
                 item.Direction,
                 item.Amount,
+                item.Count,
                 CounterpartyName = ResolveCounterpartyName(item.CounterpartyName),
-                IsRecognized = item.RecognitionDate.HasValue && item.RecognitionDate.Value.Date <= to,
+                item.IsRecognized,
             })
             .ToList();
 
@@ -6809,10 +6818,10 @@ public class ReportsController : ControllerBase
                     UnrecognizedTotal = group
                         .Where(item => !item.IsRecognized)
                         .Sum(item => item.Amount),
-                    IncomeCount = group.Count(item => item.Direction == MoneyOperationDirection.Income),
-                    ExpenseCount = group.Count(item => item.Direction == MoneyOperationDirection.Expense),
-                    RecognizedCount = group.Count(item => item.IsRecognized),
-                    UnrecognizedCount = group.Count(item => !item.IsRecognized),
+                    IncomeCount = group.Where(item => item.Direction == MoneyOperationDirection.Income).Sum(item => item.Count),
+                    ExpenseCount = group.Where(item => item.Direction == MoneyOperationDirection.Expense).Sum(item => item.Count),
+                    RecognizedCount = group.Where(item => item.IsRecognized).Sum(item => item.Count),
+                    UnrecognizedCount = group.Where(item => !item.IsRecognized).Sum(item => item.Count),
                 },
                 StringComparer.OrdinalIgnoreCase);
 
@@ -6874,8 +6883,8 @@ public class ReportsController : ControllerBase
                 .Where(item => !item.IsRecognized)
                 .Sum(item => item.Amount),
             UnallocatedBalanceTotal = unallocatedBalances.Sum(item => item.AvailableAmount),
-            RecognizedCount = enriched.Count(item => item.IsRecognized),
-            UnrecognizedCount = enriched.Count(item => !item.IsRecognized),
+            RecognizedCount = enriched.Where(item => item.IsRecognized).Sum(item => item.Count),
+            UnrecognizedCount = enriched.Where(item => !item.IsRecognized).Sum(item => item.Count),
             UnallocatedBalanceCount = unallocatedBalances.Count,
             Counterparties = counterparties,
         };
@@ -9229,6 +9238,15 @@ public class ReportsController : ControllerBase
         public MoneyOperationDirection Direction { get; init; }
         public MoneyOperationAccountingType AccountingType { get; init; }
         public decimal Amount { get; init; }
+    }
+
+    private sealed class AdvanceReportQueryRow
+    {
+        public string? CounterpartyName { get; init; }
+        public MoneyOperationDirection Direction { get; init; }
+        public bool IsRecognized { get; init; }
+        public decimal Amount { get; init; }
+        public int Count { get; init; }
     }
 
     private sealed class VatAggregateQueryRow

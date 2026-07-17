@@ -4936,7 +4936,8 @@ services.Id,
     [Fact]
     public async Task Advances_GroupsAdvanceFactOperationsByCounterpartyAndRecognition()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await SqliteTestContextFactory.CreateAsync(interceptor: interceptor);
         var advanceClient = new Client { Name = "ООО Ромашка" };
         db.Clients.Add(advanceClient);
         await db.SaveChangesAsync();
@@ -4996,6 +4997,7 @@ services.Id,
                 CreatedAt = new DateTime(2026, 5, 9),
             });
         await db.SaveChangesAsync();
+        interceptor.Commands.Clear();
         var controller = CreateController(db);
 
         var action = await controller.Advances(
@@ -5048,6 +5050,12 @@ services.Id,
                 Assert.Equal(3_000m, item.IncomeTotal);
                 Assert.Equal(3_000m, item.UnrecognizedTotal);
             });
+
+        var advanceQuery = Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"MoneyOperations\"", StringComparison.Ordinal));
+        Assert.Contains("GROUP BY", advanceQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SUM", advanceQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("COUNT", advanceQuery, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
