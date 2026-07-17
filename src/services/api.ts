@@ -4665,8 +4665,10 @@ export class ApiService {
   }
 
   // ===== Clients =====
-  async getClients() {
-    return this.request<Client[]>('/clients');
+  async getClients(options?: { signal?: AbortSignal }) {
+    return this.request<Client[]>('/clients', {
+      signal: options?.signal,
+    });
   }
 
   async getClient(id: number) {
@@ -4979,22 +4981,27 @@ export class ApiService {
     return this.request<Client[]>(`/v1/clients${q}`);
   }
 
-  async getClientsV2(params?: {
-    search?: string;
-    isActive?: boolean;
-    sortBy?: 'name' | 'createdAt';
-    sortDir?: SortDir;
-    page?: number;
-    pageSize?: number;
-    counterpartyRole?: 'client' | 'supplier';
-    [key: string]: string | number | boolean | undefined;
-  }) {
+  async getClientsV2(
+    params?: {
+      search?: string;
+      isActive?: boolean;
+      sortBy?: 'name' | 'createdAt';
+      sortDir?: SortDir;
+      page?: number;
+      pageSize?: number;
+      counterpartyRole?: 'client' | 'supplier';
+      [key: string]: string | number | boolean | undefined;
+    },
+    options?: { signal?: AbortSignal },
+  ) {
     const q = buildQuery({
       ...(params ?? {}),
       page: params?.page ?? 1,
       pageSize: params?.pageSize ?? 50,
     });
-    return this.request<PagedResult<Client>>(`/v2/clients${q}`);
+    return this.request<PagedResult<Client>>(`/v2/clients${q}`, {
+      signal: options?.signal,
+    });
   }
 
   // ===== Cases (совмещение старого и нового вызова) =====

@@ -83,9 +83,12 @@ export function useClients(options?: ClientsListOptions) {
   const [total, setTotal] = useState(0);
   const hasLoadedRef = useRef(false);
   const requestIdRef = useRef(0);
+  const activeRequestControllerRef = useRef<AbortController | null>(null);
 
   const fetchClients = useCallback(async (loadMode?: 'initial' | 'refresh') => {
     if (!enabled) {
+      activeRequestControllerRef.current?.abort();
+      activeRequestControllerRef.current = null;
       requestIdRef.current += 1;
       hasLoadedRef.current = true;
       setClients([]);
@@ -98,6 +101,9 @@ export function useClients(options?: ClientsListOptions) {
 
     const nextMode = loadMode ?? (hasLoadedRef.current ? 'refresh' : 'initial');
     const requestId = ++requestIdRef.current;
+    activeRequestControllerRef.current?.abort();
+    const controller = new AbortController();
+    activeRequestControllerRef.current = controller;
 
     try {
       if (nextMode === 'initial') {
@@ -108,15 +114,18 @@ export function useClients(options?: ClientsListOptions) {
       setError(null);
 
       if (mode === 'paged') {
-        const response = await apiService.getClientsV2({
-          search,
-          isActive,
-          sortBy,
-          sortDir,
-          page,
-          pageSize,
-          ...deserializeClientFilters(filtersKey),
-        });
+        const response = await apiService.getClientsV2(
+          {
+            search,
+            isActive,
+            sortBy,
+            sortDir,
+            page,
+            pageSize,
+            ...deserializeClientFilters(filtersKey),
+          },
+          { signal: controller.signal },
+        );
         if (requestId !== requestIdRef.current) {
           return;
         }
@@ -140,7 +149,7 @@ export function useClients(options?: ClientsListOptions) {
         );
         setTotal(response.total ?? 0);
       } else {
-        const base = await apiService.getClients();
+        const base = await apiService.getClients({ signal: controller.signal });
         if (requestId !== requestIdRef.current) {
           return;
         }
@@ -150,11 +159,17 @@ export function useClients(options?: ClientsListOptions) {
         setTotal(normalized.length);
       }
     } catch (err) {
+      if (controller.signal.aborted) {
+        return;
+      }
       if (requestId !== requestIdRef.current) {
         return;
       }
       setError(err instanceof Error ? err.message : 'Failed to fetch clients');
     } finally {
+      if (activeRequestControllerRef.current === controller) {
+        activeRequestControllerRef.current = null;
+      }
       if (requestId === requestIdRef.current) {
         hasLoadedRef.current = true;
         if (nextMode === 'initial') {
@@ -168,6 +183,11 @@ export function useClients(options?: ClientsListOptions) {
 
   useEffect(() => {
     void fetchClients();
+    return () => {
+      activeRequestControllerRef.current?.abort();
+      activeRequestControllerRef.current = null;
+      requestIdRef.current += 1;
+    };
   }, [fetchClients]);
 
   const createClient = async (client: ClientInput) => {

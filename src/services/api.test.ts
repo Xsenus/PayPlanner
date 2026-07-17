@@ -1581,6 +1581,32 @@ describe('apiService case calendar', () => {
     expect(String(url)).toContain('search=');
     expect(options?.signal).toBe(controller.signal);
   });
+
+  it('passes abort signals to both client list endpoints', async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify([]), {
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      items: [], total: 0, page: 1, pageSize: 25,
+    }), {
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const firstController = new AbortController();
+    const secondController = new AbortController();
+
+    await apiService.getClients({ signal: firstController.signal });
+    await apiService.getClientsV2(
+      { search: 'иванов', page: 1, pageSize: 25 },
+      { signal: secondController.signal },
+    );
+
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/clients');
+    expect(fetchMock.mock.calls[0][1]?.signal).toBe(firstController.signal);
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/v2/clients?');
+    expect(fetchMock.mock.calls[1][1]?.signal).toBe(secondController.signal);
+  });
 });
 
 describe('apiService reports', () => {
