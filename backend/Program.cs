@@ -54,21 +54,26 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.Configure<SlowRequestLoggingOptions>(
     builder.Configuration.GetSection(SlowRequestLoggingOptions.SectionName));
+builder.Services.Configure<SlowDbCommandLoggingOptions>(
+    builder.Configuration.GetSection(SlowDbCommandLoggingOptions.SectionName));
+builder.Services.AddSingleton<SlowDbCommandInterceptor>();
 
-void ConfigureSqlite(DbContextOptionsBuilder options) => options
+void ConfigureSqlite(IServiceProvider services, DbContextOptionsBuilder options) => options
     .UseSqlite(
         databaseProvider.ConnectionString,
         sqlite => sqlite.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery))
     .UsePayPlannerSqliteMigrations()
+    .AddInterceptors(services.GetRequiredService<SlowDbCommandInterceptor>())
     .ConfigureWarnings(warnings =>
     {
         warnings.Ignore(RelationalEventId.PendingModelChangesWarning);
         ConfigureEfDiagnostics(warnings);
     });
-void ConfigurePostgreSql(DbContextOptionsBuilder options) => options
+void ConfigurePostgreSql(IServiceProvider services, DbContextOptionsBuilder options) => options
     .UseNpgsql(
         databaseProvider.ConnectionString,
         npgsql => npgsql.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery))
+    .AddInterceptors(services.GetRequiredService<SlowDbCommandInterceptor>())
     .ConfigureWarnings(warnings =>
     {
         warnings.Ignore(RelationalEventId.PendingModelChangesWarning);
