@@ -39,6 +39,7 @@ export function useMoneyOperations(filters: MoneyOperationsFilters) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
+  const activeRequestControllerRef = useRef<AbortController | null>(null);
 
   const stableFilters = useMemo(
     () => ({
@@ -72,12 +73,18 @@ export function useMoneyOperations(filters: MoneyOperationsFilters) {
   const load = useCallback(async () => {
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
+    activeRequestControllerRef.current?.abort();
+    const controller = new AbortController();
+    activeRequestControllerRef.current = controller;
     setLoading(true);
     setError(null);
 
     try {
-      const data = await apiService.getMoneyOperationsPaged(stableFilters);
-      if (requestId !== requestIdRef.current) {
+      const data = await apiService.getMoneyOperationsPaged(
+        stableFilters,
+        { signal: controller.signal },
+      );
+      if (requestId !== requestIdRef.current || controller.signal.aborted) {
         return;
       }
 
@@ -85,7 +92,7 @@ export function useMoneyOperations(filters: MoneyOperationsFilters) {
       setTotal(data.total);
       setSummary(data.summary ?? EMPTY_SUMMARY);
     } catch (err) {
-      if (requestId !== requestIdRef.current) {
+      if (requestId !== requestIdRef.current || controller.signal.aborted) {
         return;
       }
 
@@ -95,6 +102,9 @@ export function useMoneyOperations(filters: MoneyOperationsFilters) {
       setTotal(0);
       setSummary(EMPTY_SUMMARY);
     } finally {
+      if (activeRequestControllerRef.current === controller) {
+        activeRequestControllerRef.current = null;
+      }
       if (requestId === requestIdRef.current) {
         setLoading(false);
       }
@@ -106,6 +116,8 @@ export function useMoneyOperations(filters: MoneyOperationsFilters) {
   }, [load]);
 
   useEffect(() => () => {
+    activeRequestControllerRef.current?.abort();
+    activeRequestControllerRef.current = null;
     requestIdRef.current += 1;
   }, []);
 

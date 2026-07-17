@@ -105,10 +105,15 @@ describe('useMoneyOperations', () => {
     const { rerender } = render(<MoneyOperationsProbe search="старый" />);
 
     await waitFor(() => expect(getMoneyOperationsPagedMock).toHaveBeenCalledTimes(1));
+    const firstSignal = getMoneyOperationsPagedMock.mock.calls[0]?.[1]?.signal as AbortSignal | undefined;
+    expect(firstSignal?.aborted).toBe(false);
 
     rerender(<MoneyOperationsProbe search="новый" />);
 
     await waitFor(() => expect(getMoneyOperationsPagedMock).toHaveBeenCalledTimes(2));
+    const secondSignal = getMoneyOperationsPagedMock.mock.calls[1]?.[1]?.signal as AbortSignal | undefined;
+    expect(firstSignal?.aborted).toBe(true);
+    expect(secondSignal?.aborted).toBe(false);
 
     await act(async () => {
       second.resolve({
@@ -132,5 +137,20 @@ describe('useMoneyOperations', () => {
     });
 
     expect(screen.getByTestId('items').textContent).toBe('Новый клиент');
+  });
+
+  it('aborts the active request when the hook unmounts', async () => {
+    const pending = deferred<{ items: MoneyOperation[]; total: number; summary: MoneyOperationsSummary }>();
+    getMoneyOperationsPagedMock.mockReturnValue(pending.promise);
+
+    const { unmount } = render(<MoneyOperationsProbe search="активный" />);
+
+    await waitFor(() => expect(getMoneyOperationsPagedMock).toHaveBeenCalledTimes(1));
+    const signal = getMoneyOperationsPagedMock.mock.calls[0]?.[1]?.signal as AbortSignal | undefined;
+    expect(signal?.aborted).toBe(false);
+
+    unmount();
+
+    expect(signal?.aborted).toBe(true);
   });
 });

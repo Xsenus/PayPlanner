@@ -6691,22 +6691,28 @@ export class ApiService {
     return this.request<MoneyOperation[]>(`/money-operations${q}`);
   }
 
-  async getMoneyOperationsPaged(params?: {
-    from?: string;
-    to?: string;
-    source?: MoneyOperationSource;
-    direction?: MoneyOperationDirection;
-    accountingType?: MoneyOperationAccountingType;
-    moneyAccountId?: number;
-    accountName?: string;
-    categoryName?: string;
-    linkedInvoiceId?: number;
-    search?: string;
-    page?: number;
-    pageSize?: number;
-  }) {
+  async getMoneyOperationsPaged(
+    params?: {
+      from?: string;
+      to?: string;
+      source?: MoneyOperationSource;
+      direction?: MoneyOperationDirection;
+      accountingType?: MoneyOperationAccountingType;
+      moneyAccountId?: number;
+      accountName?: string;
+      categoryName?: string;
+      linkedInvoiceId?: number;
+      search?: string;
+      page?: number;
+      pageSize?: number;
+    },
+    options?: { signal?: AbortSignal },
+  ) {
     const q = buildQuery(params ?? {});
-    return this.request<PagedResult<MoneyOperation> & { summary: MoneyOperationsSummary }>(`/money-operations/paged${q}`);
+    return this.request<PagedResult<MoneyOperation> & { summary: MoneyOperationsSummary }>(
+      `/money-operations/paged${q}`,
+      { signal: options?.signal },
+    );
   }
 
   async exportMoneyOperationsCsv(params?: {
