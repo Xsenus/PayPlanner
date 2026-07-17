@@ -6514,8 +6514,8 @@ namespace PayPlanner.Api.Migrations.PostgreSql
                     b.HasIndex("BoardId", "ZIndex")
                         .HasDatabaseName("IX_StickyNotes_BoardId_ZIndex");
 
-                    b.HasIndex("ReminderAt", "ReminderSentAt")
-                        .HasDatabaseName("IX_StickyNotes_ReminderAt_ReminderSentAt");
+                    b.HasIndex("ReminderSentAt", "ReminderAt", "Id")
+                        .HasDatabaseName("IX_StickyNotes_ReminderSentAt_ReminderAt_Id");
 
                     b.ToTable("StickyNotes");
                 });

@@ -3038,7 +3038,8 @@ public class PaymentContext : DbContext
 
             entity.HasIndex(e => e.BoardId).HasDatabaseName("IX_StickyNotes_BoardId");
             entity.HasIndex(e => e.AssignedUserId).HasDatabaseName("IX_StickyNotes_AssignedUserId");
-            entity.HasIndex(e => new { e.ReminderAt, e.ReminderSentAt }).HasDatabaseName("IX_StickyNotes_ReminderAt_ReminderSentAt");
+            entity.HasIndex(e => new { e.ReminderSentAt, e.ReminderAt, e.Id })
+                .HasDatabaseName("IX_StickyNotes_ReminderSentAt_ReminderAt_Id");
             entity.HasIndex(e => new { e.BoardId, e.ZIndex }).HasDatabaseName("IX_StickyNotes_BoardId_ZIndex");
             entity.HasIndex(e => e.UpdatedAt).HasDatabaseName("IX_StickyNotes_UpdatedAt");
         });
