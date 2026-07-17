@@ -134,6 +134,29 @@ describe('apiService acts', () => {
   });
 });
 
+describe('apiService contracts', () => {
+  it('passes the abort signal to the contracts request', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      items: [], total: 0, page: 2, pageSize: 20,
+    }), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+
+    await apiService.getContracts(
+      { search: 'договор', status: 'Draft', page: 2, pageSize: 20 },
+      { signal: controller.signal },
+    );
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/contracts?');
+    expect(String(url)).toContain('status=Draft');
+    expect(String(url)).toContain('page=2');
+    expect(options?.signal).toBe(controller.signal);
+  });
+});
+
 describe('apiService money operations', () => {
   it('passes the abort signal to the paged money operations request', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({

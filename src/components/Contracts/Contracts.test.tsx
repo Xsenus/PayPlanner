@@ -190,6 +190,7 @@ describe('Contracts', () => {
     await waitFor(() => {
       expect(apiService.getContracts).toHaveBeenLastCalledWith(
         expect.objectContaining({ status: 'Concluded' }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
     });
   });

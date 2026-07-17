@@ -51,11 +51,14 @@ export function useContracts(filters: ContractsFilters): UseContractsResult {
   });
 
   const hasLoadedRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
   const filtersKey = useMemo(() => JSON.stringify(filters), [filters]);
   const enabled = filters.enabled ?? true;
 
   const fetchContracts = useCallback(
     async (mode: 'auto' | 'refresh' = 'auto') => {
+      abortRef.current?.abort();
+      abortRef.current = null;
       if (!enabled) {
         setContracts([]);
         setPagination({ page: filters.page ?? 1, pageSize: filters.pageSize ?? 20, total: 0 });
@@ -65,6 +68,9 @@ export function useContracts(filters: ContractsFilters): UseContractsResult {
         return;
       }
 
+      const controller = new AbortController();
+      abortRef.current = controller;
+
       const isInitial = mode === 'refresh' ? false : !hasLoadedRef.current;
       if (isInitial) {
         setLoading(true);
@@ -73,20 +79,24 @@ export function useContracts(filters: ContractsFilters): UseContractsResult {
       }
       setError(null);
       try {
-        const response = await apiService.getContracts({
-          from: filters.from,
-          to: filters.to,
-          clientId: filters.clientId,
-          invoiceId: filters.invoiceId,
-          actId: filters.actId,
-          paymentId: filters.paymentId,
-          status: filters.status,
-          search: filters.search,
-          sortBy: filters.sortBy,
-          sortDir: filters.sortDir,
-          page: filters.page,
-          pageSize: filters.pageSize,
-        });
+        const response = await apiService.getContracts(
+          {
+            from: filters.from,
+            to: filters.to,
+            clientId: filters.clientId,
+            invoiceId: filters.invoiceId,
+            actId: filters.actId,
+            paymentId: filters.paymentId,
+            status: filters.status,
+            search: filters.search,
+            sortBy: filters.sortBy,
+            sortDir: filters.sortDir,
+            page: filters.page,
+            pageSize: filters.pageSize,
+          },
+          { signal: controller.signal },
+        );
+        if (controller.signal.aborted) return;
         setContracts(response.items ?? []);
         setPagination({
           page: response.page ?? filters.page ?? 1,
@@ -95,6 +105,7 @@ export function useContracts(filters: ContractsFilters): UseContractsResult {
         });
         hasLoadedRef.current = true;
       } catch (err) {
+        if (controller.signal.aborted) return;
         const message = extractDisplayErrorMessage(err, 'Не удалось загрузить договоры');
         setError(message);
         if (!hasLoadedRef.current) {
@@ -102,9 +113,11 @@ export function useContracts(filters: ContractsFilters): UseContractsResult {
           setPagination({ page: filters.page ?? 1, pageSize: filters.pageSize ?? 20, total: 0 });
         }
       } finally {
-        if (isInitial) {
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+        }
+        if (!controller.signal.aborted) {
           setLoading(false);
-        } else {
           setRefreshing(false);
         }
       }
@@ -116,6 +129,9 @@ export function useContracts(filters: ContractsFilters): UseContractsResult {
     hasLoadedRef.current = false;
     setLoading(true);
     void fetchContracts('auto');
+    return () => {
+      abortRef.current?.abort();
+    };
   }, [filtersKey, fetchContracts]);
 
   const refresh = useCallback(async () => {

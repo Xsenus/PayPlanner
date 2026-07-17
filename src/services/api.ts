@@ -2847,13 +2847,13 @@ export class ApiService {
     sortDir?: SortDir;
     page?: number;
     pageSize?: number;
-  }) {
+  }, options?: { signal?: AbortSignal }) {
     const q = buildQuery({
       ...(params ?? {}),
       page: params?.page ?? 1,
       pageSize: params?.pageSize ?? 20,
     });
-    return this.request<PagedResult<Contract>>(`/contracts${q}`);
+    return this.request<PagedResult<Contract>>(`/contracts${q}`, { signal: options?.signal });
   }
 
   async getContract(id: number) {
