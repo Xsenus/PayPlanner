@@ -5061,15 +5061,18 @@ services.Id,
     [Fact]
     public async Task PaymentPriorities_GroupsFactOperationsByPriority()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await SqliteTestContextFactory.CreateAsync(interceptor: interceptor);
         db.MoneyOperations.AddRange(
-            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 9_000m, new DateTime(2026, 5, 1), "Основной банк", paymentPriority: 1),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 4_000m, new DateTime(2026, 5, 1, 9, 0, 0), "Основной банк", paymentPriority: 1),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 5_000m, new DateTime(2026, 5, 1, 15, 0, 0), "Основной банк", paymentPriority: 1),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 3_000m, new DateTime(2026, 5, 2), "Основной банк", paymentPriority: 1),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 2_000m, new DateTime(2026, 5, 3), "Основной банк", paymentPriority: 2),
             Operation(MoneyOperationSource.Cash, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 1_000m, new DateTime(2026, 5, 4), "Касса"),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Plan, 99_999m, new DateTime(2026, 5, 5), "Основной банк", paymentPriority: 1),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Transfer, MoneyOperationAccountingType.Fact, 50_000m, new DateTime(2026, 5, 6), "Основной банк", paymentPriority: 1));
         await db.SaveChangesAsync();
+        interceptor.Commands.Clear();
         var controller = CreateController(db);
 
         var action = await controller.PaymentPriorities(
@@ -5101,6 +5104,8 @@ services.Id,
                 Assert.Equal(6_000m, item.NetTotal);
                 Assert.Equal(12_000m, item.TotalAmount);
                 Assert.Equal(80.0m, item.Share);
+                Assert.Equal(2, item.IncomeCount);
+                Assert.Equal(1, item.ExpenseCount);
             },
             item =>
             {
@@ -5109,6 +5114,8 @@ services.Id,
                 Assert.Equal(0m, item.Income);
                 Assert.Equal(2_000m, item.Expense);
                 Assert.Equal(13.3m, item.Share);
+                Assert.Equal(0, item.IncomeCount);
+                Assert.Equal(1, item.ExpenseCount);
             },
             item =>
             {
@@ -5117,7 +5124,15 @@ services.Id,
                 Assert.Equal(1_000m, item.Income);
                 Assert.Equal(0m, item.Expense);
                 Assert.Equal(6.7m, item.Share);
+                Assert.Equal(1, item.IncomeCount);
+                Assert.Equal(0, item.ExpenseCount);
             });
+
+        var priorityQuery = Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"MoneyOperations\"", StringComparison.Ordinal));
+        Assert.Contains("GROUP BY", priorityQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SUM", priorityQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("COUNT", priorityQuery, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

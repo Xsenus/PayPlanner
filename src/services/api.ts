@@ -6456,9 +6456,9 @@ export class ApiService {
     caseId?: number;
     contractId?: number;
     incomeTypeId?: number;
-  }) {
+  }, options?: { signal?: AbortSignal }) {
     const q = buildQuery(params ?? {});
-    return this.request<PaymentPriorityReport>(`/reports/payment-priorities${q}`);
+    return this.request<PaymentPriorityReport>(`/reports/payment-priorities${q}`, { signal: options?.signal });
   }
 
   async getPaidAccountReport(params?: {
