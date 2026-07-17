@@ -9,6 +9,29 @@ afterEach(() => {
   sessionStorage.clear();
 });
 
+describe('apiService object audit', () => {
+  it('passes the abort signal to the paged object audit request', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      items: [], total: 0, page: 2, pageSize: 25,
+    }), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+
+    await apiService.getObjectAuditEvents(
+      { search: 'изменение', objectType: 'client', page: 2, pageSize: 25 },
+      { signal: controller.signal },
+    );
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/object-audit?');
+    expect(String(url)).toContain('objectType=client');
+    expect(String(url)).toContain('page=2');
+    expect(options?.signal).toBe(controller.signal);
+  });
+});
+
 describe('extractResponseErrorMessage', () => {
   it('prefers problem details detail field for API errors', async () => {
     const response = new Response(

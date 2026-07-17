@@ -1,5 +1,5 @@
 import { Filter, Loader2, RefreshCw, Search, ShieldCheck } from 'lucide-react';
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import {
@@ -104,33 +104,51 @@ export function ObjectAuditPage() {
   const [pageSize, setPageSize] = useState(25);
   const [total, setTotal] = useState(0);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
+  const requestIdRef = useRef(0);
+  const activeRequestControllerRef = useRef<AbortController | null>(null);
   const debouncedSearch = useDebouncedValue(searchInput, 400);
   const debouncedActor = useDebouncedValue(actor, 400);
 
-  useEffect(() => {
-    setPage(1);
-  }, [action, debouncedActor, debouncedSearch, from, objectType, pageSize, to]);
+  const filterParams = useMemo(
+    () => ({
+      search: debouncedSearch || undefined,
+      objectType: objectType === 'all' ? undefined : objectType,
+      action: action === 'all' ? undefined : action,
+      actor: debouncedActor || undefined,
+      from: from || undefined,
+      to: to || undefined,
+      pageSize,
+    }),
+    [action, debouncedActor, debouncedSearch, from, objectType, pageSize, to],
+  );
+  const filterKey = useMemo(() => JSON.stringify(filterParams), [filterParams]);
+  const previousFilterKeyRef = useRef(filterKey);
 
   useEffect(() => {
-    let cancelled = false;
+    const filtersChanged = previousFilterKeyRef.current !== filterKey;
+    previousFilterKeyRef.current = filterKey;
+    if (filtersChanged && page !== 1) {
+      setPage(1);
+      return;
+    }
+
+    const requestId = ++requestIdRef.current;
+    activeRequestControllerRef.current?.abort();
+    const controller = new AbortController();
+    activeRequestControllerRef.current = controller;
 
     const load = async () => {
       setLoading(true);
       setError(null);
 
       try {
-        const response = await apiService.getObjectAuditEvents({
-          search: debouncedSearch || undefined,
-          objectType: objectType === 'all' ? undefined : objectType,
-          action: action === 'all' ? undefined : action,
-          actor: debouncedActor || undefined,
-          from: from || undefined,
-          to: to || undefined,
-          page,
-          pageSize,
-        });
+        const response = await apiService.getObjectAuditEvents(
+          { ...filterParams, page },
+          { signal: controller.signal },
+        );
 
-        if (cancelled) {
+        if (requestId !== requestIdRef.current || controller.signal.aborted) {
           return;
         }
 
@@ -140,11 +158,15 @@ export function ObjectAuditPage() {
           setPage(1);
         }
       } catch (loadError) {
-        if (!cancelled) {
-          setError(loadError instanceof Error ? loadError.message : 'Не удалось загрузить журнал аудита.');
+        if (requestId !== requestIdRef.current || controller.signal.aborted) {
+          return;
         }
+        setError(loadError instanceof Error ? loadError.message : 'Не удалось загрузить журнал аудита.');
       } finally {
-        if (!cancelled) {
+        if (activeRequestControllerRef.current === controller) {
+          activeRequestControllerRef.current = null;
+        }
+        if (requestId === requestIdRef.current) {
           setLoading(false);
         }
       }
@@ -153,9 +175,15 @@ export function ObjectAuditPage() {
     void load();
 
     return () => {
-      cancelled = true;
+      controller.abort();
+      if (activeRequestControllerRef.current === controller) {
+        activeRequestControllerRef.current = null;
+      }
+      if (requestIdRef.current === requestId) {
+        requestIdRef.current += 1;
+      }
     };
-  }, [action, debouncedActor, debouncedSearch, from, objectType, page, pageSize, to]);
+  }, [filterKey, filterParams, page, reloadToken]);
 
   const totalPages = useMemo(
     () => (pageSize > 0 ? Math.max(1, Math.ceil(total / pageSize)) : 1),
@@ -203,30 +231,7 @@ export function ObjectAuditPage() {
     setTo('');
   };
 
-  const handleRefresh = async () => {
-    setLoading(true);
-    setError(null);
-
-    try {
-      const response = await apiService.getObjectAuditEvents({
-        search: debouncedSearch || undefined,
-        objectType: objectType === 'all' ? undefined : objectType,
-        action: action === 'all' ? undefined : action,
-        actor: debouncedActor || undefined,
-        from: from || undefined,
-        to: to || undefined,
-        page,
-        pageSize,
-      });
-
-      setItems(response.items ?? []);
-      setTotal(response.total ?? 0);
-    } catch (refreshError) {
-      setError(refreshError instanceof Error ? refreshError.message : 'Не удалось обновить журнал аудита.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const handleRefresh = () => setReloadToken((current) => current + 1);
 
   return (
     <div className="p-6 lg:p-8">
@@ -278,7 +283,7 @@ export function ObjectAuditPage() {
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={() => void handleRefresh()}
+                onClick={handleRefresh}
                 disabled={loading}
                 className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
               >

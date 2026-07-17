@@ -3360,13 +3360,18 @@ export class ApiService {
     );
   }
 
-  async getObjectAuditEvents(params?: ObjectAuditFeedQuery) {
+  async getObjectAuditEvents(
+    params?: ObjectAuditFeedQuery,
+    options?: { signal?: AbortSignal },
+  ) {
     const q = buildQuery({
       ...(params ?? {}),
       page: params?.page ?? 1,
       pageSize: params?.pageSize ?? 25,
     });
-    return this.request<PagedResult<ObjectAuditEventDto>>(`/object-audit${q}`);
+    return this.request<PagedResult<ObjectAuditEventDto>>(`/object-audit${q}`, {
+      signal: options?.signal,
+    });
   }
 
   async getDeletedObjectAuditItems(objectType: string, search?: string) {
