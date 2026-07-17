@@ -2751,13 +2751,13 @@ export class ApiService {
     includeLineItems?: boolean;
     page?: number;
     pageSize?: number;
-  }) {
+  }, options?: { signal?: AbortSignal }) {
     const q = buildQuery({
       ...(params ?? {}),
       page: params?.page ?? 1,
       pageSize: params?.pageSize ?? 20,
     });
-    return this.request<PagedResult<Act>>(`/acts${q}`);
+    return this.request<PagedResult<Act>>(`/acts${q}`, { signal: options?.signal });
   }
 
   async getActsSummary(params?: {
@@ -2774,9 +2774,9 @@ export class ApiService {
     paymentId?: number;
     responsibleId?: number;
     search?: string;
-  }) {
+  }, options?: { signal?: AbortSignal }) {
     const q = buildQuery(params ?? {});
-    return this.request<ActsSummary>(`/acts/summary${q}`);
+    return this.request<ActsSummary>(`/acts/summary${q}`, { signal: options?.signal });
   }
 
   async getActResponsibles() {

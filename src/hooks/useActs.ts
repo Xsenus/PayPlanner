@@ -89,6 +89,8 @@ export function useActs(filters: ActsFilters): UseActsResult {
 
   const hasLoadedRef = useRef(false);
   const hasSummaryLoadedRef = useRef(false);
+  const actsAbortRef = useRef<AbortController | null>(null);
+  const summaryAbortRef = useRef<AbortController | null>(null);
   const enabled = filters.enabled ?? true;
 
   const filtersKey = useMemo(() => JSON.stringify(filters), [filters]);
@@ -96,6 +98,8 @@ export function useActs(filters: ActsFilters): UseActsResult {
 
   const fetchActs = useCallback(
     async (mode: 'auto' | 'refresh' = 'auto') => {
+      actsAbortRef.current?.abort();
+      actsAbortRef.current = null;
       if (!enabled) {
         setActs([]);
         setPagination({ page: filters.page ?? 1, pageSize: filters.pageSize ?? 20, total: 0 });
@@ -105,6 +109,9 @@ export function useActs(filters: ActsFilters): UseActsResult {
         return;
       }
 
+      const controller = new AbortController();
+      actsAbortRef.current = controller;
+
       const isInitial = mode === 'refresh' ? false : !hasLoadedRef.current;
       if (isInitial) {
         setLoading(true);
@@ -113,25 +120,29 @@ export function useActs(filters: ActsFilters): UseActsResult {
       }
       setError(null);
       try {
-        const response = await apiService.getActs({
-          from: filters.from,
-          to: filters.to,
-          status: filters.status,
-          workflowStatus: filters.workflowStatus,
-          type: filters.type,
-          clientId: filters.clientId,
-          legalEntityId: filters.legalEntityId,
-          contractId: filters.contractId,
-          invoiceId: filters.invoiceId,
-          paymentId: filters.paymentId,
-          caseId: filters.caseId,
-          responsibleId: filters.responsibleId,
-          search: filters.search,
-          sortBy: filters.sortBy,
-          sortDir: filters.sortDir,
-          page: filters.page,
-          pageSize: filters.pageSize,
-        });
+        const response = await apiService.getActs(
+          {
+            from: filters.from,
+            to: filters.to,
+            status: filters.status,
+            workflowStatus: filters.workflowStatus,
+            type: filters.type,
+            clientId: filters.clientId,
+            legalEntityId: filters.legalEntityId,
+            contractId: filters.contractId,
+            invoiceId: filters.invoiceId,
+            paymentId: filters.paymentId,
+            caseId: filters.caseId,
+            responsibleId: filters.responsibleId,
+            search: filters.search,
+            sortBy: filters.sortBy,
+            sortDir: filters.sortDir,
+            page: filters.page,
+            pageSize: filters.pageSize,
+          },
+          { signal: controller.signal },
+        );
+        if (controller.signal.aborted) return;
         setActs(normalizeActArray(response?.items));
         setPagination({
           page: Number(response?.page ?? filters.page ?? 1) || 1,
@@ -140,6 +151,7 @@ export function useActs(filters: ActsFilters): UseActsResult {
         });
         hasLoadedRef.current = true;
       } catch (err) {
+        if (controller.signal.aborted) return;
         const message = extractDisplayErrorMessage(err, 'Не удалось загрузить акты');
         setError(message);
         if (!hasLoadedRef.current) {
@@ -147,9 +159,11 @@ export function useActs(filters: ActsFilters): UseActsResult {
           setPagination({ page: filters.page ?? 1, pageSize: filters.pageSize ?? 20, total: 0 });
         }
       } finally {
-        if (isInitial) {
+        if (actsAbortRef.current === controller) {
+          actsAbortRef.current = null;
+        }
+        if (!controller.signal.aborted) {
           setLoading(false);
-        } else {
           setRefreshing(false);
         }
       }
@@ -159,40 +173,53 @@ export function useActs(filters: ActsFilters): UseActsResult {
 
   const fetchSummary = useCallback(
     async (mode: 'auto' | 'refresh' = 'auto') => {
+      summaryAbortRef.current?.abort();
+      summaryAbortRef.current = null;
       if (!enabled) {
         setSummary(null);
         setSummaryLoading(false);
         return;
       }
 
+      const controller = new AbortController();
+      summaryAbortRef.current = controller;
+
       const isInitial = mode === 'refresh' ? false : !hasSummaryLoadedRef.current;
       if (isInitial) {
         setSummaryLoading(true);
       }
       try {
-        const response = await apiService.getActsSummary({
-          from: filters.from,
-          to: filters.to,
-          status: filters.status,
-          workflowStatus: filters.workflowStatus,
-          type: filters.type,
-          clientId: filters.clientId,
-          legalEntityId: filters.legalEntityId,
-          contractId: filters.contractId,
-          invoiceId: filters.invoiceId,
-          paymentId: filters.paymentId,
-          caseId: filters.caseId,
-          responsibleId: filters.responsibleId,
-          search: filters.search,
-        });
+        const response = await apiService.getActsSummary(
+          {
+            from: filters.from,
+            to: filters.to,
+            status: filters.status,
+            workflowStatus: filters.workflowStatus,
+            type: filters.type,
+            clientId: filters.clientId,
+            legalEntityId: filters.legalEntityId,
+            contractId: filters.contractId,
+            invoiceId: filters.invoiceId,
+            paymentId: filters.paymentId,
+            caseId: filters.caseId,
+            responsibleId: filters.responsibleId,
+            search: filters.search,
+          },
+          { signal: controller.signal },
+        );
+        if (controller.signal.aborted) return;
         setSummary(normalizeActsSummary(response));
         hasSummaryLoadedRef.current = true;
       } catch {
+        if (controller.signal.aborted) return;
         if (!hasSummaryLoadedRef.current) {
           setSummary(null);
         }
       } finally {
-        if (isInitial) {
+        if (summaryAbortRef.current === controller) {
+          summaryAbortRef.current = null;
+        }
+        if (!controller.signal.aborted) {
           setSummaryLoading(false);
         }
       }
@@ -204,11 +231,17 @@ export function useActs(filters: ActsFilters): UseActsResult {
     hasLoadedRef.current = false;
     setLoading(true);
     void fetchActs('auto');
+    return () => {
+      actsAbortRef.current?.abort();
+    };
   }, [filtersKey, fetchActs]);
 
   useEffect(() => {
     hasSummaryLoadedRef.current = false;
     void fetchSummary('auto');
+    return () => {
+      summaryAbortRef.current?.abort();
+    };
   }, [summaryKey, fetchSummary]);
 
   const refresh = useCallback(async () => {
