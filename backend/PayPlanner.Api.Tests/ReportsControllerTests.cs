@@ -5292,9 +5292,11 @@ services.Id,
     [Fact]
     public async Task InvoiceStatuses_GroupsInvoicesByWorkflowStatus()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await SqliteTestContextFactory.CreateAsync(interceptor: interceptor);
         db.Payments.AddRange(
-            InvoicePayment("INV-1", PaymentType.Income, PaymentStatus.Pending, InvoiceWorkflowStatus.Draft, 1_000m, 0m, new DateTime(2026, 5, 1)),
+            InvoicePayment("INV-1A", PaymentType.Income, PaymentStatus.Pending, InvoiceWorkflowStatus.Draft, 400m, 0m, new DateTime(2026, 5, 1, 9, 0, 0)),
+            InvoicePayment("INV-1B", PaymentType.Income, PaymentStatus.Pending, InvoiceWorkflowStatus.Draft, 600m, 0m, new DateTime(2026, 5, 1, 15, 0, 0)),
             InvoicePayment("INV-2", PaymentType.Expense, PaymentStatus.Processing, InvoiceWorkflowStatus.OnSigning, 2_000m, 500m, new DateTime(2026, 5, 2)),
             InvoicePayment("INV-3", PaymentType.Income, PaymentStatus.Completed, InvoiceWorkflowStatus.Paid, 3_000m, 3_000m, new DateTime(2026, 5, 3)),
             InvoicePayment("INV-4", PaymentType.Income, PaymentStatus.Pending, InvoiceWorkflowStatus.PartiallyPaid, 4_000m, 1_500m, new DateTime(2026, 5, 4)),
@@ -5305,6 +5307,7 @@ services.Id,
             InvoicePayment("INV-OLD", PaymentType.Income, PaymentStatus.Completed, InvoiceWorkflowStatus.Paid, 99_999m, 99_999m, new DateTime(2026, 4, 30)),
             InvoicePayment("PAY-1", PaymentType.Income, PaymentStatus.Completed, InvoiceWorkflowStatus.Paid, 88_888m, 88_888m, new DateTime(2026, 5, 7), DocumentKind.Payment));
         await db.SaveChangesAsync();
+        interceptor.Commands.Clear();
         var controller = CreateController(db);
 
         var action = await controller.InvoiceStatuses(
@@ -5314,8 +5317,8 @@ services.Id,
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
         var report = Assert.IsType<InvoiceStatusReportDto>(ok.Value);
-        Assert.Equal(8, report.InvoiceCount);
-        Assert.Equal(6, report.IncomeCount);
+        Assert.Equal(9, report.InvoiceCount);
+        Assert.Equal(7, report.IncomeCount);
         Assert.Equal(2, report.ExpenseCount);
         Assert.Equal(1, report.PaidCount);
         Assert.Equal(1, report.OverdueCount);
@@ -5354,6 +5357,8 @@ services.Id,
                 Assert.Equal("Черновик", item.StatusLabel);
                 Assert.Equal(1_000m, item.TotalAmount);
                 Assert.Equal(3.6m, item.Share);
+                Assert.Equal(2, item.InvoiceCount);
+                Assert.Equal(2, item.IncomeCount);
             },
             item =>
             {
@@ -5387,6 +5392,13 @@ services.Id,
                 Assert.Equal(5_900m, item.OutstandingAmount);
                 Assert.Equal(21.4m, item.Share);
             });
+
+        var invoiceStatusQuery = Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"Payments\"", StringComparison.Ordinal));
+        Assert.Contains("GROUP BY", invoiceStatusQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SUM", invoiceStatusQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("COUNT", invoiceStatusQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("CASE", invoiceStatusQuery, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

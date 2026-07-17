@@ -7394,13 +7394,21 @@ public class ReportsController : ControllerBase
         }
 
         var rows = await query
-            .Select(item => new
+            .GroupBy(item => new
             {
                 item.Type,
                 item.Status,
                 WorkflowStatus = item.InvoiceWorkflowStatus,
-                item.Amount,
-                item.PaidAmount,
+            })
+            .Select(group => new InvoiceStatusQueryRow
+            {
+                Type = group.Key.Type,
+                Status = group.Key.Status,
+                WorkflowStatus = group.Key.WorkflowStatus,
+                Amount = group.Sum(item => item.Amount),
+                PaidAmount = group.Sum(item => item.PaidAmount < item.Amount ? item.PaidAmount : item.Amount),
+                OutstandingAmount = group.Sum(item => item.Amount > item.PaidAmount ? item.Amount - item.PaidAmount : 0m),
+                Count = group.Count(),
             })
             .ToListAsync(ct);
 
@@ -7412,10 +7420,9 @@ public class ReportsController : ControllerBase
                 item.Status,
                 WorkflowStatus = NormalizeInvoiceReportStatus(item.WorkflowStatus, item.Status, item.PaidAmount, item.Amount),
                 item.Amount,
-                PaidAmount = Math.Min(item.PaidAmount, item.Amount),
-                OutstandingAmount = item.Amount > item.PaidAmount
-                    ? Math.Round(item.Amount - item.PaidAmount, 2)
-                    : 0m,
+                item.PaidAmount,
+                item.OutstandingAmount,
+                item.Count,
             })
             .GroupBy(item => item.WorkflowStatus, StringComparer.OrdinalIgnoreCase)
             .Select(group =>
@@ -7426,11 +7433,11 @@ public class ReportsController : ControllerBase
                 {
                     Status = group.First().WorkflowStatus,
                     StatusLabel = FormatInvoiceWorkflowStatusLabel(group.First().WorkflowStatus),
-                    InvoiceCount = group.Count(),
-                    IncomeCount = group.Count(item => item.Type == PaymentType.Income),
-                    ExpenseCount = group.Count(item => item.Type == PaymentType.Expense),
-                    PaidCount = group.Count(item => item.Status == PaymentStatus.Completed),
-                    OverdueCount = group.Count(item => item.Status == PaymentStatus.Overdue),
+                    InvoiceCount = group.Sum(item => item.Count),
+                    IncomeCount = group.Where(item => item.Type == PaymentType.Income).Sum(item => item.Count),
+                    ExpenseCount = group.Where(item => item.Type == PaymentType.Expense).Sum(item => item.Count),
+                    PaidCount = group.Where(item => item.Status == PaymentStatus.Completed).Sum(item => item.Count),
+                    OverdueCount = group.Where(item => item.Status == PaymentStatus.Overdue).Sum(item => item.Count),
                     TotalAmount = statusTotal,
                     PaidAmount = group.Sum(item => item.PaidAmount),
                     OutstandingAmount = group.Sum(item => item.OutstandingAmount),
@@ -7447,16 +7454,14 @@ public class ReportsController : ControllerBase
         {
             From = from,
             To = to,
-            InvoiceCount = rows.Count,
-            IncomeCount = rows.Count(item => item.Type == PaymentType.Income),
-            ExpenseCount = rows.Count(item => item.Type == PaymentType.Expense),
-            PaidCount = rows.Count(item => item.Status == PaymentStatus.Completed),
-            OverdueCount = rows.Count(item => item.Status == PaymentStatus.Overdue),
+            InvoiceCount = rows.Sum(item => item.Count),
+            IncomeCount = rows.Where(item => item.Type == PaymentType.Income).Sum(item => item.Count),
+            ExpenseCount = rows.Where(item => item.Type == PaymentType.Expense).Sum(item => item.Count),
+            PaidCount = rows.Where(item => item.Status == PaymentStatus.Completed).Sum(item => item.Count),
+            OverdueCount = rows.Where(item => item.Status == PaymentStatus.Overdue).Sum(item => item.Count),
             TotalAmount = totalAmount,
-            PaidAmount = rows.Sum(item => Math.Min(item.PaidAmount, item.Amount)),
-            OutstandingAmount = rows.Sum(item => item.Amount > item.PaidAmount
-                ? Math.Round(item.Amount - item.PaidAmount, 2)
-                : 0m),
+            PaidAmount = rows.Sum(item => item.PaidAmount),
+            OutstandingAmount = rows.Sum(item => item.OutstandingAmount),
             Statuses = statuses,
         };
     }
@@ -9298,6 +9303,17 @@ public class ReportsController : ControllerBase
         public decimal PaidAmount { get; init; }
         public int Count { get; init; }
         public int FirstOperationId { get; init; }
+    }
+
+    private sealed class InvoiceStatusQueryRow
+    {
+        public PaymentType Type { get; init; }
+        public PaymentStatus Status { get; init; }
+        public string? WorkflowStatus { get; init; }
+        public decimal Amount { get; init; }
+        public decimal PaidAmount { get; init; }
+        public decimal OutstandingAmount { get; init; }
+        public int Count { get; init; }
     }
 
     private sealed class VatAggregateQueryRow
