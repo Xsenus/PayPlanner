@@ -1,7 +1,11 @@
 import { afterEach, vi } from 'vitest';
 import { cleanup } from '@testing-library/react';
 
+const hasDom = typeof window !== 'undefined' && typeof document !== 'undefined';
+
 afterEach(() => {
+  if (!hasDom) return;
+
   cleanup();
   vi.mocked(window.open).mockClear();
 });
@@ -32,66 +36,68 @@ function createMockWindow(): Window {
   return mockWindow as unknown as Window;
 }
 
-Object.defineProperty(window, 'open', {
-  writable: true,
-  configurable: true,
-  value: vi.fn(() => createMockWindow()),
-});
-
-document.addEventListener(
-  'click',
-  (event) => {
-    const target = event.target;
-    if (!(target instanceof Element)) return;
-
-    const anchor = target.closest('a');
-    if (!(anchor instanceof HTMLAnchorElement)) return;
-
-    if (anchor.hasAttribute('download') || anchor.href.startsWith('blob:')) {
-      event.preventDefault();
-    }
-  },
-  true,
-);
-
-const originalAnchorClick = HTMLAnchorElement.prototype.click;
-Object.defineProperty(HTMLAnchorElement.prototype, 'click', {
-  configurable: true,
-  value(this: HTMLAnchorElement) {
-    if (this.hasAttribute('download') || this.href.startsWith('blob:')) {
-      return;
-    }
-
-    return originalAnchorClick.call(this);
-  },
-});
-
-if (!('matchMedia' in window)) {
-  Object.defineProperty(window, 'matchMedia', {
+if (hasDom) {
+  Object.defineProperty(window, 'open', {
     writable: true,
-    value: vi.fn().mockImplementation((query: string) => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    })),
+    configurable: true,
+    value: vi.fn(() => createMockWindow()),
   });
-}
 
-if (!('createObjectURL' in URL)) {
-  Object.defineProperty(URL, 'createObjectURL', {
-    writable: true,
-    value: vi.fn(() => 'blob:test'),
-  });
-}
+  document.addEventListener(
+    'click',
+    (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
 
-if (!('revokeObjectURL' in URL)) {
-  Object.defineProperty(URL, 'revokeObjectURL', {
-    writable: true,
-    value: vi.fn(),
+      const anchor = target.closest('a');
+      if (!(anchor instanceof HTMLAnchorElement)) return;
+
+      if (anchor.hasAttribute('download') || anchor.href.startsWith('blob:')) {
+        event.preventDefault();
+      }
+    },
+    true,
+  );
+
+  const originalAnchorClick = HTMLAnchorElement.prototype.click;
+  Object.defineProperty(HTMLAnchorElement.prototype, 'click', {
+    configurable: true,
+    value(this: HTMLAnchorElement) {
+      if (this.hasAttribute('download') || this.href.startsWith('blob:')) {
+        return;
+      }
+
+      return originalAnchorClick.call(this);
+    },
   });
+
+  if (!('matchMedia' in window)) {
+    Object.defineProperty(window, 'matchMedia', {
+      writable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    });
+  }
+
+  if (!('createObjectURL' in URL)) {
+    Object.defineProperty(URL, 'createObjectURL', {
+      writable: true,
+      value: vi.fn(() => 'blob:test'),
+    });
+  }
+
+  if (!('revokeObjectURL' in URL)) {
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      writable: true,
+      value: vi.fn(),
+    });
+  }
 }
