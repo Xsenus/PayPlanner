@@ -207,6 +207,17 @@ const DEFAULT_TASK_JOURNAL_SETTINGS: TaskJournalSettingsDto = {
   caseInactivityEscalationUserId: null,
 };
 
+const AUTOMATION_CANDIDATES_SEARCH_DELAY_MS = 300;
+
+function buildAutomationCandidatesRequestKey(settings: TaskJournalSettingsDto, searchValue: string) {
+  return [
+    settings.caseInactivityDays,
+    Math.min(settings.caseInactivityLimit, 20),
+    settings.caseInactivityEscalationDays,
+    searchValue.trim(),
+  ].join('|');
+}
+
 const STATUS_OPTIONS: Array<{ value: TaskJournalStatus; label: string }> = [
   { value: 'new', label: 'Новая' },
   { value: 'inProgress', label: 'В работе' },
@@ -2011,6 +2022,8 @@ export function TaskJournal({
   const [creatingAutomationCaseId, setCreatingAutomationCaseId] = useState<number | null>(null);
   const [creatingAutomationAll, setCreatingAutomationAll] = useState(false);
   const automationCandidatesRequestRef = useRef(0);
+  const automationCandidatesInitializedRef = useRef(false);
+  const automationCandidatesRequestKeyRef = useRef<string | null>(null);
   const taskJournalEventSourceRef = useRef<object>({});
   const [loading, setLoading] = useState(true);
   const [filterOwnerKey, setFilterOwnerKey] = useState(() => getTaskJournalFilterStorageKey(currentUserId, mode));
@@ -2347,24 +2360,32 @@ export function TaskJournal({
   const loadAutomationCandidates = useCallback(async (
     settings: TaskJournalSettingsDto,
     searchValue: string,
+    signal?: AbortSignal,
   ) => {
     if (embedded || underControlOnly || isApprovalsMode || !canCreateTasks || !canViewCases || !settings.caseInactivityAutomationEnabled) {
       return [];
     }
 
-    return apiService.getTaskJournalCaseAutomationCandidates({
+    const params = {
       inactiveDays: settings.caseInactivityDays,
       limit: Math.min(settings.caseInactivityLimit, 20),
       escalationDays: settings.caseInactivityEscalationDays,
       search: searchValue.trim() || undefined,
-    });
+    };
+    return signal
+      ? apiService.getTaskJournalCaseAutomationCandidates(params, { signal })
+      : apiService.getTaskJournalCaseAutomationCandidates(params);
   }, [canCreateTasks, canViewCases, embedded, isApprovalsMode, underControlOnly]);
 
   const refreshTasks = useCallback(async () => {
     setLoading(true);
     try {
       const settingsPromise = apiService.getTaskJournalSettings();
-      const automationPromise = settingsPromise.then((settingsResponse) => loadAutomationCandidates(settingsResponse, searchRef.current));
+      let automationSearchValue = searchRef.current;
+      const automationPromise = settingsPromise.then((settingsResponse) => {
+        automationSearchValue = searchRef.current;
+        return loadAutomationCandidates(settingsResponse, automationSearchValue);
+      });
       const [taskItems, assigneeResponse, settingsResponse, notificationDefaultsResponse, timeZoneResponse, calendarSyncSettingsResponse, automationResponse] = await Promise.all([
         loadAllTaskJournalItems(contextFilter, underControlOnly, shouldUseCalendarVisibility, sortBy, sortDir, true),
         apiService.getTaskJournalAssignees({ calendarView: shouldUseCalendarVisibility }),
@@ -2377,6 +2398,8 @@ export function TaskJournal({
       setTasks(taskItems);
       setAssignees(assigneeResponse);
       setAutomationCandidates(automationResponse);
+      automationCandidatesRequestKeyRef.current = buildAutomationCandidatesRequestKey(settingsResponse, automationSearchValue);
+      automationCandidatesInitializedRef.current = true;
       setTaskSettings(settingsResponse);
       setTaskNotificationDefaults(parseTaskNotificationDefaults(notificationDefaultsResponse?.value));
       setCurrentTimeZoneId(normalizeUserTimeZoneId(timeZoneResponse?.value));
@@ -2428,20 +2451,37 @@ export function TaskJournal({
 
   useEffect(() => {
     searchRef.current = search;
+    if (!automationCandidatesInitializedRef.current) {
+      return;
+    }
+
+    const requestKey = buildAutomationCandidatesRequestKey(taskSettings, search);
+    if (automationCandidatesRequestKeyRef.current === requestKey) {
+      return;
+    }
+
     const requestId = automationCandidatesRequestRef.current + 1;
     automationCandidatesRequestRef.current = requestId;
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => {
+      void loadAutomationCandidates(taskSettings, search, controller.signal)
+        .then((items) => {
+          if (!controller.signal.aborted && automationCandidatesRequestRef.current === requestId) {
+            automationCandidatesRequestKeyRef.current = requestKey;
+            setAutomationCandidates(items);
+          }
+        })
+        .catch(() => {
+          if (!controller.signal.aborted && automationCandidatesRequestRef.current === requestId) {
+            setAutomationCandidates([]);
+          }
+        });
+    }, AUTOMATION_CANDIDATES_SEARCH_DELAY_MS);
 
-    void loadAutomationCandidates(taskSettings, search)
-      .then((items) => {
-        if (automationCandidatesRequestRef.current === requestId) {
-          setAutomationCandidates(items);
-        }
-      })
-      .catch(() => {
-        if (automationCandidatesRequestRef.current === requestId) {
-          setAutomationCandidates([]);
-        }
-      });
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
   }, [loadAutomationCandidates, search, taskSettings]);
 
   const assigneeById = useMemo(() => {

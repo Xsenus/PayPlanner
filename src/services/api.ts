@@ -3985,14 +3985,19 @@ export class ApiService {
     return this.request<TaskJournalAutomationDiagnosticsDto>('/tasks/automation/case-control/diagnostics');
   }
 
-  async getTaskJournalCaseAutomationCandidates(params?: { inactiveDays?: number; limit?: number; escalationDays?: number; search?: string }) {
+  async getTaskJournalCaseAutomationCandidates(
+    params?: { inactiveDays?: number; limit?: number; escalationDays?: number; search?: string },
+    options?: { signal?: AbortSignal },
+  ) {
     const q = buildQuery({
       inactiveDays: params?.inactiveDays,
       limit: params?.limit,
       escalationDays: params?.escalationDays,
       search: params?.search,
     });
-    return this.request<TaskJournalCaseAutomationCandidate[]>(`/tasks/automation/case-candidates${q}`);
+    return this.request<TaskJournalCaseAutomationCandidate[]>(`/tasks/automation/case-candidates${q}`, {
+      signal: options?.signal,
+    });
   }
 
   async createTaskJournalCaseAutomationTask(clientCaseId: number) {

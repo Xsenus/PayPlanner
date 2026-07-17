@@ -1504,6 +1504,23 @@ describe('apiService case calendar', () => {
     expect(String(assigneesUrl)).toContain('/tasks/assignees?');
     expect(String(assigneesUrl)).toContain('calendarView=true');
   });
+
+  it('passes an abort signal to the case automation search request', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify([]), {
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+
+    await apiService.getTaskJournalCaseAutomationCandidates(
+      { search: 'ИВАНОВ' },
+      { signal: controller.signal },
+    );
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/tasks/automation/case-candidates?search=');
+    expect(options?.signal).toBe(controller.signal);
+  });
 });
 
 describe('apiService reports', () => {

@@ -3186,15 +3186,66 @@ describe('TaskJournal', () => {
         : []
     ));
     await renderJournal([], { waitForTitle: null });
+    apiMock.getTaskJournalCaseAutomationCandidates.mockClear();
 
     const searchInput = screen.getByRole('textbox') as HTMLInputElement;
+    fireEvent.change(searchInput, { target: { value: 'КО' } });
+    fireEvent.change(searchInput, { target: { value: 'КОШЕЛ' } });
     fireEvent.change(searchInput, { target: { value: 'КОШЕЛЕВА' } });
 
-    await waitFor(() => expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledWith(expect.objectContaining({
-      search: 'КОШЕЛЕВА',
-    })));
+    expect(apiMock.getTaskJournalCaseAutomationCandidates).not.toHaveBeenCalled();
+    await waitFor(() => expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledTimes(1));
+    expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledWith(
+      expect.objectContaining({ search: 'КОШЕЛЕВА' }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     expect(await screen.findByText('Кошелева Елена Юрьевна')).toBeTruthy();
     expect(screen.getByText('КОШЕЛЕВА - уголовное дело')).toBeTruthy();
+  });
+
+  it('aborts an obsolete case automation search request', async () => {
+    await renderJournal([], { waitForTitle: null });
+    apiMock.getTaskJournalCaseAutomationCandidates.mockClear();
+    const signals: AbortSignal[] = [];
+    const resolvePending: Array<(items: []) => void> = [];
+    apiMock.getTaskJournalCaseAutomationCandidates.mockImplementation((
+      _params?: { search?: string },
+      options?: { signal?: AbortSignal },
+    ) => {
+      if (options?.signal) {
+        signals.push(options.signal);
+      }
+      return new Promise<[]>((resolve) => resolvePending.push(resolve));
+    });
+
+    const searchInput = screen.getByRole('textbox') as HTMLInputElement;
+    fireEvent.change(searchInput, { target: { value: 'ИВАН' } });
+    await waitFor(() => expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledTimes(1));
+    expect(signals[0]?.aborted).toBe(false);
+
+    fireEvent.change(searchInput, { target: { value: 'ИВАНОВ' } });
+
+    await waitFor(() => expect(signals[0]?.aborted).toBe(true));
+    resolvePending.forEach((resolve) => resolve([]));
+  });
+
+  it('requests a search value again after its previous request was aborted', async () => {
+    await renderJournal([], { waitForTitle: null });
+    apiMock.getTaskJournalCaseAutomationCandidates.mockClear();
+    const resolvePending: Array<(items: []) => void> = [];
+    apiMock.getTaskJournalCaseAutomationCandidates.mockImplementation(() => (
+      new Promise<[]>((resolve) => resolvePending.push(resolve))
+    ));
+
+    const searchInput = screen.getByRole('textbox') as HTMLInputElement;
+    fireEvent.change(searchInput, { target: { value: 'А' } });
+    await waitFor(() => expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledTimes(1));
+    fireEvent.change(searchInput, { target: { value: 'Б' } });
+    fireEvent.change(searchInput, { target: { value: 'А' } });
+
+    await waitFor(() => expect(apiMock.getTaskJournalCaseAutomationCandidates).toHaveBeenCalledTimes(2));
+    expect(apiMock.getTaskJournalCaseAutomationCandidates.mock.calls[1][0]).toEqual(expect.objectContaining({ search: 'А' }));
+    resolvePending.forEach((resolve) => resolve([]));
   });
 
   it('creates control tasks for all automation candidates', async () => {
