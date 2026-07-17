@@ -12,6 +12,8 @@ EF `ExecuteUpdateAsync` and `ExecuteDeleteAsync` bypass the change tracker. That
 | `backend/Controllers/LegalEntitiesController.cs:961` | `ExecuteDeleteAsync` | Legal entity address records before replacing the address collection | No per-address object audit; legal entity save flow records the visible entity change. | Address records are treated as replaceable child rows of the legal entity form. |
 | `backend/Services/UserActivity/UserActivityRetentionService.cs:109` | `ExecuteDeleteAsync` | Expired user activity log rows | No per-row object audit; service logs deleted count and retention cutoff. | Retention cleanup removes technical logs in bulk. |
 | `backend/Services/Notifications/NotificationDeliveryRetentionService.cs:152` | `ExecuteDeleteAsync` | Expired notification delivery technical rows | No per-row object audit; service records system job state and logs deleted count. | Retention cleanup removes delivery diagnostics in bulk. |
+| `backend/Services/CalendarSyncLogRetentionService.cs:176` | `ExecuteDeleteAsync` | Expired Google calendar synchronization technical rows | No per-row object audit; service records the provider-specific and total deleted counts in the system job state. | Retention cleanup removes technical synchronization diagnostics in bounded chunks. |
+| `backend/Services/CalendarSyncLogRetentionService.cs:187` | `ExecuteDeleteAsync` | Expired Yandex calendar synchronization technical rows | No per-row object audit; service records the provider-specific and total deleted counts in the system job state. | Retention cleanup removes technical synchronization diagnostics in bounded chunks. |
 
 ## Guardrails
 

@@ -47,6 +47,7 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
     private readonly TaskJournalReminderNotificationService? _taskReminderRunner;
     private readonly NotificationRetrySchedulerService? _notificationRetryRunner;
     private readonly NotificationDeliveryRetentionService? _notificationDeliveryRetentionRunner;
+    private readonly CalendarSyncLogRetentionService? _calendarSyncLogRetentionRunner;
     private readonly PaymentAdvanceReviewMonitoringService? _advanceReviewMonitoringRunner;
     private readonly CalendarSyncSchedulerService? _calendarSyncRunner;
     private readonly TaskJournalAutomationSchedulerService? _caseControlRunner;
@@ -70,7 +71,8 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
         ClientCaseCourtSyncSchedulerService? courtSyncRunner = null,
         MoneyBalanceReconciliationSchedulerService? moneyBalanceRunner = null,
         UserActivityRetentionService? userActivityRetentionRunner = null,
-        YandexDiskCrmSyncSchedulerService? yandexDiskCrmSyncRunner = null)
+        YandexDiskCrmSyncSchedulerService? yandexDiskCrmSyncRunner = null,
+        CalendarSyncLogRetentionService? calendarSyncLogRetentionRunner = null)
     {
         _db = db;
         _configuration = configuration;
@@ -87,6 +89,7 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
         _moneyBalanceRunner = moneyBalanceRunner;
         _userActivityRetentionRunner = userActivityRetentionRunner;
         _yandexDiskCrmSyncRunner = yandexDiskCrmSyncRunner;
+        _calendarSyncLogRetentionRunner = calendarSyncLogRetentionRunner;
     }
 
     [NonAction]
@@ -130,6 +133,10 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
                 item.Key == NotificationDeliveryRetentionService.RetentionDaysSettingKey ||
                 item.Key == NotificationDeliveryRetentionService.IntervalHoursSettingKey ||
                 item.Key == NotificationDeliveryRetentionService.BatchSizeSettingKey ||
+                item.Key == CalendarSyncLogRetentionService.EnabledSettingKey ||
+                item.Key == CalendarSyncLogRetentionService.RetentionDaysSettingKey ||
+                item.Key == CalendarSyncLogRetentionService.IntervalHoursSettingKey ||
+                item.Key == CalendarSyncLogRetentionService.BatchSizeSettingKey ||
                 item.Key == PaymentAdvanceReviewMonitoringService.EnabledSettingKey ||
                 item.Key == PaymentAdvanceReviewMonitoringService.IntervalHoursSettingKey ||
                 item.Key == PaymentAdvanceReviewMonitoringService.BatchSizeSettingKey ||
@@ -158,6 +165,7 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
             await BuildNotificationDeliveryRetentionJobAsync(settings, timeZone, ct),
             await BuildAdvanceReviewMonitoringJobAsync(settings, ct),
             await BuildExternalCalendarSyncJobAsync(settings, timeZone, ct),
+            await BuildCalendarSyncLogRetentionJobAsync(settings, timeZone, ct),
             await BuildCaseControlJobAsync(settings, now, ct),
             await BuildCourtSyncJobAsync(settings, ct),
             await BuildMoneyBalanceReconciliationJobAsync(ct),
@@ -251,6 +259,17 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
                             ? $"Удалено устаревших технических записей доставки уведомлений: {processedCount}."
                             : "Проверка срока хранения технических логов уведомлений выполнена, удаление не требовалось."
                         : "Очистка технических логов уведомлений выключена в настройках.";
+                    break;
+
+                case SystemJobKeys.CalendarSyncLogRetention:
+                    EnsureRunner(_calendarSyncLogRetentionRunner);
+                    var calendarLogRetentionResult = await _calendarSyncLogRetentionRunner!.RunOnceAsync(ct);
+                    processedCount = calendarLogRetentionResult.TotalDeletedCount;
+                    summary = calendarLogRetentionResult.Enabled
+                        ? processedCount > 0
+                            ? $"Удалено устаревших записей синхронизации календарей: Google — {calendarLogRetentionResult.GoogleDeletedCount}, Яндекс — {calendarLogRetentionResult.YandexDeletedCount}."
+                            : "Срок хранения журналов синхронизации календарей проверен, удаление не требовалось."
+                        : "Очистка журналов синхронизации календарей выключена в настройках.";
                     break;
 
                 case SystemJobKeys.PaymentAdvanceReviewMonitoring:
@@ -684,6 +703,54 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
         };
     }
 
+    private async Task<SystemJobDiagnosticsItemDto> BuildCalendarSyncLogRetentionJobAsync(
+        IReadOnlyDictionary<string, string> settings,
+        TimeZoneInfo timeZone,
+        CancellationToken ct)
+    {
+        var enabled = ParseBool(
+            settings.GetValueOrDefault(CalendarSyncLogRetentionService.EnabledSettingKey),
+            _configuration.GetValue("CalendarSync:LogRetention:Enabled", true));
+        var retentionDays = CalendarSyncLogRetentionService.NormalizeRetentionDays(ParseInt(
+            settings.GetValueOrDefault(CalendarSyncLogRetentionService.RetentionDaysSettingKey),
+            _configuration.GetValue("CalendarSync:LogRetention:RetentionDays", CalendarSyncLogRetentionService.DefaultRetentionDays)));
+        var intervalHours = CalendarSyncLogRetentionService.NormalizeIntervalHours(ParseInt(
+            settings.GetValueOrDefault(CalendarSyncLogRetentionService.IntervalHoursSettingKey),
+            _configuration.GetValue("CalendarSync:LogRetention:IntervalHours", CalendarSyncLogRetentionService.DefaultIntervalHours)));
+        var batchSize = CalendarSyncLogRetentionService.NormalizeBatchSize(ParseInt(
+            settings.GetValueOrDefault(CalendarSyncLogRetentionService.BatchSizeSettingKey),
+            _configuration.GetValue("CalendarSync:LogRetention:BatchSize", CalendarSyncLogRetentionService.DefaultBatchSize)));
+        var cutoff = DateTime.UtcNow.AddDays(-retentionDays);
+        var counts = _calendarSyncLogRetentionRunner is null
+            ? new CalendarSyncLogRetentionCounts(
+                await _db.GoogleCalendarSyncLogs.AsNoTracking().CountAsync(item => item.CreatedAt < cutoff, ct),
+                await _db.YandexCalendarSyncLogs.AsNoTracking().CountAsync(item => item.CreatedAt < cutoff, ct))
+            : await _calendarSyncLogRetentionRunner.CountEligibleLogsAsync(ct);
+        var oldestGoogleAt = await _db.GoogleCalendarSyncLogs.AsNoTracking().MinAsync(item => (DateTime?)item.CreatedAt, ct);
+        var oldestYandexAt = await _db.YandexCalendarSyncLogs.AsNoTracking().MinAsync(item => (DateTime?)item.CreatedAt, ct);
+        var oldestLogAt = oldestGoogleAt is null ? oldestYandexAt : oldestYandexAt is null ? oldestGoogleAt : oldestGoogleAt < oldestYandexAt ? oldestGoogleAt : oldestYandexAt;
+
+        return new SystemJobDiagnosticsItemDto
+        {
+            Key = SystemJobKeys.CalendarSyncLogRetention,
+            Name = "Очистка журналов синхронизации календарей",
+            Description = "Удаляет устаревшие технические записи синхронизации Google и Яндекс календарей по настроенному сроку хранения.",
+            Enabled = enabled,
+            Status = enabled ? "active" : "disabled",
+            StatusText = enabled ? "Включено" : "Выключено",
+            IntervalText = $"Каждые {intervalHours} ч., хранение {retentionDays} дн.",
+            PendingCount = counts.TotalCount,
+            LastProcessedCount = batchSize * 2,
+            LastActivityAt = oldestLogAt,
+            LastActivityDescription = oldestLogAt is null ? null : $"Самая старая техническая запись: {FormatSystemJobDateTime(oldestLogAt.Value, timeZone)}.",
+            NextRunHint = enabled
+                ? $"За один запуск удаляется до {batchSize} записей каждого календарного провайдера; ожидают очистки: Google — {counts.GoogleCount}, Яндекс — {counts.YandexCount}."
+                : "Автоочистка журналов синхронизации календарей выключена.",
+            ManualRunEnabled = enabled,
+            ManualRunHint = enabled ? "Можно вручную удалить устаревшие записи журналов синхронизации календарей." : "Ручной запуск недоступен, пока автоочистка выключена.",
+        };
+    }
+
     private async Task<SystemJobDiagnosticsItemDto> BuildExternalCalendarSyncJobAsync(
         IReadOnlyDictionary<string, string> settings,
         TimeZoneInfo timeZone,
@@ -977,6 +1044,10 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
                 item.Key == NotificationDeliveryRetentionService.RetentionDaysSettingKey ||
                 item.Key == NotificationDeliveryRetentionService.IntervalHoursSettingKey ||
                 item.Key == NotificationDeliveryRetentionService.BatchSizeSettingKey ||
+                item.Key == CalendarSyncLogRetentionService.EnabledSettingKey ||
+                item.Key == CalendarSyncLogRetentionService.RetentionDaysSettingKey ||
+                item.Key == CalendarSyncLogRetentionService.IntervalHoursSettingKey ||
+                item.Key == CalendarSyncLogRetentionService.BatchSizeSettingKey ||
                 item.Key == PaymentAdvanceReviewMonitoringService.EnabledSettingKey ||
                 item.Key == PaymentAdvanceReviewMonitoringService.IntervalHoursSettingKey ||
                 item.Key == PaymentAdvanceReviewMonitoringService.BatchSizeSettingKey ||
@@ -1003,6 +1074,7 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
             SystemJobKeys.NotificationRetry => await BuildNotificationRetryJobAsync(settings, ct),
             SystemJobKeys.YandexDiskCrmSync => await BuildYandexDiskCrmSyncJobAsync(settings, ct),
             SystemJobKeys.NotificationDeliveryRetention => await BuildNotificationDeliveryRetentionJobAsync(settings, timeZone, ct),
+            SystemJobKeys.CalendarSyncLogRetention => await BuildCalendarSyncLogRetentionJobAsync(settings, timeZone, ct),
             SystemJobKeys.PaymentAdvanceReviewMonitoring => await BuildAdvanceReviewMonitoringJobAsync(settings, ct),
             SystemJobKeys.ExternalCalendarSync => await BuildExternalCalendarSyncJobAsync(settings, timeZone, ct),
             SystemJobKeys.CaseInactivityControl => await BuildCaseControlJobAsync(settings, DateTime.UtcNow, ct),

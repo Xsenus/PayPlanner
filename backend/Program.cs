@@ -196,6 +196,8 @@ builder.Services.AddSingleton<NotificationRetrySchedulerService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<NotificationRetrySchedulerService>());
 builder.Services.AddSingleton<NotificationDeliveryRetentionService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<NotificationDeliveryRetentionService>());
+builder.Services.AddSingleton<CalendarSyncLogRetentionService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<CalendarSyncLogRetentionService>());
 builder.Services.AddSingleton<PaymentAdvanceReviewMonitoringService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<PaymentAdvanceReviewMonitoringService>());
 builder.Services.AddSingleton<ContractExpirationNotificationService>();

@@ -13,6 +13,7 @@ public class HostedServiceLifecycleCoverageTests
         "TaskJournalReminderNotificationService",
         "NotificationRetrySchedulerService",
         "NotificationDeliveryRetentionService",
+        "CalendarSyncLogRetentionService",
         "CaseProceduralDeadlineReminderNotificationService",
         "CalendarSyncSchedulerService",
         "GoogleCalendarBackgroundSyncService",

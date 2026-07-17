@@ -85,6 +85,10 @@ public class SystemJobsControllerTests
             new SystemSetting { Key = NotificationDeliveryRetentionService.RetentionDaysSettingKey, Value = "30", CreatedAt = now, UpdatedAt = now },
             new SystemSetting { Key = NotificationDeliveryRetentionService.IntervalHoursSettingKey, Value = "12", CreatedAt = now, UpdatedAt = now },
             new SystemSetting { Key = NotificationDeliveryRetentionService.BatchSizeSettingKey, Value = "25", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = CalendarSyncLogRetentionService.EnabledSettingKey, Value = "true", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = CalendarSyncLogRetentionService.RetentionDaysSettingKey, Value = "30", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = CalendarSyncLogRetentionService.IntervalHoursSettingKey, Value = "24", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = CalendarSyncLogRetentionService.BatchSizeSettingKey, Value = "100", CreatedAt = now, UpdatedAt = now },
             new SystemSetting { Key = PaymentAdvanceReviewMonitoringService.EnabledSettingKey, Value = "true", CreatedAt = now, UpdatedAt = now },
             new SystemSetting { Key = PaymentAdvanceReviewMonitoringService.IntervalHoursSettingKey, Value = "6", CreatedAt = now, UpdatedAt = now },
             new SystemSetting { Key = PaymentAdvanceReviewMonitoringService.BatchSizeSettingKey, Value = "15", CreatedAt = now, UpdatedAt = now },
@@ -153,6 +157,18 @@ public class SystemJobsControllerTests
             Channel = "in-app",
             Subject = "Reminder sent",
             CreatedAt = now.AddMinutes(-30),
+        });
+        scope.Db.GoogleCalendarSyncLogs.Add(new GoogleCalendarSyncLog
+        {
+            Operation = "upsert",
+            Message = "Old Google log",
+            CreatedAt = now.AddDays(-40),
+        });
+        scope.Db.YandexCalendarSyncLogs.Add(new YandexCalendarSyncLog
+        {
+            Operation = "upsert",
+            Message = "Old Yandex log",
+            CreatedAt = now.AddDays(-45),
         });
         scope.Db.NotificationDeliveries.Add(new NotificationDelivery
         {
@@ -246,12 +262,13 @@ public class SystemJobsControllerTests
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var dto = Assert.IsType<SystemJobDiagnosticsDto>(ok.Value);
 
-        Assert.Equal(11, dto.Items.Count);
+        Assert.Equal(12, dto.Items.Count);
         Assert.Contains(dto.Items, item => item.Key == "database-backup" && item.Enabled && item.IntervalText.Contains("02:00"));
         Assert.Contains(dto.Items, item => item.Key == "task-reminders" && item.PendingCount == 1 && item.LastActivityDescription == "Reminder sent");
         Assert.Contains(dto.Items, item => item.Key == "notification-retry" && item.PendingCount == 1 && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == SystemJobKeys.YandexDiskCrmSync && item.PendingCount == 1 && item.LastProcessedCount == 20 && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "notification-delivery-retention" && item.PendingCount == 1 && item.LastProcessedCount == 25 && item.ManualRunEnabled);
+        Assert.Contains(dto.Items, item => item.Key == SystemJobKeys.CalendarSyncLogRetention && item.PendingCount == 2 && item.LastProcessedCount == 200 && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == SystemJobKeys.PaymentAdvanceReviewMonitoring && item.PendingCount == 1 && item.LastProcessedCount == 15 && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "external-calendar-sync" && item.Status == "warning" && item.LastProcessedCount == 50 && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "case-inactivity-control" && item.PendingCount == 1 && item.LastProcessedCount == 7);
@@ -789,6 +806,86 @@ public class SystemJobsControllerTests
         Assert.Contains("old-pending", eventKeys);
         Assert.Contains("fresh-sent", eventKeys);
     }
+
+    [Fact]
+    public async Task CalendarSyncLogRetentionService_DeletesExpiredLogsInBoundedProviderBatches()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var now = DateTime.UtcNow;
+        scope.Db.SystemSettings.AddRange(
+            new SystemSetting { Key = CalendarSyncLogRetentionService.EnabledSettingKey, Value = "true", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = CalendarSyncLogRetentionService.RetentionDaysSettingKey, Value = "30", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = CalendarSyncLogRetentionService.BatchSizeSettingKey, Value = "100", CreatedAt = now, UpdatedAt = now });
+        scope.Db.GoogleCalendarSyncLogs.AddRange(Enumerable.Range(1, 105).Select(index => new GoogleCalendarSyncLog
+        {
+            Operation = "upsert",
+            Message = $"Old Google log {index}",
+            CreatedAt = now.AddDays(-45).AddSeconds(index),
+        }));
+        scope.Db.YandexCalendarSyncLogs.AddRange(Enumerable.Range(1, 105).Select(index => new YandexCalendarSyncLog
+        {
+            Operation = "upsert",
+            Message = $"Old Yandex log {index}",
+            CreatedAt = now.AddDays(-45).AddSeconds(index),
+        }));
+        scope.Db.GoogleCalendarSyncLogs.Add(new GoogleCalendarSyncLog { Operation = "upsert", Message = "Fresh Google log", CreatedAt = now.AddDays(-2) });
+        scope.Db.YandexCalendarSyncLogs.Add(new YandexCalendarSyncLog { Operation = "upsert", Message = "Fresh Yandex log", CreatedAt = now.AddDays(-2) });
+        await scope.Db.SaveChangesAsync();
+
+        var services = new ServiceCollection();
+        services.AddScoped(_ => new PaymentContext(scope.Options, useObjectAuditModel: false));
+        await using var provider = services.BuildServiceProvider();
+        var service = new CalendarSyncLogRetentionService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new ConfigurationBuilder().Build(),
+            NullLogger<CalendarSyncLogRetentionService>.Instance);
+
+        var eligibleBefore = await service.CountEligibleLogsAsync(CancellationToken.None);
+        Assert.Equal(105, eligibleBefore.GoogleCount);
+        Assert.Equal(105, eligibleBefore.YandexCount);
+
+        var result = await service.RunOnceAsync(CancellationToken.None);
+
+        Assert.True(result.Enabled);
+        Assert.Equal(100, result.GoogleDeletedCount);
+        Assert.Equal(100, result.YandexDeletedCount);
+        scope.Db.ChangeTracker.Clear();
+        Assert.Equal(6, await scope.Db.GoogleCalendarSyncLogs.CountAsync());
+        Assert.Equal(6, await scope.Db.YandexCalendarSyncLogs.CountAsync());
+        Assert.Contains(await scope.Db.GoogleCalendarSyncLogs.Select(item => item.Message).ToListAsync(), message => message == "Fresh Google log");
+        Assert.Contains(await scope.Db.YandexCalendarSyncLogs.Select(item => item.Message).ToListAsync(), message => message == "Fresh Yandex log");
+    }
+
+    [Fact]
+    public async Task CalendarSyncLogRetentionService_DoesNotDeleteLogsWhenDisabled()
+    {
+        await using var scope = await CreateDbScopeAsync();
+        var now = DateTime.UtcNow;
+        scope.Db.SystemSettings.Add(new SystemSetting { Key = CalendarSyncLogRetentionService.EnabledSettingKey, Value = "false", CreatedAt = now, UpdatedAt = now });
+        scope.Db.GoogleCalendarSyncLogs.Add(new GoogleCalendarSyncLog { Operation = "upsert", Message = "Preserved", CreatedAt = now.AddDays(-365) });
+        await scope.Db.SaveChangesAsync();
+
+        var services = new ServiceCollection();
+        services.AddScoped(_ => new PaymentContext(scope.Options, useObjectAuditModel: false));
+        await using var provider = services.BuildServiceProvider();
+        var service = new CalendarSyncLogRetentionService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new ConfigurationBuilder().Build(),
+            NullLogger<CalendarSyncLogRetentionService>.Instance);
+
+        Assert.Equal(0, (await service.CountEligibleLogsAsync()).TotalCount);
+        var result = await service.RunOnceAsync();
+        Assert.False(result.Enabled);
+        Assert.Equal(0, result.TotalDeletedCount);
+        Assert.Equal(1, await scope.Db.GoogleCalendarSyncLogs.CountAsync());
+    }
+
+    [Theory]
+    [InlineData(1, 30)]
+    [InlineData(90, 90)]
+    [InlineData(5000, 3650)]
+    public void CalendarSyncLogRetentionService_NormalizesRetentionDays(int value, int expected)
+        => Assert.Equal(expected, CalendarSyncLogRetentionService.NormalizeRetentionDays(value));
 
     [Fact]
     public async Task NotificationRetrySchedulerService_RetriesOversizedWebPushDeliveries()
