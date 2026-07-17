@@ -109,6 +109,7 @@ export function Contacts({ initialScope = 'all', onScopeChange }: ContactsProps)
   const [page, setPage] = useState(1);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const requestIdRef = useRef(0);
+  const activeRequestControllerRef = useRef<AbortController | null>(null);
   const hasLoadedRef = useRef(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -150,6 +151,9 @@ export function Contacts({ initialScope = 'all', onScopeChange }: ContactsProps)
 
   const loadDirectory = useCallback(async () => {
     const requestId = ++requestIdRef.current;
+    activeRequestControllerRef.current?.abort();
+    const controller = new AbortController();
+    activeRequestControllerRef.current = controller;
     const nextMode = hasLoadedRef.current ? 'refresh' : 'initial';
 
     try {
@@ -170,28 +174,34 @@ export function Contacts({ initialScope = 'all', onScopeChange }: ContactsProps)
       const dataRequest = apiService.getContacts({
         ...baseParams,
         scope,
-      });
+      }, { signal: controller.signal });
       const summaryRequest =
         scope === 'all'
           ? dataRequest
-          : apiService.getContacts({
-              ...baseParams,
-              scope: 'all',
-            });
+          : apiService.getContacts(
+              {
+                ...baseParams,
+                scope: 'all',
+              },
+              { signal: controller.signal },
+            );
       const [data, summaryData] = await Promise.all([dataRequest, summaryRequest]);
 
-      if (requestId !== requestIdRef.current) {
+      if (requestId !== requestIdRef.current || controller.signal.aborted) {
         return;
       }
 
       setContacts(data);
       setSummaryContacts(summaryData);
     } catch (nextError) {
-      if (requestId !== requestIdRef.current) {
+      if (requestId !== requestIdRef.current || controller.signal.aborted) {
         return;
       }
       setError(extractDisplayErrorMessage(nextError, 'Не удалось загрузить контакты'));
     } finally {
+      if (activeRequestControllerRef.current === controller) {
+        activeRequestControllerRef.current = null;
+      }
       if (requestId === requestIdRef.current) {
         hasLoadedRef.current = true;
         setLoading(false);
@@ -208,6 +218,11 @@ export function Contacts({ initialScope = 'all', onScopeChange }: ContactsProps)
 
   useEffect(() => {
     void loadDirectory();
+    return () => {
+      activeRequestControllerRef.current?.abort();
+      activeRequestControllerRef.current = null;
+      requestIdRef.current += 1;
+    };
   }, [loadDirectory]);
 
   useEffect(() => {

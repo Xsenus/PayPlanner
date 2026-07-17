@@ -3391,15 +3391,20 @@ export class ApiService {
   }
 
   // ===== Contacts =====
-  async getContacts(params?: {
-    scope?: ContactScope;
-    search?: string;
-    legalEntityId?: number;
-    includeInactive?: boolean;
-    syncOnly?: boolean;
-  }) {
+  async getContacts(
+    params?: {
+      scope?: ContactScope;
+      search?: string;
+      legalEntityId?: number;
+      includeInactive?: boolean;
+      syncOnly?: boolean;
+    },
+    options?: { signal?: AbortSignal },
+  ) {
     const q = buildQuery(params ?? {});
-    return this.request<ContactDirectoryItemDto[]>(`/contacts${q}`);
+    return this.request<ContactDirectoryItemDto[]>(`/contacts${q}`, {
+      signal: options?.signal,
+    });
   }
 
   async updateClientContact(id: number, payload: UpdateClientContactRequestDto) {

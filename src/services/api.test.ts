@@ -32,6 +32,27 @@ describe('apiService object audit', () => {
   });
 });
 
+describe('apiService contacts directory', () => {
+  it('passes the abort signal to the contacts request', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify([]), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+
+    await apiService.getContacts(
+      { scope: 'external', search: 'иванов', syncOnly: true },
+      { signal: controller.signal },
+    );
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/contacts?');
+    expect(String(url)).toContain('scope=external');
+    expect(String(url)).toContain('syncOnly=true');
+    expect(options?.signal).toBe(controller.signal);
+  });
+});
+
 describe('extractResponseErrorMessage', () => {
   it('prefers problem details detail field for API errors', async () => {
     const response = new Response(
