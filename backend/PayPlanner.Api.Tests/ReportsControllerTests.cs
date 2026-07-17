@@ -5500,15 +5500,18 @@ services.Id,
     [Fact]
     public async Task ActStatuses_GroupsActsByWorkflowStatus()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await SqliteTestContextFactory.CreateAsync(interceptor: interceptor);
         db.Acts.AddRange(
-            Act("ACT-1", ActStatus.Created, ActWorkflowStatus.Draft, 1_000m, new DateTime(2026, 5, 1)),
+            Act("ACT-1A", ActStatus.Created, ActWorkflowStatus.Draft, 400m, new DateTime(2026, 5, 1, 9, 0, 0)),
+            Act("ACT-1B", ActStatus.Created, ActWorkflowStatus.Draft, 600m, new DateTime(2026, 5, 1, 15, 0, 0)),
             Act("ACT-2", ActStatus.Transferred, ActWorkflowStatus.OnSigning, 2_000m, new DateTime(2026, 5, 2)),
             Act("ACT-3", ActStatus.Signed, ActWorkflowStatus.Signed, 3_000m, new DateTime(2026, 5, 3)),
             Act("ACT-4", ActStatus.Terminated, ActWorkflowStatus.Cancelled, 4_000m, new DateTime(2026, 5, 4)),
             Act("ACT-5", ActStatus.Created, ActWorkflowStatus.NotSigned, 5_000m, new DateTime(2026, 5, 5)),
             Act("ACT-OLD", ActStatus.Signed, ActWorkflowStatus.Signed, 99_999m, new DateTime(2026, 4, 30)));
         await db.SaveChangesAsync();
+        interceptor.Commands.Clear();
         var controller = CreateController(db);
 
         var action = await controller.ActStatuses(
@@ -5518,8 +5521,8 @@ services.Id,
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
         var report = Assert.IsType<ActStatusReportDto>(ok.Value);
-        Assert.Equal(5, report.ActCount);
-        Assert.Equal(2, report.CreatedCount);
+        Assert.Equal(6, report.ActCount);
+        Assert.Equal(3, report.CreatedCount);
         Assert.Equal(1, report.TransferredCount);
         Assert.Equal(1, report.SignedCount);
         Assert.Equal(1, report.TerminatedCount);
@@ -5550,6 +5553,8 @@ services.Id,
                 Assert.Equal("Черновик", item.WorkflowStatusLabel);
                 Assert.Equal(1_000m, item.TotalAmount);
                 Assert.Equal(6.7m, item.Share);
+                Assert.Equal(2, item.ActCount);
+                Assert.Equal(2, item.CreatedCount);
             },
             item =>
             {
@@ -5565,6 +5570,12 @@ services.Id,
                 Assert.Equal(4_000m, item.PendingAmount);
                 Assert.Equal(26.7m, item.Share);
             });
+
+        var actStatusQuery = Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"Acts\"", StringComparison.Ordinal));
+        Assert.Contains("GROUP BY", actStatusQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SUM", actStatusQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("COUNT", actStatusQuery, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

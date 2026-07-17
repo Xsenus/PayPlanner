@@ -7595,11 +7595,17 @@ public class ReportsController : ControllerBase
         }
 
         var rows = await query
-            .Select(item => new
+            .GroupBy(item => new
             {
                 item.Status,
                 WorkflowStatus = item.WorkflowStatus,
-                item.Amount,
+            })
+            .Select(group => new ActStatusQueryRow
+            {
+                Status = group.Key.Status,
+                WorkflowStatus = group.Key.WorkflowStatus,
+                Amount = group.Sum(item => item.Amount),
+                Count = group.Count(),
             })
             .ToListAsync(ct);
 
@@ -7610,6 +7616,7 @@ public class ReportsController : ControllerBase
                 item.Status,
                 WorkflowStatus = NormalizeActReportWorkflowStatus(item.WorkflowStatus, item.Status),
                 item.Amount,
+                item.Count,
             })
             .ToList();
 
@@ -7626,11 +7633,11 @@ public class ReportsController : ControllerBase
                 {
                     WorkflowStatus = group.First().WorkflowStatus,
                     WorkflowStatusLabel = FormatActWorkflowStatusLabel(group.First().WorkflowStatus),
-                    ActCount = group.Count(),
-                    CreatedCount = group.Count(item => item.Status == ActStatus.Created),
-                    TransferredCount = group.Count(item => item.Status == ActStatus.Transferred),
-                    SignedCount = group.Count(item => item.Status == ActStatus.Signed),
-                    TerminatedCount = group.Count(item => item.Status == ActStatus.Terminated),
+                    ActCount = group.Sum(item => item.Count),
+                    CreatedCount = group.Where(item => item.Status == ActStatus.Created).Sum(item => item.Count),
+                    TransferredCount = group.Where(item => item.Status == ActStatus.Transferred).Sum(item => item.Count),
+                    SignedCount = group.Where(item => item.Status == ActStatus.Signed).Sum(item => item.Count),
+                    TerminatedCount = group.Where(item => item.Status == ActStatus.Terminated).Sum(item => item.Count),
                     TotalAmount = statusTotal,
                     SignedAmount = signedAmount,
                     PendingAmount = statusTotal - signedAmount,
@@ -7651,11 +7658,11 @@ public class ReportsController : ControllerBase
         {
             From = periodStart,
             To = periodEnd,
-            ActCount = enriched.Count,
-            CreatedCount = enriched.Count(item => item.Status == ActStatus.Created),
-            TransferredCount = enriched.Count(item => item.Status == ActStatus.Transferred),
-            SignedCount = enriched.Count(item => item.Status == ActStatus.Signed),
-            TerminatedCount = enriched.Count(item => item.Status == ActStatus.Terminated),
+            ActCount = enriched.Sum(item => item.Count),
+            CreatedCount = enriched.Where(item => item.Status == ActStatus.Created).Sum(item => item.Count),
+            TransferredCount = enriched.Where(item => item.Status == ActStatus.Transferred).Sum(item => item.Count),
+            SignedCount = enriched.Where(item => item.Status == ActStatus.Signed).Sum(item => item.Count),
+            TerminatedCount = enriched.Where(item => item.Status == ActStatus.Terminated).Sum(item => item.Count),
             TotalAmount = totalAmount,
             SignedAmount = totalSignedAmount,
             PendingAmount = totalAmount - totalSignedAmount,
@@ -9313,6 +9320,14 @@ public class ReportsController : ControllerBase
         public decimal Amount { get; init; }
         public decimal PaidAmount { get; init; }
         public decimal OutstandingAmount { get; init; }
+        public int Count { get; init; }
+    }
+
+    private sealed class ActStatusQueryRow
+    {
+        public ActStatus Status { get; init; }
+        public string? WorkflowStatus { get; init; }
+        public decimal Amount { get; init; }
         public int Count { get; init; }
     }
 
