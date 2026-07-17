@@ -187,6 +187,40 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                     .Distinct()
                     .ToHashSetAsync(cancellationToken);
 
+            var responsibleUserIds = candidates
+                .Select(candidate => ResolveCaseResponsibleUserId(candidate.Case))
+                .Where(userId =>
+                    userId.HasValue &&
+                    userId.Value > 0 &&
+                    (defaultAssignee is null || userId.Value != defaultAssignee.Id))
+                .Select(userId => userId!.Value)
+                .Distinct()
+                .ToArray();
+            var responsibleUsers = responsibleUserIds.Length == 0
+                ? new Dictionary<int, User>()
+                : await context.Users
+                    .AsNoTracking()
+                    .Where(user =>
+                        responsibleUserIds.Contains(user.Id) &&
+                        user.IsActive &&
+                        user.IsApproved)
+                    .ToDictionaryAsync(user => user.Id, cancellationToken);
+
+            var assigneeUserIds = responsibleUsers.Keys
+                .Append(defaultAssignee?.Id ?? 0)
+                .Where(userId => userId > 0)
+                .Distinct()
+                .ToArray();
+            var assigneeTimeZoneIds = assigneeUserIds.Length == 0
+                ? new Dictionary<int, string>()
+                : await context.UserSettings
+                    .AsNoTracking()
+                    .Where(setting =>
+                        assigneeUserIds.Contains(setting.UserId) &&
+                        setting.Key == CalendarTimeZoneHelper.UserTimeZoneSettingKey)
+                    .ToDictionaryAsync(setting => setting.UserId, setting => setting.Value, cancellationToken);
+            var defaultTimeZone = CalendarTimeZoneHelper.ResolveTimeZone(null);
+
             var created = 0;
             var createdTasks = new List<CreatedAutomationTask>();
             foreach (var candidate in candidates)
@@ -202,16 +236,15 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
                     continue;
                 }
 
-                var assignee = await ResolveAutomationAssigneeAsync(context, candidate.Case, defaultAssignee, cancellationToken);
+                var assignee = ResolveAutomationAssignee(candidate.Case, responsibleUsers, defaultAssignee);
                 if (assignee is null)
                 {
                     continue;
                 }
 
-                var assigneeTimeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(
-                    context,
-                    assignee.Id,
-                    cancellationToken);
+                var assigneeTimeZone = assigneeTimeZoneIds.TryGetValue(assignee.Id, out var assigneeTimeZoneId)
+                    ? CalendarTimeZoneHelper.ResolveTimeZone(assigneeTimeZoneId)
+                    : defaultTimeZone;
                 var daysWithoutActiveTask = ResolveDaysWithoutActiveTask(
                     candidate.Case,
                     now,
@@ -312,7 +345,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
         int? configuredUserId,
         CancellationToken cancellationToken)
     {
-        if (!configuredUserId.HasValue)
+        if (!configuredUserId.HasValue || configuredUserId.Value <= 0)
         {
             return null;
         }
@@ -329,11 +362,10 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
     private static int? ResolveCaseResponsibleUserId(ClientCase clientCase)
         => clientCase.ResponsibleUserId ?? clientCase.Client?.ResponsibleUserId ?? clientCase.LegalEntity?.ResponsibleUserId;
 
-    private static async Task<User?> ResolveAutomationAssigneeAsync(
-        PaymentContext context,
+    private static User? ResolveAutomationAssignee(
         ClientCase clientCase,
-        User? fallbackAssignee,
-        CancellationToken cancellationToken)
+        IReadOnlyDictionary<int, User> responsibleUsers,
+        User? fallbackAssignee)
     {
         var responsibleUserId = ResolveCaseResponsibleUserId(clientCase);
         if (!responsibleUserId.HasValue)
@@ -346,13 +378,7 @@ public sealed class TaskJournalAutomationSchedulerService : BackgroundService
             return fallbackAssignee;
         }
 
-        return await context.Users
-            .AsNoTracking()
-            .FirstOrDefaultAsync(user =>
-                user.Id == responsibleUserId.Value &&
-                user.IsActive &&
-                user.IsApproved,
-                cancellationToken);
+        return responsibleUsers.GetValueOrDefault(responsibleUserId.Value);
     }
 
     private static string ResolveAutomationPriority(int daysWithoutActiveTask, int inactiveDays, int escalationDays)

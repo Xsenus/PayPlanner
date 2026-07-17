@@ -3178,6 +3178,15 @@ public class TasksControllerTests
             cases.Add(clientCase);
         }
 
+        db.UserSettings.Add(new UserSetting
+        {
+            UserId = author.Id,
+            Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+            Value = "Europe/Samara",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+
         await db.SaveChangesAsync();
         interceptor.Commands.Clear();
         var (scheduler, provider) = CreateAutomationScheduler(db, new Dictionary<string, string?>
@@ -3185,6 +3194,8 @@ public class TasksControllerTests
             ["TaskJournal:Automation:Enabled"] = "true",
             ["TaskJournal:Automation:InactiveDays"] = "14",
             ["TaskJournal:Automation:Limit"] = "20",
+            ["TaskJournal:Automation:DefaultAssigneeUserId"] = "0",
+            ["TaskJournal:Automation:EscalationUserId"] = "0",
         });
 
         using (provider)
@@ -3202,6 +3213,10 @@ public class TasksControllerTests
                 && command.Contains("\"ClientCaseId\"", StringComparison.Ordinal))
             .ToArray();
         Assert.Single(candidateRecheckCommands);
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"Users\"", StringComparison.Ordinal));
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal));
         var caseIds = cases.Select(clientCase => clientCase.Id).ToArray();
         Assert.Equal(cases.Count, await db.TaskJournalItems.CountAsync(task =>
             task.ClientCaseId.HasValue && caseIds.Contains(task.ClientCaseId.Value)));
