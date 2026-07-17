@@ -3652,29 +3652,35 @@ export class ApiService {
     });
   }
 
-  async getAccountsRegistry(params?: {
-    from?: string;
-    to?: string;
-    status?: 'created' | 'paid' | 'partial' | 'overdue' | 'cancelled';
-    search?: string;
-    type?: 'Income' | 'Expense';
-    clientId?: number;
-    legalEntityId?: number;
-    clientIds?: string;
-    contractId?: number;
-    clientRole?: ClientRole;
-    payablesOnly?: boolean;
-    sortBy?: 'date' | 'number' | 'amount' | 'counterparty' | 'dueDate' | 'responsible';
-    sortDir?: SortDir;
-    page?: number;
-    pageSize?: number;
-  }) {
+  async getAccountsRegistry(
+    params?: {
+      from?: string;
+      to?: string;
+      status?: 'created' | 'paid' | 'partial' | 'overdue' | 'cancelled';
+      search?: string;
+      type?: 'Income' | 'Expense';
+      clientId?: number;
+      legalEntityId?: number;
+      clientIds?: string;
+      contractId?: number;
+      clientRole?: ClientRole;
+      payablesOnly?: boolean;
+      sortBy?: 'date' | 'number' | 'amount' | 'counterparty' | 'dueDate' | 'responsible';
+      sortDir?: SortDir;
+      page?: number;
+      pageSize?: number;
+    },
+    options?: { signal?: AbortSignal },
+  ) {
     const q = buildQuery({
       ...(params ?? {}),
       page: params?.page ?? 1,
       pageSize: params?.pageSize ?? 20,
     });
-    return this.request<PagedResult<AccountRegistryRow> & { summary: AccountsSummary }>(`/accounts/registry${q}`);
+    return this.request<PagedResult<AccountRegistryRow> & { summary: AccountsSummary }>(
+      `/accounts/registry${q}`,
+      { signal: options?.signal },
+    );
   }
 
   async getPayablesDashboard(params?: {

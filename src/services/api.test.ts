@@ -53,6 +53,29 @@ describe('apiService contacts directory', () => {
   });
 });
 
+describe('apiService accounts registry', () => {
+  it('passes the abort signal to the paged accounts request', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+      items: [], total: 0, page: 3, pageSize: 20, summary: {},
+    }), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+
+    await apiService.getAccountsRegistry(
+      { search: 'счёт', status: 'overdue', page: 3, pageSize: 20 },
+      { signal: controller.signal },
+    );
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/accounts/registry?');
+    expect(String(url)).toContain('status=overdue');
+    expect(String(url)).toContain('page=3');
+    expect(options?.signal).toBe(controller.signal);
+  });
+});
+
 describe('extractResponseErrorMessage', () => {
   it('prefers problem details detail field for API errors', async () => {
     const response = new Response(

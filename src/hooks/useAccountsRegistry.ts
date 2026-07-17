@@ -93,7 +93,10 @@ export function useAccountsRegistry(params: UseAccountsRegistryParams) {
       }
 
       try {
-        const data = await apiService.getAccountsRegistry(requestParams);
+        const data = await apiService.getAccountsRegistry(
+          requestParams,
+          { signal: controller.signal },
+        );
         if (controller.signal.aborted) return;
         setItems(data.items ?? []);
         setTotal(data.total ?? 0);
@@ -105,6 +108,9 @@ export function useAccountsRegistry(params: UseAccountsRegistryParams) {
         setSummary(EMPTY_SUMMARY);
         setError(err instanceof Error ? err.message : 'Не удалось загрузить реестр счетов.');
       } finally {
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+        }
         if (!controller.signal.aborted) {
           if (mode === 'initial') {
             setLoadingInitial(false);
