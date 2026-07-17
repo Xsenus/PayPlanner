@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { UnifiedContacts, formatDate } from './UnifiedContacts';
@@ -476,5 +476,76 @@ describe('UnifiedContacts', () => {
 
     expect(apiService.updateLegalEntity).toHaveBeenCalledWith(21, payload);
     expect(toastSuccessMock).toHaveBeenCalledWith('Юр. лицо обновлено');
+  });
+
+  it('aborts an obsolete client request and keeps the latest response', async () => {
+    const signals: AbortSignal[] = [];
+    const resolvers: Array<(value: {
+      items: Client[];
+      total: number;
+      page: number;
+      pageSize: number;
+    }) => void> = [];
+    vi.mocked(apiService.getClientsV2).mockImplementation((_params, options) => {
+      if (options?.signal) signals.push(options.signal);
+      return new Promise((resolve) => resolvers.push(resolve));
+    });
+
+    render(<UnifiedContacts initialKind="client" lockKind />);
+
+    await waitFor(() => expect(apiService.getClientsV2).toHaveBeenCalledTimes(1));
+    expect(signals[0]?.aborted).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Обновить' }));
+
+    await waitFor(() => expect(apiService.getClientsV2).toHaveBeenCalledTimes(2));
+    expect(signals[0]?.aborted).toBe(true);
+    expect(signals[1]?.aborted).toBe(false);
+
+    await act(async () => {
+      resolvers[1]({
+        items: [createClient({ id: 12, name: 'Текущий клиент' })],
+        total: 1,
+        page: 1,
+        pageSize: 24,
+      });
+    });
+    expect(await screen.findByText('Текущий клиент')).toBeTruthy();
+
+    await act(async () => {
+      resolvers[0]({
+        items: [createClient({ id: 13, name: 'Устаревший клиент' })],
+        total: 1,
+        page: 1,
+        pageSize: 24,
+      });
+    });
+    expect(screen.queryByText('Устаревший клиент')).toBeNull();
+    expect(screen.getByText('Текущий клиент')).toBeTruthy();
+  });
+
+  it('passes one signal to both contact sources and aborts them on unmount', async () => {
+    let clientsSignal: AbortSignal | undefined;
+    let legalEntitiesSignal: AbortSignal | undefined;
+    vi.mocked(apiService.getClientsV2).mockImplementation((_params, options) => {
+      clientsSignal = options?.signal;
+      return new Promise(() => undefined);
+    });
+    vi.mocked(apiService.getLegalEntitiesPaged).mockImplementation((_params, options) => {
+      legalEntitiesSignal = options?.signal;
+      return new Promise(() => undefined);
+    });
+
+    const { unmount } = render(<UnifiedContacts />);
+
+    await waitFor(() => expect(apiService.getClientsV2).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(apiService.getLegalEntitiesPaged).toHaveBeenCalledTimes(1));
+    expect(clientsSignal).toBe(legalEntitiesSignal);
+    expect(clientsSignal?.aborted).toBe(false);
+
+    unmount();
+
+    expect(clientsSignal?.aborted).toBe(true);
+    expect(legalEntitiesSignal?.aborted).toBe(true);
   });
 });

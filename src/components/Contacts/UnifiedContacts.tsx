@@ -434,6 +434,8 @@ export function UnifiedContacts({
   const [detailLoadingId, setDetailLoadingId] = useState<string | null>(null);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const viewModeSaveTimerRef = useRef<number | null>(null);
+  const requestIdRef = useRef(0);
+  const activeRequestControllerRef = useRef<AbortController | null>(null);
   const {
     columnOrder,
     orderedVisibleColumns,
@@ -519,6 +521,11 @@ export function UnifiedContacts({
   }, [loadedViewModeSettingsKey, viewMode, viewModeSettingsKey, viewModeStorageKey]);
 
   const load = useCallback(async (initial = false) => {
+    const requestId = ++requestIdRef.current;
+    activeRequestControllerRef.current?.abort();
+    const controller = new AbortController();
+    activeRequestControllerRef.current = controller;
+
     try {
       if (initial) {
         setLoading(true);
@@ -545,11 +552,17 @@ export function UnifiedContacts({
             pageSize: PAGE_SIZE,
             sortBy: 'name',
             sortDir: 'asc',
-          }),
+          }, { signal: controller.signal }),
           !lockKind && canViewLegalEntities
-            ? apiService.getLegalEntitiesPaged({ search: query, page: 1, pageSize: 1 })
+            ? apiService.getLegalEntitiesPaged(
+                { search: query, page: 1, pageSize: 1 },
+                { signal: controller.signal },
+              )
             : Promise.resolve(null),
         ]);
+        if (requestId !== requestIdRef.current || controller.signal.aborted) {
+          return;
+        }
         setItems(result.items.map(buildClientContact));
         setTotal(result.total);
         setClientsTotal(result.total);
@@ -573,7 +586,7 @@ export function UnifiedContacts({
             search: query,
             page,
             pageSize: PAGE_SIZE,
-          }),
+          }, { signal: controller.signal }),
           !lockKind && canViewClients
             ? apiService.getClientsV2({
                 search: query,
@@ -581,9 +594,12 @@ export function UnifiedContacts({
                 pageSize: 1,
                 sortBy: 'name',
                 sortDir: 'asc',
-              })
+              }, { signal: controller.signal })
             : Promise.resolve(null),
         ]);
+        if (requestId !== requestIdRef.current || controller.signal.aborted) {
+          return;
+        }
         setItems(result.items.map(buildLegalContact));
         setTotal(result.total);
         if (clientsCounter) {
@@ -602,12 +618,19 @@ export function UnifiedContacts({
               pageSize: windowSize,
               sortBy: 'name',
               sortDir: 'asc',
-            })
+            }, { signal: controller.signal })
           : Promise.resolve({ items: [] as Client[], total: 0, page: 1, pageSize: windowSize }),
         canViewLegalEntities
-          ? apiService.getLegalEntitiesPaged({ search: query, page: 1, pageSize: windowSize })
+          ? apiService.getLegalEntitiesPaged(
+              { search: query, page: 1, pageSize: windowSize },
+              { signal: controller.signal },
+            )
           : Promise.resolve({ items: [] as LegalEntitySummary[], total: 0, page: 1, pageSize: windowSize }),
       ]);
+
+      if (requestId !== requestIdRef.current || controller.signal.aborted) {
+        return;
+      }
 
       if (clientsResult.status === 'rejected' && legalResult.status === 'rejected') {
         throw clientsResult.reason;
@@ -629,17 +652,30 @@ export function UnifiedContacts({
       setLegalTotal(legalPage.total);
       setTotal(clientsPage.total + legalPage.total);
     } catch (err) {
+      if (requestId !== requestIdRef.current || controller.signal.aborted) {
+        return;
+      }
       setError(err instanceof Error ? err.message : 'Не удалось загрузить контакты');
       setItems([]);
       setTotal(0);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (activeRequestControllerRef.current === controller) {
+        activeRequestControllerRef.current = null;
+      }
+      if (requestId === requestIdRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [canViewClients, canViewLegalEntities, debouncedSearch, kind, lockKind, page]);
 
   useEffect(() => {
     void load(true);
+    return () => {
+      activeRequestControllerRef.current?.abort();
+      activeRequestControllerRef.current = null;
+      requestIdRef.current += 1;
+    };
   }, [load]);
 
   useEffect(() => {
