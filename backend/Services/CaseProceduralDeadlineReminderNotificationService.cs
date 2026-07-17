@@ -86,19 +86,20 @@ public sealed class CaseProceduralDeadlineReminderNotificationService : Backgrou
             .ToListAsync(cancellationToken);
         deadlines = deadlines
             .Where(deadline => !ClientCaseStageClassifier.IsPretrial(deadline.ClientCase))
+            .Where(deadline => deadline.DueAt.Date <= today.AddDays(
+                Math.Clamp(deadline.WarningDaysBefore, 0, MaxWarningWindowDays)))
             .ToList();
+
+        var recipientsByCaseId = await ResolveCaseNotificationRecipientIdsAsync(
+            db,
+            deadlines.Select(deadline => deadline.ClientCaseId).Distinct().ToArray(),
+            cancellationToken);
 
         var notified = 0;
         foreach (var deadline in deadlines)
         {
-            var warningDays = Math.Clamp(deadline.WarningDaysBefore, 0, MaxWarningWindowDays);
-            if (deadline.DueAt.Date > today.AddDays(warningDays))
-            {
-                continue;
-            }
-
-            var recipients = await ResolveCaseNotificationRecipientIdsAsync(db, deadline.ClientCaseId, cancellationToken);
-            if (recipients.Count == 0)
+            if (!recipientsByCaseId.TryGetValue(deadline.ClientCaseId, out var recipients)
+                || recipients.Count == 0)
             {
                 continue;
             }
@@ -132,31 +133,44 @@ public sealed class CaseProceduralDeadlineReminderNotificationService : Backgrou
     private int ResolveBatchSize()
         => Math.Clamp(_configuration.GetValue("Notifications:CaseProceduralDeadlineReminders:BatchSize", 100), 1, 500);
 
-    private static async Task<IReadOnlyCollection<int>> ResolveCaseNotificationRecipientIdsAsync(
+    private static async Task<IReadOnlyDictionary<int, IReadOnlyCollection<int>>> ResolveCaseNotificationRecipientIdsAsync(
         PaymentContext db,
-        int clientCaseId,
+        IReadOnlyCollection<int> clientCaseIds,
         CancellationToken cancellationToken)
     {
-        var candidateUserIds = await db.ClientCases
+        if (clientCaseIds.Count == 0)
+        {
+            return new Dictionary<int, IReadOnlyCollection<int>>();
+        }
+
+        var caseCandidates = await db.ClientCases
             .AsNoTracking()
-            .Where(clientCase => clientCase.Id == clientCaseId)
-            .Select(clientCase => new
-            {
+            .Where(clientCase => clientCaseIds.Contains(clientCase.Id))
+            .Select(clientCase => new CaseRecipientCandidate(
+                clientCase.Id,
                 clientCase.ResponsibleUserId,
-                ClientResponsibleUserId = clientCase.Client != null ? clientCase.Client.ResponsibleUserId : null,
-                LegalEntityResponsibleUserId = clientCase.LegalEntity != null ? clientCase.LegalEntity.ResponsibleUserId : null,
-            })
+                clientCase.Client != null ? clientCase.Client.ResponsibleUserId : null,
+                clientCase.LegalEntity != null ? clientCase.LegalEntity.ResponsibleUserId : null))
             .ToListAsync(cancellationToken);
 
-        var userIds = candidateUserIds
-            .SelectMany(item => new[] { item.ResponsibleUserId, item.ClientResponsibleUserId, item.LegalEntityResponsibleUserId })
-            .Where(userId => userId.HasValue && userId.Value > 0)
-            .Select(userId => userId!.Value)
+        var candidates = caseCandidates
+            .SelectMany(item => new[]
+            {
+                item.ResponsibleUserId,
+                item.ClientResponsibleUserId,
+                item.LegalEntityResponsibleUserId,
+            }.Where(userId => userId.HasValue && userId.Value > 0)
+                .Select(userId => new CaseRecipient(item.ClientCaseId, userId!.Value)))
+            .Distinct()
+            .ToArray();
+        var userIds = candidates
+            .Select(candidate => candidate.UserId)
+            .Where(userId => userId > 0)
             .Distinct()
             .ToArray();
         if (userIds.Length == 0)
         {
-            return Array.Empty<int>();
+            return new Dictionary<int, IReadOnlyCollection<int>>();
         }
 
         var allowedUserIds = await db.Users
@@ -172,7 +186,7 @@ public sealed class CaseProceduralDeadlineReminderNotificationService : Backgrou
             .Select(user => user.Id)
             .ToListAsync(cancellationToken);
 
-        var result = new List<int>();
+        var result = new Dictionary<int, List<int>>();
         foreach (var userId in allowedUserIds)
         {
             var principal = new ClaimsPrincipal(new ClaimsIdentity(
@@ -184,17 +198,41 @@ public sealed class CaseProceduralDeadlineReminderNotificationService : Backgrou
                 continue;
             }
 
-            var canOpenCase = await db.ClientCases
-                .AsNoTracking()
-                .Where(clientCase => clientCase.Id == clientCaseId)
-                .ApplyClientCaseVisibility(visibility)
-                .AnyAsync(cancellationToken);
-            if (canOpenCase)
+            var candidateCaseIds = candidates
+                .Where(candidate => candidate.UserId == userId)
+                .Select(candidate => candidate.ClientCaseId)
+                .Distinct()
+                .ToArray();
+            var visibleCaseIds = visibility.SeesAll
+                ? candidateCaseIds
+                : await db.ClientCases
+                    .AsNoTracking()
+                    .Where(clientCase => candidateCaseIds.Contains(clientCase.Id))
+                    .ApplyClientCaseVisibility(visibility)
+                    .Select(clientCase => clientCase.Id)
+                    .ToArrayAsync(cancellationToken);
+            foreach (var clientCaseId in visibleCaseIds)
             {
-                result.Add(userId);
+                if (!result.TryGetValue(clientCaseId, out var recipients))
+                {
+                    recipients = [];
+                    result[clientCaseId] = recipients;
+                }
+
+                recipients.Add(userId);
             }
         }
 
-        return result;
+        return result.ToDictionary(
+            item => item.Key,
+            item => (IReadOnlyCollection<int>)item.Value.ToArray());
     }
+
+    private sealed record CaseRecipientCandidate(
+        int ClientCaseId,
+        int? ResponsibleUserId,
+        int? ClientResponsibleUserId,
+        int? LegalEntityResponsibleUserId);
+
+    private sealed record CaseRecipient(int ClientCaseId, int UserId);
 }

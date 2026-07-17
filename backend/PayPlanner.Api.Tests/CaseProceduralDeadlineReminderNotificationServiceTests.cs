@@ -1,5 +1,8 @@
+using System.Data.Common;
+using System.Reflection;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -14,6 +17,156 @@ namespace PayPlanner.Api.Tests;
 
 public class CaseProceduralDeadlineReminderNotificationServiceTests
 {
+    [Fact]
+    public async Task RunOnceAsync_BatchesRecipientQueriesAndPreservesCaseVisibility()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        var notificationService = DispatchProxy.Create<INotificationService, RecordingNotificationServiceProxy>();
+        var notificationRecorder = (RecordingNotificationServiceProxy)(object)notificationService;
+        var services = new ServiceCollection();
+        services.AddDbContext<PaymentContext>(options => options
+            .UseSqlite(connection)
+            .AddInterceptors(interceptor));
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Notifications:CaseProceduralDeadlineReminders:BatchSize"] = "20",
+            })
+            .Build());
+        services.AddSingleton(notificationService);
+        await using var provider = services.BuildServiceProvider();
+
+        int hiddenCaseId;
+        int deniedCaseId;
+        await using (var scope = provider.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<PaymentContext>();
+            await db.Database.EnsureCreatedAsync();
+            var allowedRole = new Role { Name = $"case-deadline-batch-{Guid.NewGuid():N}", CreatedAt = DateTime.UtcNow };
+            db.Roles.Add(allowedRole);
+            await db.SaveChangesAsync();
+            db.RolePermissions.Add(new RolePermission
+            {
+                RoleId = allowedRole.Id,
+                Section = RolePermissionCatalog.Cases,
+                CanView = true,
+                ViewScope = DataVisibilityScope.Own
+            });
+            var allowedUser = new User
+            {
+                Email = "case-deadline-batch@example.com",
+                FullName = "Ответственный по срокам",
+                PasswordHash = "hash",
+                RoleId = allowedRole.Id,
+                IsActive = true,
+                IsApproved = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            db.Users.Add(allowedUser);
+            await db.SaveChangesAsync();
+            var client = new Client
+            {
+                Name = "Клиент с несколькими сроками",
+                IsActive = true,
+                ResponsibleUserId = allowedUser.Id
+            };
+            db.Clients.Add(client);
+            await db.SaveChangesAsync();
+
+            var allowedCases = Enumerable.Range(1, 12)
+                .Select(index => new ClientCase
+                {
+                    ClientId = client.Id,
+                    Title = $"Дело со сроком {index}",
+                    CaseNumber = $"CASE-BATCH-{index}",
+                    Status = ClientCaseStatus.Open,
+                    ResponsibleUserId = allowedUser.Id
+                })
+                .ToArray();
+            var hiddenCase = new ClientCase
+            {
+                ClientId = client.Id,
+                Title = "Скрытое дело со сроком",
+                CaseNumber = "CASE-HIDDEN-DEADLINE",
+                Status = ClientCaseStatus.Open,
+                ResponsibleUserId = allowedUser.Id,
+                IsHiddenFromExecutor = true
+            };
+            db.ClientCases.AddRange(allowedCases);
+            db.ClientCases.Add(hiddenCase);
+            await db.SaveChangesAsync();
+            hiddenCaseId = hiddenCase.Id;
+
+            var deniedRole = new Role { Name = $"case-deadline-denied-{Guid.NewGuid():N}", CreatedAt = DateTime.UtcNow };
+            db.Roles.Add(deniedRole);
+            await db.SaveChangesAsync();
+            var deniedUser = new User
+            {
+                Email = "case-deadline-denied@example.com",
+                FullName = "Сотрудник без доступа к делам",
+                PasswordHash = "hash",
+                RoleId = deniedRole.Id,
+                IsActive = true,
+                IsApproved = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            db.Users.Add(deniedUser);
+            await db.SaveChangesAsync();
+            var deniedClient = new Client
+            {
+                Name = "Клиент закрытого дела",
+                IsActive = true,
+                ResponsibleUserId = deniedUser.Id
+            };
+            var deniedCase = new ClientCase
+            {
+                Client = deniedClient,
+                Title = "Дело без разрешения",
+                CaseNumber = "CASE-DENIED-DEADLINE",
+                Status = ClientCaseStatus.Open,
+                ResponsibleUserId = deniedUser.Id
+            };
+            db.Clients.Add(deniedClient);
+            db.ClientCases.Add(deniedCase);
+            await db.SaveChangesAsync();
+            deniedCaseId = deniedCase.Id;
+
+            var deadlineCases = allowedCases.Append(hiddenCase).Append(deniedCase);
+            db.ClientCaseProceduralDeadlines.AddRange(deadlineCases.Select((clientCase, index) =>
+                new ClientCaseProceduralDeadline
+                {
+                    ClientCaseId = clientCase.Id,
+                    DeadlineType = "appeal",
+                    Title = $"Процессуальный срок {index + 1}",
+                    DueAt = DateTime.UtcNow.Date.AddDays(3),
+                    AllDay = true,
+                    Status = "active",
+                    WarningDaysBefore = 7,
+                    CreatedAt = DateTime.UtcNow.AddDays(-1)
+                }));
+            await db.SaveChangesAsync();
+        }
+
+        interceptor.ReaderCommands.Clear();
+        var service = new CaseProceduralDeadlineReminderNotificationService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            provider.GetRequiredService<IConfiguration>(),
+            NullLogger<CaseProceduralDeadlineReminderNotificationService>.Instance);
+
+        var notified = await service.RunOnceAsync(CancellationToken.None);
+
+        Assert.Equal(12, notified);
+        Assert.Equal(12, notificationRecorder.Calls.Count);
+        Assert.DoesNotContain(notificationRecorder.Calls, call => call.ClientCaseId == hiddenCaseId);
+        Assert.DoesNotContain(notificationRecorder.Calls, call => call.ClientCaseId == deniedCaseId);
+        Assert.All(notificationRecorder.Calls, call => Assert.Single(call.RecipientUserIds));
+        Assert.Equal(6, interceptor.ReaderCommands.Count);
+    }
+
     [Fact]
     public async Task RunOnceAsync_NotifiesResponsibleWhenDeadlineIsInWarningWindow()
     {
@@ -238,4 +391,40 @@ public class CaseProceduralDeadlineReminderNotificationServiceTests
         public Task<TelegramNotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(new TelegramNotificationSettingsDto());
     }
+
+    private sealed class RecordingCommandInterceptor : DbCommandInterceptor
+    {
+        public List<string> ReaderCommands { get; } = [];
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            ReaderCommands.Add(command.CommandText);
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    private class RecordingNotificationServiceProxy : DispatchProxy
+    {
+        public List<CaseNotificationCall> Calls { get; } = [];
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            if (targetMethod?.Name == nameof(INotificationService.NotifyCaseProceduralDeadlineAsync)
+                && args is { Length: 7 })
+            {
+                var clientCase = Assert.IsType<ClientCase>(args[0]);
+                var recipientUserIds = Assert.IsAssignableFrom<IReadOnlyCollection<int>>(args[5]);
+                Calls.Add(new CaseNotificationCall(clientCase.Id, recipientUserIds.ToArray()));
+                return Task.CompletedTask;
+            }
+
+            throw new NotSupportedException($"Unexpected notification call: {targetMethod?.Name}.");
+        }
+    }
+
+    private sealed record CaseNotificationCall(int ClientCaseId, IReadOnlyCollection<int> RecipientUserIds);
 }
