@@ -7248,12 +7248,19 @@ public class ReportsController : ControllerBase
         CancellationToken ct)
     {
         var rows = await BuildFactQuery(from, to, source, accountName, counterpartyName, clientId, caseId, contractId, incomeTypeId, paymentsVisibility)
-            .Select(item => new
+            .GroupBy(item => new
             {
-                item.Direction,
-                item.Amount,
                 item.PaidInvoiceNumber,
-                item.PaidAmount,
+                item.Direction,
+            })
+            .Select(group => new PaidInvoiceQueryRow
+            {
+                PaidInvoiceNumber = group.Key.PaidInvoiceNumber,
+                Direction = group.Key.Direction,
+                Amount = group.Sum(item => item.Amount),
+                PaidAmount = group.Sum(item => item.PaidAmount ?? item.Amount),
+                Count = group.Count(),
+                FirstOperationId = group.Min(item => item.Id),
             })
             .ToListAsync(ct);
 
@@ -7270,7 +7277,9 @@ public class ReportsController : ControllerBase
             {
                 item.Direction,
                 item.Amount,
-                PaidAmount = item.PaidAmount ?? item.Amount,
+                item.PaidAmount,
+                item.Count,
+                item.FirstOperationId,
                 PaidInvoiceNumber = ResolvePaidInvoiceNumber(item.PaidInvoiceNumber),
             })
             .GroupBy(item => item.PaidInvoiceNumber, StringComparer.OrdinalIgnoreCase)
@@ -7286,14 +7295,14 @@ public class ReportsController : ControllerBase
 
                 return new PaidInvoiceReportItemDto
                 {
-                    PaidInvoiceNumber = group.First().PaidInvoiceNumber,
+                    PaidInvoiceNumber = group.OrderBy(item => item.FirstOperationId).First().PaidInvoiceNumber,
                     Income = income,
                     Expense = expense,
                     NetTotal = income - expense,
                     OperationTotal = operationTotal,
                     PaidAmountTotal = group.Sum(item => item.PaidAmount),
-                    IncomeCount = group.Count(item => item.Direction == MoneyOperationDirection.Income),
-                    ExpenseCount = group.Count(item => item.Direction == MoneyOperationDirection.Expense),
+                    IncomeCount = group.Where(item => item.Direction == MoneyOperationDirection.Income).Sum(item => item.Count),
+                    ExpenseCount = group.Where(item => item.Direction == MoneyOperationDirection.Expense).Sum(item => item.Count),
                     Share = turnoverTotal > 0m
                         ? Math.Round(operationTotal / turnoverTotal * 100m, 1, MidpointRounding.AwayFromZero)
                         : 0m,
@@ -9277,6 +9286,16 @@ public class ReportsController : ControllerBase
         public string? PaidAccountName { get; init; }
         public MoneyOperationDirection Direction { get; init; }
         public decimal Amount { get; init; }
+        public int Count { get; init; }
+        public int FirstOperationId { get; init; }
+    }
+
+    private sealed class PaidInvoiceQueryRow
+    {
+        public string? PaidInvoiceNumber { get; init; }
+        public MoneyOperationDirection Direction { get; init; }
+        public decimal Amount { get; init; }
+        public decimal PaidAmount { get; init; }
         public int Count { get; init; }
         public int FirstOperationId { get; init; }
     }

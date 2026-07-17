@@ -6486,9 +6486,9 @@ export class ApiService {
     caseId?: number;
     contractId?: number;
     incomeTypeId?: number;
-  }) {
+  }, options?: { signal?: AbortSignal }) {
     const q = buildQuery(params ?? {});
-    return this.request<PaidInvoiceReport>(`/reports/paid-invoices${q}`);
+    return this.request<PaidInvoiceReport>(`/reports/paid-invoices${q}`, { signal: options?.signal });
   }
 
   async getInvoiceStatusReport(params?: {
