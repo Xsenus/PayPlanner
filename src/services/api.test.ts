@@ -3169,20 +3169,25 @@ describe('apiService reports', () => {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
 
-    const result = await apiService.getPaymentPurposeReport({
-      from: '2026-05-01',
-      to: '2026-05-31',
-      source: 'Bank',
-    });
+    const result = await apiService.getPaymentPurposeReport(
+      {
+        from: '2026-05-01',
+        to: '2026-05-31',
+        source: 'Bank',
+      },
+      { signal: controller.signal },
+    );
 
     expect(result).toEqual(payload);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url] = fetchMock.mock.calls[0];
+    const [url, options] = fetchMock.mock.calls[0];
     expect(String(url)).toContain('/reports/payment-purposes?');
     expect(String(url)).toContain('from=2026-05-01');
     expect(String(url)).toContain('to=2026-05-31');
     expect(String(url)).toContain('source=Bank');
+    expect(options?.signal).toBe(controller.signal);
   });
 
   it('loads match status report with filters', async () => {
