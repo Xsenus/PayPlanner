@@ -8370,11 +8370,17 @@ public class ReportsController : ControllerBase
         CancellationToken ct)
     {
         var rows = await BuildFactQuery(from, to, source, accountName, counterpartyName, clientId, caseId, contractId, incomeTypeId, paymentsVisibility)
-            .Select(item => new
+            .GroupBy(item => new
             {
                 item.Direction,
-                item.Amount,
                 item.Currency,
+            })
+            .Select(group => new CurrencyQueryRow
+            {
+                Direction = group.Key.Direction,
+                Currency = group.Key.Currency,
+                Amount = group.Sum(item => item.Amount),
+                Count = group.Count(),
             })
             .ToListAsync(ct);
 
@@ -8391,6 +8397,7 @@ public class ReportsController : ControllerBase
             {
                 item.Direction,
                 item.Amount,
+                item.Count,
                 Currency = ResolveCurrency(item.Currency),
             })
             .GroupBy(item => item.Currency, StringComparer.OrdinalIgnoreCase)
@@ -8411,8 +8418,8 @@ public class ReportsController : ControllerBase
                     Expense = expense,
                     NetTotal = income - expense,
                     TotalAmount = totalAmount,
-                    IncomeCount = group.Count(item => item.Direction == MoneyOperationDirection.Income),
-                    ExpenseCount = group.Count(item => item.Direction == MoneyOperationDirection.Expense),
+                    IncomeCount = group.Where(item => item.Direction == MoneyOperationDirection.Income).Sum(item => item.Count),
+                    ExpenseCount = group.Where(item => item.Direction == MoneyOperationDirection.Expense).Sum(item => item.Count),
                     Share = turnoverTotal > 0m
                         ? Math.Round(totalAmount / turnoverTotal * 100m, 1, MidpointRounding.AwayFromZero)
                         : 0m,
@@ -9412,6 +9419,14 @@ public class ReportsController : ControllerBase
         public MoneyOperationDirection Direction { get; init; }
         public MoneyOperationAccountingType AccountingType { get; init; }
         public MoneyOperationMatchStatus MatchStatus { get; init; }
+        public decimal Amount { get; init; }
+        public int Count { get; init; }
+    }
+
+    private sealed class CurrencyQueryRow
+    {
+        public MoneyOperationDirection Direction { get; init; }
+        public string? Currency { get; init; }
         public decimal Amount { get; init; }
         public int Count { get; init; }
     }

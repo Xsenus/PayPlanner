@@ -6606,9 +6606,9 @@ export class ApiService {
     caseId?: number;
     contractId?: number;
     incomeTypeId?: number;
-  }) {
+  }, options?: { signal?: AbortSignal }) {
     const q = buildQuery(params ?? {});
-    return this.request<CurrencyReport>(`/reports/currencies${q}`);
+    return this.request<CurrencyReport>(`/reports/currencies${q}`, { signal: options?.signal });
   }
 
   async getCashOrderReport(params?: {

@@ -6265,15 +6265,18 @@ services.Id,
     [Fact]
     public async Task Currencies_GroupsFactOperationsByCurrency()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await SqliteTestContextFactory.CreateAsync(interceptor: interceptor);
         db.MoneyOperations.AddRange(
-            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 7_000m, new DateTime(2026, 5, 1), "Основной банк", currency: "RUB"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 3_000m, new DateTime(2026, 5, 1, 9, 0, 0), "Основной банк", currency: "RUB"),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 4_000m, new DateTime(2026, 5, 1, 15, 0, 0), "Основной банк", currency: "RUB"),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 2_000m, new DateTime(2026, 5, 2), "Основной банк", currency: " rub "),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 3_000m, new DateTime(2026, 5, 3), "Основной банк", currency: "usd"),
             Operation(MoneyOperationSource.Cash, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 1_000m, new DateTime(2026, 5, 4), "Касса", currency: null),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Plan, 99_999m, new DateTime(2026, 5, 5), "Основной банк", currency: "USD"),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Transfer, MoneyOperationAccountingType.Fact, 50_000m, new DateTime(2026, 5, 6), "Основной банк", currency: "RUB"));
         await db.SaveChangesAsync();
+        interceptor.Commands.Clear();
         var controller = CreateController(db);
 
         var action = await controller.Currencies(
@@ -6303,6 +6306,8 @@ services.Id,
                 Assert.Equal(3_000m, item.Expense);
                 Assert.Equal(4_000m, item.NetTotal);
                 Assert.Equal(10_000m, item.TotalAmount);
+                Assert.Equal(2, item.IncomeCount);
+                Assert.Equal(2, item.ExpenseCount);
                 Assert.Equal(76.9m, item.Share);
             },
             item =>
@@ -6312,6 +6317,12 @@ services.Id,
                 Assert.Equal(0m, item.Expense);
                 Assert.Equal(23.1m, item.Share);
             });
+
+        var currencyQuery = Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"MoneyOperations\"", StringComparison.Ordinal));
+        Assert.Contains("GROUP BY", currencyQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SUM", currencyQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("COUNT", currencyQuery, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
