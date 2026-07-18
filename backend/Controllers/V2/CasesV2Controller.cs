@@ -297,10 +297,10 @@ public class CasesV2Controller : ControllerBase
             inactiveDays);
 
         var total = await q.CountAsync(ct);
-        var items = await q
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .AsNoTracking()
+        var items = await SelectRegistryCaseRows(q
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .AsNoTracking())
             .ToListAsync(ct);
         if (canViewFinance)
         {
@@ -546,7 +546,7 @@ public class CasesV2Controller : ControllerBase
         }
 
         var canViewFinance = await CanViewCaseFinanceAsync(ct);
-        var items = await BuildRegistryQuery(
+        var registryQuery = BuildRegistryQuery(
                 visibility,
                 clientId,
                 legalEntityId,
@@ -565,7 +565,8 @@ public class CasesV2Controller : ControllerBase
                 activity,
                 inactiveDays)
             .Take(MaxRegistryExportRows)
-            .AsNoTracking()
+            .AsNoTracking();
+        var items = await SelectRegistryCaseRows(registryQuery)
             .ToListAsync(ct);
         if (canViewFinance)
         {
@@ -600,12 +601,93 @@ public class CasesV2Controller : ControllerBase
         string? activity,
         int? inactiveDays)
         => _db.ClientCases.AsQueryable()
-            .WithCaseIncludes()
             .ApplyClientCaseVisibility(visibility)
             .ApplyCaseRegistryScope(scope, visibility.UserId)
             .ApplyCaseFilters(clientId, legalEntityId, status, search, responsibleUserId, caseType, priority, from, to, minFee, maxFee)
             .ApplyCaseActivityFilter(activity, inactiveDays, _db.TaskJournalItems.IgnoreQueryFilters())
             .ApplyCaseSort(sortBy, sortDir);
+
+    private static IQueryable<ClientCase> SelectRegistryCaseRows(IQueryable<ClientCase> query)
+        => query.Select(item => new ClientCase
+        {
+            Id = item.Id,
+            ClientId = item.ClientId,
+            Client = item.Client == null
+                ? null
+                : new Client
+                {
+                    Id = item.Client.Id,
+                    Name = item.Client.Name,
+                },
+            LegalEntityId = item.LegalEntityId,
+            LegalEntity = item.LegalEntity == null
+                ? null
+                : new LegalEntity
+                {
+                    Id = item.LegalEntity.Id,
+                    ShortName = item.LegalEntity.ShortName,
+                    FullName = item.LegalEntity.FullName,
+                },
+            CreatedAt = item.CreatedAt,
+            CaseNumber = item.CaseNumber,
+            CaseType = item.CaseType,
+            Stage = item.Stage,
+            ResponsibleUserId = item.ResponsibleUserId,
+            ResponsibleUser = item.ResponsibleUser == null
+                ? null
+                : new User
+                {
+                    Id = item.ResponsibleUser.Id,
+                    FullName = item.ResponsibleUser.FullName,
+                    Email = item.ResponsibleUser.Email,
+                },
+            StartDate = item.StartDate,
+            DueDate = item.DueDate,
+            FeeAmount = item.FeeAmount,
+            Priority = item.Priority,
+            CourtName = item.CourtName,
+            CourtCaseNumber = item.CourtCaseNumber,
+            CourtUrl = item.CourtUrl,
+            NextHearingAt = item.NextHearingAt,
+            Claimant = item.Claimant,
+            Defendant = item.Defendant,
+            ThirdParties = item.ThirdParties,
+            Representatives = item.Representatives,
+            JudgeName = item.JudgeName,
+            Courtroom = item.Courtroom,
+            CourtSecretaryContacts = item.CourtSecretaryContacts,
+            ClaimFiledAt = item.ClaimFiledAt,
+            CourtDecisionAt = item.CourtDecisionAt,
+            AppealDeadlineAt = item.AppealDeadlineAt,
+            CassationDeadlineAt = item.CassationDeadlineAt,
+            MotionDeadlineAt = item.MotionDeadlineAt,
+            ObjectionDeadlineAt = item.ObjectionDeadlineAt,
+            DocumentsSummary = item.DocumentsSummary,
+            EventHistory = item.EventHistory,
+            Strategy = item.Strategy,
+            LastViewedAt = item.LastViewedAt,
+            LastViewedByUserId = item.LastViewedByUserId,
+            LastViewedByUserName = item.LastViewedByUserName,
+            ActivityConfirmedAt = item.ActivityConfirmedAt,
+            ActivityConfirmedByUserId = item.ActivityConfirmedByUserId,
+            ActivityConfirmedByUserName = item.ActivityConfirmedByUserName,
+            InactivityRemindersEnabled = item.InactivityRemindersEnabled,
+            IsUnderControl = item.IsUnderControl,
+            ControlMarkedAt = item.ControlMarkedAt,
+            ControlMarkedByUserId = item.ControlMarkedByUserId,
+            ControlMarkedByUserName = item.ControlMarkedByUserName,
+            IsHiddenFromExecutor = item.IsHiddenFromExecutor,
+            HiddenFromExecutorAt = item.HiddenFromExecutorAt,
+            HiddenFromExecutorByUserId = item.HiddenFromExecutorByUserId,
+            HiddenFromExecutorByUserName = item.HiddenFromExecutorByUserName,
+            AccessRequestedAt = item.AccessRequestedAt,
+            AccessRequestedByUserId = item.AccessRequestedByUserId,
+            AccessRequestedByUserName = item.AccessRequestedByUserName,
+            AccessRequestReason = item.AccessRequestReason,
+            Description = item.Description,
+            Status = item.Status,
+            Title = item.Title,
+        });
 
     private static IQueryable<ClientCase> ApplyClientCaseAccessManagementVisibility(
         IQueryable<ClientCase> query,

@@ -79,6 +79,82 @@ public class CasesV2ControllerTests
     }
 
     [Fact]
+    public async Task Get_SelectsCompactRelatedProfilesAndKeepsEditableCaseFields()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var manager = await CreateUserAsync(db, "registry-projection-manager@example.com", "Руководитель", DataVisibilityScope.All);
+        var responsible = await CreateUserAsync(db, "registry-projection-owner@example.com", "Исполнитель");
+        responsible.PasswordHash = "sensitive-password-hash";
+        var client = new Client
+        {
+            Name = "Клиент реестра",
+            Address = "Не загружать адрес в реестр",
+            Company = "Не загружать компанию в реестр",
+            Email = "private-client@example.com",
+            IsActive = true,
+            ResponsibleUserId = responsible.Id,
+        };
+        db.ClientCases.Add(new ClientCase
+        {
+            Client = client,
+            Title = "Дело компактного реестра",
+            Description = "Описание для быстрого редактирования",
+            CaseNumber = "CASE-REGISTRY-PROJECTION",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id,
+            Claimant = "Заявитель сохранён",
+            EventHistory = "История сохранена",
+            Strategy = "Стратегия сохранена",
+            CourtUrl = "https://court.example.test/case",
+            IsUnderControl = true,
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, manager);
+        interceptor.Commands.Clear();
+
+        var result = await controller.Get(
+            clientId: null,
+            legalEntityId: null,
+            status: null,
+            search: null,
+            responsibleUserId: null,
+            caseType: null,
+            priority: null,
+            from: null,
+            to: null,
+            minFee: null,
+            maxFee: null,
+            sortBy: null,
+            sortDir: null,
+            page: 1,
+            pageSize: 25,
+            ct: CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var item = Assert.Single(GetAnonymousItems(ok.Value));
+        Assert.Equal("Описание для быстрого редактирования", item.Description);
+        Assert.Equal("Заявитель сохранён", item.Claimant);
+        Assert.Equal("История сохранена", item.EventHistory);
+        Assert.Equal("Стратегия сохранена", item.Strategy);
+        Assert.Equal("https://court.example.test/case", item.CourtUrl);
+        Assert.True(item.IsUnderControl);
+        Assert.Equal("Клиент реестра", item.Client?.Name);
+        Assert.Equal(string.Empty, item.Client?.Address);
+        Assert.Equal("Исполнитель", item.ResponsibleUser?.FullName);
+        Assert.Equal(string.Empty, item.ResponsibleUser?.PasswordHash);
+
+        var listCommand = Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"ClientCases\"", StringComparison.Ordinal)
+            && command.Contains("ORDER BY", StringComparison.Ordinal)
+            && command.Contains("LIMIT", StringComparison.Ordinal));
+        Assert.DoesNotContain("\"PasswordHash\"", listCommand, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Company\"", listCommand, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Inn\"", listCommand, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Kpp\"", listCommand, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Get_FiltersInactiveCasesByActivity()
     {
         await using var db = await CreateContextAsync();
