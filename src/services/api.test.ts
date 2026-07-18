@@ -2309,6 +2309,49 @@ describe('apiService reports', () => {
     expect(String(url)).toContain('horizonDays=45');
   });
 
+  it('loads case activity report with filters and abort signal', async () => {
+    const payload = {
+      generatedAt: '2026-05-26T10:00:00Z',
+      inactivityDays: 14,
+      escalationDays: 30,
+      activity: 'inactive',
+      totalVisibleCases: 10,
+      activeCaseCount: 8,
+      finishedCaseCount: 2,
+      inactiveCaseCount: 3,
+      escalatedCaseCount: 1,
+      disabledCaseCount: 0,
+      withActiveTasksCount: 5,
+      withoutResponsibleCount: 1,
+      items: [],
+    };
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+
+    const result = await apiService.getCaseActivityReport(
+      {
+        inactiveDays: 14,
+        escalationDays: 30,
+        activity: 'inactive',
+        limit: 25,
+      },
+      { signal: controller.signal },
+    );
+
+    expect(result).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/reports/case-activity?');
+    expect(String(url)).toContain('inactiveDays=14');
+    expect(String(url)).toContain('escalationDays=30');
+    expect(String(url)).toContain('activity=inactive');
+    expect(String(url)).toContain('limit=25');
+    expect(options?.signal).toBe(controller.signal);
+  });
+
   it('loads overdue procedural deadlines report with filters', async () => {
     const payload = {
       generatedAt: '2026-05-26T10:00:00Z',

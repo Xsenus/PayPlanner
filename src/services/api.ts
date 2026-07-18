@@ -6301,9 +6301,9 @@ export class ApiService {
     escalationDays?: number;
     activity?: 'all' | 'inactive' | 'active' | 'escalated' | 'disabled';
     limit?: number;
-  }) {
+  }, options?: { signal?: AbortSignal }) {
     const q = buildQuery(params ?? {});
-    return this.request<CaseActivityReport>(`/reports/case-activity${q}`);
+    return this.request<CaseActivityReport>(`/reports/case-activity${q}`, { signal: options?.signal });
   }
 
   async getCurrentCasesReport(params?: {
