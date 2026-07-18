@@ -3714,6 +3714,95 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task CaseSuccess_ProjectsOnlyRequiredCaseColumns()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await SqliteTestContextFactory.CreateAsync(interceptor: interceptor);
+        var role = new Role { Name = "case-success-projection-role", Description = "Case success reporter" };
+        var user = new User
+        {
+            Email = "case-success-projection@example.test",
+            FullName = "Projection Success Lawyer",
+            IsActive = true,
+            Role = role,
+        };
+        var client = new Client
+        {
+            Name = "Projection Success Client",
+            Company = "Unused Company Name",
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            ResponsibleUser = user,
+            CaseNumber = "SUCCESS-PROJECTION",
+            Title = "Projection success case",
+            CaseType = "Арбитраж",
+            Status = ClientCaseStatus.Closed,
+            CreatedAt = new DateTime(2026, 5, 1),
+            StartDate = new DateTime(2026, 5, 2),
+            DueDate = new DateTime(2026, 5, 20),
+            FeeAmount = 123_456m,
+            Stage = "Unused stage",
+            CourtName = "Unused court",
+            CourtUrl = "https://example.test/unused",
+            CourtCaseNumber = "UNUSED-COURT-NUMBER",
+            Claimant = "Unused claimant",
+            Defendant = "Unused defendant",
+        };
+
+        db.Roles.Add(role);
+        db.Users.Add(user);
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                Role = role,
+                Section = RolePermissionCatalog.Reports,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                Role = role,
+                Section = RolePermissionCatalog.Cases,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            });
+        await db.SaveChangesAsync();
+        interceptor.Commands.Clear();
+
+        var controller = CreateController(db, CreateUserPrincipal(user.Id));
+        var action = await controller.CaseSuccess(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            null,
+            null,
+            null,
+            50,
+            CancellationToken.None);
+
+        var report = Assert.IsType<CaseSuccessReportDto>(Assert.IsType<OkObjectResult>(action.Result).Value);
+        var item = Assert.Single(report.Items);
+        Assert.Equal("Projection Success Client", item.ClientName);
+        Assert.Equal("Projection Success Lawyer", item.ResponsibleName);
+        Assert.Equal("successful", item.OutcomeCategory);
+        Assert.Equal(18, item.DaysInWork);
+
+        var caseQuery = Assert.Single(interceptor.Commands, command =>
+            command.StartsWith("SELECT \"c\".\"Id\", \"c\".\"CaseNumber\"", StringComparison.Ordinal));
+        Assert.Contains("\"ResponsibleUser", caseQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"FeeAmount\"", caseQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Stage\"", caseQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"CourtName\"", caseQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"CourtUrl\"", caseQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"CourtCaseNumber\"", caseQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Claimant\"", caseQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Defendant\"", caseQuery, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ClientCaseReports_UseProfileTimeZoneForPeriodsAndKeepCaseDatesDateOnly()
     {
         await using var db = await CreateContextAsync();

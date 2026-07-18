@@ -6336,9 +6336,9 @@ export class ApiService {
     responsibleUserId?: number;
     caseType?: string;
     limit?: number;
-  }) {
+  }, options?: { signal?: AbortSignal }) {
     const q = buildQuery(params ?? {});
-    return this.request<CaseSuccessReport>(`/reports/case-success${q}`);
+    return this.request<CaseSuccessReport>(`/reports/case-success${q}`, { signal: options?.signal });
   }
 
   async getLawyerWorkloadReport(params?: {

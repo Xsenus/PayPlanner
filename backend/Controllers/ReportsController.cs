@@ -2364,7 +2364,6 @@ public class ReportsController : ControllerBase
         var endExclusiveUtc = CalendarTimeZoneHelper.FromUserLocalToUtc(end.Date.AddDays(1), timeZone);
         var caseQuery = _db.ClientCases
             .AsNoTracking()
-            .WithCaseIncludes()
             .ApplyClientCaseVisibility(casesVisibility)
             .Where(item => item.CreatedAt < endExclusiveUtc
                 && (item.Status != ClientCaseStatus.Closed && item.Status != ClientCaseStatus.Lost
@@ -2386,7 +2385,25 @@ public class ReportsController : ControllerBase
             caseQuery = caseQuery.Where(item => item.CaseType != null && item.CaseType.Contains(filters.CaseType));
         }
 
-        var rows = (await caseQuery.ToListAsync(ct))
+        var cases = await caseQuery
+            .Select(item => new CaseSuccessQueryRow(
+                item.Id,
+                item.CaseNumber,
+                item.Title,
+                item.CaseType,
+                item.Status,
+                item.ResponsibleUserId,
+                item.ResponsibleUser != null ? item.ResponsibleUser.FullName : null,
+                item.Client != null ? item.Client.Name : null,
+                item.Client != null ? item.Client.Company : null,
+                item.LegalEntity != null ? item.LegalEntity.ShortName : null,
+                item.LegalEntity != null ? item.LegalEntity.FullName : null,
+                item.CreatedAt,
+                item.StartDate,
+                item.DueDate))
+            .ToListAsync(ct);
+
+        var rows = cases
             .Select(item => BuildCaseSuccessItem(item, asOf, timeZone))
             .OrderByDescending(item => item.IsFinished)
             .ThenBy(item => item.Status)
@@ -2478,7 +2495,7 @@ public class ReportsController : ControllerBase
         };
     }
 
-    private static CaseSuccessItemDto BuildCaseSuccessItem(ClientCase clientCase, DateTime asOf, TimeZoneInfo timeZone)
+    private static CaseSuccessItemDto BuildCaseSuccessItem(CaseSuccessQueryRow clientCase, DateTime asOf, TimeZoneInfo timeZone)
     {
         var (outcomeCategory, outcomeLabel) = ResolveCaseSuccessOutcome(clientCase.Status);
         var start = clientCase.StartDate.HasValue
@@ -2494,14 +2511,14 @@ public class ReportsController : ControllerBase
             CaseId = clientCase.Id,
             CaseNumber = clientCase.CaseNumber,
             CaseTitle = clientCase.Title,
-            ClientName = ResolveCaseOwnerName(clientCase),
+            ClientName = ResolveCaseSuccessOwnerName(clientCase),
             CaseType = NormalizeReportText(clientCase.CaseType, "Не указан"),
             Status = clientCase.Status.ToString(),
             StatusLabel = FormatCaseStatus(clientCase.Status),
             OutcomeCategory = outcomeCategory,
             OutcomeLabel = outcomeLabel,
             ResponsibleUserId = clientCase.ResponsibleUserId,
-            ResponsibleName = ResolveCaseResponsibleName(clientCase),
+            ResponsibleName = NormalizeReportText(clientCase.ResponsibleName, "Не назначен"),
             CreatedAt = NormalizeReportInstant(clientCase.CreatedAt),
             StartDate = NormalizeReportDate(clientCase.StartDate),
             DueDate = NormalizeReportDate(clientCase.DueDate),
@@ -5707,6 +5724,25 @@ public class ReportsController : ControllerBase
         => NormalizeReportText(item.ResponsibleName, "Не назначен");
 
     private static string ResolveCaseFinanceOwnerName(CaseFinanceQueryRow item)
+    {
+        if (!string.IsNullOrWhiteSpace(item.ClientName) || !string.IsNullOrWhiteSpace(item.ClientCompany))
+        {
+            return NormalizeReportText(
+                !string.IsNullOrWhiteSpace(item.ClientName) ? item.ClientName : item.ClientCompany,
+                "Клиент без имени");
+        }
+
+        if (!string.IsNullOrWhiteSpace(item.LegalEntityShortName) || !string.IsNullOrWhiteSpace(item.LegalEntityFullName))
+        {
+            return NormalizeReportText(
+                !string.IsNullOrWhiteSpace(item.LegalEntityShortName) ? item.LegalEntityShortName : item.LegalEntityFullName,
+                "Юридическое лицо без названия");
+        }
+
+        return "Без владельца";
+    }
+
+    private static string ResolveCaseSuccessOwnerName(CaseSuccessQueryRow item)
     {
         if (!string.IsNullOrWhiteSpace(item.ClientName) || !string.IsNullOrWhiteSpace(item.ClientCompany))
         {
@@ -9498,6 +9534,22 @@ public class ReportsController : ControllerBase
         DateTime? StartDate,
         DateTime? DueDate,
         decimal FeeAmount);
+
+    private sealed record CaseSuccessQueryRow(
+        int Id,
+        string CaseNumber,
+        string Title,
+        string CaseType,
+        ClientCaseStatus Status,
+        int? ResponsibleUserId,
+        string? ResponsibleName,
+        string? ClientName,
+        string? ClientCompany,
+        string? LegalEntityShortName,
+        string? LegalEntityFullName,
+        DateTime CreatedAt,
+        DateTime? StartDate,
+        DateTime? DueDate);
 
     private sealed record CurrentCasesReportFilters(
         string? Status,

@@ -2541,7 +2541,7 @@ describe('apiService reports', () => {
     expect(options?.signal).toBe(controller.signal);
   });
 
-  it('loads case success report with filters', async () => {
+  it('loads case success report with filters and abort signal', async () => {
     const payload = {
       generatedAt: '2026-05-26T10:00:00Z',
       from: '2026-05-01T00:00:00',
@@ -2569,19 +2569,23 @@ describe('apiService reports', () => {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
 
-    const result = await apiService.getCaseSuccessReport({
-      from: '2026-05-01',
-      to: '2026-05-31',
-      status: 'Closed',
-      responsibleUserId: 7,
-      caseType: 'bankruptcy',
-      limit: 25,
-    });
+    const result = await apiService.getCaseSuccessReport(
+      {
+        from: '2026-05-01',
+        to: '2026-05-31',
+        status: 'Closed',
+        responsibleUserId: 7,
+        caseType: 'bankruptcy',
+        limit: 25,
+      },
+      { signal: controller.signal },
+    );
 
     expect(result).toEqual(payload);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url] = fetchMock.mock.calls[0];
+    const [url, options] = fetchMock.mock.calls[0];
     expect(String(url)).toContain('/reports/case-success?');
     expect(String(url)).toContain('from=2026-05-01');
     expect(String(url)).toContain('to=2026-05-31');
@@ -2589,6 +2593,7 @@ describe('apiService reports', () => {
     expect(String(url)).toContain('responsibleUserId=7');
     expect(String(url)).toContain('caseType=bankruptcy');
     expect(String(url)).toContain('limit=25');
+    expect(options?.signal).toBe(controller.signal);
   });
 
   it('loads lawyer workload report with filters', async () => {
