@@ -6312,9 +6312,9 @@ export class ApiService {
     responsibleUserId?: number;
     caseType?: string;
     limit?: number;
-  }) {
+  }, options?: { signal?: AbortSignal }) {
     const q = buildQuery(params ?? {});
-    return this.request<CurrentCasesReport>(`/reports/current-cases${q}`);
+    return this.request<CurrentCasesReport>(`/reports/current-cases${q}`, { signal: options?.signal });
   }
 
   async getCaseFinanceReport(params?: {

@@ -4598,7 +4598,6 @@ public class ReportsController : ControllerBase
     {
         var caseQuery = _db.ClientCases
             .AsNoTracking()
-            .WithCaseIncludes()
             .ApplyClientCaseVisibility(casesVisibility)
             .Where(item => item.Status != ClientCaseStatus.Closed && item.Status != ClientCaseStatus.Lost);
 
@@ -4617,7 +4616,26 @@ public class ReportsController : ControllerBase
             caseQuery = caseQuery.Where(item => item.CaseType != null && item.CaseType.Contains(filters.CaseType));
         }
 
-        var cases = await caseQuery.ToListAsync(ct);
+        var cases = await caseQuery
+            .Select(item => new CurrentCaseQueryRow(
+                item.Id,
+                item.CaseNumber,
+                item.Title,
+                item.CaseType,
+                item.Status,
+                item.ResponsibleUserId,
+                item.ResponsibleUser != null ? item.ResponsibleUser.FullName : null,
+                item.Client != null ? item.Client.Name : null,
+                item.Client != null ? item.Client.Company : null,
+                item.LegalEntity != null ? item.LegalEntity.ShortName : null,
+                item.LegalEntity != null ? item.LegalEntity.FullName : null,
+                item.CreatedAt,
+                item.StartDate,
+                item.DueDate,
+                item.NextHearingAt,
+                item.LastViewedAt,
+                item.ActivityConfirmedAt))
+            .ToListAsync(ct);
         var caseIds = cases.Select(item => item.Id).Distinct().ToArray();
 
         var taskRows = caseIds.Length == 0
@@ -4725,7 +4743,7 @@ public class ReportsController : ControllerBase
     }
 
     private static CurrentCaseReportItemDto MapCurrentCaseReportItem(
-        ClientCase clientCase,
+        CurrentCaseQueryRow clientCase,
         IReadOnlyCollection<LegalWorkTaskRow> tasks,
         IReadOnlyCollection<CurrentCaseDeadlineRow> deadlines,
         DateTime asOf,
@@ -4753,11 +4771,11 @@ public class ReportsController : ControllerBase
             CaseNumber = clientCase.CaseNumber,
             CaseTitle = clientCase.Title,
             CaseType = NormalizeReportText(clientCase.CaseType, "Не указан"),
-            ClientName = ResolveCaseOwnerName(clientCase),
+            ClientName = ResolveCurrentCaseOwnerName(clientCase),
             Status = clientCase.Status.ToString(),
             StatusLabel = FormatCaseStatus(clientCase.Status),
             ResponsibleUserId = clientCase.ResponsibleUserId,
-            ResponsibleName = ResolveCaseResponsibleName(clientCase),
+            ResponsibleName = NormalizeReportText(clientCase.ResponsibleName, "Не назначен"),
             CreatedAt = NormalizeReportInstant(clientCase.CreatedAt),
             StartDate = NormalizeReportDate(clientCase.StartDate),
             DueDate = NormalizeReportDate(clientCase.DueDate),
@@ -5425,6 +5443,30 @@ public class ReportsController : ControllerBase
         return lastActivity;
     }
 
+    private static DateTime ResolveCaseLastActivityAt(CurrentCaseQueryRow clientCase, params DateTime?[] activitySignals)
+    {
+        var lastActivity = clientCase.CreatedAt;
+        foreach (var signal in activitySignals)
+        {
+            if (signal.HasValue && signal.Value > lastActivity)
+            {
+                lastActivity = signal.Value;
+            }
+        }
+
+        if (clientCase.LastViewedAt.HasValue && clientCase.LastViewedAt.Value > lastActivity)
+        {
+            lastActivity = clientCase.LastViewedAt.Value;
+        }
+
+        if (clientCase.ActivityConfirmedAt.HasValue && clientCase.ActivityConfirmedAt.Value > lastActivity)
+        {
+            lastActivity = clientCase.ActivityConfirmedAt.Value;
+        }
+
+        return lastActivity;
+    }
+
     private static DateTime ResolveCaseLastActivityAt(CaseActivityCaseRow clientCase, params DateTime?[] activitySignals)
     {
         var lastActivity = clientCase.CreatedAt;
@@ -5595,6 +5637,25 @@ public class ReportsController : ControllerBase
         {
             return NormalizeReportText(
                 !string.IsNullOrWhiteSpace(item.LegalEntity.ShortName) ? item.LegalEntity.ShortName : item.LegalEntity.FullName,
+                "Юридическое лицо без названия");
+        }
+
+        return "Без владельца";
+    }
+
+    private static string ResolveCurrentCaseOwnerName(CurrentCaseQueryRow item)
+    {
+        if (!string.IsNullOrWhiteSpace(item.ClientName) || !string.IsNullOrWhiteSpace(item.ClientCompany))
+        {
+            return NormalizeReportText(
+                !string.IsNullOrWhiteSpace(item.ClientName) ? item.ClientName : item.ClientCompany,
+                "Клиент без имени");
+        }
+
+        if (!string.IsNullOrWhiteSpace(item.LegalEntityShortName) || !string.IsNullOrWhiteSpace(item.LegalEntityFullName))
+        {
+            return NormalizeReportText(
+                !string.IsNullOrWhiteSpace(item.LegalEntityShortName) ? item.LegalEntityShortName : item.LegalEntityFullName,
                 "Юридическое лицо без названия");
         }
 
@@ -9280,6 +9341,25 @@ public class ReportsController : ControllerBase
         string? Status,
         int? ResponsibleUserId,
         string? CaseType);
+
+    private sealed record CurrentCaseQueryRow(
+        int Id,
+        string CaseNumber,
+        string Title,
+        string CaseType,
+        ClientCaseStatus Status,
+        int? ResponsibleUserId,
+        string? ResponsibleName,
+        string? ClientName,
+        string? ClientCompany,
+        string? LegalEntityShortName,
+        string? LegalEntityFullName,
+        DateTime CreatedAt,
+        DateTime? StartDate,
+        DateTime? DueDate,
+        DateTime? NextHearingAt,
+        DateTime? LastViewedAt,
+        DateTime? ActivityConfirmedAt);
 
     private sealed record CaseActivityReportSettings(
         int InactivityDays,

@@ -1929,6 +1929,100 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task CurrentCases_ProjectsOnlyRequiredCaseColumns()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await SqliteTestContextFactory.CreateAsync(interceptor: interceptor);
+        var role = new Role { Name = "current-cases-projection-role", Description = "Current cases reporter" };
+        var user = new User
+        {
+            Email = "current-cases-projection@example.test",
+            FullName = "Projection Lawyer",
+            IsActive = true,
+            Role = role,
+        };
+        var client = new Client
+        {
+            Name = "Projection Client",
+            Company = "Projection Company",
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            ResponsibleUser = user,
+            CaseNumber = "CURRENT-PROJECTION",
+            Title = "Projection current case",
+            CaseType = "Арбитраж",
+            Status = ClientCaseStatus.Open,
+            CreatedAt = new DateTime(2026, 5, 1),
+            StartDate = new DateTime(2026, 5, 2),
+            DueDate = new DateTime(2026, 6, 1),
+            Stage = "Unused stage",
+            CourtName = "Unused court",
+            CourtUrl = "https://example.test/unused",
+            CourtCaseNumber = "UNUSED-COURT-NUMBER",
+            Claimant = "Unused claimant",
+            Defendant = "Unused defendant",
+            FeeAmount = 123_456m,
+        };
+
+        db.Roles.Add(role);
+        db.Users.Add(user);
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                Role = role,
+                Section = RolePermissionCatalog.Reports,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                Role = role,
+                Section = RolePermissionCatalog.Cases,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                Role = role,
+                Section = RolePermissionCatalog.Tasks,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            });
+        await db.SaveChangesAsync();
+        interceptor.Commands.Clear();
+
+        var controller = CreateController(db, CreateUserPrincipal(user.Id));
+        var action = await controller.CurrentCases(
+            new DateTime(2026, 5, 20),
+            null,
+            null,
+            null,
+            50,
+            CancellationToken.None);
+
+        var report = Assert.IsType<CurrentCasesReportDto>(Assert.IsType<OkObjectResult>(action.Result).Value);
+        var item = Assert.Single(report.Items);
+        Assert.Equal("Projection Client", item.ClientName);
+        Assert.Equal("Projection Lawyer", item.ResponsibleName);
+
+        var caseQuery = Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"ClientCases\" AS \"c\"", StringComparison.Ordinal));
+        Assert.Contains("\"CaseNumber\"", caseQuery, StringComparison.Ordinal);
+        Assert.Contains("\"ResponsibleUser", caseQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Stage\"", caseQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"FeeAmount\"", caseQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"CourtName\"", caseQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"CourtUrl\"", caseQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"CourtCaseNumber\"", caseQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Claimant\"", caseQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Defendant\"", caseQuery, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task TasksReport_ReturnsOpenClosedAndAllVisibleTasks()
     {
         await using var db = await CreateContextAsync();
