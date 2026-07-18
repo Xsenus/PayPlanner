@@ -460,25 +460,48 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
     {
         var enabled = _configuration.GetValue("Notifications:TaskReminders:Enabled", true);
         var pollSeconds = Math.Clamp(_configuration.GetValue("Notifications:TaskReminders:PollSeconds", 60), 15, 3600);
-        var pendingCount = enabled
-            ? await _db.TaskJournalItems
-                .AsNoTracking()
-                .CountAsync(task =>
-                    task.AssigneeUserId.HasValue &&
-                    task.Status != "done" &&
-                    task.Status != "cancelled" &&
-                    task.DueAt <= now.AddDays(7) &&
-                    task.RemindersJson != "[]" &&
-                    task.ChannelsJson != "[]",
-                    ct)
-            : 0;
-
-        var lastReminder = await _db.NotificationDeliveries
-            .AsNoTracking()
-            .Where(item => item.EventKey.Contains(":reminder:"))
-            .OrderByDescending(item => item.CreatedAt)
-            .Select(item => new { item.CreatedAt, item.Subject })
-            .FirstOrDefaultAsync(ct);
+        var lookAhead = now.AddDays(7);
+        var eligibleCounts = _db.UseObjectAuditModel
+            ? _db.Database.SqlQuery<int>($$"""
+                SELECT
+                    CAST(COUNT(*) AS INTEGER) AS "Value"
+                FROM "TaskJournalItems"
+                WHERE {{enabled}}
+                  AND NOT "IsDeleted"
+                  AND "AssigneeUserId" IS NOT NULL
+                  AND "Status" <> 'done'
+                  AND "Status" <> 'cancelled'
+                  AND "DueAt" <= {{lookAhead}}
+                  AND "RemindersJson" <> '[]'
+                  AND "ChannelsJson" <> '[]'
+                """)
+            : _db.Database.SqlQuery<int>($$"""
+                SELECT
+                    CAST(COUNT(*) AS INTEGER) AS "Value"
+                FROM "TaskJournalItems"
+                WHERE {{enabled}}
+                  AND "AssigneeUserId" IS NOT NULL
+                  AND "Status" <> 'done'
+                  AND "Status" <> 'cancelled'
+                  AND "DueAt" <= {{lookAhead}}
+                  AND "RemindersJson" <> '[]'
+                  AND "ChannelsJson" <> '[]'
+                """);
+        var statistics = await (
+                from eligibleCount in eligibleCounts
+                from lastReminder in _db.NotificationDeliveries
+                    .AsNoTracking()
+                    .Where(item => item.EventKey.Contains(":reminder:"))
+                    .OrderByDescending(item => item.CreatedAt)
+                    .Take(1)
+                    .DefaultIfEmpty()
+                select new TaskReminderStatistics
+                {
+                    EligibleCount = eligibleCount,
+                    CreatedAt = lastReminder == null ? null : lastReminder.CreatedAt,
+                    Subject = lastReminder == null ? null : lastReminder.Subject,
+                })
+            .SingleAsync(ct);
 
         return new SystemJobDiagnosticsItemDto
         {
@@ -489,9 +512,9 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
             Status = enabled ? "active" : "disabled",
             StatusText = enabled ? "Включено" : "Выключено",
             IntervalText = $"Проверка каждые {pollSeconds} сек.",
-            PendingCount = pendingCount,
-            LastActivityAt = lastReminder?.CreatedAt,
-            LastActivityDescription = lastReminder?.Subject,
+            PendingCount = statistics.EligibleCount,
+            LastActivityAt = statistics.CreatedAt,
+            LastActivityDescription = statistics.Subject,
             NextRunHint = enabled ? "Сервис проверяет задачи с напоминаниями на ближайшие 7 дней и подтягивает ближайшие сроки дел в контрольные задачи." : "Отправка напоминаний выключена в конфигурации.",
             ManualRunEnabled = enabled,
             ManualRunHint = enabled ? "Можно вручную проверить и отправить наступившие напоминания." : "Ручной запуск недоступен, пока напоминания по задачам выключены.",
@@ -1321,5 +1344,12 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
         public string? FileName { get; init; }
         public string? Status { get; init; }
         public string? LastError { get; init; }
+    }
+
+    private sealed class TaskReminderStatistics
+    {
+        public int EligibleCount { get; init; }
+        public DateTime? CreatedAt { get; init; }
+        public string? Subject { get; init; }
     }
 }

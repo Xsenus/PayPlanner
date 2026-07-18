@@ -300,6 +300,13 @@ public class SystemJobsControllerTests
         Assert.Contains(dto.Items, item => item.Key == "court-sync" && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "money-balance-reconciliation" && item.LastProcessedCount == 2);
         Assert.Contains(dto.Items, item => item.Key == "user-activity-retention" && item.Enabled && item.NextRunHint!.Contains("30"));
+        var taskReminderStatisticsCommand = Assert.Single(interceptor.Commands, command =>
+            command.Contains("TaskJournalItems", StringComparison.Ordinal) &&
+            command.Contains("NotificationDeliveries", StringComparison.Ordinal) &&
+            command.Contains("\"Value\"", StringComparison.Ordinal) &&
+            command.Contains("EligibleCount", StringComparison.Ordinal));
+        Assert.Contains("COUNT", taskReminderStatisticsCommand, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ORDER BY", taskReminderStatisticsCommand, StringComparison.OrdinalIgnoreCase);
         var googleLogStatisticsCommand = Assert.Single(interceptor.Commands, command =>
             command.Contains("GoogleCalendarSyncLogs", StringComparison.Ordinal));
         Assert.Contains("COUNT", googleLogStatisticsCommand, StringComparison.OrdinalIgnoreCase);
@@ -310,6 +317,7 @@ public class SystemJobsControllerTests
         Assert.Contains("MIN", yandexLogStatisticsCommand, StringComparison.OrdinalIgnoreCase);
         var deliveryRetentionCommand = Assert.Single(interceptor.Commands, command =>
             command.Contains("NotificationDeliveries", StringComparison.Ordinal) &&
+            command.Contains("OldestAt", StringComparison.Ordinal) &&
             command.Contains("EligibleCount", StringComparison.Ordinal));
         Assert.Contains("COUNT", deliveryRetentionCommand, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("ORDER BY", deliveryRetentionCommand, StringComparison.OrdinalIgnoreCase);
@@ -338,6 +346,8 @@ public class SystemJobsControllerTests
         await using var scope = await CreateDbScopeAsync(interceptor);
         var oldestAt = DateTime.UtcNow.AddDays(-60);
         var oldestDeliveryAt = oldestAt.AddDays(5);
+        var lastReminderAt = oldestDeliveryAt.AddDays(1);
+        var user = await CreateUserAsync(scope.Db, "user");
         scope.Db.SystemSettings.AddRange(
             new SystemSetting
             {
@@ -381,6 +391,23 @@ public class SystemJobsControllerTests
             Status = NotificationDeliveryStatus.Sent,
             CreatedAt = oldestDeliveryAt,
         });
+        scope.Db.NotificationDeliveries.Add(new NotificationDelivery
+        {
+            EventKey = "task:15:reminder:before1d",
+            Channel = NotificationChannels.InApp,
+            Subject = "Preserved task reminder",
+            Status = NotificationDeliveryStatus.Sent,
+            CreatedAt = lastReminderAt,
+        });
+        scope.Db.TaskJournalItems.Add(new TaskJournalItem
+        {
+            ObjectName = "Reminder candidate",
+            Title = "Disabled reminder candidate",
+            AssigneeUserId = user.Id,
+            DueAt = DateTime.UtcNow.AddDays(1),
+            RemindersJson = "[\"before1d\"]",
+            ChannelsJson = "[\"in-app\"]",
+        });
         scope.Db.YandexDiskCrmSyncStates.Add(new YandexDiskCrmSyncState
         {
             DocumentKind = "contract",
@@ -396,7 +423,16 @@ public class SystemJobsControllerTests
         await scope.Db.SaveChangesAsync();
 
         interceptor.Commands.Clear();
-        var result = await CreateController(scope.Db).GetDiagnostics(CancellationToken.None);
+        var controller = new SystemJobsController(
+            scope.Db,
+            new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Notifications:TaskReminders:Enabled"] = "false",
+                })
+                .Build(),
+            new TestOptionsMonitor<AppFeatureFlagsOptions>(new AppFeatureFlagsOptions()));
+        var result = await controller.GetDiagnostics(CancellationToken.None);
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var dto = Assert.IsType<SystemJobDiagnosticsDto>(ok.Value);
         var retention = Assert.Single(dto.Items, item => item.Key == SystemJobKeys.CalendarSyncLogRetention);
@@ -406,6 +442,8 @@ public class SystemJobsControllerTests
             item => item.Key == SystemJobKeys.PaymentAdvanceReviewMonitoring);
         var yandexDisk = Assert.Single(dto.Items,
             item => item.Key == SystemJobKeys.YandexDiskCrmSync);
+        var taskReminders = Assert.Single(dto.Items,
+            item => item.Key == SystemJobKeys.TaskReminders);
 
         Assert.False(retention.Enabled);
         Assert.Equal(0, retention.PendingCount);
@@ -419,12 +457,22 @@ public class SystemJobsControllerTests
         Assert.Equal(0, yandexDisk.PendingCount);
         Assert.Equal(oldestDeliveryAt, yandexDisk.LastActivityAt);
         Assert.Contains("Preserved Yandex Disk error", yandexDisk.LastActivityDescription);
+        Assert.False(taskReminders.Enabled);
+        Assert.Equal(0, taskReminders.PendingCount);
+        Assert.Equal(lastReminderAt, taskReminders.LastActivityAt);
+        Assert.Equal("Preserved task reminder", taskReminders.LastActivityDescription);
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("TaskJournalItems", StringComparison.Ordinal) &&
+            command.Contains("NotificationDeliveries", StringComparison.Ordinal) &&
+            command.Contains("\"Value\"", StringComparison.Ordinal) &&
+            command.Contains("EligibleCount", StringComparison.Ordinal));
         Assert.Single(interceptor.Commands, command =>
             command.Contains("GoogleCalendarSyncLogs", StringComparison.Ordinal));
         Assert.Single(interceptor.Commands, command =>
             command.Contains("YandexCalendarSyncLogs", StringComparison.Ordinal));
         Assert.Single(interceptor.Commands, command =>
             command.Contains("NotificationDeliveries", StringComparison.Ordinal) &&
+            command.Contains("OldestAt", StringComparison.Ordinal) &&
             command.Contains("EligibleCount", StringComparison.Ordinal));
         Assert.DoesNotContain(interceptor.Commands, command =>
             command.Contains("PendingCount", StringComparison.Ordinal) &&
