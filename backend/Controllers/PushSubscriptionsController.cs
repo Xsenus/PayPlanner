@@ -72,21 +72,25 @@ public sealed class PushSubscriptionsController : ControllerBase
         await RevokeInvalidStoredSubscriptionsAsync(ct);
 
         var status = _webPushNotificationService.GetPublicKeyStatus();
-        var totalSubscriptionsCount = await _context.UserPushSubscriptions.AsNoTracking().CountAsync(ct);
         var activeSubscriptionsQuery = _context.UserPushSubscriptions
             .AsNoTracking()
             .Where(item => item.IsActive && item.RevokedAt == null);
-        var activeSubscriptionsCount = await activeSubscriptionsQuery.CountAsync(ct);
-        var revokedSubscriptionsCount = await _context.UserPushSubscriptions
+        var subscriptionStatistics = await _context.UserPushSubscriptions
             .AsNoTracking()
-            .CountAsync(item => !item.IsActive || item.RevokedAt != null, ct);
-        var failedSubscriptionsCount = await _context.UserPushSubscriptions
-            .AsNoTracking()
-            .CountAsync(item => item.LastErrorAt != null, ct);
-        var usersWithActiveSubscriptionsCount = await activeSubscriptionsQuery
-            .Select(item => item.UserId)
-            .Distinct()
-            .CountAsync(ct);
+            .GroupBy(_ => 1)
+            .Select(group => new
+            {
+                Total = group.Count(),
+                Active = group.Count(item => item.IsActive && item.RevokedAt == null),
+                Revoked = group.Count(item => !item.IsActive || item.RevokedAt != null),
+                Failed = group.Count(item => item.LastErrorAt != null),
+                UsersWithActive = group
+                    .Where(item => item.IsActive && item.RevokedAt == null)
+                    .Select(item => item.UserId)
+                    .Distinct()
+                    .Count(),
+            })
+            .SingleOrDefaultAsync(ct);
 
         var lastSuccessfulDeliveryAt = await _context.NotificationDeliveries
             .AsNoTracking()
@@ -117,11 +121,11 @@ public sealed class PushSubscriptionsController : ControllerBase
             PublicKeyConfigured = status.PublicKeyConfigured,
             PrivateKeyConfigured = status.PrivateKeyConfigured,
             SubjectConfigured = status.SubjectConfigured,
-            TotalSubscriptionsCount = totalSubscriptionsCount,
-            ActiveSubscriptionsCount = activeSubscriptionsCount,
-            RevokedSubscriptionsCount = revokedSubscriptionsCount,
-            FailedSubscriptionsCount = failedSubscriptionsCount,
-            UsersWithActiveSubscriptionsCount = usersWithActiveSubscriptionsCount,
+            TotalSubscriptionsCount = subscriptionStatistics?.Total ?? 0,
+            ActiveSubscriptionsCount = subscriptionStatistics?.Active ?? 0,
+            RevokedSubscriptionsCount = subscriptionStatistics?.Revoked ?? 0,
+            FailedSubscriptionsCount = subscriptionStatistics?.Failed ?? 0,
+            UsersWithActiveSubscriptionsCount = subscriptionStatistics?.UsersWithActive ?? 0,
             LastSuccessfulDeliveryAt = lastSuccessfulDeliveryAt,
             LastFailedDeliveryAt = lastFailedDelivery?.CreatedAt,
             LastDeliveryError = lastFailedDelivery?.Error,

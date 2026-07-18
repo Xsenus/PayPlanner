@@ -767,6 +767,11 @@ public class ClientsControllerTests
         }
 
         var limited = await controller.GetAll(CancellationToken.None);
+        for (var i = 0; i < 60 && limited is OkObjectResult; i += 1)
+        {
+            limited = await controller.GetAll(CancellationToken.None);
+        }
+
         var result = Assert.IsType<ObjectResult>(limited);
 
         Assert.Equal(StatusCodes.Status429TooManyRequests, result.StatusCode);

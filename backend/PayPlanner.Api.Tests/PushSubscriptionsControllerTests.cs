@@ -1,8 +1,10 @@
+using System.Data.Common;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
@@ -58,7 +60,8 @@ public class PushSubscriptionsControllerTests
     [Fact]
     public async Task GetDiagnostics_ReturnsAggregatedWebPushStateForNotificationAdmins()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
         var admin = await CreateUserAsync(db, "admin@example.com", "admin");
         var user = await CreateUserAsync(db, "push-user@example.com", "user");
         var now = DateTime.UtcNow;
@@ -116,6 +119,7 @@ public class PushSubscriptionsControllerTests
 
         var controller = CreateController(db, admin.Id, new RecordingWebPushNotificationService(
             new WebPushPublicKeyStatus(true, false, string.Empty, true, false, true)));
+        interceptor.Commands.Clear();
 
         var diagnostics = AssertOk<WebPushDiagnosticsDto>(
             await controller.GetDiagnostics(CancellationToken.None));
@@ -133,6 +137,8 @@ public class PushSubscriptionsControllerTests
         Assert.NotNull(diagnostics.LastSuccessfulDeliveryAt);
         Assert.NotNull(diagnostics.LastFailedDeliveryAt);
         Assert.Equal("Network error", diagnostics.LastDeliveryError);
+        Assert.Equal(3, interceptor.Commands.Count(command =>
+            command.Contains("FROM \"UserPushSubscriptions\"", StringComparison.Ordinal)));
     }
 
     [Fact]
@@ -348,18 +354,36 @@ public class PushSubscriptionsControllerTests
         return Assert.IsAssignableFrom<T>(ok.Value);
     }
 
-    private static async Task<PaymentContext> CreateContextAsync()
+    private static async Task<PaymentContext> CreateContextAsync(DbCommandInterceptor? interceptor = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
 
-        var options = new DbContextOptionsBuilder<PaymentContext>()
-            .UseSqlite(connection)
-            .Options;
+        var optionsBuilder = new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite(connection);
+        if (interceptor is not null)
+        {
+            optionsBuilder.AddInterceptors(interceptor);
+        }
 
-        var db = new PaymentContext(options);
+        var db = new PaymentContext(optionsBuilder.Options);
         await db.Database.EnsureCreatedAsync();
         return db;
+    }
+
+    private sealed class RecordingCommandInterceptor : DbCommandInterceptor
+    {
+        public List<string> Commands { get; } = [];
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            Commands.Add(command.CommandText);
+            return ValueTask.FromResult(result);
+        }
     }
 
     private sealed class RecordingWebPushNotificationService : IWebPushNotificationService
