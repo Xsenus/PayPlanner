@@ -6367,11 +6367,17 @@ public class ReportsController : ControllerBase
         CancellationToken ct)
     {
         var rows = await BuildFactQuery(from, to, source, accountName, counterpartyName, clientId, caseId, contractId, incomeTypeId, paymentsVisibility)
-            .Select(item => new
+            .GroupBy(item => new
             {
                 item.Direction,
-                item.Amount,
                 item.DirectionName,
+            })
+            .Select(group => new DirectionQueryRow
+            {
+                Direction = group.Key.Direction,
+                DirectionName = group.Key.DirectionName,
+                Amount = group.Sum(item => item.Amount),
+                Count = group.Count(),
             })
             .ToListAsync(ct);
 
@@ -6388,6 +6394,7 @@ public class ReportsController : ControllerBase
             {
                 item.Direction,
                 item.Amount,
+                item.Count,
                 DirectionName = ResolveDirectionName(item.DirectionName),
             })
             .GroupBy(item => item.DirectionName, StringComparer.OrdinalIgnoreCase)
@@ -6403,13 +6410,20 @@ public class ReportsController : ControllerBase
 
                 return new DirectionReportItemDto
                 {
-                    DirectionName = group.First().DirectionName,
+                    DirectionName = group
+                        .Select(item => item.DirectionName)
+                        .OrderBy(name => name, StringComparer.Ordinal)
+                        .First(),
                     Income = income,
                     Expense = expense,
                     NetTotal = income - expense,
                     TotalAmount = totalAmount,
-                    IncomeCount = group.Count(item => item.Direction == MoneyOperationDirection.Income),
-                    ExpenseCount = group.Count(item => item.Direction == MoneyOperationDirection.Expense),
+                    IncomeCount = group
+                        .Where(item => item.Direction == MoneyOperationDirection.Income)
+                        .Sum(item => item.Count),
+                    ExpenseCount = group
+                        .Where(item => item.Direction == MoneyOperationDirection.Expense)
+                        .Sum(item => item.Count),
                     Share = turnoverTotal > 0m
                         ? Math.Round(totalAmount / turnoverTotal * 100m, 1, MidpointRounding.AwayFromZero)
                         : 0m,
@@ -9535,6 +9549,14 @@ public class ReportsController : ControllerBase
     {
         public MoneyOperationDirection Direction { get; init; }
         public string? ProjectName { get; init; }
+        public decimal Amount { get; init; }
+        public int Count { get; init; }
+    }
+
+    private sealed class DirectionQueryRow
+    {
+        public MoneyOperationDirection Direction { get; init; }
+        public string? DirectionName { get; init; }
         public decimal Amount { get; init; }
         public int Count { get; init; }
     }
