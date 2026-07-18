@@ -70,7 +70,8 @@ public class SystemJobsControllerTests
     [Fact]
     public async Task GetDiagnostics_ReturnsKnownBackgroundJobsWithoutSecrets()
     {
-        await using var scope = await CreateDbScopeAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var scope = await CreateDbScopeAsync(interceptor);
         var now = DateTime.UtcNow;
         scope.Db.SystemSettings.AddRange(
             new SystemSetting { Key = "database-backup.enabled", Value = "true", CreatedAt = now, UpdatedAt = now },
@@ -257,6 +258,7 @@ public class SystemJobsControllerTests
                 },
             }));
 
+        interceptor.Commands.Clear();
         var result = await controller.GetDiagnostics(CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
@@ -279,12 +281,56 @@ public class SystemJobsControllerTests
         Assert.Contains(dto.Items, item => item.Key == "court-sync" && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "money-balance-reconciliation" && item.LastProcessedCount == 2);
         Assert.Contains(dto.Items, item => item.Key == "user-activity-retention" && item.Enabled && item.NextRunHint!.Contains("30"));
+        var googleLogStatisticsCommand = Assert.Single(interceptor.Commands, command =>
+            command.Contains("GoogleCalendarSyncLogs", StringComparison.Ordinal));
+        Assert.Contains("COUNT", googleLogStatisticsCommand, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("MIN", googleLogStatisticsCommand, StringComparison.OrdinalIgnoreCase);
+        var yandexLogStatisticsCommand = Assert.Single(interceptor.Commands, command =>
+            command.Contains("YandexCalendarSyncLogs", StringComparison.Ordinal));
+        Assert.Contains("COUNT", yandexLogStatisticsCommand, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("MIN", yandexLogStatisticsCommand, StringComparison.OrdinalIgnoreCase);
         Assert.All(dto.Items, item =>
         {
             Assert.DoesNotContain("password", item.Description, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("token", item.Description, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("secret", item.Description, StringComparison.OrdinalIgnoreCase);
         });
+    }
+
+    [Fact]
+    public async Task GetDiagnostics_PreservesOldestCalendarLogWhenRetentionDisabled()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var scope = await CreateDbScopeAsync(interceptor);
+        var oldestAt = DateTime.UtcNow.AddDays(-60);
+        scope.Db.SystemSettings.Add(new SystemSetting
+        {
+            Key = CalendarSyncLogRetentionService.EnabledSettingKey,
+            Value = "false",
+            CreatedAt = oldestAt,
+            UpdatedAt = oldestAt,
+        });
+        scope.Db.GoogleCalendarSyncLogs.Add(new GoogleCalendarSyncLog
+        {
+            Operation = "upsert",
+            Message = "Preserved old Google log",
+            CreatedAt = oldestAt,
+        });
+        await scope.Db.SaveChangesAsync();
+
+        interceptor.Commands.Clear();
+        var result = await CreateController(scope.Db).GetDiagnostics(CancellationToken.None);
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<SystemJobDiagnosticsDto>(ok.Value);
+        var retention = Assert.Single(dto.Items, item => item.Key == SystemJobKeys.CalendarSyncLogRetention);
+
+        Assert.False(retention.Enabled);
+        Assert.Equal(0, retention.PendingCount);
+        Assert.Equal(oldestAt, retention.LastActivityAt);
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("GoogleCalendarSyncLogs", StringComparison.Ordinal));
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("YandexCalendarSyncLogs", StringComparison.Ordinal));
     }
 
     [Fact]

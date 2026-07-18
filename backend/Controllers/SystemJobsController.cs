@@ -721,13 +721,25 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
             settings.GetValueOrDefault(CalendarSyncLogRetentionService.BatchSizeSettingKey),
             _configuration.GetValue("CalendarSync:LogRetention:BatchSize", CalendarSyncLogRetentionService.DefaultBatchSize)));
         var cutoff = DateTime.UtcNow.AddDays(-retentionDays);
-        var counts = _calendarSyncLogRetentionRunner is null
-            ? new CalendarSyncLogRetentionCounts(
-                await _db.GoogleCalendarSyncLogs.AsNoTracking().CountAsync(item => item.CreatedAt < cutoff, ct),
-                await _db.YandexCalendarSyncLogs.AsNoTracking().CountAsync(item => item.CreatedAt < cutoff, ct))
-            : await _calendarSyncLogRetentionRunner.CountEligibleLogsAsync(ct);
-        var oldestGoogleAt = await _db.GoogleCalendarSyncLogs.AsNoTracking().MinAsync(item => (DateTime?)item.CreatedAt, ct);
-        var oldestYandexAt = await _db.YandexCalendarSyncLogs.AsNoTracking().MinAsync(item => (DateTime?)item.CreatedAt, ct);
+        var googleStatistics = await _db.Database
+            .SqlQuery<CalendarLogRetentionStatistics>($$"""
+                SELECT
+                    CAST((SELECT COUNT(*) FROM "GoogleCalendarSyncLogs" WHERE "CreatedAt" < {{cutoff}}) AS INTEGER) AS "EligibleCount",
+                    (SELECT MIN("CreatedAt") FROM "GoogleCalendarSyncLogs") AS "OldestAt"
+                """)
+            .SingleAsync(ct);
+        var yandexStatistics = await _db.Database
+            .SqlQuery<CalendarLogRetentionStatistics>($$"""
+                SELECT
+                    CAST((SELECT COUNT(*) FROM "YandexCalendarSyncLogs" WHERE "CreatedAt" < {{cutoff}}) AS INTEGER) AS "EligibleCount",
+                    (SELECT MIN("CreatedAt") FROM "YandexCalendarSyncLogs") AS "OldestAt"
+                """)
+            .SingleAsync(ct);
+        var counts = new CalendarSyncLogRetentionCounts(
+            enabled ? googleStatistics.EligibleCount : 0,
+            enabled ? yandexStatistics.EligibleCount : 0);
+        var oldestGoogleAt = googleStatistics.OldestAt;
+        var oldestYandexAt = yandexStatistics.OldestAt;
         var oldestLogAt = oldestGoogleAt is null ? oldestYandexAt : oldestYandexAt is null ? oldestGoogleAt : oldestGoogleAt < oldestYandexAt ? oldestGoogleAt : oldestYandexAt;
 
         return new SystemJobDiagnosticsItemDto
@@ -1295,5 +1307,11 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
             ManualRunEnabled = item.ManualRunEnabled,
             ManualRunHint = item.ManualRunHint,
         };
+    }
+
+    private sealed class CalendarLogRetentionStatistics
+    {
+        public int EligibleCount { get; init; }
+        public DateTime? OldestAt { get; init; }
     }
 }
