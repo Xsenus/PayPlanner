@@ -8736,11 +8736,17 @@ public class ReportsController : ControllerBase
         }
 
         var rows = await query
-            .Select(item => new
+            .GroupBy(item => new
             {
                 item.Status,
                 item.Type,
-                item.Amount,
+            })
+            .Select(group => new CashOrderQueryRow
+            {
+                Status = group.Key.Status,
+                Type = group.Key.Type,
+                Amount = group.Sum(item => item.Amount),
+                Count = group.Count(),
             })
             .ToListAsync(ct);
 
@@ -8765,9 +8771,9 @@ public class ReportsController : ControllerBase
                     OutgoingTotal = outgoingTotal,
                     NetTotal = incomingTotal - outgoingTotal,
                     TotalAmount = totalAmount,
-                    IncomingCount = group.Count(item => item.Type == CashOrderType.Incoming),
-                    OutgoingCount = group.Count(item => item.Type == CashOrderType.Outgoing),
-                    OrderCount = group.Count(),
+                    IncomingCount = group.Where(item => item.Type == CashOrderType.Incoming).Sum(item => item.Count),
+                    OutgoingCount = group.Where(item => item.Type == CashOrderType.Outgoing).Sum(item => item.Count),
+                    OrderCount = group.Sum(item => item.Count),
                     Share = turnoverTotal > 0m
                         ? Math.Round(totalAmount / turnoverTotal * 100m, 1, MidpointRounding.AwayFromZero)
                         : 0m,
@@ -8792,10 +8798,10 @@ public class ReportsController : ControllerBase
             PostedIncomingTotal = postedIncomingTotal,
             PostedOutgoingTotal = postedOutgoingTotal,
             PostedNetTotal = postedIncomingTotal - postedOutgoingTotal,
-            OrderCount = rows.Count,
-            DraftCount = rows.Count(item => item.Status == CashOrderStatus.Draft),
-            PostedCount = rows.Count(item => item.Status == CashOrderStatus.Posted),
-            CancelledCount = rows.Count(item => item.Status == CashOrderStatus.Cancelled),
+            OrderCount = rows.Sum(item => item.Count),
+            DraftCount = rows.Where(item => item.Status == CashOrderStatus.Draft).Sum(item => item.Count),
+            PostedCount = rows.Where(item => item.Status == CashOrderStatus.Posted).Sum(item => item.Count),
+            CancelledCount = rows.Where(item => item.Status == CashOrderStatus.Cancelled).Sum(item => item.Count),
             Statuses = statuses,
         };
     }
@@ -9427,6 +9433,14 @@ public class ReportsController : ControllerBase
     {
         public MoneyOperationDirection Direction { get; init; }
         public string? Currency { get; init; }
+        public decimal Amount { get; init; }
+        public int Count { get; init; }
+    }
+
+    private sealed class CashOrderQueryRow
+    {
+        public CashOrderStatus Status { get; init; }
+        public CashOrderType Type { get; init; }
         public decimal Amount { get; init; }
         public int Count { get; init; }
     }

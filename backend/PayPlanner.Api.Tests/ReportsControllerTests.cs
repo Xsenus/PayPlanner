@@ -6328,14 +6328,17 @@ services.Id,
     [Fact]
     public async Task CashOrders_GroupsOrdersByStatus()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await SqliteTestContextFactory.CreateAsync(interceptor: interceptor);
         db.CashOrders.AddRange(
-            CashOrder("PKO-1", CashOrderType.Incoming, CashOrderStatus.Posted, 5_000m, new DateTime(2026, 5, 1)),
+            CashOrder("PKO-1", CashOrderType.Incoming, CashOrderStatus.Posted, 3_000m, new DateTime(2026, 5, 1, 9, 0, 0)),
+            CashOrder("PKO-1-2", CashOrderType.Incoming, CashOrderStatus.Posted, 2_000m, new DateTime(2026, 5, 1, 15, 0, 0)),
             CashOrder("RKO-1", CashOrderType.Outgoing, CashOrderStatus.Posted, 2_000m, new DateTime(2026, 5, 2)),
             CashOrder("PKO-2", CashOrderType.Incoming, CashOrderStatus.Draft, 1_000m, new DateTime(2026, 5, 3)),
             CashOrder("RKO-2", CashOrderType.Outgoing, CashOrderStatus.Cancelled, 500m, new DateTime(2026, 5, 4)),
             CashOrder("PKO-OLD", CashOrderType.Incoming, CashOrderStatus.Posted, 99_999m, new DateTime(2026, 4, 30)));
         await db.SaveChangesAsync();
+        interceptor.Commands.Clear();
         var controller = CreateController(db);
 
         var action = await controller.CashOrders(
@@ -6348,9 +6351,9 @@ services.Id,
         Assert.Equal(5_000m, report.PostedIncomingTotal);
         Assert.Equal(2_000m, report.PostedOutgoingTotal);
         Assert.Equal(3_000m, report.PostedNetTotal);
-        Assert.Equal(4, report.OrderCount);
+        Assert.Equal(5, report.OrderCount);
         Assert.Equal(1, report.DraftCount);
-        Assert.Equal(2, report.PostedCount);
+        Assert.Equal(3, report.PostedCount);
         Assert.Equal(1, report.CancelledCount);
 
         Assert.Collection(
@@ -6370,6 +6373,9 @@ services.Id,
                 Assert.Equal(5_000m, item.IncomingTotal);
                 Assert.Equal(2_000m, item.OutgoingTotal);
                 Assert.Equal(7_000m, item.TotalAmount);
+                Assert.Equal(2, item.IncomingCount);
+                Assert.Equal(1, item.OutgoingCount);
+                Assert.Equal(3, item.OrderCount);
                 Assert.Equal(82.4m, item.Share);
             },
             item =>
@@ -6380,6 +6386,12 @@ services.Id,
                 Assert.Equal(500m, item.OutgoingTotal);
                 Assert.Equal(5.9m, item.Share);
             });
+
+        var cashOrderQuery = Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"CashOrders\"", StringComparison.Ordinal));
+        Assert.Contains("GROUP BY", cashOrderQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SUM", cashOrderQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("COUNT", cashOrderQuery, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
