@@ -2327,22 +2327,27 @@ describe('apiService reports', () => {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
 
-    const result = await apiService.getOverdueProceduralDeadlinesReport({
-      asOf: '2026-05-26',
-      deadlineType: 'appeal',
-      responsibleUserId: 7,
-      limit: 25,
-    });
+    const result = await apiService.getOverdueProceduralDeadlinesReport(
+      {
+        asOf: '2026-05-26',
+        deadlineType: 'appeal',
+        responsibleUserId: 7,
+        limit: 25,
+      },
+      { signal: controller.signal },
+    );
 
     expect(result).toEqual(payload);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url] = fetchMock.mock.calls[0];
+    const [url, options] = fetchMock.mock.calls[0];
     expect(String(url)).toContain('/reports/overdue-deadlines?');
     expect(String(url)).toContain('asOf=2026-05-26');
     expect(String(url)).toContain('deadlineType=appeal');
     expect(String(url)).toContain('responsibleUserId=7');
     expect(String(url)).toContain('limit=25');
+    expect(options?.signal).toBe(controller.signal);
   });
 
   it('loads current cases report with filters', async () => {

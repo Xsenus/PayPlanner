@@ -4486,14 +4486,6 @@ public class ReportsController : ControllerBase
 
         var query = _db.ClientCaseProceduralDeadlines
             .AsNoTracking()
-            .Include(item => item.ClientCase)
-                .ThenInclude(item => item.Client)
-            .Include(item => item.ClientCase)
-                .ThenInclude(item => item.LegalEntity)
-            .Include(item => item.ClientCase)
-                .ThenInclude(item => item.ResponsibleUser)
-            .Include(item => item.TaskJournalItem)
-            .Include(item => item.ClientCaseDocument)
             .Where(item =>
                 visibleCaseIdsQuery.Contains(item.ClientCaseId)
                 && item.DueAt < asOf.Date
@@ -4510,6 +4502,29 @@ public class ReportsController : ControllerBase
         }
 
         var rows = await query
+            .Select(item => new OverdueDeadlineQueryRow(
+                item.Id,
+                item.ClientCaseId,
+                item.ClientCase.CaseNumber,
+                item.ClientCase.Title,
+                item.ClientCase.Client != null ? item.ClientCase.Client.Name : null,
+                item.ClientCase.Client != null ? item.ClientCase.Client.Company : null,
+                item.ClientCase.LegalEntity != null ? item.ClientCase.LegalEntity.ShortName : null,
+                item.ClientCase.LegalEntity != null ? item.ClientCase.LegalEntity.FullName : null,
+                item.ClientCase.ResponsibleUserId,
+                item.ClientCase.ResponsibleUser != null ? item.ClientCase.ResponsibleUser.FullName : null,
+                item.DeadlineType,
+                item.Title,
+                item.Description,
+                item.DueAt,
+                item.AllDay,
+                item.Status,
+                item.TaskJournalItemId,
+                item.TaskJournalItem != null ? item.TaskJournalItem.Title : null,
+                item.ClientCaseDocumentId,
+                item.ClientCaseDocument != null ? item.ClientCaseDocument.OriginalFileName : null,
+                item.SourceType,
+                item.SourceId))
             .ToListAsync(ct);
 
         var items = rows
@@ -4559,17 +4574,17 @@ public class ReportsController : ControllerBase
     }
 
     private static OverdueProceduralDeadlineItemDto MapOverdueProceduralDeadlineItem(
-        ClientCaseProceduralDeadline item,
+        OverdueDeadlineQueryRow item,
         DateTime asOf)
         => new()
         {
             DeadlineId = item.Id,
             CaseId = item.ClientCaseId,
-            CaseNumber = item.ClientCase.CaseNumber,
-            CaseTitle = item.ClientCase.Title,
-            ClientName = ResolveCaseOwnerName(item.ClientCase),
-            ResponsibleUserId = item.ClientCase.ResponsibleUserId,
-            ResponsibleName = ResolveCaseResponsibleName(item.ClientCase),
+            CaseNumber = item.CaseNumber,
+            CaseTitle = item.CaseTitle,
+            ClientName = ResolveOverdueDeadlineOwnerName(item),
+            ResponsibleUserId = item.ResponsibleUserId,
+            ResponsibleName = NormalizeReportText(item.ResponsibleName, "Не назначен"),
             DeadlineType = item.DeadlineType,
             DeadlineTypeLabel = ResolveProceduralDeadlineTypeLabel(item.DeadlineType),
             Title = NormalizeReportText(item.Title, ResolveProceduralDeadlineTypeLabel(item.DeadlineType)),
@@ -4580,9 +4595,9 @@ public class ReportsController : ControllerBase
             Status = item.Status,
             StatusLabel = ResolveProceduralDeadlineStatusLabel(item.Status),
             TaskJournalItemId = item.TaskJournalItemId,
-            TaskTitle = item.TaskJournalItem?.Title ?? string.Empty,
+            TaskTitle = item.TaskTitle ?? string.Empty,
             ClientCaseDocumentId = item.ClientCaseDocumentId,
-            DocumentName = item.ClientCaseDocument?.OriginalFileName ?? string.Empty,
+            DocumentName = item.DocumentName ?? string.Empty,
             SourceType = item.SourceType,
             SourceId = item.SourceId,
         };
@@ -5642,6 +5657,25 @@ public class ReportsController : ControllerBase
     }
 
     private static string ResolveCurrentCaseOwnerName(CurrentCaseQueryRow item)
+    {
+        if (!string.IsNullOrWhiteSpace(item.ClientName) || !string.IsNullOrWhiteSpace(item.ClientCompany))
+        {
+            return NormalizeReportText(
+                !string.IsNullOrWhiteSpace(item.ClientName) ? item.ClientName : item.ClientCompany,
+                "Клиент без имени");
+        }
+
+        if (!string.IsNullOrWhiteSpace(item.LegalEntityShortName) || !string.IsNullOrWhiteSpace(item.LegalEntityFullName))
+        {
+            return NormalizeReportText(
+                !string.IsNullOrWhiteSpace(item.LegalEntityShortName) ? item.LegalEntityShortName : item.LegalEntityFullName,
+                "Юридическое лицо без названия");
+        }
+
+        return "Без владельца";
+    }
+
+    private static string ResolveOverdueDeadlineOwnerName(OverdueDeadlineQueryRow item)
     {
         if (!string.IsNullOrWhiteSpace(item.ClientName) || !string.IsNullOrWhiteSpace(item.ClientCompany))
         {
@@ -9438,6 +9472,30 @@ public class ReportsController : ControllerBase
         string Title,
         DateTime DueAt,
         bool AllDay);
+
+    private sealed record OverdueDeadlineQueryRow(
+        int Id,
+        int ClientCaseId,
+        string CaseNumber,
+        string CaseTitle,
+        string? ClientName,
+        string? ClientCompany,
+        string? LegalEntityShortName,
+        string? LegalEntityFullName,
+        int? ResponsibleUserId,
+        string? ResponsibleName,
+        string DeadlineType,
+        string Title,
+        string Description,
+        DateTime DueAt,
+        bool AllDay,
+        string Status,
+        int? TaskJournalItemId,
+        string? TaskTitle,
+        int? ClientCaseDocumentId,
+        string? DocumentName,
+        string SourceType,
+        int? SourceId);
 
     private sealed record DeadlineSourceRow(
         string Type,

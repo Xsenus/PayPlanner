@@ -6356,9 +6356,9 @@ export class ApiService {
     deadlineType?: string;
     responsibleUserId?: number;
     limit?: number;
-  }) {
+  }, options?: { signal?: AbortSignal }) {
     const q = buildQuery(params ?? {});
-    return this.request<OverdueProceduralDeadlinesReport>(`/reports/overdue-deadlines${q}`);
+    return this.request<OverdueProceduralDeadlinesReport>(`/reports/overdue-deadlines${q}`, { signal: options?.signal });
   }
 
   async getTaskReport(params?: {

@@ -2786,7 +2786,8 @@ public class ReportsControllerTests
     [Fact]
     public async Task OverdueDeadlines_UsesVisibleProceduralDeadlines()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await SqliteTestContextFactory.CreateAsync(interceptor: interceptor);
         var role = new Role { Name = "deadline-report-lawyer", Description = "Lawyer" };
         var visibleUser = new User
         {
@@ -2888,6 +2889,7 @@ public class ReportsControllerTests
                 CreatedAt = asOf.AddDays(-20),
             });
         await db.SaveChangesAsync();
+        interceptor.Commands.Clear();
 
         var controller = CreateController(db, CreateUserPrincipal(visibleUser.Id));
 
@@ -2919,6 +2921,20 @@ public class ReportsControllerTests
         var responsible = Assert.Single(report.ByResponsible);
         Assert.Equal(visibleUser.Id, responsible.ResponsibleUserId);
         Assert.Equal(1, responsible.Count);
+
+        var deadlineQuery = Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"ClientCaseProceduralDeadlines\"", StringComparison.Ordinal));
+        Assert.DoesNotContain("\"Stage\"", deadlineQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"FeeAmount\"", deadlineQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"CourtName\"", deadlineQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"WarningDaysBefore\"", deadlineQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Notes\"", deadlineQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"CreatedByUserName\"", deadlineQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"CloseReason\"", deadlineQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"StoredFileName\"", deadlineQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"StoragePath\"", deadlineQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"RemindersJson\"", deadlineQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"ChannelsJson\"", deadlineQuery, StringComparison.Ordinal);
     }
 
     [Fact]
