@@ -6128,9 +6128,9 @@ export class ApiService {
     caseId?: number;
     contractId?: number;
     incomeTypeId?: number;
-  }) {
+  }, options?: { signal?: AbortSignal }) {
     const q = buildQuery(params ?? {});
-    return this.request<CashFlowForecastReport>(`/reports/cash-flow-forecast${q}`);
+    return this.request<CashFlowForecastReport>(`/reports/cash-flow-forecast${q}`, { signal: options?.signal });
   }
 
   async getMoneyCategoryReport(params?: {
