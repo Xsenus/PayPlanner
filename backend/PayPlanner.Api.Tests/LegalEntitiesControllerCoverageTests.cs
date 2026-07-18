@@ -1,9 +1,11 @@
+using System.Data.Common;
 using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
@@ -330,7 +332,8 @@ public class LegalEntitiesControllerCoverageTests
     [Fact]
     public async Task GetPaged_ReturnsContactCounters_ForVisiblePageOnly()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
         var targetLegalId = await CreateLegalEntityAsync(db, "Alpha Legal", inn: "7700000001");
         var otherLegalId = await CreateLegalEntityAsync(db, "Beta Legal", inn: "7700000002");
 
@@ -418,6 +421,7 @@ public class LegalEntitiesControllerCoverageTests
         await db.SaveChangesAsync();
 
         var controller = CreateController(db, new StubLegalEntityEnrichmentService(), currentUserId: 1);
+        interceptor.Commands.Clear();
 
         var action = await controller.GetPaged(search: "alpha", page: 1, pageSize: 1, ct: CancellationToken.None);
 
@@ -438,6 +442,15 @@ public class LegalEntitiesControllerCoverageTests
         Assert.Equal(2, item.RelatedInvoices.Count);
         Assert.Single(item.RelatedActs);
         Assert.Single(item.RelatedPayments);
+        Assert.Contains(item.RelatedCases, link => link.Label == "Case 1");
+        Assert.Contains(item.RelatedContracts, link => link.Label == "№C-1");
+        Assert.Contains(item.RelatedActs, link => link.Label == "№A-1" && link.Amount == 500m);
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"ClientCases\"", StringComparison.Ordinal));
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"LegalEntityContracts\"", StringComparison.Ordinal));
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"Acts\"", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -1524,18 +1537,36 @@ public class LegalEntitiesControllerCoverageTests
         return user;
     }
 
-    private static async Task<PaymentContext> CreateContextAsync()
+    private static async Task<PaymentContext> CreateContextAsync(DbCommandInterceptor? interceptor = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
 
-        var options = new DbContextOptionsBuilder<PaymentContext>()
-            .UseSqlite(connection)
-            .Options;
+        var optionsBuilder = new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite(connection);
+        if (interceptor is not null)
+        {
+            optionsBuilder.AddInterceptors(interceptor);
+        }
 
-        var db = new PaymentContext(options);
+        var db = new PaymentContext(optionsBuilder.Options);
         await db.Database.EnsureCreatedAsync();
         return db;
+    }
+
+    private sealed class RecordingCommandInterceptor : DbCommandInterceptor
+    {
+        public List<string> Commands { get; } = [];
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            Commands.Add(command.CommandText);
+            return ValueTask.FromResult(result);
+        }
     }
 
     private sealed class NoopFormRequirementsService : IFormRequirementsService

@@ -1440,17 +1440,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             .AsNoTracking()
             .ApplyContractVisibility(contractsVisibility);
 
-        var casesCountByLegalEntity = itemIds.Count == 0
-            ? new Dictionary<int, int>()
-            : await _db.ClientCases
-                .AsNoTracking()
-                .ApplyClientCaseVisibility(casesVisibility)
-                .Where(clientCase => clientCase.LegalEntityId.HasValue
-                    && itemIds.Contains(clientCase.LegalEntityId.Value))
-                .GroupBy(clientCase => clientCase.LegalEntityId!.Value)
-                .Select(group => new { LegalEntityId = group.Key, Count = group.Count() })
-                .ToDictionaryAsync(item => item.LegalEntityId, item => item.Count, ct);
-
+        var casesCountByLegalEntity = new Dictionary<int, int>();
         var caseLinksByLegalEntity = new Dictionary<int, List<RelatedDocumentLink>>();
         if (itemIds.Count > 0)
         {
@@ -1472,6 +1462,11 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
                 })
                 .ToListAsync(ct);
 
+            casesCountByLegalEntity = caseRows
+                .Where(row => row.LegalEntityId.HasValue)
+                .GroupBy(row => row.LegalEntityId!.Value)
+                .ToDictionary(group => group.Key, group => group.Count());
+
             caseLinksByLegalEntity = caseRows
                 .Where(row => row.LegalEntityId.HasValue)
                 .GroupBy(row => row.LegalEntityId!.Value)
@@ -1488,16 +1483,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
                     }).ToList());
         }
 
-        var contractsCountByLegalEntity = itemIds.Count == 0
-            ? new Dictionary<int, int>()
-            : await _db.LegalEntityContracts
-                .AsNoTracking()
-                .Where(link => visibleContracts.Any(contract => contract.Id == link.ContractId))
-                .Where(link => itemIds.Contains(link.LegalEntityId))
-                .GroupBy(link => link.LegalEntityId)
-                .Select(group => new { LegalEntityId = group.Key, Count = group.Count() })
-                .ToDictionaryAsync(item => item.LegalEntityId, item => item.Count, ct);
-
+        var contractsCountByLegalEntity = new Dictionary<int, int>();
         var contractLinksByLegalEntity = new Dictionary<int, List<RelatedDocumentLink>>();
         if (itemIds.Count > 0)
         {
@@ -1514,6 +1500,10 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
                     link.Contract.Date,
                 })
                 .ToListAsync(ct);
+
+            contractsCountByLegalEntity = contractRows
+                .GroupBy(row => row.LegalEntityId)
+                .ToDictionary(group => group.Key, group => group.Count());
 
             contractLinksByLegalEntity = contractRows
                 .GroupBy(row => row.LegalEntityId)
@@ -1534,17 +1524,7 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
                         }).ToList());
         }
 
-        var actsCountByLegalEntity = itemIds.Count == 0
-            ? new Dictionary<int, int>()
-            : await _db.Acts
-                .AsNoTracking()
-                .ApplyActVisibility(actsVisibility)
-                .Where(act => act.LegalEntityId.HasValue
-                    && itemIds.Contains(act.LegalEntityId.Value))
-                .GroupBy(act => act.LegalEntityId!.Value)
-                .Select(group => new { LegalEntityId = group.Key, Count = group.Count() })
-                .ToDictionaryAsync(item => item.LegalEntityId, item => item.Count, ct);
-
+        var actsCountByLegalEntity = new Dictionary<int, int>();
         var actLinksByLegalEntity = new Dictionary<int, List<RelatedDocumentLink>>();
         if (itemIds.Count > 0)
         {
@@ -1564,6 +1544,11 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
                     act.LegalEntityId,
                 })
                 .ToListAsync(ct);
+
+            actsCountByLegalEntity = actRows
+                .Where(row => row.LegalEntityId.HasValue)
+                .GroupBy(row => row.LegalEntityId!.Value)
+                .ToDictionary(group => group.Key, group => group.Count());
 
             actLinksByLegalEntity = actRows
                 .Where(row => row.LegalEntityId.HasValue)
