@@ -2558,22 +2558,27 @@ describe('apiService reports', () => {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
 
-    const result = await apiService.getLawyerWorkloadReport({
-      asOf: '2026-05-26',
-      horizonDays: 14,
-      lawyerUserId: 7,
-      limit: 25,
-    });
+    const result = await apiService.getLawyerWorkloadReport(
+      {
+        asOf: '2026-05-26',
+        horizonDays: 14,
+        lawyerUserId: 7,
+        limit: 25,
+      },
+      { signal: controller.signal },
+    );
 
     expect(result).toEqual(payload);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url] = fetchMock.mock.calls[0];
+    const [url, options] = fetchMock.mock.calls[0];
     expect(String(url)).toContain('/reports/lawyer-workload?');
     expect(String(url)).toContain('asOf=2026-05-26');
     expect(String(url)).toContain('horizonDays=14');
     expect(String(url)).toContain('lawyerUserId=7');
     expect(String(url)).toContain('limit=25');
+    expect(options?.signal).toBe(controller.signal);
   });
 
   it('loads direction report with filters', async () => {

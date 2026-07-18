@@ -2498,6 +2498,123 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task LawyerWorkload_ProjectsOnlyRequiredColumns()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await SqliteTestContextFactory.CreateAsync(interceptor: interceptor);
+        var role = new Role { Name = "lawyer-workload-projection-role", Description = "Workload reporter" };
+        var user = new User
+        {
+            Email = "lawyer-workload-projection@example.test",
+            FullName = "Projection Workload Lawyer",
+            IsActive = true,
+            Role = role,
+        };
+        var client = new Client { Name = "Projection workload client" };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            ResponsibleUser = user,
+            CaseNumber = "WORKLOAD-PROJECTION",
+            Title = "Projection workload case",
+            CaseType = "Арбитраж",
+            Status = ClientCaseStatus.Open,
+            CreatedAt = new DateTime(2026, 5, 1),
+            Stage = "Unused stage",
+            CourtName = "Unused court",
+            FeeAmount = 123_456m,
+        };
+
+        db.Roles.Add(role);
+        db.Users.Add(user);
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                Role = role,
+                Section = RolePermissionCatalog.Reports,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                Role = role,
+                Section = RolePermissionCatalog.Cases,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                Role = role,
+                Section = RolePermissionCatalog.Tasks,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            });
+        db.TaskJournalItems.Add(new TaskJournalItem
+        {
+            ClientCase = clientCase,
+            ObjectName = clientCase.Title,
+            Title = "Projection workload task",
+            Description = "Unused task description",
+            AssigneeUserId = null,
+            AssigneeName = "Projection Task Assignee",
+            DueAt = new DateTime(2026, 5, 19, 9, 0, 0),
+            Status = "new",
+            Priority = "high",
+            Type = "task",
+            PlannedDurationMinutes = 90,
+            CreatedAt = new DateTime(2026, 5, 10),
+        });
+        db.ClientCaseProceduralDeadlines.Add(new ClientCaseProceduralDeadline
+        {
+            ClientCase = clientCase,
+            DeadlineType = "appeal",
+            Title = "Unused deadline title",
+            Description = "Unused deadline description",
+            DueAt = new DateTime(2026, 5, 18),
+            Status = "active",
+            CreatedAt = new DateTime(2026, 5, 5),
+        });
+        await db.SaveChangesAsync();
+        interceptor.Commands.Clear();
+
+        var controller = CreateController(db, CreateUserPrincipal(user.Id));
+        var action = await controller.LawyerWorkload(
+            new DateTime(2026, 5, 20),
+            7,
+            null,
+            50,
+            CancellationToken.None);
+
+        var report = Assert.IsType<LawyerWorkloadReportDto>(Assert.IsType<OkObjectResult>(action.Result).Value);
+        Assert.Equal(1, report.TotalActiveCases);
+        Assert.Equal(1, report.TotalOpenTasks);
+        Assert.Equal(1, report.TotalOverdueDeadlines);
+
+        var caseQuery = Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"ClientCases\" AS \"c\"", StringComparison.Ordinal));
+        Assert.DoesNotContain("\"CaseNumber\"", caseQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Title\"", caseQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Stage\"", caseQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"FeeAmount\"", caseQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"CourtName\"", caseQuery, StringComparison.Ordinal);
+
+        var taskQuery = Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"TaskJournalItems\"", StringComparison.Ordinal));
+        Assert.DoesNotContain("\"Title\"", taskQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Description\"", taskQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Priority\"", taskQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Type\"", taskQuery, StringComparison.Ordinal);
+
+        var deadlineQuery = Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"ClientCaseProceduralDeadlines\"", StringComparison.Ordinal));
+        Assert.DoesNotContain("\"DeadlineType\"", deadlineQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Title\"", deadlineQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Description\"", deadlineQuery, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task LawyerWorkloadManagementExports_ApplyCasesAndTasksVisibilityScope()
     {
         await using var db = await CreateContextAsync();

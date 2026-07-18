@@ -4980,40 +4980,38 @@ public class ReportsController : ControllerBase
         var horizonEnd = asOf.Date.AddDays(horizonDays);
         var activeCases = await _db.ClientCases
             .AsNoTracking()
-            .WithCaseIncludes()
             .ApplyClientCaseVisibility(casesVisibility)
             .Where(item => item.Status != ClientCaseStatus.Closed && item.Status != ClientCaseStatus.Lost)
+            .Select(item => new LawyerWorkloadCaseRow(
+                item.Id,
+                item.ResponsibleUserId,
+                item.ResponsibleUser != null ? item.ResponsibleUser.FullName : null))
             .ToListAsync(ct);
 
         var caseIds = activeCases.Select(item => item.Id).Distinct().ToArray();
         var tasks = caseIds.Length == 0
-            ? new List<LegalWorkTaskRow>()
+            ? new List<LawyerWorkloadTaskRow>()
             : await _db.TaskJournalItems
                 .AsNoTracking()
                 .ApplyTaskVisibility(tasksVisibility)
                 .Where(item => item.ClientCaseId.HasValue && caseIds.Contains(item.ClientCaseId.Value))
-                .Select(item => new LegalWorkTaskRow(
-                    item.Id,
-                    item.ClientCaseId,
+                .Select(item => new LawyerWorkloadTaskRow(
                     item.AssigneeUserId,
                     item.AssigneeName,
                     item.Status,
-                    item.Priority,
                     item.DueAt,
                     item.PlannedDurationMinutes))
                 .ToListAsync(ct);
 
         var deadlines = caseIds.Length == 0
-            ? new List<CurrentCaseDeadlineRow>()
+            ? new List<LawyerWorkloadDeadlineRow>()
             : await _db.ClientCaseProceduralDeadlines
                 .AsNoTracking()
                 .Where(item =>
                     caseIds.Contains(item.ClientCaseId)
                     && (item.Status == "active" || item.Status == "moved"))
-                .Select(item => new CurrentCaseDeadlineRow(
+                .Select(item => new LawyerWorkloadDeadlineRow(
                     item.ClientCaseId,
-                    item.DeadlineType,
-                    item.Title,
                     item.DueAt,
                     item.AllDay))
                 .ToListAsync(ct);
@@ -5025,7 +5023,7 @@ public class ReportsController : ControllerBase
             .GroupBy(item => workloadKey(item.ResponsibleUserId))
             .ToDictionary(
                 group => group.Key,
-                group => ResolveCaseResponsibleName(group.First()));
+                group => NormalizeReportText(group.First().ResponsibleName, "Не назначен"));
         var taskAssigneeNames = tasks
             .GroupBy(item => workloadKey(item.AssigneeUserId))
             .ToDictionary(
@@ -5090,9 +5088,9 @@ public class ReportsController : ControllerBase
     private static LawyerWorkloadItemDto BuildLawyerWorkloadItem(
         int? lawyerUserId,
         string lawyerName,
-        IReadOnlyCollection<ClientCase> cases,
-        IReadOnlyCollection<LegalWorkTaskRow> tasks,
-        IReadOnlyCollection<CurrentCaseDeadlineRow> deadlines,
+        IReadOnlyCollection<LawyerWorkloadCaseRow> cases,
+        IReadOnlyCollection<LawyerWorkloadTaskRow> tasks,
+        IReadOnlyCollection<LawyerWorkloadDeadlineRow> deadlines,
         DateTime asOf,
         DateTime horizonEnd)
     {
@@ -9300,6 +9298,23 @@ public class ReportsController : ControllerBase
         string Priority,
         DateTime DueAt,
         int PlannedDurationMinutes);
+
+    private sealed record LawyerWorkloadCaseRow(
+        int Id,
+        int? ResponsibleUserId,
+        string? ResponsibleName);
+
+    private sealed record LawyerWorkloadTaskRow(
+        int? AssigneeUserId,
+        string AssigneeName,
+        string Status,
+        DateTime DueAt,
+        int PlannedDurationMinutes);
+
+    private sealed record LawyerWorkloadDeadlineRow(
+        int ClientCaseId,
+        DateTime DueAt,
+        bool AllDay);
 
     private sealed record TaskReportRow(
         int Id,

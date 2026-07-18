@@ -6346,9 +6346,9 @@ export class ApiService {
     horizonDays?: number;
     lawyerUserId?: number;
     limit?: number;
-  }) {
+  }, options?: { signal?: AbortSignal }) {
     const q = buildQuery(params ?? {});
-    return this.request<LawyerWorkloadReport>(`/reports/lawyer-workload${q}`);
+    return this.request<LawyerWorkloadReport>(`/reports/lawyer-workload${q}`, { signal: options?.signal });
   }
 
   async getOverdueProceduralDeadlinesReport(params?: {
