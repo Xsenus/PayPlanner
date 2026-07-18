@@ -93,6 +93,8 @@ public class SystemJobsControllerTests
             new SystemSetting { Key = PaymentAdvanceReviewMonitoringService.EnabledSettingKey, Value = "true", CreatedAt = now, UpdatedAt = now },
             new SystemSetting { Key = PaymentAdvanceReviewMonitoringService.IntervalHoursSettingKey, Value = "6", CreatedAt = now, UpdatedAt = now },
             new SystemSetting { Key = PaymentAdvanceReviewMonitoringService.BatchSizeSettingKey, Value = "15", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = PaymentAdvanceReviewMonitoringService.WarningAgeDaysSettingKey, Value = "10", CreatedAt = now, UpdatedAt = now },
+            new SystemSetting { Key = PaymentAdvanceReviewMonitoringService.CriticalAgeDaysSettingKey, Value = "20", CreatedAt = now, UpdatedAt = now },
             new SystemSetting { Key = CalendarSyncSchedulerService.EnabledSettingKey, Value = "true", CreatedAt = now, UpdatedAt = now },
             new SystemSetting { Key = CalendarSyncSchedulerService.IntervalMinutesSettingKey, Value = "30", CreatedAt = now, UpdatedAt = now },
             new SystemSetting { Key = CalendarSyncSchedulerService.BatchSizeSettingKey, Value = "50", CreatedAt = now, UpdatedAt = now },
@@ -114,22 +116,39 @@ public class SystemJobsControllerTests
         scope.Db.Users.Add(user);
         scope.Db.Clients.Add(client);
         await scope.Db.SaveChangesAsync();
-        scope.Db.Payments.Add(new Payment
-        {
-            ClientId = client.Id,
-            Type = PaymentType.Income,
-            DocumentKind = DocumentKind.Payment,
-            Amount = 7_100m,
-            PaidAmount = 7_100m,
-            Status = PaymentStatus.Completed,
-            IsPaid = true,
-            Date = now.Date,
-            PlannedDate = now.Date,
-            PaidDate = now.Date,
-            LastPaymentDate = now.Date,
-            Description = "Advance candidate",
-            AdvanceReviewStatus = PaymentAdvanceReviewStatus.None,
-        });
+        scope.Db.Payments.AddRange(
+            new Payment
+            {
+                ClientId = client.Id,
+                Type = PaymentType.Income,
+                DocumentKind = DocumentKind.Payment,
+                Amount = 7_100m,
+                PaidAmount = 7_100m,
+                Status = PaymentStatus.Completed,
+                IsPaid = true,
+                Date = now.Date,
+                PlannedDate = now.Date,
+                PaidDate = now.Date,
+                LastPaymentDate = now.Date,
+                Description = "Advance candidate",
+                AdvanceReviewStatus = PaymentAdvanceReviewStatus.None,
+            },
+            new Payment
+            {
+                ClientId = client.Id,
+                Type = PaymentType.Income,
+                DocumentKind = DocumentKind.Payment,
+                Amount = 8_200m,
+                PaidAmount = 8_200m,
+                Status = PaymentStatus.Completed,
+                IsPaid = true,
+                Date = now.Date.AddDays(-40),
+                PlannedDate = now.Date.AddDays(-40),
+                PaidDate = now.Date.AddDays(-40),
+                LastPaymentDate = now.Date.AddDays(-40),
+                Description = "Critical advance candidate",
+                AdvanceReviewStatus = PaymentAdvanceReviewStatus.RequiresDecision,
+            });
         scope.Db.ClientCases.Add(new ClientCase
         {
             ClientId = client.Id,
@@ -271,7 +290,7 @@ public class SystemJobsControllerTests
         Assert.Contains(dto.Items, item => item.Key == SystemJobKeys.YandexDiskCrmSync && item.PendingCount == 1 && item.LastProcessedCount == 20 && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "notification-delivery-retention" && item.PendingCount == 1 && item.LastProcessedCount == 25 && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == SystemJobKeys.CalendarSyncLogRetention && item.PendingCount == 2 && item.LastProcessedCount == 200 && item.ManualRunEnabled);
-        Assert.Contains(dto.Items, item => item.Key == SystemJobKeys.PaymentAdvanceReviewMonitoring && item.PendingCount == 1 && item.LastProcessedCount == 15 && item.ManualRunEnabled);
+        Assert.Contains(dto.Items, item => item.Key == SystemJobKeys.PaymentAdvanceReviewMonitoring && item.Status == "warning" && item.PendingCount == 2 && item.LastProcessedCount == 15 && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "external-calendar-sync" && item.Status == "warning" && item.LastProcessedCount == 50 && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "case-inactivity-control" && item.PendingCount == 1 && item.LastProcessedCount == 7);
         Assert.Contains(dto.Items, item => item.Key == "court-sync" && item.Status == "active" && item.PendingCount == 1 && item.LastProcessedCount == 12);
@@ -294,6 +313,11 @@ public class SystemJobsControllerTests
             command.Contains("EligibleCount", StringComparison.Ordinal));
         Assert.Contains("COUNT", deliveryRetentionCommand, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("ORDER BY", deliveryRetentionCommand, StringComparison.OrdinalIgnoreCase);
+        var advanceReviewStatisticsCommand = Assert.Single(interceptor.Commands, command =>
+            command.Contains("Payments", StringComparison.Ordinal) &&
+            command.Contains("PendingCount", StringComparison.Ordinal) &&
+            command.Contains("CriticalPendingCount", StringComparison.Ordinal));
+        Assert.Contains("COUNT", advanceReviewStatisticsCommand, StringComparison.OrdinalIgnoreCase);
         Assert.All(dto.Items, item =>
         {
             Assert.DoesNotContain("password", item.Description, StringComparison.OrdinalIgnoreCase);
@@ -303,7 +327,7 @@ public class SystemJobsControllerTests
     }
 
     [Fact]
-    public async Task GetDiagnostics_PreservesOldestRetentionActivityWhenJobsDisabled()
+    public async Task GetDiagnostics_PreservesRetentionActivityAndSkipsDisabledCandidateCounts()
     {
         var interceptor = new RecordingCommandInterceptor();
         await using var scope = await CreateDbScopeAsync(interceptor);
@@ -320,6 +344,13 @@ public class SystemJobsControllerTests
             new SystemSetting
             {
                 Key = NotificationDeliveryRetentionService.EnabledSettingKey,
+                Value = "false",
+                CreatedAt = oldestAt,
+                UpdatedAt = oldestAt,
+            },
+            new SystemSetting
+            {
+                Key = PaymentAdvanceReviewMonitoringService.EnabledSettingKey,
                 Value = "false",
                 CreatedAt = oldestAt,
                 UpdatedAt = oldestAt,
@@ -347,6 +378,8 @@ public class SystemJobsControllerTests
         var retention = Assert.Single(dto.Items, item => item.Key == SystemJobKeys.CalendarSyncLogRetention);
         var deliveryRetention = Assert.Single(dto.Items,
             item => item.Key == SystemJobKeys.NotificationDeliveryRetention);
+        var advanceReview = Assert.Single(dto.Items,
+            item => item.Key == SystemJobKeys.PaymentAdvanceReviewMonitoring);
 
         Assert.False(retention.Enabled);
         Assert.Equal(0, retention.PendingCount);
@@ -354,6 +387,8 @@ public class SystemJobsControllerTests
         Assert.False(deliveryRetention.Enabled);
         Assert.Equal(0, deliveryRetention.PendingCount);
         Assert.Equal(oldestDeliveryAt, deliveryRetention.LastActivityAt);
+        Assert.False(advanceReview.Enabled);
+        Assert.Equal(0, advanceReview.PendingCount);
         Assert.Single(interceptor.Commands, command =>
             command.Contains("GoogleCalendarSyncLogs", StringComparison.Ordinal));
         Assert.Single(interceptor.Commands, command =>
@@ -361,6 +396,9 @@ public class SystemJobsControllerTests
         Assert.Single(interceptor.Commands, command =>
             command.Contains("NotificationDeliveries", StringComparison.Ordinal) &&
             command.Contains("EligibleCount", StringComparison.Ordinal));
+        Assert.DoesNotContain(interceptor.Commands, command =>
+            command.Contains("PendingCount", StringComparison.Ordinal) &&
+            command.Contains("CriticalPendingCount", StringComparison.Ordinal));
     }
 
     [Fact]

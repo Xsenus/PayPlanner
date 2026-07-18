@@ -670,12 +670,23 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
             settings.GetValueOrDefault(PaymentAdvanceReviewMonitoringService.CriticalAgeDaysSettingKey),
             _configuration.GetValue("Payments:AdvanceReview:Monitoring:CriticalAgeDays", PaymentAdvanceReviewMonitoringService.DefaultCriticalAgeDays)),
             warningAgeDays);
-        var pendingCount = _advanceReviewMonitoringRunner is null
-            ? await CountPendingAdvanceReviewCandidatesAsync(enabled, ct)
-            : await _advanceReviewMonitoringRunner.CountPendingCandidatesAsync(ct);
-        var criticalPendingCount = _advanceReviewMonitoringRunner is null
-            ? await CountCriticalAdvanceReviewCandidatesAsync(enabled, criticalAgeDays, ct)
-            : await _advanceReviewMonitoringRunner.CountCriticalPendingCandidatesAsync(ct);
+        var criticalCutoff = DateTime.UtcNow.Date.AddDays(-criticalAgeDays);
+        var candidateStatistics = enabled
+            ? await BuildAdvanceReviewCandidateQuery()
+                .GroupBy(_ => 1)
+                .Select(group => new AdvanceReviewCandidateStatistics
+                {
+                    PendingCount = group.Count(),
+                    CriticalPendingCount = group.Count(payment =>
+                        (payment.LastPaymentDate
+                            ?? payment.PaidDate
+                            ?? (payment.Date == default ? payment.CreatedAt : payment.Date)).Date
+                        <= criticalCutoff),
+                })
+                .SingleOrDefaultAsync(ct)
+            : null;
+        var pendingCount = candidateStatistics?.PendingCount ?? 0;
+        var criticalPendingCount = candidateStatistics?.CriticalPendingCount ?? 0;
 
         var lastNotification = await _db.UserNotifications
             .AsNoTracking()
@@ -1120,30 +1131,14 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
                 ct);
     }
 
-    private async Task<int> CountPendingAdvanceReviewCandidatesAsync(bool enabled, CancellationToken ct)
+    private IQueryable<Payment> BuildAdvanceReviewCandidateQuery()
     {
-        if (!enabled)
-        {
-            return 0;
-        }
-
         var candidatePredicate = PaymentAdvanceReviewService.UnallocatedAdvanceCandidatePredicate();
-        return await _db.Payments
+        return _db.Payments
             .AsNoTracking()
             .Where(candidatePredicate)
             .Where(payment => payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.None
-                || payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.RequiresDecision)
-            .CountAsync(ct);
-    }
-
-    private async Task<int> CountCriticalAdvanceReviewCandidatesAsync(bool enabled, int criticalAgeDays, CancellationToken ct)
-    {
-        if (!enabled)
-        {
-            return 0;
-        }
-
-        return await PaymentAdvanceReviewMonitoringService.CountCriticalPendingCandidatesAsync(_db, criticalAgeDays, ct);
+                || payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.RequiresDecision);
     }
 
     private async Task<int> CountPendingYandexDiskCrmSyncItemsAsync(
@@ -1316,5 +1311,11 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
     {
         public int EligibleCount { get; init; }
         public DateTime? OldestAt { get; init; }
+    }
+
+    private sealed class AdvanceReviewCandidateStatistics
+    {
+        public int PendingCount { get; init; }
+        public int CriticalPendingCount { get; init; }
     }
 }
