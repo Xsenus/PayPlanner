@@ -6187,9 +6187,11 @@ services.Id,
     [Fact]
     public async Task JournalStatuses_GroupsFactOperationsByComputedJournalStatus()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await SqliteTestContextFactory.CreateAsync(interceptor: interceptor);
         db.MoneyOperations.AddRange(
-            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 6_000m, new DateTime(2026, 5, 1), "Основной банк", matchStatus: MoneyOperationMatchStatus.Matched),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 2_500m, new DateTime(2026, 5, 1, 9, 0, 0), "Основной банк", matchStatus: MoneyOperationMatchStatus.Matched),
+            Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 3_500m, new DateTime(2026, 5, 1, 15, 0, 0), "Основной банк", matchStatus: MoneyOperationMatchStatus.Matched),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 2_000m, new DateTime(2026, 5, 2), "Основной банк", matchStatus: MoneyOperationMatchStatus.Matched),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 3_000m, new DateTime(2026, 5, 3), "Основной банк"),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 1_000m, new DateTime(2026, 5, 4), "Основной банк", matchStatus: MoneyOperationMatchStatus.ClarificationRequired),
@@ -6197,6 +6199,7 @@ services.Id,
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Plan, 99_999m, new DateTime(2026, 5, 6), "Основной банк"),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Transfer, MoneyOperationAccountingType.Fact, 50_000m, new DateTime(2026, 5, 7), "Основной банк", matchStatus: MoneyOperationMatchStatus.Matched));
         await db.SaveChangesAsync();
+        interceptor.Commands.Clear();
         var controller = CreateController(db);
 
         var action = await controller.JournalStatuses(
@@ -6216,8 +6219,8 @@ services.Id,
         Assert.Equal(9_500m, report.IncomeTotal);
         Assert.Equal(3_000m, report.ExpenseTotal);
         Assert.Equal(6_500m, report.NetTotal);
-        Assert.Equal(5, report.OperationCount);
-        Assert.Equal(3, report.PostedCount);
+        Assert.Equal(6, report.OperationCount);
+        Assert.Equal(4, report.PostedCount);
         Assert.Equal(1, report.ProcessingCount);
         Assert.Equal(1, report.ErrorCount);
 
@@ -6246,8 +6249,17 @@ services.Id,
                 Assert.Equal(6_500m, item.Income);
                 Assert.Equal(2_000m, item.Expense);
                 Assert.Equal(8_500m, item.TotalAmount);
+                Assert.Equal(3, item.IncomeCount);
+                Assert.Equal(1, item.ExpenseCount);
+                Assert.Equal(4, item.OperationCount);
                 Assert.Equal(68m, item.Share);
             });
+
+        var journalStatusQuery = Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"MoneyOperations\"", StringComparison.Ordinal));
+        Assert.Contains("GROUP BY", journalStatusQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SUM", journalStatusQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("COUNT", journalStatusQuery, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

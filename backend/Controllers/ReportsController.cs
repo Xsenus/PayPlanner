@@ -8228,13 +8228,21 @@ public class ReportsController : ControllerBase
         CancellationToken ct)
     {
         var rows = await BuildFactQuery(from, to, source, accountName, counterpartyName, clientId, caseId, contractId, incomeTypeId, paymentsVisibility)
-            .Select(item => new
+            .GroupBy(item => new
             {
                 item.Source,
                 item.Direction,
                 item.AccountingType,
                 item.MatchStatus,
-                item.Amount,
+            })
+            .Select(group => new JournalStatusQueryRow
+            {
+                Source = group.Key.Source,
+                Direction = group.Key.Direction,
+                AccountingType = group.Key.AccountingType,
+                MatchStatus = group.Key.MatchStatus,
+                Amount = group.Sum(item => item.Amount),
+                Count = group.Count(),
             })
             .ToListAsync(ct);
 
@@ -8243,6 +8251,7 @@ public class ReportsController : ControllerBase
             {
                 item.Direction,
                 item.Amount,
+                item.Count,
                 Status = ResolveJournalStatus(item.Source, item.Direction, item.AccountingType, item.MatchStatus),
             })
             .ToList();
@@ -8275,9 +8284,9 @@ public class ReportsController : ControllerBase
                     Expense = expense,
                     NetTotal = income - expense,
                     TotalAmount = totalAmount,
-                    IncomeCount = group.Count(item => item.Direction == MoneyOperationDirection.Income),
-                    ExpenseCount = group.Count(item => item.Direction == MoneyOperationDirection.Expense),
-                    OperationCount = group.Count(),
+                    IncomeCount = group.Where(item => item.Direction == MoneyOperationDirection.Income).Sum(item => item.Count),
+                    ExpenseCount = group.Where(item => item.Direction == MoneyOperationDirection.Expense).Sum(item => item.Count),
+                    OperationCount = group.Sum(item => item.Count),
                     Share = turnoverTotal > 0m
                         ? Math.Round(totalAmount / turnoverTotal * 100m, 1, MidpointRounding.AwayFromZero)
                         : 0m,
@@ -8295,10 +8304,10 @@ public class ReportsController : ControllerBase
             IncomeTotal = incomeTotal,
             ExpenseTotal = expenseTotal,
             NetTotal = incomeTotal - expenseTotal,
-            OperationCount = enriched.Count,
-            PostedCount = enriched.Count(item => item.Status == MoneyOperationJournalStatus.Posted),
-            ProcessingCount = enriched.Count(item => item.Status == MoneyOperationJournalStatus.Processing),
-            ErrorCount = enriched.Count(item => item.Status == MoneyOperationJournalStatus.Error),
+            OperationCount = enriched.Sum(item => item.Count),
+            PostedCount = enriched.Where(item => item.Status == MoneyOperationJournalStatus.Posted).Sum(item => item.Count),
+            ProcessingCount = enriched.Where(item => item.Status == MoneyOperationJournalStatus.Processing).Sum(item => item.Count),
+            ErrorCount = enriched.Where(item => item.Status == MoneyOperationJournalStatus.Error).Sum(item => item.Count),
             Statuses = statuses,
         };
     }
@@ -9392,6 +9401,16 @@ public class ReportsController : ControllerBase
     private sealed class MatchStatusQueryRow
     {
         public MoneyOperationDirection Direction { get; init; }
+        public MoneyOperationMatchStatus MatchStatus { get; init; }
+        public decimal Amount { get; init; }
+        public int Count { get; init; }
+    }
+
+    private sealed class JournalStatusQueryRow
+    {
+        public MoneyOperationSource Source { get; init; }
+        public MoneyOperationDirection Direction { get; init; }
+        public MoneyOperationAccountingType AccountingType { get; init; }
         public MoneyOperationMatchStatus MatchStatus { get; init; }
         public decimal Amount { get; init; }
         public int Count { get; init; }

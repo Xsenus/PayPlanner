@@ -6591,9 +6591,9 @@ export class ApiService {
     caseId?: number;
     contractId?: number;
     incomeTypeId?: number;
-  }) {
+  }, options?: { signal?: AbortSignal }) {
     const q = buildQuery(params ?? {});
-    return this.request<JournalStatusReport>(`/reports/journal-statuses${q}`);
+    return this.request<JournalStatusReport>(`/reports/journal-statuses${q}`, { signal: options?.signal });
   }
 
   async getCurrencyReport(params?: {
