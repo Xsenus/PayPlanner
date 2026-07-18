@@ -558,15 +558,25 @@ public class TasksControllerTests
             new SystemSetting { Key = "tasks.automation.caseControl.defaultAssigneeUserId", Value = fallbackAssignee.Id.ToString(), CreatedAt = now, UpdatedAt = now },
             new SystemSetting { Key = "tasks.automation.caseControl.escalationDays", Value = "30", CreatedAt = now, UpdatedAt = now },
             new SystemSetting { Key = "tasks.automation.caseControl.escalationUserId", Value = escalationUser.Id.ToString(), CreatedAt = now, UpdatedAt = now });
-        db.ObjectAuditEvents.Add(new ObjectAuditEvent
-        {
-            ObjectType = "client-case",
-            ObjectId = clientCase.Id,
-            Action = "Automation",
-            Description = "Создана контрольная задача по делу БАНКРОТСТВО.",
-            MetadataJson = "{\"event\":\"caseInactivityControlTaskCreated\"}",
-            CreatedAt = now.AddDays(-1),
-        });
+        db.ObjectAuditEvents.AddRange(
+            new ObjectAuditEvent
+            {
+                ObjectType = "client-case",
+                ObjectId = clientCase.Id,
+                Action = "Automation",
+                Description = "Старая контрольная задача.",
+                MetadataJson = "{\"event\":\"caseInactivityControlTaskCreated\"}",
+                CreatedAt = now.AddDays(-10),
+            },
+            new ObjectAuditEvent
+            {
+                ObjectType = "client-case",
+                ObjectId = clientCase.Id,
+                Action = "Automation",
+                Description = "Создана контрольная задача по делу БАНКРОТСТВО.",
+                MetadataJson = "{\"event\":\"caseInactivityControlTaskCreated\"}",
+                CreatedAt = now.AddDays(-1),
+            });
         await db.SaveChangesAsync();
         var controller = CreateController(db, new RecordingNotificationService(), admin);
         interceptor.Commands.Clear();
@@ -591,6 +601,8 @@ public class TasksControllerTests
         Assert.Equal("Создана контрольная задача по делу БАНКРОТСТВО.", dto.LastCreatedDescription);
         Assert.Single(interceptor.Commands, command =>
             command.Contains("FROM \"ClientCases\"", StringComparison.Ordinal));
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"ObjectAuditEvents\"", StringComparison.Ordinal));
     }
 
     [Fact]

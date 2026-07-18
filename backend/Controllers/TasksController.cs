@@ -510,12 +510,20 @@ public class TasksController : ControllerBase
                 item.MetadataJson != null &&
                 item.MetadataJson.Contains("caseInactivityControlTaskCreated"));
 
-        var lastCreated = await auditQuery
-            .OrderByDescending(item => item.CreatedAt)
-            .Select(item => new { item.CreatedAt, item.Description })
-            .FirstOrDefaultAsync(ct);
-
         var createdSince = now.AddDays(-7);
+        var auditStatistics = await auditQuery
+            .GroupBy(_ => 1)
+            .Select(group => new
+            {
+                CreatedCountLast7Days = group.Count(item => item.CreatedAt >= createdSince),
+                LastCreatedAt = group.Max(item => (DateTime?)item.CreatedAt),
+                LastCreatedDescription = group
+                    .OrderByDescending(item => item.CreatedAt)
+                    .Select(item => item.Description)
+                    .FirstOrDefault(),
+            })
+            .SingleOrDefaultAsync(ct);
+
         return Ok(new TaskJournalAutomationDiagnosticsDto
         {
             Enabled = settings.CaseInactivityAutomationEnabled,
@@ -528,9 +536,9 @@ public class TasksController : ControllerBase
             EscalationUserName = escalationUser is null ? string.Empty : BuildUserDisplayName(escalationUser.FullName, escalationUser.Email),
             VisibleCandidateCount = candidateStatistics?.CandidateCount ?? 0,
             VisibleEscalationCandidateCount = candidateStatistics?.EscalationCount ?? 0,
-            CreatedTaskCountLast7Days = await auditQuery.CountAsync(item => item.CreatedAt >= createdSince, ct),
-            LastCreatedAt = lastCreated is null ? null : ToIso(lastCreated.CreatedAt),
-            LastCreatedDescription = lastCreated?.Description,
+            CreatedTaskCountLast7Days = auditStatistics?.CreatedCountLast7Days ?? 0,
+            LastCreatedAt = auditStatistics?.LastCreatedAt is { } lastCreatedAt ? ToIso(lastCreatedAt) : null,
+            LastCreatedDescription = auditStatistics?.LastCreatedDescription,
         });
     }
 
