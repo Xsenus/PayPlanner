@@ -6582,14 +6582,17 @@ services.Id,
     [Fact]
     public async Task BankStatementImports_GroupsBatchesByStatus()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await SqliteTestContextFactory.CreateAsync(interceptor: interceptor);
         db.BankStatementImportBatches.AddRange(
             BankStatementImportBatch("may-ok.txt", BankStatementImportBatchStatus.Applied, 10, 8, 2, 0, 0, new DateTime(2026, 5, 1, 10, 0, 0)),
+            BankStatementImportBatch("may-ok-2.txt", BankStatementImportBatchStatus.Applied, 2, 1, 1, 0, 0, new DateTime(2026, 5, 1, 15, 0, 0)),
             BankStatementImportBatch("may-errors.txt", BankStatementImportBatchStatus.AppliedWithErrors, 12, 7, 2, 3, 0, new DateTime(2026, 5, 2, 11, 0, 0)),
             BankStatementImportBatch("may-rolled.txt", BankStatementImportBatchStatus.RolledBack, 5, 5, 0, 0, 5, new DateTime(2026, 5, 3, 12, 0, 0)),
             BankStatementImportBatch("may-blocked.txt", BankStatementImportBatchStatus.RollbackBlocked, 4, 3, 0, 1, 0, new DateTime(2026, 5, 4, 13, 0, 0)),
             BankStatementImportBatch("old.txt", BankStatementImportBatchStatus.Applied, 99, 99, 0, 0, 0, new DateTime(2026, 4, 30, 10, 0, 0, DateTimeKind.Utc)));
         await db.SaveChangesAsync();
+        interceptor.Commands.Clear();
         var controller = CreateController(db);
 
         var action = await controller.BankStatementImports(
@@ -6599,13 +6602,13 @@ services.Id,
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
         var report = Assert.IsType<BankStatementImportReportDto>(ok.Value);
-        Assert.Equal(4, report.BatchCount);
-        Assert.Equal(31, report.RowsReadTotal);
-        Assert.Equal(23, report.CreatedRowsTotal);
-        Assert.Equal(4, report.SkippedRowsTotal);
+        Assert.Equal(5, report.BatchCount);
+        Assert.Equal(33, report.RowsReadTotal);
+        Assert.Equal(24, report.CreatedRowsTotal);
+        Assert.Equal(5, report.SkippedRowsTotal);
         Assert.Equal(4, report.ErrorRowsTotal);
         Assert.Equal(5, report.RollbackRowsTotal);
-        Assert.Equal(1, report.AppliedCount);
+        Assert.Equal(2, report.AppliedCount);
         Assert.Equal(1, report.AppliedWithErrorsCount);
         Assert.Equal(1, report.RolledBackCount);
         Assert.Equal(1, report.RollbackBlockedCount);
@@ -6618,7 +6621,7 @@ services.Id,
                 Assert.Equal("Применен с ошибками", item.StatusLabel);
                 Assert.Equal(12, item.RowsRead);
                 Assert.Equal(3, item.ErrorRows);
-                Assert.Equal(25m, item.Share);
+                Assert.Equal(20m, item.Share);
             },
             item =>
             {
@@ -6626,29 +6629,39 @@ services.Id,
                 Assert.Equal("Откат заблокирован", item.StatusLabel);
                 Assert.Equal(4, item.RowsRead);
                 Assert.Equal(1, item.ErrorRows);
-                Assert.Equal(25m, item.Share);
+                Assert.Equal(20m, item.Share);
             },
             item =>
             {
                 Assert.Equal(BankStatementImportBatchStatus.Applied, item.Status);
                 Assert.Equal("Применен", item.StatusLabel);
-                Assert.Equal(10, item.RowsRead);
+                Assert.Equal(2, item.BatchCount);
+                Assert.Equal(12, item.RowsRead);
+                Assert.Equal(9, item.CreatedRows);
+                Assert.Equal(3, item.SkippedRows);
                 Assert.Equal(0, item.ErrorRows);
-                Assert.Equal(25m, item.Share);
+                Assert.Equal(40m, item.Share);
             },
             item =>
             {
                 Assert.Equal(BankStatementImportBatchStatus.RolledBack, item.Status);
                 Assert.Equal("Откатан", item.StatusLabel);
                 Assert.Equal(5, item.RollbackRows);
-                Assert.Equal(25m, item.Share);
+                Assert.Equal(20m, item.Share);
             });
+
+        var batchQuery = Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"BankStatementImportBatches\"", StringComparison.Ordinal));
+        Assert.Contains("GROUP BY", batchQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SUM", batchQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("COUNT", batchQuery, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public async Task BankStatementImports_AppliesRowFinancialFilters()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await SqliteTestContextFactory.CreateAsync(interceptor: interceptor);
         var targetClient = new Client { Name = "Target Client" };
         var otherClient = new Client { Name = "Other Client" };
         var targetCase = new ClientCase { CaseNumber = "CASE-BANK-1", Client = targetClient };
@@ -6702,7 +6715,7 @@ services.Id,
         db.MoneyOperations.AddRange(targetOperation, otherOperation);
         await db.SaveChangesAsync();
 
-        var batch = BankStatementImportBatch("filtered-bank.txt", BankStatementImportBatchStatus.AppliedWithErrors, 2, 1, 0, 1, 0, new DateTime(2026, 5, 10, 10, 0, 0, DateTimeKind.Utc));
+        var batch = BankStatementImportBatch("filtered-bank.txt", BankStatementImportBatchStatus.AppliedWithErrors, 3, 2, 0, 1, 0, new DateTime(2026, 5, 10, 10, 0, 0, DateTimeKind.Utc));
         batch.Rows.Add(new BankStatementImportRow
         {
             RowNumber = 1,
@@ -6719,6 +6732,19 @@ services.Id,
         batch.Rows.Add(new BankStatementImportRow
         {
             RowNumber = 2,
+            ImportKey = "target-row-2",
+            Status = BankStatementImportRowStatus.Created,
+            MoneyOperationId = targetOperation.Id,
+            Date = new DateTime(2026, 5, 10),
+            Direction = MoneyOperationDirection.Income,
+            Amount = 1_500m,
+            AccountName = "Main account",
+            CounterpartyName = "Target Client",
+            CreatedAt = new DateTime(2026, 5, 10, 10, 6, 0, DateTimeKind.Utc),
+        });
+        batch.Rows.Add(new BankStatementImportRow
+        {
+            RowNumber = 3,
             ImportKey = "other-row",
             Status = BankStatementImportRowStatus.Error,
             MoneyOperationId = otherOperation.Id,
@@ -6727,10 +6753,11 @@ services.Id,
             Amount = 9_000m,
             AccountName = "Other account",
             CounterpartyName = "Other Client",
-            CreatedAt = new DateTime(2026, 5, 10, 10, 6, 0, DateTimeKind.Utc),
+            CreatedAt = new DateTime(2026, 5, 10, 10, 7, 0, DateTimeKind.Utc),
         });
         db.BankStatementImportBatches.Add(batch);
         await db.SaveChangesAsync();
+        interceptor.Commands.Clear();
         var controller = CreateController(db);
 
         var action = await controller.BankStatementImports(
@@ -6747,17 +6774,22 @@ services.Id,
         var ok = Assert.IsType<OkObjectResult>(action.Result);
         var report = Assert.IsType<BankStatementImportReportDto>(ok.Value);
         Assert.Equal(1, report.BatchCount);
-        Assert.Equal(1, report.RowsReadTotal);
-        Assert.Equal(1, report.CreatedRowsTotal);
+        Assert.Equal(2, report.RowsReadTotal);
+        Assert.Equal(2, report.CreatedRowsTotal);
         Assert.Equal(0, report.ErrorRowsTotal);
         Assert.Equal(1, report.AppliedWithErrorsCount);
         var status = Assert.Single(report.Statuses);
         Assert.Equal(BankStatementImportBatchStatus.AppliedWithErrors, status.Status);
         Assert.Equal(1, status.BatchCount);
-        Assert.Equal(1, status.RowsRead);
-        Assert.Equal(1, status.CreatedRows);
+        Assert.Equal(2, status.RowsRead);
+        Assert.Equal(2, status.CreatedRows);
         Assert.Equal(0, status.ErrorRows);
         Assert.Equal(100m, status.Share);
+
+        var rowQuery = Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"BankStatementImportRows\"", StringComparison.Ordinal));
+        Assert.Contains("GROUP BY", rowQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("COUNT", rowQuery, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

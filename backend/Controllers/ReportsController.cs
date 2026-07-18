@@ -8929,24 +8929,22 @@ public class ReportsController : ControllerBase
             }
 
             var rowItems = await filteredRowsQuery
-                .Select(row => new
+                .GroupBy(row => new
                 {
-                    BatchId = row.BatchId,
                     BatchStatus = row.Batch!.Status,
-                    row.Status,
-                    row.CreatedAt,
+                    RowStatus = row.Status,
+                    row.BatchId,
+                })
+                .Select(group => new BankStatementFilteredQueryRow
+                {
+                    BatchId = group.Key.BatchId,
+                    BatchStatus = group.Key.BatchStatus,
+                    RowStatus = group.Key.RowStatus,
+                    RowCount = group.Count(),
                 })
                 .ToListAsync(ct);
 
-            rowItems = rowItems
-                .Where(item =>
-                {
-                    var localDate = CalendarTimeZoneHelper.ToUserLocal(item.CreatedAt, timeZone).Date;
-                    return localDate >= localStart && localDate <= localEnd;
-                })
-                .ToList();
-
-            var batchCount = rowItems.Select(item => item.BatchId).Distinct().Count();
+            var filteredBatchCount = rowItems.Select(item => item.BatchId).Distinct().Count();
             var statusRows = rowItems
                 .GroupBy(item => item.BatchStatus)
                 .Select(group =>
@@ -8957,13 +8955,13 @@ public class ReportsController : ControllerBase
                         Status = group.Key,
                         StatusLabel = FormatBankStatementImportStatusLabel(group.Key),
                         BatchCount = distinctBatchCount,
-                        RowsRead = group.Count(),
-                        CreatedRows = group.Count(item => item.Status == BankStatementImportRowStatus.Created),
-                        SkippedRows = group.Count(item => item.Status == BankStatementImportRowStatus.Skipped),
-                        ErrorRows = group.Count(item => item.Status == BankStatementImportRowStatus.Error),
-                        RollbackRows = group.Count(item => item.Status is BankStatementImportRowStatus.RolledBack or BankStatementImportRowStatus.RollbackSkipped),
-                        Share = batchCount > 0
-                            ? Math.Round((decimal)distinctBatchCount / batchCount * 100m, 1, MidpointRounding.AwayFromZero)
+                        RowsRead = group.Sum(item => item.RowCount),
+                        CreatedRows = group.Where(item => item.RowStatus == BankStatementImportRowStatus.Created).Sum(item => item.RowCount),
+                        SkippedRows = group.Where(item => item.RowStatus == BankStatementImportRowStatus.Skipped).Sum(item => item.RowCount),
+                        ErrorRows = group.Where(item => item.RowStatus == BankStatementImportRowStatus.Error).Sum(item => item.RowCount),
+                        RollbackRows = group.Where(item => item.RowStatus is BankStatementImportRowStatus.RolledBack or BankStatementImportRowStatus.RollbackSkipped).Sum(item => item.RowCount),
+                        Share = filteredBatchCount > 0
+                            ? Math.Round((decimal)distinctBatchCount / filteredBatchCount * 100m, 1, MidpointRounding.AwayFromZero)
                             : 0m,
                     };
                 })
@@ -8976,12 +8974,12 @@ public class ReportsController : ControllerBase
             {
                 From = from,
                 To = to,
-                BatchCount = batchCount,
-                RowsReadTotal = rowItems.Count,
-                CreatedRowsTotal = rowItems.Count(item => item.Status == BankStatementImportRowStatus.Created),
-                SkippedRowsTotal = rowItems.Count(item => item.Status == BankStatementImportRowStatus.Skipped),
-                ErrorRowsTotal = rowItems.Count(item => item.Status == BankStatementImportRowStatus.Error),
-                RollbackRowsTotal = rowItems.Count(item => item.Status is BankStatementImportRowStatus.RolledBack or BankStatementImportRowStatus.RollbackSkipped),
+                BatchCount = filteredBatchCount,
+                RowsReadTotal = rowItems.Sum(item => item.RowCount),
+                CreatedRowsTotal = rowItems.Where(item => item.RowStatus == BankStatementImportRowStatus.Created).Sum(item => item.RowCount),
+                SkippedRowsTotal = rowItems.Where(item => item.RowStatus == BankStatementImportRowStatus.Skipped).Sum(item => item.RowCount),
+                ErrorRowsTotal = rowItems.Where(item => item.RowStatus == BankStatementImportRowStatus.Error).Sum(item => item.RowCount),
+                RollbackRowsTotal = rowItems.Where(item => item.RowStatus is BankStatementImportRowStatus.RolledBack or BankStatementImportRowStatus.RollbackSkipped).Sum(item => item.RowCount),
                 AppliedCount = rowItems.Where(item => item.BatchStatus == BankStatementImportBatchStatus.Applied).Select(item => item.BatchId).Distinct().Count(),
                 AppliedWithErrorsCount = rowItems.Where(item => item.BatchStatus == BankStatementImportBatchStatus.AppliedWithErrors).Select(item => item.BatchId).Distinct().Count(),
                 RolledBackCount = rowItems.Where(item => item.BatchStatus == BankStatementImportBatchStatus.RolledBack).Select(item => item.BatchId).Distinct().Count(),
@@ -8993,40 +8991,33 @@ public class ReportsController : ControllerBase
         var rows = await _db.BankStatementImportBatches
             .AsNoTracking()
             .Where(item => item.CreatedAt >= startUtc && item.CreatedAt < endUtc)
-            .Select(item => new
-            {
-                item.Status,
-                item.RowsRead,
-                item.CreatedRows,
-                item.SkippedRows,
-                item.ErrorRows,
-                item.RollbackRows,
-                item.CreatedAt,
-            })
-            .ToListAsync(ct);
-
-        rows = rows
-            .Where(item =>
-            {
-                var localDate = CalendarTimeZoneHelper.ToUserLocal(item.CreatedAt, timeZone).Date;
-                return localDate >= localStart && localDate <= localEnd;
-            })
-            .ToList();
-
-        var statuses = rows
             .GroupBy(item => item.Status)
-            .Select(group => new BankStatementImportReportItemDto
+            .Select(group => new BankStatementBatchQueryRow
             {
                 Status = group.Key,
-                StatusLabel = FormatBankStatementImportStatusLabel(group.Key),
                 BatchCount = group.Count(),
                 RowsRead = group.Sum(item => item.RowsRead),
                 CreatedRows = group.Sum(item => item.CreatedRows),
                 SkippedRows = group.Sum(item => item.SkippedRows),
                 ErrorRows = group.Sum(item => item.ErrorRows),
                 RollbackRows = group.Sum(item => item.RollbackRows),
-                Share = rows.Count > 0
-                    ? Math.Round((decimal)group.Count() / rows.Count * 100m, 1, MidpointRounding.AwayFromZero)
+            })
+            .ToListAsync(ct);
+
+        var batchCount = rows.Sum(item => item.BatchCount);
+        var statuses = rows
+            .Select(item => new BankStatementImportReportItemDto
+            {
+                Status = item.Status,
+                StatusLabel = FormatBankStatementImportStatusLabel(item.Status),
+                BatchCount = item.BatchCount,
+                RowsRead = item.RowsRead,
+                CreatedRows = item.CreatedRows,
+                SkippedRows = item.SkippedRows,
+                ErrorRows = item.ErrorRows,
+                RollbackRows = item.RollbackRows,
+                Share = batchCount > 0
+                    ? Math.Round((decimal)item.BatchCount / batchCount * 100m, 1, MidpointRounding.AwayFromZero)
                     : 0m,
             })
             .OrderBy(item => BankStatementImportStatusSortOrder(item.Status))
@@ -9038,16 +9029,16 @@ public class ReportsController : ControllerBase
         {
             From = from,
             To = to,
-            BatchCount = rows.Count,
+            BatchCount = batchCount,
             RowsReadTotal = rows.Sum(item => item.RowsRead),
             CreatedRowsTotal = rows.Sum(item => item.CreatedRows),
             SkippedRowsTotal = rows.Sum(item => item.SkippedRows),
             ErrorRowsTotal = rows.Sum(item => item.ErrorRows),
             RollbackRowsTotal = rows.Sum(item => item.RollbackRows),
-            AppliedCount = rows.Count(item => item.Status == BankStatementImportBatchStatus.Applied),
-            AppliedWithErrorsCount = rows.Count(item => item.Status == BankStatementImportBatchStatus.AppliedWithErrors),
-            RolledBackCount = rows.Count(item => item.Status == BankStatementImportBatchStatus.RolledBack),
-            RollbackBlockedCount = rows.Count(item => item.Status == BankStatementImportBatchStatus.RollbackBlocked),
+            AppliedCount = rows.Where(item => item.Status == BankStatementImportBatchStatus.Applied).Sum(item => item.BatchCount),
+            AppliedWithErrorsCount = rows.Where(item => item.Status == BankStatementImportBatchStatus.AppliedWithErrors).Sum(item => item.BatchCount),
+            RolledBackCount = rows.Where(item => item.Status == BankStatementImportBatchStatus.RolledBack).Sum(item => item.BatchCount),
+            RollbackBlockedCount = rows.Where(item => item.Status == BankStatementImportBatchStatus.RollbackBlocked).Sum(item => item.BatchCount),
             Statuses = statuses,
         };
     }
@@ -9443,6 +9434,25 @@ public class ReportsController : ControllerBase
         public CashOrderType Type { get; init; }
         public decimal Amount { get; init; }
         public int Count { get; init; }
+    }
+
+    private sealed class BankStatementFilteredQueryRow
+    {
+        public int BatchId { get; init; }
+        public string BatchStatus { get; init; } = string.Empty;
+        public string RowStatus { get; init; } = string.Empty;
+        public int RowCount { get; init; }
+    }
+
+    private sealed class BankStatementBatchQueryRow
+    {
+        public string Status { get; init; } = string.Empty;
+        public int BatchCount { get; init; }
+        public int RowsRead { get; init; }
+        public int CreatedRows { get; init; }
+        public int SkippedRows { get; init; }
+        public int ErrorRows { get; init; }
+        public int RollbackRows { get; init; }
     }
 
     private sealed class VatAggregateQueryRow

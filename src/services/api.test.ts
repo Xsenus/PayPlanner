@@ -3412,21 +3412,25 @@ describe('apiService reports', () => {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
 
-    const result = await apiService.getBankStatementImportReport({
-      from: '2026-05-01',
-      to: '2026-05-31',
-      accountName: 'Main account',
-      counterpartyName: 'Target',
-      clientId: 10,
-      caseId: 20,
-      contractId: 30,
-      incomeTypeId: 40,
-    });
+    const result = await apiService.getBankStatementImportReport(
+      {
+        from: '2026-05-01',
+        to: '2026-05-31',
+        accountName: 'Main account',
+        counterpartyName: 'Target',
+        clientId: 10,
+        caseId: 20,
+        contractId: 30,
+        incomeTypeId: 40,
+      },
+      { signal: controller.signal },
+    );
 
     expect(result).toEqual(payload);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url] = fetchMock.mock.calls[0];
+    const [url, options] = fetchMock.mock.calls[0];
     expect(String(url)).toContain('/reports/bank-statement-imports?');
     expect(String(url)).toContain('from=2026-05-01');
     expect(String(url)).toContain('to=2026-05-31');
@@ -3436,6 +3440,7 @@ describe('apiService reports', () => {
     expect(String(url)).toContain('caseId=20');
     expect(String(url)).toContain('contractId=30');
     expect(String(url)).toContain('incomeTypeId=40');
+    expect(options?.signal).toBe(controller.signal);
   });
 
   it('loads spreadsheet import report with filters', async () => {

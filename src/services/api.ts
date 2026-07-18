@@ -6635,9 +6635,9 @@ export class ApiService {
     caseId?: number;
     contractId?: number;
     incomeTypeId?: number;
-  }) {
+  }, options?: { signal?: AbortSignal }) {
     const q = buildQuery(params ?? {});
-    return this.request<BankStatementImportReport>(`/reports/bank-statement-imports${q}`);
+    return this.request<BankStatementImportReport>(`/reports/bank-statement-imports${q}`, { signal: options?.signal });
   }
 
   async getSpreadsheetImportReport(params?: {
