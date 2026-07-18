@@ -161,25 +161,22 @@ public sealed class CalendarSyncSchedulerService : BackgroundService
             calendarSettings.GoogleCalendarSyncEnabled == true,
             calendarSettings.YandexCalendarSyncEnabled == true,
             calendarSettings);
-        var candidateCount = schedulerSettings.Enabled && featureEnabled
-            ? await CountCandidateEventsAsync(schedulerSettings, cancellationToken)
-            : 0;
-        var oldestCandidateAt = schedulerSettings.Enabled && featureEnabled
-            ? await GetOldestCandidateAtAsync(schedulerSettings, cancellationToken)
-            : null;
+        var candidateStatistics = schedulerSettings.Enabled && featureEnabled
+            ? await LoadCandidateStatisticsAsync(schedulerSettings, cancellationToken)
+            : new CalendarSyncCandidateStatistics(0, null);
 
         return new CalendarSyncSchedulerState(
             schedulerSettings.Enabled,
             featureEnabled,
             readiness,
-            candidateCount,
-            oldestCandidateAt,
+            candidateStatistics.Count,
+            candidateStatistics.OldestAt,
             schedulerSettings.IntervalMinutes,
             schedulerSettings.BatchSize,
             schedulerSettings.LookAheadDays);
     }
 
-    private async Task<int> CountCandidateEventsAsync(
+    private async Task<CalendarSyncCandidateStatistics> LoadCandidateStatisticsAsync(
         CalendarSyncSchedulerSettings settings,
         CancellationToken cancellationToken)
     {
@@ -187,61 +184,57 @@ public sealed class CalendarSyncSchedulerService : BackgroundService
         var context = scope.ServiceProvider.GetRequiredService<PaymentContext>();
         var (fromUtc, toUtc) = BuildWindow(settings.LookAheadDays);
 
-        var taskCount = await context.TaskJournalItems
+        var taskStatistics = await context.TaskJournalItems
             .AsNoTracking()
             .Where(item =>
                 item.DueAt >= fromUtc &&
                 item.DueAt <= toUtc &&
                 item.Status != "done" &&
                 item.Status != "cancelled")
-            .CountAsync(cancellationToken);
+            .GroupBy(_ => 1)
+            .Select(group => new
+            {
+                Count = group.Count(),
+                OldestAt = group.Min(item => (DateTime?)item.DueAt),
+            })
+            .SingleOrDefaultAsync(cancellationToken);
 
-        var caseDeadlineCount = await context.ClientCases
-            .AsNoTracking()
-            .Where(item => item.DueDate.HasValue && item.DueDate.Value >= fromUtc && item.DueDate.Value <= toUtc)
-            .CountAsync(cancellationToken);
-
-        var hearingCount = await context.ClientCases
-            .AsNoTracking()
-            .Where(item => item.NextHearingAt.HasValue && item.NextHearingAt.Value >= fromUtc && item.NextHearingAt.Value <= toUtc)
-            .CountAsync(cancellationToken);
-
-        return Math.Min(taskCount + caseDeadlineCount + hearingCount, settings.BatchSize);
-    }
-
-    private async Task<DateTime?> GetOldestCandidateAtAsync(
-        CalendarSyncSchedulerSettings settings,
-        CancellationToken cancellationToken)
-    {
-        using var scope = _scopeFactory.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<PaymentContext>();
-        var (fromUtc, toUtc) = BuildWindow(settings.LookAheadDays);
-        var taskAt = await context.TaskJournalItems
+        var caseStatistics = await context.ClientCases
             .AsNoTracking()
             .Where(item =>
-                item.DueAt >= fromUtc &&
-                item.DueAt <= toUtc &&
-                item.Status != "done" &&
-                item.Status != "cancelled")
-            .OrderBy(item => item.DueAt)
-            .Select(item => (DateTime?)item.DueAt)
-            .FirstOrDefaultAsync(cancellationToken);
-        var dueAt = await context.ClientCases
-            .AsNoTracking()
-            .Where(item => item.DueDate.HasValue && item.DueDate.Value >= fromUtc && item.DueDate.Value <= toUtc)
-            .OrderBy(item => item.DueDate)
-            .Select(item => item.DueDate)
-            .FirstOrDefaultAsync(cancellationToken);
-        var hearingAt = await context.ClientCases
-            .AsNoTracking()
-            .Where(item => item.NextHearingAt.HasValue && item.NextHearingAt.Value >= fromUtc && item.NextHearingAt.Value <= toUtc)
-            .OrderBy(item => item.NextHearingAt)
-            .Select(item => item.NextHearingAt)
-            .FirstOrDefaultAsync(cancellationToken);
+                (item.DueDate.HasValue && item.DueDate.Value >= fromUtc && item.DueDate.Value <= toUtc) ||
+                (item.NextHearingAt.HasValue && item.NextHearingAt.Value >= fromUtc && item.NextHearingAt.Value <= toUtc))
+            .GroupBy(_ => 1)
+            .Select(group => new
+            {
+                DeadlineCount = group.Count(item =>
+                    item.DueDate.HasValue && item.DueDate.Value >= fromUtc && item.DueDate.Value <= toUtc),
+                OldestDeadlineAt = group
+                    .Where(item => item.DueDate.HasValue && item.DueDate.Value >= fromUtc && item.DueDate.Value <= toUtc)
+                    .Min(item => item.DueDate),
+                HearingCount = group.Count(item =>
+                    item.NextHearingAt.HasValue && item.NextHearingAt.Value >= fromUtc && item.NextHearingAt.Value <= toUtc),
+                OldestHearingAt = group
+                    .Where(item => item.NextHearingAt.HasValue && item.NextHearingAt.Value >= fromUtc && item.NextHearingAt.Value <= toUtc)
+                    .Min(item => item.NextHearingAt),
+            })
+            .SingleOrDefaultAsync(cancellationToken);
 
-        return new[] { taskAt, dueAt, hearingAt }
+        var candidateCount = Math.Min(
+            (taskStatistics?.Count ?? 0) +
+            (caseStatistics?.DeadlineCount ?? 0) +
+            (caseStatistics?.HearingCount ?? 0),
+            settings.BatchSize);
+        var oldestAt = new[]
+        {
+            taskStatistics?.OldestAt,
+            caseStatistics?.OldestDeadlineAt,
+            caseStatistics?.OldestHearingAt,
+        }
             .Where(item => item.HasValue)
             .Min();
+
+        return new CalendarSyncCandidateStatistics(candidateCount, oldestAt);
     }
 
     private async Task<CalendarSyncSettingsDto> LoadCalendarSyncSettingsAsync(CancellationToken cancellationToken)
@@ -337,6 +330,10 @@ public sealed class CalendarSyncSchedulerService : BackgroundService
         int IntervalMinutes,
         int BatchSize,
         int LookAheadDays);
+
+    private readonly record struct CalendarSyncCandidateStatistics(
+        int Count,
+        DateTime? OldestAt);
 }
 
 public sealed record CalendarSyncSchedulerResult(

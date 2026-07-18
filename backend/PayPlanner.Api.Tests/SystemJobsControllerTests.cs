@@ -1429,7 +1429,8 @@ public class SystemJobsControllerTests
     [Fact]
     public async Task CalendarSyncSchedulerService_CountsCandidatesOnlyAfterReadiness()
     {
-        await using var scope = await CreateDbScopeAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var scope = await CreateDbScopeAsync(interceptor);
         var now = DateTime.UtcNow;
         scope.Db.SystemSettings.AddRange(
             new SystemSetting { Key = CalendarSyncSchedulerService.EnabledSettingKey, Value = "true", CreatedAt = now, UpdatedAt = now },
@@ -1473,6 +1474,7 @@ public class SystemJobsControllerTests
             CaseNumber = "CASE-3",
             Status = ClientCaseStatus.Open,
             Title = "Case with hearing",
+            DueDate = now.AddDays(4),
             NextHearingAt = now.AddDays(5),
         });
         await scope.Db.SaveChangesAsync();
@@ -1492,12 +1494,36 @@ public class SystemJobsControllerTests
             }),
             NullLogger<CalendarSyncSchedulerService>.Instance);
 
+        interceptor.Commands.Clear();
         var state = await service.BuildDiagnosticsStateAsync(CancellationToken.None);
 
         Assert.True(state.SchedulerEnabled);
         Assert.True(state.FeatureEnabled);
         Assert.False(state.Readiness.ReadyToConnect);
-        Assert.Equal(2, state.CandidateCount);
+        Assert.Equal(3, state.CandidateCount);
+        Assert.Equal(now.AddDays(2), state.OldestCandidateAt);
+        Assert.Equal(4, interceptor.Commands.Count);
+        var taskStatisticsCommand = Assert.Single(interceptor.Commands, command =>
+            command.Contains("TaskJournalItems", StringComparison.Ordinal));
+        Assert.Contains("COUNT", taskStatisticsCommand, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("MIN", taskStatisticsCommand, StringComparison.OrdinalIgnoreCase);
+        var caseStatisticsCommand = Assert.Single(interceptor.Commands, command =>
+            command.Contains("ClientCases", StringComparison.Ordinal));
+        Assert.Contains("COUNT", caseStatisticsCommand, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("MIN", caseStatisticsCommand, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(2, interceptor.Commands.Count(command =>
+            command.Contains("SystemSettings", StringComparison.Ordinal)));
+
+        scope.Db.TaskJournalItems.RemoveRange(await scope.Db.TaskJournalItems.ToListAsync());
+        scope.Db.ClientCases.RemoveRange(await scope.Db.ClientCases.ToListAsync());
+        await scope.Db.SaveChangesAsync();
+        interceptor.Commands.Clear();
+
+        var emptyState = await service.BuildDiagnosticsStateAsync(CancellationToken.None);
+
+        Assert.Equal(0, emptyState.CandidateCount);
+        Assert.Null(emptyState.OldestCandidateAt);
+        Assert.Equal(4, interceptor.Commands.Count);
 
         var result = await service.RunOnceAsync(CancellationToken.None);
 
