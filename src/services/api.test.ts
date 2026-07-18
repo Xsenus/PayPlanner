@@ -2105,22 +2105,27 @@ describe('apiService reports', () => {
       headers: { 'content-type': 'application/json' },
     }));
     vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
 
-    const result = await apiService.getCounterpartyReport({
-      from: '2026-05-01',
-      to: '2026-05-31',
-      source: 'Bank',
-      counterpartyName: 'ООО Ромашка',
-    });
+    const result = await apiService.getCounterpartyReport(
+      {
+        from: '2026-05-01',
+        to: '2026-05-31',
+        source: 'Bank',
+        counterpartyName: 'ООО Ромашка',
+      },
+      { signal: controller.signal },
+    );
 
     expect(result).toEqual(payload);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url] = fetchMock.mock.calls[0];
+    const [url, options] = fetchMock.mock.calls[0];
     expect(String(url)).toContain('/reports/counterparties?');
     expect(String(url)).toContain('from=2026-05-01');
     expect(String(url)).toContain('to=2026-05-31');
     expect(String(url)).toContain('source=Bank');
     expect(String(url)).toContain('counterpartyName=%D0%9E%D0%9E%D0%9E+%D0%A0%D0%BE%D0%BC%D0%B0%D1%88%D0%BA%D0%B0');
+    expect(options?.signal).toBe(controller.signal);
   });
 
   it('loads project report with filters', async () => {

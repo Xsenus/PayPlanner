@@ -4564,7 +4564,8 @@ services.Id,
     [Fact]
     public async Task Counterparties_GroupsFactOperationsByCounterparty()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await SqliteTestContextFactory.CreateAsync(interceptor: interceptor);
         db.MoneyOperations.AddRange(
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 10_000m, new DateTime(2026, 5, 1), "Основной банк", counterpartyName: "ООО Ромашка"),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 5_000m, new DateTime(2026, 5, 2), "Основной банк", counterpartyName: "  ооо ромашка  "),
@@ -4573,6 +4574,7 @@ services.Id,
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 4_000m, new DateTime(2026, 5, 5), "Основной банк"),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Plan, 99_999m, new DateTime(2026, 5, 6), "Основной банк", counterpartyName: "ООО Ромашка"));
         await db.SaveChangesAsync();
+        interceptor.Commands.Clear();
         var controller = CreateController(db);
 
         var action = await controller.Counterparties(
@@ -4620,6 +4622,12 @@ services.Id,
                 Assert.Equal(4_000m, item.Expense);
                 Assert.Equal(16.0m, item.Share);
             });
+
+        var counterpartyQuery = Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"MoneyOperations\"", StringComparison.Ordinal));
+        Assert.Contains("GROUP BY", counterpartyQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SUM", counterpartyQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("COUNT", counterpartyQuery, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

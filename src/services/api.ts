@@ -6158,9 +6158,9 @@ export class ApiService {
     caseId?: number;
     contractId?: number;
     incomeTypeId?: number;
-  }) {
+  }, options?: { signal?: AbortSignal }) {
     const q = buildQuery(params ?? {});
-    return this.request<CounterpartyReport>(`/reports/counterparties${q}`);
+    return this.request<CounterpartyReport>(`/reports/counterparties${q}`, { signal: options?.signal });
   }
 
   async getProjectReport(params?: {
