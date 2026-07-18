@@ -2007,7 +2007,6 @@ public class ReportsController : ControllerBase
 
         var caseQuery = _db.ClientCases
             .AsNoTracking()
-            .WithCaseIncludes()
             .ApplyClientCaseVisibility(casesVisibility)
             .Where(item => item.CreatedAt < endExclusiveUtc
                 && (item.Status != ClientCaseStatus.Closed && item.Status != ClientCaseStatus.Lost
@@ -2030,6 +2029,27 @@ public class ReportsController : ControllerBase
         }
 
         var cases = await caseQuery
+            .Select(item => new LegalWorkCaseRow(
+                item.Id,
+                item.CaseNumber,
+                item.Title,
+                item.CaseType,
+                item.Status,
+                item.ResponsibleUserId,
+                item.ResponsibleUser != null ? item.ResponsibleUser.FullName : null,
+                item.Client != null ? item.Client.Name : null,
+                item.Client != null ? item.Client.Company : null,
+                item.LegalEntity != null ? item.LegalEntity.ShortName : null,
+                item.LegalEntity != null ? item.LegalEntity.FullName : null,
+                item.CreatedAt,
+                item.StartDate,
+                item.DueDate,
+                item.FeeAmount,
+                item.NextHearingAt,
+                item.ClaimFiledAt,
+                item.AppealDeadlineAt,
+                item.MotionDeadlineAt,
+                item.ObjectionDeadlineAt))
             .ToListAsync(ct);
 
         var caseIds = cases.Select(item => item.Id).Distinct().ToArray();
@@ -2598,7 +2618,7 @@ public class ReportsController : ControllerBase
     }
 
     private static IReadOnlyList<LegalWorkCaseItemDto> BuildLegalWorkCaseItems(
-        IReadOnlyCollection<ClientCase> cases,
+        IReadOnlyCollection<LegalWorkCaseRow> cases,
         IReadOnlyDictionary<int, decimal> paidByCase,
         IReadOnlyDictionary<int, int> openTaskCountsByCase,
         IReadOnlyDictionary<int, int> overdueTaskCountsByCase,
@@ -2615,11 +2635,11 @@ public class ReportsController : ControllerBase
                     CaseNumber = clientCase.CaseNumber,
                     CaseTitle = clientCase.Title,
                     CaseType = NormalizeReportText(clientCase.CaseType, "Не указан"),
-                    ClientName = ResolveCaseOwnerName(clientCase),
+                    ClientName = ResolveLegalWorkOwnerName(clientCase),
                     Status = clientCase.Status.ToString(),
                     StatusLabel = FormatCaseStatus(clientCase.Status),
                     ResponsibleUserId = clientCase.ResponsibleUserId,
-                    ResponsibleName = ResolveCaseResponsibleName(clientCase),
+                    ResponsibleName = NormalizeReportText(clientCase.ResponsibleName, "Не назначен"),
                     CreatedAt = NormalizeReportInstant(clientCase.CreatedAt),
                     StartDate = NormalizeReportDate(clientCase.StartDate),
                     DueDate = NormalizeReportDate(clientCase.DueDate),
@@ -5298,7 +5318,7 @@ public class ReportsController : ControllerBase
     }
 
     private static IReadOnlyList<LegalWorkResponsibleItemDto> BuildLegalWorkResponsibleItems(
-        IReadOnlyCollection<ClientCase> cases,
+        IReadOnlyCollection<LegalWorkCaseRow> cases,
         IReadOnlyCollection<LegalWorkTaskRow> openTasks,
         IReadOnlyCollection<LegalWorkTaskRow> overdueTasks,
         IReadOnlyCollection<LegalWorkTaskRow> onApprovalTasks,
@@ -5325,7 +5345,7 @@ public class ReportsController : ControllerBase
         return cases
             .GroupBy(item => new ResponsibleReportKey(
                 item.ResponsibleUserId,
-                ResolveCaseResponsibleName(item)))
+                NormalizeReportText(item.ResponsibleName, "Не назначен")))
             .Select(group =>
             {
                 var responsibleId = group.Key.ResponsibleUserId;
@@ -5356,7 +5376,7 @@ public class ReportsController : ControllerBase
             .ToList();
     }
 
-    private static IEnumerable<LegalWorkDeadlineItemDto> BuildLegalWorkDeadlines(ClientCase item, DateTime today)
+    private static IEnumerable<LegalWorkDeadlineItemDto> BuildLegalWorkDeadlines(LegalWorkCaseRow item, DateTime today)
     {
         foreach (var row in BuildDeadlineRows(item))
         {
@@ -5365,9 +5385,9 @@ public class ReportsController : ControllerBase
                 CaseId = item.Id,
                 CaseNumber = item.CaseNumber,
                 CaseTitle = item.Title,
-                ClientName = ResolveCaseOwnerName(item),
+                ClientName = ResolveLegalWorkOwnerName(item),
                 ResponsibleUserId = item.ResponsibleUserId,
-                ResponsibleName = ResolveCaseResponsibleName(item),
+                ResponsibleName = NormalizeReportText(item.ResponsibleName, "Не назначен"),
                 DeadlineType = row.Type,
                 DeadlineLabel = row.Label,
                 DueAt = row.DueAt,
@@ -5376,7 +5396,7 @@ public class ReportsController : ControllerBase
         }
     }
 
-    private static IEnumerable<DeadlineSourceRow> BuildDeadlineRows(ClientCase item)
+    private static IEnumerable<DeadlineSourceRow> BuildDeadlineRows(LegalWorkCaseRow item)
     {
         if (item.DueDate.HasValue)
         {
@@ -5722,6 +5742,25 @@ public class ReportsController : ControllerBase
 
     private static string ResolveCaseActivityResponsibleName(CaseActivityCaseRow item)
         => NormalizeReportText(item.ResponsibleName, "Не назначен");
+
+    private static string ResolveLegalWorkOwnerName(LegalWorkCaseRow item)
+    {
+        if (!string.IsNullOrWhiteSpace(item.ClientName) || !string.IsNullOrWhiteSpace(item.ClientCompany))
+        {
+            return NormalizeReportText(
+                !string.IsNullOrWhiteSpace(item.ClientName) ? item.ClientName : item.ClientCompany,
+                "Клиент без имени");
+        }
+
+        if (!string.IsNullOrWhiteSpace(item.LegalEntityShortName) || !string.IsNullOrWhiteSpace(item.LegalEntityFullName))
+        {
+            return NormalizeReportText(
+                !string.IsNullOrWhiteSpace(item.LegalEntityShortName) ? item.LegalEntityShortName : item.LegalEntityFullName,
+                "Юридическое лицо без названия");
+        }
+
+        return "Без владельца";
+    }
 
     private static string ResolveCaseFinanceOwnerName(CaseFinanceQueryRow item)
     {
@@ -9504,6 +9543,28 @@ public class ReportsController : ControllerBase
         decimal Amount,
         decimal PaidAmount,
         PaymentStatus Status);
+
+    private sealed record LegalWorkCaseRow(
+        int Id,
+        string CaseNumber,
+        string Title,
+        string CaseType,
+        ClientCaseStatus Status,
+        int? ResponsibleUserId,
+        string? ResponsibleName,
+        string? ClientName,
+        string? ClientCompany,
+        string? LegalEntityShortName,
+        string? LegalEntityFullName,
+        DateTime CreatedAt,
+        DateTime? StartDate,
+        DateTime? DueDate,
+        decimal FeeAmount,
+        DateTime? NextHearingAt,
+        DateTime? ClaimFiledAt,
+        DateTime? AppealDeadlineAt,
+        DateTime? MotionDeadlineAt,
+        DateTime? ObjectionDeadlineAt);
 
     private sealed record CaseFinancePaymentRow(
         int PaymentId,

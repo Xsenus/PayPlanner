@@ -2171,6 +2171,64 @@ describe('apiService reports', () => {
     expect(options?.signal).toBe(controller.signal);
   });
 
+  it('loads legal work report with filters and abort signal', async () => {
+    const payload = {
+      from: '2026-05-01T00:00:00',
+      to: '2026-05-31T00:00:00',
+      statusFilter: 'Open',
+      responsibleUserIdFilter: 7,
+      caseTypeFilter: 'bankruptcy',
+      totalCases: 1,
+      activeCases: 1,
+      closedCases: 0,
+      lostCases: 0,
+      onHoldCases: 0,
+      overdueDeadlineCount: 0,
+      upcomingDeadlineCount: 0,
+      openTaskCount: 0,
+      overdueTaskCount: 0,
+      onApprovalTaskCount: 0,
+      feeTotal: 30000,
+      paidTotal: 12000,
+      outstandingTotal: 18000,
+      casesByStatus: [],
+      casesByType: [],
+      responsibles: [],
+      financeByStatus: [],
+      deadlinesByType: [],
+      cases: [],
+      overdueDeadlines: [],
+      upcomingDeadlines: [],
+    };
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+
+    const result = await apiService.getLegalWorkReport(
+      {
+        from: '2026-05-01',
+        to: '2026-05-31',
+        status: 'Open',
+        responsibleUserId: 7,
+        caseType: 'bankruptcy',
+      },
+      { signal: controller.signal },
+    );
+
+    expect(result).toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/reports/legal-work?');
+    expect(String(url)).toContain('from=2026-05-01');
+    expect(String(url)).toContain('to=2026-05-31');
+    expect(String(url)).toContain('status=Open');
+    expect(String(url)).toContain('responsibleUserId=7');
+    expect(String(url)).toContain('caseType=bankruptcy');
+    expect(options?.signal).toBe(controller.signal);
+  });
+
   it('downloads legal work report exports with filters', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response('excel-data', {
       headers: {

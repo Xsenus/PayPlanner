@@ -3249,6 +3249,118 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task LegalWork_ProjectsOnlyRequiredCaseColumns()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await SqliteTestContextFactory.CreateAsync(interceptor: interceptor);
+        var role = new Role { Name = "legal-work-projection-role", Description = "Legal work reporter" };
+        var user = new User
+        {
+            Email = "legal-work-projection@example.test",
+            FullName = "Projection Legal Lawyer",
+            IsActive = true,
+            Role = role,
+        };
+        var client = new Client
+        {
+            Name = "Projection Legal Client",
+            Company = "Unused Company Name",
+        };
+        var today = DateTime.UtcNow.Date;
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            ResponsibleUser = user,
+            CaseNumber = "LEGAL-PROJECTION",
+            Title = "Projection legal work case",
+            CaseType = "Арбитраж",
+            Status = ClientCaseStatus.Open,
+            CreatedAt = today.AddDays(-20),
+            StartDate = today.AddDays(-19),
+            DueDate = today.AddDays(1),
+            FeeAmount = 50_000m,
+            NextHearingAt = today.AddDays(2),
+            ClaimFiledAt = today.AddDays(3),
+            AppealDeadlineAt = today.AddDays(4),
+            MotionDeadlineAt = today.AddDays(5),
+            ObjectionDeadlineAt = today.AddDays(6),
+            Stage = "Unused stage",
+            CourtName = "Unused court",
+            CourtUrl = "https://example.test/unused",
+            CourtCaseNumber = "UNUSED-COURT-NUMBER",
+            Claimant = "Unused claimant",
+            Defendant = "Unused defendant",
+        };
+
+        db.Roles.Add(role);
+        db.Users.Add(user);
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                Role = role,
+                Section = RolePermissionCatalog.Reports,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                Role = role,
+                Section = RolePermissionCatalog.Cases,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                Role = role,
+                Section = RolePermissionCatalog.Tasks,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                Role = role,
+                Section = RolePermissionCatalog.Accounts,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            });
+        await db.SaveChangesAsync();
+        interceptor.Commands.Clear();
+
+        var controller = CreateController(db, CreateUserPrincipal(user.Id));
+        var action = await controller.LegalWork(
+            today.AddDays(-30),
+            today.AddDays(30),
+            null,
+            null,
+            null,
+            CancellationToken.None);
+
+        var report = Assert.IsType<LegalWorkReportDto>(Assert.IsType<OkObjectResult>(action.Result).Value);
+        var item = Assert.Single(report.Cases);
+        Assert.Equal("Projection Legal Client", item.ClientName);
+        Assert.Equal("Projection Legal Lawyer", item.ResponsibleName);
+        Assert.Equal(50_000m, item.FeeAmount);
+        Assert.Equal(6, report.UpcomingDeadlineCount);
+
+        var caseQuery = Assert.Single(interceptor.Commands, command =>
+            command.StartsWith("SELECT \"c\".\"Id\", \"c\".\"CaseNumber\"", StringComparison.Ordinal));
+        Assert.Contains("\"FeeAmount\"", caseQuery, StringComparison.Ordinal);
+        Assert.Contains("\"NextHearingAt\"", caseQuery, StringComparison.Ordinal);
+        Assert.Contains("\"ClaimFiledAt\"", caseQuery, StringComparison.Ordinal);
+        Assert.Contains("\"AppealDeadlineAt\"", caseQuery, StringComparison.Ordinal);
+        Assert.Contains("\"MotionDeadlineAt\"", caseQuery, StringComparison.Ordinal);
+        Assert.Contains("\"ObjectionDeadlineAt\"", caseQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Stage\"", caseQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"CourtName\"", caseQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"CourtUrl\"", caseQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"CourtCaseNumber\"", caseQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Claimant\"", caseQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Defendant\"", caseQuery, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CaseFinance_UsesVisibleCasesAndPayments()
     {
         await using var db = await CreateContextAsync();

@@ -6184,9 +6184,9 @@ export class ApiService {
     status?: string;
     responsibleUserId?: number;
     caseType?: string;
-  }) {
+  }, options?: { signal?: AbortSignal }) {
     const q = buildQuery(params ?? {});
-    return this.request<LegalWorkReport>(`/reports/legal-work${q}`);
+    return this.request<LegalWorkReport>(`/reports/legal-work${q}`, { signal: options?.signal });
   }
 
   async downloadLegalWorkReport(params?: {
