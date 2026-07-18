@@ -1,9 +1,11 @@
+using System.Data.Common;
 using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Controllers.V2;
 using PayPlanner.Api.Data;
@@ -24,7 +26,8 @@ public class ClientsControllerTests
     [Fact]
     public async Task V2Get_ReturnsPagedSearchResults_WithContactCounters()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
         var userId = await CreateUserAsync(db, "admin");
         var legalEntityId = await CreateLegalEntityAsync(db, "Alpha Legal");
 
@@ -54,7 +57,7 @@ public class ClientsControllerTests
         await db.SaveChangesAsync();
 
         db.ClientCases.AddRange(
-            new ClientCase { ClientId = target.Id, Title = "Case 1" },
+            new ClientCase { ClientId = target.Id, Title = "Case 1", Description = "Case preview details" },
             new ClientCase { ClientId = target.Id, Title = "Case 2" });
 
         var contract = new Contract
@@ -105,6 +108,7 @@ public class ClientsControllerTests
         await db.SaveChangesAsync();
 
         var controller = CreateV2Controller(db, userId);
+        interceptor.Commands.Clear();
 
         var action = await controller.Get(
             search: "alpha",
@@ -139,6 +143,8 @@ public class ClientsControllerTests
         Assert.Equal(target.Id, item.Id);
         Assert.Equal(2, item.CasesCount);
         Assert.Equal(2, item.Cases.Count);
+        Assert.Contains(item.Cases, clientCase =>
+            clientCase.Title == "Case 1" && clientCase.Description == "Case preview details");
         Assert.Equal(1, item.ContractsCount);
         Assert.Equal(2, item.InvoicesCount);
         Assert.Equal(1, item.ActsCount);
@@ -148,6 +154,8 @@ public class ClientsControllerTests
         Assert.Equal(2, item.RelatedInvoices.Count);
         Assert.Single(item.RelatedActs);
         Assert.Single(item.RelatedPayments);
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"ClientCases\"", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -2506,18 +2514,36 @@ public class ClientsControllerTests
         };
     }
 
-    private static async Task<PaymentContext> CreateContextAsync()
+    private static async Task<PaymentContext> CreateContextAsync(DbCommandInterceptor? interceptor = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
 
-        var options = new DbContextOptionsBuilder<PaymentContext>()
-            .UseSqlite(connection)
-            .Options;
+        var optionsBuilder = new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite(connection);
+        if (interceptor is not null)
+        {
+            optionsBuilder.AddInterceptors(interceptor);
+        }
 
-        var db = new PaymentContext(options);
+        var db = new PaymentContext(optionsBuilder.Options);
         await db.Database.EnsureCreatedAsync();
         return db;
+    }
+
+    private sealed class RecordingCommandInterceptor : DbCommandInterceptor
+    {
+        public List<string> Commands { get; } = [];
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            Commands.Add(command.CommandText);
+            return ValueTask.FromResult(result);
+        }
     }
 
     private static (string TimeZoneId, DateTime ProfileToday) ResolveTimeZoneWithDifferentLocalDate()

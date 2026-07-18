@@ -242,14 +242,6 @@ public class ClientsV2Controller : ControllerBase
                 .AsNoTracking()
                 .ApplyContractVisibility(contractsVisibility);
 
-            var casesCountByClient = await _db.ClientCases
-                .AsNoTracking()
-                .ApplyClientCaseVisibility(casesVisibility)
-                .Where(c => c.ClientId.HasValue && itemIds.Contains(c.ClientId.Value))
-                .GroupBy(c => c.ClientId!.Value)
-                .Select(g => new { ClientId = g.Key, Count = g.Count() })
-                .ToDictionaryAsync(x => x.ClientId, x => x.Count, ct);
-
             var casesByClient = await _db.ClientCases
                 .AsNoTracking()
                 .ApplyClientCaseVisibility(casesVisibility)
@@ -257,6 +249,11 @@ public class ClientsV2Controller : ControllerBase
                 .OrderByDescending(c => c.CreatedAt)
                 .ThenByDescending(c => c.Id)
                 .ToListAsync(ct);
+
+            var casesCountByClient = casesByClient
+                .Where(c => c.ClientId.HasValue)
+                .GroupBy(c => c.ClientId!.Value)
+                .ToDictionary(group => group.Key, group => group.Count());
 
             var caseLinksByClient = casesByClient
                 .Where(c => c.ClientId.HasValue)
