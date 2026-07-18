@@ -8296,12 +8296,53 @@ public class CasesV2Controller : ControllerBase
         var caseIdSet = caseIds.ToHashSet();
         var payments = await _db.Payments
             .AsNoTracking()
-            .Include(payment => payment.InvoiceClientCases)
             .Where(payment => payment.Status != PaymentStatus.Cancelled)
             .Where(payment =>
                 (payment.ClientCaseId.HasValue && caseIds.Contains(payment.ClientCaseId.Value)) ||
                 payment.InvoiceClientCases.Any(link => caseIds.Contains(link.ClientCaseId)))
+            .Select(payment => new Payment
+            {
+                Id = payment.Id,
+                Account = payment.Account,
+                AccountDate = payment.AccountDate,
+                InvoiceId = payment.InvoiceId,
+                LegacyAccountNumber = payment.LegacyAccountNumber,
+                LegacyAccountDate = payment.LegacyAccountDate,
+                Amount = payment.Amount,
+                ClientCaseId = payment.ClientCaseId,
+                ClientId = payment.ClientId,
+                ExpenseClientId = payment.ExpenseClientId,
+                DocumentKind = payment.DocumentKind,
+                Date = payment.Date,
+                PaidAmount = payment.PaidAmount,
+                SystemNotes = payment.SystemNotes,
+                Status = payment.Status,
+                Type = payment.Type,
+            })
             .ToListAsync(ct);
+
+        var paymentIds = payments.Select(payment => payment.Id).ToArray();
+        if (paymentIds.Length > 0)
+        {
+            var links = await _db.InvoiceClientCases
+                .AsNoTracking()
+                .Where(link => paymentIds.Contains(link.PaymentId) && caseIds.Contains(link.ClientCaseId))
+                .Select(link => new
+                {
+                    link.PaymentId,
+                    link.ClientCaseId,
+                })
+                .ToListAsync(ct);
+            var paymentById = payments.ToDictionary(payment => payment.Id);
+            foreach (var link in links)
+            {
+                paymentById[link.PaymentId].InvoiceClientCases.Add(new InvoiceClientCase
+                {
+                    PaymentId = link.PaymentId,
+                    ClientCaseId = link.ClientCaseId,
+                });
+            }
+        }
 
         foreach (var payment in InvoiceManagedPaymentRules.FilterVisiblePayments(payments))
         {

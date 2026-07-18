@@ -1093,7 +1093,8 @@ public class CasesV2ControllerTests
     [Fact]
     public async Task Get_AddsFinanceSummaryForVisibleCases()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
         var owner = await CreateUserAsync(db, "owner@example.com", "Владелец");
         await GrantSectionPermissionAsync(db, owner, RolePermissionCatalog.Payments, viewScope: DataVisibilityScope.All);
         var client = new Client
@@ -1145,6 +1146,20 @@ public class CasesV2ControllerTests
                 Date = new DateTime(2026, 5, 12, 0, 0, 0, DateTimeKind.Utc),
                 PlannedDate = new DateTime(2026, 5, 12, 0, 0, 0, DateTimeKind.Utc),
             });
+        var linkedPayment = new Payment
+        {
+            Client = client,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Pending,
+            Amount = 3000m,
+            PaidAmount = 1000m,
+            Date = new DateTime(2026, 5, 13, 0, 0, 0, DateTimeKind.Utc),
+            PlannedDate = new DateTime(2026, 5, 13, 0, 0, 0, DateTimeKind.Utc),
+            Description = "Не загружать описание для сводки реестра",
+            Notes = "Не загружать заметки для сводки реестра",
+            CounterpartyName = "Не загружать контрагента для сводки реестра",
+        };
+        db.Payments.Add(linkedPayment);
         db.TaskJournalItems.AddRange(
             new TaskJournalItem
             {
@@ -1178,7 +1193,14 @@ public class CasesV2ControllerTests
                 UpdatedAt = new DateTime(2026, 5, 4, 10, 0, 0, DateTimeKind.Utc),
             });
         await db.SaveChangesAsync();
+        db.InvoiceClientCases.Add(new InvoiceClientCase
+        {
+            PaymentId = linkedPayment.Id,
+            ClientCaseId = clientCase.Id,
+        });
+        await db.SaveChangesAsync();
         var controller = CreateController(db, owner);
+        interceptor.Commands.Clear();
 
         var result = await controller.Get(
             clientId: null,
@@ -1200,10 +1222,10 @@ public class CasesV2ControllerTests
 
         var item = Assert.Single(GetAnonymousItems(Assert.IsType<OkObjectResult>(result).Value));
 
-        Assert.Equal(50000m, item.IncomeTotal);
-        Assert.Equal(35000m, item.IncomePaid);
-        Assert.Equal(15000m, item.IncomeOutstanding);
-        Assert.Equal(1, item.IncomeCount);
+        Assert.Equal(53000m, item.IncomeTotal);
+        Assert.Equal(36000m, item.IncomePaid);
+        Assert.Equal(17000m, item.IncomeOutstanding);
+        Assert.Equal(2, item.IncomeCount);
         Assert.Equal(7000m, item.ExpenseTotal);
         Assert.Equal(2000m, item.ExpensePaid);
         Assert.Equal(5000m, item.ExpenseOutstanding);
@@ -1214,6 +1236,18 @@ public class CasesV2ControllerTests
         Assert.Equal(33, item.TaskProgressPercent);
         Assert.NotNull(item.LastTaskAt);
         Assert.True(item.LastTaskAt >= new DateTime(2026, 5, 4, 10, 0, 0, DateTimeKind.Utc));
+
+        var paymentCommand = Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"Payments\"", StringComparison.Ordinal)
+            && command.Contains("SystemNotes", StringComparison.Ordinal));
+        Assert.DoesNotContain("\"Description\"", paymentCommand, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Notes\"", paymentCommand, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"CounterpartyName\"", paymentCommand, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"PaymentOrderNumber\"", paymentCommand, StringComparison.Ordinal);
+        Assert.Contains(interceptor.Commands, command =>
+            command.Contains("FROM \"InvoiceClientCases\"", StringComparison.Ordinal)
+            && command.Contains("PaymentId", StringComparison.Ordinal)
+            && command.Contains("ClientCaseId", StringComparison.Ordinal));
     }
 
     [Fact]
