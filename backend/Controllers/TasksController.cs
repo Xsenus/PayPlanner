@@ -475,25 +475,32 @@ public class TasksController : ControllerBase
                     .Max(courtEvent => (DateTime?)(courtEvent.UpdatedAt ?? courtEvent.CreatedAt)),
             });
 
-        var candidateQuery = visibleCases.Where(item =>
-            item.ActiveTaskCount == 0 &&
-            (item.LastTaskAt ?? item.CreatedAt) <= inactivityCutoff &&
-            (item.LastTaskCommentAt ?? item.CreatedAt) <= inactivityCutoff &&
-            (item.LastDocumentAt ?? item.CreatedAt) <= inactivityCutoff &&
-            (item.LastCourtEventAt ?? item.CreatedAt) <= inactivityCutoff &&
-            (item.LastViewedAt ?? item.CreatedAt) <= inactivityCutoff &&
-            (item.ActivityConfirmedAt ?? item.CreatedAt) <= inactivityCutoff &&
-            item.InactivityRemindersEnabled);
-
-        var escalationCandidateQuery = visibleCases.Where(item =>
-            item.ActiveTaskCount == 0 &&
-            (item.LastTaskAt ?? item.CreatedAt) <= escalationCutoff &&
-            (item.LastTaskCommentAt ?? item.CreatedAt) <= escalationCutoff &&
-            (item.LastDocumentAt ?? item.CreatedAt) <= escalationCutoff &&
-            (item.LastCourtEventAt ?? item.CreatedAt) <= escalationCutoff &&
-            (item.LastViewedAt ?? item.CreatedAt) <= escalationCutoff &&
-            (item.ActivityConfirmedAt ?? item.CreatedAt) <= escalationCutoff &&
-            item.InactivityRemindersEnabled);
+        var candidateStatistics = settings.CaseInactivityAutomationEnabled
+            ? await visibleCases
+                .GroupBy(_ => 1)
+                .Select(group => new
+                {
+                    CandidateCount = group.Count(item =>
+                        item.ActiveTaskCount == 0 &&
+                        (item.LastTaskAt ?? item.CreatedAt) <= inactivityCutoff &&
+                        (item.LastTaskCommentAt ?? item.CreatedAt) <= inactivityCutoff &&
+                        (item.LastDocumentAt ?? item.CreatedAt) <= inactivityCutoff &&
+                        (item.LastCourtEventAt ?? item.CreatedAt) <= inactivityCutoff &&
+                        (item.LastViewedAt ?? item.CreatedAt) <= inactivityCutoff &&
+                        (item.ActivityConfirmedAt ?? item.CreatedAt) <= inactivityCutoff &&
+                        item.InactivityRemindersEnabled),
+                    EscalationCount = group.Count(item =>
+                        item.ActiveTaskCount == 0 &&
+                        (item.LastTaskAt ?? item.CreatedAt) <= escalationCutoff &&
+                        (item.LastTaskCommentAt ?? item.CreatedAt) <= escalationCutoff &&
+                        (item.LastDocumentAt ?? item.CreatedAt) <= escalationCutoff &&
+                        (item.LastCourtEventAt ?? item.CreatedAt) <= escalationCutoff &&
+                        (item.LastViewedAt ?? item.CreatedAt) <= escalationCutoff &&
+                        (item.ActivityConfirmedAt ?? item.CreatedAt) <= escalationCutoff &&
+                        item.InactivityRemindersEnabled),
+                })
+                .SingleOrDefaultAsync(ct)
+            : null;
 
         var auditQuery = _db.ObjectAuditEvents
             .AsNoTracking()
@@ -519,8 +526,8 @@ public class TasksController : ControllerBase
             DefaultAssigneeName = defaultAssignee is null ? string.Empty : BuildUserDisplayName(defaultAssignee.FullName, defaultAssignee.Email),
             EscalationUserId = settings.CaseInactivityEscalationUserId,
             EscalationUserName = escalationUser is null ? string.Empty : BuildUserDisplayName(escalationUser.FullName, escalationUser.Email),
-            VisibleCandidateCount = settings.CaseInactivityAutomationEnabled ? await candidateQuery.CountAsync(ct) : 0,
-            VisibleEscalationCandidateCount = settings.CaseInactivityAutomationEnabled ? await escalationCandidateQuery.CountAsync(ct) : 0,
+            VisibleCandidateCount = candidateStatistics?.CandidateCount ?? 0,
+            VisibleEscalationCandidateCount = candidateStatistics?.EscalationCount ?? 0,
             CreatedTaskCountLast7Days = await auditQuery.CountAsync(item => item.CreatedAt >= createdSince, ct),
             LastCreatedAt = lastCreated is null ? null : ToIso(lastCreated.CreatedAt),
             LastCreatedDescription = lastCreated?.Description,

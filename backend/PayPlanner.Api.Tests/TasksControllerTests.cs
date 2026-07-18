@@ -542,7 +542,8 @@ public class TasksControllerTests
     [Fact]
     public async Task GetCaseControlAutomationDiagnostics_ReturnsCurrentAutomationState()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
         var admin = await CreateAdminUserAsync(db, "admin-diagnostics@example.com", "Администратор");
         var fallbackAssignee = await CreateAdminUserAsync(db, "fallback-diagnostics@example.com", "Резервный исполнитель");
         var escalationUser = await CreateAdminUserAsync(db, "escalation-diagnostics@example.com", "Руководитель");
@@ -568,6 +569,7 @@ public class TasksControllerTests
         });
         await db.SaveChangesAsync();
         var controller = CreateController(db, new RecordingNotificationService(), admin);
+        interceptor.Commands.Clear();
 
         var result = await controller.GetCaseControlAutomationDiagnostics(CancellationToken.None);
 
@@ -587,6 +589,8 @@ public class TasksControllerTests
         Assert.Equal(1, dto.CreatedTaskCountLast7Days);
         Assert.NotNull(dto.LastCreatedAt);
         Assert.Equal("Создана контрольная задача по делу БАНКРОТСТВО.", dto.LastCreatedDescription);
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"ClientCases\"", StringComparison.Ordinal));
     }
 
     [Fact]
