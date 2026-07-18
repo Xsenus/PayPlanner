@@ -923,39 +923,45 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
         var inactivityDays = Math.Clamp(ParseInt(settings.GetValueOrDefault(CaseControlInactiveDaysKey), 14), 1, 365);
         var limit = Math.Clamp(ParseInt(settings.GetValueOrDefault(CaseControlLimitKey), 25), 1, 100);
         var cutoff = now.AddDays(-inactivityDays);
-        var pendingCount = enabled
-            ? await _db.ClientCases
-                .AsNoTracking()
-                .CountAsync(clientCase =>
-                    clientCase.Status == ClientCaseStatus.Open &&
-                    clientCase.InactivityRemindersEnabled &&
-                    (clientCase.LastViewedAt ?? clientCase.CreatedAt) <= cutoff &&
-                    (clientCase.ActivityConfirmedAt ?? clientCase.CreatedAt) <= cutoff &&
-                    (_db.TaskJournalComments
-                        .Where(comment => comment.TaskJournalItem.ClientCaseId == clientCase.Id)
-                        .Max(comment => (DateTime?)(comment.UpdatedAt ?? comment.CreatedAt)) ?? clientCase.CreatedAt) <= cutoff &&
-                    (_db.ClientCaseDocuments
-                        .Where(document => document.ClientCaseId == clientCase.Id)
-                        .Max(document => (DateTime?)document.UploadedAt) ?? clientCase.CreatedAt) <= cutoff &&
-                    (_db.ClientCaseCourtEvents
-                        .Where(courtEvent => courtEvent.ClientCaseId == clientCase.Id)
-                        .Max(courtEvent => (DateTime?)(courtEvent.UpdatedAt ?? courtEvent.CreatedAt)) ?? clientCase.CreatedAt) <= cutoff &&
-                    !_db.TaskJournalItems.Any(task =>
-                        task.ClientCaseId == clientCase.Id &&
-                        CaseControlActiveTaskStatuses.Contains(task.Status)),
-                    ct)
-            : 0;
-
-        var lastAutomation = await _db.ObjectAuditEvents
+        var candidates = _db.ClientCases
             .AsNoTracking()
-            .Where(item =>
-                item.ObjectType == "client-case" &&
-                item.Action == "Automation" &&
-                item.MetadataJson != null &&
-                item.MetadataJson.Contains("caseInactivityControlTaskCreated"))
-            .OrderByDescending(item => item.CreatedAt)
-            .Select(item => new { item.CreatedAt, item.Description })
-            .FirstOrDefaultAsync(ct);
+            .Where(clientCase =>
+                clientCase.Status == ClientCaseStatus.Open &&
+                clientCase.InactivityRemindersEnabled &&
+                (clientCase.LastViewedAt ?? clientCase.CreatedAt) <= cutoff &&
+                (clientCase.ActivityConfirmedAt ?? clientCase.CreatedAt) <= cutoff &&
+                (_db.TaskJournalComments
+                    .Where(comment => comment.TaskJournalItem.ClientCaseId == clientCase.Id)
+                    .Max(comment => (DateTime?)(comment.UpdatedAt ?? comment.CreatedAt)) ?? clientCase.CreatedAt) <= cutoff &&
+                (_db.ClientCaseDocuments
+                    .Where(document => document.ClientCaseId == clientCase.Id)
+                    .Max(document => (DateTime?)document.UploadedAt) ?? clientCase.CreatedAt) <= cutoff &&
+                (_db.ClientCaseCourtEvents
+                    .Where(courtEvent => courtEvent.ClientCaseId == clientCase.Id)
+                    .Max(courtEvent => (DateTime?)(courtEvent.UpdatedAt ?? courtEvent.CreatedAt)) ?? clientCase.CreatedAt) <= cutoff &&
+                !_db.TaskJournalItems.Any(task =>
+                    task.ClientCaseId == clientCase.Id &&
+                    CaseControlActiveTaskStatuses.Contains(task.Status)));
+        var singleton = _db.Database.SqlQuery<int>($"SELECT 1 AS \"Value\"");
+        var statistics = await (
+                from _ in singleton
+                from lastAutomation in _db.ObjectAuditEvents
+                    .AsNoTracking()
+                    .Where(item =>
+                        item.ObjectType == "client-case" &&
+                        item.Action == "Automation" &&
+                        item.MetadataJson != null &&
+                        item.MetadataJson.Contains("caseInactivityControlTaskCreated"))
+                    .OrderByDescending(item => item.CreatedAt)
+                    .Take(1)
+                    .DefaultIfEmpty()
+                select new CaseControlStatistics
+                {
+                    EligibleCount = enabled ? candidates.Count() : 0,
+                    CreatedAt = lastAutomation == null ? null : lastAutomation.CreatedAt,
+                    Description = lastAutomation == null ? null : lastAutomation.Description,
+                })
+            .SingleAsync(ct);
 
         return new SystemJobDiagnosticsItemDto
         {
@@ -966,10 +972,10 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
             Status = enabled ? "active" : "disabled",
             StatusText = enabled ? "Включено" : "Выключено",
             IntervalText = "Проверка каждые 5 минут",
-            PendingCount = pendingCount,
+            PendingCount = statistics.EligibleCount,
             LastProcessedCount = limit,
-            LastActivityAt = lastAutomation?.CreatedAt,
-            LastActivityDescription = lastAutomation?.Description,
+            LastActivityAt = statistics.CreatedAt,
+            LastActivityDescription = statistics.Description,
             NextRunHint = enabled ? $"Порог неактивности: {inactivityDays} дн., лимит за запуск: {limit}." : "Автоматическое создание контрольных задач выключено.",
             ManualRunEnabled = enabled,
             ManualRunHint = enabled ? "Можно вручную проверить неактивные дела и создать контрольные задачи." : "Ручной запуск недоступен, пока автоконтроль неактивных дел выключен.",
@@ -1377,5 +1383,12 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
         public int EligibleCount { get; init; }
         public DateTime? CreatedAt { get; init; }
         public string? CaseNumber { get; init; }
+    }
+
+    private sealed class CaseControlStatistics
+    {
+        public int EligibleCount { get; init; }
+        public DateTime? CreatedAt { get; init; }
+        public string? Description { get; init; }
     }
 }

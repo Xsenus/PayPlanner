@@ -316,6 +316,12 @@ public class SystemJobsControllerTests
             command.Contains("EligibleCount", StringComparison.Ordinal));
         Assert.Contains("COUNT", courtSyncStatisticsCommand, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("ORDER BY", courtSyncStatisticsCommand, StringComparison.OrdinalIgnoreCase);
+        var caseControlStatisticsCommand = Assert.Single(interceptor.Commands, command =>
+            command.Contains("ClientCases", StringComparison.Ordinal) &&
+            command.Contains("ObjectAuditEvents", StringComparison.Ordinal) &&
+            command.Contains("EligibleCount", StringComparison.Ordinal));
+        Assert.Contains("COUNT", caseControlStatisticsCommand, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ORDER BY", caseControlStatisticsCommand, StringComparison.OrdinalIgnoreCase);
         Assert.Single(interceptor.Commands, command =>
             command.Contains(NotificationRetrySchedulerService.EnabledSettingKey, StringComparison.Ordinal));
         var taskReminderStatisticsCommand = Assert.Single(interceptor.Commands, command =>
@@ -394,6 +400,13 @@ public class SystemJobsControllerTests
                 Value = "false",
                 CreatedAt = oldestAt,
                 UpdatedAt = oldestAt,
+            },
+            new SystemSetting
+            {
+                Key = "tasks.automation.caseControl.enabled",
+                Value = "false",
+                CreatedAt = oldestAt,
+                UpdatedAt = oldestAt,
             });
         scope.Db.GoogleCalendarSyncLogs.Add(new GoogleCalendarSyncLog
         {
@@ -438,6 +451,15 @@ public class SystemJobsControllerTests
             CreatedAt = oldestAt,
             UpdatedAt = oldestDeliveryAt,
         });
+        var lastCaseAutomationAt = oldestDeliveryAt.AddDays(2);
+        scope.Db.ObjectAuditEvents.Add(new ObjectAuditEvent
+        {
+            ObjectType = "client-case",
+            Action = "Automation",
+            Description = "Preserved case control activity",
+            MetadataJson = "{\"event\":\"caseInactivityControlTaskCreated\"}",
+            CreatedAt = lastCaseAutomationAt,
+        });
         await scope.Db.SaveChangesAsync();
 
         interceptor.Commands.Clear();
@@ -462,6 +484,8 @@ public class SystemJobsControllerTests
             item => item.Key == SystemJobKeys.YandexDiskCrmSync);
         var taskReminders = Assert.Single(dto.Items,
             item => item.Key == SystemJobKeys.TaskReminders);
+        var caseControl = Assert.Single(dto.Items,
+            item => item.Key == SystemJobKeys.CaseInactivityControl);
 
         Assert.False(retention.Enabled);
         Assert.Equal(0, retention.PendingCount);
@@ -479,6 +503,10 @@ public class SystemJobsControllerTests
         Assert.Equal(0, taskReminders.PendingCount);
         Assert.Equal(lastReminderAt, taskReminders.LastActivityAt);
         Assert.Equal("Preserved task reminder", taskReminders.LastActivityDescription);
+        Assert.False(caseControl.Enabled);
+        Assert.Equal(0, caseControl.PendingCount);
+        Assert.Equal(lastCaseAutomationAt, caseControl.LastActivityAt);
+        Assert.Equal("Preserved case control activity", caseControl.LastActivityDescription);
         Assert.Single(interceptor.Commands, command =>
             command.Contains("TaskJournalItems", StringComparison.Ordinal) &&
             command.Contains("NotificationDeliveries", StringComparison.Ordinal) &&
