@@ -63,7 +63,8 @@ public class UserActivityControllerOnlineTests
     [Fact]
     public async Task GetOnlineAsync_ReturnsUsersWithOnlineStateAndLastLogin()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
         var role = new Role { Name = "admin", Description = "Administrator" };
         db.Roles.Add(role);
         await db.SaveChangesAsync();
@@ -149,6 +150,7 @@ public class UserActivityControllerOnlineTests
         await db.SaveChangesAsync();
 
         var controller = CreateController(db);
+        interceptor.Commands.Clear();
         var result = await controller.GetOnlineAsync(CancellationToken.None);
         var summary = AssertOk<UserOnlineSummaryDto>(result);
 
@@ -164,9 +166,45 @@ public class UserActivityControllerOnlineTests
         var loggedOut = Assert.Single(summary.Users, user => user.UserId == logoutUser.Id);
         Assert.False(loggedOut.IsOnline);
         Assert.Equal("logout", loggedOut.LastAction);
+        Assert.NotNull(loggedOut.LastLogoutAt);
 
         var inactive = Assert.Single(summary.Users, user => user.UserId == inactiveUser.Id);
         Assert.False(inactive.IsOnline);
+        Assert.Equal(2, interceptor.Commands.Count);
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"UserActivityLogs\"", StringComparison.Ordinal));
+        Assert.DoesNotContain(interceptor.Commands, command =>
+            command.Contains("FROM \"Users\"", StringComparison.Ordinal) &&
+            command.Contains("UserActivityLogs", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task GetOnlineAsync_DoesNotReadLogs_WhenPresenceFieldsAreComplete()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var user = await CreateUserAsync(db, "admin");
+        var now = DateTime.UtcNow;
+        user.LastActivityAt = now.AddMinutes(-1);
+        user.LastLoginAt = now.AddMinutes(-5);
+        user.LastLogoutAt = now.AddDays(-1);
+        user.LastActivityAction = "heartbeat";
+        user.LastActivitySection = "session";
+        user.LastActivityIpAddress = "127.0.0.1";
+        user.LastActivityUserAgent = "test-browser";
+        await db.SaveChangesAsync();
+
+        interceptor.Commands.Clear();
+        var summary = AssertOk<UserOnlineSummaryDto>(
+            await CreateController(db).GetOnlineAsync(CancellationToken.None));
+
+        var current = Assert.Single(summary.Users);
+        Assert.Equal(user.Id, current.UserId);
+        Assert.True(current.IsOnline);
+        Assert.Equal("heartbeat", current.LastAction);
+        Assert.Single(interceptor.Commands);
+        Assert.DoesNotContain(interceptor.Commands, command =>
+            command.Contains("UserActivityLogs", StringComparison.Ordinal));
     }
 
     [Fact]

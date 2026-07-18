@@ -157,12 +157,11 @@ public class UserActivityController : ControllerBase, IAsyncActionFilter
         var now = DateTime.UtcNow;
         var onlineAfter = now.AddMinutes(-OnlineThresholdMinutes);
 
-        var users = await _context.Users
+        var userRows = await _context.Users
             .AsNoTracking()
-            .Include(x => x.Role)
             .OrderBy(x => x.FullName)
             .ThenBy(x => x.Email)
-            .Select(user => new UserOnlineStatusDto
+            .Select(user => new
             {
                 UserId = user.Id,
                 FullName = user.FullName,
@@ -171,45 +170,92 @@ public class UserActivityController : ControllerBase, IAsyncActionFilter
                 Department = user.DepartmentDictionary != null ? user.DepartmentDictionary.Name : user.Department,
                 IsActive = user.IsActive,
                 IsApproved = user.IsApproved,
-                LastActivityAt = user.LastActivityAt ?? _context.UserActivityLogs
-                    .Where(log => log.UserId == user.Id)
-                    .Max(log => (DateTime?)log.CreatedAt),
-                LastLoginAt = user.LastLoginAt ?? _context.UserActivityLogs
-                    .Where(log => log.UserId == user.Id
-                        && (log.Category == "auth" || log.Category == "Auth")
-                        && (log.Action == "login" || log.Action == "Login"))
-                    .Max(log => (DateTime?)log.CreatedAt),
-                LastLogoutAt = user.LastLogoutAt ?? _context.UserActivityLogs
-                    .Where(log => log.UserId == user.Id
-                        && (log.Category == "auth" || log.Category == "Auth")
-                        && (log.Action == "logout" || log.Action == "Logout"))
-                    .Max(log => (DateTime?)log.CreatedAt),
-                LastAction = user.LastActivityAction ?? _context.UserActivityLogs
-                    .Where(log => log.UserId == user.Id)
-                    .OrderByDescending(log => log.CreatedAt)
-                    .ThenByDescending(log => log.Id)
-                    .Select(log => log.Action)
-                    .FirstOrDefault(),
-                LastSection = user.LastActivitySection ?? _context.UserActivityLogs
-                    .Where(log => log.UserId == user.Id)
-                    .OrderByDescending(log => log.CreatedAt)
-                    .ThenByDescending(log => log.Id)
-                    .Select(log => log.Section)
-                    .FirstOrDefault(),
-                LastIpAddress = user.LastActivityIpAddress ?? _context.UserActivityLogs
-                    .Where(log => log.UserId == user.Id)
-                    .OrderByDescending(log => log.CreatedAt)
-                    .ThenByDescending(log => log.Id)
-                    .Select(log => log.IpAddress)
-                    .FirstOrDefault(),
-                LastUserAgent = user.LastActivityUserAgent ?? _context.UserActivityLogs
-                    .Where(log => log.UserId == user.Id)
-                    .OrderByDescending(log => log.CreatedAt)
-                    .ThenByDescending(log => log.Id)
-                    .Select(log => log.UserAgent)
-                    .FirstOrDefault()
+                user.LastActivityAt,
+                user.LastLoginAt,
+                user.LastLogoutAt,
+                user.LastActivityAction,
+                user.LastActivitySection,
+                user.LastActivityIpAddress,
+                user.LastActivityUserAgent,
             })
             .ToListAsync(cancellationToken);
+
+        var fallbackUserIds = userRows
+            .Where(user =>
+                !user.LastActivityAt.HasValue ||
+                !user.LastLoginAt.HasValue ||
+                !user.LastLogoutAt.HasValue ||
+                user.LastActivityAction is null ||
+                user.LastActivitySection is null ||
+                user.LastActivityIpAddress is null ||
+                user.LastActivityUserAgent is null)
+            .Select(user => user.UserId)
+            .ToList();
+
+        var logStatisticsByUser = fallbackUserIds.Count == 0
+            ? []
+            : await _context.UserActivityLogs
+                .AsNoTracking()
+                .Where(log => log.UserId.HasValue && fallbackUserIds.Contains(log.UserId.Value))
+                .GroupBy(log => log.UserId!.Value)
+                .Select(group => new
+                {
+                    UserId = group.Key,
+                    LastActivityAt = group.Max(log => (DateTime?)log.CreatedAt),
+                    LastLoginAt = group
+                        .Where(log =>
+                            (log.Category == "auth" || log.Category == "Auth") &&
+                            (log.Action == "login" || log.Action == "Login"))
+                        .Max(log => (DateTime?)log.CreatedAt),
+                    LastLogoutAt = group
+                        .Where(log =>
+                            (log.Category == "auth" || log.Category == "Auth") &&
+                            (log.Action == "logout" || log.Action == "Logout"))
+                        .Max(log => (DateTime?)log.CreatedAt),
+                    LastAction = group
+                        .OrderByDescending(log => log.CreatedAt)
+                        .ThenByDescending(log => log.Id)
+                        .Select(log => log.Action)
+                        .FirstOrDefault(),
+                    LastSection = group
+                        .OrderByDescending(log => log.CreatedAt)
+                        .ThenByDescending(log => log.Id)
+                        .Select(log => log.Section)
+                        .FirstOrDefault(),
+                    LastIpAddress = group
+                        .OrderByDescending(log => log.CreatedAt)
+                        .ThenByDescending(log => log.Id)
+                        .Select(log => log.IpAddress)
+                        .FirstOrDefault(),
+                    LastUserAgent = group
+                        .OrderByDescending(log => log.CreatedAt)
+                        .ThenByDescending(log => log.Id)
+                        .Select(log => log.UserAgent)
+                        .FirstOrDefault(),
+                })
+                .ToDictionaryAsync(item => item.UserId, cancellationToken);
+
+        var users = userRows.Select(user =>
+        {
+            logStatisticsByUser.TryGetValue(user.UserId, out var logStatistics);
+            return new UserOnlineStatusDto
+            {
+                UserId = user.UserId,
+                FullName = user.FullName,
+                Email = user.Email,
+                RoleName = user.RoleName,
+                Department = user.Department,
+                IsActive = user.IsActive,
+                IsApproved = user.IsApproved,
+                LastActivityAt = user.LastActivityAt ?? logStatistics?.LastActivityAt,
+                LastLoginAt = user.LastLoginAt ?? logStatistics?.LastLoginAt,
+                LastLogoutAt = user.LastLogoutAt ?? logStatistics?.LastLogoutAt,
+                LastAction = user.LastActivityAction ?? logStatistics?.LastAction,
+                LastSection = user.LastActivitySection ?? logStatistics?.LastSection,
+                LastIpAddress = user.LastActivityIpAddress ?? logStatistics?.LastIpAddress,
+                LastUserAgent = user.LastActivityUserAgent ?? logStatistics?.LastUserAgent,
+            };
+        }).ToList();
 
         foreach (var user in users)
         {
