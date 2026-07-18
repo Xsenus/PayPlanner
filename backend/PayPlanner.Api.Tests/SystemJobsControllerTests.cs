@@ -313,6 +313,11 @@ public class SystemJobsControllerTests
             command.Contains("EligibleCount", StringComparison.Ordinal));
         Assert.Contains("COUNT", deliveryRetentionCommand, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("ORDER BY", deliveryRetentionCommand, StringComparison.OrdinalIgnoreCase);
+        var yandexDiskStatisticsCommand = Assert.Single(interceptor.Commands, command =>
+            command.Contains("YandexDiskCrmSyncStates", StringComparison.Ordinal) &&
+            command.Contains("EligibleCount", StringComparison.Ordinal));
+        Assert.Contains("COUNT", yandexDiskStatisticsCommand, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ORDER BY", yandexDiskStatisticsCommand, StringComparison.OrdinalIgnoreCase);
         var advanceReviewStatisticsCommand = Assert.Single(interceptor.Commands, command =>
             command.Contains("Payments", StringComparison.Ordinal) &&
             command.Contains("PendingCount", StringComparison.Ordinal) &&
@@ -354,6 +359,13 @@ public class SystemJobsControllerTests
                 Value = "false",
                 CreatedAt = oldestAt,
                 UpdatedAt = oldestAt,
+            },
+            new SystemSetting
+            {
+                Key = YandexDiskCrmSyncSchedulerService.EnabledSettingKey,
+                Value = "false",
+                CreatedAt = oldestAt,
+                UpdatedAt = oldestAt,
             });
         scope.Db.GoogleCalendarSyncLogs.Add(new GoogleCalendarSyncLog
         {
@@ -369,6 +381,18 @@ public class SystemJobsControllerTests
             Status = NotificationDeliveryStatus.Sent,
             CreatedAt = oldestDeliveryAt,
         });
+        scope.Db.YandexDiskCrmSyncStates.Add(new YandexDiskCrmSyncState
+        {
+            DocumentKind = "contract",
+            ObjectType = "contract",
+            ObjectId = 15,
+            FileName = "contract-15.pdf",
+            Status = YandexDiskCrmSyncStatus.Failed,
+            LastError = "Preserved Yandex Disk error",
+            AttemptCount = 1,
+            CreatedAt = oldestAt,
+            UpdatedAt = oldestDeliveryAt,
+        });
         await scope.Db.SaveChangesAsync();
 
         interceptor.Commands.Clear();
@@ -380,6 +404,8 @@ public class SystemJobsControllerTests
             item => item.Key == SystemJobKeys.NotificationDeliveryRetention);
         var advanceReview = Assert.Single(dto.Items,
             item => item.Key == SystemJobKeys.PaymentAdvanceReviewMonitoring);
+        var yandexDisk = Assert.Single(dto.Items,
+            item => item.Key == SystemJobKeys.YandexDiskCrmSync);
 
         Assert.False(retention.Enabled);
         Assert.Equal(0, retention.PendingCount);
@@ -389,6 +415,10 @@ public class SystemJobsControllerTests
         Assert.Equal(oldestDeliveryAt, deliveryRetention.LastActivityAt);
         Assert.False(advanceReview.Enabled);
         Assert.Equal(0, advanceReview.PendingCount);
+        Assert.False(yandexDisk.Enabled);
+        Assert.Equal(0, yandexDisk.PendingCount);
+        Assert.Equal(oldestDeliveryAt, yandexDisk.LastActivityAt);
+        Assert.Contains("Preserved Yandex Disk error", yandexDisk.LastActivityDescription);
         Assert.Single(interceptor.Commands, command =>
             command.Contains("GoogleCalendarSyncLogs", StringComparison.Ordinal));
         Assert.Single(interceptor.Commands, command =>
@@ -399,6 +429,9 @@ public class SystemJobsControllerTests
         Assert.DoesNotContain(interceptor.Commands, command =>
             command.Contains("PendingCount", StringComparison.Ordinal) &&
             command.Contains("CriticalPendingCount", StringComparison.Ordinal));
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("YandexDiskCrmSyncStates", StringComparison.Ordinal) &&
+            command.Contains("EligibleCount", StringComparison.Ordinal));
     }
 
     [Fact]

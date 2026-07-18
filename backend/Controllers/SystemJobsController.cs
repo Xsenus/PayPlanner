@@ -559,16 +559,32 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
         var maxAttempts = YandexDiskCrmSyncSchedulerService.NormalizeMaxAttempts(ParseInt(
             settings.GetValueOrDefault(YandexDiskCrmSyncSchedulerService.MaxAttemptsSettingKey),
             _configuration.GetValue("YandexDisk:CrmSync:Scheduler:MaxAttempts", YandexDiskCrmSyncSchedulerService.DefaultMaxAttempts)));
-        var pendingCount = _yandexDiskCrmSyncRunner is null
-            ? await CountPendingYandexDiskCrmSyncItemsAsync(enabled, delayMinutes, maxAttempts, ct)
-            : await _yandexDiskCrmSyncRunner.CountEligibleItemsAsync(ct);
-
-        var lastSync = await _db.YandexDiskCrmSyncStates
-            .AsNoTracking()
-            .Where(item => item.LastSyncedAt != null || item.Status == YandexDiskCrmSyncStatus.Failed)
-            .OrderByDescending(item => item.UpdatedAt)
-            .Select(item => new { item.UpdatedAt, item.FileName, item.Status, item.LastError })
-            .FirstOrDefaultAsync(ct);
+        var cutoff = DateTime.UtcNow.AddMinutes(-delayMinutes);
+        var statistics = await _db.Database
+            .SqlQuery<YandexDiskCrmSyncStatistics>($$"""
+                SELECT
+                    CAST(CASE WHEN {{enabled}} THEN
+                        (SELECT COUNT(*)
+                         FROM "YandexDiskCrmSyncStates"
+                         WHERE "Status" IN ({{YandexDiskCrmSyncStatus.Pending}}, {{YandexDiskCrmSyncStatus.Failed}})
+                           AND "AttemptCount" < {{maxAttempts}}
+                           AND "UpdatedAt" <= {{cutoff}})
+                        ELSE 0 END AS INTEGER) AS "EligibleCount",
+                    "LastSync"."UpdatedAt",
+                    "LastSync"."FileName",
+                    "LastSync"."Status",
+                    "LastSync"."LastError"
+                FROM (SELECT 1) AS "Base"
+                LEFT JOIN (
+                    SELECT "UpdatedAt", "FileName", "Status", "LastError"
+                    FROM "YandexDiskCrmSyncStates"
+                    WHERE "LastSyncedAt" IS NOT NULL OR "Status" = {{YandexDiskCrmSyncStatus.Failed}}
+                    ORDER BY "UpdatedAt" DESC
+                    LIMIT 1
+                ) AS "LastSync" ON 1 = 1
+                """)
+            .SingleAsync(ct);
+        var pendingCount = statistics.EligibleCount;
 
         return new SystemJobDiagnosticsItemDto
         {
@@ -581,12 +597,12 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
             IntervalText = $"Каждые {intervalMinutes} мин., задержка перед повтором {delayMinutes} мин.",
             PendingCount = pendingCount,
             LastProcessedCount = batchSize,
-            LastActivityAt = lastSync?.UpdatedAt,
-            LastActivityDescription = lastSync is null
+            LastActivityAt = statistics.UpdatedAt,
+            LastActivityDescription = statistics.UpdatedAt is null
                 ? null
-                : lastSync.Status == YandexDiskCrmSyncStatus.Failed
-                    ? $"Последняя ошибка Я.Диска: {lastSync.LastError}"
-                    : $"Последний отправленный документ: {lastSync.FileName}",
+                : statistics.Status == YandexDiskCrmSyncStatus.Failed
+                    ? $"Последняя ошибка Я.Диска: {statistics.LastError}"
+                    : $"Последний отправленный документ: {statistics.FileName}",
             NextRunHint = enabled
                 ? $"За один запуск обрабатывается до {batchSize} документов, максимум попыток: {maxAttempts}."
                 : "Фоновая отправка CRM-документов на Я.Диск выключена.",
@@ -1141,27 +1157,6 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
                 || payment.AdvanceReviewStatus == PaymentAdvanceReviewStatus.RequiresDecision);
     }
 
-    private async Task<int> CountPendingYandexDiskCrmSyncItemsAsync(
-        bool enabled,
-        int delayMinutes,
-        int maxAttempts,
-        CancellationToken ct)
-    {
-        if (!enabled)
-        {
-            return 0;
-        }
-
-        var cutoff = DateTime.UtcNow.AddMinutes(-delayMinutes);
-        return await _db.YandexDiskCrmSyncStates
-            .AsNoTracking()
-            .CountAsync(item =>
-                (item.Status == YandexDiskCrmSyncStatus.Pending || item.Status == YandexDiskCrmSyncStatus.Failed)
-                && item.AttemptCount < maxAttempts
-                && item.UpdatedAt <= cutoff,
-                ct);
-    }
-
     private async Task RecordManualSuccessAsync(
         string jobKey,
         DateTime startedAt,
@@ -1317,5 +1312,14 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
     {
         public int PendingCount { get; init; }
         public int CriticalPendingCount { get; init; }
+    }
+
+    private sealed class YandexDiskCrmSyncStatistics
+    {
+        public int EligibleCount { get; init; }
+        public DateTime? UpdatedAt { get; init; }
+        public string? FileName { get; init; }
+        public string? Status { get; init; }
+        public string? LastError { get; init; }
     }
 }
