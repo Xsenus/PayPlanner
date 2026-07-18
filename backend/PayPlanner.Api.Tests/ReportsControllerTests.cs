@@ -3428,6 +3428,145 @@ public class ReportsControllerTests
     }
 
     [Fact]
+    public async Task CaseFinance_ProjectsRequiredColumnsAndLoadsBothPaymentTypesTogether()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await SqliteTestContextFactory.CreateAsync(interceptor: interceptor);
+        var role = new Role { Name = "case-finance-projection-role", Description = "Case finance reporter" };
+        var user = new User
+        {
+            Email = "case-finance-projection@example.test",
+            FullName = "Projection Finance Lawyer",
+            IsActive = true,
+            Role = role,
+        };
+        var client = new Client
+        {
+            Name = "Projection Finance Client",
+            Company = "Unused Company Name",
+        };
+        var clientCase = new ClientCase
+        {
+            Client = client,
+            ResponsibleUser = user,
+            CaseNumber = "FIN-PROJECTION",
+            Title = "Projection finance case",
+            CaseType = "Арбитраж",
+            Status = ClientCaseStatus.Open,
+            CreatedAt = new DateTime(2026, 5, 1),
+            StartDate = new DateTime(2026, 5, 2),
+            DueDate = new DateTime(2026, 6, 1),
+            FeeAmount = 10_000m,
+            Stage = "Unused stage",
+            CourtName = "Unused court",
+            CourtUrl = "https://example.test/unused",
+            CourtCaseNumber = "UNUSED-COURT-NUMBER",
+            Claimant = "Unused claimant",
+            Defendant = "Unused defendant",
+        };
+
+        db.Roles.Add(role);
+        db.Users.Add(user);
+        db.Clients.Add(client);
+        db.ClientCases.Add(clientCase);
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                Role = role,
+                Section = RolePermissionCatalog.Reports,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                Role = role,
+                Section = RolePermissionCatalog.Cases,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            },
+            new RolePermission
+            {
+                Role = role,
+                Section = RolePermissionCatalog.Accounts,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            });
+        await db.SaveChangesAsync();
+
+        var income = new Payment
+        {
+            ClientId = client.Id,
+            ClientCaseId = clientCase.Id,
+            Type = PaymentType.Income,
+            Status = PaymentStatus.Completed,
+            Amount = 4_000m,
+            PaidAmount = 4_000m,
+            Date = new DateTime(2026, 5, 10),
+            PlannedDate = new DateTime(2026, 5, 10),
+            CreatedAt = new DateTime(2026, 5, 10),
+        };
+        var expense = new Payment
+        {
+            ExpenseClientId = client.Id,
+            ClientCaseId = clientCase.Id,
+            Type = PaymentType.Expense,
+            Status = PaymentStatus.Completed,
+            Amount = 1_000m,
+            PaidAmount = 1_000m,
+            Date = new DateTime(2026, 5, 11),
+            PlannedDate = new DateTime(2026, 5, 11),
+            CreatedAt = new DateTime(2026, 5, 11),
+        };
+        db.Payments.AddRange(income, expense);
+        await db.SaveChangesAsync();
+        db.InvoiceClientCases.Add(new InvoiceClientCase
+        {
+            PaymentId = income.Id,
+            ClientCaseId = clientCase.Id,
+        });
+        await db.SaveChangesAsync();
+        interceptor.Commands.Clear();
+
+        var controller = CreateController(db, CreateUserPrincipal(user.Id));
+        var action = await controller.CaseFinance(
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            null,
+            null,
+            null,
+            50,
+            CancellationToken.None);
+
+        var report = Assert.IsType<CaseFinanceReportDto>(Assert.IsType<OkObjectResult>(action.Result).Value);
+        var item = Assert.Single(report.Items);
+        Assert.Equal("Projection Finance Client", item.ClientName);
+        Assert.Equal("Projection Finance Lawyer", item.ResponsibleName);
+        Assert.Equal(4_000m, item.PaidTotal);
+        Assert.Equal(1_000m, item.ExpenseTotal);
+        Assert.Equal(6_000m, item.OutstandingTotal);
+
+        var caseQuery = Assert.Single(interceptor.Commands, command =>
+            command.StartsWith("SELECT \"c\".\"Id\", \"c\".\"CaseNumber\"", StringComparison.Ordinal));
+        Assert.Contains("\"FeeAmount\"", caseQuery, StringComparison.Ordinal);
+        Assert.Contains("\"ResponsibleUser", caseQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Stage\"", caseQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"CourtName\"", caseQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"CourtUrl\"", caseQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"CourtCaseNumber\"", caseQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Claimant\"", caseQuery, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Defendant\"", caseQuery, StringComparison.Ordinal);
+
+        var paymentQueries = interceptor.Commands
+            .Where(command => command.Contains("FROM \"Payments\" AS \"p\"", StringComparison.Ordinal))
+            .ToList();
+        Assert.Equal(2, paymentQueries.Count);
+        Assert.All(paymentQueries, command =>
+        {
+            Assert.Contains("\"Type\"", command, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
     public async Task CaseSuccess_UsesVisibleCasesAndStatusFormula()
     {
         await using var db = await CreateContextAsync();

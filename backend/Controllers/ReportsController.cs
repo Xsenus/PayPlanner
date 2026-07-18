@@ -2207,7 +2207,6 @@ public class ReportsController : ControllerBase
         var endExclusiveUtc = CalendarTimeZoneHelper.FromUserLocalToUtc(end.Date.AddDays(1), timeZone);
         var caseQuery = _db.ClientCases
             .AsNoTracking()
-            .WithCaseIncludes()
             .ApplyClientCaseVisibility(casesVisibility)
             .Where(item => item.CreatedAt < endExclusiveUtc
                 && (item.Status != ClientCaseStatus.Closed && item.Status != ClientCaseStatus.Lost
@@ -2229,16 +2228,34 @@ public class ReportsController : ControllerBase
             caseQuery = caseQuery.Where(item => item.CaseType != null && item.CaseType.Contains(filters.CaseType));
         }
 
-        var cases = await caseQuery.ToListAsync(ct);
+        var cases = await caseQuery
+            .Select(item => new CaseFinanceQueryRow(
+                item.Id,
+                item.CaseNumber,
+                item.Title,
+                item.CaseType,
+                item.Status,
+                item.ResponsibleUserId,
+                item.ResponsibleUser != null ? item.ResponsibleUser.FullName : null,
+                item.Client != null ? item.Client.Name : null,
+                item.Client != null ? item.Client.Company : null,
+                item.LegalEntity != null ? item.LegalEntity.ShortName : null,
+                item.LegalEntity != null ? item.LegalEntity.FullName : null,
+                item.CreatedAt,
+                item.StartDate,
+                item.DueDate,
+                item.FeeAmount))
+            .ToListAsync(ct);
         var caseIds = cases.Select(item => item.Id).Distinct().ToArray();
-        var incomePayments = await BuildLegalWorkPaymentRowsAsync(caseIds, accountsVisibility, PaymentType.Income, ct);
-        var expensePayments = await BuildLegalWorkPaymentRowsAsync(caseIds, accountsVisibility, PaymentType.Expense, ct);
-        var paidByCase = incomePayments
+        var payments = await BuildCaseFinancePaymentRowsAsync(caseIds, accountsVisibility, ct);
+        var paidByCase = payments
+            .Where(item => item.Type == PaymentType.Income)
             .GroupBy(item => item.CaseId)
             .ToDictionary(
                 group => group.Key,
                 group => group.Sum(item => ResolvePaidAmount(item.Amount, item.PaidAmount, item.Status)));
-        var expenseByCase = expensePayments
+        var expenseByCase = payments
+            .Where(item => item.Type == PaymentType.Expense)
             .GroupBy(item => item.CaseId)
             .ToDictionary(
                 group => group.Key,
@@ -2502,7 +2519,7 @@ public class ReportsController : ControllerBase
             _ => ("inProgress", "В работе"),
         };
 
-    private static CaseFinanceItemDto BuildCaseFinanceItem(ClientCase clientCase, decimal paid, decimal expense)
+    private static CaseFinanceItemDto BuildCaseFinanceItem(CaseFinanceQueryRow clientCase, decimal paid, decimal expense)
     {
         var fee = Math.Max(0m, clientCase.FeeAmount);
         var outstanding = Math.Max(0m, fee - paid);
@@ -2517,12 +2534,12 @@ public class ReportsController : ControllerBase
             CaseId = clientCase.Id,
             CaseNumber = clientCase.CaseNumber,
             CaseTitle = clientCase.Title,
-            ClientName = ResolveCaseOwnerName(clientCase),
+            ClientName = ResolveCaseFinanceOwnerName(clientCase),
             CaseType = NormalizeReportText(clientCase.CaseType, "Не указан"),
             Status = clientCase.Status.ToString(),
             StatusLabel = FormatCaseStatus(clientCase.Status),
             ResponsibleUserId = clientCase.ResponsibleUserId,
-            ResponsibleName = ResolveCaseResponsibleName(clientCase),
+            ResponsibleName = NormalizeReportText(clientCase.ResponsibleName, "Не назначен"),
             CreatedAt = NormalizeReportInstant(clientCase.CreatedAt),
             StartDate = NormalizeReportDate(clientCase.StartDate),
             DueDate = NormalizeReportDate(clientCase.DueDate),
@@ -4289,6 +4306,58 @@ public class ReportsController : ControllerBase
             .ToList();
     }
 
+    private async Task<IReadOnlyList<CaseFinancePaymentRow>> BuildCaseFinancePaymentRowsAsync(
+        IReadOnlyCollection<int> caseIds,
+        DataVisibilityAccess accountsVisibility,
+        CancellationToken ct)
+    {
+        if (caseIds.Count == 0)
+        {
+            return [];
+        }
+
+        var paymentQuery = _db.Payments
+            .AsNoTracking()
+            .ApplyPaymentVisibility(accountsVisibility)
+            .ExcludeInstallmentParentInvoices(_db)
+            .Where(item =>
+                (item.Type == PaymentType.Income || item.Type == PaymentType.Expense)
+                && item.Status != PaymentStatus.Cancelled);
+
+        var directRows = await paymentQuery
+            .Where(item => item.ClientCaseId.HasValue && caseIds.Contains(item.ClientCaseId.Value))
+            .Select(item => new CaseFinancePaymentRow(
+                item.Id,
+                item.ClientCaseId!.Value,
+                item.Type,
+                item.Amount,
+                item.PaidAmount,
+                item.Status))
+            .ToListAsync(ct);
+
+        var linkedRows = await _db.InvoiceClientCases
+            .AsNoTracking()
+            .Where(link => caseIds.Contains(link.ClientCaseId))
+            .Join(
+                paymentQuery,
+                link => link.PaymentId,
+                payment => payment.Id,
+                (link, payment) => new CaseFinancePaymentRow(
+                    payment.Id,
+                    link.ClientCaseId,
+                    payment.Type,
+                    payment.Amount,
+                    payment.PaidAmount,
+                    payment.Status))
+            .ToListAsync(ct);
+
+        return directRows
+            .Concat(linkedRows)
+            .GroupBy(item => new { item.PaymentId, item.CaseId })
+            .Select(group => group.First())
+            .ToList();
+    }
+
     private async Task<CaseActivityReportSettings> GetCaseActivityReportSettingsAsync(CancellationToken ct)
     {
         var settings = await _db.SystemSettings
@@ -5636,6 +5705,25 @@ public class ReportsController : ControllerBase
 
     private static string ResolveCaseActivityResponsibleName(CaseActivityCaseRow item)
         => NormalizeReportText(item.ResponsibleName, "Не назначен");
+
+    private static string ResolveCaseFinanceOwnerName(CaseFinanceQueryRow item)
+    {
+        if (!string.IsNullOrWhiteSpace(item.ClientName) || !string.IsNullOrWhiteSpace(item.ClientCompany))
+        {
+            return NormalizeReportText(
+                !string.IsNullOrWhiteSpace(item.ClientName) ? item.ClientName : item.ClientCompany,
+                "Клиент без имени");
+        }
+
+        if (!string.IsNullOrWhiteSpace(item.LegalEntityShortName) || !string.IsNullOrWhiteSpace(item.LegalEntityFullName))
+        {
+            return NormalizeReportText(
+                !string.IsNullOrWhiteSpace(item.LegalEntityShortName) ? item.LegalEntityShortName : item.LegalEntityFullName,
+                "Юридическое лицо без названия");
+        }
+
+        return "Без владельца";
+    }
 
     private static string ResolveCaseOwnerName(ClientCase item)
     {
@@ -9381,10 +9469,35 @@ public class ReportsController : ControllerBase
         decimal PaidAmount,
         PaymentStatus Status);
 
+    private sealed record CaseFinancePaymentRow(
+        int PaymentId,
+        int CaseId,
+        PaymentType Type,
+        decimal Amount,
+        decimal PaidAmount,
+        PaymentStatus Status);
+
     private sealed record LegalWorkReportFilters(
         string? Status,
         int? ResponsibleUserId,
         string? CaseType);
+
+    private sealed record CaseFinanceQueryRow(
+        int Id,
+        string CaseNumber,
+        string Title,
+        string CaseType,
+        ClientCaseStatus Status,
+        int? ResponsibleUserId,
+        string? ResponsibleName,
+        string? ClientName,
+        string? ClientCompany,
+        string? LegalEntityShortName,
+        string? LegalEntityFullName,
+        DateTime CreatedAt,
+        DateTime? StartDate,
+        DateTime? DueDate,
+        decimal FeeAmount);
 
     private sealed record CurrentCasesReportFilters(
         string? Status,
