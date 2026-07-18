@@ -159,12 +159,31 @@ public sealed class NotificationRetrySchedulerService : BackgroundService
     public async Task<int> CountEligibleRetriesAsync(CancellationToken cancellationToken = default)
     {
         var settings = await ResolveSettingsAsync(cancellationToken);
-        if (!settings.Enabled)
+        return await CountEligibleRetriesAsync(
+            settings.Enabled,
+            settings.DelayMinutes,
+            settings.MaxAttempts,
+            cancellationToken);
+    }
+
+    public async Task<int> CountEligibleRetriesAsync(
+        bool enabled,
+        int delayMinutes,
+        int maxAttempts,
+        CancellationToken cancellationToken = default)
+    {
+        if (!enabled)
         {
             return 0;
         }
 
-        return (await LoadRetryCandidatesAsync(settings with { BatchSize = 200 }, cancellationToken)).Count;
+        var settings = new NotificationRetrySettings(
+            true,
+            DefaultIntervalMinutes,
+            NormalizeDelay(delayMinutes),
+            200,
+            NormalizeMaxAttempts(maxAttempts));
+        return (await LoadRetryCandidatesAsync(settings, cancellationToken)).Count;
     }
 
     private async Task<IReadOnlyList<NotificationDelivery>> LoadRetryCandidatesAsync(

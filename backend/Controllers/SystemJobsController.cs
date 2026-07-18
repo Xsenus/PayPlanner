@@ -542,7 +542,7 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
             _configuration.GetValue("Notifications:Retry:MaxAttempts", NotificationRetrySchedulerService.DefaultMaxAttempts)));
         var pendingCount = _notificationRetryRunner is null
             ? await CountFailedExternalDeliveriesAsync(enabled, delayMinutes, ct)
-            : await _notificationRetryRunner.CountEligibleRetriesAsync(ct);
+            : await _notificationRetryRunner.CountEligibleRetriesAsync(enabled, delayMinutes, maxAttempts, ct);
 
         return new SystemJobDiagnosticsItemDto
         {

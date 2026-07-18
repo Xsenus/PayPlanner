@@ -246,15 +246,23 @@ public class SystemJobsControllerTests
         });
         await scope.Db.SaveChangesAsync();
 
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Notifications:TaskReminders:Enabled"] = "true",
+                ["Notifications:TaskReminders:PollSeconds"] = "45",
+            })
+            .Build();
+        var services = new ServiceCollection();
+        services.AddScoped(_ => new PaymentContext(scope.Options, useObjectAuditModel: false));
+        using var serviceProvider = services.BuildServiceProvider();
+        var notificationRetryRunner = new NotificationRetrySchedulerService(
+            serviceProvider.GetRequiredService<IServiceScopeFactory>(),
+            configuration,
+            NullLogger<NotificationRetrySchedulerService>.Instance);
         var controller = new SystemJobsController(
             scope.Db,
-            new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string?>
-                {
-                    ["Notifications:TaskReminders:Enabled"] = "true",
-                    ["Notifications:TaskReminders:PollSeconds"] = "45",
-                })
-                .Build(),
+            configuration,
             new TestOptionsMonitor<AppFeatureFlagsOptions>(new AppFeatureFlagsOptions
             {
                 Legal = new LegalFeatureFlagsOptions
@@ -275,7 +283,8 @@ public class SystemJobsControllerTests
                     ProcessedCount = 3,
                     Summary = "Проверено дел: 3.",
                 },
-            }));
+            }),
+            notificationRetryRunner: notificationRetryRunner);
 
         interceptor.Commands.Clear();
         var result = await controller.GetDiagnostics(CancellationToken.None);
@@ -300,6 +309,8 @@ public class SystemJobsControllerTests
         Assert.Contains(dto.Items, item => item.Key == "court-sync" && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "money-balance-reconciliation" && item.LastProcessedCount == 2);
         Assert.Contains(dto.Items, item => item.Key == "user-activity-retention" && item.Enabled && item.NextRunHint!.Contains("30"));
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains(NotificationRetrySchedulerService.EnabledSettingKey, StringComparison.Ordinal));
         var taskReminderStatisticsCommand = Assert.Single(interceptor.Commands, command =>
             command.Contains("TaskJournalItems", StringComparison.Ordinal) &&
             command.Contains("NotificationDeliveries", StringComparison.Ordinal) &&
