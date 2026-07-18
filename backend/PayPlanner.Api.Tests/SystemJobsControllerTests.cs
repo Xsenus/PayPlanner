@@ -309,6 +309,13 @@ public class SystemJobsControllerTests
         Assert.Contains(dto.Items, item => item.Key == "court-sync" && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "money-balance-reconciliation" && item.LastProcessedCount == 2);
         Assert.Contains(dto.Items, item => item.Key == "user-activity-retention" && item.Enabled && item.NextRunHint!.Contains("30"));
+        var courtSyncStatisticsCommand = Assert.Single(interceptor.Commands, command =>
+            command.Contains("ClientCases", StringComparison.Ordinal) &&
+            command.Contains("EventHistory", StringComparison.Ordinal) &&
+            command.Contains("\"Value\"", StringComparison.Ordinal) &&
+            command.Contains("EligibleCount", StringComparison.Ordinal));
+        Assert.Contains("COUNT", courtSyncStatisticsCommand, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ORDER BY", courtSyncStatisticsCommand, StringComparison.OrdinalIgnoreCase);
         Assert.Single(interceptor.Commands, command =>
             command.Contains(NotificationRetrySchedulerService.EnabledSettingKey, StringComparison.Ordinal));
         var taskReminderStatisticsCommand = Assert.Single(interceptor.Commands, command =>
@@ -496,13 +503,27 @@ public class SystemJobsControllerTests
     [Fact]
     public async Task GetDiagnostics_MarksCourtSyncBlockedWhenFeatureFlagIsOff()
     {
-        await using var scope = await CreateDbScopeAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var scope = await CreateDbScopeAsync(interceptor);
+        var lastCourtSyncAt = DateTime.UtcNow.AddHours(-2);
         scope.Db.SystemSettings.Add(new SystemSetting
         {
             Key = ClientCaseCourtSyncSchedulerService.EnabledSettingKey,
             Value = "true",
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
+        });
+        var client = new Client { Name = "Court sync client" };
+        scope.Db.Clients.Add(client);
+        scope.Db.ClientCases.Add(new ClientCase
+        {
+            Client = client,
+            Title = "Court sync candidate",
+            CaseNumber = "COURT-BLOCKED-1",
+            Status = ClientCaseStatus.Open,
+            CourtUrl = "https://example.sudrf.ru/case/blocked-1",
+            EventHistory = "судебная активность сохранена.",
+            CreatedAt = lastCourtSyncAt,
         });
         await scope.Db.SaveChangesAsync();
         var controller = new SystemJobsController(
@@ -516,6 +537,7 @@ public class SystemJobsControllerTests
                 },
             }));
 
+        interceptor.Commands.Clear();
         var result = await controller.GetDiagnostics(CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
@@ -525,7 +547,15 @@ public class SystemJobsControllerTests
         Assert.False(courtSync.Enabled);
         Assert.Equal("blocked", courtSync.Status);
         Assert.Equal("Ожидает feature flag", courtSync.StatusText);
+        Assert.Equal(0, courtSync.PendingCount);
+        Assert.Equal(lastCourtSyncAt, courtSync.LastActivityAt);
+        Assert.Contains("COURT-BLOCKED-1", courtSync.LastActivityDescription);
         Assert.False(courtSync.ManualRunEnabled);
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("ClientCases", StringComparison.Ordinal) &&
+            command.Contains("EventHistory", StringComparison.Ordinal) &&
+            command.Contains("\"Value\"", StringComparison.Ordinal) &&
+            command.Contains("EligibleCount", StringComparison.Ordinal));
     }
 
     [Fact]

@@ -991,18 +991,37 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
             settings.GetValueOrDefault(ClientCaseCourtSyncSchedulerService.BatchSizeSettingKey),
             _configuration.GetValue<int?>("LegalIntegrations:CourtSyncScheduler:BatchSize") ?? ClientCaseCourtSyncSchedulerService.DefaultBatchSize));
         var enabled = featureEnabled && settingEnabled;
-        var pendingCount = enabled
-            ? await _db.ClientCases
-                .AsNoTracking()
-                .CountAsync(item => item.Status == ClientCaseStatus.Open && item.CourtUrl != string.Empty, ct)
-            : 0;
-
-        var lastCourtSync = await _db.ClientCases
-            .AsNoTracking()
-            .Where(item => item.EventHistory.Contains("судебн"))
-            .OrderByDescending(item => item.CreatedAt)
-            .Select(item => new { item.CreatedAt, Description = item.CaseNumber })
-            .FirstOrDefaultAsync(ct);
+        var eligibleCounts = _db.UseObjectAuditModel
+            ? _db.Database.SqlQuery<int>($$"""
+                SELECT CAST(COUNT(*) AS INTEGER) AS "Value"
+                FROM "ClientCases"
+                WHERE {{enabled}}
+                  AND NOT "IsDeleted"
+                  AND "Status" = {{ClientCaseStatus.Open}}
+                  AND "CourtUrl" <> ''
+                """)
+            : _db.Database.SqlQuery<int>($$"""
+                SELECT CAST(COUNT(*) AS INTEGER) AS "Value"
+                FROM "ClientCases"
+                WHERE {{enabled}}
+                  AND "Status" = {{ClientCaseStatus.Open}}
+                  AND "CourtUrl" <> ''
+                """);
+        var statistics = await (
+                from eligibleCount in eligibleCounts
+                from lastCourtSync in _db.ClientCases
+                    .AsNoTracking()
+                    .Where(item => item.EventHistory.Contains("судебн"))
+                    .OrderByDescending(item => item.CreatedAt)
+                    .Take(1)
+                    .DefaultIfEmpty()
+                select new CourtSyncStatistics
+                {
+                    EligibleCount = eligibleCount,
+                    CreatedAt = lastCourtSync == null ? null : lastCourtSync.CreatedAt,
+                    CaseNumber = lastCourtSync == null ? null : lastCourtSync.CaseNumber,
+                })
+            .SingleAsync(ct);
 
         return new SystemJobDiagnosticsItemDto
         {
@@ -1013,10 +1032,10 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
             Status = enabled ? "active" : settingEnabled ? "blocked" : "disabled",
             StatusText = enabled ? "Включено" : settingEnabled ? "Ожидает feature flag" : "Выключено",
             IntervalText = $"Каждые {intervalMinutes} мин.",
-            PendingCount = pendingCount,
+            PendingCount = statistics.EligibleCount,
             LastProcessedCount = batchSize,
-            LastActivityAt = lastCourtSync?.CreatedAt,
-            LastActivityDescription = lastCourtSync is null ? null : $"Последнее дело с судебной активностью: {lastCourtSync.Description}",
+            LastActivityAt = statistics.CreatedAt,
+            LastActivityDescription = statistics.CreatedAt is null ? null : $"Последнее дело с судебной активностью: {statistics.CaseNumber}",
             NextRunHint = enabled ? $"За один запуск обрабатывается до {batchSize} дел." : "Фоновая судебная синхронизация не запускается автоматически.",
             ManualRunEnabled = enabled,
             ManualRunHint = enabled ? "Можно вручную запустить синхронизацию судебных источников." : "Ручной запуск доступен только после включения настройки и feature flag судебной синхронизации.",
@@ -1351,5 +1370,12 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
         public int EligibleCount { get; init; }
         public DateTime? CreatedAt { get; init; }
         public string? Subject { get; init; }
+    }
+
+    private sealed class CourtSyncStatistics
+    {
+        public int EligibleCount { get; init; }
+        public DateTime? CreatedAt { get; init; }
+        public string? CaseNumber { get; init; }
     }
 }
