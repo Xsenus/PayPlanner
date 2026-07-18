@@ -4633,7 +4633,8 @@ services.Id,
     [Fact]
     public async Task Projects_GroupsFactOperationsByProjectName()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await SqliteTestContextFactory.CreateAsync(interceptor: interceptor);
         db.MoneyOperations.AddRange(
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 12_000m, new DateTime(2026, 5, 1), "Основной банк", projectName: "Проект Альфа"),
             Operation(MoneyOperationSource.Cash, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 3_000m, new DateTime(2026, 5, 2), "Касса", projectName: " проект альфа "),
@@ -4641,6 +4642,7 @@ services.Id,
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 2_000m, new DateTime(2026, 5, 4), "Основной банк"),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Plan, 99_999m, new DateTime(2026, 5, 5), "Основной банк", projectName: "Проект Альфа"));
         await db.SaveChangesAsync();
+        interceptor.Commands.Clear();
         var controller = CreateController(db);
 
         var action = await controller.Projects(
@@ -4686,6 +4688,12 @@ services.Id,
                 Assert.Equal(2_000m, item.Expense);
                 Assert.Equal(9.1m, item.Share);
             });
+
+        var projectQuery = Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"MoneyOperations\"", StringComparison.Ordinal));
+        Assert.Contains("GROUP BY", projectQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SUM", projectQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("COUNT", projectQuery, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
