@@ -6643,9 +6643,9 @@ export class ApiService {
   async getSpreadsheetImportReport(params?: {
     from?: string;
     to?: string;
-  }) {
+  }, options?: { signal?: AbortSignal }) {
     const q = buildQuery(params ?? {});
-    return this.request<SpreadsheetImportReport>(`/reports/spreadsheet-imports${q}`);
+    return this.request<SpreadsheetImportReport>(`/reports/spreadsheet-imports${q}`, { signal: options?.signal });
   }
 
   /** Упрощённый вызов: сводка по клиенту. */

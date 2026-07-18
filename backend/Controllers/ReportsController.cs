@@ -9076,44 +9076,50 @@ public class ReportsController : ControllerBase
         var rows = await _db.SpreadsheetImportBatches
             .AsNoTracking()
             .Where(item => item.CreatedAt >= startUtc && item.CreatedAt < endUtc)
-            .Select(item => new
-            {
-                item.Status,
-                FileCount = item.Files.Count,
-                item.TotalRows,
-                item.CreatedRows,
-                item.UpdatedRows,
-                item.SkippedRows,
-                item.ErrorRows,
-                item.RollbackRows,
-                item.CreatedAt,
-            })
-            .ToListAsync(ct);
-
-        rows = rows
-            .Where(item =>
-            {
-                var localDate = CalendarTimeZoneHelper.ToUserLocal(item.CreatedAt, timeZone).Date;
-                return localDate >= localStart && localDate <= localEnd;
-            })
-            .ToList();
-
-        var statuses = rows
             .GroupBy(item => item.Status)
-            .Select(group => new SpreadsheetImportReportItemDto
+            .Select(group => new SpreadsheetImportBatchQueryRow
             {
                 Status = group.Key,
-                StatusLabel = FormatSpreadsheetImportStatusLabel(group.Key),
                 BatchCount = group.Count(),
-                FileCount = group.Sum(item => item.FileCount),
                 TotalRows = group.Sum(item => item.TotalRows),
                 CreatedRows = group.Sum(item => item.CreatedRows),
                 UpdatedRows = group.Sum(item => item.UpdatedRows),
                 SkippedRows = group.Sum(item => item.SkippedRows),
                 ErrorRows = group.Sum(item => item.ErrorRows),
                 RollbackRows = group.Sum(item => item.RollbackRows),
-                Share = rows.Count > 0
-                    ? Math.Round((decimal)group.Count() / rows.Count * 100m, 1, MidpointRounding.AwayFromZero)
+            })
+            .ToListAsync(ct);
+
+        var fileCounts = await _db.SpreadsheetImportBatchFiles
+            .AsNoTracking()
+            .Where(item =>
+                item.Batch != null &&
+                item.Batch.CreatedAt >= startUtc &&
+                item.Batch.CreatedAt < endUtc)
+            .GroupBy(item => item.Batch!.Status)
+            .Select(group => new SpreadsheetImportFileQueryRow
+            {
+                Status = group.Key,
+                FileCount = group.Count(),
+            })
+            .ToDictionaryAsync(item => item.Status, item => item.FileCount, ct);
+
+        var batchCount = rows.Sum(item => item.BatchCount);
+        var statuses = rows
+            .Select(item => new SpreadsheetImportReportItemDto
+            {
+                Status = item.Status,
+                StatusLabel = FormatSpreadsheetImportStatusLabel(item.Status),
+                BatchCount = item.BatchCount,
+                FileCount = fileCounts.GetValueOrDefault(item.Status),
+                TotalRows = item.TotalRows,
+                CreatedRows = item.CreatedRows,
+                UpdatedRows = item.UpdatedRows,
+                SkippedRows = item.SkippedRows,
+                ErrorRows = item.ErrorRows,
+                RollbackRows = item.RollbackRows,
+                Share = batchCount > 0
+                    ? Math.Round((decimal)item.BatchCount / batchCount * 100m, 1, MidpointRounding.AwayFromZero)
                     : 0m,
             })
             .OrderBy(item => SpreadsheetImportStatusSortOrder(item.Status))
@@ -9125,18 +9131,18 @@ public class ReportsController : ControllerBase
         {
             From = from,
             To = to,
-            BatchCount = rows.Count,
-            FileCount = rows.Sum(item => item.FileCount),
+            BatchCount = batchCount,
+            FileCount = fileCounts.Values.Sum(),
             TotalRows = rows.Sum(item => item.TotalRows),
             CreatedRows = rows.Sum(item => item.CreatedRows),
             UpdatedRows = rows.Sum(item => item.UpdatedRows),
             SkippedRows = rows.Sum(item => item.SkippedRows),
             ErrorRows = rows.Sum(item => item.ErrorRows),
             RollbackRows = rows.Sum(item => item.RollbackRows),
-            AppliedCount = rows.Count(item => item.Status == SpreadsheetImportBatchStatus.Applied),
-            AppliedWithErrorsCount = rows.Count(item => item.Status == SpreadsheetImportBatchStatus.AppliedWithErrors),
-            RolledBackCount = rows.Count(item => item.Status == SpreadsheetImportBatchStatus.RolledBack),
-            RolledBackWithConflictsCount = rows.Count(item => item.Status == SpreadsheetImportBatchStatus.RolledBackWithConflicts),
+            AppliedCount = rows.Where(item => item.Status == SpreadsheetImportBatchStatus.Applied).Sum(item => item.BatchCount),
+            AppliedWithErrorsCount = rows.Where(item => item.Status == SpreadsheetImportBatchStatus.AppliedWithErrors).Sum(item => item.BatchCount),
+            RolledBackCount = rows.Where(item => item.Status == SpreadsheetImportBatchStatus.RolledBack).Sum(item => item.BatchCount),
+            RolledBackWithConflictsCount = rows.Where(item => item.Status == SpreadsheetImportBatchStatus.RolledBackWithConflicts).Sum(item => item.BatchCount),
             Statuses = statuses,
         };
     }
@@ -9453,6 +9459,24 @@ public class ReportsController : ControllerBase
         public int SkippedRows { get; init; }
         public int ErrorRows { get; init; }
         public int RollbackRows { get; init; }
+    }
+
+    private sealed class SpreadsheetImportBatchQueryRow
+    {
+        public string Status { get; init; } = string.Empty;
+        public int BatchCount { get; init; }
+        public int TotalRows { get; init; }
+        public int CreatedRows { get; init; }
+        public int UpdatedRows { get; init; }
+        public int SkippedRows { get; init; }
+        public int ErrorRows { get; init; }
+        public int RollbackRows { get; init; }
+    }
+
+    private sealed class SpreadsheetImportFileQueryRow
+    {
+        public string Status { get; init; } = string.Empty;
+        public int FileCount { get; init; }
     }
 
     private sealed class VatAggregateQueryRow

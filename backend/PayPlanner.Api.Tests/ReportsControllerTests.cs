@@ -6890,14 +6890,17 @@ services.Id,
     [Fact]
     public async Task SpreadsheetImports_GroupsBatchesByStatus()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await SqliteTestContextFactory.CreateAsync(interceptor: interceptor);
         db.SpreadsheetImportBatches.AddRange(
             SpreadsheetImportBatch("May OK", SpreadsheetImportBatchStatus.Applied, 2, 20, 10, 4, 5, 1, 0, new DateTime(2026, 5, 1, 10, 0, 0)),
+            SpreadsheetImportBatch("May OK 2", SpreadsheetImportBatchStatus.Applied, 2, 4, 2, 1, 1, 0, 0, new DateTime(2026, 5, 1, 15, 0, 0)),
             SpreadsheetImportBatch("May Errors", SpreadsheetImportBatchStatus.AppliedWithErrors, 1, 12, 5, 2, 2, 3, 0, new DateTime(2026, 5, 2, 11, 0, 0)),
             SpreadsheetImportBatch("May Rolled", SpreadsheetImportBatchStatus.RolledBack, 1, 8, 4, 1, 2, 1, 4, new DateTime(2026, 5, 3, 12, 0, 0)),
             SpreadsheetImportBatch("May Conflicts", SpreadsheetImportBatchStatus.RolledBackWithConflicts, 3, 6, 2, 1, 1, 2, 2, new DateTime(2026, 5, 4, 13, 0, 0)),
             SpreadsheetImportBatch("Old", SpreadsheetImportBatchStatus.Applied, 5, 99, 99, 0, 0, 0, 0, new DateTime(2026, 4, 30, 10, 0, 0, DateTimeKind.Utc)));
         await db.SaveChangesAsync();
+        interceptor.Commands.Clear();
         var controller = CreateController(db);
 
         var action = await controller.SpreadsheetImports(
@@ -6907,15 +6910,15 @@ services.Id,
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
         var report = Assert.IsType<SpreadsheetImportReportDto>(ok.Value);
-        Assert.Equal(4, report.BatchCount);
-        Assert.Equal(7, report.FileCount);
-        Assert.Equal(46, report.TotalRows);
-        Assert.Equal(21, report.CreatedRows);
-        Assert.Equal(8, report.UpdatedRows);
-        Assert.Equal(10, report.SkippedRows);
+        Assert.Equal(5, report.BatchCount);
+        Assert.Equal(9, report.FileCount);
+        Assert.Equal(50, report.TotalRows);
+        Assert.Equal(23, report.CreatedRows);
+        Assert.Equal(9, report.UpdatedRows);
+        Assert.Equal(11, report.SkippedRows);
         Assert.Equal(7, report.ErrorRows);
         Assert.Equal(6, report.RollbackRows);
-        Assert.Equal(1, report.AppliedCount);
+        Assert.Equal(2, report.AppliedCount);
         Assert.Equal(1, report.AppliedWithErrorsCount);
         Assert.Equal(1, report.RolledBackCount);
         Assert.Equal(1, report.RolledBackWithConflictsCount);
@@ -6929,7 +6932,7 @@ services.Id,
                 Assert.Equal(1, item.FileCount);
                 Assert.Equal(12, item.TotalRows);
                 Assert.Equal(3, item.ErrorRows);
-                Assert.Equal(25m, item.Share);
+                Assert.Equal(20m, item.Share);
             },
             item =>
             {
@@ -6938,15 +6941,19 @@ services.Id,
                 Assert.Equal(3, item.FileCount);
                 Assert.Equal(6, item.TotalRows);
                 Assert.Equal(2, item.RollbackRows);
-                Assert.Equal(25m, item.Share);
+                Assert.Equal(20m, item.Share);
             },
             item =>
             {
                 Assert.Equal(SpreadsheetImportBatchStatus.Applied, item.Status);
                 Assert.Equal("Применен", item.StatusLabel);
-                Assert.Equal(2, item.FileCount);
-                Assert.Equal(20, item.TotalRows);
-                Assert.Equal(25m, item.Share);
+                Assert.Equal(2, item.BatchCount);
+                Assert.Equal(4, item.FileCount);
+                Assert.Equal(24, item.TotalRows);
+                Assert.Equal(12, item.CreatedRows);
+                Assert.Equal(5, item.UpdatedRows);
+                Assert.Equal(6, item.SkippedRows);
+                Assert.Equal(40m, item.Share);
             },
             item =>
             {
@@ -6954,8 +6961,19 @@ services.Id,
                 Assert.Equal("Откатан", item.StatusLabel);
                 Assert.Equal(1, item.FileCount);
                 Assert.Equal(4, item.RollbackRows);
-                Assert.Equal(25m, item.Share);
+                Assert.Equal(20m, item.Share);
             });
+
+        var batchQuery = Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"SpreadsheetImportBatches\"", StringComparison.Ordinal));
+        Assert.Contains("GROUP BY", batchQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SUM", batchQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("COUNT", batchQuery, StringComparison.OrdinalIgnoreCase);
+
+        var fileQuery = Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"SpreadsheetImportBatchFiles\"", StringComparison.Ordinal));
+        Assert.Contains("GROUP BY", fileQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("COUNT", fileQuery, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
