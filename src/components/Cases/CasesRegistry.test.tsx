@@ -384,6 +384,23 @@ describe('CasesRegistry', () => {
     expect(apiService.getCaseAccessRequests).not.toHaveBeenCalled();
   });
 
+  it('aborts the pending access requests call when the registry closes', async () => {
+    let requestSignal: AbortSignal | undefined;
+    vi.mocked(apiService.getCaseAccessRequests).mockImplementation((options) => {
+      requestSignal = options?.signal;
+      return new Promise(() => undefined);
+    });
+
+    const { unmount } = render(<CasesRegistry />);
+
+    await waitFor(() => expect(requestSignal).toBeInstanceOf(AbortSignal));
+    expect(requestSignal?.aborted).toBe(false);
+
+    unmount();
+
+    expect(requestSignal?.aborted).toBe(true);
+  });
+
   it('aborts an obsolete active registry request', async () => {
     render(<CasesRegistry />);
 

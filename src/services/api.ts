@@ -5241,8 +5241,10 @@ export class ApiService {
     });
   }
 
-  async getCaseAccessRequests() {
-    return this.request<ClientCaseAccessRequest[]>('/v2/cases/access-requests');
+  async getCaseAccessRequests(options?: { signal?: AbortSignal }) {
+    return this.request<ClientCaseAccessRequest[]>('/v2/cases/access-requests', {
+      signal: options?.signal,
+    });
   }
 
   async resolveCaseAccessRequest(caseId: number, payload: { grant: boolean; comment?: string }) {

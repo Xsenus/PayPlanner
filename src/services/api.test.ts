@@ -53,6 +53,22 @@ describe('apiService contacts directory', () => {
   });
 });
 
+describe('apiService case access requests', () => {
+  it('passes the abort signal to the pending access requests call', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify([]), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const controller = new AbortController();
+
+    await apiService.getCaseAccessRequests({ signal: controller.signal });
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/v2/cases/access-requests');
+    expect(options?.signal).toBe(controller.signal);
+  });
+});
+
 describe('apiService accounts registry', () => {
   it('passes the abort signal to the paged accounts request', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({

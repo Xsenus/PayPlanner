@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Globalization;
 using System.Security.Claims;
 using System.Text;
@@ -7,6 +8,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -544,6 +546,56 @@ public class CasesV2ControllerTests
         Assert.Equal(owner.Id, item.ResponsibleUserId);
         Assert.Equal("Исполнитель", item.RequestedByUserName);
         Assert.Equal("Нужно проверить срок.", item.Reason);
+    }
+
+    [Fact]
+    public async Task GetAccessRequests_SelectsOnlyListFields()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var manager = await CreateUserAsync(db, "access-projection-manager@example.com", "Руководитель", DataVisibilityScope.All);
+        var responsible = await CreateUserAsync(db, "access-projection-owner@example.com", "Исполнитель");
+        var client = new Client
+        {
+            Name = "Клиент компактного запроса",
+            IsActive = true,
+            ResponsibleUserId = responsible.Id,
+        };
+        db.ClientCases.Add(new ClientCase
+        {
+            Client = client,
+            Title = "Дело компактного запроса",
+            CaseNumber = "CASE-PROJECTION",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = responsible.Id,
+            Description = "Не должно загружаться для списка запросов доступа",
+            EventHistory = "Не должно загружаться для списка запросов доступа",
+            FeeAmount = 123456m,
+            IsHiddenFromExecutor = true,
+            AccessRequestedAt = new DateTime(2026, 7, 18, 9, 0, 0, DateTimeKind.Utc),
+            AccessRequestedByUserId = responsible.Id,
+            AccessRequestedByUserName = "Исполнитель",
+            AccessRequestReason = "Нужно проверить дело.",
+        });
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, manager, notificationService: CreateNotificationService(db));
+        interceptor.Commands.Clear();
+
+        var result = await controller.GetAccessRequests(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var item = Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<CasesV2Controller.ClientCaseAccessRequestListItemDto>>(ok.Value));
+        Assert.Equal("CASE-PROJECTION", item.CaseNumber);
+        Assert.Equal("Клиент компактного запроса", item.OwnerName);
+        Assert.Equal("Исполнитель", item.ResponsibleName);
+
+        var listCommand = Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"ClientCases\"", StringComparison.Ordinal)
+            && command.Contains("AccessRequestedAt", StringComparison.Ordinal)
+            && command.Contains("ORDER BY", StringComparison.Ordinal));
+        Assert.DoesNotContain("Description", listCommand, StringComparison.Ordinal);
+        Assert.DoesNotContain("EventHistory", listCommand, StringComparison.Ordinal);
+        Assert.DoesNotContain("FeeAmount", listCommand, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -8456,15 +8508,35 @@ public class CasesV2ControllerTests
         await db.SaveChangesAsync();
     }
 
-    private static async Task<PaymentContext> CreateContextAsync()
+    private static async Task<PaymentContext> CreateContextAsync(DbCommandInterceptor? interceptor = null)
     {
         var connection = new SqliteConnection("DataSource=:memory:");
         await connection.OpenAsync();
-        var options = new DbContextOptionsBuilder<PaymentContext>()
-            .UseSqlite(connection)
-            .Options;
+        var optionsBuilder = new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite(connection);
+        if (interceptor is not null)
+        {
+            optionsBuilder.AddInterceptors(interceptor);
+        }
+
+        var options = optionsBuilder.Options;
         var db = new PaymentContext(options);
         await db.Database.EnsureCreatedAsync();
         return db;
+    }
+
+    private sealed class RecordingCommandInterceptor : DbCommandInterceptor
+    {
+        public List<string> Commands { get; } = [];
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            Commands.Add(command.CommandText);
+            return ValueTask.FromResult(result);
+        }
     }
 }

@@ -3353,11 +3353,27 @@ public class CasesV2Controller : ControllerBase
         }
 
         var items = await ApplyClientCaseAccessManagementVisibility(_db.ClientCases.AsQueryable(), visibility)
-            .WithCaseIncludes()
             .Where(item => item.AccessRequestedAt.HasValue)
             .OrderByDescending(item => item.AccessRequestedAt)
             .Take(100)
             .AsNoTracking()
+            .Select(item => new ClientCaseAccessRequestRow
+            {
+                ClientCaseId = item.Id,
+                CaseNumber = item.CaseNumber,
+                Title = item.Title,
+                ClientName = item.Client != null ? item.Client.Name : null,
+                LegalEntityShortName = item.LegalEntity != null ? item.LegalEntity.ShortName : null,
+                LegalEntityFullName = item.LegalEntity != null ? item.LegalEntity.FullName : null,
+                ResponsibleUserId = item.ResponsibleUserId,
+                ResponsibleFullName = item.ResponsibleUser != null ? item.ResponsibleUser.FullName : null,
+                ResponsibleEmail = item.ResponsibleUser != null ? item.ResponsibleUser.Email : null,
+                RequestedAt = item.AccessRequestedAt!.Value,
+                AccessRequestedByUserId = item.AccessRequestedByUserId,
+                AccessRequestedByUserName = item.AccessRequestedByUserName,
+                Reason = item.AccessRequestReason,
+                IsHiddenFromExecutor = item.IsHiddenFromExecutor,
+            })
             .ToListAsync(ct);
 
         return Ok(items.Select(MapClientCaseAccessRequest).ToList());
@@ -9420,22 +9436,22 @@ public class CasesV2Controller : ControllerBase
         }
     }
 
-    private static ClientCaseAccessRequestListItemDto MapClientCaseAccessRequest(ClientCase clientCase)
+    private static ClientCaseAccessRequestListItemDto MapClientCaseAccessRequest(ClientCaseAccessRequestRow clientCase)
         => new()
         {
-            ClientCaseId = clientCase.Id,
+            ClientCaseId = clientCase.ClientCaseId,
             CaseNumber = clientCase.CaseNumber,
             Title = clientCase.Title,
-            OwnerName = clientCase.Client?.Name
-                ?? clientCase.LegalEntity?.ShortName
-                ?? clientCase.LegalEntity?.FullName
+            OwnerName = clientCase.ClientName
+                ?? clientCase.LegalEntityShortName
+                ?? clientCase.LegalEntityFullName
                 ?? string.Empty,
             ResponsibleUserId = clientCase.ResponsibleUserId,
-            ResponsibleName = FormatCaseResponsible(clientCase.ResponsibleUser),
-            RequestedAt = clientCase.AccessRequestedAt!.Value,
+            ResponsibleName = FormatCaseResponsible(clientCase.ResponsibleFullName, clientCase.ResponsibleEmail),
+            RequestedAt = clientCase.RequestedAt,
             RequestedByUserId = clientCase.AccessRequestedByUserId,
             RequestedByUserName = clientCase.AccessRequestedByUserName,
-            Reason = clientCase.AccessRequestReason,
+            Reason = clientCase.Reason,
             IsHiddenFromExecutor = clientCase.IsHiddenFromExecutor,
         };
 
@@ -11778,9 +11794,12 @@ public class CasesV2Controller : ControllerBase
     };
 
     private static string FormatCaseResponsible(User? user)
-        => string.IsNullOrWhiteSpace(user?.FullName)
-            ? string.IsNullOrWhiteSpace(user?.Email) ? "Ответственный владельца" : user.Email
-            : user.FullName;
+        => FormatCaseResponsible(user?.FullName, user?.Email);
+
+    private static string FormatCaseResponsible(string? fullName, string? email)
+        => string.IsNullOrWhiteSpace(fullName)
+            ? string.IsNullOrWhiteSpace(email) ? "Ответственный владельца" : email
+            : fullName;
 
     private static string FormatCaseTextValue(string? value)
         => string.IsNullOrWhiteSpace(value) ? "не указано" : value.Trim();
@@ -11895,6 +11914,24 @@ public class CasesV2Controller : ControllerBase
         public DateTime RequestedAt { get; set; }
         public int? RequestedByUserId { get; set; }
         public string RequestedByUserName { get; set; } = string.Empty;
+        public string Reason { get; set; } = string.Empty;
+        public bool IsHiddenFromExecutor { get; set; }
+    }
+
+    private sealed class ClientCaseAccessRequestRow
+    {
+        public int ClientCaseId { get; set; }
+        public string CaseNumber { get; set; } = string.Empty;
+        public string Title { get; set; } = string.Empty;
+        public string? ClientName { get; set; }
+        public string? LegalEntityShortName { get; set; }
+        public string? LegalEntityFullName { get; set; }
+        public int? ResponsibleUserId { get; set; }
+        public string? ResponsibleFullName { get; set; }
+        public string? ResponsibleEmail { get; set; }
+        public DateTime RequestedAt { get; set; }
+        public int? AccessRequestedByUserId { get; set; }
+        public string AccessRequestedByUserName { get; set; } = string.Empty;
         public string Reason { get; set; } = string.Empty;
         public bool IsHiddenFromExecutor { get; set; }
     }

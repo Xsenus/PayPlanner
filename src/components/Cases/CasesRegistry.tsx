@@ -509,8 +509,9 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
     }
 
     let cancelled = false;
+    const controller = new AbortController();
     setAccessRequestsLoading(true);
-    void apiService.getCaseAccessRequests()
+    void apiService.getCaseAccessRequests({ signal: controller.signal })
       .then((result) => {
         if (!cancelled) {
           setAccessRequests(result ?? []);
@@ -529,6 +530,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [canManageCaseAccess, reloadToken]);
 
