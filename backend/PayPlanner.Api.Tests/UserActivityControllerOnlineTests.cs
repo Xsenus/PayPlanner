@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -7,6 +8,7 @@ using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
@@ -218,6 +220,41 @@ public class UserActivityControllerOnlineTests
         Assert.Equal("heartbeat", current.LastAction);
     }
 
+    [Fact]
+    public async Task GetMaintenanceAsync_LoadsLogStatisticsWithSingleQuery()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var controller = CreateController(db);
+
+        interceptor.Commands.Clear();
+        var empty = AssertOk<UserActivityMaintenanceDto>(
+            await controller.GetMaintenanceAsync(CancellationToken.None));
+
+        Assert.Equal(0, empty.LogEntries);
+        Assert.Null(empty.OldestLogAt);
+        Assert.Null(empty.NewestLogAt);
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"UserActivityLogs\"", StringComparison.Ordinal));
+
+        var oldest = DateTime.UtcNow.AddDays(-2);
+        var newest = DateTime.UtcNow.AddMinutes(-5);
+        db.UserActivityLogs.AddRange(
+            new UserActivityLog { Category = "test", Action = "oldest", Status = UserActivityStatus.Info, CreatedAt = oldest },
+            new UserActivityLog { Category = "test", Action = "newest", Status = UserActivityStatus.Success, CreatedAt = newest });
+        await db.SaveChangesAsync();
+
+        interceptor.Commands.Clear();
+        var populated = AssertOk<UserActivityMaintenanceDto>(
+            await controller.GetMaintenanceAsync(CancellationToken.None));
+
+        Assert.Equal(2, populated.LogEntries);
+        Assert.Equal(oldest, populated.OldestLogAt);
+        Assert.Equal(newest, populated.NewestLogAt);
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"UserActivityLogs\"", StringComparison.Ordinal));
+    }
+
     private static UserActivityController CreateController(PaymentContext db)
         => new(
             db,
@@ -231,18 +268,36 @@ public class UserActivityControllerOnlineTests
         return Assert.IsType<T>(ok.Value);
     }
 
-    private static async Task<PaymentContext> CreateContextAsync()
+    private static async Task<PaymentContext> CreateContextAsync(DbCommandInterceptor? interceptor = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
 
-        var options = new DbContextOptionsBuilder<PaymentContext>()
-            .UseSqlite(connection)
-            .Options;
+        var optionsBuilder = new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite(connection);
+        if (interceptor is not null)
+        {
+            optionsBuilder.AddInterceptors(interceptor);
+        }
 
-        var db = new PaymentContext(options);
+        var db = new PaymentContext(optionsBuilder.Options);
         await db.Database.EnsureCreatedAsync();
         return db;
+    }
+
+    private sealed class RecordingCommandInterceptor : DbCommandInterceptor
+    {
+        public List<string> Commands { get; } = [];
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            Commands.Add(command.CommandText);
+            return ValueTask.FromResult(result);
+        }
     }
 
     private static async Task<User> CreateUserAsync(PaymentContext db, string roleName)

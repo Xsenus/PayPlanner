@@ -491,27 +491,25 @@ public class UserActivityController : ControllerBase, IAsyncActionFilter
     private async Task<UserActivityMaintenanceDto> BuildMaintenanceAsync(CancellationToken cancellationToken)
     {
         var settings = await _activityService.GetSettingsAsync(cancellationToken);
-        var logEntries = await _context.UserActivityLogs.AsNoTracking().CountAsync(cancellationToken);
-
-        DateTime? oldestLogAt = null;
-        DateTime? newestLogAt = null;
-
-        if (logEntries > 0)
-        {
-            oldestLogAt = await _context.UserActivityLogs.AsNoTracking()
-                .MinAsync(x => (DateTime?)x.CreatedAt, cancellationToken);
-            newestLogAt = await _context.UserActivityLogs.AsNoTracking()
-                .MaxAsync(x => (DateTime?)x.CreatedAt, cancellationToken);
-        }
+        var logStatistics = await _context.UserActivityLogs
+            .AsNoTracking()
+            .GroupBy(_ => 1)
+            .Select(group => new
+            {
+                Count = group.Count(),
+                Oldest = group.Min(item => (DateTime?)item.CreatedAt),
+                Newest = group.Max(item => (DateTime?)item.CreatedAt),
+            })
+            .SingleOrDefaultAsync(cancellationToken);
 
         return new UserActivityMaintenanceDto
         {
             IsEnabled = settings.IsEnabled,
             RetentionDays = settings.RetentionDays,
             UpdatedAt = settings.UpdatedAt,
-            LogEntries = logEntries,
-            OldestLogAt = oldestLogAt,
-            NewestLogAt = newestLogAt,
+            LogEntries = logStatistics?.Count ?? 0,
+            OldestLogAt = logStatistics?.Oldest,
+            NewestLogAt = logStatistics?.Newest,
             Storage = MapStorage(await _sqliteMaintenanceService.GetStorageStatsAsync(cancellationToken)),
         };
     }
