@@ -6078,16 +6078,20 @@ public class ReportsController : ControllerBase
         DataVisibilityAccess paymentsVisibility,
         CancellationToken ct)
     {
-        var query = BuildFactQuery(from, to, source, accountName, counterpartyName, clientId, caseId, contractId, incomeTypeId, paymentsVisibility)
-            .Include(item => item.IncomeType);
-
-        var rows = await query
-            .Select(item => new
+        var rows = await BuildFactQuery(from, to, source, accountName, counterpartyName, clientId, caseId, contractId, incomeTypeId, paymentsVisibility)
+            .GroupBy(item => new
             {
                 item.Direction,
-                item.Amount,
                 IncomeTypeName = item.IncomeType != null ? item.IncomeType.Name : null,
                 item.CategoryName,
+            })
+            .Select(group => new MoneyCategoryQueryRow
+            {
+                Direction = group.Key.Direction,
+                IncomeTypeName = group.Key.IncomeTypeName,
+                CategoryName = group.Key.CategoryName,
+                Amount = group.Sum(item => item.Amount),
+                Count = group.Count(),
             })
             .ToListAsync(ct);
 
@@ -6107,17 +6111,17 @@ public class ReportsController : ControllerBase
             NetTotal = incomeTotal - expenseTotal,
             Income = BuildCategoryItems(
                 rows.Where(item => item.Direction == MoneyOperationDirection.Income)
-                    .Select(item => (item.Amount, CategoryName: ResolveCategoryName(item.IncomeTypeName, item.CategoryName))),
+                    .Select(item => (item.Amount, item.Count, CategoryName: ResolveCategoryName(item.IncomeTypeName, item.CategoryName))),
                 incomeTotal),
             Expense = BuildCategoryItems(
                 rows.Where(item => item.Direction == MoneyOperationDirection.Expense)
-                    .Select(item => (item.Amount, CategoryName: ResolveCategoryName(item.IncomeTypeName, item.CategoryName))),
+                    .Select(item => (item.Amount, item.Count, CategoryName: ResolveCategoryName(item.IncomeTypeName, item.CategoryName))),
                 expenseTotal),
         };
     }
 
     private static List<MoneyCategoryReportItemDto> BuildCategoryItems(
-        IEnumerable<(decimal Amount, string CategoryName)> rows,
+        IEnumerable<(decimal Amount, int Count, string CategoryName)> rows,
         decimal total)
         => rows
             .GroupBy(item => item.CategoryName, StringComparer.OrdinalIgnoreCase)
@@ -6127,9 +6131,12 @@ public class ReportsController : ControllerBase
 
                 return new MoneyCategoryReportItemDto
                 {
-                    CategoryName = group.First().CategoryName,
+                    CategoryName = group
+                        .Select(item => item.CategoryName)
+                        .OrderBy(name => name, StringComparer.Ordinal)
+                        .First(),
                     Amount = amount,
-                    Count = group.Count(),
+                    Count = group.Sum(item => item.Count),
                     Share = total > 0m ? Math.Round(amount / total * 100m, 1, MidpointRounding.AwayFromZero) : 0m,
                 };
             })
@@ -9477,6 +9484,15 @@ public class ReportsController : ControllerBase
     {
         public string Status { get; init; } = string.Empty;
         public int FileCount { get; init; }
+    }
+
+    private sealed class MoneyCategoryQueryRow
+    {
+        public MoneyOperationDirection Direction { get; init; }
+        public string? IncomeTypeName { get; init; }
+        public string? CategoryName { get; init; }
+        public decimal Amount { get; init; }
+        public int Count { get; init; }
     }
 
     private sealed class VatAggregateQueryRow

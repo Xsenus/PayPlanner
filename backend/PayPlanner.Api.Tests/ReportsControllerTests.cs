@@ -4433,7 +4433,8 @@ services.Id,
     [Fact]
     public async Task Categories_GroupsFactOperationsByIncomeTypeAndCategoryName()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await SqliteTestContextFactory.CreateAsync(interceptor: interceptor);
         var services = new IncomeType
         {
             Name = "Услуги",
@@ -4455,10 +4456,12 @@ services.Id,
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 10_000m, new DateTime(2026, 5, 1), "Основной банк", services.Id, counterpartyName: "ООО Ромашка"),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 5_000m, new DateTime(2026, 5, 2), "Основной банк", services.Id, counterpartyName: "ИП Петров"),
             Operation(MoneyOperationSource.Cash, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 3_000m, new DateTime(2026, 5, 3), "Касса", categoryName: "Розница"),
+            Operation(MoneyOperationSource.Cash, MoneyOperationDirection.Income, MoneyOperationAccountingType.Fact, 2_000m, new DateTime(2026, 5, 3, 15, 0, 0), "Касса", categoryName: " розница "),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 4_000m, new DateTime(2026, 5, 4), "Основной банк", taxes.Id, counterpartyName: "ООО Ромашка"),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Expense, MoneyOperationAccountingType.Fact, 1_000m, new DateTime(2026, 5, 5), "Основной банк"),
             Operation(MoneyOperationSource.Bank, MoneyOperationDirection.Income, MoneyOperationAccountingType.Plan, 99_999m, new DateTime(2026, 5, 5), "Основной банк", services.Id));
         await db.SaveChangesAsync();
+        interceptor.Commands.Clear();
         var controller = CreateController(db);
 
         var action = await controller.Categories(
@@ -4475,9 +4478,9 @@ services.Id,
 
         var ok = Assert.IsType<OkObjectResult>(action.Result);
         var report = Assert.IsType<MoneyCategoryReportDto>(ok.Value);
-        Assert.Equal(18_000m, report.IncomeTotal);
+        Assert.Equal(20_000m, report.IncomeTotal);
         Assert.Equal(5_000m, report.ExpenseTotal);
-        Assert.Equal(13_000m, report.NetTotal);
+        Assert.Equal(15_000m, report.NetTotal);
 
         Assert.Collection(
             report.Income,
@@ -4486,14 +4489,14 @@ services.Id,
                 Assert.Equal("Услуги", item.CategoryName);
                 Assert.Equal(15_000m, item.Amount);
                 Assert.Equal(2, item.Count);
-                Assert.Equal(83.3m, item.Share);
+                Assert.Equal(75m, item.Share);
             },
             item =>
             {
                 Assert.Equal("Розница", item.CategoryName);
-                Assert.Equal(3_000m, item.Amount);
-                Assert.Equal(1, item.Count);
-                Assert.Equal(16.7m, item.Share);
+                Assert.Equal(5_000m, item.Amount);
+                Assert.Equal(2, item.Count);
+                Assert.Equal(25m, item.Share);
             });
 
         Assert.Collection(
@@ -4511,6 +4514,13 @@ services.Id,
                 Assert.Equal(20.0m, item.Share);
             });
 
+        var categoryQuery = Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"MoneyOperations\"", StringComparison.Ordinal));
+        Assert.Contains("GROUP BY", categoryQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SUM", categoryQuery, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("COUNT", categoryQuery, StringComparison.OrdinalIgnoreCase);
+        interceptor.Commands.Clear();
+
         var accountAction = await controller.Categories(
             new DateTime(2026, 5, 1),
             new DateTime(2026, 5, 31),
@@ -4525,11 +4535,12 @@ services.Id,
 
         var accountOk = Assert.IsType<OkObjectResult>(accountAction.Result);
         var accountReport = Assert.IsType<MoneyCategoryReportDto>(accountOk.Value);
-        Assert.Equal(3_000m, accountReport.IncomeTotal);
+        Assert.Equal(5_000m, accountReport.IncomeTotal);
         Assert.Equal(0m, accountReport.ExpenseTotal);
         var incomeItem = Assert.Single(accountReport.Income);
         Assert.Equal("Розница", incomeItem.CategoryName);
-        Assert.Equal(3_000m, incomeItem.Amount);
+        Assert.Equal(5_000m, incomeItem.Amount);
+        Assert.Equal(2, incomeItem.Count);
 
         var counterpartyAction = await controller.Categories(
             new DateTime(2026, 5, 1),
