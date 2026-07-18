@@ -154,8 +154,14 @@ public class ClientsControllerTests
         Assert.Equal(2, item.RelatedInvoices.Count);
         Assert.Single(item.RelatedActs);
         Assert.Single(item.RelatedPayments);
+        Assert.Contains(item.RelatedContracts, link => link.Label == "№C-1");
+        Assert.Contains(item.RelatedActs, link => link.Label == "№A-1" && link.Amount == 500m);
         Assert.Single(interceptor.Commands, command =>
             command.Contains("FROM \"ClientCases\"", StringComparison.Ordinal));
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"ClientContracts\"", StringComparison.Ordinal));
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"Acts\"", StringComparison.Ordinal));
     }
 
     [Fact]

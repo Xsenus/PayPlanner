@@ -270,14 +270,6 @@ public class ClientsV2Controller : ControllerBase
                         Date = c.CreatedAt,
                     }).ToList());
 
-            var contractsCountByClient = await _db.ClientContracts
-                .AsNoTracking()
-                .Where(c => visibleContracts.Any(contract => contract.Id == c.ContractId))
-                .Where(c => itemIds.Contains(c.ClientId))
-                .GroupBy(c => c.ClientId)
-                .Select(g => new { ClientId = g.Key, Count = g.Count() })
-                .ToDictionaryAsync(x => x.ClientId, x => x.Count, ct);
-
             var contractRows = await _db.ClientContracts
                 .AsNoTracking()
                 .Where(c => visibleContracts.Any(contract => contract.Id == c.ContractId))
@@ -291,6 +283,10 @@ public class ClientsV2Controller : ControllerBase
                     c.Contract.Date,
                 })
                 .ToListAsync(ct);
+
+            var contractsCountByClient = contractRows
+                .GroupBy(row => row.ClientId)
+                .ToDictionary(group => group.Key, group => group.Count());
 
             var contractLinksByClient = contractRows
                 .GroupBy(row => row.ClientId)
@@ -310,14 +306,6 @@ public class ClientsV2Controller : ControllerBase
                             Date = row.Date,
                         }).ToList());
 
-            var actsCountByClient = await _db.Acts
-                .AsNoTracking()
-                .ApplyActVisibility(actsVisibility)
-                .Where(a => a.ClientId.HasValue && itemIds.Contains(a.ClientId.Value))
-                .GroupBy(a => a.ClientId!.Value)
-                .Select(g => new { ClientId = g.Key, Count = g.Count() })
-                .ToDictionaryAsync(x => x.ClientId, x => x.Count, ct);
-
             var actRows = await _db.Acts
                 .AsNoTracking()
                 .ApplyActVisibility(actsVisibility)
@@ -333,6 +321,11 @@ public class ClientsV2Controller : ControllerBase
                     a.LegalEntityId,
                 })
                 .ToListAsync(ct);
+
+            var actsCountByClient = actRows
+                .Where(row => row.ClientId.HasValue)
+                .GroupBy(row => row.ClientId!.Value)
+                .ToDictionary(group => group.Key, group => group.Count());
 
             var actLinksByClient = actRows
                 .Where(row => row.ClientId.HasValue)
