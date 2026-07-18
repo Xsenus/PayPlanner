@@ -613,18 +613,21 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
             settings.GetValueOrDefault(NotificationDeliveryRetentionService.BatchSizeSettingKey),
             _configuration.GetValue("Notifications:DeliveryRetention:BatchSize", NotificationDeliveryRetentionService.DefaultBatchSize)));
         var cutoff = DateTime.UtcNow.AddDays(-retentionDays);
-        var pendingCount = _notificationDeliveryRetentionRunner is null
-            ? await _db.NotificationDeliveries
-                .AsNoTracking()
-                .Where(item => item.CreatedAt < cutoff && item.Status != NotificationDeliveryStatus.Pending)
-                .CountAsync(ct)
-            : await _notificationDeliveryRetentionRunner.CountEligibleDeliveriesAsync(ct);
-        var oldestDeliveryAt = await _db.NotificationDeliveries
-            .AsNoTracking()
-            .Where(item => item.Status != NotificationDeliveryStatus.Pending)
-            .OrderBy(item => item.CreatedAt)
-            .Select(item => (DateTime?)item.CreatedAt)
-            .FirstOrDefaultAsync(ct);
+        var retentionStatistics = await _db.Database
+            .SqlQuery<RetentionStatistics>($$"""
+                SELECT
+                    CAST((SELECT COUNT(*)
+                          FROM "NotificationDeliveries"
+                          WHERE "CreatedAt" < {{cutoff}} AND "Status" <> {{NotificationDeliveryStatus.Pending}}) AS INTEGER) AS "EligibleCount",
+                    (SELECT "CreatedAt"
+                     FROM "NotificationDeliveries"
+                     WHERE "Status" <> {{NotificationDeliveryStatus.Pending}}
+                     ORDER BY "CreatedAt"
+                     LIMIT 1) AS "OldestAt"
+                """)
+            .SingleAsync(ct);
+        var pendingCount = enabled ? retentionStatistics.EligibleCount : 0;
+        var oldestDeliveryAt = retentionStatistics.OldestAt;
 
         return new SystemJobDiagnosticsItemDto
         {
@@ -722,14 +725,14 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
             _configuration.GetValue("CalendarSync:LogRetention:BatchSize", CalendarSyncLogRetentionService.DefaultBatchSize)));
         var cutoff = DateTime.UtcNow.AddDays(-retentionDays);
         var googleStatistics = await _db.Database
-            .SqlQuery<CalendarLogRetentionStatistics>($$"""
+            .SqlQuery<RetentionStatistics>($$"""
                 SELECT
                     CAST((SELECT COUNT(*) FROM "GoogleCalendarSyncLogs" WHERE "CreatedAt" < {{cutoff}}) AS INTEGER) AS "EligibleCount",
                     (SELECT MIN("CreatedAt") FROM "GoogleCalendarSyncLogs") AS "OldestAt"
                 """)
             .SingleAsync(ct);
         var yandexStatistics = await _db.Database
-            .SqlQuery<CalendarLogRetentionStatistics>($$"""
+            .SqlQuery<RetentionStatistics>($$"""
                 SELECT
                     CAST((SELECT COUNT(*) FROM "YandexCalendarSyncLogs" WHERE "CreatedAt" < {{cutoff}}) AS INTEGER) AS "EligibleCount",
                     (SELECT MIN("CreatedAt") FROM "YandexCalendarSyncLogs") AS "OldestAt"
@@ -1309,7 +1312,7 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
         };
     }
 
-    private sealed class CalendarLogRetentionStatistics
+    private sealed class RetentionStatistics
     {
         public int EligibleCount { get; init; }
         public DateTime? OldestAt { get; init; }

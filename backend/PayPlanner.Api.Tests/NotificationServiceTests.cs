@@ -4481,7 +4481,7 @@ public class NotificationServiceTests
         db.Users.AddRange(assignee, approver);
         await db.SaveChangesAsync();
 
-        var nowUtc = DateTime.UtcNow;
+        var nowUtc = new DateTime(2026, 7, 18, 12, 0, 0, DateTimeKind.Utc);
         var task = new TaskJournalItem
         {
             ObjectName = "ЕГОРОВ - спор",

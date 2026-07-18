@@ -289,6 +289,11 @@ public class SystemJobsControllerTests
             command.Contains("YandexCalendarSyncLogs", StringComparison.Ordinal));
         Assert.Contains("COUNT", yandexLogStatisticsCommand, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("MIN", yandexLogStatisticsCommand, StringComparison.OrdinalIgnoreCase);
+        var deliveryRetentionCommand = Assert.Single(interceptor.Commands, command =>
+            command.Contains("NotificationDeliveries", StringComparison.Ordinal) &&
+            command.Contains("EligibleCount", StringComparison.Ordinal));
+        Assert.Contains("COUNT", deliveryRetentionCommand, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ORDER BY", deliveryRetentionCommand, StringComparison.OrdinalIgnoreCase);
         Assert.All(dto.Items, item =>
         {
             Assert.DoesNotContain("password", item.Description, StringComparison.OrdinalIgnoreCase);
@@ -298,23 +303,40 @@ public class SystemJobsControllerTests
     }
 
     [Fact]
-    public async Task GetDiagnostics_PreservesOldestCalendarLogWhenRetentionDisabled()
+    public async Task GetDiagnostics_PreservesOldestRetentionActivityWhenJobsDisabled()
     {
         var interceptor = new RecordingCommandInterceptor();
         await using var scope = await CreateDbScopeAsync(interceptor);
         var oldestAt = DateTime.UtcNow.AddDays(-60);
-        scope.Db.SystemSettings.Add(new SystemSetting
-        {
-            Key = CalendarSyncLogRetentionService.EnabledSettingKey,
-            Value = "false",
-            CreatedAt = oldestAt,
-            UpdatedAt = oldestAt,
-        });
+        var oldestDeliveryAt = oldestAt.AddDays(5);
+        scope.Db.SystemSettings.AddRange(
+            new SystemSetting
+            {
+                Key = CalendarSyncLogRetentionService.EnabledSettingKey,
+                Value = "false",
+                CreatedAt = oldestAt,
+                UpdatedAt = oldestAt,
+            },
+            new SystemSetting
+            {
+                Key = NotificationDeliveryRetentionService.EnabledSettingKey,
+                Value = "false",
+                CreatedAt = oldestAt,
+                UpdatedAt = oldestAt,
+            });
         scope.Db.GoogleCalendarSyncLogs.Add(new GoogleCalendarSyncLog
         {
             Operation = "upsert",
             Message = "Preserved old Google log",
             CreatedAt = oldestAt,
+        });
+        scope.Db.NotificationDeliveries.Add(new NotificationDelivery
+        {
+            EventKey = "retention-disabled",
+            Channel = NotificationChannels.Email,
+            Subject = "Preserved old delivery",
+            Status = NotificationDeliveryStatus.Sent,
+            CreatedAt = oldestDeliveryAt,
         });
         await scope.Db.SaveChangesAsync();
 
@@ -323,14 +345,22 @@ public class SystemJobsControllerTests
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var dto = Assert.IsType<SystemJobDiagnosticsDto>(ok.Value);
         var retention = Assert.Single(dto.Items, item => item.Key == SystemJobKeys.CalendarSyncLogRetention);
+        var deliveryRetention = Assert.Single(dto.Items,
+            item => item.Key == SystemJobKeys.NotificationDeliveryRetention);
 
         Assert.False(retention.Enabled);
         Assert.Equal(0, retention.PendingCount);
         Assert.Equal(oldestAt, retention.LastActivityAt);
+        Assert.False(deliveryRetention.Enabled);
+        Assert.Equal(0, deliveryRetention.PendingCount);
+        Assert.Equal(oldestDeliveryAt, deliveryRetention.LastActivityAt);
         Assert.Single(interceptor.Commands, command =>
             command.Contains("GoogleCalendarSyncLogs", StringComparison.Ordinal));
         Assert.Single(interceptor.Commands, command =>
             command.Contains("YandexCalendarSyncLogs", StringComparison.Ordinal));
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("NotificationDeliveries", StringComparison.Ordinal) &&
+            command.Contains("EligibleCount", StringComparison.Ordinal));
     }
 
     [Fact]
