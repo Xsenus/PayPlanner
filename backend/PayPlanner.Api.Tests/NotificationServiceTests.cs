@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Net;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
@@ -6,6 +7,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Data;
@@ -3809,6 +3811,76 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyActCreatedAsync_ReusesVisibilityCheckForAllRecipients()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var adminRole = new Role
+        {
+            Name = "admin",
+            Description = "Администратор",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Roles.Add(adminRole);
+        await db.SaveChangesAsync();
+        var actor = new User
+        {
+            Email = "act-query-actor@example.com",
+            FullName = "Автор акта",
+            PasswordHash = "hash",
+            RoleId = adminRole.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        var recipients = Enumerable.Range(1, 12)
+            .Select(index => new User
+            {
+                Email = $"act-query-recipient-{index}@example.com",
+                FullName = $"Получатель акта {index}",
+                PasswordHash = "hash",
+                RoleId = adminRole.Id,
+                IsActive = true,
+                IsApproved = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            })
+            .ToArray();
+        db.Users.AddRange(recipients.Append(actor));
+        await db.SaveChangesAsync();
+        var act = new Act
+        {
+            Number = "A-QUERY-12",
+            Title = "Акт с несколькими получателями",
+            Date = new DateTime(2026, 7, 19),
+            Amount = 12000m,
+            Status = ActStatus.Created,
+            WorkflowStatus = ActWorkflowStatus.Draft,
+            ResponsibleId = recipients[0].Id,
+        };
+        db.Acts.Add(act);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+        interceptor.ReaderCommands.Clear();
+
+        await service.NotifyActCreatedAsync(
+            act,
+            actor.FullName,
+            actor.Id,
+            recipients.Select(user => user.Id).ToArray());
+
+        var notifications = await db.UserNotifications.AsNoTracking().ToListAsync();
+        Assert.Equal(12, notifications.Count);
+        Assert.Equal(
+            recipients.Select(user => user.Id).Order(),
+            notifications.Select(notification => notification.RecipientUserId).Order());
+        Assert.Equal(12, interceptor.ReaderCommands.Count(command =>
+            command.Contains("SELECT EXISTS", StringComparison.Ordinal)
+            && command.Contains("FROM \"Acts\"", StringComparison.Ordinal)));
+    }
+
+    [Fact]
     public async Task NotifyActChangedAsync_CreatesActNotificationAndDeduplicatesByState()
     {
         await using var db = await CreateContextAsync();
@@ -5226,16 +5298,19 @@ public class NotificationServiceTests
         return (task, author, assignee, observer);
     }
 
-    private static async Task<PaymentContext> CreateContextAsync()
+    private static async Task<PaymentContext> CreateContextAsync(DbCommandInterceptor? interceptor = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
 
-        var options = new DbContextOptionsBuilder<PaymentContext>()
-            .UseSqlite(connection)
-            .Options;
+        var optionsBuilder = new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite(connection);
+        if (interceptor is not null)
+        {
+            optionsBuilder.AddInterceptors(interceptor);
+        }
 
-        var db = new PaymentContext(options);
+        var db = new PaymentContext(optionsBuilder.Options);
         await db.Database.EnsureCreatedAsync();
         return db;
     }
@@ -5523,6 +5598,21 @@ public class NotificationServiceTests
         db.StickyNotes.Add(note);
         await db.SaveChangesAsync();
         return note;
+    }
+
+    private sealed class RecordingCommandInterceptor : DbCommandInterceptor
+    {
+        public List<string> ReaderCommands { get; } = [];
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            ReaderCommands.Add(command.CommandText);
+            return ValueTask.FromResult(result);
+        }
     }
 
     private sealed class RecordingEmailService : IEmailService
