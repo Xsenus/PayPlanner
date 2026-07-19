@@ -136,7 +136,15 @@ public class ContractExpirationNotificationServiceTests
         Assert.Equal(12, affected);
         Assert.Equal(12, notificationRecorder.Calls.Count);
         Assert.All(notificationRecorder.Calls, call => Assert.Single(call.RecipientUserIds));
-        Assert.Equal(8, interceptor.ReaderCommands.Count);
+        Assert.Equal(3, interceptor.ReaderCommands.Count);
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("ClientContracts", StringComparison.Ordinal)
+            && command.Contains("LegalEntityContracts", StringComparison.Ordinal)
+            && command.Contains("ContractInvoices", StringComparison.Ordinal)
+            && command.Contains("ContractPayments", StringComparison.Ordinal)
+            && command.Contains("ContractActs", StringComparison.Ordinal)
+            && command.Contains("FROM \"Payments\"", StringComparison.Ordinal)
+            && command.Contains("PaymentResponsibles", StringComparison.Ordinal));
     }
 
     [Fact]

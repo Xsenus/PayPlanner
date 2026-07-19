@@ -103,47 +103,48 @@ public sealed class ContractExpirationNotificationService : BackgroundService
             return new Dictionary<int, IReadOnlyCollection<int>>();
         }
 
-        var candidates = new List<ContractRecipientCandidate>();
-        candidates.AddRange(await db.ClientContracts
+        var clientCandidates = db.ClientContracts
             .AsNoTracking()
             .Where(link => contractIds.Contains(link.ContractId)
                 && link.Client.ResponsibleUserId.HasValue)
-            .Select(link => new ContractRecipientCandidate(link.ContractId, link.Client.ResponsibleUserId!.Value))
-            .ToListAsync(ct));
-        candidates.AddRange(await db.LegalEntityContracts
+            .Select(link => new { link.ContractId, UserId = link.Client.ResponsibleUserId!.Value });
+        var legalEntityCandidates = db.LegalEntityContracts
             .AsNoTracking()
             .Where(link => contractIds.Contains(link.ContractId)
                 && link.LegalEntity.ResponsibleUserId.HasValue)
-            .Select(link => new ContractRecipientCandidate(link.ContractId, link.LegalEntity.ResponsibleUserId!.Value))
-            .ToListAsync(ct));
-        candidates.AddRange(await (
+            .Select(link => new { link.ContractId, UserId = link.LegalEntity.ResponsibleUserId!.Value });
+        var invoiceCandidates =
             from link in db.ContractInvoices.AsNoTracking()
             join responsible in db.PaymentResponsibles.AsNoTracking()
                 on link.InvoiceId equals responsible.PaymentId
             where contractIds.Contains(link.ContractId)
-            select new ContractRecipientCandidate(link.ContractId, responsible.UserId))
-            .ToListAsync(ct));
-        candidates.AddRange(await (
+            select new { link.ContractId, responsible.UserId };
+        var linkedPaymentCandidates =
             from link in db.ContractPayments.AsNoTracking()
             join responsible in db.PaymentResponsibles.AsNoTracking()
                 on link.PaymentId equals responsible.PaymentId
             where contractIds.Contains(link.ContractId)
-            select new ContractRecipientCandidate(link.ContractId, responsible.UserId))
-            .ToListAsync(ct));
-        candidates.AddRange(await db.ContractActs
+            select new { link.ContractId, responsible.UserId };
+        var actCandidates = db.ContractActs
             .AsNoTracking()
             .Where(link => contractIds.Contains(link.ContractId)
                 && link.Act.ResponsibleId.HasValue)
-            .Select(link => new ContractRecipientCandidate(link.ContractId, link.Act.ResponsibleId!.Value))
-            .ToListAsync(ct));
-        candidates.AddRange(await (
+            .Select(link => new { link.ContractId, UserId = link.Act.ResponsibleId!.Value });
+        var directPaymentCandidates =
             from payment in db.Payments.AsNoTracking()
             join responsible in db.PaymentResponsibles.AsNoTracking()
                 on payment.Id equals responsible.PaymentId
             where payment.ContractId.HasValue && contractIds.Contains(payment.ContractId.Value)
-            select new ContractRecipientCandidate(payment.ContractId!.Value, responsible.UserId))
+            select new { ContractId = payment.ContractId!.Value, responsible.UserId };
+
+        var candidates = await clientCandidates
+            .Concat(legalEntityCandidates)
+            .Concat(invoiceCandidates)
+            .Concat(linkedPaymentCandidates)
+            .Concat(actCandidates)
+            .Concat(directPaymentCandidates)
             .Distinct()
-            .ToListAsync(ct));
+            .ToListAsync(ct);
 
         var userIds = candidates
             .Select(candidate => candidate.UserId)
@@ -178,6 +179,4 @@ public sealed class ContractExpirationNotificationService : BackgroundService
                     .Distinct()
                     .ToArray());
     }
-
-    private sealed record ContractRecipientCandidate(int ContractId, int UserId);
 }
