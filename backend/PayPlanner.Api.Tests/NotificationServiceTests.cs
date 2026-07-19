@@ -4329,7 +4329,7 @@ public class NotificationServiceTests
     }
 
     [Fact]
-    public async Task NotifyCourtSyncFailedAsync_LoadsRecipientNotificationSettingsInSingleQuery()
+    public async Task NotifyCourtSyncFailedAsync_LoadsVisibilityAndRecipientSettingsInSingleQueriesAndDeduplicates()
     {
         var interceptor = new RecordingCommandInterceptor();
         await using var db = await CreateContextAsync(interceptor);
@@ -4356,6 +4356,10 @@ public class NotificationServiceTests
             .ToArray();
         db.Users.AddRange(recipients);
         await db.SaveChangesAsync();
+        var deniedRecipient = await CreateUserWithoutSectionAccessAsync(
+            db,
+            "court-sync-query-denied@example.com",
+            RolePermissionCatalog.Cases);
         var client = new Client
         {
             Name = "Клиент судебной синхронизации",
@@ -4385,11 +4389,15 @@ public class NotificationServiceTests
             "Источник временно недоступен",
             recipients[^1].FullName,
             recipients[^1].Id,
-            recipients.Select(user => user.Id).Append(recipients[0].Id).ToArray());
+            recipients.Select(user => user.Id)
+                .Append(recipients[0].Id)
+                .Append(deniedRecipient.Id)
+                .ToArray());
 
         var notifications = await db.UserNotifications.AsNoTracking().ToListAsync();
         Assert.Equal(11, notifications.Count);
         Assert.DoesNotContain(notifications, notification => notification.RecipientUserId == recipients[^1].Id);
+        Assert.DoesNotContain(notifications, notification => notification.RecipientUserId == deniedRecipient.Id);
         Assert.Equal(11, notifications.Select(notification => notification.RecipientUserId).Distinct().Count());
         Assert.All(notifications, notification =>
         {
@@ -4400,6 +4408,9 @@ public class NotificationServiceTests
             Assert.Contains("Источник временно недоступен", notification.BodyPreview, StringComparison.Ordinal);
         });
         Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("SELECT EXISTS", StringComparison.Ordinal)
+            && command.Contains("FROM \"ClientCases\"", StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
             command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
             && command.Contains(UserNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
         Assert.Single(interceptor.ReaderCommands, command =>
@@ -4408,6 +4419,19 @@ public class NotificationServiceTests
         Assert.Single(interceptor.ReaderCommands, command =>
             command.Contains("FROM \"SystemSettings\"", StringComparison.Ordinal)
             && command.Contains(RoleNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
+
+        await service.NotifyCourtSyncFailedAsync(
+            clientCase,
+            "Картотека арбитражных дел",
+            "Источник временно недоступен",
+            recipients[^1].FullName,
+            recipients[^1].Id,
+            recipients.Select(user => user.Id)
+                .Append(recipients[0].Id)
+                .Append(deniedRecipient.Id)
+                .ToArray());
+
+        Assert.Equal(11, await db.UserNotifications.CountAsync());
     }
 
     [Fact]

@@ -2542,11 +2542,12 @@ public sealed class NotificationService : INotificationService
             return;
         }
 
-        var recipients = recipientUserIds
-            .Where(userId => userId > 0 && !UserNotificationAntiSpamPolicy.ShouldSuppressSelfNotification(userId, actorUserId))
-            .Distinct()
-            .ToList();
-        if (recipients.Count == 0)
+        var visibleRecipientUserIds = await ResolveVisibleCaseNotificationRecipientIdsAsync(
+            clientCase,
+            recipientUserIds,
+            actorUserId,
+            cancellationToken);
+        if (visibleRecipientUserIds.Count == 0)
         {
             return;
         }
@@ -2563,7 +2564,7 @@ public sealed class NotificationService : INotificationService
             cancellationToken: cancellationToken);
         var stateHash = BuildStableTextHash($"{provider}|{normalizedSummary}");
         var recipientNotificationChannels = await ResolveUserNotificationChannelsAsync(
-            recipients,
+            visibleRecipientUserIds,
             UserNotificationTypes.CourtSyncFailed,
             [
                 NotificationChannels.InApp,
@@ -2572,7 +2573,7 @@ public sealed class NotificationService : INotificationService
             ],
             cancellationToken);
 
-        foreach (var recipientUserId in recipients)
+        foreach (var recipientUserId in visibleRecipientUserIds)
         {
             await CreateUserNotificationAsync(
                 recipientUserId,
@@ -2594,6 +2595,7 @@ public sealed class NotificationService : INotificationService
                     summary = normalizedSummary
                 },
                 cancellationToken,
+                objectVisibilityValidated: true,
                 resolvedNotificationChannels: recipientNotificationChannels[recipientUserId]);
         }
     }
