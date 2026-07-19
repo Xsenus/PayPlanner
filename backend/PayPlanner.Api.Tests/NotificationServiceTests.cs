@@ -4118,6 +4118,134 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyCaseAccessRequestedAsync_LoadsRecipientSettingsInSingleQueriesAndPreservesVisibilityBypass()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var adminRole = new Role
+        {
+            Name = "admin",
+            Description = "Администратор",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Roles.Add(adminRole);
+        await db.SaveChangesAsync();
+        var requester = new User
+        {
+            Email = "case-access-query-requester@example.com",
+            FullName = "Заявитель доступа",
+            PasswordHash = "hash",
+            RoleId = adminRole.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        var managers = Enumerable.Range(1, 11)
+            .Select(index => new User
+            {
+                Email = $"case-access-query-manager-{index}@example.com",
+                FullName = $"Руководитель запроса доступа {index}",
+                PasswordHash = "hash",
+                RoleId = adminRole.Id,
+                IsActive = true,
+                IsApproved = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            })
+            .ToArray();
+        db.Users.AddRange(managers.Append(requester));
+        await db.SaveChangesAsync();
+        var managerWithoutCaseAccess = await CreateUserWithoutSectionAccessAsync(
+            db,
+            "case-access-query-manager-without-case-access@example.com",
+            RolePermissionCatalog.Cases);
+        var client = new Client
+        {
+            Name = "Клиент массового запроса доступа",
+            IsActive = true,
+            ResponsibleUserId = requester.Id,
+        };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+        var clientCase = new ClientCase
+        {
+            ClientId = client.Id,
+            Title = "Скрытое дело для массового запроса доступа",
+            CaseNumber = "CASE-ACCESS-QUERY-12",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = requester.Id,
+            IsHiddenFromExecutor = true,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            realtime,
+            webPush);
+        var requestedAt = new DateTime(2026, 7, 20, 5, 0, 0, DateTimeKind.Utc);
+        var managerUserIds = managers.Select(user => user.Id)
+            .Append(managers[0].Id)
+            .Append(managerWithoutCaseAccess.Id)
+            .Append(requester.Id)
+            .ToArray();
+        interceptor.ReaderCommands.Clear();
+
+        await service.NotifyCaseAccessRequestedAsync(
+            clientCase,
+            requester.FullName,
+            requester.Id,
+            "Нужно проверить материалы скрытого дела",
+            requestedAt,
+            managerUserIds);
+
+        var notifications = await db.UserNotifications.AsNoTracking().ToListAsync();
+        Assert.Equal(12, notifications.Count);
+        Assert.Equal(12, realtime.Notifications.Count);
+        Assert.Equal(12, webPush.Notifications.Count);
+        Assert.DoesNotContain(notifications, notification => notification.RecipientUserId == requester.Id);
+        Assert.Contains(notifications, notification => notification.RecipientUserId == managerWithoutCaseAccess.Id);
+        Assert.Equal(12, notifications.Select(notification => notification.RecipientUserId).Distinct().Count());
+        Assert.All(notifications, notification =>
+        {
+            Assert.Equal(UserNotificationTypes.CaseAccessRequested, notification.Type);
+            Assert.Equal("violet", notification.Tone);
+            Assert.Equal("case", notification.ObjectType);
+            Assert.Equal(clientCase.Id, notification.ObjectId);
+            Assert.Contains("CASE-ACCESS-QUERY-12", notification.Title);
+            Assert.Contains($"\"requestedByUserId\":{requester.Id}", notification.MetadataJson, StringComparison.Ordinal);
+        });
+        Assert.DoesNotContain(interceptor.ReaderCommands, command =>
+            command.Contains("SELECT EXISTS", StringComparison.Ordinal)
+            && command.Contains("FROM \"ClientCases\"", StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(UserNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(UserNotificationDoNotDisturbSettings.SettingKey, StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"SystemSettings\"", StringComparison.Ordinal)
+            && command.Contains(RoleNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
+
+        await service.NotifyCaseAccessRequestedAsync(
+            clientCase,
+            requester.FullName,
+            requester.Id,
+            "Нужно проверить материалы скрытого дела",
+            requestedAt,
+            managerUserIds);
+
+        Assert.Equal(12, await db.UserNotifications.CountAsync());
+        Assert.Equal(12, realtime.Notifications.Count);
+        Assert.Equal(12, webPush.Notifications.Count);
+    }
+
+    [Fact]
     public async Task NotifyCaseAccessResolvedAsync_CreatesRequesterNotificationAndDeduplicates()
     {
         await using var db = await CreateContextAsync();

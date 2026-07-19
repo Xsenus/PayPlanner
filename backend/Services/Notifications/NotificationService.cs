@@ -2412,6 +2412,15 @@ public sealed class NotificationService : INotificationService
             return;
         }
 
+        var recipients = managerUserIds
+            .Where(userId => userId > 0 && userId != requesterUserId)
+            .Distinct()
+            .ToList();
+        if (recipients.Count == 0)
+        {
+            return;
+        }
+
         var normalizedRequesterName = NormalizeNotificationText(requesterName, "Сотрудник");
         var normalizedReason = NormalizeNotificationText(reason, "не указана");
         var requestedAtUtc = NormalizeUtcInstant(requestedAt);
@@ -2422,10 +2431,17 @@ public sealed class NotificationService : INotificationService
             BuildCaseAccessTemplateValues(clientCase, normalizedRequesterName, normalizedReason, null, "запрошен", requestedAtUtc, null),
             purpose: NotificationPurposes.TaskReminder,
             cancellationToken: cancellationToken);
+        var recipientNotificationChannels = await ResolveUserNotificationChannelsAsync(
+            recipients,
+            UserNotificationTypes.CaseAccessRequested,
+            [
+                NotificationChannels.InApp,
+                NotificationChannels.Toast,
+                NotificationChannels.WebPush,
+            ],
+            cancellationToken);
 
-        foreach (var managerUserId in managerUserIds
-            .Where(userId => userId > 0 && userId != requesterUserId)
-            .Distinct())
+        foreach (var managerUserId in recipients)
         {
             await CreateUserNotificationAsync(
                 managerUserId,
@@ -2446,7 +2462,8 @@ public sealed class NotificationService : INotificationService
                     reason = normalizedReason,
                     requestedAt = requestedAtUtc
                 },
-                cancellationToken);
+                cancellationToken,
+                resolvedNotificationChannels: recipientNotificationChannels[managerUserId]);
         }
     }
 
