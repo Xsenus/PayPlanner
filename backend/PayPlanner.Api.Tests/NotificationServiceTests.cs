@@ -1690,6 +1690,103 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyTaskAssignedAsync_LoadsRecipientTimeZonesInSingleQuery()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var adminRole = new Role
+        {
+            Name = "admin",
+            Description = "Администратор",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Roles.Add(adminRole);
+        await db.SaveChangesAsync();
+        var actor = new User
+        {
+            Email = "task-timezone-query-actor@example.com",
+            FullName = "Автор задачи",
+            PasswordHash = "hash",
+            RoleId = adminRole.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        var recipients = Enumerable.Range(1, 12)
+            .Select(index => new User
+            {
+                Email = $"task-timezone-query-recipient-{index}@example.com",
+                FullName = $"Получатель задачи {index}",
+                PasswordHash = "hash",
+                RoleId = adminRole.Id,
+                IsActive = true,
+                IsApproved = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            })
+            .ToArray();
+        db.Users.AddRange(recipients.Append(actor));
+        await db.SaveChangesAsync();
+        db.UserSettings.AddRange(
+            new UserSetting
+            {
+                UserId = recipients[0].Id,
+                Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+                Value = "UTC",
+            },
+            new UserSetting
+            {
+                UserId = recipients[1].Id,
+                Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+                Value = "Asia/Novosibirsk",
+            });
+        var dueAt = new DateTime(2026, 7, 19, 12, 0, 0, DateTimeKind.Utc);
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Массовая задача",
+            Title = "Проверить пакет документов",
+            AuthorUserId = actor.Id,
+            AuthorName = actor.FullName,
+            AssigneeUserId = recipients[0].Id,
+            AssigneeName = recipients[0].FullName,
+            DueAt = dueAt,
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "new",
+            Participants = recipients
+                .Skip(1)
+                .Select((user, index) => new TaskJournalParticipant
+                {
+                    UserId = user.Id,
+                    DisplayName = user.FullName,
+                    Role = "observer",
+                    SortOrder = index,
+                })
+                .ToList(),
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+        interceptor.ReaderCommands.Clear();
+
+        var deliveries = await service.NotifyTaskAssignedAsync(task, actor.FullName, actor.Id);
+
+        Assert.Empty(deliveries);
+        var notifications = await db.UserNotifications.AsNoTracking().ToListAsync();
+        Assert.Equal(12, notifications.Count);
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(CalendarTimeZoneHelper.UserTimeZoneSettingKey, StringComparison.Ordinal));
+        Assert.Contains(
+            "19.07.2026 12:00",
+            notifications.Single(notification => notification.RecipientUserId == recipients[0].Id).BodyPreview);
+        Assert.Contains(
+            "19.07.2026 19:00",
+            notifications.Single(notification => notification.RecipientUserId == recipients[1].Id).BodyPreview);
+    }
+
+    [Fact]
     public async Task NotifyTaskAssignedAsync_HighlightsUrgentDueAt()
     {
         await using var db = await CreateContextAsync();

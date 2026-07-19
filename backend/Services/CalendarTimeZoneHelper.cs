@@ -28,6 +28,31 @@ public static class CalendarTimeZoneHelper
         return ResolveTimeZone(null);
     }
 
+    public static async Task<IReadOnlyDictionary<int, TimeZoneInfo>> ResolveUserTimeZonesAsync(
+        PaymentContext db,
+        IEnumerable<int> userIds,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedUserIds = userIds
+            .Where(userId => userId > 0)
+            .Distinct()
+            .ToArray();
+        if (normalizedUserIds.Length == 0)
+        {
+            return new Dictionary<int, TimeZoneInfo>();
+        }
+
+        var timeZoneSettings = await db.UserSettings
+            .AsNoTracking()
+            .Where(item => normalizedUserIds.Contains(item.UserId) && item.Key == UserTimeZoneSettingKey)
+            .Select(item => new { item.UserId, item.Value })
+            .ToDictionaryAsync(item => item.UserId, item => item.Value, cancellationToken);
+
+        return normalizedUserIds.ToDictionary(
+            userId => userId,
+            userId => ResolveTimeZone(timeZoneSettings.GetValueOrDefault(userId)));
+    }
+
     public static TimeZoneInfo ResolveTimeZone(string? timeZoneId)
     {
         var normalized = NormalizeTimeZoneId(timeZoneId);

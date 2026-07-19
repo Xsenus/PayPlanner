@@ -600,10 +600,14 @@ public sealed class NotificationService : INotificationService
         var eventKey = $"task:{task.Id}:assigned";
         var tone = ResolveTaskAssignedTone(task);
         var isUrgent = string.Equals(tone, "rose", StringComparison.OrdinalIgnoreCase);
+        var recipientTimeZones = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
+            _context,
+            recipients,
+            cancellationToken);
         var deliveries = new List<NotificationDelivery>();
         foreach (var userId in recipients)
         {
-            var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(userId, cancellationToken);
+            var recipientTimeZone = recipientTimeZones[userId];
             var taskAssignedSubject = $"Новая задача: {task.Title}";
             var taskAssignedBody = BuildTaskAssignedBody(task, actorName, recipientTimeZone);
             var message = await RenderTemplateAsync(

@@ -43,11 +43,17 @@ public sealed class CalendarTimeZoneHelperTests
         var configured = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(db, configuredUser.Id);
         var fallback = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(db, fallbackUser.Id);
         var anonymous = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(db, null);
+        var batch = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
+            db,
+            [configuredUser.Id, fallbackUser.Id, configuredUser.Id, 0]);
 
         Assert.Equal(CalendarTimeZoneHelper.ResolveTimeZone("Europe/Samara").Id, configured.Id);
         var defaultTimeZone = CalendarTimeZoneHelper.ResolveTimeZone(CalendarTimeZoneHelper.DefaultTimeZoneId);
         Assert.Equal(defaultTimeZone.Id, fallback.Id);
         Assert.Equal(defaultTimeZone.Id, anonymous.Id);
+        Assert.Equal(2, batch.Count);
+        Assert.Equal(configured.Id, batch[configuredUser.Id].Id);
+        Assert.Equal(fallback.Id, batch[fallbackUser.Id].Id);
     }
 
     [Fact]
