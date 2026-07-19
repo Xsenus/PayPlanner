@@ -1358,6 +1358,15 @@ public sealed class NotificationService : INotificationService
             return;
         }
 
+        var recipients = recipientUserIds
+            .Where(userId => userId > 0 && !UserNotificationAntiSpamPolicy.ShouldSuppressSelfNotification(userId, actorUserId))
+            .Distinct()
+            .ToList();
+        if (recipients.Count == 0)
+        {
+            return;
+        }
+
         var normalizedBoardTitle = NormalizeNotificationText(boardTitle, "Общее");
         var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
         var normalizedAction = NormalizeStickyNoteImportantAction(action);
@@ -1377,10 +1386,17 @@ public sealed class NotificationService : INotificationService
             },
             purpose: NotificationPurposes.ManualTest,
             cancellationToken: cancellationToken);
+        var recipientNotificationChannels = await ResolveUserNotificationChannelsAsync(
+            recipients,
+            UserNotificationTypes.NoteImportantChanged,
+            [
+                NotificationChannels.InApp,
+                NotificationChannels.Toast,
+                NotificationChannels.WebPush,
+            ],
+            cancellationToken);
 
-        foreach (var recipientUserId in recipientUserIds
-            .Where(userId => userId > 0 && !UserNotificationAntiSpamPolicy.ShouldSuppressSelfNotification(userId, actorUserId))
-            .Distinct())
+        foreach (var recipientUserId in recipients)
         {
             await CreateUserNotificationAsync(
                 recipientUserId,
@@ -1402,7 +1418,8 @@ public sealed class NotificationService : INotificationService
                     actorUserId,
                     actorName = normalizedActorName
                 },
-                cancellationToken);
+                cancellationToken,
+                resolvedNotificationChannels: recipientNotificationChannels[recipientUserId]);
         }
     }
 

@@ -5055,6 +5055,77 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyStickyNoteImportantChangeAsync_LoadsRecipientNotificationSettingsInSingleQuery()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var actor = await CreateUserAsync(db, "note-important-query-actor@example.com");
+        var recipients = Enumerable.Range(1, 12)
+            .Select(index => new User
+            {
+                Email = $"note-important-query-recipient-{index}@example.com",
+                FullName = $"Участник общей доски {index}",
+                PasswordHash = "hash",
+                RoleId = actor.RoleId,
+                IsActive = true,
+                IsApproved = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            })
+            .ToArray();
+        db.Users.AddRange(recipients);
+        await db.SaveChangesAsync();
+        var note = await CreateStickyNoteAsync(db, actor, StickyNoteBoardVisibility.Shared);
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            realtime,
+            webPush);
+        interceptor.ReaderCommands.Clear();
+
+        await service.NotifyStickyNoteImportantChangeAsync(
+            note.Id,
+            note.BoardId,
+            "Общее",
+            "Важная информация для всей команды",
+            "pinned",
+            actor.FullName,
+            actor.Id,
+            recipients.Select(user => user.Id)
+                .Append(recipients[0].Id)
+                .Append(actor.Id)
+                .ToArray(),
+            3);
+
+        var notifications = await db.UserNotifications.AsNoTracking().ToListAsync();
+        Assert.Equal(12, notifications.Count);
+        Assert.Equal(12, realtime.Notifications.Count);
+        Assert.Equal(12, webPush.Notifications.Count);
+        Assert.DoesNotContain(notifications, notification => notification.RecipientUserId == actor.Id);
+        Assert.Equal(12, notifications.Select(notification => notification.RecipientUserId).Distinct().Count());
+        Assert.All(notifications, notification =>
+        {
+            Assert.Equal(UserNotificationTypes.NoteImportantChanged, notification.Type);
+            Assert.Equal("orange", notification.Tone);
+            Assert.Equal("note", notification.ObjectType);
+            Assert.Equal(note.Id, notification.ObjectId);
+            Assert.Contains("Важная информация для всей команды", notification.BodyPreview);
+        });
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(UserNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(UserNotificationDoNotDisturbSettings.SettingKey, StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"SystemSettings\"", StringComparison.Ordinal)
+            && command.Contains(RoleNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task NotifyPaymentAssignedAsync_CreatesPaymentNotificationAndDeduplicates()
     {
         await using var db = await CreateContextAsync();
