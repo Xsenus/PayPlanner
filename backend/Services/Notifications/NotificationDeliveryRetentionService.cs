@@ -52,7 +52,7 @@ public sealed class NotificationDeliveryRetentionService : BackgroundService
             {
                 try
                 {
-                    await RunOnceAsync(stoppingToken);
+                    await RunOnceAsync(settings, DateTime.UtcNow, stoppingToken);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -83,6 +83,14 @@ public sealed class NotificationDeliveryRetentionService : BackgroundService
     {
         var startedAt = DateTime.UtcNow;
         var settings = await ResolveSettingsAsync(cancellationToken);
+        return await RunOnceAsync(settings, startedAt, cancellationToken);
+    }
+
+    private async Task<NotificationDeliveryRetentionResult> RunOnceAsync(
+        NotificationDeliveryRetentionSettings settings,
+        DateTime startedAt,
+        CancellationToken cancellationToken)
+    {
         if (!settings.Enabled)
         {
             await RecordSuccessAsync(
@@ -135,20 +143,10 @@ public sealed class NotificationDeliveryRetentionService : BackgroundService
         var context = scope.ServiceProvider.GetRequiredService<PaymentContext>();
         var sqliteMaintenanceService = scope.ServiceProvider.GetService<ISqliteMaintenanceService>();
         var cutoff = DateTime.UtcNow.AddDays(-settings.RetentionDays);
-        var ids = await BuildExpiredDeliveryQuery(context, cutoff)
+        var deleted = await BuildExpiredDeliveryQuery(context, cutoff)
             .OrderBy(item => item.CreatedAt)
             .ThenBy(item => item.Id)
-            .Select(item => item.Id)
             .Take(settings.BatchSize)
-            .ToListAsync(cancellationToken);
-
-        if (ids.Count == 0)
-        {
-            return 0;
-        }
-
-        var deleted = await context.NotificationDeliveries
-            .Where(item => ids.Contains(item.Id))
             .ExecuteDeleteAsync(cancellationToken);
 
         if (deleted > 0)

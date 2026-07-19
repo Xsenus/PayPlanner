@@ -1035,7 +1035,8 @@ public class SystemJobsControllerTests
     [Fact]
     public async Task NotificationDeliveryRetentionService_DeletesOnlyExpiredCompletedDeliveries()
     {
-        await using var scope = await CreateDbScopeAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var scope = await CreateDbScopeAsync(interceptor);
         var now = DateTime.UtcNow;
         scope.Db.SystemSettings.AddRange(
             new SystemSetting { Key = NotificationDeliveryRetentionService.EnabledSettingKey, Value = "true", CreatedAt = now, UpdatedAt = now },
@@ -1084,12 +1085,18 @@ public class SystemJobsControllerTests
             new ConfigurationBuilder().Build(),
             NullLogger<NotificationDeliveryRetentionService>.Instance);
 
+        interceptor.Commands.Clear();
         Assert.Equal(2, await service.CountEligibleDeliveriesAsync(CancellationToken.None));
+        Assert.Equal(2, interceptor.Commands.Count);
+        Assert.Single(interceptor.Commands, command => command.Contains("SystemSettings", StringComparison.Ordinal));
+        Assert.Single(interceptor.Commands, command => command.Contains("NotificationDeliveries", StringComparison.Ordinal));
 
+        interceptor.Commands.Clear();
         var result = await service.RunOnceAsync(CancellationToken.None);
 
         Assert.True(result.Enabled);
         Assert.Equal(2, result.DeletedCount);
+        Assert.Single(interceptor.Commands, command => command.Contains("SystemSettings", StringComparison.Ordinal));
         scope.Db.ChangeTracker.Clear();
         var eventKeys = await scope.Db.NotificationDeliveries
             .AsNoTracking()
