@@ -1119,6 +1119,15 @@ public sealed class NotificationService : INotificationService
             },
             purpose: NotificationPurposes.ManualTest,
             cancellationToken: cancellationToken);
+        var adminNotificationChannels = await ResolveUserNotificationChannelsAsync(
+            admins,
+            UserNotificationTypes.SystemAdminWarning,
+            [
+                NotificationChannels.InApp,
+                NotificationChannels.Toast,
+                NotificationChannels.WebPush,
+            ],
+            cancellationToken);
 
         foreach (var adminId in admins)
         {
@@ -1140,7 +1149,8 @@ public sealed class NotificationService : INotificationService
                     summary = normalizedSummary,
                     details = normalizedDetails
                 },
-                cancellationToken);
+                cancellationToken,
+                resolvedNotificationChannels: adminNotificationChannels[adminId]);
         }
     }
 
