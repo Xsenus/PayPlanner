@@ -2321,10 +2321,14 @@ public sealed class NotificationService : INotificationService
             .ToList();
         var eventKey = $"case:{task.ClientCaseId ?? 0}:inactivity-control:{task.Id}";
         var caseInactivitySubject = $"Автоконтроль дела: {task.ObjectName}";
+        var recipientTimeZones = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
+            _context,
+            recipientUserIds,
+            cancellationToken);
         var deliveries = new List<NotificationDelivery>();
         foreach (var recipientUserId in recipientUserIds)
         {
-            var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(recipientUserId, cancellationToken);
+            var recipientTimeZone = recipientTimeZones[recipientUserId];
             var caseInactivityBody = BuildCaseInactivityControlBody(task, daysWithoutActiveTask, recipientTimeZone);
             var message = await RenderTemplateAsync(
                 NotificationTemplateKeys.CaseInactivityControl,
