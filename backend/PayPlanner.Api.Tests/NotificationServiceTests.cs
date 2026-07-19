@@ -6467,7 +6467,7 @@ public class NotificationServiceTests
     }
 
     [Fact]
-    public async Task NotifyContractExpiringAsync_ReusesVisibilityCheckForAllRecipients()
+    public async Task NotifyContractExpiringAsync_LoadsVisibilityAndRecipientSettingsInSingleQueries()
     {
         var interceptor = new RecordingCommandInterceptor();
         await using var db = await CreateContextAsync(interceptor);
@@ -6505,7 +6505,14 @@ public class NotificationServiceTests
         };
         db.Contracts.Add(contract);
         await db.SaveChangesAsync();
-        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            realtime,
+            webPush);
         interceptor.ReaderCommands.Clear();
 
         await service.NotifyContractExpiringAsync(
@@ -6515,12 +6522,32 @@ public class NotificationServiceTests
 
         var notifications = await db.UserNotifications.AsNoTracking().ToListAsync();
         Assert.Equal(12, notifications.Count);
+        Assert.Equal(12, realtime.Notifications.Count);
+        Assert.Equal(12, webPush.Notifications.Count);
         Assert.Equal(
             recipients.Select(user => user.Id).Order(),
             notifications.Select(notification => notification.RecipientUserId).Order());
+        Assert.All(notifications, notification =>
+        {
+            Assert.Equal(UserNotificationTypes.ContractExpiring, notification.Type);
+            Assert.Equal("rose", notification.Tone);
+            Assert.Equal("contract", notification.ObjectType);
+            Assert.Equal(contract.Id, notification.ObjectId);
+            Assert.Contains("D-EXPIRING-QUERY-12", notification.BodyPreview);
+            Assert.Contains("Осталось дней: 3", notification.BodyPreview);
+        });
         Assert.Single(interceptor.ReaderCommands, command =>
             command.Contains("SELECT EXISTS", StringComparison.Ordinal)
             && command.Contains("FROM \"Contracts\"", StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(UserNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(UserNotificationDoNotDisturbSettings.SettingKey, StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"SystemSettings\"", StringComparison.Ordinal)
+            && command.Contains(RoleNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
     }
 
     [Fact]

@@ -2029,6 +2029,15 @@ public sealed class NotificationService : INotificationService
             purpose: NotificationPurposes.ManualTest,
             cancellationToken: cancellationToken);
         var expirationDate = contract.ValidUntil.Value.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var recipientNotificationChannels = await ResolveUserNotificationChannelsAsync(
+            visibleRecipientUserIds,
+            UserNotificationTypes.ContractExpiring,
+            [
+                NotificationChannels.InApp,
+                NotificationChannels.Toast,
+                NotificationChannels.WebPush,
+            ],
+            cancellationToken);
 
         foreach (var recipientUserId in visibleRecipientUserIds)
         {
@@ -2051,7 +2060,8 @@ public sealed class NotificationService : INotificationService
                     daysLeft
                 },
                 cancellationToken,
-                objectVisibilityValidated: true);
+                objectVisibilityValidated: true,
+                resolvedNotificationChannels: recipientNotificationChannels[recipientUserId]);
         }
     }
 
