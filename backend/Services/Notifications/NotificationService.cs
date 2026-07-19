@@ -905,6 +905,15 @@ public sealed class NotificationService : INotificationService
             _context,
             recipients,
             cancellationToken);
+        var recipientNotificationChannels = await ResolveUserNotificationChannelsAsync(
+            recipients,
+            UserNotificationTypes.TaskCancelled,
+            channels.Concat([
+                NotificationChannels.InApp,
+                NotificationChannels.Toast,
+                NotificationChannels.WebPush,
+            ]),
+            cancellationToken);
         var deliveries = new List<NotificationDelivery>();
         foreach (var userId in recipients)
         {
@@ -932,16 +941,15 @@ public sealed class NotificationService : INotificationService
                     "task",
                     task.Id,
                     null,
-                    null,
+                    task,
                     new { actorUserId, actorName, action = normalizedAction },
-                    cancellationToken);
+                    cancellationToken,
+                    resolvedNotificationChannels: recipientNotificationChannels[userId]);
             }
 
-            var enabledChannels = await ResolveUserNotificationChannelsAsync(
-                userId,
-                UserNotificationTypes.TaskCancelled,
-                channels,
-                cancellationToken);
+            var enabledChannels = channels
+                .Where(recipientNotificationChannels[userId].Contains)
+                .ToList();
             if (enabledChannels.Count > 0)
             {
                 deliveries.AddRange(await SendToUserAsync(userId, message, enabledChannels, eventKey, cancellationToken));
@@ -3350,7 +3358,8 @@ public sealed class NotificationService : INotificationService
         TaskJournalItem? task,
         object? metadata,
         CancellationToken cancellationToken,
-        bool objectVisibilityValidated = false)
+        bool objectVisibilityValidated = false,
+        IReadOnlySet<string>? resolvedNotificationChannels = null)
         => CreateUserNotificationAsync(
             new NotificationEventEnvelope(
                 recipientUserId,
@@ -3365,7 +3374,8 @@ public sealed class NotificationService : INotificationService
                 metadata,
                 task),
             cancellationToken,
-            objectVisibilityValidated);
+            objectVisibilityValidated,
+            resolvedNotificationChannels);
 
     private async Task<bool> CreateUserNotificationAsync(
         NotificationEventEnvelope notificationEvent,
