@@ -1,8 +1,5 @@
-using System.Globalization;
-using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
-using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services.Notifications;
 
@@ -148,6 +145,7 @@ public sealed class CaseProceduralDeadlineReminderNotificationService : Backgrou
             .Where(clientCase => clientCaseIds.Contains(clientCase.Id))
             .Select(clientCase => new CaseRecipientCandidate(
                 clientCase.Id,
+                clientCase.IsHiddenFromExecutor,
                 clientCase.ResponsibleUserId,
                 clientCase.Client != null ? clientCase.Client.ResponsibleUserId : null,
                 clientCase.LegalEntity != null ? clientCase.LegalEntity.ResponsibleUserId : null))
@@ -160,7 +158,10 @@ public sealed class CaseProceduralDeadlineReminderNotificationService : Backgrou
                 item.ClientResponsibleUserId,
                 item.LegalEntityResponsibleUserId,
             }.Where(userId => userId.HasValue && userId.Value > 0)
-                .Select(userId => new CaseRecipient(item.ClientCaseId, userId!.Value)))
+                .Select(userId => new CaseRecipient(
+                    item.ClientCaseId,
+                    item.IsHiddenFromExecutor,
+                    userId!.Value)))
             .Distinct()
             .ToArray();
         var userIds = candidates
@@ -173,7 +174,7 @@ public sealed class CaseProceduralDeadlineReminderNotificationService : Backgrou
             return new Dictionary<int, IReadOnlyCollection<int>>();
         }
 
-        var allowedUserIds = await db.Users
+        var allowedUsers = await db.Users
             .AsNoTracking()
             .Where(user => userIds.Contains(user.Id)
                 && user.IsActive
@@ -183,56 +184,36 @@ public sealed class CaseProceduralDeadlineReminderNotificationService : Backgrou
                     || user.Role.Permissions.Any(permission =>
                         permission.Section == RolePermissionCatalog.Cases
                         && permission.CanView)))
-            .Select(user => user.Id)
+            .Select(user => new
+            {
+                user.Id,
+                CanSeeHiddenCases = user.Role!.Name == "admin"
+                    || user.Role.Permissions.Any(permission =>
+                        permission.Section == RolePermissionCatalog.Cases
+                        && permission.CanView
+                        && permission.ViewScope == DataVisibilityScope.All),
+            })
             .ToListAsync(cancellationToken);
 
-        var result = new Dictionary<int, List<int>>();
-        foreach (var userId in allowedUserIds)
-        {
-            var principal = new ClaimsPrincipal(new ClaimsIdentity(
-                [new Claim(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture))],
-                authenticationType: "CaseProceduralDeadlineReminderAccessCheck"));
-            var visibility = await db.ResolveDataVisibilityAsync(principal, RolePermissionCatalog.Cases, cancellationToken);
-            if (visibility is null)
-            {
-                continue;
-            }
-
-            var candidateCaseIds = candidates
-                .Where(candidate => candidate.UserId == userId)
-                .Select(candidate => candidate.ClientCaseId)
-                .Distinct()
-                .ToArray();
-            var visibleCaseIds = visibility.SeesAll
-                ? candidateCaseIds
-                : await db.ClientCases
-                    .AsNoTracking()
-                    .Where(clientCase => candidateCaseIds.Contains(clientCase.Id))
-                    .ApplyClientCaseVisibility(visibility)
-                    .Select(clientCase => clientCase.Id)
-                    .ToArrayAsync(cancellationToken);
-            foreach (var clientCaseId in visibleCaseIds)
-            {
-                if (!result.TryGetValue(clientCaseId, out var recipients))
-                {
-                    recipients = [];
-                    result[clientCaseId] = recipients;
-                }
-
-                recipients.Add(userId);
-            }
-        }
-
-        return result.ToDictionary(
-            item => item.Key,
-            item => (IReadOnlyCollection<int>)item.Value.ToArray());
+        var accessByUserId = allowedUsers.ToDictionary(user => user.Id, user => user.CanSeeHiddenCases);
+        return candidates
+            .Where(candidate => accessByUserId.TryGetValue(candidate.UserId, out var canSeeHiddenCases)
+                && (!candidate.IsHiddenFromExecutor || canSeeHiddenCases))
+            .GroupBy(candidate => candidate.ClientCaseId)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyCollection<int>)group
+                    .Select(candidate => candidate.UserId)
+                    .Distinct()
+                    .ToArray());
     }
 
     private sealed record CaseRecipientCandidate(
         int ClientCaseId,
+        bool IsHiddenFromExecutor,
         int? ResponsibleUserId,
         int? ClientResponsibleUserId,
         int? LegalEntityResponsibleUserId);
 
-    private sealed record CaseRecipient(int ClientCaseId, int UserId);
+    private sealed record CaseRecipient(int ClientCaseId, bool IsHiddenFromExecutor, int UserId);
 }

@@ -142,8 +142,10 @@ public class CaseNotificationInventoryTests
         AssertMethodContains(
             deadlineReminderSource,
             "ResolveCaseNotificationRecipientIdsAsync",
-            "ResolveDataVisibilityAsync",
-            "ApplyClientCaseVisibility");
+            "RolePermissionCatalog.Cases",
+            "permission.CanView",
+            "DataVisibilityScope.All",
+            "IsHiddenFromExecutor");
         AssertMethodContains(
             automationSource,
             "NotifyCreatedAutomationTasksAsync",
