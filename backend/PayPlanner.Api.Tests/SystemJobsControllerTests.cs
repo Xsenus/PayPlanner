@@ -1206,7 +1206,8 @@ public class SystemJobsControllerTests
     [Fact]
     public async Task NotificationRetrySchedulerService_RetriesOversizedWebPushDeliveries()
     {
-        await using var scope = await CreateDbScopeAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var scope = await CreateDbScopeAsync(interceptor);
         var now = DateTime.UtcNow;
         scope.Db.SystemSettings.AddRange(
             new SystemSetting { Key = NotificationRetrySchedulerService.EnabledSettingKey, Value = "true", CreatedAt = now, UpdatedAt = now },
@@ -1283,12 +1284,14 @@ public class SystemJobsControllerTests
             NullLogger<NotificationRetrySchedulerService>.Instance);
 
         Assert.Equal(1, await service.CountEligibleRetriesAsync(CancellationToken.None));
+        interceptor.Commands.Clear();
         var result = await service.RunOnceAsync(CancellationToken.None);
 
         Assert.True(result.Enabled);
         Assert.Equal(1, result.RetriedCount);
         Assert.Equal(0, result.SkippedCount);
         Assert.Equal(original.Id, Assert.Single(webPush.RetryDeliveryIds));
+        Assert.Single(interceptor.Commands, command => command.Contains("SystemSettings", StringComparison.Ordinal));
     }
 
     [Fact]

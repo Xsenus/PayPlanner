@@ -57,7 +57,7 @@ public sealed class NotificationRetrySchedulerService : BackgroundService
             {
                 try
                 {
-                    await RunOnceAsync(stoppingToken);
+                    await RunOnceAsync(settings, stoppingToken);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -84,13 +84,18 @@ public sealed class NotificationRetrySchedulerService : BackgroundService
         }
     }
 
-    public async Task<NotificationRetrySchedulerResult> RunOnceAsync(CancellationToken cancellationToken = default)
+    public Task<NotificationRetrySchedulerResult> RunOnceAsync(CancellationToken cancellationToken = default)
+        => RunOnceAsync(null, cancellationToken);
+
+    private async Task<NotificationRetrySchedulerResult> RunOnceAsync(
+        NotificationRetrySettings? settingsSnapshot,
+        CancellationToken cancellationToken)
     {
         await _runLock.WaitAsync(cancellationToken);
         try
         {
             var startedAt = DateTime.UtcNow;
-            var settings = await ResolveSettingsAsync(cancellationToken);
+            var settings = settingsSnapshot ?? await ResolveSettingsAsync(cancellationToken);
             if (!settings.Enabled)
             {
                 await RecordSuccessAsync(startedAt, 0, 0, "Повторная отправка уведомлений выключена в настройках.", cancellationToken);
