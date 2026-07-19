@@ -2402,11 +2402,15 @@ public sealed class NotificationService : INotificationService
         var conflictSubject = $"Конфликт расписания: {task.Title}";
         var conflictKey = string.Join('-', effectiveConflicts.Select(item => item.Id).OrderBy(id => id));
         var eventKey = $"task:{task.Id}:schedule-conflict:{task.DueAt:yyyyMMddHHmm}:{task.PlannedDurationMinutes}:{conflictKey}";
+        var recipientTimeZones = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
+            _context,
+            recipients,
+            cancellationToken);
         var deliveries = new List<NotificationDelivery>();
 
         foreach (var userId in recipients)
         {
-            var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(userId, cancellationToken);
+            var recipientTimeZone = recipientTimeZones[userId];
             var conflictBody = BuildTaskScheduleConflictBody(task, effectiveConflicts, actorName, recipientTimeZone);
             var message = await RenderTemplateAsync(
                 NotificationTemplateKeys.TaskScheduleConflict,
