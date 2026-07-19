@@ -5997,6 +5997,105 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyActChangedAsync_LoadsRecipientNotificationSettingsInSingleQuery()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var adminRole = new Role
+        {
+            Name = "admin",
+            Description = "Администратор",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Roles.Add(adminRole);
+        await db.SaveChangesAsync();
+        var actor = new User
+        {
+            Email = "act-change-query-actor@example.com",
+            FullName = "Автор изменения акта",
+            PasswordHash = "hash",
+            RoleId = adminRole.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        var recipients = Enumerable.Range(1, 12)
+            .Select(index => new User
+            {
+                Email = $"act-change-query-recipient-{index}@example.com",
+                FullName = $"Получатель изменения акта {index}",
+                PasswordHash = "hash",
+                RoleId = adminRole.Id,
+                IsActive = true,
+                IsApproved = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            })
+            .ToArray();
+        db.Users.AddRange(recipients.Append(actor));
+        await db.SaveChangesAsync();
+        var act = new Act
+        {
+            Number = "A-CHANGE-12",
+            Title = "Изменённый акт для команды",
+            Date = new DateTime(2026, 7, 20),
+            Amount = 32000m,
+            Status = ActStatus.Signed,
+            WorkflowStatus = ActWorkflowStatus.Signed,
+            ResponsibleId = recipients[0].Id,
+        };
+        db.Acts.Add(act);
+        await db.SaveChangesAsync();
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            realtime,
+            webPush);
+        interceptor.ReaderCommands.Clear();
+
+        await service.NotifyActChangedAsync(
+            act,
+            ["Состояние документа: Отправлен на подпись -> Подписан"],
+            actor.FullName,
+            actor.Id,
+            recipients.Select(user => user.Id)
+                .Append(recipients[0].Id)
+                .Append(actor.Id)
+                .ToArray());
+
+        var notifications = await db.UserNotifications.AsNoTracking().ToListAsync();
+        Assert.Equal(12, notifications.Count);
+        Assert.Equal(12, realtime.Notifications.Count);
+        Assert.Equal(12, webPush.Notifications.Count);
+        Assert.DoesNotContain(notifications, notification => notification.RecipientUserId == actor.Id);
+        Assert.Equal(12, notifications.Select(notification => notification.RecipientUserId).Distinct().Count());
+        Assert.All(notifications, notification =>
+        {
+            Assert.Equal(UserNotificationTypes.ActChanged, notification.Type);
+            Assert.Equal("amber", notification.Tone);
+            Assert.Equal("act", notification.ObjectType);
+            Assert.Equal(act.Id, notification.ObjectId);
+            Assert.Contains("Подписан", notification.BodyPreview);
+        });
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("SELECT EXISTS", StringComparison.Ordinal)
+            && command.Contains("FROM \"Acts\"", StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(UserNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(UserNotificationDoNotDisturbSettings.SettingKey, StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"SystemSettings\"", StringComparison.Ordinal)
+            && command.Contains(RoleNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task NotifyContractCreatedAsync_CreatesContractNotificationAndDeduplicates()
     {
         await using var db = await CreateContextAsync();
