@@ -3897,6 +3897,150 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyCaseDocumentAsync_LoadsVisibilityAndRecipientSettingsInSingleQueriesAndDeduplicates()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var adminRole = new Role
+        {
+            Name = "admin",
+            Description = "Администратор",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Roles.Add(adminRole);
+        await db.SaveChangesAsync();
+        var actor = new User
+        {
+            Email = "case-document-query-actor@example.com",
+            FullName = "Автор изменения документа",
+            PasswordHash = "hash",
+            RoleId = adminRole.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        var recipients = Enumerable.Range(1, 12)
+            .Select(index => new User
+            {
+                Email = $"case-document-query-recipient-{index}@example.com",
+                FullName = $"Получатель изменения документа {index}",
+                PasswordHash = "hash",
+                RoleId = adminRole.Id,
+                IsActive = true,
+                IsApproved = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            })
+            .ToArray();
+        db.Users.AddRange(recipients.Append(actor));
+        await db.SaveChangesAsync();
+        var deniedRecipient = await CreateUserWithoutSectionAccessAsync(
+            db,
+            "case-document-query-denied@example.com",
+            RolePermissionCatalog.Cases);
+        var client = new Client
+        {
+            Name = "Клиент массового уведомления о документе",
+            IsActive = true,
+            ResponsibleUserId = recipients[0].Id,
+        };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+        var clientCase = new ClientCase
+        {
+            ClientId = client.Id,
+            Title = "Дело с массовым изменением документа",
+            CaseNumber = "CASE-DOCUMENT-QUERY-12",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = recipients[0].Id,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var document = new ClientCaseDocument
+        {
+            ClientCaseId = clientCase.Id,
+            DocumentKey = "mass-claim",
+            Version = 3,
+            DocumentType = "Иск",
+            Status = DocumentWorkflowStatus.NeedsCorrection,
+            OriginalFileName = "mass-claim-v3.pdf",
+            StoredFileName = "mass-claim-v3.pdf",
+            StoragePath = "1/mass-claim-v3.pdf",
+            ContentType = "application/pdf",
+            SizeBytes = 4096,
+            UploadedByName = actor.FullName,
+            UploadedAt = new DateTime(2026, 7, 20, 4, 0, 0, DateTimeKind.Utc),
+        };
+        db.ClientCaseDocuments.Add(document);
+        await db.SaveChangesAsync();
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            realtime,
+            webPush);
+        var recipientUserIds = recipients.Select(user => user.Id)
+            .Append(recipients[0].Id)
+            .Append(deniedRecipient.Id)
+            .Append(actor.Id)
+            .ToArray();
+        interceptor.ReaderCommands.Clear();
+
+        await service.NotifyCaseDocumentAsync(
+            clientCase,
+            document,
+            "updated",
+            actor.FullName,
+            actor.Id,
+            recipientUserIds);
+
+        var notifications = await db.UserNotifications.AsNoTracking().ToListAsync();
+        Assert.Equal(12, notifications.Count);
+        Assert.Equal(12, realtime.Notifications.Count);
+        Assert.Empty(webPush.Notifications);
+        Assert.DoesNotContain(notifications, notification => notification.RecipientUserId == actor.Id);
+        Assert.DoesNotContain(notifications, notification => notification.RecipientUserId == deniedRecipient.Id);
+        Assert.Equal(12, notifications.Select(notification => notification.RecipientUserId).Distinct().Count());
+        Assert.All(notifications, notification =>
+        {
+            Assert.Equal(UserNotificationTypes.CaseDocument, notification.Type);
+            Assert.Equal("amber", notification.Tone);
+            Assert.Equal("case", notification.ObjectType);
+            Assert.Equal(clientCase.Id, notification.ObjectId);
+            Assert.Contains("mass-claim-v3.pdf", notification.Title);
+            Assert.Contains($"\"clientCaseDocumentId\":{document.Id}", notification.MetadataJson, StringComparison.Ordinal);
+            Assert.Contains("\"requiresAction\":true", notification.MetadataJson, StringComparison.Ordinal);
+        });
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("SELECT EXISTS", StringComparison.Ordinal)
+            && command.Contains("FROM \"ClientCases\"", StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(UserNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(UserNotificationDoNotDisturbSettings.SettingKey, StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"SystemSettings\"", StringComparison.Ordinal)
+            && command.Contains(RoleNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
+
+        await service.NotifyCaseDocumentAsync(
+            clientCase,
+            document,
+            "updated",
+            actor.FullName,
+            actor.Id,
+            recipientUserIds);
+
+        Assert.Equal(12, await db.UserNotifications.CountAsync());
+        Assert.Equal(12, realtime.Notifications.Count);
+        Assert.Empty(webPush.Notifications);
+    }
+
+    [Fact]
     public async Task NotifyCaseAccessRequestedAsync_CreatesManagerNotificationAndDeduplicates()
     {
         await using var db = await CreateContextAsync();
