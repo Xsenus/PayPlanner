@@ -15,6 +15,7 @@ using System.Globalization;
 using System.Data.Common;
 using System.Security.Claims;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
@@ -331,14 +332,11 @@ public class SystemJobsControllerTests
             command.Contains("EligibleCount", StringComparison.Ordinal));
         Assert.Contains("COUNT", taskReminderStatisticsCommand, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("ORDER BY", taskReminderStatisticsCommand, StringComparison.OrdinalIgnoreCase);
-        var googleLogStatisticsCommand = Assert.Single(interceptor.Commands, command =>
-            command.Contains("GoogleCalendarSyncLogs", StringComparison.Ordinal));
-        Assert.Contains("COUNT", googleLogStatisticsCommand, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("MIN", googleLogStatisticsCommand, StringComparison.OrdinalIgnoreCase);
-        var yandexLogStatisticsCommand = Assert.Single(interceptor.Commands, command =>
+        var calendarLogStatisticsCommand = Assert.Single(interceptor.Commands, command =>
+            command.Contains("GoogleCalendarSyncLogs", StringComparison.Ordinal) &&
             command.Contains("YandexCalendarSyncLogs", StringComparison.Ordinal));
-        Assert.Contains("COUNT", yandexLogStatisticsCommand, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("MIN", yandexLogStatisticsCommand, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(2, Regex.Count(calendarLogStatisticsCommand, @"SELECT\s+COUNT\(\*\)", RegexOptions.IgnoreCase));
+        Assert.Equal(2, Regex.Count(calendarLogStatisticsCommand, @"SELECT\s+MIN\(", RegexOptions.IgnoreCase));
         var deliveryRetentionCommand = Assert.Single(interceptor.Commands, command =>
             command.Contains("NotificationDeliveries", StringComparison.Ordinal) &&
             command.Contains("OldestAt", StringComparison.Ordinal) &&
@@ -513,8 +511,7 @@ public class SystemJobsControllerTests
             command.Contains("\"Value\"", StringComparison.Ordinal) &&
             command.Contains("EligibleCount", StringComparison.Ordinal));
         Assert.Single(interceptor.Commands, command =>
-            command.Contains("GoogleCalendarSyncLogs", StringComparison.Ordinal));
-        Assert.Single(interceptor.Commands, command =>
+            command.Contains("GoogleCalendarSyncLogs", StringComparison.Ordinal) &&
             command.Contains("YandexCalendarSyncLogs", StringComparison.Ordinal));
         Assert.Single(interceptor.Commands, command =>
             command.Contains("NotificationDeliveries", StringComparison.Ordinal) &&
