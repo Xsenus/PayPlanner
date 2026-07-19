@@ -5703,6 +5703,112 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyInvoiceChangedAsync_LoadsRecipientNotificationSettingsInSingleQuery()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var adminRole = new Role
+        {
+            Name = "admin",
+            Description = "Администратор",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Roles.Add(adminRole);
+        await db.SaveChangesAsync();
+        var actor = new User
+        {
+            Email = "invoice-change-query-actor@example.com",
+            FullName = "Автор изменения счёта",
+            PasswordHash = "hash",
+            RoleId = adminRole.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        var recipients = Enumerable.Range(1, 12)
+            .Select(index => new User
+            {
+                Email = $"invoice-change-query-recipient-{index}@example.com",
+                FullName = $"Получатель изменения счёта {index}",
+                PasswordHash = "hash",
+                RoleId = adminRole.Id,
+                IsActive = true,
+                IsApproved = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            })
+            .ToArray();
+        db.Users.AddRange(recipients.Append(actor));
+        await db.SaveChangesAsync();
+        var payment = new Payment
+        {
+            Account = "Счёт №CHANGE-12",
+            Date = new DateTime(2026, 7, 20),
+            Amount = 56000m,
+            PaidAmount = 12000m,
+            Status = PaymentStatus.Pending,
+            Type = PaymentType.Income,
+            DocumentKind = DocumentKind.Invoice,
+            InvoiceWorkflowStatus = InvoiceWorkflowStatus.PartiallyPaid,
+            Responsibles = { new PaymentResponsible { UserId = recipients[0].Id } },
+            Invoice = new Invoice
+            {
+                Number = "CHANGE-12",
+                Date = new DateTime(2026, 7, 20),
+            },
+        };
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            realtime,
+            webPush);
+        interceptor.ReaderCommands.Clear();
+
+        await service.NotifyInvoiceChangedAsync(
+            payment,
+            ["Статус счёта: Черновик -> Частично оплачен"],
+            actor.FullName,
+            actor.Id,
+            recipients.Select(user => user.Id)
+                .Append(recipients[0].Id)
+                .Append(actor.Id)
+                .ToArray());
+
+        var notifications = await db.UserNotifications.AsNoTracking().ToListAsync();
+        Assert.Equal(12, notifications.Count);
+        Assert.Equal(12, realtime.Notifications.Count);
+        Assert.Equal(12, webPush.Notifications.Count);
+        Assert.DoesNotContain(notifications, notification => notification.RecipientUserId == actor.Id);
+        Assert.Equal(12, notifications.Select(notification => notification.RecipientUserId).Distinct().Count());
+        Assert.All(notifications, notification =>
+        {
+            Assert.Equal(UserNotificationTypes.InvoiceChanged, notification.Type);
+            Assert.Equal("amber", notification.Tone);
+            Assert.Equal("invoice", notification.ObjectType);
+            Assert.Equal(payment.Id, notification.ObjectId);
+            Assert.Contains("Частично оплачен", notification.BodyPreview);
+        });
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("SELECT EXISTS", StringComparison.Ordinal)
+            && command.Contains("FROM \"Payments\"", StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(UserNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(UserNotificationDoNotDisturbSettings.SettingKey, StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"SystemSettings\"", StringComparison.Ordinal)
+            && command.Contains(RoleNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task NotifyActCreatedAsync_CreatesActNotificationAndDeduplicates()
     {
         await using var db = await CreateContextAsync();

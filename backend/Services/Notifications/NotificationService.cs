@@ -1678,6 +1678,15 @@ public sealed class NotificationService : INotificationService
             invoicePayment.PaidAmount.ToString("0.00", CultureInfo.InvariantCulture),
             string.Join(";", normalizedChanges)
         ]));
+        var recipientNotificationChannels = await ResolveUserNotificationChannelsAsync(
+            visibleRecipientUserIds,
+            UserNotificationTypes.InvoiceChanged,
+            [
+                NotificationChannels.InApp,
+                NotificationChannels.Toast,
+                NotificationChannels.WebPush,
+            ],
+            cancellationToken);
 
         foreach (var recipientUserId in visibleRecipientUserIds)
         {
@@ -1701,7 +1710,8 @@ public sealed class NotificationService : INotificationService
                     changes = normalizedChanges
                 },
                 cancellationToken,
-                objectVisibilityValidated: true);
+                objectVisibilityValidated: true,
+                resolvedNotificationChannels: recipientNotificationChannels[recipientUserId]);
         }
     }
 
