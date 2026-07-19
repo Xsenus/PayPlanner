@@ -2952,10 +2952,14 @@ public sealed class NotificationService : INotificationService
 
         var taskCommentSubject = $"Комментарий по задаче: {task.Title}";
         var eventKey = $"task:{task.Id}:comment:{comment.Id}";
+        var recipientTimeZones = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
+            _context,
+            recipients,
+            cancellationToken);
         var deliveries = new List<NotificationDelivery>();
         foreach (var userId in recipients)
         {
-            var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(userId, cancellationToken);
+            var recipientTimeZone = recipientTimeZones[userId];
             var taskCommentBody = BuildTaskCommentBody(task, comment, recipientTimeZone);
             var message = await RenderTemplateAsync(
                 NotificationTemplateKeys.TaskComment,

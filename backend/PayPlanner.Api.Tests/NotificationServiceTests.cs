@@ -2590,6 +2590,140 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyTaskCommentAsync_LoadsRecipientTimeZonesInSingleQuery()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var adminRole = new Role
+        {
+            Name = "admin",
+            Description = "Администратор",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Roles.Add(adminRole);
+        await db.SaveChangesAsync();
+        var actor = new User
+        {
+            Email = "task-comment-timezone-query-actor@example.com",
+            FullName = "Автор комментария",
+            PasswordHash = "hash",
+            RoleId = adminRole.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        var recipients = Enumerable.Range(1, 12)
+            .Select(index => new User
+            {
+                Email = $"task-comment-timezone-query-recipient-{index}@example.com",
+                FullName = $"Участник обсуждения {index}",
+                PasswordHash = "hash",
+                RoleId = adminRole.Id,
+                IsActive = true,
+                IsApproved = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            })
+            .ToArray();
+        db.Users.AddRange(recipients.Append(actor));
+        await db.SaveChangesAsync();
+        db.UserSettings.AddRange(
+            new UserSetting
+            {
+                UserId = recipients[0].Id,
+                Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+                Value = "UTC",
+            },
+            new UserSetting
+            {
+                UserId = recipients[1].Id,
+                Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+                Value = "Asia/Novosibirsk",
+            });
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "notifications.templates.v1",
+            Value = JsonSerializer.Serialize(new
+            {
+                templates = new[]
+                {
+                    new
+                    {
+                        key = NotificationTemplateKeys.TaskComment,
+                        isEnabled = true,
+                        subject = "Комментарий по задаче: {{task.title}}",
+                        body = "Срок: {{task.dueAt}}\n{{comment.authorName}}: {{comment.text}}",
+                    },
+                },
+            }, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        var dueAt = new DateTime(2026, 7, 19, 12, 0, 0, DateTimeKind.Utc);
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Массовая задача",
+            Title = "Обсудить документы",
+            AuthorUserId = actor.Id,
+            AuthorName = actor.FullName,
+            AssigneeUserId = recipients[0].Id,
+            AssigneeName = recipients[0].FullName,
+            DueAt = dueAt,
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "inProgress",
+            Participants = recipients
+                .Skip(1)
+                .Select((user, index) => new TaskJournalParticipant
+                {
+                    UserId = user.Id,
+                    DisplayName = user.FullName,
+                    Role = "observer",
+                    SortOrder = index,
+                })
+                .ToList(),
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+        var comment = new TaskJournalComment
+        {
+            TaskJournalItemId = task.Id,
+            Kind = "comment",
+            Text = "Проверьте новую версию документов.",
+            AuthorUserId = actor.Id,
+            AuthorName = actor.FullName,
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.TaskJournalComments.Add(comment);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+        interceptor.ReaderCommands.Clear();
+
+        var deliveries = await service.NotifyTaskCommentAsync(task, comment);
+
+        Assert.Empty(deliveries);
+        var notifications = await db.UserNotifications.AsNoTracking().ToListAsync();
+        Assert.Equal(12, notifications.Count);
+        Assert.DoesNotContain(notifications, notification => notification.RecipientUserId == actor.Id);
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(CalendarTimeZoneHelper.UserTimeZoneSettingKey, StringComparison.Ordinal));
+        var utcNotification = notifications.Single(
+            notification => notification.RecipientUserId == recipients[0].Id);
+        Assert.Contains("Срок: 19.07.2026 12:00", utcNotification.BodyPreview);
+        var novosibirskNotification = notifications.Single(
+            notification => notification.RecipientUserId == recipients[1].Id);
+        Assert.Contains("Срок: 19.07.2026 19:00", novosibirskNotification.BodyPreview);
+        Assert.All(notifications, notification =>
+        {
+            Assert.Equal(UserNotificationTypes.TaskComment, notification.Type);
+            Assert.Contains("Проверьте новую версию документов.", notification.BodyPreview);
+            Assert.Contains($"\"commentId\":{comment.Id}", notification.MetadataJson);
+        });
+    }
+
+    [Fact]
     public async Task NotifyTaskDeadlineChangeRequestedAsync_NotifiesReviewerAndObservers()
     {
         await using var db = await CreateContextAsync();
