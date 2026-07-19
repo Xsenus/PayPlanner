@@ -799,7 +799,8 @@ public class SystemJobsControllerTests
     [Fact]
     public async Task PaymentAdvanceReviewMonitoringService_MarksOldCandidatesAndCreatesNotification()
     {
-        await using var scope = await CreateDbScopeAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var scope = await CreateDbScopeAsync(interceptor);
         var now = DateTime.UtcNow;
         var role = new Role { Name = $"advance-monitor-role-{Guid.NewGuid():N}", Description = "Advance monitor role" };
         scope.Db.Roles.Add(role);
@@ -856,12 +857,15 @@ public class SystemJobsControllerTests
             new ConfigurationBuilder().Build(),
             NullLogger<PaymentAdvanceReviewMonitoringService>.Instance);
 
+        interceptor.Commands.Clear();
         var result = await service.RunOnceAsync(CancellationToken.None);
 
         Assert.True(result.Enabled);
         Assert.Equal(1, result.ProcessedCount);
         Assert.Equal(1, result.MarkedCount);
         Assert.Equal(1, result.NotifiedCount);
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains(PaymentAdvanceReviewMonitoringService.EnabledSettingKey, StringComparison.Ordinal));
         var refreshed = await scope.Db.Payments.AsNoTracking().SingleAsync(payment => payment.Id == candidate.Id);
         Assert.Equal(PaymentAdvanceReviewStatus.RequiresDecision, refreshed.AdvanceReviewStatus);
         var notification = Assert.Single(await scope.Db.UserNotifications.AsNoTracking().ToListAsync());

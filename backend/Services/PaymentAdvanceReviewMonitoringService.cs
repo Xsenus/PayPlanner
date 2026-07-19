@@ -56,7 +56,7 @@ public sealed class PaymentAdvanceReviewMonitoringService : BackgroundService
             {
                 try
                 {
-                    await RunOnceAsync(stoppingToken);
+                    await RunOnceAsync(settings, stoppingToken);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -83,10 +83,15 @@ public sealed class PaymentAdvanceReviewMonitoringService : BackgroundService
         }
     }
 
-    public async Task<PaymentAdvanceReviewMonitoringResult> RunOnceAsync(CancellationToken cancellationToken = default)
+    public Task<PaymentAdvanceReviewMonitoringResult> RunOnceAsync(CancellationToken cancellationToken = default)
+        => RunOnceAsync(null, cancellationToken);
+
+    private async Task<PaymentAdvanceReviewMonitoringResult> RunOnceAsync(
+        PaymentAdvanceReviewMonitoringSettings? settingsSnapshot,
+        CancellationToken cancellationToken)
     {
         var startedAt = DateTime.UtcNow;
-        var settings = await ResolveSettingsAsync(cancellationToken);
+        var settings = settingsSnapshot ?? await ResolveSettingsAsync(cancellationToken);
         if (!settings.Enabled)
         {
             await RecordSuccessAsync(
