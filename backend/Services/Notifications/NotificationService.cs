@@ -893,10 +893,14 @@ public sealed class NotificationService : INotificationService
         var subject = $"Задача отменена: {task.Title}";
         var eventKey = $"task:{task.Id}:cancelled:{NormalizeEventKeySegment(normalizedAction)}";
         var channels = ResolveTaskMessageChannels(task);
+        var recipientTimeZones = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
+            _context,
+            recipients,
+            cancellationToken);
         var deliveries = new List<NotificationDelivery>();
         foreach (var userId in recipients)
         {
-            var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(userId, cancellationToken);
+            var recipientTimeZone = recipientTimeZones[userId];
             var body = BuildTaskCancelledBody(task, actorName, normalizedAction, recipientTimeZone);
             var message = await RenderTemplateAsync(
                 NotificationTemplateKeys.TaskCancelled,
