@@ -2,7 +2,6 @@ using System;
 using System.Globalization;
 using System.Linq;
 using System.Linq.Expressions;
-using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
@@ -187,30 +186,8 @@ public class ContractsController : ControllerBase
             .Select(user => user.Id)
             .ToListAsync(ct);
 
-        var result = new List<int>();
-        foreach (var userId in allowedUserIds)
-        {
-            var principal = new ClaimsPrincipal(new ClaimsIdentity(
-                new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture)) },
-                authenticationType: "ContractNotificationAccessCheck"));
-            var visibility = await _db.ResolveDataVisibilityAsync(principal, RolePermissionCatalog.Contracts, ct);
-            if (visibility is null)
-            {
-                continue;
-            }
-
-            var canOpenContract = await _db.Contracts
-                .AsNoTracking()
-                .Where(contract => contract.Id == contractId)
-                .ApplyContractVisibility(visibility)
-                .AnyAsync(ct);
-            if (canOpenContract)
-            {
-                result.Add(userId);
-            }
-        }
-
-        return result;
+        // NotificationService centrally revalidates object visibility before persisting notifications.
+        return allowedUserIds;
     }
 
     private async Task NotifyContractCreatedAsync(Contract contract, CancellationToken ct)

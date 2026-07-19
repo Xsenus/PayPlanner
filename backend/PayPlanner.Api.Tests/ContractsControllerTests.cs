@@ -402,11 +402,30 @@ public class ContractsControllerTests
             IsActive = true,
             IsApproved = true,
         };
-        db.Users.AddRange(responsible, actor);
+        var additionalResponsibles = Enumerable.Range(1, 11)
+            .Select(index => new User
+            {
+                Email = $"responsible-{index}@example.test",
+                FullName = $"Responsible User {index}",
+                RoleId = responsibleRole.Id,
+                IsActive = true,
+                IsApproved = true,
+            })
+            .ToArray();
+        db.Users.AddRange(additionalResponsibles.Append(responsible).Append(actor));
         await db.SaveChangesAsync();
 
         var client = await CreateClientAsync(db);
         client.ResponsibleUserId = responsible.Id;
+        var additionalClients = additionalResponsibles
+            .Select((user, index) => new Client
+            {
+                Name = $"Тестовый клиент {index + 1}",
+                Company = $"ООО Тест {index + 1}",
+                ResponsibleUserId = user.Id,
+            })
+            .ToArray();
+        db.Clients.AddRange(additionalClients);
         var contract = new Contract
         {
             Number = "CT-NOTIFY-1",
@@ -417,7 +436,14 @@ public class ContractsControllerTests
         };
         db.Contracts.Add(contract);
         await db.SaveChangesAsync();
-        db.ClientContracts.Add(new ClientContract { ContractId = contract.Id, ClientId = client.Id });
+        db.ClientContracts.AddRange(
+            additionalClients
+                .Select(linkedClient => new ClientContract
+                {
+                    ContractId = contract.Id,
+                    ClientId = linkedClient.Id,
+                })
+                .Append(new ClientContract { ContractId = contract.Id, ClientId = client.Id }));
         await db.SaveChangesAsync();
 
         var controller = CreateAdminController(
@@ -432,12 +458,18 @@ public class ContractsControllerTests
         var dto = Assert.IsType<ContractDto>(ok.Value);
         Assert.Equal(ContractStatus.Concluded, dto.Status);
 
-        var notification = await db.UserNotifications.AsNoTracking().SingleAsync(CancellationToken.None);
-        Assert.Equal(responsible.Id, notification.RecipientUserId);
-        Assert.Equal(UserNotificationTypes.ContractChanged, notification.Type);
-        Assert.Equal("contract", notification.ObjectType);
-        Assert.Equal(contract.Id, notification.ObjectId);
-        Assert.Contains("CT-NOTIFY-1", notification.BodyPreview);
+        var notifications = await db.UserNotifications.AsNoTracking().ToListAsync(CancellationToken.None);
+        Assert.Equal(12, notifications.Count);
+        Assert.Equal(
+            additionalResponsibles.Select(user => user.Id).Append(responsible.Id).Order(),
+            notifications.Select(notification => notification.RecipientUserId).Order());
+        Assert.All(notifications, notification =>
+        {
+            Assert.Equal(UserNotificationTypes.ContractChanged, notification.Type);
+            Assert.Equal("contract", notification.ObjectType);
+            Assert.Equal(contract.Id, notification.ObjectId);
+            Assert.Contains("CT-NOTIFY-1", notification.BodyPreview);
+        });
         Assert.Single(interceptor.ReaderCommands, command =>
             command.Contains("UNION", StringComparison.Ordinal)
             && command.Contains("ClientContracts", StringComparison.Ordinal)
@@ -446,6 +478,9 @@ public class ContractsControllerTests
             && command.Contains("ContractPayments", StringComparison.Ordinal)
             && command.Contains("ContractActs", StringComparison.Ordinal)
             && command.Contains("PaymentResponsibles", StringComparison.Ordinal));
+        Assert.Equal(24, interceptor.ReaderCommands.Count(command =>
+            command.Contains("SELECT EXISTS", StringComparison.Ordinal)
+            && command.Contains("FROM \"Contracts\"", StringComparison.Ordinal)));
     }
 
     [Fact]
