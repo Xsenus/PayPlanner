@@ -56,12 +56,13 @@ public sealed class CalendarSyncSchedulerService : BackgroundService
 
         while (!stoppingToken.IsCancellationRequested)
         {
-            var settings = await ResolveSchedulerSettingsAsync(stoppingToken);
+            var settingsSnapshot = await LoadSettingsSnapshotAsync(stoppingToken);
+            var settings = settingsSnapshot.SchedulerSettings;
             if (settings.Enabled)
             {
                 try
                 {
-                    await RunOnceAsync(stoppingToken);
+                    await RunOnceAsync(settingsSnapshot, stoppingToken);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
@@ -90,8 +91,16 @@ public sealed class CalendarSyncSchedulerService : BackgroundService
 
     public async Task<CalendarSyncSchedulerResult> RunOnceAsync(CancellationToken cancellationToken = default)
     {
+        var settingsSnapshot = await LoadSettingsSnapshotAsync(cancellationToken);
+        return await RunOnceAsync(settingsSnapshot, cancellationToken);
+    }
+
+    private async Task<CalendarSyncSchedulerResult> RunOnceAsync(
+        CalendarSyncSettingsSnapshot settingsSnapshot,
+        CancellationToken cancellationToken)
+    {
         var startedAt = DateTime.UtcNow;
-        var schedulerSettings = await ResolveSchedulerSettingsAsync(cancellationToken);
+        var schedulerSettings = settingsSnapshot.SchedulerSettings;
         if (!schedulerSettings.Enabled)
         {
             await RecordSuccessAsync(
@@ -106,7 +115,7 @@ public sealed class CalendarSyncSchedulerService : BackgroundService
         await _runLock.WaitAsync(cancellationToken);
         try
         {
-            var state = await BuildStateAsync(schedulerSettings, cancellationToken);
+            var state = await BuildStateAsync(settingsSnapshot, cancellationToken);
             if (!state.FeatureEnabled)
             {
                 await RecordSuccessAsync(
@@ -147,15 +156,18 @@ public sealed class CalendarSyncSchedulerService : BackgroundService
 
     public async Task<CalendarSyncSchedulerState> BuildDiagnosticsStateAsync(CancellationToken cancellationToken = default)
     {
-        var settings = await ResolveSchedulerSettingsAsync(cancellationToken);
-        return await BuildStateAsync(settings, cancellationToken);
+        var settingsSnapshot = await LoadSettingsSnapshotAsync(cancellationToken);
+        return await BuildStateAsync(settingsSnapshot, cancellationToken);
     }
 
     private async Task<CalendarSyncSchedulerState> BuildStateAsync(
-        CalendarSyncSchedulerSettings schedulerSettings,
+        CalendarSyncSettingsSnapshot settingsSnapshot,
         CancellationToken cancellationToken)
     {
-        var calendarSettings = await LoadCalendarSyncSettingsAsync(cancellationToken);
+        var schedulerSettings = settingsSnapshot.SchedulerSettings;
+        var calendarSettings = ParseCalendarSyncSettings(
+            settingsSnapshot.CalendarSettingsValue,
+            settingsSnapshot.CalendarSettingsUpdatedAt);
         var featureEnabled = calendarSettings.ExternalCalendarSyncEnabled == true;
         var readiness = CalendarSyncProviderRegistry.BuildReadiness(
             calendarSettings.GoogleCalendarSyncEnabled == true,
@@ -250,38 +262,7 @@ public sealed class CalendarSyncSchedulerService : BackgroundService
         return new CalendarSyncCandidateStatistics(candidateCount, oldestAt);
     }
 
-    private async Task<CalendarSyncSettingsDto> LoadCalendarSyncSettingsAsync(CancellationToken cancellationToken)
-    {
-        using var scope = _scopeFactory.CreateScope();
-        var context = scope.ServiceProvider.GetRequiredService<PaymentContext>();
-        var setting = await context.SystemSettings
-            .AsNoTracking()
-            .FirstOrDefaultAsync(item => item.Key == CalendarSyncSettingsKey, cancellationToken);
-        if (setting is null || string.IsNullOrWhiteSpace(setting.Value))
-        {
-            return CalendarSyncProviderRegistry.BuildDefaultSettings(_featureFlags.CurrentValue.Legal.ExternalCalendarSync);
-        }
-
-        try
-        {
-            var settings = JsonSerializer.Deserialize<CalendarSyncSettingsDto>(setting.Value, JsonOptions);
-            if (settings is not null)
-            {
-                settings.UpdatedAt ??= setting.UpdatedAt;
-                return CalendarSyncProviderRegistry.NormalizeSettings(settings, _featureFlags.CurrentValue.Legal.ExternalCalendarSync);
-            }
-        }
-        catch (JsonException)
-        {
-            _logger.LogWarning("Stored calendar sync settings are invalid. Defaults will be used for scheduler diagnostics.");
-        }
-
-        var defaults = CalendarSyncProviderRegistry.BuildDefaultSettings(_featureFlags.CurrentValue.Legal.ExternalCalendarSync);
-        defaults.UpdatedAt = setting.UpdatedAt;
-        return defaults;
-    }
-
-    private async Task<CalendarSyncSchedulerSettings> ResolveSchedulerSettingsAsync(CancellationToken cancellationToken)
+    private async Task<CalendarSyncSettingsSnapshot> LoadSettingsSnapshotAsync(CancellationToken cancellationToken)
     {
         using var scope = _scopeFactory.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<PaymentContext>();
@@ -291,15 +272,50 @@ public sealed class CalendarSyncSchedulerService : BackgroundService
                 item.Key == EnabledSettingKey ||
                 item.Key == IntervalMinutesSettingKey ||
                 item.Key == BatchSizeSettingKey ||
-                item.Key == LookAheadDaysSettingKey)
-            .ToDictionaryAsync(item => item.Key, item => item.Value, cancellationToken);
+                item.Key == LookAheadDaysSettingKey ||
+                item.Key == CalendarSyncSettingsKey)
+            .ToListAsync(cancellationToken);
+        var values = settings.ToDictionary(item => item.Key, item => item.Value);
+        var schedulerSettings = BuildSchedulerSettings(values);
+        var calendarSetting = settings.FirstOrDefault(item => item.Key == CalendarSyncSettingsKey);
+        return new CalendarSyncSettingsSnapshot(
+            schedulerSettings,
+            calendarSetting?.Value,
+            calendarSetting?.UpdatedAt);
+    }
 
-        return new CalendarSyncSchedulerSettings(
+    private CalendarSyncSettingsDto ParseCalendarSyncSettings(string? value, DateTime? updatedAt)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return CalendarSyncProviderRegistry.BuildDefaultSettings(_featureFlags.CurrentValue.Legal.ExternalCalendarSync);
+        }
+
+        try
+        {
+            var settings = JsonSerializer.Deserialize<CalendarSyncSettingsDto>(value, JsonOptions);
+            if (settings is not null)
+            {
+                settings.UpdatedAt ??= updatedAt;
+                return CalendarSyncProviderRegistry.NormalizeSettings(settings, _featureFlags.CurrentValue.Legal.ExternalCalendarSync);
+            }
+        }
+        catch (JsonException)
+        {
+            _logger.LogWarning("Stored calendar sync settings are invalid. Defaults will be used for scheduler diagnostics.");
+        }
+
+        var defaults = CalendarSyncProviderRegistry.BuildDefaultSettings(_featureFlags.CurrentValue.Legal.ExternalCalendarSync);
+        defaults.UpdatedAt = updatedAt;
+        return defaults;
+    }
+
+    private CalendarSyncSchedulerSettings BuildSchedulerSettings(IReadOnlyDictionary<string, string> settings)
+        => new(
             ParseBool(settings.GetValueOrDefault(EnabledSettingKey), _configuration.GetValue("CalendarSync:Scheduler:Enabled", false)),
             NormalizeInterval(ParseInt(settings.GetValueOrDefault(IntervalMinutesSettingKey), _configuration.GetValue("CalendarSync:Scheduler:IntervalMinutes", DefaultIntervalMinutes))),
             NormalizeBatchSize(ParseInt(settings.GetValueOrDefault(BatchSizeSettingKey), _configuration.GetValue("CalendarSync:Scheduler:BatchSize", DefaultBatchSize))),
             NormalizeLookAheadDays(ParseInt(settings.GetValueOrDefault(LookAheadDaysSettingKey), _configuration.GetValue("CalendarSync:Scheduler:LookAheadDays", DefaultLookAheadDays))));
-    }
 
     private async Task RecordSuccessAsync(
         DateTime startedAt,
@@ -343,6 +359,11 @@ public sealed class CalendarSyncSchedulerService : BackgroundService
         int IntervalMinutes,
         int BatchSize,
         int LookAheadDays);
+
+    private sealed record CalendarSyncSettingsSnapshot(
+        CalendarSyncSchedulerSettings SchedulerSettings,
+        string? CalendarSettingsValue,
+        DateTime? CalendarSettingsUpdatedAt);
 
     private readonly record struct CalendarSyncCandidateStatistics(
         int Count,

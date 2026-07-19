@@ -1796,14 +1796,14 @@ public class SystemJobsControllerTests
         Assert.False(state.Readiness.ReadyToConnect);
         Assert.Equal(3, state.CandidateCount);
         Assert.Equal(now.AddDays(2), state.OldestCandidateAt);
-        Assert.Equal(3, interceptor.Commands.Count);
+        Assert.Equal(2, interceptor.Commands.Count);
         var candidateStatisticsCommand = Assert.Single(interceptor.Commands, command =>
             command.Contains("TaskJournalItems", StringComparison.Ordinal) &&
             command.Contains("ClientCases", StringComparison.Ordinal));
         Assert.Contains("COUNT", candidateStatisticsCommand, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("MIN", candidateStatisticsCommand, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(2, interceptor.Commands.Count(command =>
-            command.Contains("SystemSettings", StringComparison.Ordinal)));
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("SystemSettings", StringComparison.Ordinal));
 
         scope.Db.TaskJournalItems.RemoveRange(await scope.Db.TaskJournalItems.ToListAsync());
         scope.Db.ClientCases.RemoveRange(await scope.Db.ClientCases.ToListAsync());
@@ -1814,17 +1814,21 @@ public class SystemJobsControllerTests
 
         Assert.Equal(0, emptyState.CandidateCount);
         Assert.Null(emptyState.OldestCandidateAt);
-        Assert.Equal(3, interceptor.Commands.Count);
+        Assert.Equal(2, interceptor.Commands.Count);
         Assert.Single(interceptor.Commands, command =>
             command.Contains("TaskJournalItems", StringComparison.Ordinal) &&
             command.Contains("ClientCases", StringComparison.Ordinal));
 
+        interceptor.Commands.Clear();
         var result = await service.RunOnceAsync(CancellationToken.None);
 
         Assert.True(result.Enabled);
         Assert.False(result.ReadyToConnect);
         Assert.Equal(0, result.ProcessedCount);
         Assert.True(result.SkippedCount > 0);
+        Assert.Equal(2, interceptor.Commands.Count);
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("SystemSettings", StringComparison.Ordinal));
     }
 
     [Fact]
