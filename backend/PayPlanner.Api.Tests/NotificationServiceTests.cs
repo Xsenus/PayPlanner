@@ -3559,6 +3559,135 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyCaseProceduralDeadlineAsync_LoadsVisibilityAndRecipientSettingsInSingleQueries()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var adminRole = new Role
+        {
+            Name = "admin",
+            Description = "Администратор",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Roles.Add(adminRole);
+        await db.SaveChangesAsync();
+        var actor = new User
+        {
+            Email = "deadline-query-actor@example.com",
+            FullName = "Автор изменения срока",
+            PasswordHash = "hash",
+            RoleId = adminRole.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        var recipients = Enumerable.Range(1, 12)
+            .Select(index => new User
+            {
+                Email = $"deadline-query-recipient-{index}@example.com",
+                FullName = $"Получатель процессуального срока {index}",
+                PasswordHash = "hash",
+                RoleId = adminRole.Id,
+                IsActive = true,
+                IsApproved = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            })
+            .ToArray();
+        db.Users.AddRange(recipients.Append(actor));
+        await db.SaveChangesAsync();
+        var deniedRecipient = await CreateUserWithoutSectionAccessAsync(
+            db,
+            "deadline-query-denied@example.com",
+            RolePermissionCatalog.Cases);
+        var client = new Client
+        {
+            Name = "Клиент массового процессуального срока",
+            IsActive = true,
+            ResponsibleUserId = recipients[0].Id,
+        };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+        var clientCase = new ClientCase
+        {
+            ClientId = client.Id,
+            Title = "Дело с массовым уведомлением о сроке",
+            CaseNumber = "CASE-DEADLINE-QUERY-12",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = recipients[0].Id,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var deadline = new ClientCaseProceduralDeadline
+        {
+            ClientCaseId = clientCase.Id,
+            DeadlineType = "appeal",
+            Title = "Апелляционная жалоба для нескольких получателей",
+            DueAt = new DateTime(2026, 7, 30, 12, 0, 0, DateTimeKind.Utc),
+            AllDay = false,
+            Status = "active",
+            WarningDaysBefore = 5,
+            Notes = "Подготовить общий пакет документов",
+            CreatedAt = new DateTime(2026, 7, 20, 2, 0, 0, DateTimeKind.Utc),
+            UpdatedAt = new DateTime(2026, 7, 20, 2, 0, 0, DateTimeKind.Utc),
+        };
+        db.ClientCaseProceduralDeadlines.Add(deadline);
+        await db.SaveChangesAsync();
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            realtime,
+            webPush);
+        interceptor.ReaderCommands.Clear();
+
+        await service.NotifyCaseProceduralDeadlineAsync(
+            clientCase,
+            deadline,
+            "updated",
+            actor.FullName,
+            actor.Id,
+            recipients.Select(user => user.Id)
+                .Append(recipients[0].Id)
+                .Append(deniedRecipient.Id)
+                .Append(actor.Id)
+                .ToArray());
+
+        var notifications = await db.UserNotifications.AsNoTracking().ToListAsync();
+        Assert.Equal(12, notifications.Count);
+        Assert.Equal(12, realtime.Notifications.Count);
+        Assert.Equal(12, webPush.Notifications.Count);
+        Assert.DoesNotContain(notifications, notification => notification.RecipientUserId == actor.Id);
+        Assert.DoesNotContain(notifications, notification => notification.RecipientUserId == deniedRecipient.Id);
+        Assert.Equal(12, notifications.Select(notification => notification.RecipientUserId).Distinct().Count());
+        Assert.All(notifications, notification =>
+        {
+            Assert.Equal(UserNotificationTypes.CaseProceduralDeadline, notification.Type);
+            Assert.Equal("blue", notification.Tone);
+            Assert.Equal("case", notification.ObjectType);
+            Assert.Equal(clientCase.Id, notification.ObjectId);
+            Assert.Contains("CASE-DEADLINE-QUERY-12", notification.Title);
+            Assert.Contains("Апелляционная жалоба для нескольких получателей", notification.BodyPreview);
+            Assert.Contains("Подготовить общий пакет документов", notification.BodyPreview);
+        });
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("SELECT EXISTS", StringComparison.Ordinal)
+            && command.Contains("FROM \"ClientCases\"", StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(UserNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(UserNotificationDoNotDisturbSettings.SettingKey, StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"SystemSettings\"", StringComparison.Ordinal)
+            && command.Contains(RoleNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task NotifyCaseDocumentAsync_CreatesNotificationAndDeduplicates()
     {
         await using var db = await CreateContextAsync();
