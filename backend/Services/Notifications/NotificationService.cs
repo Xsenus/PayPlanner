@@ -3010,14 +3010,19 @@ public sealed class NotificationService : INotificationService
                 NotificationChannels.WebPush,
             ]),
             cancellationToken);
+        var templateDefinition = NotificationTemplateCatalog.Find(NotificationTemplateKeys.TaskChanged);
+        var templateStorage = templateDefinition is null
+            ? new NotificationTemplateStorage()
+            : await LoadTemplateStorageAsync(cancellationToken);
         var deliveries = new List<NotificationDelivery>();
         foreach (var userId in recipients)
         {
             var recipientTimeZone = recipientTimeZones[userId];
             var subject = $"Запрос переноса срока: {task.Title}";
             var body = BuildTaskDeadlineChangeRequestBody(task, request, recipientTimeZone);
-            var message = await RenderTemplateAsync(
-                NotificationTemplateKeys.TaskChanged,
+            var message = RenderTemplate(
+                templateDefinition,
+                templateStorage,
                 subject,
                 body,
                 NotificationTemplateCatalog.MergeValues(
@@ -3028,8 +3033,8 @@ public sealed class NotificationService : INotificationService
                         ["task.changes"] = $"- Запрошен перенос срока на {FormatTaskDueAt(request.RequestedDueAt, recipientTimeZone)}",
                         ["task.commentBlock"] = $"Причина: {request.Reason.Trim()}",
                     }),
-                purpose: NotificationPurposes.TaskReminder,
-                cancellationToken: cancellationToken);
+                isSensitive: false,
+                purpose: NotificationPurposes.TaskReminder);
 
             if (HasTaskChannel(task, NotificationChannels.InApp))
             {
