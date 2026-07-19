@@ -1,7 +1,9 @@
+using System.Data.Common;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Controllers;
@@ -370,7 +372,8 @@ public class ContractsControllerTests
     [Fact]
     public async Task MarkConcluded_NotifiesClientResponsibleWithContractsAccess()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
 
         var responsibleRole = new Role { Name = "contract-responsible" };
         responsibleRole.Permissions.Add(new RolePermission
@@ -421,6 +424,7 @@ public class ContractsControllerTests
             db,
             notificationService: CreateNotificationService(db),
             actorUserId: actor.Id);
+        interceptor.ReaderCommands.Clear();
 
         var actionResult = await controller.MarkConcluded(contract.Id, CancellationToken.None);
 
@@ -434,6 +438,14 @@ public class ContractsControllerTests
         Assert.Equal("contract", notification.ObjectType);
         Assert.Equal(contract.Id, notification.ObjectId);
         Assert.Contains("CT-NOTIFY-1", notification.BodyPreview);
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("UNION", StringComparison.Ordinal)
+            && command.Contains("ClientContracts", StringComparison.Ordinal)
+            && command.Contains("LegalEntityContracts", StringComparison.Ordinal)
+            && command.Contains("ContractInvoices", StringComparison.Ordinal)
+            && command.Contains("ContractPayments", StringComparison.Ordinal)
+            && command.Contains("ContractActs", StringComparison.Ordinal)
+            && command.Contains("PaymentResponsibles", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -2161,16 +2173,19 @@ public class ContractsControllerTests
         Assert.False(await db.ContractPayments.AsNoTracking().AnyAsync(item => item.ContractId == contract.Id && item.PaymentId == payment.Id));
     }
 
-    private static async Task<PaymentContext> CreateContextAsync()
+    private static async Task<PaymentContext> CreateContextAsync(DbCommandInterceptor? interceptor = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
 
-        var options = new DbContextOptionsBuilder<PaymentContext>()
-            .UseSqlite(connection)
-            .Options;
+        var optionsBuilder = new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite(connection);
+        if (interceptor is not null)
+        {
+            optionsBuilder.AddInterceptors(interceptor);
+        }
 
-        var db = new PaymentContext(options);
+        var db = new PaymentContext(optionsBuilder.Options);
         await db.Database.EnsureCreatedAsync();
         return db;
     }
@@ -2497,6 +2512,21 @@ public class ContractsControllerTests
 
         public Task<List<string>> GetMissingFieldsAsync(string section, object model, CancellationToken ct = default)
             => Task.FromResult(new List<string>());
+    }
+
+    private sealed class RecordingCommandInterceptor : DbCommandInterceptor
+    {
+        public List<string> ReaderCommands { get; } = [];
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            ReaderCommands.Add(command.CommandText);
+            return ValueTask.FromResult(result);
+        }
     }
 
     private static void AssertLocalDate(DateTime? actual, int year, int month, int day)

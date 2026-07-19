@@ -74,100 +74,100 @@ public class ContractsController : ControllerBase
 
     private async Task<IReadOnlyCollection<int>> ResolveContractNotificationRecipientsAsync(int contractId, CancellationToken ct)
     {
-        var candidateUserIds = new List<int>();
-        candidateUserIds.AddRange(await _db.ClientContracts
+        var clientCandidates = _db.ClientContracts
             .AsNoTracking()
             .Where(link => link.ContractId == contractId
                 && link.Client.ResponsibleUserId.HasValue)
-            .Select(link => link.Client.ResponsibleUserId!.Value)
-            .ToListAsync(ct));
-        candidateUserIds.AddRange(await _db.LegalEntityContracts
+            .Select(link => new { UserId = link.Client.ResponsibleUserId!.Value });
+        var legalEntityCandidates = _db.LegalEntityContracts
             .AsNoTracking()
             .Where(link => link.ContractId == contractId
                 && link.LegalEntity.ResponsibleUserId.HasValue)
-            .Select(link => link.LegalEntity.ResponsibleUserId!.Value)
-            .ToListAsync(ct));
-        candidateUserIds.AddRange(await _db.ContractInvoices
+            .Select(link => new { UserId = link.LegalEntity.ResponsibleUserId!.Value });
+        var invoiceResponsibleCandidates = _db.ContractInvoices
             .AsNoTracking()
             .Where(link => link.ContractId == contractId)
-            .SelectMany(link => link.Invoice.Responsibles.Select(responsible => responsible.UserId))
-            .ToListAsync(ct));
-        candidateUserIds.AddRange(await _db.ContractInvoices
+            .SelectMany(link => link.Invoice.Responsibles.Select(responsible => new { responsible.UserId }));
+        var invoiceClientCandidates = _db.ContractInvoices
             .AsNoTracking()
             .Where(link => link.ContractId == contractId
                 && link.Invoice.Client != null
                 && link.Invoice.Client.ResponsibleUserId.HasValue)
-            .Select(link => link.Invoice.Client!.ResponsibleUserId!.Value)
-            .ToListAsync(ct));
-        candidateUserIds.AddRange(await _db.ContractInvoices
+            .Select(link => new { UserId = link.Invoice.Client!.ResponsibleUserId!.Value });
+        var invoiceLegalEntityCandidates = _db.ContractInvoices
             .AsNoTracking()
             .Where(link => link.ContractId == contractId
                 && link.Invoice.LegalEntity != null
                 && link.Invoice.LegalEntity.ResponsibleUserId.HasValue)
-            .Select(link => link.Invoice.LegalEntity!.ResponsibleUserId!.Value)
-            .ToListAsync(ct));
-        candidateUserIds.AddRange(await _db.ContractPayments
+            .Select(link => new { UserId = link.Invoice.LegalEntity!.ResponsibleUserId!.Value });
+        var linkedPaymentResponsibleCandidates = _db.ContractPayments
             .AsNoTracking()
             .Where(link => link.ContractId == contractId)
-            .SelectMany(link => link.Payment.Responsibles.Select(responsible => responsible.UserId))
-            .ToListAsync(ct));
-        candidateUserIds.AddRange(await _db.ContractPayments
+            .SelectMany(link => link.Payment.Responsibles.Select(responsible => new { responsible.UserId }));
+        var linkedPaymentClientCandidates = _db.ContractPayments
             .AsNoTracking()
             .Where(link => link.ContractId == contractId
                 && link.Payment.Client != null
                 && link.Payment.Client.ResponsibleUserId.HasValue)
-            .Select(link => link.Payment.Client!.ResponsibleUserId!.Value)
-            .ToListAsync(ct));
-        candidateUserIds.AddRange(await _db.ContractPayments
+            .Select(link => new { UserId = link.Payment.Client!.ResponsibleUserId!.Value });
+        var linkedPaymentLegalEntityCandidates = _db.ContractPayments
             .AsNoTracking()
             .Where(link => link.ContractId == contractId
                 && link.Payment.LegalEntity != null
                 && link.Payment.LegalEntity.ResponsibleUserId.HasValue)
-            .Select(link => link.Payment.LegalEntity!.ResponsibleUserId!.Value)
-            .ToListAsync(ct));
-        candidateUserIds.AddRange(await _db.ContractActs
+            .Select(link => new { UserId = link.Payment.LegalEntity!.ResponsibleUserId!.Value });
+        var actResponsibleCandidates = _db.ContractActs
             .AsNoTracking()
             .Where(link => link.ContractId == contractId
                 && link.Act.ResponsibleId.HasValue)
-            .Select(link => link.Act.ResponsibleId!.Value)
-            .ToListAsync(ct));
-        candidateUserIds.AddRange(await _db.ContractActs
+            .Select(link => new { UserId = link.Act.ResponsibleId!.Value });
+        var actClientCandidates = _db.ContractActs
             .AsNoTracking()
             .Where(link => link.ContractId == contractId
                 && link.Act.Client != null
                 && link.Act.Client.ResponsibleUserId.HasValue)
-            .Select(link => link.Act.Client!.ResponsibleUserId!.Value)
-            .ToListAsync(ct));
-        candidateUserIds.AddRange(await _db.ContractActs
+            .Select(link => new { UserId = link.Act.Client!.ResponsibleUserId!.Value });
+        var actLegalEntityCandidates = _db.ContractActs
             .AsNoTracking()
             .Where(link => link.ContractId == contractId
                 && link.Act.LegalEntity != null
                 && link.Act.LegalEntity.ResponsibleUserId.HasValue)
-            .Select(link => link.Act.LegalEntity!.ResponsibleUserId!.Value)
-            .ToListAsync(ct));
-        candidateUserIds.AddRange(await _db.Payments
+            .Select(link => new { UserId = link.Act.LegalEntity!.ResponsibleUserId!.Value });
+        var directPaymentResponsibleCandidates = _db.Payments
             .AsNoTracking()
             .Where(payment => payment.ContractId == contractId)
-            .SelectMany(payment => payment.Responsibles.Select(responsible => responsible.UserId))
-            .ToListAsync(ct));
-        candidateUserIds.AddRange(await _db.Payments
+            .SelectMany(payment => payment.Responsibles.Select(responsible => new { responsible.UserId }));
+        var directPaymentClientCandidates = _db.Payments
             .AsNoTracking()
             .Where(payment => payment.ContractId == contractId
                 && payment.Client != null
                 && payment.Client.ResponsibleUserId.HasValue)
-            .Select(payment => payment.Client!.ResponsibleUserId!.Value)
-            .ToListAsync(ct));
-        candidateUserIds.AddRange(await _db.Payments
+            .Select(payment => new { UserId = payment.Client!.ResponsibleUserId!.Value });
+        var directPaymentLegalEntityCandidates = _db.Payments
             .AsNoTracking()
             .Where(payment => payment.ContractId == contractId
                 && payment.LegalEntity != null
                 && payment.LegalEntity.ResponsibleUserId.HasValue)
-            .Select(payment => payment.LegalEntity!.ResponsibleUserId!.Value)
-            .ToListAsync(ct));
+            .Select(payment => new { UserId = payment.LegalEntity!.ResponsibleUserId!.Value });
 
-        var userIds = candidateUserIds
-            .Where(userId => userId > 0)
-            .Distinct()
+        var userIds = (await clientCandidates
+                .Concat(legalEntityCandidates)
+                .Concat(invoiceResponsibleCandidates)
+                .Concat(invoiceClientCandidates)
+                .Concat(invoiceLegalEntityCandidates)
+                .Concat(linkedPaymentResponsibleCandidates)
+                .Concat(linkedPaymentClientCandidates)
+                .Concat(linkedPaymentLegalEntityCandidates)
+                .Concat(actResponsibleCandidates)
+                .Concat(actClientCandidates)
+                .Concat(actLegalEntityCandidates)
+                .Concat(directPaymentResponsibleCandidates)
+                .Concat(directPaymentClientCandidates)
+                .Concat(directPaymentLegalEntityCandidates)
+                .Where(candidate => candidate.UserId > 0)
+                .Select(candidate => candidate.UserId)
+                .Distinct()
+                .ToListAsync(ct))
             .ToArray();
         if (userIds.Length == 0)
         {
