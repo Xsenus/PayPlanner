@@ -1104,7 +1104,8 @@ public class SystemJobsControllerTests
     [Fact]
     public async Task CalendarSyncLogRetentionService_DeletesExpiredLogsInBoundedProviderBatches()
     {
-        await using var scope = await CreateDbScopeAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var scope = await CreateDbScopeAsync(interceptor);
         var now = DateTime.UtcNow;
         scope.Db.SystemSettings.AddRange(
             new SystemSetting { Key = CalendarSyncLogRetentionService.EnabledSettingKey, Value = "true", CreatedAt = now, UpdatedAt = now },
@@ -1134,15 +1135,29 @@ public class SystemJobsControllerTests
             new ConfigurationBuilder().Build(),
             NullLogger<CalendarSyncLogRetentionService>.Instance);
 
+        interceptor.Commands.Clear();
         var eligibleBefore = await service.CountEligibleLogsAsync(CancellationToken.None);
         Assert.Equal(105, eligibleBefore.GoogleCount);
         Assert.Equal(105, eligibleBefore.YandexCount);
+        Assert.Equal(2, interceptor.Commands.Count);
+        Assert.Single(interceptor.Commands, command => command.Contains("SystemSettings", StringComparison.Ordinal));
+        var eligibleCountCommand = Assert.Single(interceptor.Commands, command =>
+            command.Contains("GoogleCalendarSyncLogs", StringComparison.Ordinal) &&
+            command.Contains("YandexCalendarSyncLogs", StringComparison.Ordinal));
+        Assert.Equal(2, Regex.Count(eligibleCountCommand, @"SELECT\s+COUNT\(\*\)", RegexOptions.IgnoreCase));
 
+        interceptor.Commands.Clear();
         var result = await service.RunOnceAsync(CancellationToken.None);
 
         Assert.True(result.Enabled);
         Assert.Equal(100, result.GoogleDeletedCount);
         Assert.Equal(100, result.YandexDeletedCount);
+        Assert.Equal(2, interceptor.Commands.Count);
+        Assert.Single(interceptor.Commands, command => command.Contains("SystemSettings", StringComparison.Ordinal));
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("GoogleCalendarSyncLogs", StringComparison.Ordinal) &&
+            command.Contains("YandexCalendarSyncLogs", StringComparison.Ordinal) &&
+            command.Contains("UNION ALL", StringComparison.OrdinalIgnoreCase));
         scope.Db.ChangeTracker.Clear();
         Assert.Equal(6, await scope.Db.GoogleCalendarSyncLogs.CountAsync());
         Assert.Equal(6, await scope.Db.YandexCalendarSyncLogs.CountAsync());

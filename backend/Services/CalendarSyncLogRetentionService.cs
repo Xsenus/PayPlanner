@@ -54,7 +54,7 @@ public sealed class CalendarSyncLogRetentionService : BackgroundService
                 settings = await ResolveSettingsAsync(stoppingToken);
                 if (settings.Enabled)
                 {
-                    await RunOnceAsync(stoppingToken);
+                    await RunOnceAsync(settings, DateTime.UtcNow, stoppingToken);
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -85,6 +85,14 @@ public sealed class CalendarSyncLogRetentionService : BackgroundService
     {
         var startedAt = DateTime.UtcNow;
         var settings = await ResolveSettingsAsync(cancellationToken);
+        return await RunOnceAsync(settings, startedAt, cancellationToken);
+    }
+
+    private async Task<CalendarSyncLogRetentionResult> RunOnceAsync(
+        CalendarSyncLogRetentionSettings settings,
+        DateTime startedAt,
+        CancellationToken cancellationToken)
+    {
         if (!settings.Enabled)
         {
             await RecordSuccessAsync(startedAt, 0, "Очистка журналов синхронизации календарей выключена в настройках.", cancellationToken);
@@ -121,9 +129,14 @@ public sealed class CalendarSyncLogRetentionService : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var context = scope.ServiceProvider.GetRequiredService<PaymentContext>();
         var cutoff = DateTime.UtcNow.AddDays(-settings.RetentionDays);
-        var googleCount = await context.GoogleCalendarSyncLogs.AsNoTracking().CountAsync(item => item.CreatedAt < cutoff, cancellationToken);
-        var yandexCount = await context.YandexCalendarSyncLogs.AsNoTracking().CountAsync(item => item.CreatedAt < cutoff, cancellationToken);
-        return new CalendarSyncLogRetentionCounts(googleCount, yandexCount);
+        var counts = await context.Database
+            .SqlQuery<CalendarSyncLogRetentionCountSnapshot>($$"""
+                SELECT
+                    CAST((SELECT COUNT(*) FROM "GoogleCalendarSyncLogs" WHERE "CreatedAt" < {{cutoff}}) AS INTEGER) AS "GoogleCount",
+                    CAST((SELECT COUNT(*) FROM "YandexCalendarSyncLogs" WHERE "CreatedAt" < {{cutoff}}) AS INTEGER) AS "YandexCount"
+                """)
+            .SingleAsync(cancellationToken);
+        return new CalendarSyncLogRetentionCounts(counts.GoogleCount, counts.YandexCount);
     }
 
     private async Task<CalendarSyncLogRetentionResult> DeleteExpiredLogsAsync(
@@ -135,22 +148,31 @@ public sealed class CalendarSyncLogRetentionService : BackgroundService
         var sqliteMaintenanceService = scope.ServiceProvider.GetService<ISqliteMaintenanceService>();
         var cutoff = DateTime.UtcNow.AddDays(-settings.RetentionDays);
 
-        var googleIds = await context.GoogleCalendarSyncLogs
+        var googleCandidates = context.GoogleCalendarSyncLogs
             .AsNoTracking()
             .Where(item => item.CreatedAt < cutoff)
             .OrderBy(item => item.CreatedAt)
             .ThenBy(item => item.Id)
-            .Select(item => item.Id)
-            .Take(settings.BatchSize)
-            .ToListAsync(cancellationToken);
-        var yandexIds = await context.YandexCalendarSyncLogs
+            .Select(item => new { Provider = "google", item.Id })
+            .Take(settings.BatchSize);
+        var yandexCandidates = context.YandexCalendarSyncLogs
             .AsNoTracking()
             .Where(item => item.CreatedAt < cutoff)
             .OrderBy(item => item.CreatedAt)
             .ThenBy(item => item.Id)
-            .Select(item => item.Id)
-            .Take(settings.BatchSize)
+            .Select(item => new { Provider = "yandex", item.Id })
+            .Take(settings.BatchSize);
+        var candidates = await googleCandidates
+            .Concat(yandexCandidates)
             .ToListAsync(cancellationToken);
+        var googleIds = candidates
+            .Where(item => item.Provider == "google")
+            .Select(item => item.Id)
+            .ToList();
+        var yandexIds = candidates
+            .Where(item => item.Provider == "yandex")
+            .Select(item => item.Id)
+            .ToList();
 
         var googleDeleted = await DeleteGoogleLogsAsync(context, googleIds, cancellationToken);
         var yandexDeleted = await DeleteYandexLogsAsync(context, yandexIds, cancellationToken);
@@ -222,6 +244,12 @@ public sealed class CalendarSyncLogRetentionService : BackgroundService
     public static int NormalizeBatchSize(int value) => Math.Clamp(value, 100, 10000);
 
     private readonly record struct CalendarSyncLogRetentionSettings(bool Enabled, int RetentionDays, int IntervalHours, int BatchSize);
+
+    private sealed class CalendarSyncLogRetentionCountSnapshot
+    {
+        public int GoogleCount { get; init; }
+        public int YandexCount { get; init; }
+    }
 }
 
 public sealed record CalendarSyncLogRetentionCounts(int GoogleCount, int YandexCount)
