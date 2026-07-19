@@ -2079,6 +2079,16 @@ public sealed class NotificationService : INotificationService
             return;
         }
 
+        var visibleRecipientUserIds = await ResolveVisibleCaseNotificationRecipientIdsAsync(
+            clientCase,
+            recipientUserIds,
+            actorUserId,
+            cancellationToken);
+        if (visibleRecipientUserIds.Count == 0)
+        {
+            return;
+        }
+
         var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
         var notificationType = ResolveCourtEventNotificationType(courtEvent);
         var templateKey = ResolveCourtEventTemplateKey(notificationType);
@@ -2093,9 +2103,17 @@ public sealed class NotificationService : INotificationService
             cancellationToken: cancellationToken);
 
         var version = (courtEvent.UpdatedAt ?? courtEvent.CreatedAt).Ticks.ToString(CultureInfo.InvariantCulture);
-        foreach (var recipientUserId in recipientUserIds
-            .Where(userId => userId > 0 && !UserNotificationAntiSpamPolicy.ShouldSuppressSelfNotification(userId, actorUserId))
-            .Distinct())
+        var recipientNotificationChannels = await ResolveUserNotificationChannelsAsync(
+            visibleRecipientUserIds,
+            notificationType,
+            [
+                NotificationChannels.InApp,
+                NotificationChannels.Toast,
+                NotificationChannels.WebPush,
+            ],
+            cancellationToken);
+
+        foreach (var recipientUserId in visibleRecipientUserIds)
         {
             await CreateUserNotificationAsync(
                 recipientUserId,
@@ -2123,7 +2141,9 @@ public sealed class NotificationService : INotificationService
                     clientCaseDocumentId = courtEvent.ClientCaseDocumentId,
                     proceduralDeadlineId = courtEvent.ProceduralDeadlineId
                 },
-                cancellationToken);
+                cancellationToken,
+                objectVisibilityValidated: true,
+                resolvedNotificationChannels: recipientNotificationChannels[recipientUserId]);
         }
     }
 
@@ -5403,7 +5423,7 @@ public sealed class NotificationService : INotificationService
         IReadOnlyCollection<int> recipientUserIds,
         int? actorUserId,
         CancellationToken cancellationToken)
-        => await ResolveVisibleFinancialNotificationRecipientIdsAsync(
+        => await ResolveVisibleDataScopedNotificationRecipientIdsAsync(
             recipientUserIds,
             actorUserId,
             section,
@@ -5419,7 +5439,7 @@ public sealed class NotificationService : INotificationService
         IReadOnlyCollection<int> recipientUserIds,
         int? actorUserId,
         CancellationToken cancellationToken)
-        => await ResolveVisibleFinancialNotificationRecipientIdsAsync(
+        => await ResolveVisibleDataScopedNotificationRecipientIdsAsync(
             recipientUserIds,
             actorUserId,
             RolePermissionCatalog.Acts,
@@ -5435,7 +5455,7 @@ public sealed class NotificationService : INotificationService
         IReadOnlyCollection<int> recipientUserIds,
         int? actorUserId,
         CancellationToken cancellationToken)
-        => await ResolveVisibleFinancialNotificationRecipientIdsAsync(
+        => await ResolveVisibleDataScopedNotificationRecipientIdsAsync(
             recipientUserIds,
             actorUserId,
             RolePermissionCatalog.Contracts,
@@ -5446,7 +5466,23 @@ public sealed class NotificationService : INotificationService
                 .AnyAsync(ct),
             cancellationToken);
 
-    private async Task<IReadOnlyList<int>> ResolveVisibleFinancialNotificationRecipientIdsAsync(
+    private async Task<IReadOnlyList<int>> ResolveVisibleCaseNotificationRecipientIdsAsync(
+        ClientCase clientCase,
+        IReadOnlyCollection<int> recipientUserIds,
+        int? actorUserId,
+        CancellationToken cancellationToken)
+        => await ResolveVisibleDataScopedNotificationRecipientIdsAsync(
+            recipientUserIds,
+            actorUserId,
+            RolePermissionCatalog.Cases,
+            async (access, ct) => await _context.ClientCases
+                .AsNoTracking()
+                .Where(item => item.Id == clientCase.Id)
+                .ApplyClientCaseVisibility(access)
+                .AnyAsync(ct),
+            cancellationToken);
+
+    private async Task<IReadOnlyList<int>> ResolveVisibleDataScopedNotificationRecipientIdsAsync(
         IReadOnlyCollection<int> recipientUserIds,
         int? actorUserId,
         string section,
@@ -5473,7 +5509,7 @@ public sealed class NotificationService : INotificationService
                 continue;
             }
 
-            var visibilityKey = BuildFinancialVisibilityGroupKey(access);
+            var visibilityKey = BuildDataVisibilityGroupKey(access);
             recipientVisibilityKeys.Add((userId, visibilityKey));
             visibilityByKey.TryAdd(visibilityKey, access);
         }
@@ -5493,7 +5529,7 @@ public sealed class NotificationService : INotificationService
             .ToArray();
     }
 
-    private static string BuildFinancialVisibilityGroupKey(DataVisibilityAccess access)
+    private static string BuildDataVisibilityGroupKey(DataVisibilityAccess access)
         => access.SeesAll
             ? "all"
             : $"restricted:{string.Join(',', access.VisibleUserIds.Distinct().Order())}";

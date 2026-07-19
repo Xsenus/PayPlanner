@@ -3357,6 +3357,129 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyCaseCourtEventAsync_LoadsVisibilityAndRecipientSettingsInSingleQueries()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var adminRole = new Role
+        {
+            Name = "admin",
+            Description = "Администратор",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Roles.Add(adminRole);
+        await db.SaveChangesAsync();
+        var actor = new User
+        {
+            Email = "court-query-actor@example.com",
+            FullName = "Автор судебного события",
+            PasswordHash = "hash",
+            RoleId = adminRole.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        var recipients = Enumerable.Range(1, 12)
+            .Select(index => new User
+            {
+                Email = $"court-query-recipient-{index}@example.com",
+                FullName = $"Получатель судебного события {index}",
+                PasswordHash = "hash",
+                RoleId = adminRole.Id,
+                IsActive = true,
+                IsApproved = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            })
+            .ToArray();
+        db.Users.AddRange(recipients.Append(actor));
+        await db.SaveChangesAsync();
+        var client = new Client
+        {
+            Name = "Клиент массового судебного события",
+            IsActive = true,
+            ResponsibleUserId = recipients[0].Id,
+        };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+        var clientCase = new ClientCase
+        {
+            ClientId = client.Id,
+            Title = "Дело с массовым судебным уведомлением",
+            CaseNumber = "CASE-COURT-QUERY-12",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = recipients[0].Id,
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var courtEvent = new ClientCaseCourtEvent
+        {
+            ClientCaseId = clientCase.Id,
+            EventType = "hearing",
+            Title = "Заседание для нескольких получателей",
+            ScheduledAt = new DateTime(2026, 7, 23, 9, 30, 0, DateTimeKind.Utc),
+            CourtInstance = "first",
+            CourtName = "Арбитражный суд",
+            CourtCaseNumber = "А55-120/2026",
+            MovementStatus = "scheduled",
+            SourceType = "manual",
+            CreatedAt = new DateTime(2026, 7, 20, 1, 0, 0, DateTimeKind.Utc),
+            UpdatedAt = new DateTime(2026, 7, 20, 1, 0, 0, DateTimeKind.Utc),
+        };
+        db.ClientCaseCourtEvents.Add(courtEvent);
+        await db.SaveChangesAsync();
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            realtime,
+            webPush);
+        interceptor.ReaderCommands.Clear();
+
+        await service.NotifyCaseCourtEventAsync(
+            clientCase,
+            courtEvent,
+            "created",
+            actor.FullName,
+            actor.Id,
+            recipients.Select(user => user.Id)
+                .Append(recipients[0].Id)
+                .Append(actor.Id)
+                .ToArray());
+
+        var notifications = await db.UserNotifications.AsNoTracking().ToListAsync();
+        Assert.Equal(12, notifications.Count);
+        Assert.Equal(12, realtime.Notifications.Count);
+        Assert.Equal(12, webPush.Notifications.Count);
+        Assert.DoesNotContain(notifications, notification => notification.RecipientUserId == actor.Id);
+        Assert.Equal(12, notifications.Select(notification => notification.RecipientUserId).Distinct().Count());
+        Assert.All(notifications, notification =>
+        {
+            Assert.Equal(UserNotificationTypes.CourtHearing, notification.Type);
+            Assert.Equal("cyan", notification.Tone);
+            Assert.Equal("case", notification.ObjectType);
+            Assert.Equal(clientCase.Id, notification.ObjectId);
+            Assert.Contains("CASE-COURT-QUERY-12", notification.Title);
+            Assert.Contains("Заседание для нескольких получателей", notification.BodyPreview);
+        });
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("SELECT EXISTS", StringComparison.Ordinal)
+            && command.Contains("FROM \"ClientCases\"", StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(UserNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(UserNotificationDoNotDisturbSettings.SettingKey, StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"SystemSettings\"", StringComparison.Ordinal)
+            && command.Contains(RoleNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task NotifyCaseProceduralDeadlineAsync_CreatesNotificationAndDeduplicates()
     {
         await using var db = await CreateContextAsync();
