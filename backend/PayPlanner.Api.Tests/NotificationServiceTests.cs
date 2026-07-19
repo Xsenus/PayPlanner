@@ -8245,6 +8245,9 @@ public class NotificationServiceTests
         Assert.Single(interceptor.ReaderCommands, command =>
             command.Contains("FROM \"SystemSettings\"", StringComparison.Ordinal)
             && command.Contains(RoleNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"SystemSettings\"", StringComparison.Ordinal)
+            && command.Contains("notifications.templates.v1", StringComparison.Ordinal));
         var notifications = await db.UserNotifications.AsNoTracking().ToListAsync();
         Assert.Equal(12, notifications.Count);
         var utcNotification = notifications.Single(
@@ -8283,6 +8286,9 @@ public class NotificationServiceTests
         Assert.Single(interceptor.ReaderCommands, command =>
             command.Contains("FROM \"SystemSettings\"", StringComparison.Ordinal)
             && command.Contains(RoleNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"SystemSettings\"", StringComparison.Ordinal)
+            && command.Contains("notifications.templates.v1", StringComparison.Ordinal));
         Assert.Equal(12, await db.UserNotifications.CountAsync());
     }
 

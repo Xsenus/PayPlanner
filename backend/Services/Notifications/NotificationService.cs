@@ -3243,6 +3243,10 @@ public sealed class NotificationService : INotificationService
                 NotificationChannels.WebPush,
             ]),
             cancellationToken);
+        var templateDefinition = NotificationTemplateCatalog.Find(NotificationTemplateKeys.TaskApprovalOverdue);
+        var templateStorage = templateDefinition is null
+            ? new NotificationTemplateStorage()
+            : await LoadTemplateStorageAsync(cancellationToken);
         var deliveries = new List<NotificationDelivery>();
         foreach (var userId in recipients)
         {
@@ -3250,8 +3254,9 @@ public sealed class NotificationService : INotificationService
             var localDate = CalendarTimeZoneHelper.ToUserLocal(nowUtc, recipientTimeZone).Date;
             var eventKey = $"task:{task.Id}:approval-overdue:{localDate:yyyyMMdd}";
             var approvalBody = BuildTaskApprovalOverdueBody(task, currentApprover, recipientTimeZone);
-            var message = await RenderTemplateAsync(
-                NotificationTemplateKeys.TaskApprovalOverdue,
+            var message = RenderTemplate(
+                templateDefinition,
+                templateStorage,
                 subject,
                 approvalBody,
                 NotificationTemplateCatalog.MergeValues(
@@ -3261,8 +3266,8 @@ public sealed class NotificationService : INotificationService
                         ["approval.approverName"] = ResolveParticipantName(currentApprover),
                         ["approval.dueAt"] = FormatTaskDueAt(DateTime.SpecifyKind(task.ApprovalDueAt.Value, DateTimeKind.Utc), recipientTimeZone)
                     }),
-                purpose: NotificationPurposes.TaskReminder,
-                cancellationToken: cancellationToken);
+                isSensitive: false,
+                purpose: NotificationPurposes.TaskReminder);
 
             if (HasTaskChannel(task, NotificationChannels.InApp))
             {
