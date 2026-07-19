@@ -1,8 +1,10 @@
+using System.Data.Common;
 using System.Text.Json;
 using System.Net;
 using System.Text;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Data;
@@ -14,6 +16,96 @@ namespace PayPlanner.Api.Tests;
 
 public class WebPushNotificationServiceTests
 {
+    [Fact]
+    public async Task SendUserNotificationAsync_LoadsCompletedEndpointsOnceForAllSubscriptions()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var user = await CreateUserWithSubscriptionAsync(db, "multi-device-push@example.com");
+        for (var index = 1; index < 12; index++)
+        {
+            db.UserPushSubscriptions.Add(new UserPushSubscription
+            {
+                UserId = user.Id,
+                Endpoint = $"https://push.example/multi-device-{index}",
+                P256dh = "p256dh",
+                Auth = "auth",
+                Browser = "Chrome",
+                Platform = "Windows",
+                DeviceName = $"Устройство {index}",
+                UserAgent = "Test",
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+                LastSeenAt = DateTime.UtcNow,
+            });
+        }
+
+        await db.SaveChangesAsync();
+        var endpoints = await db.UserPushSubscriptions
+            .Where(subscription => subscription.UserId == user.Id)
+            .OrderBy(subscription => subscription.Id)
+            .Select(subscription => subscription.Endpoint)
+            .ToArrayAsync();
+        var notification = CreateNotification(user.Id, new UserNotification
+        {
+            Type = UserNotificationTypes.TaskAssigned,
+            EventKey = "task:multi-device:assigned",
+            Title = "Новая задача",
+            BodyPreview = "Проверьте задачу.",
+            Tone = "blue",
+            ObjectType = "task",
+            ObjectId = 101,
+        });
+        db.UserNotifications.Add(notification);
+        db.NotificationDeliveries.AddRange(
+            new NotificationDelivery
+            {
+                EventKey = notification.EventKey,
+                Channel = NotificationChannels.WebPush,
+                SenderName = "Web Push",
+                RecipientUserId = user.Id,
+                RecipientAddress = endpoints[0],
+                Subject = notification.Title,
+                BodyPreview = notification.BodyPreview,
+                Status = NotificationDeliveryStatus.Sent,
+                CreatedAt = DateTime.UtcNow.AddMinutes(-5),
+                SentAt = DateTime.UtcNow.AddMinutes(-5),
+            },
+            new NotificationDelivery
+            {
+                EventKey = notification.EventKey,
+                Channel = NotificationChannels.WebPush,
+                SenderName = "Web Push",
+                RecipientUserId = user.Id,
+                RecipientAddress = endpoints[1],
+                Subject = notification.Title,
+                BodyPreview = notification.BodyPreview,
+                Status = NotificationDeliveryStatus.Failed,
+                Error = "Temporary failure",
+                CreatedAt = DateTime.UtcNow.AddMinutes(-5),
+            });
+        await db.SaveChangesAsync();
+        interceptor.ReaderCommands.Clear();
+        var service = CreateService(db);
+
+        await service.SendUserNotificationAsync(notification);
+
+        var selectCommands = interceptor.ReaderCommands
+            .Where(command => command.StartsWith("SELECT", StringComparison.Ordinal))
+            .ToArray();
+        Assert.Equal(2, selectCommands.Length);
+        Assert.Single(selectCommands, command =>
+            command.Contains("NotificationDeliveries", StringComparison.Ordinal)
+            && command.Contains("RecipientAddress", StringComparison.Ordinal));
+        var deliveries = await db.NotificationDeliveries
+            .Where(delivery => delivery.EventKey == notification.EventKey)
+            .ToListAsync();
+        Assert.Equal(13, deliveries.Count);
+        Assert.Single(deliveries, delivery => delivery.RecipientAddress == endpoints[0]);
+        Assert.Equal(2, deliveries.Count(delivery => delivery.RecipientAddress == endpoints[1]));
+    }
+
     [Fact]
     public async Task SendUserNotificationAsync_SanitizesFinancialPayloadInDeliveryLogWhenServerIsNotReady()
     {
@@ -437,18 +529,36 @@ public class WebPushNotificationServiceTests
         return notification;
     }
 
-    private static async Task<PaymentContext> CreateContextAsync()
+    private static async Task<PaymentContext> CreateContextAsync(DbCommandInterceptor? interceptor = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
 
-        var options = new DbContextOptionsBuilder<PaymentContext>()
-            .UseSqlite(connection)
-            .Options;
+        var optionsBuilder = new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite(connection);
+        if (interceptor is not null)
+        {
+            optionsBuilder.AddInterceptors(interceptor);
+        }
 
-        var db = new PaymentContext(options);
+        var db = new PaymentContext(optionsBuilder.Options);
         await db.Database.EnsureCreatedAsync();
         return db;
+    }
+
+    private sealed class RecordingCommandInterceptor : DbCommandInterceptor
+    {
+        public List<string> ReaderCommands { get; } = [];
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            ReaderCommands.Add(command.CommandText);
+            return ValueTask.FromResult(result);
+        }
     }
 
     private sealed class FailingWebPushNotificationService : WebPushNotificationService

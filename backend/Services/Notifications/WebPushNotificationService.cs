@@ -84,10 +84,24 @@ public class WebPushNotificationService : IWebPushNotificationService
         var pushTitle = ResolvePushTitle(notification);
         var pushBodyPreview = ResolvePushBodyPreview(notification);
         var payload = BuildPayload(notification, pushTitle, pushBodyPreview);
+        var subscriptionEndpoints = subscriptions
+            .Select(subscription => subscription.Endpoint)
+            .ToArray();
+        var completedEndpoints = (await _context.NotificationDeliveries
+                .AsNoTracking()
+                .Where(item =>
+                    item.EventKey == notification.EventKey
+                    && item.Channel == NotificationChannels.WebPush
+                    && item.RecipientAddress != null
+                    && subscriptionEndpoints.Contains(item.RecipientAddress)
+                    && item.Status != NotificationDeliveryStatus.Failed)
+                .Select(item => item.RecipientAddress!)
+                .ToListAsync(cancellationToken))
+            .ToHashSet(StringComparer.Ordinal);
         var pendingDeliveries = new List<(NotificationDelivery Delivery, UserPushSubscription Subscription)>();
         foreach (var subscription in subscriptions)
         {
-            if (await HasCompletedWebPushDeliveryAsync(notification.EventKey, subscription.Endpoint, cancellationToken))
+            if (completedEndpoints.Contains(subscription.Endpoint))
             {
                 continue;
             }
@@ -308,19 +322,6 @@ public class WebPushNotificationService : IWebPushNotificationService
         var subject = _configuration["WebPush:Subject"]?.Trim() ?? string.Empty;
         return new VapidConfig(enabled, publicKey, privateKey, subject);
     }
-
-    private async Task<bool> HasCompletedWebPushDeliveryAsync(
-        string eventKey,
-        string endpoint,
-        CancellationToken cancellationToken)
-        => await _context.NotificationDeliveries
-            .AsNoTracking()
-            .AnyAsync(item =>
-                item.EventKey == eventKey
-                && item.Channel == NotificationChannels.WebPush
-                && item.RecipientAddress == endpoint
-                && item.Status != NotificationDeliveryStatus.Failed,
-                cancellationToken);
 
     private static string ResolveBaseEventKey(string eventKey)
     {
