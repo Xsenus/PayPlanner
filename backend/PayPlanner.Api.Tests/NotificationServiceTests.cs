@@ -5410,6 +5410,146 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyTaskApprovalRequestedAsync_LoadsRecipientTimeZonesInSingleQuery()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var adminRole = new Role
+        {
+            Name = "admin",
+            Description = "Администратор",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Roles.Add(adminRole);
+        await db.SaveChangesAsync();
+        var actor = new User
+        {
+            Email = "approval-request-timezone-query-actor@example.com",
+            FullName = "Автор согласования",
+            PasswordHash = "hash",
+            RoleId = adminRole.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        var recipients = Enumerable.Range(1, 12)
+            .Select(index => new User
+            {
+                Email = $"approval-request-timezone-query-recipient-{index}@example.com",
+                FullName = $"Участник согласования {index}",
+                PasswordHash = "hash",
+                RoleId = adminRole.Id,
+                IsActive = true,
+                IsApproved = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            })
+            .ToArray();
+        db.Users.AddRange(recipients.Append(actor));
+        await db.SaveChangesAsync();
+        db.UserSettings.AddRange(
+            new UserSetting
+            {
+                UserId = recipients[0].Id,
+                Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+                Value = "UTC",
+            },
+            new UserSetting
+            {
+                UserId = recipients[1].Id,
+                Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+                Value = "Asia/Novosibirsk",
+            });
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "notifications.templates.v1",
+            Value = JsonSerializer.Serialize(new
+            {
+                templates = new[]
+                {
+                    new
+                    {
+                        key = NotificationTemplateKeys.TaskApprovalRequested,
+                        isEnabled = true,
+                        subject = "Задача ожидает согласования: {{task.title}}",
+                        body = "Срок: {{task.dueAt}}\nСогласующий: {{approval.approverName}}",
+                    },
+                },
+            }, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        var dueAt = new DateTime(2026, 7, 19, 12, 0, 0, DateTimeKind.Utc);
+        var approver = new TaskJournalParticipant
+        {
+            UserId = recipients[11].Id,
+            User = recipients[11],
+            DisplayName = recipients[11].FullName,
+            Role = "approver",
+            ApprovalStatus = "pending",
+            SortOrder = 11,
+        };
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Массовая задача",
+            Title = "Согласовать документы",
+            AuthorUserId = actor.Id,
+            AuthorName = actor.FullName,
+            AssigneeUserId = recipients[0].Id,
+            AssigneeName = recipients[0].FullName,
+            DueAt = dueAt,
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "onApproval",
+            Participants = recipients
+                .Skip(1)
+                .Take(10)
+                .Select((user, index) => new TaskJournalParticipant
+                {
+                    UserId = user.Id,
+                    DisplayName = user.FullName,
+                    Role = "observer",
+                    SortOrder = index,
+                })
+                .Append(new TaskJournalParticipant
+                {
+                    UserId = recipients[0].Id,
+                    DisplayName = recipients[0].FullName,
+                    Role = "observer",
+                    SortOrder = 10,
+                })
+                .Append(approver)
+                .ToList(),
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+        interceptor.ReaderCommands.Clear();
+
+        var deliveries = await service.NotifyTaskApprovalRequestedAsync(task, actor.FullName, actor.Id);
+
+        Assert.Empty(deliveries);
+        var notifications = await db.UserNotifications.AsNoTracking().ToListAsync();
+        Assert.Equal(12, notifications.Count);
+        Assert.DoesNotContain(notifications, notification => notification.RecipientUserId == actor.Id);
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(CalendarTimeZoneHelper.UserTimeZoneSettingKey, StringComparison.Ordinal));
+        var utcNotification = notifications.Single(
+            notification => notification.RecipientUserId == recipients[0].Id);
+        Assert.Contains("Срок: 19.07.2026 12:00", utcNotification.BodyPreview);
+        var novosibirskNotification = notifications.Single(
+            notification => notification.RecipientUserId == recipients[1].Id);
+        Assert.Contains("Срок: 19.07.2026 19:00", novosibirskNotification.BodyPreview);
+        Assert.All(notifications, notification =>
+        {
+            Assert.Equal(UserNotificationTypes.TaskApprovalRequested, notification.Type);
+            Assert.Contains($"\"currentApproverId\":{approver.Id}", notification.MetadataJson);
+        });
+    }
+
+    [Fact]
     public async Task NotifyTaskApprovalDecisionAsync_CreatesRevisionNotificationForAssignee()
     {
         await using var db = await CreateContextAsync();

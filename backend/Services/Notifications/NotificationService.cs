@@ -2471,10 +2471,14 @@ public sealed class NotificationService : INotificationService
         var approvalSubject = $"Задача ожидает согласования: {task.Title}";
         var channels = ResolveTaskMessageChannels(task);
         var eventKey = $"task:{task.Id}:approval-request:{currentApprover?.Id ?? 0}:{DateTime.UtcNow:yyyyMMddHHmmssfff}";
+        var recipientTimeZones = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
+            _context,
+            recipients,
+            cancellationToken);
         var deliveries = new List<NotificationDelivery>();
         foreach (var userId in recipients)
         {
-            var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(userId, cancellationToken);
+            var recipientTimeZone = recipientTimeZones[userId];
             var approvalBody = BuildTaskApprovalRequestedBody(task, actorName, currentApprover, recipientTimeZone);
             var message = await RenderTemplateAsync(
                 NotificationTemplateKeys.TaskApprovalRequested,
