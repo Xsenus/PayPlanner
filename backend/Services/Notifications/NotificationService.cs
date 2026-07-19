@@ -2752,21 +2752,26 @@ public sealed class NotificationService : INotificationService
                 NotificationChannels.WebPush,
             ]),
             cancellationToken);
+        var templateDefinition = NotificationTemplateCatalog.Find(NotificationTemplateKeys.TaskScheduleConflict);
+        var templateStorage = templateDefinition is null
+            ? new NotificationTemplateStorage()
+            : await LoadTemplateStorageAsync(cancellationToken);
         var deliveries = new List<NotificationDelivery>();
 
         foreach (var userId in recipients)
         {
             var recipientTimeZone = recipientTimeZones[userId];
             var conflictBody = BuildTaskScheduleConflictBody(task, effectiveConflicts, actorName, recipientTimeZone);
-            var message = await RenderTemplateAsync(
-                NotificationTemplateKeys.TaskScheduleConflict,
+            var message = RenderTemplate(
+                templateDefinition,
+                templateStorage,
                 conflictSubject,
                 conflictBody,
                 NotificationTemplateCatalog.MergeValues(
                     BuildTaskTemplateValues(task, recipientTimeZone, actorName),
                     new Dictionary<string, string?> { ["conflicts"] = BuildConflictSummary(effectiveConflicts, recipientTimeZone) }),
-                purpose: NotificationPurposes.TaskReminder,
-                cancellationToken: cancellationToken);
+                isSensitive: false,
+                purpose: NotificationPurposes.TaskReminder);
 
             if (HasTaskChannel(task, NotificationChannels.InApp))
             {
