@@ -2246,6 +2246,16 @@ public sealed class NotificationService : INotificationService
             return;
         }
 
+        var visibleRecipientUserIds = await ResolveVisibleCaseNotificationRecipientIdsAsync(
+            clientCase,
+            recipientUserIds,
+            actorUserId,
+            cancellationToken);
+        if (visibleRecipientUserIds.Count == 0)
+        {
+            return;
+        }
+
         var normalizedActorName = NormalizeNotificationText(actorName, "Сотрудник");
         var normalizedMessageText = NormalizeNotificationText(messageText, "Новое сообщение");
         var normalizedOccurredAt = NormalizeUtcInstant(occurredAtUtc);
@@ -2262,10 +2272,17 @@ public sealed class NotificationService : INotificationService
             Math.Max(attachmentCount, 0).ToString(CultureInfo.InvariantCulture),
             normalizedActorName,
             normalizedOccurredAt.Ticks.ToString(CultureInfo.InvariantCulture)));
+        var recipientNotificationChannels = await ResolveUserNotificationChannelsAsync(
+            visibleRecipientUserIds,
+            UserNotificationTypes.CaseConversation,
+            [
+                NotificationChannels.InApp,
+                NotificationChannels.Toast,
+                NotificationChannels.WebPush,
+            ],
+            cancellationToken);
 
-        foreach (var recipientUserId in recipientUserIds
-            .Where(userId => userId > 0 && !UserNotificationAntiSpamPolicy.ShouldSuppressSelfNotification(userId, actorUserId))
-            .Distinct())
+        foreach (var recipientUserId in visibleRecipientUserIds)
         {
             await CreateUserNotificationAsync(
                 recipientUserId,
@@ -2288,7 +2305,9 @@ public sealed class NotificationService : INotificationService
                     messagePreview = Truncate(normalizedMessageText, 300),
                     occurredAt = normalizedOccurredAt
                 },
-                cancellationToken);
+                cancellationToken,
+                objectVisibilityValidated: true,
+                resolvedNotificationChannels: recipientNotificationChannels[recipientUserId]);
         }
     }
 
