@@ -694,6 +694,7 @@ public class NotificationServiceTests
     [InlineData("payment", RolePermissionCatalog.Payments, UserNotificationTypes.PaymentAssigned)]
     [InlineData("invoice", RolePermissionCatalog.Accounts, UserNotificationTypes.InvoiceCreated)]
     [InlineData("act", RolePermissionCatalog.Acts, UserNotificationTypes.ActCreated)]
+    [InlineData("contract", RolePermissionCatalog.Contracts, UserNotificationTypes.ContractCreated)]
     [InlineData("case", RolePermissionCatalog.Cases, UserNotificationTypes.CaseCourtEvent)]
     [InlineData("task", RolePermissionCatalog.Tasks, UserNotificationTypes.TaskAssigned)]
     public async Task NotifyAsync_SkipsProtectedObjectNotification_WhenRecipientHasNoSectionAccess(
@@ -5431,6 +5432,29 @@ public class NotificationServiceTests
                     db.Acts.Add(act);
                     await db.SaveChangesAsync();
                     return act.Id;
+                }
+
+            case "contract":
+                {
+                    var client = new Client
+                    {
+                        Name = "Клиент закрытого договора",
+                        ResponsibleUserId = owner.Id
+                    };
+                    var contract = new Contract
+                    {
+                        Number = $"CONTRACT-{Guid.NewGuid():N}",
+                        Date = now.Date,
+                        Amount = 12000m,
+                        Status = ContractStatus.Draft,
+                        ClientContracts =
+                        {
+                            new ClientContract { Client = client }
+                        }
+                    };
+                    db.Contracts.Add(contract);
+                    await db.SaveChangesAsync();
+                    return contract.Id;
                 }
 
             case "case":

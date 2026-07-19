@@ -1721,7 +1721,8 @@ public sealed class NotificationService : INotificationService
                     actorUserId,
                     actorName = normalizedActorName
                 },
-                cancellationToken);
+                cancellationToken,
+                objectVisibilityValidated: true);
         }
     }
 
@@ -1786,7 +1787,8 @@ public sealed class NotificationService : INotificationService
                     actorName = normalizedActorName,
                     changes = normalizedChanges
                 },
-                cancellationToken);
+                cancellationToken,
+                objectVisibilityValidated: true);
         }
     }
 
@@ -3253,7 +3255,8 @@ public sealed class NotificationService : INotificationService
         int? taskJournalItemId,
         TaskJournalItem? task,
         object? metadata,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool objectVisibilityValidated = false)
         => CreateUserNotificationAsync(
             new NotificationEventEnvelope(
                 recipientUserId,
@@ -3267,11 +3270,13 @@ public sealed class NotificationService : INotificationService
                 tone,
                 metadata,
                 task),
-            cancellationToken);
+            cancellationToken,
+            objectVisibilityValidated);
 
     private async Task<bool> CreateUserNotificationAsync(
         NotificationEventEnvelope notificationEvent,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool objectVisibilityValidated = false)
     {
         if (notificationEvent.RecipientUserId <= 0 || string.IsNullOrWhiteSpace(notificationEvent.EventKey))
         {
@@ -3305,7 +3310,8 @@ public sealed class NotificationService : INotificationService
             return false;
         }
 
-        if (!await CanRecipientSeeNotificationObjectAsync(notificationEvent, type, cancellationToken))
+        if (!objectVisibilityValidated
+            && !await CanRecipientSeeNotificationObjectAsync(notificationEvent, type, cancellationToken))
         {
             _logger.LogWarning(
                 "User notification {EventKey} for user {RecipientUserId} was skipped because linked object {ObjectType}:{ObjectId} is not visible to recipient.",

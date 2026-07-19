@@ -478,7 +478,7 @@ public class ContractsControllerTests
             && command.Contains("ContractPayments", StringComparison.Ordinal)
             && command.Contains("ContractActs", StringComparison.Ordinal)
             && command.Contains("PaymentResponsibles", StringComparison.Ordinal));
-        Assert.Equal(24, interceptor.ReaderCommands.Count(command =>
+        Assert.Equal(12, interceptor.ReaderCommands.Count(command =>
             command.Contains("SELECT EXISTS", StringComparison.Ordinal)
             && command.Contains("FROM \"Contracts\"", StringComparison.Ordinal)));
     }
