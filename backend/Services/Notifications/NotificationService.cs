@@ -2368,6 +2368,15 @@ public sealed class NotificationService : INotificationService
             _context,
             recipientUserIds,
             cancellationToken);
+        var recipientNotificationChannels = await ResolveUserNotificationChannelsAsync(
+            recipientUserIds,
+            UserNotificationTypes.CaseInactivityControl,
+            channels.Concat([
+                NotificationChannels.InApp,
+                NotificationChannels.Toast,
+                NotificationChannels.WebPush,
+            ]),
+            cancellationToken);
         var deliveries = new List<NotificationDelivery>();
         foreach (var recipientUserId in recipientUserIds)
         {
@@ -2400,14 +2409,13 @@ public sealed class NotificationService : INotificationService
                         task.AssigneeUserId,
                         isEscalationObserver = recipientUserId != task.AssigneeUserId.Value
                     },
-                    cancellationToken);
+                    cancellationToken,
+                    recipientNotificationChannels[recipientUserId]);
             }
 
-            var enabledChannels = await ResolveUserNotificationChannelsAsync(
-                recipientUserId,
-                UserNotificationTypes.CaseInactivityControl,
-                channels,
-                cancellationToken);
+            var enabledChannels = channels
+                .Where(recipientNotificationChannels[recipientUserId].Contains)
+                .ToList();
             if (enabledChannels.Count > 0)
             {
                 deliveries.AddRange(await SendToUserAsync(recipientUserId, message, enabledChannels, eventKey, cancellationToken));
