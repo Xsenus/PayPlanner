@@ -1477,7 +1477,8 @@ public sealed class NotificationService : INotificationService
                     actorUserId,
                     actorName = normalizedActorName
                 },
-                cancellationToken);
+                cancellationToken,
+                objectVisibilityValidated: true);
         }
     }
 
@@ -1545,7 +1546,8 @@ public sealed class NotificationService : INotificationService
                     actorName = normalizedActorName,
                     changes = normalizedChanges
                 },
-                cancellationToken);
+                cancellationToken,
+                objectVisibilityValidated: true);
         }
     }
 

@@ -3696,6 +3696,82 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyInvoiceCreatedAsync_ReusesVisibilityCheckForAllRecipients()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var adminRole = new Role
+        {
+            Name = "admin",
+            Description = "Администратор",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Roles.Add(adminRole);
+        await db.SaveChangesAsync();
+        var actor = new User
+        {
+            Email = "invoice-query-actor@example.com",
+            FullName = "Автор счета",
+            PasswordHash = "hash",
+            RoleId = adminRole.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        var recipients = Enumerable.Range(1, 12)
+            .Select(index => new User
+            {
+                Email = $"invoice-query-recipient-{index}@example.com",
+                FullName = $"Получатель счета {index}",
+                PasswordHash = "hash",
+                RoleId = adminRole.Id,
+                IsActive = true,
+                IsApproved = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            })
+            .ToArray();
+        db.Users.AddRange(recipients.Append(actor));
+        await db.SaveChangesAsync();
+        var payment = new Payment
+        {
+            Account = "Счет №QUERY-12",
+            Date = new DateTime(2026, 7, 19),
+            Amount = 12000m,
+            Status = PaymentStatus.Pending,
+            Type = PaymentType.Income,
+            DocumentKind = DocumentKind.Invoice,
+            InvoiceWorkflowStatus = InvoiceWorkflowStatus.Draft,
+            Responsibles = { new PaymentResponsible { UserId = recipients[0].Id } },
+            Invoice = new Invoice
+            {
+                Number = "QUERY-12",
+                Date = new DateTime(2026, 7, 19),
+            },
+        };
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+        interceptor.ReaderCommands.Clear();
+
+        await service.NotifyInvoiceCreatedAsync(
+            payment,
+            actor.FullName,
+            actor.Id,
+            recipients.Select(user => user.Id).ToArray());
+
+        var notifications = await db.UserNotifications.AsNoTracking().ToListAsync();
+        Assert.Equal(12, notifications.Count);
+        Assert.Equal(
+            recipients.Select(user => user.Id).Order(),
+            notifications.Select(notification => notification.RecipientUserId).Order());
+        Assert.Equal(12, interceptor.ReaderCommands.Count(command =>
+            command.Contains("SELECT EXISTS", StringComparison.Ordinal)
+            && command.Contains("FROM \"Payments\"", StringComparison.Ordinal)));
+    }
+
+    [Fact]
     public async Task NotifyInvoiceChangedAsync_CreatesInvoiceNotificationAndDeduplicatesByState()
     {
         await using var db = await CreateContextAsync();
