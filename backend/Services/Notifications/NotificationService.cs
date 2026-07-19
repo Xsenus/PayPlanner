@@ -2304,6 +2304,15 @@ public sealed class NotificationService : INotificationService
             return;
         }
 
+        var recipients = recipientUserIds
+            .Where(userId => userId > 0 && !UserNotificationAntiSpamPolicy.ShouldSuppressSelfNotification(userId, actorUserId))
+            .Distinct()
+            .ToList();
+        if (recipients.Count == 0)
+        {
+            return;
+        }
+
         var normalizedActorName = NormalizeNotificationText(actorName, "CRM");
         var normalizedSummary = NormalizeNotificationText(summary, "Судебный источник временно недоступен.");
         var provider = NormalizeNotificationText(providerName, "судебный источник");
@@ -2315,10 +2324,17 @@ public sealed class NotificationService : INotificationService
             purpose: NotificationPurposes.TaskReminder,
             cancellationToken: cancellationToken);
         var stateHash = BuildStableTextHash($"{provider}|{normalizedSummary}");
+        var recipientNotificationChannels = await ResolveUserNotificationChannelsAsync(
+            recipients,
+            UserNotificationTypes.CourtSyncFailed,
+            [
+                NotificationChannels.InApp,
+                NotificationChannels.Toast,
+                NotificationChannels.WebPush,
+            ],
+            cancellationToken);
 
-        foreach (var recipientUserId in recipientUserIds
-            .Where(userId => userId > 0 && !UserNotificationAntiSpamPolicy.ShouldSuppressSelfNotification(userId, actorUserId))
-            .Distinct())
+        foreach (var recipientUserId in recipients)
         {
             await CreateUserNotificationAsync(
                 recipientUserId,
@@ -2339,7 +2355,8 @@ public sealed class NotificationService : INotificationService
                     providerName = provider,
                     summary = normalizedSummary
                 },
-                cancellationToken);
+                cancellationToken,
+                resolvedNotificationChannels: recipientNotificationChannels[recipientUserId]);
         }
     }
 

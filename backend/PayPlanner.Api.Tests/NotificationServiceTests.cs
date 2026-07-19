@@ -3675,6 +3675,88 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyCourtSyncFailedAsync_LoadsRecipientNotificationSettingsInSingleQuery()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var adminRole = new Role
+        {
+            Name = "admin",
+            Description = "Администратор",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Roles.Add(adminRole);
+        await db.SaveChangesAsync();
+        var recipients = Enumerable.Range(1, 12)
+            .Select(index => new User
+            {
+                Email = $"court-sync-query-recipient-{index}@example.com",
+                FullName = $"Получатель {index}",
+                PasswordHash = "hash",
+                RoleId = adminRole.Id,
+                IsActive = true,
+                IsApproved = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            })
+            .ToArray();
+        db.Users.AddRange(recipients);
+        await db.SaveChangesAsync();
+        var client = new Client
+        {
+            Name = "Клиент судебной синхронизации",
+            IsActive = true,
+            ResponsibleUserId = recipients[0].Id,
+        };
+        db.Clients.Add(client);
+        await db.SaveChangesAsync();
+        var clientCase = new ClientCase
+        {
+            ClientId = client.Id,
+            Title = "Судебное дело",
+            CaseNumber = "CASE-SYNC-QUERY-1",
+            Status = ClientCaseStatus.Open,
+            ResponsibleUserId = recipients[0].Id,
+            CourtName = "Арбитражный суд",
+            CourtCaseNumber = "А45-100/2026",
+        };
+        db.ClientCases.Add(clientCase);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+        interceptor.ReaderCommands.Clear();
+
+        await service.NotifyCourtSyncFailedAsync(
+            clientCase,
+            "Картотека арбитражных дел",
+            "Источник временно недоступен",
+            recipients[^1].FullName,
+            recipients[^1].Id,
+            recipients.Select(user => user.Id).Append(recipients[0].Id).ToArray());
+
+        var notifications = await db.UserNotifications.AsNoTracking().ToListAsync();
+        Assert.Equal(11, notifications.Count);
+        Assert.DoesNotContain(notifications, notification => notification.RecipientUserId == recipients[^1].Id);
+        Assert.Equal(11, notifications.Select(notification => notification.RecipientUserId).Distinct().Count());
+        Assert.All(notifications, notification =>
+        {
+            Assert.Equal(UserNotificationTypes.CourtSyncFailed, notification.Type);
+            Assert.Equal("rose", notification.Tone);
+            Assert.Equal("case", notification.ObjectType);
+            Assert.Equal(clientCase.Id, notification.ObjectId);
+            Assert.Contains("Источник временно недоступен", notification.BodyPreview, StringComparison.Ordinal);
+        });
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(UserNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(UserNotificationDoNotDisturbSettings.SettingKey, StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"SystemSettings\"", StringComparison.Ordinal)
+            && command.Contains(RoleNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task NotifyCaseInactivityControlTaskCreatedAsync_CreatesDedicatedInAppNotification()
     {
         await using var db = await CreateContextAsync();
