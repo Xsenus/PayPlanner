@@ -1600,6 +1600,15 @@ public sealed class NotificationService : INotificationService
             BuildInvoiceTemplateValues(invoicePayment, normalizedActorName, []),
             purpose: NotificationPurposes.ManualTest,
             cancellationToken: cancellationToken);
+        var recipientNotificationChannels = await ResolveUserNotificationChannelsAsync(
+            visibleRecipientUserIds,
+            UserNotificationTypes.InvoiceCreated,
+            [
+                NotificationChannels.InApp,
+                NotificationChannels.Toast,
+                NotificationChannels.WebPush,
+            ],
+            cancellationToken);
 
         foreach (var recipientUserId in visibleRecipientUserIds)
         {
@@ -1622,7 +1631,8 @@ public sealed class NotificationService : INotificationService
                     actorName = normalizedActorName
                 },
                 cancellationToken,
-                objectVisibilityValidated: true);
+                objectVisibilityValidated: true,
+                resolvedNotificationChannels: recipientNotificationChannels[recipientUserId]);
         }
     }
 
