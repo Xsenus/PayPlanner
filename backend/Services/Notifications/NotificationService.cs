@@ -659,13 +659,30 @@ public sealed class NotificationService : INotificationService
         var channels = ResolveTaskMessageChannels(task);
         var currentAssigneeUserId = task.AssigneeUserId;
         var allRecipients = ResolveTaskNotificationUserIds(task, actorUserId);
+        var timeZoneRecipientIds = allRecipients.ToHashSet();
+        if (currentAssigneeUserId.HasValue && currentAssigneeUserId.Value != actorUserId)
+        {
+            timeZoneRecipientIds.Add(currentAssigneeUserId.Value);
+        }
+
+        if (previousAssigneeUserId.HasValue
+            && previousAssigneeUserId.Value != actorUserId
+            && previousAssigneeUserId.Value != currentAssigneeUserId)
+        {
+            timeZoneRecipientIds.Add(previousAssigneeUserId.Value);
+        }
+
+        var recipientTimeZones = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
+            _context,
+            timeZoneRecipientIds,
+            cancellationToken);
         var eventStamp = DateTime.UtcNow.ToString("yyyyMMddHHmmssfff", CultureInfo.InvariantCulture);
         var deliveries = new List<NotificationDelivery>();
 
         if (currentAssigneeUserId.HasValue && currentAssigneeUserId.Value != actorUserId)
         {
             var userId = currentAssigneeUserId.Value;
-            var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(userId, cancellationToken);
+            var recipientTimeZone = recipientTimeZones[userId];
             var subject = $"Задача назначена вам: {task.Title}";
             var body = BuildTaskReassignedToNewAssigneeBody(task, changeLabels, actorName, previousAssigneeName, comment, recipientTimeZone);
             var message = await RenderTemplateAsync(
@@ -712,7 +729,7 @@ public sealed class NotificationService : INotificationService
             && previousAssigneeUserId.Value != currentAssigneeUserId)
         {
             var userId = previousAssigneeUserId.Value;
-            var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(userId, cancellationToken);
+            var recipientTimeZone = recipientTimeZones[userId];
             var recipientChangeLabels = FormatTaskChangeLabels(changeLabels, recipientTimeZone);
             var subject = $"Задача снята с вас: {task.Title}";
             var body = BuildTaskReassignedFromPreviousAssigneeBody(task, recipientChangeLabels, actorName, previousAssigneeName, comment, recipientTimeZone);
@@ -762,7 +779,7 @@ public sealed class NotificationService : INotificationService
             .ToList();
         foreach (var userId in remainingRecipients)
         {
-            var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(userId, cancellationToken);
+            var recipientTimeZone = recipientTimeZones[userId];
             var recipientChangeLabels = FormatTaskChangeLabels(changeLabels, recipientTimeZone);
             var subject = $"Изменен исполнитель задачи: {task.Title}";
             var body = BuildTaskChangedBody(task, recipientChangeLabels, actorName, comment, recipientTimeZone);

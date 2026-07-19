@@ -2014,6 +2014,122 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyTaskReassignedAsync_LoadsRecipientTimeZonesInSingleQuery()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var adminRole = new Role
+        {
+            Name = "admin",
+            Description = "Администратор",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Roles.Add(adminRole);
+        await db.SaveChangesAsync();
+        var actor = new User
+        {
+            Email = "task-reassign-timezone-query-actor@example.com",
+            FullName = "Автор",
+            PasswordHash = "hash",
+            RoleId = adminRole.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        var recipients = Enumerable.Range(1, 12)
+            .Select(index => new User
+            {
+                Email = $"task-reassign-timezone-query-recipient-{index}@example.com",
+                FullName = $"Сотрудник {index}",
+                PasswordHash = "hash",
+                RoleId = adminRole.Id,
+                IsActive = true,
+                IsApproved = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            })
+            .ToArray();
+        db.Users.AddRange(recipients.Append(actor));
+        await db.SaveChangesAsync();
+        db.UserSettings.AddRange(
+            new UserSetting
+            {
+                UserId = recipients[0].Id,
+                Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+                Value = "UTC",
+            },
+            new UserSetting
+            {
+                UserId = recipients[1].Id,
+                Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+                Value = "Asia/Novosibirsk",
+            });
+        var previousDueAt = new DateTime(2026, 7, 19, 11, 0, 0, DateTimeKind.Utc);
+        var dueAt = new DateTime(2026, 7, 19, 12, 0, 0, DateTimeKind.Utc);
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Дело",
+            Title = "Документы",
+            AuthorUserId = actor.Id,
+            AuthorName = actor.FullName,
+            AssigneeUserId = recipients[0].Id,
+            AssigneeName = recipients[0].FullName,
+            DueAt = dueAt,
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "inProgress",
+            Participants = recipients
+                .Skip(2)
+                .Select((user, index) => new TaskJournalParticipant
+                {
+                    UserId = user.Id,
+                    DisplayName = user.FullName,
+                    Role = "observer",
+                    SortOrder = index,
+                })
+                .ToList(),
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+        interceptor.ReaderCommands.Clear();
+
+        var deliveries = await service.NotifyTaskReassignedAsync(
+            task,
+            recipients[1].Id,
+            recipients[1].FullName,
+            [
+                $"Срок: {previousDueAt:dd.MM.yyyy HH:mm} -> {dueAt:dd.MM.yyyy HH:mm}",
+                $"Исполнитель: {recipients[1].FullName} -> {recipients[0].FullName}",
+            ],
+            actor.FullName,
+            actor.Id);
+
+        Assert.Empty(deliveries);
+        var notifications = await db.UserNotifications.AsNoTracking().ToListAsync();
+        Assert.Equal(12, notifications.Count);
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(CalendarTimeZoneHelper.UserTimeZoneSettingKey, StringComparison.Ordinal));
+        var currentAssigneeNotification = notifications.Single(
+            notification => notification.RecipientUserId == recipients[0].Id);
+        Assert.Equal(UserNotificationTypes.TaskAssigned, currentAssigneeNotification.Type);
+        Assert.Contains("Срок: 19.07.2026 12:00", currentAssigneeNotification.BodyPreview);
+        var previousAssigneeNotification = notifications.Single(
+            notification => notification.RecipientUserId == recipients[1].Id);
+        Assert.Equal(UserNotificationTypes.TaskChanged, previousAssigneeNotification.Type);
+        Assert.Contains(
+            "Срок: 19.07.2026 18:00 -> 19.07.2026 19:00",
+            previousAssigneeNotification.BodyPreview);
+        Assert.All(
+            recipients.Skip(2),
+            recipient => Assert.Equal(
+                UserNotificationTypes.TaskChanged,
+                notifications.Single(notification => notification.RecipientUserId == recipient.Id).Type));
+    }
+
+    [Fact]
     public async Task NotifyTaskAssignedAsync_PublishesRealtimeNotificationForAssignee()
     {
         await using var db = await CreateContextAsync();
