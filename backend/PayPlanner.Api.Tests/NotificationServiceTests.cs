@@ -3645,7 +3645,95 @@ public class NotificationServiceTests
         Assert.Equal(
             recipients.Select(user => user.Id).Order(),
             notifications.Select(notification => notification.RecipientUserId).Order());
-        Assert.Equal(12, interceptor.ReaderCommands.Count(command =>
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("SELECT EXISTS", StringComparison.Ordinal)
+            && command.Contains("FROM \"Payments\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task NotifyPaymentAssignedAsync_DoesNotShareVisibilityAcrossDifferentScopes()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var adminRole = new Role
+        {
+            Name = "admin",
+            Description = "Администратор",
+            CreatedAt = DateTime.UtcNow,
+        };
+        var ownRole = new Role
+        {
+            Name = "payment-own-viewer",
+            Description = "Платежи только ответственного",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Roles.AddRange(adminRole, ownRole);
+        await db.SaveChangesAsync();
+        db.RolePermissions.Add(new RolePermission
+        {
+            RoleId = ownRole.Id,
+            Section = RolePermissionCatalog.Payments,
+            CanView = true,
+            ViewScope = DataVisibilityScope.Own,
+        });
+        var actor = new User
+        {
+            Email = "payment-scope-actor@example.com",
+            FullName = "Автор платежа с разными областями",
+            PasswordHash = "hash",
+            RoleId = adminRole.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        var owner = new User
+        {
+            Email = "payment-scope-owner@example.com",
+            FullName = "Ответственный за платеж",
+            PasswordHash = "hash",
+            RoleId = ownRole.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        var other = new User
+        {
+            Email = "payment-scope-other@example.com",
+            FullName = "Другой сотрудник",
+            PasswordHash = "hash",
+            RoleId = ownRole.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        db.Users.AddRange(actor, owner, other);
+        await db.SaveChangesAsync();
+        var payment = new Payment
+        {
+            Description = "Платеж с разными областями видимости",
+            Date = new DateTime(2026, 7, 19),
+            Amount = 12000m,
+            Status = PaymentStatus.Pending,
+            Type = PaymentType.Income,
+            Responsibles = { new PaymentResponsible { UserId = owner.Id } },
+        };
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+        interceptor.ReaderCommands.Clear();
+
+        await service.NotifyPaymentAssignedAsync(
+            payment,
+            actor.FullName,
+            actor.Id,
+            [owner.Id, other.Id]);
+
+        var notification = await db.UserNotifications.AsNoTracking().SingleAsync();
+        Assert.Equal(owner.Id, notification.RecipientUserId);
+        Assert.Equal(2, interceptor.ReaderCommands.Count(command =>
             command.Contains("SELECT EXISTS", StringComparison.Ordinal)
             && command.Contains("FROM \"Payments\"", StringComparison.Ordinal)));
     }
@@ -3835,9 +3923,9 @@ public class NotificationServiceTests
         Assert.Equal(
             recipients.Select(user => user.Id).Order(),
             notifications.Select(notification => notification.RecipientUserId).Order());
-        Assert.Equal(12, interceptor.ReaderCommands.Count(command =>
+        Assert.Single(interceptor.ReaderCommands, command =>
             command.Contains("SELECT EXISTS", StringComparison.Ordinal)
-            && command.Contains("FROM \"Payments\"", StringComparison.Ordinal)));
+            && command.Contains("FROM \"Payments\"", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -4020,9 +4108,9 @@ public class NotificationServiceTests
         Assert.Equal(
             recipients.Select(user => user.Id).Order(),
             notifications.Select(notification => notification.RecipientUserId).Order());
-        Assert.Equal(12, interceptor.ReaderCommands.Count(command =>
+        Assert.Single(interceptor.ReaderCommands, command =>
             command.Contains("SELECT EXISTS", StringComparison.Ordinal)
-            && command.Contains("FROM \"Acts\"", StringComparison.Ordinal)));
+            && command.Contains("FROM \"Acts\"", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -4290,9 +4378,9 @@ public class NotificationServiceTests
         Assert.Equal(
             recipients.Select(user => user.Id).Order(),
             notifications.Select(notification => notification.RecipientUserId).Order());
-        Assert.Equal(12, interceptor.ReaderCommands.Count(command =>
+        Assert.Single(interceptor.ReaderCommands, command =>
             command.Contains("SELECT EXISTS", StringComparison.Ordinal)
-            && command.Contains("FROM \"Contracts\"", StringComparison.Ordinal)));
+            && command.Contains("FROM \"Contracts\"", StringComparison.Ordinal));
     }
 
     [Fact]

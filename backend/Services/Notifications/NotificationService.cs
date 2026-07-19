@@ -4975,7 +4975,8 @@ public sealed class NotificationService : INotificationService
             return Array.Empty<int>();
         }
 
-        var visibleUserIds = new List<int>(candidateUserIds.Length);
+        var recipientVisibilityKeys = new List<(int UserId, string VisibilityKey)>(candidateUserIds.Length);
+        var visibilityByKey = new Dictionary<string, DataVisibilityAccess>(StringComparer.Ordinal);
         foreach (var userId in candidateUserIds)
         {
             var principal = CreateNotificationRecipientPrincipal(userId);
@@ -4985,14 +4986,30 @@ public sealed class NotificationService : INotificationService
                 continue;
             }
 
+            var visibilityKey = BuildFinancialVisibilityGroupKey(access);
+            recipientVisibilityKeys.Add((userId, visibilityKey));
+            visibilityByKey.TryAdd(visibilityKey, access);
+        }
+
+        var visibleKeys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (visibilityKey, access) in visibilityByKey)
+        {
             if (await canSeeObjectAsync(access, cancellationToken))
             {
-                visibleUserIds.Add(userId);
+                visibleKeys.Add(visibilityKey);
             }
         }
 
-        return visibleUserIds;
+        return recipientVisibilityKeys
+            .Where(item => visibleKeys.Contains(item.VisibilityKey))
+            .Select(item => item.UserId)
+            .ToArray();
     }
+
+    private static string BuildFinancialVisibilityGroupKey(DataVisibilityAccess access)
+        => access.SeesAll
+            ? "all"
+            : $"restricted:{string.Join(',', access.VisibleUserIds.Distinct().Order())}";
 
     private static ClaimsPrincipal CreateNotificationRecipientPrincipal(int userId)
         => new(new ClaimsIdentity(
