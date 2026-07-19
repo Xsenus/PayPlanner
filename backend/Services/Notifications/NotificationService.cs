@@ -1532,6 +1532,15 @@ public sealed class NotificationService : INotificationService
             (payment.PaymentStatusId ?? 0).ToString(CultureInfo.InvariantCulture),
             string.Join(";", normalizedChanges)
         ]));
+        var recipientNotificationChannels = await ResolveUserNotificationChannelsAsync(
+            visibleRecipientUserIds,
+            UserNotificationTypes.PaymentChanged,
+            [
+                NotificationChannels.InApp,
+                NotificationChannels.Toast,
+                NotificationChannels.WebPush,
+            ],
+            cancellationToken);
 
         foreach (var recipientUserId in visibleRecipientUserIds)
         {
@@ -1555,7 +1564,8 @@ public sealed class NotificationService : INotificationService
                     changeText
                 },
                 cancellationToken,
-                objectVisibilityValidated: true);
+                objectVisibilityValidated: true,
+                resolvedNotificationChannels: recipientNotificationChannels[recipientUserId]);
         }
     }
 
