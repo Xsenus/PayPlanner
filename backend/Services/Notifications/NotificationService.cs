@@ -3418,13 +3418,18 @@ public sealed class NotificationService : INotificationService
                 NotificationChannels.WebPush,
             ]),
             cancellationToken);
+        var templateDefinition = NotificationTemplateCatalog.Find(NotificationTemplateKeys.TaskComment);
+        var templateStorage = templateDefinition is null
+            ? new NotificationTemplateStorage()
+            : await LoadTemplateStorageAsync(cancellationToken);
         var deliveries = new List<NotificationDelivery>();
         foreach (var userId in recipients)
         {
             var recipientTimeZone = recipientTimeZones[userId];
             var taskCommentBody = BuildTaskCommentBody(task, comment, recipientTimeZone);
-            var message = await RenderTemplateAsync(
-                NotificationTemplateKeys.TaskComment,
+            var message = RenderTemplate(
+                templateDefinition,
+                templateStorage,
                 taskCommentSubject,
                 taskCommentBody,
                 NotificationTemplateCatalog.MergeValues(
@@ -3434,8 +3439,8 @@ public sealed class NotificationService : INotificationService
                         ["comment.authorName"] = comment.AuthorName,
                         ["comment.text"] = comment.Text,
                     }),
-                purpose: NotificationPurposes.TaskReminder,
-                cancellationToken: cancellationToken);
+                isSensitive: false,
+                purpose: NotificationPurposes.TaskReminder);
 
             if (HasTaskChannel(task, NotificationChannels.InApp))
             {
