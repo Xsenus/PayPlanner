@@ -6158,6 +6158,111 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyContractCreatedAsync_LoadsRecipientNotificationSettingsInSingleQuery()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var adminRole = new Role
+        {
+            Name = "admin",
+            Description = "Администратор",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Roles.Add(adminRole);
+        await db.SaveChangesAsync();
+        var actor = new User
+        {
+            Email = "contract-query-actor@example.com",
+            FullName = "Автор договора",
+            PasswordHash = "hash",
+            RoleId = adminRole.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        var recipients = Enumerable.Range(1, 12)
+            .Select(index => new User
+            {
+                Email = $"contract-query-recipient-{index}@example.com",
+                FullName = $"Получатель договора {index}",
+                PasswordHash = "hash",
+                RoleId = adminRole.Id,
+                IsActive = true,
+                IsApproved = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            })
+            .ToArray();
+        db.Users.AddRange(recipients.Append(actor));
+        await db.SaveChangesAsync();
+        var client = new Client
+        {
+            Name = "Клиент группового договора",
+            IsActive = true,
+            ResponsibleUserId = recipients[0].Id,
+        };
+        var contract = new Contract
+        {
+            Number = "D-QUERY-12",
+            Title = "Договор для нескольких получателей",
+            Date = new DateTime(2026, 7, 20),
+            StartDate = new DateTime(2026, 7, 21),
+            ValidUntil = new DateTime(2026, 12, 31),
+            Amount = 120000m,
+            Status = ContractStatus.Draft,
+            ClientContracts = { new ClientContract { Client = client } },
+        };
+        db.Contracts.Add(contract);
+        await db.SaveChangesAsync();
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            realtime,
+            webPush);
+        interceptor.ReaderCommands.Clear();
+
+        await service.NotifyContractCreatedAsync(
+            contract,
+            actor.FullName,
+            actor.Id,
+            recipients.Select(user => user.Id)
+                .Append(recipients[0].Id)
+                .Append(actor.Id)
+                .ToArray());
+
+        var notifications = await db.UserNotifications.AsNoTracking().ToListAsync();
+        Assert.Equal(12, notifications.Count);
+        Assert.Equal(12, realtime.Notifications.Count);
+        Assert.Equal(12, webPush.Notifications.Count);
+        Assert.DoesNotContain(notifications, notification => notification.RecipientUserId == actor.Id);
+        Assert.Equal(12, notifications.Select(notification => notification.RecipientUserId).Distinct().Count());
+        Assert.All(notifications, notification =>
+        {
+            Assert.Equal(UserNotificationTypes.ContractCreated, notification.Type);
+            Assert.Equal("blue", notification.Tone);
+            Assert.Equal("contract", notification.ObjectType);
+            Assert.Equal(contract.Id, notification.ObjectId);
+            Assert.Contains("D-QUERY-12", notification.BodyPreview);
+        });
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("SELECT EXISTS", StringComparison.Ordinal)
+            && command.Contains("FROM \"Contracts\"", StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(UserNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(UserNotificationDoNotDisturbSettings.SettingKey, StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"SystemSettings\"", StringComparison.Ordinal)
+            && command.Contains(RoleNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task NotifyContractChangedAsync_CreatesContractNotificationAndDeduplicatesByState()
     {
         await using var db = await CreateContextAsync();
