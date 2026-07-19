@@ -2834,20 +2834,25 @@ public sealed class NotificationService : INotificationService
                 NotificationChannels.WebPush,
             ]),
             cancellationToken);
+        var templateDefinition = NotificationTemplateCatalog.Find(NotificationTemplateKeys.TaskApprovalRequested);
+        var templateStorage = templateDefinition is null
+            ? new NotificationTemplateStorage()
+            : await LoadTemplateStorageAsync(cancellationToken);
         var deliveries = new List<NotificationDelivery>();
         foreach (var userId in recipients)
         {
             var recipientTimeZone = recipientTimeZones[userId];
             var approvalBody = BuildTaskApprovalRequestedBody(task, actorName, currentApprover, recipientTimeZone);
-            var message = await RenderTemplateAsync(
-                NotificationTemplateKeys.TaskApprovalRequested,
+            var message = RenderTemplate(
+                templateDefinition,
+                templateStorage,
                 approvalSubject,
                 approvalBody,
                 NotificationTemplateCatalog.MergeValues(
                     BuildTaskTemplateValues(task, recipientTimeZone, actorName),
                     new Dictionary<string, string?> { ["approval.approverName"] = currentApprover?.User?.FullName ?? currentApprover?.User?.Email ?? "не указан" }),
-                purpose: NotificationPurposes.TaskReminder,
-                cancellationToken: cancellationToken);
+                isSensitive: false,
+                purpose: NotificationPurposes.TaskReminder);
 
             if (HasTaskChannel(task, NotificationChannels.InApp))
             {
