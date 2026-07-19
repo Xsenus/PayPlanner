@@ -2823,10 +2823,14 @@ public sealed class NotificationService : INotificationService
 
         var subject = $"Просрочено согласование: {task.Title}";
         var channels = ResolveTaskMessageChannels(task);
+        var recipientTimeZones = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
+            _context,
+            recipients,
+            cancellationToken);
         var deliveries = new List<NotificationDelivery>();
         foreach (var userId in recipients)
         {
-            var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(userId, cancellationToken);
+            var recipientTimeZone = recipientTimeZones[userId];
             var localDate = CalendarTimeZoneHelper.ToUserLocal(nowUtc, recipientTimeZone).Date;
             var eventKey = $"task:{task.Id}:approval-overdue:{localDate:yyyyMMdd}";
             var approvalBody = BuildTaskApprovalOverdueBody(task, currentApprover, recipientTimeZone);

@@ -6324,6 +6324,149 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyTaskApprovalOverdueAsync_LoadsRecipientTimeZonesInSingleQuery()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var adminRole = new Role
+        {
+            Name = "admin",
+            Description = "Администратор",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Roles.Add(adminRole);
+        await db.SaveChangesAsync();
+        var recipients = Enumerable.Range(1, 12)
+            .Select(index => new User
+            {
+                Email = $"approval-overdue-timezone-query-recipient-{index}@example.com",
+                FullName = $"Получатель просрочки {index}",
+                PasswordHash = "hash",
+                RoleId = adminRole.Id,
+                IsActive = true,
+                IsApproved = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            })
+            .ToArray();
+        db.Users.AddRange(recipients);
+        await db.SaveChangesAsync();
+        db.UserSettings.AddRange(
+            new UserSetting
+            {
+                UserId = recipients[0].Id,
+                Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+                Value = "UTC",
+            },
+            new UserSetting
+            {
+                UserId = recipients[1].Id,
+                Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+                Value = "Asia/Novosibirsk",
+            });
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "notifications.templates.v1",
+            Value = JsonSerializer.Serialize(new
+            {
+                templates = new[]
+                {
+                    new
+                    {
+                        key = NotificationTemplateKeys.TaskApprovalOverdue,
+                        isEnabled = true,
+                        subject = "Просрочено согласование: {{task.title}}",
+                        body = "Срок задачи: {{task.dueAt}}\nСрок согласования: {{approval.dueAt}}\nСогласующий: {{approval.approverName}}",
+                    },
+                },
+            }, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        var nowUtc = new DateTime(2026, 7, 19, 20, 30, 0, DateTimeKind.Utc);
+        var approvalDueAt = new DateTime(2026, 7, 19, 10, 0, 0, DateTimeKind.Utc);
+        var dueAt = new DateTime(2026, 7, 23, 12, 0, 0, DateTimeKind.Utc);
+        var currentApprover = new TaskJournalParticipant
+        {
+            UserId = recipients[11].Id,
+            DisplayName = recipients[11].FullName,
+            Role = "approver",
+            ApprovalStatus = "pending",
+            SortOrder = 11,
+        };
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Массовая задача",
+            Title = "Просроченное массовое согласование",
+            AuthorUserId = recipients[0].Id,
+            AuthorName = recipients[0].FullName,
+            AssigneeUserId = recipients[1].Id,
+            AssigneeName = recipients[1].FullName,
+            DueAt = dueAt,
+            ApprovalDueAt = approvalDueAt,
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "onApproval",
+            Participants = recipients
+                .Skip(2)
+                .Take(9)
+                .Select((user, index) => new TaskJournalParticipant
+                {
+                    UserId = user.Id,
+                    DisplayName = user.FullName,
+                    Role = "observer",
+                    SortOrder = index,
+                })
+                .Append(new TaskJournalParticipant
+                {
+                    UserId = recipients[1].Id,
+                    DisplayName = recipients[1].FullName,
+                    Role = "observer",
+                    SortOrder = 9,
+                })
+                .Append(currentApprover)
+                .ToList(),
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+        interceptor.ReaderCommands.Clear();
+
+        var firstDeliveries = await service.NotifyTaskApprovalOverdueAsync(task, nowUtc);
+
+        Assert.Empty(firstDeliveries);
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(CalendarTimeZoneHelper.UserTimeZoneSettingKey, StringComparison.Ordinal));
+        var notifications = await db.UserNotifications.AsNoTracking().ToListAsync();
+        Assert.Equal(12, notifications.Count);
+        var utcNotification = notifications.Single(
+            notification => notification.RecipientUserId == recipients[0].Id);
+        Assert.Contains("Срок задачи: 23.07.2026 12:00", utcNotification.BodyPreview);
+        Assert.Contains("Срок согласования: 19.07.2026 10:00", utcNotification.BodyPreview);
+        Assert.EndsWith(":20260719", utcNotification.EventKey, StringComparison.Ordinal);
+        var novosibirskNotification = notifications.Single(
+            notification => notification.RecipientUserId == recipients[1].Id);
+        Assert.Contains("Срок задачи: 23.07.2026 19:00", novosibirskNotification.BodyPreview);
+        Assert.Contains("Срок согласования: 19.07.2026 17:00", novosibirskNotification.BodyPreview);
+        Assert.EndsWith(":20260720", novosibirskNotification.EventKey, StringComparison.Ordinal);
+        Assert.All(notifications, notification =>
+        {
+            Assert.Equal(UserNotificationTypes.TaskApprovalOverdue, notification.Type);
+            Assert.Contains($"\"currentApproverId\":{currentApprover.Id}", notification.MetadataJson);
+        });
+        interceptor.ReaderCommands.Clear();
+
+        var repeatedDeliveries = await service.NotifyTaskApprovalOverdueAsync(task, nowUtc.AddMinutes(5));
+
+        Assert.Empty(repeatedDeliveries);
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(CalendarTimeZoneHelper.UserTimeZoneSettingKey, StringComparison.Ordinal));
+        Assert.Equal(12, await db.UserNotifications.CountAsync());
+    }
+
+    [Fact]
     public async Task SendToUserAsync_SendsThroughAllMatchingSendersForPurpose()
     {
         await using var db = await CreateContextAsync();
