@@ -1796,15 +1796,12 @@ public class SystemJobsControllerTests
         Assert.False(state.Readiness.ReadyToConnect);
         Assert.Equal(3, state.CandidateCount);
         Assert.Equal(now.AddDays(2), state.OldestCandidateAt);
-        Assert.Equal(4, interceptor.Commands.Count);
-        var taskStatisticsCommand = Assert.Single(interceptor.Commands, command =>
-            command.Contains("TaskJournalItems", StringComparison.Ordinal));
-        Assert.Contains("COUNT", taskStatisticsCommand, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("MIN", taskStatisticsCommand, StringComparison.OrdinalIgnoreCase);
-        var caseStatisticsCommand = Assert.Single(interceptor.Commands, command =>
+        Assert.Equal(3, interceptor.Commands.Count);
+        var candidateStatisticsCommand = Assert.Single(interceptor.Commands, command =>
+            command.Contains("TaskJournalItems", StringComparison.Ordinal) &&
             command.Contains("ClientCases", StringComparison.Ordinal));
-        Assert.Contains("COUNT", caseStatisticsCommand, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("MIN", caseStatisticsCommand, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("COUNT", candidateStatisticsCommand, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("MIN", candidateStatisticsCommand, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(2, interceptor.Commands.Count(command =>
             command.Contains("SystemSettings", StringComparison.Ordinal)));
 
@@ -1817,7 +1814,10 @@ public class SystemJobsControllerTests
 
         Assert.Equal(0, emptyState.CandidateCount);
         Assert.Null(emptyState.OldestCandidateAt);
-        Assert.Equal(4, interceptor.Commands.Count);
+        Assert.Equal(3, interceptor.Commands.Count);
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("TaskJournalItems", StringComparison.Ordinal) &&
+            command.Contains("ClientCases", StringComparison.Ordinal));
 
         var result = await service.RunOnceAsync(CancellationToken.None);
 

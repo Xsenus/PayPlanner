@@ -184,7 +184,7 @@ public sealed class CalendarSyncSchedulerService : BackgroundService
         var context = scope.ServiceProvider.GetRequiredService<PaymentContext>();
         var (fromUtc, toUtc) = BuildWindow(settings.LookAheadDays);
 
-        var taskStatistics = await context.TaskJournalItems
+        var taskStatistics = context.TaskJournalItems
             .AsNoTracking()
             .Where(item =>
                 item.DueAt >= fromUtc &&
@@ -194,12 +194,11 @@ public sealed class CalendarSyncSchedulerService : BackgroundService
             .GroupBy(_ => 1)
             .Select(group => new
             {
-                Count = group.Count(),
+                Count = (int?)group.Count(),
                 OldestAt = group.Min(item => (DateTime?)item.DueAt),
-            })
-            .SingleOrDefaultAsync(cancellationToken);
+            });
 
-        var caseStatistics = await context.ClientCases
+        var caseStatistics = context.ClientCases
             .AsNoTracking()
             .Where(item =>
                 (item.DueDate.HasValue && item.DueDate.Value >= fromUtc && item.DueDate.Value <= toUtc) ||
@@ -207,29 +206,43 @@ public sealed class CalendarSyncSchedulerService : BackgroundService
             .GroupBy(_ => 1)
             .Select(group => new
             {
-                DeadlineCount = group.Count(item =>
+                DeadlineCount = (int?)group.Count(item =>
                     item.DueDate.HasValue && item.DueDate.Value >= fromUtc && item.DueDate.Value <= toUtc),
                 OldestDeadlineAt = group
                     .Where(item => item.DueDate.HasValue && item.DueDate.Value >= fromUtc && item.DueDate.Value <= toUtc)
                     .Min(item => item.DueDate),
-                HearingCount = group.Count(item =>
+                HearingCount = (int?)group.Count(item =>
                     item.NextHearingAt.HasValue && item.NextHearingAt.Value >= fromUtc && item.NextHearingAt.Value <= toUtc),
                 OldestHearingAt = group
                     .Where(item => item.NextHearingAt.HasValue && item.NextHearingAt.Value >= fromUtc && item.NextHearingAt.Value <= toUtc)
                     .Min(item => item.NextHearingAt),
-            })
-            .SingleOrDefaultAsync(cancellationToken);
+            });
+        var singleton = context.Database.SqlQuery<int>($"SELECT 1 AS \"Value\"");
+        var statistics = await (
+                from _ in singleton
+                from tasks in taskStatistics.Take(1).DefaultIfEmpty()
+                from cases in caseStatistics.Take(1).DefaultIfEmpty()
+                select new CalendarSyncCombinedCandidateStatistics
+                {
+                    TaskCount = tasks == null ? 0 : tasks.Count ?? 0,
+                    OldestTaskAt = tasks == null ? null : tasks.OldestAt,
+                    DeadlineCount = cases == null ? 0 : cases.DeadlineCount ?? 0,
+                    OldestDeadlineAt = cases == null ? null : cases.OldestDeadlineAt,
+                    HearingCount = cases == null ? 0 : cases.HearingCount ?? 0,
+                    OldestHearingAt = cases == null ? null : cases.OldestHearingAt,
+                })
+            .SingleAsync(cancellationToken);
 
         var candidateCount = Math.Min(
-            (taskStatistics?.Count ?? 0) +
-            (caseStatistics?.DeadlineCount ?? 0) +
-            (caseStatistics?.HearingCount ?? 0),
+            statistics.TaskCount +
+            statistics.DeadlineCount +
+            statistics.HearingCount,
             settings.BatchSize);
         var oldestAt = new[]
         {
-            taskStatistics?.OldestAt,
-            caseStatistics?.OldestDeadlineAt,
-            caseStatistics?.OldestHearingAt,
+            statistics.OldestTaskAt,
+            statistics.OldestDeadlineAt,
+            statistics.OldestHearingAt,
         }
             .Where(item => item.HasValue)
             .Min();
@@ -334,6 +347,16 @@ public sealed class CalendarSyncSchedulerService : BackgroundService
     private readonly record struct CalendarSyncCandidateStatistics(
         int Count,
         DateTime? OldestAt);
+
+    private sealed class CalendarSyncCombinedCandidateStatistics
+    {
+        public int TaskCount { get; init; }
+        public DateTime? OldestTaskAt { get; init; }
+        public int DeadlineCount { get; init; }
+        public DateTime? OldestDeadlineAt { get; init; }
+        public int HearingCount { get; init; }
+        public DateTime? OldestHearingAt { get; init; }
+    }
 }
 
 public sealed record CalendarSyncSchedulerResult(
