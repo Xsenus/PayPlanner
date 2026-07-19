@@ -2855,10 +2855,14 @@ public sealed class NotificationService : INotificationService
             ? $"task:{task.Id}:due-at:{DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc):yyyyMMddHHmm}:{actorUserId}"
             : $"task:{task.Id}:changed:{DateTime.UtcNow:yyyyMMddHHmmssfff}:{actorUserId}";
         var tone = hasDueAtChange ? ResolveDueAtChangeTone(task) : "blue";
+        var recipientTimeZones = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
+            _context,
+            recipients,
+            cancellationToken);
         var deliveries = new List<NotificationDelivery>();
         foreach (var userId in recipients)
         {
-            var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(userId, cancellationToken);
+            var recipientTimeZone = recipientTimeZones[userId];
             var recipientChangeLabels = FormatTaskChangeLabels(changeLabels, recipientTimeZone);
             var taskChangedBody = BuildTaskChangedBody(task, recipientChangeLabels, actorName, comment, recipientTimeZone);
             var message = await RenderTemplateAsync(
