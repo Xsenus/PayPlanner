@@ -604,6 +604,15 @@ public sealed class NotificationService : INotificationService
             _context,
             recipients,
             cancellationToken);
+        var recipientNotificationChannels = await ResolveUserNotificationChannelsAsync(
+            recipients,
+            UserNotificationTypes.TaskAssigned,
+            channels.Concat([
+                NotificationChannels.InApp,
+                NotificationChannels.Toast,
+                NotificationChannels.WebPush,
+            ]),
+            cancellationToken);
         var deliveries = new List<NotificationDelivery>();
         foreach (var userId in recipients)
         {
@@ -629,14 +638,13 @@ public sealed class NotificationService : INotificationService
                     tone,
                     task,
                     new { actorUserId, actorName, task.AssigneeUserId, task.AssigneeName, isUrgent },
-                    cancellationToken);
+                    cancellationToken,
+                    recipientNotificationChannels[userId]);
             }
 
-            var enabledChannels = await ResolveUserNotificationChannelsAsync(
-                userId,
-                UserNotificationTypes.TaskAssigned,
-                channels,
-                cancellationToken);
+            var enabledChannels = channels
+                .Where(recipientNotificationChannels[userId].Contains)
+                .ToList();
             if (enabledChannels.Count > 0)
             {
                 deliveries.AddRange(await SendToUserAsync(userId, message, enabledChannels, eventKey, cancellationToken));
@@ -3295,7 +3303,8 @@ public sealed class NotificationService : INotificationService
         string tone,
         TaskJournalItem task,
         object? metadata,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlySet<string>? resolvedNotificationChannels = null)
         => CreateUserNotificationAsync(
             new NotificationEventEnvelope(
                 recipientUserId,
@@ -3309,7 +3318,8 @@ public sealed class NotificationService : INotificationService
                 tone,
                 metadata,
                 task),
-            cancellationToken);
+            cancellationToken,
+            resolvedNotificationChannels: resolvedNotificationChannels);
 
     private Task<bool> CreateUserNotificationAsync(
         int recipientUserId,
@@ -3344,7 +3354,8 @@ public sealed class NotificationService : INotificationService
     private async Task<bool> CreateUserNotificationAsync(
         NotificationEventEnvelope notificationEvent,
         CancellationToken cancellationToken,
-        bool objectVisibilityValidated = false)
+        bool objectVisibilityValidated = false,
+        IReadOnlySet<string>? resolvedNotificationChannels = null)
     {
         if (notificationEvent.RecipientUserId <= 0 || string.IsNullOrWhiteSpace(notificationEvent.EventKey))
         {
@@ -3357,7 +3368,14 @@ public sealed class NotificationService : INotificationService
             return false;
         }
 
-        if (!await IsUserNotificationChannelEnabledAsync(notificationEvent.RecipientUserId, type, NotificationChannels.InApp, cancellationToken))
+        var inAppEnabled = resolvedNotificationChannels is not null
+            ? resolvedNotificationChannels.Contains(NotificationChannels.InApp)
+            : await IsUserNotificationChannelEnabledAsync(
+                notificationEvent.RecipientUserId,
+                type,
+                NotificationChannels.InApp,
+                cancellationToken);
+        if (!inAppEnabled)
         {
             return false;
         }
@@ -3406,11 +3424,24 @@ public sealed class NotificationService : INotificationService
         };
         _context.UserNotifications.Add(notification);
         await _context.SaveChangesAsync(cancellationToken);
-        var toastEnabled = await IsUserNotificationChannelEnabledAsync(notificationEvent.RecipientUserId, type, NotificationChannels.Toast, cancellationToken);
+        var toastEnabled = resolvedNotificationChannels is not null
+            ? resolvedNotificationChannels.Contains(NotificationChannels.Toast)
+            : await IsUserNotificationChannelEnabledAsync(
+                notificationEvent.RecipientUserId,
+                type,
+                NotificationChannels.Toast,
+                cancellationToken);
         await _realtimePublisher.PublishUserNotificationAsync(notification, toastEnabled, cancellationToken);
 
+        var webPushEnabled = resolvedNotificationChannels is not null
+            ? resolvedNotificationChannels.Contains(NotificationChannels.WebPush)
+            : await IsUserNotificationChannelEnabledAsync(
+                notificationEvent.RecipientUserId,
+                type,
+                NotificationChannels.WebPush,
+                cancellationToken);
         if (_webPushNotificationService is not null
-            && await IsUserNotificationChannelEnabledAsync(notificationEvent.RecipientUserId, type, NotificationChannels.WebPush, cancellationToken))
+            && webPushEnabled)
         {
             await _webPushNotificationService.SendUserNotificationAsync(notification, cancellationToken);
         }
@@ -3607,6 +3638,127 @@ public sealed class NotificationService : INotificationService
                 nowUtc,
                 timeZone))
             .ToList();
+    }
+
+    private async Task<IReadOnlyDictionary<int, IReadOnlySet<string>>> ResolveUserNotificationChannelsAsync(
+        IEnumerable<int> recipientUserIds,
+        string type,
+        IEnumerable<string> channels,
+        CancellationToken cancellationToken)
+    {
+        var userIds = recipientUserIds
+            .Where(userId => userId > 0)
+            .Distinct()
+            .ToList();
+        if (userIds.Count == 0)
+        {
+            return new Dictionary<int, IReadOnlySet<string>>();
+        }
+
+        var normalizedChannels = channels
+            .Select(channel => NotificationChannels.UserPreferences.FirstOrDefault(candidate =>
+                string.Equals(candidate, channel?.Trim(), StringComparison.OrdinalIgnoreCase)))
+            .Where(channel => channel is not null)
+            .Cast<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (normalizedChannels.Count == 0)
+        {
+            return userIds.ToDictionary(
+                userId => userId,
+                _ => (IReadOnlySet<string>)new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        }
+
+        var settingRows = await _context.UserSettings
+            .AsNoTracking()
+            .Where(item => userIds.Contains(item.UserId)
+                           && (item.Key == UserNotificationPreferenceSettings.SettingKey
+                               || item.Key == UserNotificationDoNotDisturbSettings.SettingKey))
+            .Select(item => new { item.UserId, item.Key, item.Value })
+            .ToListAsync(cancellationToken);
+        var settingsByUser = settingRows
+            .GroupBy(item => item.UserId)
+            .ToDictionary(
+                group => group.Key,
+                group => group.ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal));
+
+        var preferencesByUser = new Dictionary<int, UserNotificationPreferenceSnapshot>();
+        var usersWithoutPersonalPreferences = new List<int>();
+        foreach (var userId in userIds)
+        {
+            if (settingsByUser.TryGetValue(userId, out var userSettings)
+                && userSettings.TryGetValue(UserNotificationPreferenceSettings.SettingKey, out var rawPreferences))
+            {
+                preferencesByUser[userId] = UserNotificationPreferenceSettings.Parse(rawPreferences);
+            }
+            else
+            {
+                usersWithoutPersonalPreferences.Add(userId);
+            }
+        }
+
+        if (usersWithoutPersonalPreferences.Count > 0)
+        {
+            var rolesByUser = await _context.Users
+                .AsNoTracking()
+                .Where(user => usersWithoutPersonalPreferences.Contains(user.Id))
+                .Select(user => new
+                {
+                    user.Id,
+                    user.RoleId,
+                    RoleName = user.Role != null ? user.Role.Name : string.Empty,
+                })
+                .ToDictionaryAsync(user => user.Id, cancellationToken);
+            var roleSetting = rolesByUser.Values.Any(role => role.RoleId > 0)
+                ? await _context.SystemSettings
+                    .AsNoTracking()
+                    .Where(item => item.Key == RoleNotificationPreferenceSettings.SettingKey)
+                    .Select(item => item.Value)
+                    .FirstOrDefaultAsync(cancellationToken)
+                : null;
+
+            foreach (var userId in usersWithoutPersonalPreferences)
+            {
+                if (!rolesByUser.TryGetValue(userId, out var role) || role.RoleId <= 0)
+                {
+                    preferencesByUser[userId] = UserNotificationPreferenceSettings.Empty;
+                    continue;
+                }
+
+                preferencesByUser[userId] = RoleNotificationPreferenceSettings.ParseForRole(roleSetting, role.RoleId)
+                    ?? RoleNotificationPreferenceDefaults.Resolve(role.RoleName).Preferences;
+            }
+        }
+
+        var doNotDisturbByUser = userIds.ToDictionary(
+            userId => userId,
+            userId => settingsByUser.TryGetValue(userId, out var userSettings)
+                      && userSettings.TryGetValue(UserNotificationDoNotDisturbSettings.SettingKey, out var rawDoNotDisturb)
+                ? UserNotificationDoNotDisturbSettings.Parse(rawDoNotDisturb)
+                : UserNotificationDoNotDisturbSettings.Disabled);
+        var usersWithDoNotDisturb = doNotDisturbByUser
+            .Where(item => item.Value.Enabled)
+            .Select(item => item.Key)
+            .ToList();
+        var timeZonesByUser = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
+            _context,
+            usersWithDoNotDisturb,
+            cancellationToken);
+        var typeDefinition = UserNotificationTypes.Find(type);
+        var nowUtc = DateTime.UtcNow;
+
+        return userIds.ToDictionary(
+            userId => userId,
+            userId => (IReadOnlySet<string>)normalizedChannels
+                .Where(channel => IsChannelAvailableForNotificationType(type, channel))
+                .Where(channel => UserNotificationPreferenceSettings.IsChannelEnabled(preferencesByUser[userId], type, channel))
+                .Where(channel => !UserNotificationDoNotDisturbSettings.IsChannelMuted(
+                    doNotDisturbByUser[userId],
+                    typeDefinition,
+                    channel,
+                    nowUtc,
+                    timeZonesByUser.GetValueOrDefault(userId, TimeZoneInfo.Utc)))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase));
     }
 
     private static bool IsChannelAvailableForNotificationType(string type, string channel)
