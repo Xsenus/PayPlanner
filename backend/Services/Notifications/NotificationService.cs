@@ -1848,7 +1848,8 @@ public sealed class NotificationService : INotificationService
                     validUntil = expirationDate,
                     daysLeft
                 },
-                cancellationToken);
+                cancellationToken,
+                objectVisibilityValidated: true);
         }
     }
 

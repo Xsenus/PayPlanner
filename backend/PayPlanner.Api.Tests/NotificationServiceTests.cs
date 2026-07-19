@@ -4239,6 +4239,105 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyContractExpiringAsync_ReusesVisibilityCheckForAllRecipients()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var adminRole = new Role
+        {
+            Name = "admin",
+            Description = "Администратор",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Roles.Add(adminRole);
+        await db.SaveChangesAsync();
+        var recipients = Enumerable.Range(1, 12)
+            .Select(index => new User
+            {
+                Email = $"contract-expiring-query-recipient-{index}@example.com",
+                FullName = $"Получатель напоминания о договоре {index}",
+                PasswordHash = "hash",
+                RoleId = adminRole.Id,
+                IsActive = true,
+                IsApproved = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            })
+            .ToArray();
+        db.Users.AddRange(recipients);
+        await db.SaveChangesAsync();
+        var contract = new Contract
+        {
+            Number = "D-EXPIRING-QUERY-12",
+            Title = "Договор с несколькими получателями напоминания",
+            Date = new DateTime(2026, 7, 19),
+            ValidUntil = new DateTime(2026, 7, 22),
+            Amount = 12000m,
+            Status = ContractStatus.Concluded,
+        };
+        db.Contracts.Add(contract);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+        interceptor.ReaderCommands.Clear();
+
+        await service.NotifyContractExpiringAsync(
+            contract,
+            3,
+            recipients.Select(user => user.Id).ToArray());
+
+        var notifications = await db.UserNotifications.AsNoTracking().ToListAsync();
+        Assert.Equal(12, notifications.Count);
+        Assert.Equal(
+            recipients.Select(user => user.Id).Order(),
+            notifications.Select(notification => notification.RecipientUserId).Order());
+        Assert.Equal(12, interceptor.ReaderCommands.Count(command =>
+            command.Contains("SELECT EXISTS", StringComparison.Ordinal)
+            && command.Contains("FROM \"Contracts\"", StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public async Task NotifyContractExpiringAsync_SkipsRecipientWithoutContractsAccess()
+    {
+        await using var db = await CreateContextAsync();
+        var deniedRecipient = await CreateUserWithoutSectionAccessAsync(
+            db,
+            "contract-expiring-denied-recipient@example.com",
+            RolePermissionCatalog.Contracts);
+        var client = new Client
+        {
+            Name = "Клиент скрытого истекающего договора",
+            IsActive = true,
+            ResponsibleUserId = deniedRecipient.Id,
+        };
+        var contract = new Contract
+        {
+            Number = "D-EXPIRING-DENIED",
+            Title = "Скрытый истекающий договор",
+            Date = new DateTime(2026, 7, 19),
+            ValidUntil = new DateTime(2026, 7, 22),
+            Amount = 12000m,
+            Status = ContractStatus.Concluded,
+            ClientContracts = { new ClientContract { Client = client } },
+        };
+        db.Contracts.Add(contract);
+        await db.SaveChangesAsync();
+        var realtime = new RecordingRealtimeNotificationPublisher();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            realtime,
+            webPush);
+
+        await service.NotifyContractExpiringAsync(contract, 3, [deniedRecipient.Id]);
+
+        Assert.Empty(await db.UserNotifications.ToListAsync());
+        Assert.Empty(realtime.Notifications);
+        Assert.Empty(webPush.Notifications);
+    }
+
+    [Fact]
     public async Task NotifyPaymentAssignedAsync_SkipsRecipientWithoutPaymentsAccess()
     {
         await using var db = await CreateContextAsync();
