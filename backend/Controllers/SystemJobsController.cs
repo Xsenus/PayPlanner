@@ -710,8 +710,17 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
             _configuration.GetValue("Payments:AdvanceReview:Monitoring:CriticalAgeDays", PaymentAdvanceReviewMonitoringService.DefaultCriticalAgeDays)),
             warningAgeDays);
         var criticalCutoff = DateTime.UtcNow.Date.AddDays(-criticalAgeDays);
-        var candidateStatistics = enabled
-            ? await BuildAdvanceReviewCandidateQuery()
+        var singleton = _db.Database.SqlQuery<int>($"SELECT 1 AS \"Value\"");
+        var lastNotifications = _db.UserNotifications
+            .AsNoTracking()
+            .Where(item => item.Type == UserNotificationTypes.PaymentAdvanceReviewRequired
+                || item.Type == UserNotificationTypes.PaymentAdvanceReviewEscalation)
+            .OrderByDescending(item => item.CreatedAt)
+            .Take(1);
+        AdvanceReviewDiagnosticsStatistics statistics;
+        if (enabled)
+        {
+            var candidateStatistics = BuildAdvanceReviewCandidateQuery()
                 .GroupBy(_ => 1)
                 .Select(group => new AdvanceReviewCandidateStatistics
                 {
@@ -721,19 +730,38 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
                             ?? payment.PaidDate
                             ?? (payment.Date == default ? payment.CreatedAt : payment.Date)).Date
                         <= criticalCutoff),
-                })
-                .SingleOrDefaultAsync(ct)
-            : null;
-        var pendingCount = candidateStatistics?.PendingCount ?? 0;
-        var criticalPendingCount = candidateStatistics?.CriticalPendingCount ?? 0;
-
-        var lastNotification = await _db.UserNotifications
-            .AsNoTracking()
-            .Where(item => item.Type == UserNotificationTypes.PaymentAdvanceReviewRequired
-                || item.Type == UserNotificationTypes.PaymentAdvanceReviewEscalation)
-            .OrderByDescending(item => item.CreatedAt)
-            .Select(item => new { item.CreatedAt, item.Title })
-            .FirstOrDefaultAsync(ct);
+                });
+            statistics = await (
+                    from _ in singleton
+                    from candidates in candidateStatistics
+                        .Take(1)
+                        .DefaultIfEmpty()
+                    from lastNotification in lastNotifications.DefaultIfEmpty()
+                    select new AdvanceReviewDiagnosticsStatistics
+                    {
+                        PendingCount = candidates == null ? 0 : candidates.PendingCount ?? 0,
+                        CriticalPendingCount = candidates == null ? 0 : candidates.CriticalPendingCount ?? 0,
+                        CreatedAt = lastNotification == null ? null : lastNotification.CreatedAt,
+                        Title = lastNotification == null ? null : lastNotification.Title,
+                    })
+                .SingleAsync(ct);
+        }
+        else
+        {
+            statistics = await (
+                    from _ in singleton
+                    from lastNotification in lastNotifications.DefaultIfEmpty()
+                    select new AdvanceReviewDiagnosticsStatistics
+                    {
+                        PendingCount = 0,
+                        CriticalPendingCount = 0,
+                        CreatedAt = lastNotification == null ? null : lastNotification.CreatedAt,
+                        Title = lastNotification == null ? null : lastNotification.Title,
+                    })
+                .SingleAsync(ct);
+        }
+        var pendingCount = statistics.PendingCount;
+        var criticalPendingCount = statistics.CriticalPendingCount;
 
         return new SystemJobDiagnosticsItemDto
         {
@@ -746,8 +774,8 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
             IntervalText = $"Каждые {intervalHours} ч.",
             PendingCount = pendingCount,
             LastProcessedCount = batchSize,
-            LastActivityAt = lastNotification?.CreatedAt,
-            LastActivityDescription = lastNotification?.Title,
+            LastActivityAt = statistics.CreatedAt,
+            LastActivityDescription = statistics.Title,
             NextRunHint = enabled
                 ? $"За один запуск проверяется до {batchSize} платежей, ожидают разбора: {pendingCount}, критичных старше {criticalAgeDays} дн.: {criticalPendingCount}. Предупреждение начинается с {warningAgeDays} дн."
                 : "Автоматический мониторинг авансов выключен.",
@@ -1365,8 +1393,16 @@ public sealed class SystemJobsController : ControllerBase, IAsyncActionFilter
 
     private sealed class AdvanceReviewCandidateStatistics
     {
+        public int? PendingCount { get; init; }
+        public int? CriticalPendingCount { get; init; }
+    }
+
+    private sealed class AdvanceReviewDiagnosticsStatistics
+    {
         public int PendingCount { get; init; }
         public int CriticalPendingCount { get; init; }
+        public DateTime? CreatedAt { get; init; }
+        public string? Title { get; init; }
     }
 
     private sealed class YandexDiskCrmSyncStatistics

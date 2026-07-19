@@ -150,6 +150,19 @@ public class SystemJobsControllerTests
                 Description = "Critical advance candidate",
                 AdvanceReviewStatus = PaymentAdvanceReviewStatus.RequiresDecision,
             });
+        scope.Db.UserNotifications.Add(new UserNotification
+        {
+            RecipientUserId = user.Id,
+            EventKey = "payment:advance-review:diagnostics",
+            Type = UserNotificationTypes.PaymentAdvanceReviewEscalation,
+            Title = "Advance review escalated",
+            BodyPreview = "Critical advance requires review",
+            Tone = "red",
+            ObjectType = "payment",
+            ObjectId = 1,
+            MetadataJson = "{}",
+            CreatedAt = now.AddMinutes(-5),
+        });
         scope.Db.ClientCases.Add(new ClientCase
         {
             ClientId = client.Id,
@@ -300,7 +313,7 @@ public class SystemJobsControllerTests
         Assert.Contains(dto.Items, item => item.Key == SystemJobKeys.YandexDiskCrmSync && item.PendingCount == 1 && item.LastProcessedCount == 20 && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "notification-delivery-retention" && item.PendingCount == 1 && item.LastProcessedCount == 25 && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == SystemJobKeys.CalendarSyncLogRetention && item.PendingCount == 2 && item.LastProcessedCount == 200 && item.ManualRunEnabled);
-        Assert.Contains(dto.Items, item => item.Key == SystemJobKeys.PaymentAdvanceReviewMonitoring && item.Status == "warning" && item.PendingCount == 2 && item.LastProcessedCount == 15 && item.ManualRunEnabled);
+        Assert.Contains(dto.Items, item => item.Key == SystemJobKeys.PaymentAdvanceReviewMonitoring && item.Status == "warning" && item.PendingCount == 2 && item.LastProcessedCount == 15 && item.LastActivityDescription == "Advance review escalated" && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "external-calendar-sync" && item.Status == "warning" && item.LastProcessedCount == 50 && item.ManualRunEnabled);
         Assert.Contains(dto.Items, item => item.Key == "case-inactivity-control" && item.PendingCount == 1 && item.LastProcessedCount == 7);
         Assert.Contains(dto.Items, item => item.Key == "court-sync" && item.Status == "active" && item.PendingCount == 1 && item.LastProcessedCount == 12);
@@ -350,6 +363,7 @@ public class SystemJobsControllerTests
         Assert.Contains("ORDER BY", yandexDiskStatisticsCommand, StringComparison.OrdinalIgnoreCase);
         var advanceReviewStatisticsCommand = Assert.Single(interceptor.Commands, command =>
             command.Contains("Payments", StringComparison.Ordinal) &&
+            command.Contains("UserNotifications", StringComparison.Ordinal) &&
             command.Contains("PendingCount", StringComparison.Ordinal) &&
             command.Contains("CriticalPendingCount", StringComparison.Ordinal));
         Assert.Contains("COUNT", advanceReviewStatisticsCommand, StringComparison.OrdinalIgnoreCase);
@@ -458,6 +472,20 @@ public class SystemJobsControllerTests
             MetadataJson = "{\"event\":\"caseInactivityControlTaskCreated\"}",
             CreatedAt = lastCaseAutomationAt,
         });
+        var lastAdvanceReviewAt = oldestDeliveryAt.AddDays(3);
+        scope.Db.UserNotifications.Add(new UserNotification
+        {
+            RecipientUserId = user.Id,
+            EventKey = "payment:advance-review:preserved",
+            Type = UserNotificationTypes.PaymentAdvanceReviewRequired,
+            Title = "Preserved advance review notification",
+            BodyPreview = "Advance review remains visible",
+            Tone = "amber",
+            ObjectType = "payment",
+            ObjectId = 15,
+            MetadataJson = "{}",
+            CreatedAt = lastAdvanceReviewAt,
+        });
         await scope.Db.SaveChangesAsync();
 
         interceptor.Commands.Clear();
@@ -493,6 +521,8 @@ public class SystemJobsControllerTests
         Assert.Equal(oldestDeliveryAt, deliveryRetention.LastActivityAt);
         Assert.False(advanceReview.Enabled);
         Assert.Equal(0, advanceReview.PendingCount);
+        Assert.Equal(lastAdvanceReviewAt, advanceReview.LastActivityAt);
+        Assert.Equal("Preserved advance review notification", advanceReview.LastActivityDescription);
         Assert.False(yandexDisk.Enabled);
         Assert.Equal(0, yandexDisk.PendingCount);
         Assert.Equal(oldestDeliveryAt, yandexDisk.LastActivityAt);
@@ -518,8 +548,11 @@ public class SystemJobsControllerTests
             command.Contains("OldestAt", StringComparison.Ordinal) &&
             command.Contains("EligibleCount", StringComparison.Ordinal));
         Assert.DoesNotContain(interceptor.Commands, command =>
+            command.Contains("Payments", StringComparison.Ordinal) &&
             command.Contains("PendingCount", StringComparison.Ordinal) &&
             command.Contains("CriticalPendingCount", StringComparison.Ordinal));
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("UserNotifications", StringComparison.Ordinal));
         Assert.Single(interceptor.Commands, command =>
             command.Contains("YandexDiskCrmSyncStates", StringComparison.Ordinal) &&
             command.Contains("EligibleCount", StringComparison.Ordinal));
