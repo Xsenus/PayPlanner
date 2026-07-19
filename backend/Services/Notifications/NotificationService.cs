@@ -637,19 +637,24 @@ public sealed class NotificationService : INotificationService
                 NotificationChannels.WebPush,
             ]),
             cancellationToken);
+        var templateDefinition = NotificationTemplateCatalog.Find(NotificationTemplateKeys.TaskAssigned);
+        var templateStorage = templateDefinition is null
+            ? new NotificationTemplateStorage()
+            : await LoadTemplateStorageAsync(cancellationToken);
         var deliveries = new List<NotificationDelivery>();
         foreach (var userId in recipients)
         {
             var recipientTimeZone = recipientTimeZones[userId];
             var taskAssignedSubject = $"Новая задача: {task.Title}";
             var taskAssignedBody = BuildTaskAssignedBody(task, actorName, recipientTimeZone);
-            var message = await RenderTemplateAsync(
-                NotificationTemplateKeys.TaskAssigned,
+            var message = RenderTemplate(
+                templateDefinition,
+                templateStorage,
                 taskAssignedSubject,
                 taskAssignedBody,
                 BuildTaskAssignmentTemplateValues(task, recipientTimeZone, actorName, taskAssignedSubject),
-                purpose: NotificationPurposes.TaskReminder,
-                cancellationToken: cancellationToken);
+                isSensitive: false,
+                purpose: NotificationPurposes.TaskReminder);
 
             if (HasTaskChannel(task, NotificationChannels.InApp))
             {

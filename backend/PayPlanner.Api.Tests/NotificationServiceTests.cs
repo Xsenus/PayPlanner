@@ -1909,6 +1909,9 @@ public class NotificationServiceTests
         Assert.Single(interceptor.ReaderCommands, command =>
             command.Contains("FROM \"SystemSettings\"", StringComparison.Ordinal)
             && command.Contains(RoleNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"SystemSettings\"", StringComparison.Ordinal)
+            && command.Contains("notifications.templates.v1", StringComparison.Ordinal));
         Assert.Contains(
             "19.07.2026 12:00",
             notifications.Single(notification => notification.RecipientUserId == recipients[0].Id).BodyPreview);
