@@ -4522,6 +4522,99 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyCalendarAccessChangedAsync_LoadsRecipientNotificationSettingsInSingleQuery()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var actor = await CreateUserAsync(db, "calendar-access-query-actor@example.com");
+        var role = new Role
+        {
+            Name = "calendar-access-query-role",
+            Description = "Calendar batch role",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync();
+        var recipients = Enumerable.Range(1, 12)
+            .Select(index => new User
+            {
+                Email = $"calendar-access-query-recipient-{index}@example.com",
+                FullName = $"Секретарь {index}",
+                PasswordHash = "hash",
+                RoleId = role.Id,
+                IsActive = true,
+                IsApproved = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            })
+            .ToArray();
+        var added = new User
+        {
+            Email = "calendar-access-query-added@example.com",
+            FullName = "Добавленный календарь",
+            PasswordHash = "hash",
+            RoleId = actor.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        var removed = new User
+        {
+            Email = "calendar-access-query-removed@example.com",
+            FullName = "Убранный календарь",
+            PasswordHash = "hash",
+            RoleId = actor.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        db.Users.AddRange(recipients);
+        db.Users.AddRange(added, removed);
+        await db.SaveChangesAsync();
+        var webPush = new RecordingWebPushNotificationService();
+        var service = CreateService(
+            db,
+            new RecordingEmailService(),
+            new RecordingTelegramService(),
+            webPushNotificationService: webPush);
+        interceptor.ReaderCommands.Clear();
+
+        await service.NotifyCalendarAccessChangedAsync(
+            role.Id,
+            [added.Id],
+            [removed.Id],
+            actor.FullName,
+            actor.Id);
+
+        var notifications = await db.UserNotifications.AsNoTracking().ToListAsync();
+        Assert.Equal(12, notifications.Count);
+        Assert.Equal(12, webPush.Notifications.Count);
+        Assert.All(notifications, notification =>
+        {
+            Assert.Equal(UserNotificationTypes.CalendarAccessChanged, notification.Type);
+            Assert.Equal("calendar", notification.ObjectType);
+            Assert.Equal(role.Id, notification.ObjectId);
+            Assert.Contains("Добавленный календарь", notification.BodyPreview);
+            Assert.Contains("Убранный календарь", notification.BodyPreview);
+        });
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(UserNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(UserNotificationDoNotDisturbSettings.SettingKey, StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"Users\"", StringComparison.Ordinal)
+            && command.Contains("\"RoleId\"", StringComparison.Ordinal)
+            && command.Contains("\"RoleName\"", StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"SystemSettings\"", StringComparison.Ordinal)
+            && command.Contains(RoleNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task NotifyExternalCalendarSyncWarningAsync_NotifiesAdminsOnlyAndDeduplicates()
     {
         await using var db = await CreateContextAsync();

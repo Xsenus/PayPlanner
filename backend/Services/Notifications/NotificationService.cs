@@ -1045,6 +1045,15 @@ public sealed class NotificationService : INotificationService
             },
             purpose: NotificationPurposes.TaskReminder,
             cancellationToken: cancellationToken);
+        var recipientNotificationChannels = await ResolveUserNotificationChannelsAsync(
+            recipients,
+            UserNotificationTypes.CalendarAccessChanged,
+            [
+                NotificationChannels.InApp,
+                NotificationChannels.Toast,
+                NotificationChannels.WebPush,
+            ],
+            cancellationToken);
 
         foreach (var userId in recipients)
         {
@@ -1060,7 +1069,8 @@ public sealed class NotificationService : INotificationService
                 null,
                 null,
                 new { roleId, actorUserId, actorName, addedVisibleUserIds, removedVisibleUserIds },
-                cancellationToken);
+                cancellationToken,
+                resolvedNotificationChannels: recipientNotificationChannels[userId]);
         }
     }
 
