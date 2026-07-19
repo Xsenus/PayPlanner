@@ -308,6 +308,30 @@ public sealed class NotificationService : INotificationService
         }
 
         var storage = await LoadTemplateStorageAsync(cancellationToken);
+        return RenderTemplate(
+            definition,
+            storage,
+            fallbackSubject,
+            fallbackBody,
+            values,
+            isSensitive,
+            purpose);
+    }
+
+    private static NotificationMessage RenderTemplate(
+        NotificationTemplateDefinition? definition,
+        NotificationTemplateStorage storage,
+        string fallbackSubject,
+        string fallbackBody,
+        IReadOnlyDictionary<string, string?> values,
+        bool isSensitive,
+        string purpose)
+    {
+        if (definition is null)
+        {
+            return new NotificationMessage(fallbackSubject, fallbackBody, IsSensitive: isSensitive, Purpose: purpose);
+        }
+
         var item = storage.Templates.FirstOrDefault(template => string.Equals(template.Key, definition.Key, StringComparison.OrdinalIgnoreCase));
         if (item is { IsEnabled: false })
         {
@@ -2634,20 +2658,25 @@ public sealed class NotificationService : INotificationService
                 NotificationChannels.WebPush,
             ]),
             cancellationToken);
+        var templateDefinition = NotificationTemplateCatalog.Find(NotificationTemplateKeys.CaseInactivityControl);
+        var templateStorage = templateDefinition is null
+            ? new NotificationTemplateStorage()
+            : await LoadTemplateStorageAsync(cancellationToken);
         var deliveries = new List<NotificationDelivery>();
         foreach (var recipientUserId in recipientUserIds)
         {
             var recipientTimeZone = recipientTimeZones[recipientUserId];
             var caseInactivityBody = BuildCaseInactivityControlBody(task, daysWithoutActiveTask, recipientTimeZone);
-            var message = await RenderTemplateAsync(
-                NotificationTemplateKeys.CaseInactivityControl,
+            var message = RenderTemplate(
+                templateDefinition,
+                templateStorage,
                 caseInactivitySubject,
                 caseInactivityBody,
                 NotificationTemplateCatalog.MergeValues(
                     BuildTaskTemplateValues(task, recipientTimeZone),
                     new Dictionary<string, string?> { ["case.daysWithoutActiveTask"] = daysWithoutActiveTask.ToString(CultureInfo.InvariantCulture) }),
-                purpose: NotificationPurposes.TaskReminder,
-                cancellationToken: cancellationToken);
+                isSensitive: false,
+                purpose: NotificationPurposes.TaskReminder);
 
             if (HasTaskChannel(task, NotificationChannels.InApp))
             {
