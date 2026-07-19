@@ -2735,6 +2735,19 @@ public class NotificationServiceTests
         Assert.Single(interceptor.ReaderCommands, command =>
             command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
             && command.Contains(CalendarTimeZoneHelper.UserTimeZoneSettingKey, StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(UserNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(UserNotificationDoNotDisturbSettings.SettingKey, StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"Users\"", StringComparison.Ordinal)
+            && command.Contains("\"RoleId\"", StringComparison.Ordinal)
+            && command.Contains("\"RoleName\"", StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"SystemSettings\"", StringComparison.Ordinal)
+            && command.Contains(RoleNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal));
         var utcNotification = notifications.Single(
             notification => notification.RecipientUserId == recipients[0].Id);
         Assert.Contains("Срок: 19.07.2026 12:00", utcNotification.BodyPreview);
