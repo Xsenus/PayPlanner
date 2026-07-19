@@ -2620,10 +2620,14 @@ public sealed class NotificationService : INotificationService
 
         var channels = ResolveTaskMessageChannels(task);
         var eventKey = $"task:{task.Id}:deadline-change-request:{request.Id}:requested";
+        var recipientTimeZones = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
+            _context,
+            recipients,
+            cancellationToken);
         var deliveries = new List<NotificationDelivery>();
         foreach (var userId in recipients)
         {
-            var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(userId, cancellationToken);
+            var recipientTimeZone = recipientTimeZones[userId];
             var subject = $"Запрос переноса срока: {task.Title}";
             var body = BuildTaskDeadlineChangeRequestBody(task, request, recipientTimeZone);
             var message = await RenderTemplateAsync(

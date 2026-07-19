@@ -2762,6 +2762,154 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyTaskDeadlineChangeRequestedAsync_LoadsRecipientTimeZonesInSingleQuery()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var adminRole = new Role
+        {
+            Name = "admin",
+            Description = "Администратор",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Roles.Add(adminRole);
+        await db.SaveChangesAsync();
+        var requester = new User
+        {
+            Email = "deadline-request-timezone-query-requester@example.com",
+            FullName = "Инициатор переноса",
+            PasswordHash = "hash",
+            RoleId = adminRole.Id,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        var recipients = Enumerable.Range(1, 12)
+            .Select(index => new User
+            {
+                Email = $"deadline-request-timezone-query-recipient-{index}@example.com",
+                FullName = $"Получатель переноса {index}",
+                PasswordHash = "hash",
+                RoleId = adminRole.Id,
+                IsActive = true,
+                IsApproved = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            })
+            .ToArray();
+        db.Users.AddRange(recipients.Append(requester));
+        await db.SaveChangesAsync();
+        db.UserSettings.AddRange(
+            new UserSetting
+            {
+                UserId = recipients[0].Id,
+                Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+                Value = "UTC",
+            },
+            new UserSetting
+            {
+                UserId = recipients[1].Id,
+                Key = CalendarTimeZoneHelper.UserTimeZoneSettingKey,
+                Value = "Asia/Novosibirsk",
+            });
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "notifications.templates.v1",
+            Value = JsonSerializer.Serialize(new
+            {
+                templates = new[]
+                {
+                    new
+                    {
+                        key = NotificationTemplateKeys.TaskChanged,
+                        isEnabled = true,
+                        subject = "{{task.changeSubject}}",
+                        body = "Текущий срок: {{task.dueAt}}\n{{task.changes}}\n{{task.commentBlock}}",
+                    },
+                },
+            }, new JsonSerializerOptions(JsonSerializerDefaults.Web)),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        var dueAt = new DateTime(2026, 7, 19, 12, 0, 0, DateTimeKind.Utc);
+        var requestedDueAt = new DateTime(2026, 7, 21, 12, 0, 0, DateTimeKind.Utc);
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Массовая задача",
+            Title = "Перенести срок документов",
+            AuthorUserId = recipients[0].Id,
+            AuthorName = recipients[0].FullName,
+            AssigneeUserId = requester.Id,
+            AssigneeName = requester.FullName,
+            DueAt = dueAt,
+            RemindersJson = "[]",
+            ChannelsJson = "[\"inApp\"]",
+            Status = "inProgress",
+            Participants = recipients
+                .Skip(1)
+                .Select((user, index) => new TaskJournalParticipant
+                {
+                    UserId = user.Id,
+                    DisplayName = user.FullName,
+                    Role = "observer",
+                    SortOrder = index,
+                })
+                .Append(new TaskJournalParticipant
+                {
+                    UserId = recipients[0].Id,
+                    DisplayName = recipients[0].FullName,
+                    Role = "observer",
+                    SortOrder = recipients.Length,
+                })
+                .ToList(),
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+        var request = new TaskJournalDeadlineChangeRequest
+        {
+            TaskJournalItemId = task.Id,
+            RequestedByUserId = requester.Id,
+            RequestedByName = requester.FullName,
+            ReviewerUserId = recipients[0].Id,
+            ReviewerName = recipients[0].FullName,
+            CurrentDueAt = dueAt,
+            RequestedDueAt = requestedDueAt,
+            Reason = "Нужно дождаться новых документов.",
+            Status = "pending",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.TaskJournalDeadlineChangeRequests.Add(request);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+        interceptor.ReaderCommands.Clear();
+
+        var deliveries = await service.NotifyTaskDeadlineChangeRequestedAsync(task, request);
+
+        Assert.Empty(deliveries);
+        var notifications = await db.UserNotifications.AsNoTracking().ToListAsync();
+        Assert.Equal(12, notifications.Count);
+        Assert.DoesNotContain(notifications, notification => notification.RecipientUserId == requester.Id);
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"UserSettings\"", StringComparison.Ordinal)
+            && command.Contains(CalendarTimeZoneHelper.UserTimeZoneSettingKey, StringComparison.Ordinal));
+        var utcNotification = notifications.Single(
+            notification => notification.RecipientUserId == recipients[0].Id);
+        Assert.Contains("Текущий срок: 19.07.2026 12:00", utcNotification.BodyPreview);
+        Assert.Contains("Запрошен перенос срока на 21.07.2026 12:00", utcNotification.BodyPreview);
+        var novosibirskNotification = notifications.Single(
+            notification => notification.RecipientUserId == recipients[1].Id);
+        Assert.Contains("Текущий срок: 19.07.2026 19:00", novosibirskNotification.BodyPreview);
+        Assert.Contains("Запрошен перенос срока на 21.07.2026 19:00", novosibirskNotification.BodyPreview);
+        Assert.All(notifications, notification =>
+        {
+            Assert.Equal(UserNotificationTypes.TaskDeadlineChangeRequested, notification.Type);
+            Assert.Contains("Нужно дождаться новых документов.", notification.BodyPreview);
+            Assert.Contains($"\"deadlineChangeRequestId\":{request.Id}", notification.MetadataJson);
+        });
+    }
+
+    [Fact]
     public async Task NotifyTaskDeadlineChangeApprovedAsync_NotifiesRequesterAndObservers()
     {
         await using var db = await CreateContextAsync();
