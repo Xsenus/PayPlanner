@@ -2899,6 +2899,7 @@ public sealed class NotificationService : INotificationService
         var isRevision = string.Equals(decision, "revisionRequested", StringComparison.OrdinalIgnoreCase);
         var isCompletedApproval = !isRevision && string.Equals(task.Status, "done", StringComparison.OrdinalIgnoreCase);
         var type = isRevision ? UserNotificationTypes.TaskRevisionRequested : UserNotificationTypes.TaskApproved;
+        var templateKey = isRevision ? NotificationTemplateKeys.TaskRevisionRequested : NotificationTemplateKeys.TaskApproved;
         var tone = isRevision ? "orange" : "emerald";
         var subject = isRevision
             ? $"Задача возвращена на доработку: {task.Title}"
@@ -2926,20 +2927,25 @@ public sealed class NotificationService : INotificationService
                 NotificationChannels.WebPush,
             ]),
             cancellationToken);
+        var templateDefinition = NotificationTemplateCatalog.Find(templateKey);
+        var templateStorage = templateDefinition is null
+            ? new NotificationTemplateStorage()
+            : await LoadTemplateStorageAsync(cancellationToken);
         var deliveries = new List<NotificationDelivery>();
         foreach (var userId in recipients)
         {
             var recipientTimeZone = recipientTimeZones[userId];
             var approvalDecisionBody = BuildTaskApprovalDecisionBody(task, approver, decision, actorName, resolution, recipientTimeZone);
-            var message = await RenderTemplateAsync(
-                isRevision ? NotificationTemplateKeys.TaskRevisionRequested : NotificationTemplateKeys.TaskApproved,
+            var message = RenderTemplate(
+                templateDefinition,
+                templateStorage,
                 subject,
                 approvalDecisionBody,
                 NotificationTemplateCatalog.MergeValues(
                     BuildTaskTemplateValues(task, recipientTimeZone, actorName),
                     new Dictionary<string, string?> { ["approval.resolution"] = string.IsNullOrWhiteSpace(resolution) ? "Без комментария." : resolution.Trim() }),
-                purpose: NotificationPurposes.TaskReminder,
-                cancellationToken: cancellationToken);
+                isSensitive: false,
+                purpose: NotificationPurposes.TaskReminder);
 
             if (HasTaskChannel(task, NotificationChannels.InApp))
             {
