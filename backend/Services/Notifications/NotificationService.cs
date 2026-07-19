@@ -684,6 +684,39 @@ public sealed class NotificationService : INotificationService
             _context,
             timeZoneRecipientIds,
             cancellationToken);
+        var remainingRecipients = allRecipients
+            .Where(userId => userId != currentAssigneeUserId && userId != previousAssigneeUserId)
+            .ToList();
+        var currentAssigneeRecipients = currentAssigneeUserId.HasValue
+                                        && currentAssigneeUserId.Value != actorUserId
+            ? new[] { currentAssigneeUserId.Value }
+            : Array.Empty<int>();
+        var changedRecipients = remainingRecipients.ToHashSet();
+        if (previousAssigneeUserId.HasValue
+            && previousAssigneeUserId.Value != actorUserId
+            && previousAssigneeUserId.Value != currentAssigneeUserId)
+        {
+            changedRecipients.Add(previousAssigneeUserId.Value);
+        }
+
+        var currentAssigneeNotificationChannels = await ResolveUserNotificationChannelsAsync(
+            currentAssigneeRecipients,
+            UserNotificationTypes.TaskAssigned,
+            channels.Concat([
+                NotificationChannels.InApp,
+                NotificationChannels.Toast,
+                NotificationChannels.WebPush,
+            ]),
+            cancellationToken);
+        var changedRecipientNotificationChannels = await ResolveUserNotificationChannelsAsync(
+            changedRecipients,
+            UserNotificationTypes.TaskChanged,
+            channels.Concat([
+                NotificationChannels.InApp,
+                NotificationChannels.Toast,
+                NotificationChannels.WebPush,
+            ]),
+            cancellationToken);
         var eventStamp = DateTime.UtcNow.ToString("yyyyMMddHHmmssfff", CultureInfo.InvariantCulture);
         var deliveries = new List<NotificationDelivery>();
 
@@ -718,14 +751,13 @@ public sealed class NotificationService : INotificationService
                     "blue",
                     task,
                     new { actorUserId, actorName, previousAssigneeUserId, previousAssigneeName, task.AssigneeUserId, task.AssigneeName, isReassignment = true },
-                    cancellationToken);
+                    cancellationToken,
+                    currentAssigneeNotificationChannels[userId]);
             }
 
-            var enabledChannels = await ResolveUserNotificationChannelsAsync(
-                userId,
-                UserNotificationTypes.TaskAssigned,
-                channels,
-                cancellationToken);
+            var enabledChannels = channels
+                .Where(currentAssigneeNotificationChannels[userId].Contains)
+                .ToList();
             if (enabledChannels.Count > 0)
             {
                 deliveries.AddRange(await SendToUserAsync(userId, message, enabledChannels, eventKey, cancellationToken));
@@ -768,23 +800,19 @@ public sealed class NotificationService : INotificationService
                     "amber",
                     task,
                     new { actorUserId, actorName, previousAssigneeUserId, previousAssigneeName, task.AssigneeUserId, task.AssigneeName, hasAssigneeChange = true },
-                    cancellationToken);
+                    cancellationToken,
+                    changedRecipientNotificationChannels[userId]);
             }
 
-            var enabledChannels = await ResolveUserNotificationChannelsAsync(
-                userId,
-                UserNotificationTypes.TaskChanged,
-                channels,
-                cancellationToken);
+            var enabledChannels = channels
+                .Where(changedRecipientNotificationChannels[userId].Contains)
+                .ToList();
             if (enabledChannels.Count > 0)
             {
                 deliveries.AddRange(await SendToUserAsync(userId, message, enabledChannels, eventKey, cancellationToken));
             }
         }
 
-        var remainingRecipients = allRecipients
-            .Where(userId => userId != currentAssigneeUserId && userId != previousAssigneeUserId)
-            .ToList();
         foreach (var userId in remainingRecipients)
         {
             var recipientTimeZone = recipientTimeZones[userId];
@@ -818,14 +846,13 @@ public sealed class NotificationService : INotificationService
                     "amber",
                     task,
                     new { actorUserId, actorName, changeLabels, previousAssigneeUserId, previousAssigneeName, task.AssigneeUserId, task.AssigneeName, hasAssigneeChange = true },
-                    cancellationToken);
+                    cancellationToken,
+                    changedRecipientNotificationChannels[userId]);
             }
 
-            var enabledChannels = await ResolveUserNotificationChannelsAsync(
-                userId,
-                UserNotificationTypes.TaskChanged,
-                channels,
-                cancellationToken);
+            var enabledChannels = channels
+                .Where(changedRecipientNotificationChannels[userId].Contains)
+                .ToList();
             if (enabledChannels.Count > 0)
             {
                 deliveries.AddRange(await SendToUserAsync(userId, message, enabledChannels, eventKey, cancellationToken));
