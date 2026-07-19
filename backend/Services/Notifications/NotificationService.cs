@@ -2730,11 +2730,15 @@ public sealed class NotificationService : INotificationService
             : "rejected";
         var eventKey = $"task:{task.Id}:deadline-change-request:{request.Id}:{statusSegment}";
         var actorName = string.IsNullOrWhiteSpace(request.DecidedByName) ? request.ReviewerName : request.DecidedByName.Trim();
+        var recipientTimeZones = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
+            _context,
+            recipients,
+            cancellationToken);
         var deliveries = new List<NotificationDelivery>();
 
         foreach (var userId in recipients)
         {
-            var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(userId, cancellationToken);
+            var recipientTimeZone = recipientTimeZones[userId];
             var body = BuildTaskDeadlineChangeDecisionBody(task, request, actionText, actorName, recipientTimeZone);
             var decisionDueAtText = request.DecisionDueAt.HasValue
                 ? FormatTaskDueAt(request.DecisionDueAt.Value, recipientTimeZone)
