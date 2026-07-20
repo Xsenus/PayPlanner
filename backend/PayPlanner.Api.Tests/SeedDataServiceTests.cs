@@ -1,5 +1,7 @@
+using System.Data.Common;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
 using PayPlanner.Api.Services;
@@ -133,6 +135,26 @@ public class SeedDataServiceTests
         Assert.Equal(RolePermissionCatalog.AllSections.Length, await db.RolePermissions.CountAsync(item => item.RoleId == role.Id));
     }
 
+    [Fact]
+    public async Task SeedAsync_LoadsDocumentStatusesInSingleQuery()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        await SeedDataService.SeedAsync(db);
+        db.ChangeTracker.Clear();
+        interceptor.ReaderCommands.Clear();
+
+        await SeedDataService.SeedAsync(db);
+
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase)
+            && command.Contains("FROM \"DocumentStatuses\"", StringComparison.Ordinal));
+        Assert.Equal(
+            DocumentWorkflowStatus.Defaults.Count,
+            await db.DocumentStatuses.CountAsync(status =>
+                DocumentWorkflowStatus.Defaults.Select(item => item.Code).Contains(status.Code)));
+    }
+
     private static async Task<SeedSnapshot> CreateSnapshotAsync(PaymentContext db)
     {
         var rolePermissionPairs = await db.RolePermissions
@@ -159,18 +181,36 @@ public class SeedDataServiceTests
             Payments: await db.Payments.CountAsync());
     }
 
-    private static async Task<PaymentContext> CreateContextAsync()
+    private static async Task<PaymentContext> CreateContextAsync(DbCommandInterceptor? interceptor = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
 
-        var options = new DbContextOptionsBuilder<PaymentContext>()
-            .UseSqlite(connection)
-            .Options;
+        var optionsBuilder = new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite(connection);
+        if (interceptor is not null)
+        {
+            optionsBuilder.AddInterceptors(interceptor);
+        }
 
-        var db = new PaymentContext(options);
+        var db = new PaymentContext(optionsBuilder.Options);
         await db.Database.EnsureCreatedAsync();
         return db;
+    }
+
+    private sealed class RecordingCommandInterceptor : DbCommandInterceptor
+    {
+        public List<string> ReaderCommands { get; } = [];
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            ReaderCommands.Add(command.CommandText);
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
     }
 
     private sealed record SeedSnapshot(

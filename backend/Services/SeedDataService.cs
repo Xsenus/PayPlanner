@@ -1122,12 +1122,13 @@ namespace PayPlanner.Api.Services
 
         private static async Task EnsureDocumentStatusesAsync(PaymentContext ctx)
         {
+            var existingStatuses = await ctx.DocumentStatuses
+                .ToDictionaryAsync(status => status.Code, StringComparer.Ordinal);
             foreach (var status in DocumentWorkflowStatus.Defaults)
             {
-                var existing = await ctx.DocumentStatuses.FirstOrDefaultAsync(x => x.Code == status.Code);
-                if (existing is null)
+                if (!existingStatuses.TryGetValue(status.Code, out var existing))
                 {
-                    ctx.DocumentStatuses.Add(new DocumentStatusEntity
+                    existing = new DocumentStatusEntity
                     {
                         Code = status.Code,
                         Name = status.Name,
@@ -1138,7 +1139,9 @@ namespace PayPlanner.Api.Services
                         UseForActs = status.UseForActs,
                         UseForContracts = status.UseForContracts,
                         SortOrder = status.SortOrder,
-                    });
+                    };
+                    ctx.DocumentStatuses.Add(existing);
+                    existingStatuses.Add(status.Code, existing);
                 }
                 else
                 {
