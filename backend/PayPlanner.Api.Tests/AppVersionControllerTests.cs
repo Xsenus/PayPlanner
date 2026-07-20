@@ -1,9 +1,11 @@
+using System.Data.Common;
 using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using PayPlanner.Api.Controllers;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Models;
@@ -519,6 +521,76 @@ public sealed class AppVersionControllerTests
         }
     }
 
+    [Fact]
+    public async Task SeedService_LoadsExistingReleasesInSingleQuery()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var scope = await CreateScopeAsync(interceptor);
+        var existingAgent = Release("2026-05-23-agent", version: "1.14.0");
+        existingAgent.Source = "agent";
+        existingAgent.Title = "Старый заголовок";
+        var staleAgent = Release("2026-05-22-stale", version: "1.13.0");
+        staleAgent.Source = "agent";
+        var manual = Release("2026-05-24-manual", version: "1.14.1");
+        manual.Source = "manual";
+        manual.Title = "Ручной заголовок";
+        scope.Db.AppReleases.AddRange(existingAgent, staleAgent, manual);
+        await scope.Db.SaveChangesAsync();
+
+        var tempRoot = await CreateTempReleaseRootAsync(
+            """
+            [
+              {
+                "releaseId": "2026-05-23-agent",
+                "version": "1.14.0",
+                "releasedAt": "2026-05-23T00:00:00",
+                "title": "Обновлённый заголовок",
+                "summary": "Обновлённое описание",
+                "isActive": true,
+                "items": [{ "type": "improved", "text": "Обновлённый пункт" }]
+              },
+              {
+                "releaseId": "2026-05-24-manual",
+                "version": "1.14.1",
+                "releasedAt": "2026-05-24T00:00:00",
+                "title": "Заголовок из файла",
+                "summary": "Не должен заменить ручную версию",
+                "isActive": true,
+                "items": [{ "type": "fixed", "text": "Не должен заменить ручной пункт" }]
+              },
+              {
+                "releaseId": "2026-05-25-new",
+                "version": "1.14.2",
+                "releasedAt": "2026-05-25T00:00:00",
+                "title": "Новая версия",
+                "summary": "Новая версия из файла",
+                "isActive": true,
+                "items": [{ "type": "new", "text": "Новая возможность" }]
+              }
+            ]
+            """);
+
+        try
+        {
+            interceptor.Commands.Clear();
+
+            await AppReleaseSeedService.SyncAsync(scope.Db, tempRoot);
+
+            Assert.Single(interceptor.Commands, command =>
+                command.TrimStart().StartsWith("SELECT", StringComparison.OrdinalIgnoreCase)
+                && command.Contains("FROM \"AppReleases\"", StringComparison.Ordinal));
+            Assert.Equal("Обновлённый заголовок", existingAgent.Title);
+            Assert.Equal("Обновлённый пункт", Assert.Single(existingAgent.Items).Text);
+            Assert.Equal("Ручной заголовок", manual.Title);
+            Assert.DoesNotContain(scope.Db.AppReleases.Local, release => release.ReleaseId == staleAgent.ReleaseId);
+            Assert.Contains(scope.Db.AppReleases.Local, release => release.ReleaseId == "2026-05-25-new");
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
     private static AppVersionController CreateController(PaymentContext db, int userId, params AppRelease[] releases)
         => CreateController(db, userId, TimeProvider.System, releases);
 
@@ -640,16 +712,38 @@ public sealed class AppVersionControllerTests
         return user;
     }
 
-    private static async Task<TestDbScope> CreateScopeAsync()
+    private static async Task<TestDbScope> CreateScopeAsync(DbCommandInterceptor? interceptor = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
-        var options = new DbContextOptionsBuilder<PaymentContext>()
-            .UseSqlite(connection)
-            .Options;
+        var optionsBuilder = new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite(
+                connection,
+                sqlite => sqlite.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery));
+        if (interceptor is not null)
+        {
+            optionsBuilder.AddInterceptors(interceptor);
+        }
+
+        var options = optionsBuilder.Options;
         var db = new PaymentContext(options, useObjectAuditModel: false);
         await db.Database.EnsureCreatedAsync();
         return new TestDbScope(connection, db);
+    }
+
+    private sealed class RecordingCommandInterceptor : DbCommandInterceptor
+    {
+        public List<string> Commands { get; } = [];
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            Commands.Add(command.CommandText);
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
     }
 
     private sealed class TestDbScope(SqliteConnection connection, PaymentContext db) : IAsyncDisposable

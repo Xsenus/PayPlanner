@@ -43,13 +43,18 @@ public static class AppReleaseSeedService
         var seedReleaseIds = normalized
             .Select(release => release.ReleaseId.Trim())
             .ToHashSet(StringComparer.Ordinal);
+        var existingReleases = await db.AppReleases
+            .Include(release => release.Items)
+            .Where(release => release.Source == "agent" || seedReleaseIds.Contains(release.ReleaseId))
+            .AsSingleQuery()
+            .ToListAsync(ct);
+        var existingReleasesById = existingReleases
+            .ToDictionary(release => release.ReleaseId, StringComparer.Ordinal);
 
         foreach (var seed in normalized)
         {
             var releaseId = seed.ReleaseId.Trim();
-            var existing = await db.AppReleases
-                .Include(release => release.Items)
-                .FirstOrDefaultAsync(release => release.ReleaseId == releaseId, ct);
+            existingReleasesById.TryGetValue(releaseId, out var existing);
 
             if (existing?.Source == "manual")
             {
@@ -93,9 +98,9 @@ public static class AppReleaseSeedService
             }
         }
 
-        var staleAgentReleases = await db.AppReleases
+        var staleAgentReleases = existingReleases
             .Where(release => release.Source == "agent" && !seedReleaseIds.Contains(release.ReleaseId))
-            .ToArrayAsync(ct);
+            .ToArray();
         if (staleAgentReleases.Length > 0)
         {
             db.AppReleases.RemoveRange(staleAgentReleases);
