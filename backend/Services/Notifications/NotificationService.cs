@@ -1009,6 +1009,10 @@ public sealed class NotificationService : INotificationService
                 NotificationChannels.WebPush,
             ]),
             cancellationToken);
+        var deliveryRecipientIds = recipients
+            .Where(userId => channels.Any(recipientNotificationChannels[userId].Contains))
+            .ToList();
+        var deliveryRecipients = await ResolveRecipientsAsync(deliveryRecipientIds, cancellationToken);
         var templateDefinition = NotificationTemplateCatalog.Find(NotificationTemplateKeys.TaskCancelled);
         var templateStorage = templateDefinition is null
             ? new NotificationTemplateStorage()
@@ -1052,7 +1056,10 @@ public sealed class NotificationService : INotificationService
                 .ToList();
             if (enabledChannels.Count > 0)
             {
-                deliveries.AddRange(await SendToUserAsync(userId, message, enabledChannels, eventKey, cancellationToken));
+                if (deliveryRecipients.TryGetValue(userId, out var recipient))
+                {
+                    deliveries.AddRange(await SendAsync(recipient, message, enabledChannels, eventKey, cancellationToken));
+                }
             }
         }
 
