@@ -174,6 +174,7 @@ type TaskJournalFilterPreferences = {
   dateFrom: string;
   dateTo: string;
   statusFilter: TaskStatusFilter;
+  counterpartyFilter: string;
   caseFilter: string;
   assigneeFilter: string;
   typeFilter: TaskJournalType | 'all';
@@ -340,6 +341,7 @@ function createDefaultFilterPreferences(userId: number | null, mode: TaskJournal
     dateFrom: '',
     dateTo: '',
     statusFilter: 'active',
+    counterpartyFilter: 'all',
     caseFilter: 'all',
     assigneeFilter: 'all',
     typeFilter: 'all',
@@ -467,6 +469,10 @@ function normalizeTaskJournalFilterPreferences(
     dateFrom: isDateFilterValue(parsed?.dateFrom) ? parsed.dateFrom : defaults.dateFrom,
     dateTo: isDateFilterValue(parsed?.dateTo) ? parsed.dateTo : defaults.dateTo,
     statusFilter: isStatusFilter(parsed?.statusFilter) ? parsed.statusFilter : defaults.statusFilter,
+    counterpartyFilter: typeof parsed?.counterpartyFilter === 'string'
+      && (parsed.counterpartyFilter === 'all' || /^(client|legal):\d+$/.test(parsed.counterpartyFilter))
+      ? parsed.counterpartyFilter
+      : defaults.counterpartyFilter,
     caseFilter: typeof parsed?.caseFilter === 'string' && (parsed.caseFilter === 'all' || /^\d+$/.test(parsed.caseFilter))
       ? parsed.caseFilter
       : defaults.caseFilter,
@@ -1999,6 +2005,7 @@ export function TaskJournal({
         dateFrom: '',
         dateTo: '',
         statusFilter: 'overdue' as const,
+        counterpartyFilter: 'all',
         caseFilter: 'all',
         assigneeFilter: 'all',
         typeFilter: 'all' as const,
@@ -2043,7 +2050,14 @@ export function TaskJournal({
   const [icsReminderPreset, setIcsReminderPreset] = useState<IcsReminderPreset>(initialPreferences.icsReminderPreset);
   const [periodMode, setPeriodMode] = useState<PeriodMode>(initialPreferences.periodMode);
   const [statusFilter, setStatusFilter] = useState<TaskStatusFilter>(initialPreferences.statusFilter);
+  const [counterpartyFilter, setCounterpartyFilter] = useState(initialPreferences.counterpartyFilter);
   const [caseFilter, setCaseFilter] = useState(initialPreferences.caseFilter);
+  const selectedFilterClientId = counterpartyFilter.startsWith('client:')
+    ? Number(counterpartyFilter.slice('client:'.length))
+    : undefined;
+  const selectedFilterLegalEntityId = counterpartyFilter.startsWith('legal:')
+    ? Number(counterpartyFilter.slice('legal:'.length))
+    : undefined;
   const [assigneeFilter, setAssigneeFilter] = useState(initialPreferences.assigneeFilter);
   const [typeFilter, setTypeFilter] = useState<TaskJournalType | 'all'>(initialPreferences.typeFilter);
   const [priorityFilter, setPriorityFilter] = useState<TaskJournalPriority | 'all'>(initialPreferences.priorityFilter);
@@ -2121,6 +2135,7 @@ export function TaskJournal({
     setDateFromFilter('');
     setDateToFilter('');
     setStatusFilter('overdue');
+    setCounterpartyFilter('all');
     setCaseFilter('all');
     setAssigneeFilter('all');
     setTypeFilter('all');
@@ -2150,6 +2165,7 @@ export function TaskJournal({
     setDateFromFilter(nextPreferences.dateFrom);
     setDateToFilter(nextPreferences.dateTo);
     setStatusFilter(nextPreferences.statusFilter);
+    setCounterpartyFilter(nextPreferences.counterpartyFilter);
     setCaseFilter(nextPreferences.caseFilter);
     setAssigneeFilter(nextPreferences.assigneeFilter);
     setTypeFilter(nextPreferences.typeFilter);
@@ -2188,6 +2204,7 @@ export function TaskJournal({
       dateFrom: dateFromFilter,
       dateTo: dateToFilter,
       statusFilter,
+      counterpartyFilter,
       caseFilter,
       assigneeFilter,
       typeFilter,
@@ -2196,7 +2213,7 @@ export function TaskJournal({
       sortBy,
       sortDir,
     }, mode);
-  }, [assigneeFilter, calendarColorMode, calendarConflictPolicy, calendarLoadWarningMode, caseFilter, currentUserId, dateFromFilter, dateToFilter, icsReminderPreset, metricFilter, mode, periodMode, priorityFilter, quickFilter, search, sortBy, sortDir, statusFilter, typeFilter, viewMode]);
+  }, [assigneeFilter, calendarColorMode, calendarConflictPolicy, calendarLoadWarningMode, caseFilter, counterpartyFilter, currentUserId, dateFromFilter, dateToFilter, icsReminderPreset, metricFilter, mode, periodMode, priorityFilter, quickFilter, search, sortBy, sortDir, statusFilter, typeFilter, viewMode]);
 
   const captureSavedViewFilters = (): TaskJournalFilterPreferences => ({
     viewMode,
@@ -2210,6 +2227,7 @@ export function TaskJournal({
     dateFrom: dateFromFilter,
     dateTo: dateToFilter,
     statusFilter,
+    counterpartyFilter,
     caseFilter,
     assigneeFilter,
     typeFilter,
@@ -2231,6 +2249,7 @@ export function TaskJournal({
     setDateFromFilter(filters.dateFrom);
     setDateToFilter(filters.dateTo);
     setStatusFilter(filters.statusFilter);
+    setCounterpartyFilter(filters.counterpartyFilter);
     setCaseFilter(filters.caseFilter);
     setAssigneeFilter(filters.assigneeFilter);
     setTypeFilter(filters.typeFilter);
@@ -2492,25 +2511,69 @@ export function TaskJournal({
 
   const assigneeOptions = useMemo(() => Array.from(assigneeById.values()), [assigneeById]);
 
-  const caseFilterOptions = useMemo(() => {
-    const byId = new Map<number, string>();
+  const counterpartyCaseFilterData = useMemo(() => {
+    const counterparties = new Map<string, string>();
+    const casesByCounterparty = new Map<string, Map<number, string>>();
     tasks.forEach((task) => {
+      const counterpartyKey = task.clientId
+        ? `client:${task.clientId}`
+        : task.legalEntityId
+          ? `legal:${task.legalEntityId}`
+          : '';
+      const counterpartyName = task.clientName?.trim() || task.legalEntityName?.trim() || '';
+      if (!counterpartyKey || !counterpartyName) {
+        return;
+      }
+
+      if (!counterparties.has(counterpartyKey)) {
+        counterparties.set(counterpartyKey, counterpartyName);
+      }
       if (!task.clientCaseId || !task.clientCaseTitle?.trim()) {
         return;
       }
 
-      const ownerName = task.clientName?.trim() || task.legalEntityName?.trim() || '';
-      const label = ownerName
-        ? `${ownerName} — ${task.clientCaseTitle.trim()}`
-        : task.clientCaseTitle.trim();
-      if (!byId.has(task.clientCaseId)) {
-        byId.set(task.clientCaseId, label);
+      let counterpartyCases = casesByCounterparty.get(counterpartyKey);
+      if (!counterpartyCases) {
+        counterpartyCases = new Map<number, string>();
+        casesByCounterparty.set(counterpartyKey, counterpartyCases);
+      }
+      if (!counterpartyCases.has(task.clientCaseId)) {
+        counterpartyCases.set(task.clientCaseId, task.clientCaseTitle.trim());
       }
     });
 
-    return Array.from(byId, ([id, label]) => ({ id, label }))
-      .sort((left, right) => left.label.localeCompare(right.label, 'ru'));
+    return {
+      counterparties: Array.from(counterparties, ([value, label]) => ({ value, label }))
+        .sort((left, right) => left.label.localeCompare(right.label, 'ru')),
+      casesByCounterparty,
+    };
   }, [tasks]);
+
+  const caseFilterOptions = useMemo(() => {
+    if (counterpartyFilter === 'all') {
+      return [];
+    }
+
+    const counterpartyCases = counterpartyCaseFilterData.casesByCounterparty.get(counterpartyFilter);
+    return counterpartyCases
+      ? Array.from(counterpartyCases, ([id, label]) => ({ id, label }))
+          .sort((left, right) => left.label.localeCompare(right.label, 'ru'))
+      : [];
+  }, [counterpartyCaseFilterData, counterpartyFilter]);
+
+  useEffect(() => {
+    if (caseFilter === 'all' || counterpartyFilter !== 'all') {
+      return;
+    }
+
+    const matchingCounterparty = Array.from(counterpartyCaseFilterData.casesByCounterparty)
+      .find(([, cases]) => cases.has(Number(caseFilter)))?.[0];
+    if (matchingCounterparty) {
+      setCounterpartyFilter(matchingCounterparty);
+    } else {
+      setCaseFilter('all');
+    }
+  }, [caseFilter, counterpartyCaseFilterData, counterpartyFilter]);
 
   const visibleTaskCalendarUserIds = useMemo(() => {
     if (isAdminUser || taskCalendarViewScope === 'all') {
@@ -2778,6 +2841,12 @@ export function TaskJournal({
         assigneeFilter === 'all' ||
         String(task.assigneeUserId ?? task.assigneeName) === assigneeFilter ||
         hasAssigneeParticipant(task, assigneeFilter);
+      const taskCounterpartyKey = task.clientId
+        ? `client:${task.clientId}`
+        : task.legalEntityId
+          ? `legal:${task.legalEntityId}`
+          : '';
+      const counterpartyOk = counterpartyFilter === 'all' || taskCounterpartyKey === counterpartyFilter;
       const caseOk = caseFilter === 'all' || String(task.clientCaseId ?? '') === caseFilter;
       const typeOk = typeFilter === 'all' || task.type === typeFilter;
       const priorityOk = priorityFilter === 'all' || task.priority === priorityFilter;
@@ -2793,9 +2862,9 @@ export function TaskJournal({
         task.title,
       ].some((value) => value.toLowerCase().includes(q));
 
-      return approvalScopeOk && quickOk && assigneeOk && caseOk && typeOk && priorityOk && dateOk && searchOk;
+      return approvalScopeOk && quickOk && assigneeOk && counterpartyOk && caseOk && typeOk && priorityOk && dateOk && searchOk;
     });
-  }, [assigneeFilter, caseFilter, currentUserId, currentUserName, dateRangeBounds, isAdminUser, isApprovalsMode, priorityFilter, quickFilter, search, tasks, typeFilter]);
+  }, [assigneeFilter, caseFilter, counterpartyFilter, currentUserId, currentUserName, dateRangeBounds, isAdminUser, isApprovalsMode, priorityFilter, quickFilter, search, tasks, typeFilter]);
 
   const statusAndPeriodFilteredTasks = useMemo(() => {
     const nowDate = getCurrentCalendarDate();
@@ -4018,8 +4087,8 @@ export function TaskJournal({
     try {
       const response = await apiService.downloadTaskJournalCalendar({
         clientCaseId: caseFilter !== 'all' ? Number(caseFilter) : undefined,
-        clientId: contextFilter?.clientId ?? undefined,
-        legalEntityId: contextFilter?.legalEntityId ?? undefined,
+        clientId: contextFilter?.clientId ?? selectedFilterClientId,
+        legalEntityId: contextFilter?.legalEntityId ?? selectedFilterLegalEntityId,
         reminderMinutes: icsReminderMinutes,
       });
       downloadBlob(response.fileName, response.blob);
@@ -4103,8 +4172,8 @@ export function TaskJournal({
       priority: reportPriority,
       assigneeUserId: reportAssigneeUserId,
       clientCaseId: caseFilter !== 'all' ? Number(caseFilter) : undefined,
-      clientId: contextFilter?.clientId ?? undefined,
-      legalEntityId: contextFilter?.legalEntityId ?? undefined,
+      clientId: contextFilter?.clientId ?? selectedFilterClientId,
+      legalEntityId: contextFilter?.legalEntityId ?? selectedFilterLegalEntityId,
       from,
       to,
     };
@@ -4408,7 +4477,7 @@ export function TaskJournal({
 
         <section className="mb-6 min-w-0 max-w-full space-y-3" data-testid="task-filters-panel">
           <div
-            className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(240px,1fr)_repeat(5,minmax(140px,190px))]"
+            className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(220px,1fr)_repeat(6,minmax(130px,180px))]"
             data-testid="task-main-filter-row"
           >
             <label className="relative block">
@@ -4436,13 +4505,30 @@ export function TaskJournal({
             </select>
 
             <select
+              value={counterpartyFilter}
+              onChange={(event) => {
+                setCounterpartyFilter(event.target.value);
+                setCaseFilter('all');
+              }}
+              className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              aria-label="Контрагент"
+              data-testid="task-counterparty-filter"
+            >
+              <option value="all">Все контрагенты</option>
+              {counterpartyCaseFilterData.counterparties.map((counterparty) => (
+                <option key={counterparty.value} value={counterparty.value}>{counterparty.label}</option>
+              ))}
+            </select>
+
+            <select
               value={caseFilter}
               onChange={(event) => setCaseFilter(event.target.value)}
+              disabled={counterpartyFilter === 'all'}
               className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
               aria-label="Фильтр по делу"
               data-testid="task-case-filter"
             >
-              <option value="all">Все дела</option>
+              <option value="all">{counterpartyFilter === 'all' ? 'Сначала выберите контрагента' : 'Все дела контрагента'}</option>
               {caseFilterOptions.map((clientCase) => (
                 <option key={clientCase.id} value={String(clientCase.id)}>{clientCase.label}</option>
               ))}

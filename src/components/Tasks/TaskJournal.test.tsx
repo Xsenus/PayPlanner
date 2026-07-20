@@ -548,7 +548,7 @@ describe('TaskJournal', () => {
 
     expect(screen.getByText('Контрагент / дело')).toBeTruthy();
     expect(screen.getByText('Наименование задачи')).toBeTruthy();
-    expect(screen.getByText('Иванов Иван Иванович')).toBeTruthy();
+    expect(screen.getAllByText('Иванов Иван Иванович').length).toBeGreaterThan(0);
     expect(screen.getByText('БАНКРОТСТВО')).toBeTruthy();
   });
 
@@ -2431,8 +2431,15 @@ describe('TaskJournal', () => {
     ]);
 
     const caseFilter = screen.getByTestId('task-case-filter') as HTMLSelectElement;
-    expect(within(caseFilter).getByRole('option', { name: 'Иванов Иван Иванович — БАНКРОТСТВО' })).toBeTruthy();
-    expect(within(caseFilter).getByRole('option', { name: 'Петров Петр Петрович — НАСЛЕДСТВО' })).toBeTruthy();
+    expect(caseFilter.disabled).toBe(true);
+    expect(within(caseFilter).queryByRole('option', { name: 'БАНКРОТСТВО' })).toBeNull();
+    expect(within(caseFilter).queryByRole('option', { name: 'НАСЛЕДСТВО' })).toBeNull();
+
+    fireEvent.change(screen.getByTestId('task-counterparty-filter'), { target: { value: 'client:11' } });
+
+    expect(caseFilter.disabled).toBe(false);
+    expect(within(caseFilter).queryByRole('option', { name: 'БАНКРОТСТВО' })).toBeNull();
+    expect(within(caseFilter).getByRole('option', { name: 'НАСЛЕДСТВО' })).toBeTruthy();
 
     fireEvent.change(caseFilter, { target: { value: '200' } });
 
@@ -2440,6 +2447,7 @@ describe('TaskJournal', () => {
     await waitFor(() => expect(screen.queryByText('Задача по банкротству')).toBeNull());
     await waitFor(() => {
       expect(JSON.parse(window.localStorage.getItem('pp.task_journal.filters.v1.user:7') ?? '{}')).toMatchObject({
+        counterpartyFilter: 'client:11',
         caseFilter: '200',
       });
     });
@@ -2455,6 +2463,11 @@ describe('TaskJournal', () => {
       clientCaseId: 200,
       includeTasks: false,
     })));
+
+    fireEvent.change(screen.getByTestId('task-counterparty-filter'), { target: { value: 'client:10' } });
+    expect(caseFilter.value).toBe('all');
+    expect(within(caseFilter).getByRole('option', { name: 'БАНКРОТСТВО' })).toBeTruthy();
+    expect(within(caseFilter).queryByRole('option', { name: 'НАСЛЕДСТВО' })).toBeNull();
   });
 
   it('saves, applies and deletes custom task journal views', async () => {
@@ -2475,6 +2488,7 @@ describe('TaskJournal', () => {
       ], { waitForTitle: null });
 
       const searchInput = screen.getByPlaceholderText('Поиск по контрагенту, делу или наименованию задачи') as HTMLInputElement;
+      fireEvent.change(screen.getByTestId('task-counterparty-filter'), { target: { value: 'client:10' } });
       fireEvent.change(screen.getByTestId('task-case-filter'), { target: { value: '100' } });
       fireEvent.change(screen.getByTestId('task-priority-filter'), { target: { value: 'urgent' } });
       fireEvent.change(searchInput, { target: { value: 'Срочная' } });
@@ -2490,12 +2504,13 @@ describe('TaskJournal', () => {
       const savedViews = JSON.parse(rawSavedViews ?? '[]') as Array<{
         id: string;
         name: string;
-        filters: { caseFilter?: string; priorityFilter?: string; search?: string };
+        filters: { counterpartyFilter?: string; caseFilter?: string; priorityFilter?: string; search?: string };
       }>;
       expect(savedViews).toHaveLength(1);
       expect(savedViews[0]).toMatchObject({
         name: 'Срочные задачи',
         filters: {
+          counterpartyFilter: 'client:10',
           caseFilter: '100',
           priorityFilter: 'urgent',
           search: 'Срочная',
@@ -2503,13 +2518,14 @@ describe('TaskJournal', () => {
       });
 
       fireEvent.change(screen.getByTestId('task-priority-filter'), { target: { value: 'all' } });
-      fireEvent.change(screen.getByTestId('task-case-filter'), { target: { value: 'all' } });
+      fireEvent.change(screen.getByTestId('task-counterparty-filter'), { target: { value: 'all' } });
       fireEvent.change(searchInput, { target: { value: '' } });
 
       fireEvent.change(screen.getByTestId('task-saved-view-select'), { target: { value: savedViews[0].id } });
 
       await waitFor(() => {
         expect((screen.getByTestId('task-priority-filter') as HTMLSelectElement).value).toBe('urgent');
+        expect((screen.getByTestId('task-counterparty-filter') as HTMLSelectElement).value).toBe('client:10');
         expect((screen.getByTestId('task-case-filter') as HTMLSelectElement).value).toBe('100');
         expect(searchInput.value).toBe('Срочная');
       });

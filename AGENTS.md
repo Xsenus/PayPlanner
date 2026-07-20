@@ -29,6 +29,10 @@ Keep changes scoped to the requested behavior. Do not rewrite unrelated release 
 
 When the legacy task card and the new task card window both exist, any change to task business logic, saving rules, permissions, statuses, result handling, deadlines, reminders, files, comments, subtasks, labels, priorities, CRM links, or related API behavior must be applied to both forms unless the task explicitly says otherwise. Verify both the old and the new task card before considering the change complete, including the administrator setting that switches which card is shown to all users.
 
+## Performance and Optimization
+
+Optimize every implementation as far as reasonably possible. Before completing a task, review database and API query counts, payload sizes, algorithmic complexity, repeated calculations, network requests, rendering work, memory use, and other relevant resource costs. Avoid N+1 queries, loading or processing data before it is needed, duplicate work, and unbounded full-list operations when a narrower indexed or demand-driven operation is available. Preserve correctness, readability, security, and maintainability while choosing the most efficient practical solution.
+
 ## Commits
 
 Use short, meaningful Russian commit messages that describe the user-visible or technical result of the change. Avoid generic messages such as `fix`, `update`, `changes`, or English placeholders when a clear Russian summary is possible.
