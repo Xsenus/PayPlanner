@@ -3092,7 +3092,8 @@ public class ReportsControllerTests
     [Fact]
     public async Task LegalWork_UsesCaseTaskAndPaymentVisibility()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await SqliteTestContextFactory.CreateAsync(interceptor: interceptor);
         var role = new Role { Name = "legal-work-lawyer", Description = "Lawyer" };
         var visibleUser = new User
         {
@@ -3234,6 +3235,7 @@ public class ReportsControllerTests
         await db.SaveChangesAsync();
 
         var controller = CreateController(db, CreateUserPrincipal(visibleUser.Id));
+        interceptor.Commands.Clear();
 
         var action = await controller.LegalWork(today.AddDays(-30), today.AddDays(30), null, null, null, CancellationToken.None);
 
@@ -3246,6 +3248,8 @@ public class ReportsControllerTests
         Assert.Equal(1, report.OpenTaskCount);
         Assert.Equal("LEGAL-VISIBLE", Assert.Single(report.OverdueDeadlines).CaseNumber);
         Assert.DoesNotContain(report.Responsibles, item => item.ResponsibleUserId == hiddenUser.Id);
+        Assert.Equal(2, interceptor.Commands.Count(command =>
+            command.Contains("RolePermissions", StringComparison.Ordinal)));
     }
 
     [Fact]

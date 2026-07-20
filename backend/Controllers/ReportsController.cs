@@ -22,6 +22,12 @@ public class ReportsController : ControllerBase
 {
     private const string CaseInactivityAutomationDaysSettingKey = "tasks.automation.caseControl.inactiveDays";
     private const string CaseInactivityAutomationEscalationDaysSettingKey = "tasks.automation.caseControl.escalationDays";
+    private static readonly string[] LegalWorkVisibilitySections =
+    [
+        RolePermissionCatalog.Cases,
+        RolePermissionCatalog.Tasks,
+        RolePermissionCatalog.Accounts,
+    ];
 
     private readonly PaymentContext _db;
     private readonly ILogger<ReportsController> _logger;
@@ -179,9 +185,10 @@ public class ReportsController : ControllerBase
             return Forbid();
         }
 
-        var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
-        var tasksVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
-        var accountsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+        var visibilityBySection = await _db.ResolveDataVisibilitiesAsync(User, LegalWorkVisibilitySections, ct);
+        var casesVisibility = visibilityBySection[RolePermissionCatalog.Cases];
+        var tasksVisibility = visibilityBySection[RolePermissionCatalog.Tasks];
+        var accountsVisibility = visibilityBySection[RolePermissionCatalog.Accounts];
         if (casesVisibility is null || tasksVisibility is null || accountsVisibility is null)
         {
             return Unauthorized();
@@ -589,9 +596,10 @@ public class ReportsController : ControllerBase
             return (null, Forbid());
         }
 
-        var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
-        var tasksVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct);
-        var accountsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+        var visibilityBySection = await _db.ResolveDataVisibilitiesAsync(User, LegalWorkVisibilitySections, ct);
+        var casesVisibility = visibilityBySection[RolePermissionCatalog.Cases];
+        var tasksVisibility = visibilityBySection[RolePermissionCatalog.Tasks];
+        var accountsVisibility = visibilityBySection[RolePermissionCatalog.Accounts];
         if (casesVisibility is null || tasksVisibility is null || accountsVisibility is null)
         {
             return (null, Unauthorized());
