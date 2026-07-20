@@ -3161,6 +3161,7 @@ public class NotificationServiceTests
     {
         var interceptor = new RecordingCommandInterceptor();
         await using var db = await CreateContextAsync(interceptor);
+        await SeedEmailSettingsAsync(db);
         var adminRole = new Role
         {
             Name = "admin",
@@ -3195,6 +3196,16 @@ public class NotificationServiceTests
             .ToArray();
         db.Users.AddRange(recipients.Append(reviewer));
         await db.SaveChangesAsync();
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = RoleNotificationPreferenceSettings.SettingKey,
+            Value = RoleNotificationPreferenceSettings.Serialize(new Dictionary<int, UserNotificationPreferenceSnapshot>
+            {
+                [adminRole.Id] = new([], new Dictionary<string, IReadOnlyList<string>>())
+            }),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
         db.UserSettings.AddRange(
             new UserSetting
             {
@@ -3239,7 +3250,7 @@ public class NotificationServiceTests
             AssigneeName = recipients[0].FullName,
             DueAt = decisionDueAt,
             RemindersJson = "[]",
-            ChannelsJson = "[\"inApp\"]",
+            ChannelsJson = "[\"inApp\",\"email\"]",
             Status = "inProgress",
             Participants = recipients
                 .Skip(1)
@@ -3286,7 +3297,7 @@ public class NotificationServiceTests
 
         var deliveries = await service.NotifyTaskDeadlineChangeApprovedAsync(task, request);
 
-        Assert.Empty(deliveries);
+        Assert.Equal(12, deliveries.Count);
         var notifications = await db.UserNotifications.AsNoTracking().ToListAsync();
         Assert.Equal(12, notifications.Count);
         Assert.DoesNotContain(notifications, notification => notification.RecipientUserId == reviewer.Id);
@@ -3309,6 +3320,9 @@ public class NotificationServiceTests
         Assert.Single(interceptor.ReaderCommands, command =>
             command.Contains("FROM \"SystemSettings\"", StringComparison.Ordinal)
             && command.Contains("notifications.templates.v1", StringComparison.Ordinal));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"Users\"", StringComparison.Ordinal)
+            && command.Contains("ExternalIdentities", StringComparison.Ordinal));
         var utcNotification = notifications.Single(
             notification => notification.RecipientUserId == recipients[0].Id);
         Assert.Contains("Срок задачи: 22.07.2026 12:00", utcNotification.BodyPreview);
