@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -70,8 +69,7 @@ public class PaymentsController : ControllerBase
             .ApplyPaymentVisibility(visibility)
             .AnyAsync(payment => payment.Id == id, ct);
 
-    private async Task<IReadOnlyCollection<int>> ResolvePaymentNotificationRecipientsAsync(
-        Payment payment,
+    private async Task<int[]> ResolvePaymentNotificationCandidatesAsync(
         IEnumerable<int> candidateUserIds,
         CancellationToken ct)
     {
@@ -81,10 +79,10 @@ public class PaymentsController : ControllerBase
             .ToArray();
         if (userIds.Length == 0)
         {
-            return Array.Empty<int>();
+            return [];
         }
 
-        var allowedUserIds = await _db.Users
+        return await _db.Users
             .AsNoTracking()
             .Where(user => userIds.Contains(user.Id)
                 && user.IsActive
@@ -94,41 +92,10 @@ public class PaymentsController : ControllerBase
                         permission.Section == RolePermissionCatalog.Payments
                         && permission.CanView))))
             .Select(user => user.Id)
-            .ToListAsync(ct);
-
-        if (allowedUserIds.Count == 0)
-        {
-            return Array.Empty<int>();
-        }
-
-        var visibleRecipientIds = new List<int>();
-        foreach (var userId in allowedUserIds)
-        {
-            var principal = new ClaimsPrincipal(new ClaimsIdentity(
-                new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture)) },
-                authenticationType: "NotificationAccessCheck"));
-            var visibility = await _db.ResolveDataVisibilityAsync(principal, RolePermissionCatalog.Payments, ct);
-            if (visibility is null)
-            {
-                continue;
-            }
-
-            var canOpenPayment = await _db.Payments
-                .AsNoTracking()
-                .Where(item => item.Id == payment.Id)
-                .ApplyPaymentVisibility(visibility)
-                .AnyAsync(ct);
-            if (canOpenPayment)
-            {
-                visibleRecipientIds.Add(userId);
-            }
-        }
-
-        return visibleRecipientIds;
+            .ToArrayAsync(ct);
     }
 
-    private async Task<IReadOnlyCollection<int>> ResolveInvoiceNotificationRecipientsAsync(
-        Payment invoicePayment,
+    private async Task<int[]> ResolveInvoiceNotificationCandidatesAsync(
         IEnumerable<int> candidateUserIds,
         CancellationToken ct)
     {
@@ -138,10 +105,10 @@ public class PaymentsController : ControllerBase
             .ToArray();
         if (userIds.Length == 0)
         {
-            return Array.Empty<int>();
+            return [];
         }
 
-        var allowedUserIds = await _db.Users
+        return await _db.Users
             .AsNoTracking()
             .Where(user => userIds.Contains(user.Id)
                 && user.IsActive
@@ -152,32 +119,7 @@ public class PaymentsController : ControllerBase
                         permission.Section == RolePermissionCatalog.Accounts
                         && permission.CanView)))
             .Select(user => user.Id)
-            .ToListAsync(ct);
-
-        var visibleRecipientIds = new List<int>();
-        foreach (var userId in allowedUserIds)
-        {
-            var principal = new ClaimsPrincipal(new ClaimsIdentity(
-                new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture)) },
-                authenticationType: "NotificationAccessCheck"));
-            var visibility = await _db.ResolveDataVisibilityAsync(principal, RolePermissionCatalog.Accounts, ct);
-            if (visibility is null)
-            {
-                continue;
-            }
-
-            var canOpenInvoice = await _db.Payments
-                .AsNoTracking()
-                .Where(item => item.Id == invoicePayment.Id)
-                .ApplyPaymentVisibility(visibility)
-                .AnyAsync(ct);
-            if (canOpenInvoice)
-            {
-                visibleRecipientIds.Add(userId);
-            }
-        }
-
-        return visibleRecipientIds;
+            .ToArrayAsync(ct);
     }
 
     private async Task<IActionResult?> RequirePaymentsPermissionAsync(
@@ -198,11 +140,10 @@ public class PaymentsController : ControllerBase
         }
 
         await _db.Entry(payment).Collection(item => item.Responsibles).LoadAsync(ct);
-        var recipients = await ResolvePaymentNotificationRecipientsAsync(
-            payment,
+        var recipients = await ResolvePaymentNotificationCandidatesAsync(
             payment.Responsibles.Select(item => item.UserId),
             ct);
-        if (recipients.Count == 0)
+        if (recipients.Length == 0)
         {
             return;
         }
@@ -226,11 +167,10 @@ public class PaymentsController : ControllerBase
         }
 
         await _db.Entry(payment).Collection(item => item.Responsibles).LoadAsync(ct);
-        var recipients = await ResolvePaymentNotificationRecipientsAsync(
-            payment,
+        var recipients = await ResolvePaymentNotificationCandidatesAsync(
             payment.Responsibles.Select(item => item.UserId),
             ct);
-        if (recipients.Count == 0)
+        if (recipients.Length == 0)
         {
             return;
         }
@@ -283,11 +223,10 @@ public class PaymentsController : ControllerBase
 
         await _db.Entry(invoicePayment).Collection(item => item.Responsibles).LoadAsync(ct);
         await _db.Entry(invoicePayment).Reference(item => item.Invoice).LoadAsync(ct);
-        var recipients = await ResolveInvoiceNotificationRecipientsAsync(
-            invoicePayment,
+        var recipients = await ResolveInvoiceNotificationCandidatesAsync(
             invoicePayment.Responsibles.Select(item => item.UserId),
             ct);
-        if (recipients.Count == 0)
+        if (recipients.Length == 0)
         {
             return;
         }
