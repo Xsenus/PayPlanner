@@ -5758,9 +5758,21 @@ public sealed class NotificationService : INotificationService
             return Array.Empty<int>();
         }
 
-        var recipientVisibilityKeys = new List<(int UserId, string VisibilityKey)>(candidateUserIds.Length);
+        var eligibleUserIds = await _context.Users
+            .AsNoTracking()
+            .Where(user => candidateUserIds.Contains(user.Id)
+                && user.IsActive
+                && user.IsApproved)
+            .Select(user => user.Id)
+            .ToListAsync(cancellationToken);
+        if (eligibleUserIds.Count == 0)
+        {
+            return Array.Empty<int>();
+        }
+
+        var recipientVisibilityKeys = new List<(int UserId, string VisibilityKey)>(eligibleUserIds.Count);
         var visibilityByKey = new Dictionary<string, DataVisibilityAccess>(StringComparer.Ordinal);
-        foreach (var userId in candidateUserIds)
+        foreach (var userId in eligibleUserIds)
         {
             var principal = CreateNotificationRecipientPrincipal(userId);
             var access = await _context.ResolveDataVisibilityAsync(principal, section, cancellationToken);

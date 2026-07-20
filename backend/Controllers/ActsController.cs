@@ -2,8 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Globalization;
-using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -71,68 +69,9 @@ public class ActsController : ControllerBase
     private async Task<bool> IsCurrentUserAdminAsync(CancellationToken ct)
         => await _db.IsUserAdminOrLegacyFallbackAsync(User, ct);
 
-    private async Task<IReadOnlyCollection<int>> ResolveActNotificationRecipientsAsync(
-        Act act,
-        IEnumerable<int> candidateUserIds,
-        CancellationToken ct)
-    {
-        var userIds = candidateUserIds
-            .Where(userId => userId > 0)
-            .Distinct()
-            .ToArray();
-        if (userIds.Length == 0)
-        {
-            return Array.Empty<int>();
-        }
-
-        var allowedUserIds = await _db.Users
-            .AsNoTracking()
-            .Where(user => userIds.Contains(user.Id)
-                && user.IsActive
-                && user.IsApproved
-                && user.Role != null
-                && (user.Role.Name == "admin"
-                    || user.Role.Permissions.Any(permission =>
-                        permission.Section == RolePermissionCatalog.Acts
-                        && permission.CanView)))
-            .Select(user => user.Id)
-            .ToListAsync(ct);
-
-        var result = new List<int>();
-        foreach (var userId in allowedUserIds)
-        {
-            var principal = new ClaimsPrincipal(new ClaimsIdentity(
-                new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture)) },
-                authenticationType: "ActNotificationAccessCheck"));
-            var visibility = await _db.ResolveDataVisibilityAsync(principal, RolePermissionCatalog.Acts, ct);
-            if (visibility is null)
-            {
-                continue;
-            }
-
-            var canOpenAct = await _db.Acts
-                .AsNoTracking()
-                .Where(item => item.Id == act.Id)
-                .ApplyActVisibility(visibility)
-                .AnyAsync(ct);
-            if (canOpenAct)
-            {
-                result.Add(userId);
-            }
-        }
-
-        return result;
-    }
-
     private async Task NotifyActCreatedAsync(Act act, CancellationToken ct)
     {
         if (_notificationService is null || !act.ResponsibleId.HasValue)
-        {
-            return;
-        }
-
-        var recipients = await ResolveActNotificationRecipientsAsync(act, [act.ResponsibleId.Value], ct);
-        if (recipients.Count == 0)
         {
             return;
         }
@@ -141,7 +80,7 @@ public class ActsController : ControllerBase
             act,
             User.GetDisplayName(),
             User.GetUserId() ?? 0,
-            recipients,
+            [act.ResponsibleId.Value],
             ct);
     }
 
@@ -152,18 +91,12 @@ public class ActsController : ControllerBase
             return;
         }
 
-        var recipients = await ResolveActNotificationRecipientsAsync(act, [act.ResponsibleId.Value], ct);
-        if (recipients.Count == 0)
-        {
-            return;
-        }
-
         await _notificationService.NotifyActChangedAsync(
             act,
             changeLabels,
             User.GetDisplayName(),
             User.GetUserId() ?? 0,
-            recipients,
+            [act.ResponsibleId.Value],
             ct);
     }
 

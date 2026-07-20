@@ -1,4 +1,6 @@
 using System.ComponentModel.DataAnnotations;
+using System.Data.Common;
+using System.Reflection;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -6,6 +8,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using PayPlanner.Api.Controllers;
@@ -3184,18 +3187,77 @@ public class ActsControllerTests
         Assert.Equal("act-export.doc", file.FileDownloadName);
     }
 
-    private static async Task<PaymentContext> CreateContextAsync()
+    [Fact]
+    public async Task ActNotifications_DelegateVisibilityCheckWithoutAdditionalQueries()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var actor = await CreateAdminUserAsync(db, "Автор акта", "act-notification-actor@example.com");
+        var responsible = await CreateAdminUserAsync(db, "Ответственный по акту", "act-notification-recipient@example.com");
+        var act = new Act
+        {
+            Number = "ACT-NOTIFICATION-QUERY",
+            Date = new DateTime(2026, 7, 20),
+            Amount = 15_000m,
+            Status = ActStatus.Created,
+            WorkflowStatus = ActWorkflowStatus.Draft,
+            ResponsibleId = responsible.Id,
+        };
+        db.Acts.Add(act);
+        await db.SaveChangesAsync();
+
+        var notificationService = DispatchProxy.Create<INotificationService, RecordingNotificationServiceProxy>();
+        var recorder = (RecordingNotificationServiceProxy)(object)notificationService;
+        var controller = new ActsController(
+            db,
+            new NoopFormRequirementsService(),
+            notificationService: notificationService)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(BuildUserClaims(actor.Id, includeAdminRoleClaim: true), "Test")),
+                },
+            },
+        };
+        interceptor.ReaderCommands.Clear();
+
+        await InvokeNotificationMethodAsync(controller, "NotifyActCreatedAsync", act, CancellationToken.None);
+        await InvokeNotificationMethodAsync(controller, "NotifyActChangedAsync", act, new[] { "Статус" }, CancellationToken.None);
+
+        Assert.Empty(interceptor.ReaderCommands);
+        Assert.Equal(2, recorder.Calls.Count);
+        Assert.All(recorder.Calls, call => Assert.Equal(new[] { responsible.Id }, call.RecipientUserIds));
+        Assert.Equal(["NotifyActCreatedAsync", "NotifyActChangedAsync"], recorder.Calls.Select(call => call.MethodName));
+    }
+
+    private static async Task<PaymentContext> CreateContextAsync(DbCommandInterceptor? interceptor = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
 
-        var options = new DbContextOptionsBuilder<PaymentContext>()
-            .UseSqlite(connection)
-            .Options;
+        var optionsBuilder = new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite(connection);
+        if (interceptor is not null)
+        {
+            optionsBuilder.AddInterceptors(interceptor);
+        }
 
-        var db = new PaymentContext(options);
+        var db = new PaymentContext(optionsBuilder.Options);
         await db.Database.EnsureCreatedAsync();
         return db;
+    }
+
+    private static async Task InvokeNotificationMethodAsync(
+        ActsController controller,
+        string methodName,
+        params object[] arguments)
+    {
+        var method = typeof(ActsController).GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        var task = Assert.IsAssignableFrom<Task>(method.Invoke(controller, arguments));
+        await task;
     }
 
     private static async Task<PaymentContext> CreateFileContextAsync(string dbPath)
@@ -3658,6 +3720,35 @@ public class ActsControllerTests
 
         public Task<TelegramNotificationSettingsDto> GetSettingsAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(new TelegramNotificationSettingsDto());
+    }
+
+    private class RecordingNotificationServiceProxy : DispatchProxy
+    {
+        public List<(string MethodName, IReadOnlyCollection<int> RecipientUserIds)> Calls { get; } = [];
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            Assert.NotNull(targetMethod);
+            Assert.NotNull(args);
+            var recipientUserIds = Assert.IsAssignableFrom<IReadOnlyCollection<int>>(args[^2]);
+            Calls.Add((targetMethod.Name, recipientUserIds.ToArray()));
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class RecordingCommandInterceptor : DbCommandInterceptor
+    {
+        public List<string> ReaderCommands { get; } = [];
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            ReaderCommands.Add(command.CommandText);
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
     }
 
     private sealed class RecordingYandexDiskService : IYandexDiskService

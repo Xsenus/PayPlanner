@@ -7576,6 +7576,43 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyActCreatedAsync_SkipsUnapprovedRecipient()
+    {
+        await using var db = await CreateContextAsync();
+        var actor = await CreateUserAsync(db, "act-unapproved-actor@example.com");
+        var recipient = new User
+        {
+            Email = "act-unapproved-recipient@example.com",
+            FullName = "Неподтверждённый ответственный",
+            PasswordHash = "hash",
+            RoleId = actor.RoleId,
+            IsActive = true,
+            IsApproved = false,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        db.Users.Add(recipient);
+        await db.SaveChangesAsync();
+        var act = new Act
+        {
+            Number = "A-UNAPPROVED",
+            Title = "Акт для неподтверждённого пользователя",
+            Date = new DateTime(2026, 7, 20),
+            Amount = 42_000m,
+            Status = ActStatus.Created,
+            WorkflowStatus = ActWorkflowStatus.Draft,
+            ResponsibleId = recipient.Id,
+        };
+        db.Acts.Add(act);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+
+        await service.NotifyActCreatedAsync(act, actor.FullName, actor.Id, [recipient.Id]);
+
+        Assert.Empty(await db.UserNotifications.ToListAsync());
+    }
+
+    [Fact]
     public async Task NotifyContractCreatedAsync_SkipsRecipientWithoutContractsAccess()
     {
         await using var db = await CreateContextAsync();
