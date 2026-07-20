@@ -644,6 +644,12 @@ public sealed class NotificationService : INotificationService
                 NotificationChannels.WebPush,
             ]),
             cancellationToken);
+        var externalDeliveryRecipientIds = recipients
+            .Where(userId => channels.Any(recipientNotificationChannels[userId].Contains))
+            .ToList();
+        var externalDeliveryRecipients = await ResolveRecipientsAsync(
+            externalDeliveryRecipientIds,
+            cancellationToken);
         var templateDefinition = NotificationTemplateCatalog.Find(NotificationTemplateKeys.TaskAssigned);
         var templateStorage = templateDefinition is null
             ? new NotificationTemplateStorage()
@@ -683,7 +689,10 @@ public sealed class NotificationService : INotificationService
                 .ToList();
             if (enabledChannels.Count > 0)
             {
-                deliveries.AddRange(await SendToUserAsync(userId, message, enabledChannels, eventKey, cancellationToken));
+                if (externalDeliveryRecipients.TryGetValue(userId, out var recipient))
+                {
+                    deliveries.AddRange(await SendAsync(recipient, message, enabledChannels, eventKey, cancellationToken));
+                }
             }
         }
 
@@ -4482,6 +4491,27 @@ public sealed class NotificationService : INotificationService
             .Include(item => item.ExternalIdentities)
             .FirstOrDefaultAsync(item => item.Id == userId, cancellationToken);
         return user is null ? BuildRecipient(fallback) : BuildRecipient(user);
+    }
+
+    private async Task<IReadOnlyDictionary<int, NotificationRecipient>> ResolveRecipientsAsync(
+        IEnumerable<int> userIds,
+        CancellationToken cancellationToken)
+    {
+        var normalizedUserIds = userIds
+            .Where(userId => userId > 0)
+            .Distinct()
+            .ToArray();
+        if (normalizedUserIds.Length == 0)
+        {
+            return new Dictionary<int, NotificationRecipient>();
+        }
+
+        var users = await _context.Users
+            .AsNoTracking()
+            .Include(item => item.ExternalIdentities)
+            .Where(item => normalizedUserIds.Contains(item.Id))
+            .ToListAsync(cancellationToken);
+        return users.ToDictionary(item => item.Id, BuildRecipient);
     }
 
     private static NotificationRecipient BuildRecipient(User user)
