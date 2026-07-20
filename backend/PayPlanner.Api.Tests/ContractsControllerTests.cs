@@ -470,7 +470,7 @@ public class ContractsControllerTests
             Assert.Equal(contract.Id, notification.ObjectId);
             Assert.Contains("CT-NOTIFY-1", notification.BodyPreview);
         });
-        Assert.Single(interceptor.ReaderCommands, command =>
+        var recipientSelectionCommand = Assert.Single(interceptor.ReaderCommands, command =>
             command.Contains("UNION", StringComparison.Ordinal)
             && command.Contains("ClientContracts", StringComparison.Ordinal)
             && command.Contains("LegalEntityContracts", StringComparison.Ordinal)
@@ -478,6 +478,8 @@ public class ContractsControllerTests
             && command.Contains("ContractPayments", StringComparison.Ordinal)
             && command.Contains("ContractActs", StringComparison.Ordinal)
             && command.Contains("PaymentResponsibles", StringComparison.Ordinal));
+        Assert.Contains("Users", recipientSelectionCommand, StringComparison.Ordinal);
+        Assert.Contains("RolePermissions", recipientSelectionCommand, StringComparison.Ordinal);
         Assert.Equal(12, interceptor.ReaderCommands.Count(command =>
             command.Contains("SELECT EXISTS", StringComparison.Ordinal)
             && command.Contains("FROM \"Contracts\"", StringComparison.Ordinal)));

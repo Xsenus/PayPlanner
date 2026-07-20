@@ -149,33 +149,27 @@ public class ContractsController : ControllerBase
                 && payment.LegalEntity.ResponsibleUserId.HasValue)
             .Select(payment => new { UserId = payment.LegalEntity!.ResponsibleUserId!.Value });
 
-        var userIds = (await clientCandidates
-                .Concat(legalEntityCandidates)
-                .Concat(invoiceResponsibleCandidates)
-                .Concat(invoiceClientCandidates)
-                .Concat(invoiceLegalEntityCandidates)
-                .Concat(linkedPaymentResponsibleCandidates)
-                .Concat(linkedPaymentClientCandidates)
-                .Concat(linkedPaymentLegalEntityCandidates)
-                .Concat(actResponsibleCandidates)
-                .Concat(actClientCandidates)
-                .Concat(actLegalEntityCandidates)
-                .Concat(directPaymentResponsibleCandidates)
-                .Concat(directPaymentClientCandidates)
-                .Concat(directPaymentLegalEntityCandidates)
-                .Where(candidate => candidate.UserId > 0)
-                .Select(candidate => candidate.UserId)
-                .Distinct()
-                .ToListAsync(ct))
-            .ToArray();
-        if (userIds.Length == 0)
-        {
-            return Array.Empty<int>();
-        }
+        var candidateUserIds = clientCandidates
+            .Concat(legalEntityCandidates)
+            .Concat(invoiceResponsibleCandidates)
+            .Concat(invoiceClientCandidates)
+            .Concat(invoiceLegalEntityCandidates)
+            .Concat(linkedPaymentResponsibleCandidates)
+            .Concat(linkedPaymentClientCandidates)
+            .Concat(linkedPaymentLegalEntityCandidates)
+            .Concat(actResponsibleCandidates)
+            .Concat(actClientCandidates)
+            .Concat(actLegalEntityCandidates)
+            .Concat(directPaymentResponsibleCandidates)
+            .Concat(directPaymentClientCandidates)
+            .Concat(directPaymentLegalEntityCandidates)
+            .Where(candidate => candidate.UserId > 0)
+            .Select(candidate => candidate.UserId)
+            .Distinct();
 
         var allowedUserIds = await _db.Users
             .AsNoTracking()
-            .Where(user => userIds.Contains(user.Id)
+            .Where(user => candidateUserIds.Contains(user.Id)
                 && user.IsActive
                 && user.IsApproved
                 && user.Role != null
@@ -184,7 +178,7 @@ public class ContractsController : ControllerBase
                         permission.Section == RolePermissionCatalog.Contracts
                         && permission.CanView)))
             .Select(user => user.Id)
-            .ToListAsync(ct);
+            .ToArrayAsync(ct);
 
         // NotificationService centrally revalidates object visibility before persisting notifications.
         return allowedUserIds;
