@@ -26,6 +26,16 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
     private const long MaxLegalEntityRequestSizeBytes = 16 * 1024 * 1024;
     private const int MaxInlineLegalEntityAssetDataUrlLength = 350_000;
     private const int MaxInlineLegalEntityAssetsTotalLength = 800_000;
+    private static readonly string[] PagedVisibilitySections =
+    [
+        RolePermissionCatalog.LegalEntities,
+        RolePermissionCatalog.Clients,
+        RolePermissionCatalog.Accounts,
+        RolePermissionCatalog.Acts,
+        RolePermissionCatalog.Cases,
+        RolePermissionCatalog.Contracts,
+        RolePermissionCatalog.Payments,
+    ];
     private static readonly HashSet<string> LegalQuickClientRequirementFields = new(StringComparer.OrdinalIgnoreCase)
     {
         "Inn",
@@ -279,6 +289,12 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
     }
 
     private async Task<IQueryable<LegalEntity>> ApplyCompanyVisibilityAsync(IQueryable<LegalEntity> query, CancellationToken ct)
+        => await ApplyCompanyVisibilityAsync(query, await GetCurrentAccessAsync(ct), ct);
+
+    private async Task<IQueryable<LegalEntity>> ApplyCompanyVisibilityAsync(
+        IQueryable<LegalEntity> query,
+        DataVisibilityAccess? access,
+        CancellationToken ct)
     {
         var state = await LoadMainCompanySettingsStateAsync(ct);
         if (state.CompanyIds.Count > 0)
@@ -286,7 +302,6 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             query = query.Where(item => !state.CompanyIds.Contains(item.Id));
         }
 
-        var access = await GetCurrentAccessAsync(ct);
         query = query.ApplyLegalEntityVisibility(access);
 
         return query;
@@ -452,17 +467,35 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
 
     private async Task<HashSet<int>> LoadVisibleClientIdsAsync(IEnumerable<LegalEntity> entities, CancellationToken ct)
     {
-        var clientIds = entities
-            .SelectMany(entity => entity.Clients.Select(client => client.Id))
-            .Distinct()
-            .ToList();
-
+        var clientIds = GetClientIds(entities);
         if (clientIds.Count == 0)
         {
-            return new HashSet<int>();
+            return [];
         }
 
         var visibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Clients, ct);
+        return await LoadVisibleClientIdsAsync(clientIds, visibility, ct);
+    }
+
+    private async Task<HashSet<int>> LoadVisibleClientIdsAsync(
+        IEnumerable<LegalEntity> entities,
+        DataVisibilityAccess? visibility,
+        CancellationToken ct)
+    {
+        var clientIds = GetClientIds(entities);
+        if (clientIds.Count == 0)
+        {
+            return [];
+        }
+
+        return await LoadVisibleClientIdsAsync(clientIds, visibility, ct);
+    }
+
+    private async Task<HashSet<int>> LoadVisibleClientIdsAsync(
+        IReadOnlyCollection<int> clientIds,
+        DataVisibilityAccess? visibility,
+        CancellationToken ct)
+    {
         var ids = await _db.Clients
             .AsNoTracking()
             .ApplyClientVisibility(visibility)
@@ -472,6 +505,12 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
 
         return ids.ToHashSet();
     }
+
+    private static List<int> GetClientIds(IEnumerable<LegalEntity> entities)
+        => entities
+            .SelectMany(entity => entity.Clients.Select(client => client.Id))
+            .Distinct()
+            .ToList();
 
     private async Task<LegalEntityDetailDto> MapDetailForCurrentUserAsync(
         LegalEntity entity,
@@ -1400,8 +1439,12 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 200);
 
-        var baseQuery = await ApplyCompanyVisibilityAsync(_db.LegalEntities
-            .AsQueryable(), ct);
+        var visibilityBySection = await _db.ResolveDataVisibilitiesAsync(User, PagedVisibilitySections, ct);
+
+        var baseQuery = await ApplyCompanyVisibilityAsync(
+            _db.LegalEntities.AsQueryable(),
+            visibilityBySection[RolePermissionCatalog.LegalEntities],
+            ct);
 
         if (!string.IsNullOrWhiteSpace(search))
         {
@@ -1431,11 +1474,11 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             .ToListAsync(ct);
 
         var itemIds = items.Select(item => item.Id).ToList();
-        var accountsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
-        var actsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Acts, ct);
-        var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
-        var contractsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Contracts, ct);
-        var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+        var accountsVisibility = visibilityBySection[RolePermissionCatalog.Accounts];
+        var actsVisibility = visibilityBySection[RolePermissionCatalog.Acts];
+        var casesVisibility = visibilityBySection[RolePermissionCatalog.Cases];
+        var contractsVisibility = visibilityBySection[RolePermissionCatalog.Contracts];
+        var paymentsVisibility = visibilityBySection[RolePermissionCatalog.Payments];
         var visibleContracts = _db.Contracts
             .AsNoTracking()
             .ApplyContractVisibility(contractsVisibility);
@@ -1731,7 +1774,10 @@ public class LegalEntitiesController : ControllerBase, IAsyncActionFilter
             }
         }
 
-        var visibleClientIds = await LoadVisibleClientIdsAsync(items, ct);
+        var visibleClientIds = await LoadVisibleClientIdsAsync(
+            items,
+            visibilityBySection[RolePermissionCatalog.Clients],
+            ct);
         return Ok(new PagedResponse<LegalEntityListItemDto>
         {
             Items = items.Select(item =>

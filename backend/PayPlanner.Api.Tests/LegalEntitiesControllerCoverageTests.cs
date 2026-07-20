@@ -456,7 +456,8 @@ public class LegalEntitiesControllerCoverageTests
     [Fact]
     public async Task GetPaged_HidesFinancialRelatedDocuments_WhenSectionViewAccessDenied()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
         var user = await CreateUserAsync(db, isActive: true);
         db.RolePermissions.AddRange(
             new RolePermission
@@ -570,6 +571,7 @@ public class LegalEntitiesControllerCoverageTests
             new StubLegalEntityEnrichmentService(),
             currentUserId: user.Id,
             isAdmin: false);
+        interceptor.Commands.Clear();
 
         var action = await controller.GetPaged(search: "Restricted", page: 1, pageSize: 10, ct: CancellationToken.None);
 
@@ -590,6 +592,8 @@ public class LegalEntitiesControllerCoverageTests
         Assert.Empty(item.RelatedInvoices);
         Assert.Empty(item.RelatedActs);
         Assert.Empty(item.RelatedPayments);
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"RolePermissions\"", StringComparison.Ordinal));
     }
 
     [Fact]
