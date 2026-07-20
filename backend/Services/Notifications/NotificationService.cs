@@ -746,6 +746,11 @@ public sealed class NotificationService : INotificationService
                 NotificationChannels.WebPush,
             ]),
             cancellationToken);
+        var assignedTemplateDefinition = NotificationTemplateCatalog.Find(NotificationTemplateKeys.TaskAssigned);
+        var changedTemplateDefinition = NotificationTemplateCatalog.Find(NotificationTemplateKeys.TaskChanged);
+        var templateStorage = assignedTemplateDefinition is null && changedTemplateDefinition is null
+            ? new NotificationTemplateStorage()
+            : await LoadTemplateStorageAsync(cancellationToken);
         var eventStamp = DateTime.UtcNow.ToString("yyyyMMddHHmmssfff", CultureInfo.InvariantCulture);
         var deliveries = new List<NotificationDelivery>();
 
@@ -755,8 +760,9 @@ public sealed class NotificationService : INotificationService
             var recipientTimeZone = recipientTimeZones[userId];
             var subject = $"Задача назначена вам: {task.Title}";
             var body = BuildTaskReassignedToNewAssigneeBody(task, changeLabels, actorName, previousAssigneeName, comment, recipientTimeZone);
-            var message = await RenderTemplateAsync(
-                NotificationTemplateKeys.TaskAssigned,
+            var message = RenderTemplate(
+                assignedTemplateDefinition,
+                templateStorage,
                 subject,
                 body,
                 BuildTaskAssignmentTemplateValues(
@@ -765,8 +771,8 @@ public sealed class NotificationService : INotificationService
                     actorName,
                     subject,
                     $"Предыдущий исполнитель: {FormatNotificationName(previousAssigneeName)}\nНовый исполнитель: {FormatNotificationName(task.AssigneeName)}"),
-                purpose: NotificationPurposes.TaskReminder,
-                cancellationToken: cancellationToken);
+                isSensitive: false,
+                purpose: NotificationPurposes.TaskReminder);
             var eventKey = $"task:{task.Id}:reassigned-to:{userId}:{eventStamp}";
 
             if (HasTaskChannel(task, NotificationChannels.InApp))
@@ -802,8 +808,9 @@ public sealed class NotificationService : INotificationService
             var recipientChangeLabels = FormatTaskChangeLabels(changeLabels, recipientTimeZone);
             var subject = $"Задача снята с вас: {task.Title}";
             var body = BuildTaskReassignedFromPreviousAssigneeBody(task, recipientChangeLabels, actorName, previousAssigneeName, comment, recipientTimeZone);
-            var message = await RenderTemplateAsync(
-                NotificationTemplateKeys.TaskChanged,
+            var message = RenderTemplate(
+                changedTemplateDefinition,
+                templateStorage,
                 subject,
                 body,
                 NotificationTemplateCatalog.MergeValues(
@@ -814,8 +821,8 @@ public sealed class NotificationService : INotificationService
                         ["task.commentBlock"] = string.IsNullOrWhiteSpace(comment) ? string.Empty : $"Комментарий: {comment.Trim()}",
                         ["task.changeSubject"] = subject,
                     }),
-                purpose: NotificationPurposes.TaskReminder,
-                cancellationToken: cancellationToken);
+                isSensitive: false,
+                purpose: NotificationPurposes.TaskReminder);
             var eventKey = $"task:{task.Id}:reassigned-from:{userId}:{eventStamp}";
 
             if (HasTaskChannel(task, NotificationChannels.InApp))
@@ -848,8 +855,9 @@ public sealed class NotificationService : INotificationService
             var recipientChangeLabels = FormatTaskChangeLabels(changeLabels, recipientTimeZone);
             var subject = $"Изменен исполнитель задачи: {task.Title}";
             var body = BuildTaskChangedBody(task, recipientChangeLabels, actorName, comment, recipientTimeZone);
-            var message = await RenderTemplateAsync(
-                NotificationTemplateKeys.TaskChanged,
+            var message = RenderTemplate(
+                changedTemplateDefinition,
+                templateStorage,
                 subject,
                 body,
                 NotificationTemplateCatalog.MergeValues(
@@ -860,8 +868,8 @@ public sealed class NotificationService : INotificationService
                         ["task.commentBlock"] = string.IsNullOrWhiteSpace(comment) ? string.Empty : $"Комментарий: {comment.Trim()}",
                         ["task.changeSubject"] = subject,
                     }),
-                purpose: NotificationPurposes.TaskReminder,
-                cancellationToken: cancellationToken);
+                isSensitive: false,
+                purpose: NotificationPurposes.TaskReminder);
             var eventKey = $"task:{task.Id}:reassigned-observer:{userId}:{eventStamp}";
 
             if (HasTaskChannel(task, NotificationChannels.InApp))

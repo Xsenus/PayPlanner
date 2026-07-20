@@ -2157,6 +2157,9 @@ public class NotificationServiceTests
         Assert.Equal(2, interceptor.ReaderCommands.Count(command =>
             command.Contains("FROM \"SystemSettings\"", StringComparison.Ordinal)
             && command.Contains(RoleNotificationPreferenceSettings.SettingKey, StringComparison.Ordinal)));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"SystemSettings\"", StringComparison.Ordinal)
+            && command.Contains("notifications.templates.v1", StringComparison.Ordinal));
         var currentAssigneeNotification = notifications.Single(
             notification => notification.RecipientUserId == recipients[0].Id);
         Assert.Equal(UserNotificationTypes.TaskAssigned, currentAssigneeNotification.Type);
