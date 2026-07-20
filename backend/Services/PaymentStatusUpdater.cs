@@ -1,9 +1,6 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using PayPlanner.Api.Data;
-using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Services.Notifications;
-using System.Globalization;
-using System.Security.Claims;
 using PayPlanner.Api.Models;
 
 namespace PayPlanner.Api.Services
@@ -193,30 +190,8 @@ namespace PayPlanner.Api.Services
                 .Select(user => user.Id)
                 .ToListAsync(ct);
 
-            var result = new List<int>();
-            foreach (var userId in allowedUserIds)
-            {
-                var principal = new ClaimsPrincipal(new ClaimsIdentity(
-                    new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture)) },
-                    authenticationType: "NotificationAccessCheck"));
-                var visibility = await db.ResolveDataVisibilityAsync(principal, RolePermissionCatalog.Payments, ct);
-                if (visibility is null)
-                {
-                    continue;
-                }
-
-                var canOpenPayment = await db.Payments
-                    .AsNoTracking()
-                    .Where(item => item.Id == payment.Id)
-                    .ApplyPaymentVisibility(visibility)
-                    .AnyAsync(ct);
-                if (canOpenPayment)
-                {
-                    result.Add(userId);
-                }
-            }
-
-            return result;
+            // NotificationService centrally revalidates object visibility before persisting notifications.
+            return allowedUserIds;
         }
 
         private static async Task<IReadOnlyCollection<int>> ResolveInvoiceNotificationRecipientsAsync(
@@ -247,30 +222,8 @@ namespace PayPlanner.Api.Services
                 .Select(user => user.Id)
                 .ToListAsync(ct);
 
-            var result = new List<int>();
-            foreach (var userId in allowedUserIds)
-            {
-                var principal = new ClaimsPrincipal(new ClaimsIdentity(
-                    new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture)) },
-                    authenticationType: "NotificationAccessCheck"));
-                var visibility = await db.ResolveDataVisibilityAsync(principal, RolePermissionCatalog.Accounts, ct);
-                if (visibility is null)
-                {
-                    continue;
-                }
-
-                var canOpenInvoice = await db.Payments
-                    .AsNoTracking()
-                    .Where(item => item.Id == payment.Id)
-                    .ApplyPaymentVisibility(visibility)
-                    .AnyAsync(ct);
-                if (canOpenInvoice)
-                {
-                    result.Add(userId);
-                }
-            }
-
-            return result;
+            // NotificationService centrally revalidates object visibility before persisting notifications.
+            return allowedUserIds;
         }
 
         private static DateTime ResolvePaymentLocalToday(

@@ -1,5 +1,7 @@
+using System.Data.Common;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -19,8 +21,11 @@ public class PaymentStatusUpdaterTests
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
+        var interceptor = new RecordingCommandInterceptor();
         var services = new ServiceCollection();
-        services.AddDbContext<PaymentContext>(options => options.UseSqlite(connection));
+        services.AddDbContext<PaymentContext>(options => options
+            .UseSqlite(connection)
+            .AddInterceptors(interceptor));
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
         services.AddSingleton<IEmailService, NoopEmailService>();
         services.AddSingleton<ITelegramNotificationService, NoopTelegramNotificationService>();
@@ -72,6 +77,7 @@ public class PaymentStatusUpdaterTests
         var updater = new PaymentStatusUpdater(
             provider.GetRequiredService<IServiceScopeFactory>(),
             NullLogger<PaymentStatusUpdater>.Instance);
+        interceptor.ReaderCommands.Clear();
 
         var affected = await updater.RunOnceAsync(CancellationToken.None);
 
@@ -85,6 +91,7 @@ public class PaymentStatusUpdaterTests
         Assert.Equal("payment", notification.ObjectType);
         Assert.Equal(payment.Id, notification.ObjectId);
         Assert.Contains("Просрочен", notification.BodyPreview);
+        Assert.Single(interceptor.ReaderCommands, IsPaymentVisibilityQuery);
     }
 
     [Fact]
@@ -92,8 +99,11 @@ public class PaymentStatusUpdaterTests
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
+        var interceptor = new RecordingCommandInterceptor();
         var services = new ServiceCollection();
-        services.AddDbContext<PaymentContext>(options => options.UseSqlite(connection));
+        services.AddDbContext<PaymentContext>(options => options
+            .UseSqlite(connection)
+            .AddInterceptors(interceptor));
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
         services.AddSingleton<IEmailService, NoopEmailService>();
         services.AddSingleton<ITelegramNotificationService, NoopTelegramNotificationService>();
@@ -155,6 +165,7 @@ public class PaymentStatusUpdaterTests
         var updater = new PaymentStatusUpdater(
             provider.GetRequiredService<IServiceScopeFactory>(),
             NullLogger<PaymentStatusUpdater>.Instance);
+        interceptor.ReaderCommands.Clear();
 
         var affected = await updater.RunOnceAsync(CancellationToken.None);
 
@@ -168,6 +179,26 @@ public class PaymentStatusUpdaterTests
         Assert.Equal("invoice", notification.ObjectType);
         Assert.Equal(payment.Id, notification.ObjectId);
         Assert.Contains("Просрочен", notification.BodyPreview);
+        Assert.Single(interceptor.ReaderCommands, IsPaymentVisibilityQuery);
+    }
+
+    private static bool IsPaymentVisibilityQuery(string command)
+        => command.Contains("SELECT EXISTS", StringComparison.Ordinal)
+            && command.Contains("FROM \"Payments\"", StringComparison.Ordinal);
+
+    private sealed class RecordingCommandInterceptor : DbCommandInterceptor
+    {
+        public List<string> ReaderCommands { get; } = [];
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            ReaderCommands.Add(command.CommandText);
+            return ValueTask.FromResult(result);
+        }
     }
 
     private sealed class NoopEmailService : IEmailService
