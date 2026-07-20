@@ -23,6 +23,74 @@ namespace PayPlanner.Api.Tests;
 public class NotificationServiceTests
 {
     [Fact]
+    public async Task NotifyPendingRegistrationAsync_LoadsTemplatesOnceForAllAdmins()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        await SeedEmailSettingsAsync(db);
+        var adminRole = new Role
+        {
+            Name = "admin",
+            Description = "Администратор",
+            CreatedAt = DateTime.UtcNow,
+        };
+        var userRole = new Role
+        {
+            Name = "user",
+            Description = "Пользователь",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.Roles.AddRange(adminRole, userRole);
+        await db.SaveChangesAsync();
+        var user = new User
+        {
+            Email = "pending-registration@example.com",
+            FullName = "Новый пользователь",
+            PasswordHash = "hash",
+            RoleId = userRole.Id,
+            IsActive = true,
+            IsApproved = false,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        var admins = Enumerable.Range(1, 12)
+            .Select(index => new User
+            {
+                Email = $"registration-admin-{index}@example.com",
+                FullName = $"Администратор {index}",
+                PasswordHash = "hash",
+                RoleId = adminRole.Id,
+                IsActive = true,
+                IsApproved = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            })
+            .ToArray();
+        db.Users.AddRange(admins.Append(user));
+        db.SystemSettings.Add(new SystemSetting
+        {
+            Key = "notifications.registration.notifyAdmins",
+            Value = "true",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        var emailService = new RecordingEmailService();
+        var service = CreateService(db, emailService, new RecordingTelegramService());
+        interceptor.ReaderCommands.Clear();
+
+        await service.NotifyPendingRegistrationAsync(user);
+
+        Assert.Equal(13, emailService.Messages.Count);
+        Assert.Single(emailService.Messages, message => message.To == user.Email);
+        Assert.Equal(12, emailService.Messages.Count(message =>
+            message.Subject.Contains("Новая регистрация", StringComparison.OrdinalIgnoreCase)));
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"SystemSettings\"", StringComparison.Ordinal)
+            && command.Contains("notifications.templates.v1", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task GetChannelsAsync_ReturnsActiveChannelsAndFutureAdapters()
     {
         await using var db = await CreateContextAsync();

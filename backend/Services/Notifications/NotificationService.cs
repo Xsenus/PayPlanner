@@ -436,13 +436,19 @@ public sealed class NotificationService : INotificationService
         var deliveries = new List<NotificationDelivery>();
         var recipient = await ResolveRecipientAsync(user.Id, user, cancellationToken);
         var userValues = BuildUserTemplateValues(user);
-        var pendingMessage = await RenderTemplateAsync(
-            NotificationTemplateKeys.RegistrationPending,
+        var pendingTemplateDefinition = NotificationTemplateCatalog.Find(NotificationTemplateKeys.RegistrationPending);
+        var adminTemplateDefinition = NotificationTemplateCatalog.Find(NotificationTemplateKeys.RegistrationAdminNewUser);
+        var templateStorage = pendingTemplateDefinition is null && adminTemplateDefinition is null
+            ? new NotificationTemplateStorage()
+            : await LoadTemplateStorageAsync(cancellationToken);
+        var pendingMessage = RenderTemplate(
+            pendingTemplateDefinition,
+            templateStorage,
             "Регистрация ожидает подтверждения",
             $"Здравствуйте, {DisplayName(user)}!\n\nВаша заявка на регистрацию получена и ожидает проверки администратором.",
             userValues,
-            purpose: NotificationPurposes.RegistrationUser,
-            cancellationToken: cancellationToken);
+            isSensitive: false,
+            purpose: NotificationPurposes.RegistrationUser);
         deliveries.AddRange(await SendAsync(
             recipient,
             pendingMessage,
@@ -458,16 +464,17 @@ public sealed class NotificationService : INotificationService
                 .Include(item => item.ExternalIdentities)
                 .Where(item => item.IsActive && item.IsApproved && item.Role != null && item.Role.Name == "admin")
                 .ToListAsync(cancellationToken);
+            var adminMessage = RenderTemplate(
+                adminTemplateDefinition,
+                templateStorage,
+                "Новая регистрация в CRM",
+                $"В системе зарегистрировался новый пользователь.\n\nИмя: {DisplayName(user)}\nEmail: {user.Email}",
+                userValues,
+                isSensitive: false,
+                purpose: NotificationPurposes.RegistrationAdmin);
 
             foreach (var admin in admins)
             {
-                var adminMessage = await RenderTemplateAsync(
-                    NotificationTemplateKeys.RegistrationAdminNewUser,
-                    "Новая регистрация в CRM",
-                    $"В системе зарегистрировался новый пользователь.\n\nИмя: {DisplayName(user)}\nEmail: {user.Email}",
-                    userValues,
-                    purpose: NotificationPurposes.RegistrationAdmin,
-                    cancellationToken: cancellationToken);
                 deliveries.AddRange(await SendAsync(
                     BuildRecipient(admin),
                     adminMessage,
