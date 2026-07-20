@@ -1,6 +1,8 @@
+using System.Data.Common;
 using System.Security.Claims;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using PayPlanner.Api.Data;
 using PayPlanner.Api.Extensions;
 using PayPlanner.Api.Models;
@@ -11,6 +13,77 @@ namespace PayPlanner.Api.Tests;
 
 public class DataVisibilityServiceTests
 {
+    [Fact]
+    public async Task ResolveDataVisibilitiesAsync_LoadsSharedAccessDataOnceAndPreservesSectionScopes()
+    {
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
+        var role = new Role { Name = "manager", Description = "manager" };
+        var department = new DepartmentDictionaryItem { Name = "Продажи", IsActive = true };
+        db.Roles.Add(role);
+        db.Departments.Add(department);
+        await db.SaveChangesAsync();
+
+        db.RolePermissions.AddRange(
+            CreatePermission(role.Id, RolePermissionCatalog.Tasks, DataVisibilityScope.Own),
+            CreatePermission(role.Id, RolePermissionCatalog.Cases, DataVisibilityScope.Department),
+            CreatePermission(role.Id, RolePermissionCatalog.Accounts, DataVisibilityScope.All),
+            CreatePermission(role.Id, RolePermissionCatalog.Payments, DataVisibilityScope.Own, canView: false),
+            CreatePermission(role.Id, RolePermissionCatalog.Contracts, DataVisibilityScope.Own));
+        var current = new User
+        {
+            Email = "batch-current@example.com",
+            PasswordHash = "hash",
+            FullName = "Batch Current",
+            RoleId = role.Id,
+            DepartmentId = department.Id,
+            Department = department.Name,
+            IsActive = true,
+        };
+        var teammate = new User
+        {
+            Email = "batch-teammate@example.com",
+            PasswordHash = "hash",
+            FullName = "Batch Teammate",
+            RoleId = role.Id,
+            DepartmentId = department.Id,
+            Department = department.Name,
+            IsActive = true,
+        };
+        db.Users.AddRange(current, teammate);
+        await db.SaveChangesAsync();
+        interceptor.ReaderCommands.Clear();
+
+        var principal = CreatePrincipal(current.Id);
+        var sections = new[]
+        {
+            RolePermissionCatalog.Tasks,
+            RolePermissionCatalog.Cases,
+            RolePermissionCatalog.Accounts,
+            RolePermissionCatalog.Payments,
+            RolePermissionCatalog.Acts,
+            RolePermissionCatalog.Contracts,
+        };
+        foreach (var section in sections)
+        {
+            await db.ResolveDataVisibilityAsync(principal, section);
+        }
+
+        Assert.Equal(14, interceptor.ReaderCommands.Count);
+        interceptor.ReaderCommands.Clear();
+
+        var access = await db.ResolveDataVisibilitiesAsync(principal, sections);
+
+        Assert.Equal(3, interceptor.ReaderCommands.Count);
+        Assert.Equal(DataVisibilityScope.Own, access[RolePermissionCatalog.Tasks]!.ViewScope);
+        Assert.Equal(DataVisibilityScope.Department, access[RolePermissionCatalog.Cases]!.ViewScope);
+        Assert.True(access[RolePermissionCatalog.Cases]!.CanSeeUser(teammate.Id));
+        Assert.Equal(DataVisibilityScope.All, access[RolePermissionCatalog.Accounts]!.ViewScope);
+        Assert.Null(access[RolePermissionCatalog.Payments]);
+        Assert.Null(access[RolePermissionCatalog.Acts]);
+        Assert.Equal(DataVisibilityScope.Own, access[RolePermissionCatalog.Contracts]!.ViewScope);
+    }
+
     [Fact]
     public async Task IsUserAdminOrLegacyFallbackAsync_UsesDatabaseRoleForExistingUser()
     {
@@ -411,18 +484,49 @@ public class DataVisibilityServiceTests
         Assert.DoesNotContain(inactiveSelected.Id, access.VisibleUserIds);
     }
 
-    private static async Task<PaymentContext> CreateContextAsync()
+    private static RolePermission CreatePermission(
+        int roleId,
+        string section,
+        string viewScope,
+        bool canView = true)
+        => new()
+        {
+            RoleId = roleId,
+            Section = section,
+            CanView = canView,
+            ViewScope = viewScope,
+        };
+
+    private static async Task<PaymentContext> CreateContextAsync(DbCommandInterceptor? interceptor = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
 
-        var options = new DbContextOptionsBuilder<PaymentContext>()
-            .UseSqlite(connection)
-            .Options;
+        var optionsBuilder = new DbContextOptionsBuilder<PaymentContext>()
+            .UseSqlite(connection);
+        if (interceptor is not null)
+        {
+            optionsBuilder.AddInterceptors(interceptor);
+        }
 
-        var db = new PaymentContext(options);
+        var db = new PaymentContext(optionsBuilder.Options);
         await db.Database.EnsureCreatedAsync();
         return db;
+    }
+
+    private sealed class RecordingCommandInterceptor : DbCommandInterceptor
+    {
+        public List<string> ReaderCommands { get; } = [];
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            ReaderCommands.Add(command.CommandText);
+            return ValueTask.FromResult(result);
+        }
     }
 
     private static ClaimsPrincipal CreatePrincipal(int userId, bool isAdminClaim = false)

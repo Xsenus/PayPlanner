@@ -16,6 +16,16 @@ namespace PayPlanner.Api.Controllers;
 [Authorize]
 public class NotificationInboxController : ControllerBase
 {
+    private static readonly string[] NotificationTargetSections =
+    [
+        RolePermissionCatalog.Tasks,
+        RolePermissionCatalog.Cases,
+        RolePermissionCatalog.Accounts,
+        RolePermissionCatalog.Payments,
+        RolePermissionCatalog.Acts,
+        RolePermissionCatalog.Contracts,
+    ];
+
     private readonly PaymentContext _context;
 
     public NotificationInboxController(PaymentContext context)
@@ -336,16 +346,17 @@ public class NotificationInboxController : ControllerBase
         var userId = User.GetUserId().GetValueOrDefault();
         var canViewNotes = userId > 0
             && await _context.HasUserSectionPermissionAsync(User, RolePermissionCatalog.Notes, static permission => permission.CanView, ct);
+        var visibilityBySection = await _context.ResolveDataVisibilitiesAsync(User, NotificationTargetSections, ct);
 
         return new NotificationTargetVisibility(
             userId,
             canViewNotes,
-            await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Tasks, ct),
-            await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct),
-            await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct),
-            await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct),
-            await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Acts, ct),
-            await _context.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Contracts, ct));
+            visibilityBySection[RolePermissionCatalog.Tasks],
+            visibilityBySection[RolePermissionCatalog.Cases],
+            visibilityBySection[RolePermissionCatalog.Accounts],
+            visibilityBySection[RolePermissionCatalog.Payments],
+            visibilityBySection[RolePermissionCatalog.Acts],
+            visibilityBySection[RolePermissionCatalog.Contracts]);
     }
 
     private async Task<UserNotificationPreferenceSnapshot> LoadNotificationPreferencesAsync(int userId, CancellationToken ct)
