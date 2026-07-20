@@ -51,7 +51,7 @@ describe('useClients', () => {
     );
 
     await waitFor(() => expect(apiService.getClients).toHaveBeenCalledTimes(1));
-    expect(result.current.loading).toBe(false);
+    await waitFor(() => expect(result.current.loading).toBe(false));
 
     rerender({ enabled: true });
 
@@ -72,7 +72,7 @@ describe('useClients', () => {
     );
 
     await waitFor(() => expect(apiService.getClientsV2).toHaveBeenCalledTimes(1));
-    expect(result.current.loading).toBe(false);
+    await waitFor(() => expect(result.current.loading).toBe(false));
 
     rerender({ search: 'test' });
 
