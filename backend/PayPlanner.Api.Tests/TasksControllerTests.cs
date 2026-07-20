@@ -913,6 +913,34 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task CreateTask_InternalBillingDecisionKeepsClientWithoutCaseAndDoesNotEnterInvoices()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "internal-client-author@example.com", "Автор");
+        var client = await CreateClientAsync(db, "Клиент без дела");
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.CreateTask(new UpsertTaskJournalItemRequest
+        {
+            ClientId = client.Id,
+            ClientCaseId = null,
+            ClientBillingClassification = TaskClientBillingClassification.Internal,
+            Title = "Неоплачиваемая задача клиента",
+            DueAt = DateTime.UtcNow.AddHours(2),
+        }, CancellationToken.None);
+
+        var created = Assert.IsType<CreatedResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalItemDto>(created.Value);
+        Assert.Equal(client.Id, dto.ClientId);
+        Assert.Null(dto.ClientCaseId);
+        Assert.False(dto.IsInternal);
+        Assert.Equal(TaskClientBillingClassification.Internal, dto.ClientBillingClassification);
+        Assert.Equal("internal", dto.BillingStatus);
+        Assert.Null(dto.BillingContractId);
+        Assert.Null(dto.BillingInvoiceId);
+    }
+
+    [Fact]
     public async Task CreateTask_PersistsApprovalDueAt()
     {
         await using var db = await CreateContextAsync();

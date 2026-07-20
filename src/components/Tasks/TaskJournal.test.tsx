@@ -944,6 +944,51 @@ describe('TaskJournal', () => {
     expect(apiMock.createTaskJournalItem.mock.calls[0][0]).not.toHaveProperty('billingContractId');
   });
 
+  it.each([
+    { taskCardWindowMode: 'legacy' as const, caseId: null },
+    { taskCardWindowMode: 'modern' as const, caseId: '100' },
+  ])('creates an unpaid client task without a contract check in the $taskCardWindowMode card', async ({ taskCardWindowMode, caseId }) => {
+    await renderJournal([], {
+      waitForTitle: null,
+      settings: { taskCardWindowMode },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Добавить задачу/i }));
+    await screen.findByRole('heading', { name: 'Выберите клиента и дело' });
+
+    const unpaidButton = screen.getByRole('button', { name: 'Неоплачиваемая задача' }) as HTMLButtonElement;
+    expect(unpaidButton.disabled).toBe(true);
+
+    fireEvent.focus(screen.getByRole('combobox', { name: 'Клиент' }));
+    fireEvent.click(within(await screen.findByRole('listbox', { name: 'Клиент' })).getByRole('option', { name: /Иванов Иван Иванович/ }));
+    if (caseId) {
+      fireEvent.change(screen.getByTestId('task-billing-wizard-case'), { target: { value: caseId } });
+    }
+
+    expect(unpaidButton.disabled).toBe(false);
+    fireEvent.click(unpaidButton);
+
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    expect(within(card).getByText('Общая задача без контрагента')).toBeTruthy();
+    expect(screen.getByText(taskCardWindowMode === 'modern'
+      ? 'НЕОПЛАЧИВАЕМАЯ · НЕ ДЛЯ СЧЁТА'
+      : 'Неоплачиваемая задача: привязана к контрагенту, но не будет учитываться при выставлении счёта.')).toBeTruthy();
+    fireEvent.change(within(card).getByTestId('task-title-input'), { target: { value: 'Бесплатная работа по клиенту' } });
+    fireEvent.click(within(card).getByRole('button', { name: 'Создать задачу' }));
+
+    await waitFor(() => expect(apiMock.createTaskJournalItem).toHaveBeenCalledTimes(1));
+    expect(apiMock.getTaskBillingContext).not.toHaveBeenCalled();
+    expect(apiMock.createTaskJournalItem).toHaveBeenCalledWith(expect.objectContaining({
+      isInternal: false,
+      clientId: 10,
+      legalEntityId: null,
+      clientCaseId: caseId ? 100 : null,
+      clientBillingClassification: 'internal',
+      title: 'Бесплатная работа по клиенту',
+    }));
+    expect(apiMock.createTaskJournalItem.mock.calls[0][0]).not.toHaveProperty('billingContractId');
+  });
+
   it('prepares one invoice draft from selected unbilled client tasks', async () => {
     const onCreateInvoiceDraft = vi.fn();
     const unbilledTask = createTask({

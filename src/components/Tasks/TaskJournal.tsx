@@ -6187,7 +6187,12 @@ function TaskBillingBadge({ task, className = '' }: { task: TaskJournalItem; cla
       ? { label: `В СЧЁТЕ${task.billingInvoiceNumber ? ` №${task.billingInvoiceNumber}` : ''}`, className: 'border-emerald-300 bg-emerald-100 text-emerald-800' }
       : task.billingStatus === 'fixed'
         ? { label: 'КЛИЕНТСКАЯ · ФИКСИРОВАННЫЙ ДОГОВОР', className: 'border-violet-300 bg-violet-100 text-violet-800' }
-        : { label: 'ВНУТРЕННЯЯ · НЕ ДЛЯ СЧЁТА', className: 'border-slate-300 bg-slate-100 text-slate-700' };
+        : {
+            label: task.clientId || task.legalEntityId
+              ? 'НЕОПЛАЧИВАЕМАЯ · НЕ ДЛЯ СЧЁТА'
+              : 'ВНУТРЕННЯЯ · НЕ ДЛЯ СЧЁТА',
+            className: 'border-slate-300 bg-slate-100 text-slate-700',
+          };
 
   return (
     <span className={`${className} inline-flex max-w-full items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold tracking-wide ${meta.className}`} data-testid={`task-billing-badge-${task.id}`}>
@@ -7712,7 +7717,7 @@ function TaskBillingCreateWizard({
       isInternal: false,
       clientId,
       legalEntityId,
-      clientCaseId: Number(clientCaseId),
+      clientCaseId: selectedCase?.id ?? null,
       objectName,
       clientBillingClassification: classification,
       billingContractId: contract?.id ?? null,
@@ -7775,7 +7780,7 @@ function TaskBillingCreateWizard({
                 {availableCases.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
               </select>
             </label>
-            {!casesLoading && ownerId && availableCases.length === 0 ? <div className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">У клиента нет активных дел. Сначала создайте дело, чтобы новая задача попала в финансовый учёт.</div> : null}
+            {!casesLoading && ownerId && availableCases.length === 0 ? <div className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">У контрагента нет активных дел. Платную задачу можно создать после добавления дела, а неоплачиваемую — прямо сейчас с привязкой к контрагенту.</div> : null}
             {error ? <div className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</div> : null}
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
               <button
@@ -7795,11 +7800,19 @@ function TaskBillingCreateWizard({
               >
                 Создать общую внутреннюю задачу без клиента
               </button>
-              <div className="flex justify-end gap-2">
-              <button type="button" onClick={onCancel} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600">Отмена</button>
-              <button type="button" onClick={() => void loadBilling()} disabled={loading || !ownerId || !clientCaseId} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
-                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Проверить договор
-              </button>
+              <div className="flex flex-wrap justify-end gap-2">
+                <button type="button" onClick={onCancel} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600">Отмена</button>
+                <button
+                  type="button"
+                  onClick={() => complete('internal')}
+                  disabled={!ownerId}
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
+                >
+                  <ShieldAlert className="h-4 w-4" /> Неоплачиваемая задача
+                </button>
+                <button type="button" onClick={() => void loadBilling()} disabled={loading || !ownerId || !clientCaseId} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
+                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Проверить договор
+                </button>
               </div>
             </div>
           </div>
@@ -9282,7 +9295,9 @@ function TaskModal({
                       <WalletCards className="h-3.5 w-3.5" />
                       {form.clientBillingClassification === 'billable'
                         ? form.billingMode === 'Fixed' ? 'КЛИЕНТСКАЯ · ФИКСИРОВАННЫЙ ДОГОВОР' : 'ПЛАТНАЯ ЗАДАЧА'
-                        : 'ВНУТРЕННЯЯ · НЕ ДЛЯ СЧЁТА'}
+                        : form.clientId || form.legalEntityId
+                          ? 'НЕОПЛАЧИВАЕМАЯ · НЕ ДЛЯ СЧЁТА'
+                          : 'ВНУТРЕННЯЯ · НЕ ДЛЯ СЧЁТА'}
                     </span>
                   ) : null}
                 </div>
@@ -9664,7 +9679,7 @@ function TaskModal({
                     data-testid="task-internal-checkbox"
                     className="h-4 w-4 rounded border-slate-300 text-blue-600"
                   />
-                  Внутренняя задача
+                  Общая задача без контрагента
                 </label>
                 <LookupSelect
                   value={selectedCounterpartyValue}
@@ -10013,7 +10028,9 @@ function TaskModal({
           <div className={`mx-6 mt-4 rounded-xl border p-3 text-sm font-semibold ${form.clientBillingClassification === 'billable' ? 'border-rose-200 bg-rose-50 text-rose-800' : 'border-slate-200 bg-slate-50 text-slate-700'}`}>
             {form.clientBillingClassification === 'billable'
               ? form.billingMode === 'Fixed' ? 'Клиентская задача в рамках договора с фиксированной оплатой.' : 'Платная задача: после выполнения она останется на контроле до включения в счёт.'
-              : 'Внутренняя задача: не будет учитываться при выставлении счёта клиенту.'}
+              : form.clientId || form.legalEntityId
+                ? 'Неоплачиваемая задача: привязана к контрагенту, но не будет учитываться при выставлении счёта.'
+                : 'Внутренняя задача: не будет учитываться при выставлении счёта клиенту.'}
           </div>
         ) : null}
 
@@ -10069,9 +10086,9 @@ function TaskModal({
               className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
             />
             <span>
-              <span className="font-semibold text-slate-900">Внутренняя задача</span>
+              <span className="font-semibold text-slate-900">Общая задача без контрагента</span>
               <span className="mt-1 block text-xs leading-5 text-slate-500">
-                Для задач сотрудников без привязки к клиенту, юридическому лицу или делу.
+                Включите только для общей задачи сотрудников. Неоплачиваемая задача клиента сохраняет выбранного контрагента и дело.
               </span>
             </span>
           </label>
