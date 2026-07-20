@@ -584,6 +584,15 @@ public sealed class AppVersionControllerTests
             Assert.Equal("Ручной заголовок", manual.Title);
             Assert.DoesNotContain(scope.Db.AppReleases.Local, release => release.ReleaseId == staleAgent.ReleaseId);
             Assert.Contains(scope.Db.AppReleases.Local, release => release.ReleaseId == "2026-05-25-new");
+            var updatedAt = existingAgent.UpdatedAt;
+            interceptor.Commands.Clear();
+
+            await AppReleaseSeedService.SyncAsync(scope.Db, tempRoot);
+
+            var repeatedCommand = Assert.Single(interceptor.Commands);
+            Assert.StartsWith("SELECT", repeatedCommand.TrimStart(), StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(updatedAt, existingAgent.UpdatedAt);
+            Assert.False(scope.Db.ChangeTracker.HasChanges());
         }
         finally
         {

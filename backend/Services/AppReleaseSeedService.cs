@@ -61,28 +61,11 @@ public static class AppReleaseSeedService
                 continue;
             }
 
-            var now = DateTime.UtcNow;
-            var target = existing ?? new AppRelease
-            {
-                ReleaseId = releaseId,
-                CreatedAt = now,
-                Source = "agent",
-            };
-
-            target.Version = seed.Version?.Trim() ?? string.Empty;
-            target.ReleasedAt = seed.ReleasedAt;
-            target.Title = string.IsNullOrWhiteSpace(seed.Title) ? "Обновление приложения" : seed.Title.Trim();
-            target.Summary = seed.Summary?.Trim() ?? string.Empty;
-            target.IsActive = seed.IsActive;
-            target.UpdatedAt = now;
-            target.Source = string.IsNullOrWhiteSpace(seed.Source) ? "agent" : seed.Source.Trim();
-
-            if (existing is not null)
-            {
-                db.AppReleaseItems.RemoveRange(existing.Items);
-            }
-
-            target.Items = seed.Items
+            var version = seed.Version?.Trim() ?? string.Empty;
+            var title = string.IsNullOrWhiteSpace(seed.Title) ? "Обновление приложения" : seed.Title.Trim();
+            var summary = seed.Summary?.Trim() ?? string.Empty;
+            var source = string.IsNullOrWhiteSpace(seed.Source) ? "agent" : seed.Source.Trim();
+            var items = seed.Items
                 .Where(item => !string.IsNullOrWhiteSpace(item.Text))
                 .Select((item, index) => new AppReleaseItem
                 {
@@ -91,6 +74,34 @@ public static class AppReleaseSeedService
                     SortOrder = index,
                 })
                 .ToList();
+            if (existing is not null
+                && MatchesSeed(existing, seed, version, title, summary, source, items))
+            {
+                continue;
+            }
+
+            var now = DateTime.UtcNow;
+            var target = existing ?? new AppRelease
+            {
+                ReleaseId = releaseId,
+                CreatedAt = now,
+                Source = "agent",
+            };
+
+            target.Version = version;
+            target.ReleasedAt = seed.ReleasedAt;
+            target.Title = title;
+            target.Summary = summary;
+            target.IsActive = seed.IsActive;
+            target.UpdatedAt = now;
+            target.Source = source;
+
+            if (existing is not null)
+            {
+                db.AppReleaseItems.RemoveRange(existing.Items);
+            }
+
+            target.Items = items;
 
             if (existing is null)
             {
@@ -107,6 +118,36 @@ public static class AppReleaseSeedService
         }
 
         await db.SaveChangesAsync(ct);
+    }
+
+    private static bool MatchesSeed(
+        AppRelease existing,
+        AppReleaseSeedDto seed,
+        string version,
+        string title,
+        string summary,
+        string source,
+        IReadOnlyList<AppReleaseItem> items)
+    {
+        if (!string.Equals(existing.Version, version, StringComparison.Ordinal)
+            || existing.ReleasedAt != seed.ReleasedAt
+            || !string.Equals(existing.Title, title, StringComparison.Ordinal)
+            || !string.Equals(existing.Summary, summary, StringComparison.Ordinal)
+            || existing.IsActive != seed.IsActive
+            || !string.Equals(existing.Source, source, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var existingItems = existing.Items
+            .OrderBy(item => item.SortOrder)
+            .ThenBy(item => item.Id)
+            .ToArray();
+        return existingItems.Length == items.Count
+            && existingItems.Zip(items).All(pair =>
+                pair.First.SortOrder == pair.Second.SortOrder
+                && string.Equals(pair.First.Type, pair.Second.Type, StringComparison.Ordinal)
+                && string.Equals(pair.First.Text, pair.Second.Text, StringComparison.Ordinal));
     }
 
     private static string NormalizeType(string? type)
