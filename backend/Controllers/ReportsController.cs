@@ -28,6 +28,11 @@ public class ReportsController : ControllerBase
         RolePermissionCatalog.Tasks,
         RolePermissionCatalog.Accounts,
     ];
+    private static readonly string[] CaseFinanceVisibilitySections =
+    [
+        RolePermissionCatalog.Cases,
+        RolePermissionCatalog.Accounts,
+    ];
 
     private readonly PaymentContext _db;
     private readonly ILogger<ReportsController> _logger;
@@ -540,8 +545,9 @@ public class ReportsController : ControllerBase
             return Forbid();
         }
 
-        var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
-        var accountsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+        var visibilityBySection = await _db.ResolveDataVisibilitiesAsync(User, CaseFinanceVisibilitySections, ct);
+        var casesVisibility = visibilityBySection[RolePermissionCatalog.Cases];
+        var accountsVisibility = visibilityBySection[RolePermissionCatalog.Accounts];
         if (casesVisibility is null || accountsVisibility is null)
         {
             return Unauthorized();
@@ -680,8 +686,9 @@ public class ReportsController : ControllerBase
         {
             case "case-finance":
                 {
-                    var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
-                    var accountsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
+                    var visibilityBySection = await _db.ResolveDataVisibilitiesAsync(User, CaseFinanceVisibilitySections, ct);
+                    var casesVisibility = visibilityBySection[RolePermissionCatalog.Cases];
+                    var accountsVisibility = visibilityBySection[RolePermissionCatalog.Accounts];
                     if (casesVisibility is null || accountsVisibility is null)
                     {
                         return (null, Unauthorized());

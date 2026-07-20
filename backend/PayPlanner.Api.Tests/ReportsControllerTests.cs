@@ -3591,6 +3591,7 @@ public class ReportsControllerTests
                 Role = role,
                 Section = RolePermissionCatalog.Reports,
                 CanView = true,
+                CanExport = true,
                 ViewScope = DataVisibilityScope.All,
             },
             new RolePermission
@@ -3680,6 +3681,37 @@ public class ReportsControllerTests
         {
             Assert.Contains("\"Type\"", command, StringComparison.Ordinal);
         });
+
+        AssertCaseFinanceVisibilityIsLoadedInOneBatch(interceptor.Commands);
+
+        interceptor.Commands.Clear();
+        var exportAction = await controller.ExportManagementReportCsv(
+            "case-finance",
+            new DateTime(2026, 5, 1),
+            new DateTime(2026, 5, 31),
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            50,
+            CancellationToken.None);
+
+        var export = Assert.IsType<FileContentResult>(exportAction);
+        Assert.Equal("text/csv; charset=utf-8", export.ContentType);
+        AssertCaseFinanceVisibilityIsLoadedInOneBatch(interceptor.Commands);
     }
 
     [Fact]
@@ -8128,6 +8160,17 @@ services.Id,
         }
 
         throw new InvalidOperationException("No test timezone with a local date different from UTC was found.");
+    }
+
+    private static void AssertCaseFinanceVisibilityIsLoadedInOneBatch(IReadOnlyCollection<string> commands)
+    {
+        Assert.Single(commands, command =>
+            command.Contains("FROM \"Users\"", StringComparison.Ordinal)
+            && command.Contains("\"DepartmentId\"", StringComparison.Ordinal)
+            && command.Contains("\"RoleId\"", StringComparison.Ordinal));
+        Assert.Single(commands, command =>
+            command.StartsWith("SELECT \"r\".\"Section\", \"r\".\"CanView\"", StringComparison.Ordinal)
+            && command.Contains("FROM \"RolePermissions\"", StringComparison.Ordinal));
     }
 
     private sealed class RecordingCommandInterceptor : DbCommandInterceptor
