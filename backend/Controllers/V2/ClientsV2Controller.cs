@@ -13,6 +13,16 @@ namespace PayPlanner.Api.Controllers.V2;
 [Authorize]
 public class ClientsV2Controller : ControllerBase
 {
+    private static readonly string[] PagedVisibilitySections =
+    [
+        RolePermissionCatalog.Clients,
+        RolePermissionCatalog.Accounts,
+        RolePermissionCatalog.Acts,
+        RolePermissionCatalog.Cases,
+        RolePermissionCatalog.Contracts,
+        RolePermissionCatalog.Payments,
+    ];
+
     private readonly PaymentContext _db;
     public ClientsV2Controller(PaymentContext db) => _db = db;
 
@@ -107,7 +117,8 @@ public class ClientsV2Controller : ControllerBase
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 500);
 
-        var access = await GetCurrentAccessAsync(ct);
+        var visibilityBySection = await _db.ResolveDataVisibilitiesAsync(User, PagedVisibilitySections, ct);
+        var access = visibilityBySection[RolePermissionCatalog.Clients];
         if (access is null)
         {
             return MissingClientsVisibilityResult();
@@ -233,11 +244,11 @@ public class ClientsV2Controller : ControllerBase
         var itemIds = items.Select(c => c.Id).ToList();
         if (itemIds.Count > 0)
         {
-            var accountsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Accounts, ct);
-            var actsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Acts, ct);
-            var casesVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Cases, ct);
-            var contractsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Contracts, ct);
-            var paymentsVisibility = await _db.ResolveDataVisibilityAsync(User, RolePermissionCatalog.Payments, ct);
+            var accountsVisibility = visibilityBySection[RolePermissionCatalog.Accounts];
+            var actsVisibility = visibilityBySection[RolePermissionCatalog.Acts];
+            var casesVisibility = visibilityBySection[RolePermissionCatalog.Cases];
+            var contractsVisibility = visibilityBySection[RolePermissionCatalog.Contracts];
+            var paymentsVisibility = visibilityBySection[RolePermissionCatalog.Payments];
             var visibleContracts = _db.Contracts
                 .AsNoTracking()
                 .ApplyContractVisibility(contractsVisibility);

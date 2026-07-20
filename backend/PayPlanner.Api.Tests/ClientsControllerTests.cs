@@ -167,7 +167,8 @@ public class ClientsControllerTests
     [Fact]
     public async Task V2Get_HidesFinancialRelatedDocuments_WhenSectionViewAccessDenied()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await CreateContextAsync(interceptor);
         var userId = await CreateUserAsync(db);
         var roleId = await db.Users
             .Where(user => user.Id == userId)
@@ -277,6 +278,7 @@ public class ClientsControllerTests
         await db.SaveChangesAsync();
 
         var controller = CreateV2Controller(db, userId);
+        interceptor.Commands.Clear();
 
         var action = await controller.Get(
             search: "Restricted",
@@ -318,6 +320,8 @@ public class ClientsControllerTests
         Assert.Empty(item.RelatedInvoices);
         Assert.Empty(item.RelatedActs);
         Assert.Empty(item.RelatedPayments);
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("FROM \"RolePermissions\"", StringComparison.Ordinal));
     }
 
     [Fact]
