@@ -114,8 +114,7 @@ public class InvoicesController : ControllerBase
     private async Task<bool> IsCurrentUserAdminAsync(CancellationToken ct)
         => await _db.IsUserAdminOrLegacyFallbackAsync(User, ct);
 
-    private async Task<IReadOnlyCollection<int>> ResolveInvoiceNotificationRecipientsAsync(
-        Payment invoicePayment,
+    private async Task<int[]> ResolveInvoiceNotificationCandidatesAsync(
         IEnumerable<int> candidateUserIds,
         CancellationToken ct)
     {
@@ -125,10 +124,10 @@ public class InvoicesController : ControllerBase
             .ToArray();
         if (userIds.Length == 0)
         {
-            return Array.Empty<int>();
+            return [];
         }
 
-        var allowedUserIds = await _db.Users
+        return await _db.Users
             .AsNoTracking()
             .Where(user => userIds.Contains(user.Id)
                 && user.IsActive
@@ -139,32 +138,7 @@ public class InvoicesController : ControllerBase
                         permission.Section == RolePermissionCatalog.Accounts
                         && permission.CanView)))
             .Select(user => user.Id)
-            .ToListAsync(ct);
-
-        var visibleRecipientIds = new List<int>();
-        foreach (var userId in allowedUserIds)
-        {
-            var principal = new ClaimsPrincipal(new ClaimsIdentity(
-                new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture)) },
-                authenticationType: "NotificationAccessCheck"));
-            var visibility = await _db.ResolveDataVisibilityAsync(principal, RolePermissionCatalog.Accounts, ct);
-            if (visibility is null)
-            {
-                continue;
-            }
-
-            var canOpenInvoice = await _db.Payments
-                .AsNoTracking()
-                .Where(item => item.Id == invoicePayment.Id)
-                .ApplyPaymentVisibility(visibility)
-                .AnyAsync(ct);
-            if (canOpenInvoice)
-            {
-                visibleRecipientIds.Add(userId);
-            }
-        }
-
-        return visibleRecipientIds;
+            .ToArrayAsync(ct);
     }
 
     private async Task NotifyInvoiceCreatedAsync(Payment invoicePayment, CancellationToken ct)
@@ -176,11 +150,10 @@ public class InvoicesController : ControllerBase
 
         await _db.Entry(invoicePayment).Collection(item => item.Responsibles).LoadAsync(ct);
         await _db.Entry(invoicePayment).Reference(item => item.Invoice).LoadAsync(ct);
-        var recipients = await ResolveInvoiceNotificationRecipientsAsync(
-            invoicePayment,
+        var recipientUserIds = await ResolveInvoiceNotificationCandidatesAsync(
             invoicePayment.Responsibles.Select(item => item.UserId),
             ct);
-        if (recipients.Count == 0)
+        if (recipientUserIds.Length == 0)
         {
             return;
         }
@@ -189,7 +162,7 @@ public class InvoicesController : ControllerBase
             invoicePayment,
             User.GetDisplayName(),
             User.GetUserId() ?? 0,
-            recipients,
+            recipientUserIds,
             ct);
     }
 
@@ -205,11 +178,10 @@ public class InvoicesController : ControllerBase
 
         await _db.Entry(invoicePayment).Collection(item => item.Responsibles).LoadAsync(ct);
         await _db.Entry(invoicePayment).Reference(item => item.Invoice).LoadAsync(ct);
-        var recipients = await ResolveInvoiceNotificationRecipientsAsync(
-            invoicePayment,
+        var recipientUserIds = await ResolveInvoiceNotificationCandidatesAsync(
             invoicePayment.Responsibles.Select(item => item.UserId),
             ct);
-        if (recipients.Count == 0)
+        if (recipientUserIds.Length == 0)
         {
             return;
         }
@@ -219,7 +191,7 @@ public class InvoicesController : ControllerBase
             changeLabels,
             User.GetDisplayName(),
             User.GetUserId() ?? 0,
-            recipients,
+            recipientUserIds,
             ct);
     }
 

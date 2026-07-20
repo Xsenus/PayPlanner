@@ -3188,7 +3188,7 @@ public class ActsControllerTests
     }
 
     [Fact]
-    public async Task ActNotifications_DelegateVisibilityCheckWithoutAdditionalQueries()
+    public async Task ActNotifications_LoadEligibleRecipientOnceAndDelegateVisibilityCheck()
     {
         var interceptor = new RecordingCommandInterceptor();
         await using var db = await CreateContextAsync(interceptor);
@@ -3226,7 +3226,11 @@ public class ActsControllerTests
         await InvokeNotificationMethodAsync(controller, "NotifyActCreatedAsync", act, CancellationToken.None);
         await InvokeNotificationMethodAsync(controller, "NotifyActChangedAsync", act, new[] { "Статус" }, CancellationToken.None);
 
-        Assert.Empty(interceptor.ReaderCommands);
+        Assert.Equal(2, interceptor.ReaderCommands.Count(command =>
+            command.Contains("FROM \"Users\"", StringComparison.Ordinal)
+            && command.Contains("RolePermissions", StringComparison.Ordinal)));
+        Assert.DoesNotContain(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"Acts\"", StringComparison.Ordinal));
         Assert.Equal(2, recorder.Calls.Count);
         Assert.All(recorder.Calls, call => Assert.Equal(new[] { responsible.Id }, call.RecipientUserIds));
         Assert.Equal(["NotifyActCreatedAsync", "NotifyActChangedAsync"], recorder.Calls.Select(call => call.MethodName));

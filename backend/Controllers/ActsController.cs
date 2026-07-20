@@ -69,9 +69,42 @@ public class ActsController : ControllerBase
     private async Task<bool> IsCurrentUserAdminAsync(CancellationToken ct)
         => await _db.IsUserAdminOrLegacyFallbackAsync(User, ct);
 
+    private async Task<int[]> ResolveActNotificationCandidatesAsync(
+        IEnumerable<int> candidateUserIds,
+        CancellationToken ct)
+    {
+        var userIds = candidateUserIds
+            .Where(userId => userId > 0)
+            .Distinct()
+            .ToArray();
+        if (userIds.Length == 0)
+        {
+            return [];
+        }
+
+        return await _db.Users
+            .AsNoTracking()
+            .Where(user => userIds.Contains(user.Id)
+                && user.IsActive
+                && user.IsApproved
+                && user.Role != null
+                && (user.Role.Name == "admin"
+                    || user.Role.Permissions.Any(permission =>
+                        permission.Section == RolePermissionCatalog.Acts
+                        && permission.CanView)))
+            .Select(user => user.Id)
+            .ToArrayAsync(ct);
+    }
+
     private async Task NotifyActCreatedAsync(Act act, CancellationToken ct)
     {
         if (_notificationService is null || !act.ResponsibleId.HasValue)
+        {
+            return;
+        }
+
+        var recipientUserIds = await ResolveActNotificationCandidatesAsync([act.ResponsibleId.Value], ct);
+        if (recipientUserIds.Length == 0)
         {
             return;
         }
@@ -80,7 +113,7 @@ public class ActsController : ControllerBase
             act,
             User.GetDisplayName(),
             User.GetUserId() ?? 0,
-            [act.ResponsibleId.Value],
+            recipientUserIds,
             ct);
     }
 
@@ -91,12 +124,18 @@ public class ActsController : ControllerBase
             return;
         }
 
+        var recipientUserIds = await ResolveActNotificationCandidatesAsync([act.ResponsibleId.Value], ct);
+        if (recipientUserIds.Length == 0)
+        {
+            return;
+        }
+
         await _notificationService.NotifyActChangedAsync(
             act,
             changeLabels,
             User.GetDisplayName(),
             User.GetUserId() ?? 0,
-            [act.ResponsibleId.Value],
+            recipientUserIds,
             ct);
     }
 
