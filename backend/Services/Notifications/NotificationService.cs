@@ -2903,6 +2903,10 @@ public sealed class NotificationService : INotificationService
         var templateStorage = templateDefinition is null
             ? new NotificationTemplateStorage()
             : await LoadTemplateStorageAsync(cancellationToken);
+        var deliveryRecipientIds = recipients
+            .Where(userId => channels.Any(recipientNotificationChannels[userId].Contains))
+            .ToList();
+        var deliveryRecipients = await ResolveRecipientsAsync(deliveryRecipientIds, cancellationToken);
         var deliveries = new List<NotificationDelivery>();
         foreach (var userId in recipients)
         {
@@ -2937,9 +2941,9 @@ public sealed class NotificationService : INotificationService
             var enabledChannels = channels
                 .Where(recipientNotificationChannels[userId].Contains)
                 .ToList();
-            if (enabledChannels.Count > 0)
+            if (enabledChannels.Count > 0 && deliveryRecipients.TryGetValue(userId, out var recipient))
             {
-                deliveries.AddRange(await SendToUserAsync(userId, message, enabledChannels, eventKey, cancellationToken));
+                deliveries.AddRange(await SendAsync(recipient, message, enabledChannels, eventKey, cancellationToken));
             }
         }
 
