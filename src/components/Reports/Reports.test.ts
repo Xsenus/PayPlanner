@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 import { describe, expect, it } from 'vitest';
-import { buildBankReportFilters } from './Reports';
+import { buildBankReportFilters } from './reportFilters';
 import { buildVisibleReportGroups } from './reportAccess';
 
 describe('Reports bank filters', () => {

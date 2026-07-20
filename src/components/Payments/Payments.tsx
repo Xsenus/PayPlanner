@@ -1122,7 +1122,7 @@ export function Payments({
     setAdvanceReviewFilter('all');
     setSearch('');
     setTypeFilter(defaultType ?? 'all');
-  }, [defaultType]);
+  }, [defaultFrom, defaultTo, defaultType]);
 
   const handleAddPayment = useCallback(
     (type: Payment['type']) => {

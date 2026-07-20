@@ -494,6 +494,8 @@ export function ActModal({
   const documentStatusSettings = useDocumentStatusSettings();
   const { legalEntities } = useLegalEntities();
   const profileTimeZoneId = useUserTimeZone();
+  const profileTimeZoneIdRef = useRef(profileTimeZoneId);
+  profileTimeZoneIdRef.current = profileTimeZoneId;
   const defaultDate = todayYMDInTimeZone(profileTimeZoneId);
   const defaultDateRef = useRef(defaultDate);
   const [form, setForm] = useState<FormState>(() =>
@@ -522,7 +524,7 @@ export function ActModal({
 
   useEffect(() => {
     if (open) {
-      setForm(normalizeActToForm(act, defaultClientId, defaultResponsibleId, initialValues, profileTimeZoneId));
+      setForm(normalizeActToForm(act, defaultClientId, defaultResponsibleId, initialValues, profileTimeZoneIdRef.current));
       setLocalError(null);
       setInvoiceDetails(null);
       setInvoiceError(null);
@@ -534,7 +536,6 @@ export function ActModal({
       setManualLineItems([]);
       manualLineItemsSeedRef.current = null;
       setLineItemPickerOpen(false);
-      defaultDateRef.current = defaultDate;
     }
   }, [open, act, defaultClientId, defaultResponsibleId, initialValues]);
 

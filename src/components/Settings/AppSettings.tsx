@@ -484,7 +484,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
   };
 
 
-  const loadDaDataCredentials = async () => {
+  const loadDaDataCredentials = useCallback(async () => {
     setCredentialsLoading(true);
     setCredentialsMessage(null);
     try {
@@ -499,7 +499,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
     } finally {
       setCredentialsLoading(false);
     }
-  };
+  }, []);
 
   const saveDaDataCredentials = async () => {
     if (!canEditIntegrationSettings || dadataSettings?.canEdit === false) {
@@ -787,7 +787,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
     if (activeSection === 'form-requirements') {
       void loadFormRequirements();
     }
-  }, [activeDatabaseOperationsSubsection, activeSection, canViewIntegrationSettings, loadDatabaseStatus, loadDuplicates, mergeKind]);
+  }, [activeDatabaseOperationsSubsection, activeSection, canViewIntegrationSettings, loadDaDataCredentials, loadDatabaseStatus, loadDuplicates, mergeKind]);
 
   return (
     <div className="p-3 lg:p-4">

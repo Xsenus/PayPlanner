@@ -20,9 +20,9 @@ import { useToast } from '../../hooks/useToast';
 import { apiService } from '../../services/api';
 import type { Client, LegalEntityDetail, LegalEntityInput, LegalEntitySummary, PaymentKind, RelatedDocumentLink } from '../../types';
 import { getObjectAuditActorLabel } from '../../utils/objectAudit';
-import { formatDateInTimeZone } from '../../utils/timeZoneDate';
 import { LegalEntityModal } from '../LegalEntities/LegalEntityModal';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
+import { formatContactDate as formatDate } from './contactFormatters';
 
 type ContactKind = 'all' | 'client' | 'legal';
 type ViewMode = 'cards' | 'table';
@@ -236,11 +236,6 @@ function columnsForScope(scope: ContactKind): ContactColumnConfig[] {
   if (scope === 'client') return CLIENT_CONTACT_COLUMNS;
   if (scope === 'legal') return LEGAL_CONTACT_COLUMNS;
   return COMMON_CONTACT_COLUMNS;
-}
-
-export function formatDate(value?: string | null, timeZoneId?: string | null) {
-  if (!value) return '';
-  return formatDateInTimeZone(value, timeZoneId) || value;
 }
 
 function normalizeRelatedPaymentKind(value?: string | null): PaymentKind | undefined {

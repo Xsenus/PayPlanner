@@ -921,6 +921,8 @@ export function InvoiceModal({
   const { confirm, prompt } = useDialog();
   const toast = useToast();
   const profileTimeZoneId = useUserTimeZone();
+  const profileTimeZoneIdRef = useRef(profileTimeZoneId);
+  profileTimeZoneIdRef.current = profileTimeZoneId;
   const defaultDate = todayYMDInTimeZone(profileTimeZoneId);
   const defaultDateRef = useRef(defaultDate);
   const typeOptions: PaymentKind[] = ['Income', 'Expense'];
@@ -1823,7 +1825,7 @@ export function InvoiceModal({
         defaultType,
         defaultExpenseClientId,
         defaultExpenseLegalEntityId,
-        profileTimeZoneId,
+        profileTimeZoneIdRef.current,
       );
       setForm(nextForm);
       setLineItems(resumeDraft?.lineItems ?? normalizeLineItems(invoice?.lineItems, invoice?.amount));
@@ -1846,7 +1848,6 @@ export function InvoiceModal({
       if (presentation === 'page') {
         setPageViewMode(resumeDraft?.pageViewMode ?? true);
       }
-      defaultDateRef.current = defaultDate;
       lastAutoContractClientIdRef.current = nextForm.contractId ? nextForm.clientId : '';
     }
   }, [defaultClientId, defaultLegalEntityId, defaultExpenseClientId, defaultExpenseLegalEntityId, defaultClientCaseId, defaultResponsibleId, defaultType, invoice, open, presentation, relatedInstallmentPlan, resumeDraft]);

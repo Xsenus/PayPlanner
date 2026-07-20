@@ -28,7 +28,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 import { usePeriodStats } from '../../hooks/usePeriodStats';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
-import { useCashFlowReport, type CashFlowReportFilters } from '../../hooks/useCashFlowReport';
+import { useCashFlowReport } from '../../hooks/useCashFlowReport';
 import { useCashFlowForecastReport } from '../../hooks/useCashFlowForecastReport';
 import { useCashReport } from '../../hooks/useCashReport';
 import { useMoneyCategoryReport } from '../../hooks/useMoneyCategoryReport';
@@ -43,6 +43,7 @@ import { useLawyerWorkloadReport } from '../../hooks/useLawyerWorkloadReport';
 import { useOverdueProceduralDeadlinesReport } from '../../hooks/useOverdueProceduralDeadlinesReport';
 import { useTaskReport, type TaskReportScope } from '../../hooks/useTaskReport';
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
+import { buildBankReportFilters } from './reportFilters';
 import { useDirectionReport } from '../../hooks/useDirectionReport';
 import { useSalesPointReport } from '../../hooks/useSalesPointReport';
 import { useVatReport } from '../../hooks/useVatReport';
@@ -112,13 +113,6 @@ const moneySourceOptions: Array<{ value: 'all' | MoneyOperationSource; label: st
   { value: 'Card', label: 'Карта' },
   { value: 'EMoney', label: 'Электронные деньги' },
 ];
-
-export function buildBankReportFilters(filters: CashFlowReportFilters): CashFlowReportFilters {
-  return {
-    ...filters,
-    source: 'Bank',
-  };
-}
 
 type PieTooltipProps = {
   active?: boolean;

@@ -103,6 +103,8 @@ export function ContractModal({
 }: ContractModalProps) {
   const { t } = useTranslation();
   const profileTimeZoneId = useUserTimeZone();
+  const profileTimeZoneIdRef = useRef(profileTimeZoneId);
+  profileTimeZoneIdRef.current = profileTimeZoneId;
   const isEdit = mode === 'edit';
   const defaultDate = todayYMDInTimeZone(profileTimeZoneId);
   const defaultDateRef = useRef(defaultDate);
@@ -122,13 +124,12 @@ export function ContractModal({
 
   useEffect(() => {
     if (open) {
-      setForm(normalizeContractToForm(contract, profileTimeZoneId));
+      setForm(normalizeContractToForm(contract, profileTimeZoneIdRef.current));
       setLocalError(null);
       setSelectedCounterparties(buildInitialCounterparties(contract, defaultClients));
       setPickerOpen(false);
       setNumberManuallyEdited(isEdit);
       numberManuallyEditedRef.current = isEdit;
-      defaultDateRef.current = defaultDate;
     }
   }, [open, contract, defaultClients, isEdit]);
 

@@ -36,8 +36,8 @@ import { useTableSelection } from '../../hooks/useTableSelection';
 import { useUserTimeZone } from '../../hooks/useUserTimeZone';
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
-import { formatDateInTimeZone } from '../../utils/timeZoneDate';
 import { ClientStatusBadge } from './ClientStatusBadge';
+import { formatClientDate as formatDate } from './clientFormatters';
 import { FormPromptModal } from '../ui/FormPromptModal';
 import { TableContextMenu, type TableContextMenuAction } from '../ui/TableContextMenu';
 import { TableColumnSettings } from '../ui/TableColumnSettings';
@@ -92,11 +92,6 @@ function statusClasses(statusRaw?: string) {
     return 'bg-blue-100 text-blue-700 border border-blue-200';
   if (s.includes('cancel')) return 'bg-gray-200 text-gray-700 border border-gray-300';
   return 'bg-slate-100 text-slate-700 border border-slate-200';
-}
-
-export function formatDate(d?: string | null, timeZoneId?: string | null) {
-  if (!d) return '';
-  return formatDateInTimeZone(d, timeZoneId) || d;
 }
 
 function getClientCaseCount(client: Client) {

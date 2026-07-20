@@ -2616,7 +2616,7 @@ export function TaskJournal({
     } finally {
       setCaseCalendarLoading(false);
     }
-  }, [calendarAnchorDate, calendarResponsibleUserId, canViewCases, caseFilter, effectiveTaskJournalTimeZoneId, periodMode, toast, viewMode]);
+  }, [calendarAnchorDate, calendarResponsibleUserId, canViewCases, caseFilter, periodMode, toast, viewMode]);
 
   const buildCaseCalendarParams = useCallback(() => {
     const range = getCaseCalendarRange(calendarAnchorDate, viewMode === 'timeline' ? 'week' : periodMode);
@@ -2629,7 +2629,7 @@ export function TaskJournal({
       responsibleUserId,
       includeTasks: false,
     };
-  }, [calendarAnchorDate, calendarResponsibleUserId, caseFilter, effectiveTaskJournalTimeZoneId, periodMode, viewMode]);
+  }, [calendarAnchorDate, calendarResponsibleUserId, caseFilter, periodMode, viewMode]);
 
   useEffect(() => {
     void refreshCaseCalendarEvents();
@@ -2765,7 +2765,7 @@ export function TaskJournal({
     [clients, legalEntities],
   );
 
-  const dateRangeBounds = useMemo(() => getTaskDateRangeBounds(dateFromFilter, dateToFilter), [effectiveTaskJournalTimeZoneId, dateFromFilter, dateToFilter]);
+  const dateRangeBounds = useMemo(() => getTaskDateRangeBounds(dateFromFilter, dateToFilter), [dateFromFilter, dateToFilter]);
 
   const scopeFilteredTasks = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -2821,12 +2821,12 @@ export function TaskJournal({
     return viewMode === 'list'
       ? nextTasks
       : nextTasks.sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime());
-  }, [effectiveTaskJournalTimeZoneId, dateFromFilter, dateToFilter, metricFilter, periodMode, scopeFilteredTasks, statusFilter, viewMode]);
+  }, [dateFromFilter, dateToFilter, metricFilter, periodMode, scopeFilteredTasks, statusFilter, viewMode]);
 
   const filteredTasks = useMemo(() => {
     const nowDate = getCurrentCalendarDate();
     return statusAndPeriodFilteredTasks.filter((task) => matchesMetricFilter(task, metricFilter, nowDate));
-  }, [effectiveTaskJournalTimeZoneId, metricFilter, statusAndPeriodFilteredTasks]);
+  }, [metricFilter, statusAndPeriodFilteredTasks]);
 
   const pendingDeadlineChangeDecision = useMemo<Exclude<DeadlineChangeDecisionPromptState, null> | null>(() => {
     if (!isApprovalsMode) {
@@ -3107,7 +3107,7 @@ export function TaskJournal({
     const today = active.filter((task) => isSameTaskDay(task.dueAt, getCurrentCalendarDate()));
     const high = active.filter((task) => task.priority === 'high' || task.priority === 'urgent');
     return { active: active.length, overdue: overdue.length, today: today.length, high: high.length };
-  }, [effectiveTaskJournalTimeZoneId, statusAndPeriodFilteredTasks]);
+  }, [statusAndPeriodFilteredTasks]);
 
   const boardColumns = useMemo(() => {
     const nowDate = getCurrentCalendarDate();
@@ -3143,7 +3143,7 @@ export function TaskJournal({
         }),
       },
     ];
-  }, [effectiveTaskJournalTimeZoneId, filteredTasks, periodMode]);
+  }, [filteredTasks, periodMode]);
 
   const handleQuickFilterChange = (nextFilter: QuickFilter) => {
     setQuickFilter(nextFilter);
@@ -4148,7 +4148,6 @@ export function TaskJournal({
             presentation="page"
             state={routeTaskState}
             tasks={tasks}
-            timeZoneId={effectiveTaskJournalTimeZoneId}
             assignees={assignees}
             clients={clients}
             legalEntities={legalEntities}
@@ -4758,7 +4757,6 @@ export function TaskJournal({
             <TaskCalendar
               tasks={calendarTasks}
               mode={periodMode}
-              timeZoneId={effectiveTaskJournalTimeZoneId}
               colorMode={calendarColorMode}
               completedTaskCalendarAction={completedTaskCalendarAction}
               loadWarningMode={calendarLoadWarningMode}
@@ -4832,7 +4830,6 @@ export function TaskJournal({
           presentation="modal"
           state={modal}
           tasks={tasks}
-          timeZoneId={effectiveTaskJournalTimeZoneId}
           assignees={assignees}
           clients={clients}
           legalEntities={legalEntities}
@@ -6468,7 +6465,7 @@ function TaskTimelineCalendar({
     });
 
     return map;
-  }, [tasks, timeZoneId, visibleDayKeys]);
+  }, [tasks, visibleDayKeys]);
 
   const weekTasks = useMemo(
     () => visibleDays.flatMap((day) => tasksByDate.get(toLocalDateKey(day)) ?? []),
@@ -6829,7 +6826,6 @@ function CalendarTaskTooltip({ task }: { task: TaskJournalItem }) {
 function TaskCalendar({
   tasks,
   mode,
-  timeZoneId,
   colorMode,
   completedTaskCalendarAction,
   loadWarningMode,
@@ -6856,7 +6852,6 @@ function TaskCalendar({
 }: {
   tasks: TaskJournalItem[];
   mode: PeriodMode;
-  timeZoneId: string;
   colorMode: TaskCalendarColorMode;
   completedTaskCalendarAction: 'color' | 'hide';
   loadWarningMode: TaskCalendarLoadWarningMode;
@@ -6910,7 +6905,7 @@ function TaskCalendar({
     });
 
     return map;
-  }, [tasks, timeZoneId]);
+  }, [tasks]);
 
   const selectedTasks = useMemo(
     () => tasksByDate.get(toLocalDateKey(selectedDate)) ?? [],
@@ -7407,7 +7402,6 @@ function TaskCalendar({
 
 function TaskDaySchedulePanel({
   tasks,
-  timeZoneId,
   selectedDueAt,
   plannedDurationMinutes,
   assigneeUserId,
@@ -7415,7 +7409,6 @@ function TaskDaySchedulePanel({
   currentTaskId,
 }: {
   tasks: TaskJournalItem[];
-  timeZoneId: string;
   selectedDueAt: string;
   plannedDurationMinutes: number | null | undefined;
   assigneeUserId?: number | null;
@@ -7438,7 +7431,7 @@ function TaskDaySchedulePanel({
         return !Number.isNaN(due.getTime()) && isSameTaskDay(task.dueAt, selectedDate);
       })
       .sort((a, b) => getTaskStartMinute(a) - getTaskStartMinute(b) || a.id - b.id);
-  }, [selectedDate, tasks, timeZoneId]);
+  }, [selectedDate, tasks]);
 
   const activeDayTasks = useMemo(() => dayTasks.filter((task) => isTaskJournalActive(task.status)), [dayTasks]);
   const assigneeDayTasks = useMemo(
@@ -7764,7 +7757,6 @@ type TaskModalProps = {
   chrome?: TaskCardChrome;
   state: ModalState;
   tasks: TaskJournalItem[];
-  timeZoneId: string;
   assignees: TaskJournalAssignee[];
   clients: Client[];
   legalEntities: LegalEntitySummary[];
@@ -7806,7 +7798,6 @@ function TaskModal({
   chrome = 'legacy',
   state,
   tasks,
-  timeZoneId,
   assignees,
   clients,
   legalEntities,
@@ -10116,7 +10107,6 @@ function TaskModal({
               <div className="lg:col-span-2">
                 <TaskDaySchedulePanel
                   tasks={tasks}
-                  timeZoneId={timeZoneId}
                   selectedDueAt={form.dueAt}
                   plannedDurationMinutes={form.plannedDurationMinutes}
                   assigneeUserId={form.assigneeUserId}

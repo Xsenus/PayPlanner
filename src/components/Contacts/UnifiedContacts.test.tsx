@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { UnifiedContacts, formatDate } from './UnifiedContacts';
+import { UnifiedContacts } from './UnifiedContacts';
+import { formatContactDate } from './contactFormatters';
 import { apiService, type UserSettingDto } from '../../services/api';
 import type { Client, LegalEntityDetail, LegalEntitySummary } from '../../types';
 
@@ -238,8 +239,8 @@ describe('UnifiedContacts', () => {
   });
 
   it('formats contact exact dates in the selected profile time zone', () => {
-    expect(formatDate('2026-06-04T22:30:00Z', 'Europe/Samara')).toBe('05.06.2026');
-    expect(formatDate('2026-06-04T22:30:00Z', 'America/New_York')).toBe('04.06.2026');
+    expect(formatContactDate('2026-06-04T22:30:00Z', 'Europe/Samara')).toBe('05.06.2026');
+    expect(formatContactDate('2026-06-04T22:30:00Z', 'America/New_York')).toBe('04.06.2026');
   });
 
   it('loads table view mode for the combined contacts section from user settings', async () => {
