@@ -4145,7 +4145,8 @@ public class ReportsControllerTests
     [Fact]
     public async Task CashFlow_ReturnsForbidWhenReportsAreHiddenForRole()
     {
-        await using var db = await CreateContextAsync();
+        var interceptor = new RecordingCommandInterceptor();
+        await using var db = await SqliteTestContextFactory.CreateAsync(interceptor: interceptor);
         var role = new Role
         {
             Name = "limited",
@@ -4173,6 +4174,7 @@ public class ReportsControllerTests
         await db.SaveChangesAsync();
 
         var controller = CreateController(db, CreateUserPrincipal(user.Id));
+        interceptor.Commands.Clear();
 
         var action = await controller.CashFlow(
             new DateTime(2026, 5, 1),
@@ -4187,6 +4189,9 @@ public class ReportsControllerTests
             CancellationToken.None);
 
         Assert.IsType<ForbidResult>(action.Result);
+        Assert.Equal(2, interceptor.Commands.Count);
+        Assert.Single(interceptor.Commands, command =>
+            command.Contains("RolePermissions", StringComparison.Ordinal));
     }
 
     [Fact]

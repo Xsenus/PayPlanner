@@ -66,47 +66,59 @@ public class ReportsController : ControllerBase
 
     private async Task<bool> CanViewReportsAsync(CancellationToken ct)
     {
-        if (await IsCurrentUserAdminAsync(ct))
-        {
-            return true;
-        }
-
-        var userId = User.GetUserId();
-        if (!userId.HasValue)
-        {
-            return false;
-        }
-
-        if (await _db.IsUserAdminAsync(userId.Value, ct))
-        {
-            return true;
-        }
-
-        var permission = await _db.GetUserSectionPermissionAsync(userId.Value, RolePermissionCatalog.Reports, ct);
-        return permission?.CanView == true;
+        var permission = await ResolveReportsPermissionAsync(ct);
+        return permission is { IsAdmin: true } or { CanView: true };
     }
 
     private async Task<bool> CanExportReportsAsync(CancellationToken ct)
     {
-        if (await IsCurrentUserAdminAsync(ct))
-        {
-            return true;
-        }
+        var permission = await ResolveReportsPermissionAsync(ct);
+        return permission is { IsAdmin: true } or { CanExport: true };
+    }
 
+    private async Task<ReportsPermissionSnapshot?> ResolveReportsPermissionAsync(CancellationToken ct)
+    {
         var userId = User.GetUserId();
         if (!userId.HasValue)
         {
-            return false;
+            return User.IsInRole("admin")
+                ? new ReportsPermissionSnapshot(true, false, false)
+                : null;
         }
 
-        if (await _db.IsUserAdminAsync(userId.Value, ct))
+        var permission = await (
+                from user in _db.Users.AsNoTracking()
+                where user.Id == userId.Value && user.IsActive
+                join rolePermission in _db.RolePermissions
+                        .AsNoTracking()
+                        .Where(item => item.Section == RolePermissionCatalog.Reports)
+                    on user.RoleId equals rolePermission.RoleId into rolePermissions
+                from rolePermission in rolePermissions.DefaultIfEmpty()
+                select new
+                {
+                    RoleName = user.Role != null ? user.Role.Name : string.Empty,
+                    CanView = rolePermission != null && rolePermission.CanView,
+                    CanExport = rolePermission != null && rolePermission.CanExport,
+                })
+            .FirstOrDefaultAsync(ct);
+
+        if (permission is not null)
         {
-            return true;
+            return new ReportsPermissionSnapshot(
+                string.Equals(permission.RoleName, "admin", StringComparison.OrdinalIgnoreCase),
+                permission.CanView,
+                permission.CanExport);
         }
 
-        var permission = await _db.GetUserSectionPermissionAsync(userId.Value, RolePermissionCatalog.Reports, ct);
-        return permission?.CanExport == true;
+        if (await _db.Users.AsNoTracking().AnyAsync(ct) || !User.IsInRole("admin"))
+        {
+            return null;
+        }
+
+        return new ReportsPermissionSnapshot(true, false, false);
     }
+
+    private sealed record ReportsPermissionSnapshot(bool IsAdmin, bool CanView, bool CanExport);
 
     private Task<bool> HasPaymentsPermissionAsync(
         Func<RolePermissionValues, bool> isAllowed,
