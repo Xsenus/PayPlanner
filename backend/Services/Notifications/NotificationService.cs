@@ -5758,31 +5758,131 @@ public sealed class NotificationService : INotificationService
             return Array.Empty<int>();
         }
 
-        var eligibleUserIds = await _context.Users
+        var recipientAccessRows = await _context.Users
             .AsNoTracking()
             .Where(user => candidateUserIds.Contains(user.Id)
                 && user.IsActive
                 && user.IsApproved)
-            .Select(user => user.Id)
+            .Select(user => new
+            {
+                user.Id,
+                user.DepartmentId,
+                user.Department,
+                RoleName = user.Role != null ? user.Role.Name : string.Empty,
+                Permission = user.Role == null
+                    ? null
+                    : user.Role.Permissions
+                        .Where(permission => permission.Section == section)
+                        .Select(permission => new
+                        {
+                            permission.CanView,
+                            permission.ViewScope,
+                        })
+                        .FirstOrDefault(),
+                HasAnyRolePermission = user.Role != null && user.Role.Permissions.Any(),
+            })
             .ToListAsync(cancellationToken);
-        if (eligibleUserIds.Count == 0)
+        if (recipientAccessRows.Count == 0)
         {
             return Array.Empty<int>();
         }
 
-        var recipientVisibilityKeys = new List<(int UserId, string VisibilityKey)>(eligibleUserIds.Count);
-        var visibilityByKey = new Dictionary<string, DataVisibilityAccess>(StringComparer.Ordinal);
-        foreach (var userId in eligibleUserIds)
+        var accessCandidates = new List<NotificationRecipientAccessCandidate>(recipientAccessRows.Count);
+        foreach (var row in recipientAccessRows)
         {
-            var principal = CreateNotificationRecipientPrincipal(userId);
-            var access = await _context.ResolveDataVisibilityAsync(principal, section, cancellationToken);
-            if (access is null)
+            var isAdmin = string.Equals(row.RoleName, "admin", StringComparison.OrdinalIgnoreCase);
+            if (!isAdmin && row.Permission is null && row.HasAnyRolePermission)
             {
                 continue;
             }
 
+            if (!isAdmin && row.Permission is not null && !row.Permission.CanView)
+            {
+                continue;
+            }
+
+            var scope = isAdmin || !RolePermissionCatalog.HasDataScope(section)
+                ? DataVisibilityScope.All
+                : DataVisibilityScope.Normalize(row.Permission?.ViewScope, DataVisibilityScope.Own);
+            accessCandidates.Add(new NotificationRecipientAccessCandidate(
+                row.Id,
+                isAdmin,
+                scope,
+                row.DepartmentId,
+                row.Department?.Trim()));
+        }
+
+        if (accessCandidates.Count == 0)
+        {
+            return Array.Empty<int>();
+        }
+
+        var departmentIds = accessCandidates
+            .Where(candidate => string.Equals(candidate.Scope, DataVisibilityScope.Department, StringComparison.OrdinalIgnoreCase))
+            .Select(candidate => candidate.DepartmentId)
+            .OfType<int>()
+            .Distinct()
+            .ToArray();
+        var departmentNames = accessCandidates
+            .Where(candidate => string.Equals(candidate.Scope, DataVisibilityScope.Department, StringComparison.OrdinalIgnoreCase))
+            .Select(candidate => candidate.Department)
+            .Where(department => !string.IsNullOrWhiteSpace(department))
+            .Select(department => department!)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var departmentUsers = new List<NotificationDepartmentUser>();
+        if (departmentIds.Length > 0 || departmentNames.Length > 0)
+        {
+            var departmentUserRows = await _context.Users
+                .AsNoTracking()
+                .Where(user => user.IsActive
+                    && ((user.DepartmentId.HasValue && departmentIds.Contains(user.DepartmentId.Value))
+                        || (user.Department != null && departmentNames.Contains(user.Department))))
+                .Select(user => new { user.Id, user.DepartmentId, user.Department })
+                .ToListAsync(cancellationToken);
+            departmentUsers.AddRange(departmentUserRows.Select(user => new NotificationDepartmentUser(
+                user.Id,
+                user.DepartmentId,
+                user.Department)));
+        }
+
+        var recipientVisibilityKeys = new List<(int UserId, string VisibilityKey)>(accessCandidates.Count);
+        var visibilityByKey = new Dictionary<string, DataVisibilityAccess>(StringComparer.Ordinal);
+        foreach (var candidate in accessCandidates)
+        {
+            IReadOnlyCollection<int> visibleUserIds;
+            if (candidate.IsAdmin
+                || string.Equals(candidate.Scope, DataVisibilityScope.All, StringComparison.OrdinalIgnoreCase))
+            {
+                visibleUserIds = Array.Empty<int>();
+            }
+            else if (string.Equals(candidate.Scope, DataVisibilityScope.Department, StringComparison.OrdinalIgnoreCase)
+                     && (candidate.DepartmentId.HasValue || !string.IsNullOrWhiteSpace(candidate.Department)))
+            {
+                visibleUserIds = departmentUsers
+                    .Where(user =>
+                        (candidate.DepartmentId.HasValue
+                            && user.DepartmentId == candidate.DepartmentId.Value)
+                        || (!string.IsNullOrWhiteSpace(candidate.Department)
+                            && string.Equals(user.Department, candidate.Department, StringComparison.Ordinal)))
+                    .Select(user => user.UserId)
+                    .Append(candidate.UserId)
+                    .Distinct()
+                    .ToArray();
+            }
+            else
+            {
+                visibleUserIds = [candidate.UserId];
+            }
+
+            var access = new DataVisibilityAccess(
+                candidate.UserId,
+                candidate.IsAdmin,
+                section,
+                candidate.Scope,
+                visibleUserIds);
             var visibilityKey = BuildDataVisibilityGroupKey(access);
-            recipientVisibilityKeys.Add((userId, visibilityKey));
+            recipientVisibilityKeys.Add((candidate.UserId, visibilityKey));
             visibilityByKey.TryAdd(visibilityKey, access);
         }
 
@@ -5800,6 +5900,15 @@ public sealed class NotificationService : INotificationService
             .Select(item => item.UserId)
             .ToArray();
     }
+
+    private sealed record NotificationRecipientAccessCandidate(
+        int UserId,
+        bool IsAdmin,
+        string Scope,
+        int? DepartmentId,
+        string? Department);
+
+    private sealed record NotificationDepartmentUser(int UserId, int? DepartmentId, string? Department);
 
     private static string BuildDataVisibilityGroupKey(DataVisibilityAccess access)
         => access.SeesAll

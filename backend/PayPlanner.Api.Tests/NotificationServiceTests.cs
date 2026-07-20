@@ -6245,6 +6245,89 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyPaymentAssignedAsync_PreservesOwnDepartmentAndAllVisibility()
+    {
+        await using var db = await CreateContextAsync();
+        var adminRole = new Role { Name = "admin", CreatedAt = DateTime.UtcNow };
+        var ownRole = new Role { Name = "payment-own-batch", CreatedAt = DateTime.UtcNow };
+        var departmentRole = new Role { Name = "payment-department-batch", CreatedAt = DateTime.UtcNow };
+        var allRole = new Role { Name = "payment-all-batch", CreatedAt = DateTime.UtcNow };
+        db.Roles.AddRange(adminRole, ownRole, departmentRole, allRole);
+        await db.SaveChangesAsync();
+        db.RolePermissions.AddRange(
+            new RolePermission
+            {
+                RoleId = ownRole.Id,
+                Section = RolePermissionCatalog.Payments,
+                CanView = true,
+                ViewScope = DataVisibilityScope.Own,
+            },
+            new RolePermission
+            {
+                RoleId = departmentRole.Id,
+                Section = RolePermissionCatalog.Payments,
+                CanView = true,
+                ViewScope = DataVisibilityScope.Department,
+            },
+            new RolePermission
+            {
+                RoleId = allRole.Id,
+                Section = RolePermissionCatalog.Payments,
+                CanView = true,
+                ViewScope = DataVisibilityScope.All,
+            });
+        var actor = CreateNotificationUser("payment-batch-actor@example.com", adminRole.Id);
+        var owner = CreateNotificationUser("payment-batch-owner@example.com", ownRole.Id, "Финансы");
+        var unrelatedOwn = CreateNotificationUser("payment-batch-own-other@example.com", ownRole.Id, "Продажи");
+        var sameDepartment = CreateNotificationUser("payment-batch-department@example.com", departmentRole.Id, "Финансы");
+        var otherDepartment = CreateNotificationUser("payment-batch-department-other@example.com", departmentRole.Id, "Продажи");
+        var allViewer = CreateNotificationUser("payment-batch-all@example.com", allRole.Id);
+        db.Users.AddRange(actor, owner, unrelatedOwn, sameDepartment, otherDepartment, allViewer);
+        await db.SaveChangesAsync();
+        var payment = new Payment
+        {
+            Description = "Платёж для пакетной проверки доступа",
+            Date = new DateTime(2026, 7, 20),
+            Amount = 32000m,
+            Status = PaymentStatus.Pending,
+            Type = PaymentType.Income,
+            Responsibles = { new PaymentResponsible { UserId = owner.Id } },
+        };
+        db.Payments.Add(payment);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, new RecordingEmailService(), new RecordingTelegramService());
+
+        await service.NotifyPaymentAssignedAsync(
+            payment,
+            actor.FullName,
+            actor.Id,
+            [owner.Id, unrelatedOwn.Id, sameDepartment.Id, otherDepartment.Id, allViewer.Id]);
+
+        var recipientIds = await db.UserNotifications
+            .AsNoTracking()
+            .Select(notification => notification.RecipientUserId)
+            .OrderBy(userId => userId)
+            .ToListAsync();
+        Assert.Equal(
+            new[] { owner.Id, sameDepartment.Id, allViewer.Id }.Order(),
+            recipientIds);
+    }
+
+    private static User CreateNotificationUser(string email, int roleId, string? department = null)
+        => new()
+        {
+            Email = email,
+            FullName = email,
+            PasswordHash = "hash",
+            RoleId = roleId,
+            Department = department,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+
+    [Fact]
     public async Task NotifyPaymentChangedAsync_CreatesPaymentNotificationAndDeduplicatesByState()
     {
         await using var db = await CreateContextAsync();
@@ -7147,6 +7230,12 @@ public class NotificationServiceTests
             Assert.Equal(contract.Id, notification.ObjectId);
             Assert.Contains("D-QUERY-12", notification.BodyPreview);
         });
+        Assert.Single(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"Users\"", StringComparison.Ordinal)
+            && command.Contains("\"DepartmentId\"", StringComparison.Ordinal));
+        Assert.DoesNotContain(interceptor.ReaderCommands, command =>
+            command.Contains("FROM \"RolePermissions\"", StringComparison.Ordinal)
+            && !command.Contains("FROM \"Users\"", StringComparison.Ordinal));
         Assert.Single(interceptor.ReaderCommands, command =>
             command.Contains("SELECT EXISTS", StringComparison.Ordinal)
             && command.Contains("FROM \"Contracts\"", StringComparison.Ordinal));
