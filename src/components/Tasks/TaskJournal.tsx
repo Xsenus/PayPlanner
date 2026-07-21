@@ -1,3 +1,4 @@
+import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
@@ -4577,7 +4578,7 @@ export function TaskJournal({
             <div className="grid w-full gap-3 sm:grid-cols-2 xl:w-[380px] xl:shrink-0" data-testid="task-date-filter-row">
               <label className="relative block">
               <span className="pointer-events-none absolute left-3 top-1 text-[10px] font-semibold text-slate-400">Дата с</span>
-              <input
+              <SystemDateInput
                 type="date"
                 value={dateFromFilter}
                 onChange={(event) => setDateFromFilter(event.target.value)}
@@ -4589,7 +4590,7 @@ export function TaskJournal({
 
               <label className="relative block">
               <span className="pointer-events-none absolute left-3 top-1 text-[10px] font-semibold text-slate-400">Дата по</span>
-              <input
+              <SystemDateInput
                 type="date"
                 value={dateToFilter}
                 onChange={(event) => setDateToFilter(event.target.value)}
@@ -5346,7 +5347,7 @@ function TaskApprovalDecisionPrompt({
         <label className="mt-4 block text-sm font-semibold text-slate-700" htmlFor="task-approval-revision-due-at">
           Срок доработки
         </label>
-        <input
+        <SystemDateInput
           id="task-approval-revision-due-at"
           type="datetime-local"
           value={revisionDueAt}
@@ -5495,7 +5496,7 @@ function TaskDeadlineChangeDecisionPrompt({
         <label className="mt-4 block text-sm font-semibold text-slate-700" htmlFor="deadline-change-approved-due-at">
           Новый срок задачи
         </label>
-        <input
+        <SystemDateInput
           id="deadline-change-approved-due-at"
           type="datetime-local"
           value={approvedDueAt}
@@ -5758,7 +5759,7 @@ function TaskBulkActionsPanel({
           </label>
           <label className="block sm:col-span-2 xl:col-span-1">
             <span className="text-xs font-semibold text-slate-500">Срок</span>
-            <input
+            <SystemDateInput
               type="datetime-local"
               value={dueAt}
               onChange={(event) => onDueAtChange(event.target.value)}
@@ -8929,7 +8930,7 @@ function TaskModal({
           Срок доработки
           <div className="mt-2 flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 focus-within:border-orange-400 focus-within:ring-2 focus-within:ring-orange-100">
             <CalendarClock className="h-4 w-4 text-slate-400" />
-            <input
+            <SystemDateInput
               type="datetime-local"
               value={revisionReviewDueAt}
               onChange={(event) => {
@@ -9518,7 +9519,7 @@ function TaskModal({
                   </ModernTaskQuickField>
                 ) : null}
                 <ModernTaskQuickField icon={<CalendarClock className="h-4 w-4" />} label="Дата">
-                  <input
+                  <SystemDateInput
                     type="datetime-local"
                     value={form.dueAt}
                     onChange={(event) => update('dueAt', event.target.value)}
@@ -9589,7 +9590,7 @@ function TaskModal({
                       </label>
                       <label className="block text-xs font-medium text-slate-600">
                         Точная дата оплаты
-                        <input
+                        <SystemDateInput
                           type="date"
                           value={form.contractorPaymentDueDate ? String(form.contractorPaymentDueDate).split('T')[0] : ''}
                           onChange={(event) => update('contractorPaymentDueDate', event.target.value || null)}
@@ -9826,7 +9827,7 @@ function TaskModal({
               {canRequestDeadlineChange ? (
                 <section className="rounded-xl border border-amber-200 bg-amber-50 p-3">
                   <div className="mb-2 text-sm font-semibold text-amber-900">Запрос переноса срока</div>
-                  <input type="datetime-local" aria-label="Новый срок для запроса переноса" value={deadlineRequestDueAt} onChange={(event) => setDeadlineRequestDueAt(event.target.value)} className="w-full rounded-lg border border-amber-200 bg-white px-2 py-2 text-sm" />
+                  <SystemDateInput type="datetime-local" aria-label="Новый срок для запроса переноса" value={deadlineRequestDueAt} onChange={(event) => setDeadlineRequestDueAt(event.target.value)} className="w-full rounded-lg border border-amber-200 bg-white px-2 py-2 text-sm" />
                   <button type="button" onClick={openDeadlineRequestReasonDialog} disabled={deadlineRequestSaving || !deadlineRequestDueAt} className="mt-2 w-full rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-amber-600 disabled:opacity-60">
                     {deadlineRequestSaving ? 'Отправляем...' : 'Запросить перенос'}
                   </button>
@@ -10172,7 +10173,7 @@ function TaskModal({
             </Field>
             <Field label="Дата и время исполнения">
               <div className="flex gap-2">
-                <input
+                <SystemDateInput
                   type="datetime-local"
                   value={form.dueAt}
                   onChange={(event) => update('dueAt', event.target.value)}
@@ -10198,7 +10199,7 @@ function TaskModal({
               </div>
             </Field>
             <Field label="Срок согласования">
-              <input
+              <SystemDateInput
                 type="datetime-local"
                 value={form.approvalDueAt ?? ''}
                 onChange={(event) => update('approvalDueAt', event.target.value || null)}
@@ -10282,7 +10283,7 @@ function TaskModal({
                   />
                 </Field>
                 <Field label="Точная дата оплаты">
-                  <input
+                  <SystemDateInput
                     type="date"
                     value={form.contractorPaymentDueDate ? String(form.contractorPaymentDueDate).split('T')[0] : ''}
                     onChange={(event) => update('contractorPaymentDueDate', event.target.value || null)}
@@ -10556,7 +10557,7 @@ function TaskModal({
             <section className="mt-5 rounded-2xl border border-amber-200 bg-amber-50/60 p-4">
               <div className="grid gap-4 lg:grid-cols-[220px_auto] lg:items-end">
                 <Field label="Новый срок">
-                  <input
+                  <SystemDateInput
                     type="datetime-local"
                     aria-label="Новый срок для запроса переноса"
                     value={deadlineRequestDueAt}

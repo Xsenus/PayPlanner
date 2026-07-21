@@ -1,3 +1,4 @@
+import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { CalendarDays, CreditCard, Loader2, ReceiptText, UserRoundSearch, Wallet } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -782,7 +783,7 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
 
             <label className="flex flex-col text-sm">
               <span className={fieldLabelClass}>Дата первого платежа</span>
-              <input
+              <SystemDateInput
                 type="date"
                 value={requestForm.startDate}
                 onChange={handleDateChange}
@@ -893,7 +894,7 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
                           {item.sequence}
                         </td>
                         <td className="w-[220px] px-3 py-2.5 text-center">
-                          <input
+                          <SystemDateInput
                             type="date"
                             value={toDateInputValue(item.date)}
                             onChange={(event) => handleScheduleDateChange(item.sequence, event.target.value)}

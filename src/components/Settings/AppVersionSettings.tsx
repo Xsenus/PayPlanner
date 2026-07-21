@@ -1,3 +1,4 @@
+import { SystemDateInput } from '../ui/SystemDateInput';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { History, Loader2, Plus, Save, Trash2 } from 'lucide-react';
 import { apiService, type AppReleaseAdminDto, type AppReleaseItemDto, type SaveAppReleaseRequest } from '../../services/api';
@@ -343,7 +344,7 @@ export function AppVersionSettings() {
           </label>
           <label className="block">
             <span className="text-sm font-medium text-slate-700">Дата и время релиза</span>
-            <input
+            <SystemDateInput
               type="datetime-local"
               step={1}
               value={form.releasedAt}

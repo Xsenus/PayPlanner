@@ -1,3 +1,4 @@
+import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import {
   ArrowLeft,
@@ -6462,7 +6463,7 @@ export function ClientDetail({
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Дата рождения
                       </label>
-                      <input
+                      <SystemDateInput
                         type="date"
                         name="birthDate"
                         value={clientFormState.birthDate}
@@ -7009,7 +7010,7 @@ export function ClientDetail({
                               className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3"
                             />
                             <div className="md:col-span-2">
-                              <input
+                              <SystemDateInput
                                 type="date"
                                 value={item.startDate}
                                 onChange={(e) =>
@@ -7024,7 +7025,7 @@ export function ClientDetail({
                               />
                             </div>
                             <div className="md:col-span-2">
-                              <input
+                              <SystemDateInput
                                 type="date"
                                 value={item.endDate}
                                 onChange={(e) =>
@@ -7238,7 +7239,7 @@ export function ClientDetail({
                                   className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3"
                                 />
                                 <div className="md:col-span-5">
-                                  <input
+                                  <SystemDateInput
                                     type="date"
                                     value={doc.issueDate}
                                     onChange={(e) =>
@@ -7365,7 +7366,7 @@ export function ClientDetail({
                                 className="px-3 py-2 border border-gray-300 rounded-lg md:col-span-3"
                               />
                               <div className="md:col-span-5">
-                                <input
+                                <SystemDateInput
                                   type="date"
                                   value={doc.issueDate}
                                   onChange={(e) =>
@@ -9630,7 +9631,7 @@ export function ClientDetail({
                   <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4">
                     <div className="flex items-center gap-2">
                       <CalendarRange className="h-4 w-4 text-gray-500" />
-                      <input
+                      <SystemDateInput
                         type="date"
                         value={actFrom}
                         onChange={(event) =>
@@ -9639,7 +9640,7 @@ export function ClientDetail({
                         className="w-36 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                       />
                       <span className="text-gray-500">—</span>
-                      <input
+                      <SystemDateInput
                         type="date"
                         value={actTo}
                         onChange={(event) =>
@@ -10079,7 +10080,7 @@ export function ClientDetail({
                   <div className="mb-6 flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
                     <div className="flex items-center gap-2">
                       <CalendarRange className="h-4 w-4 text-gray-500" />
-                      <input
+                      <SystemDateInput
                         type="date"
                         value={contractFrom}
                         onChange={(event) =>
@@ -10088,7 +10089,7 @@ export function ClientDetail({
                         className="w-36 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-200"
                       />
                       <span className="text-gray-500">—</span>
-                      <input
+                      <SystemDateInput
                         type="date"
                         value={contractTo}
                         onChange={(event) =>

@@ -1,3 +1,4 @@
+import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent } from 'react';
 import {
@@ -1583,7 +1584,7 @@ export function StickyNotes() {
           </label>
           <label className="flex min-w-0 items-center gap-1 rounded border border-black/10 bg-white/35 px-1.5 py-1 text-[10px] text-slate-600">
             <CalendarClock className="h-3 w-3 shrink-0" />
-            <input
+            <SystemDateInput
               type="datetime-local"
               value={formatDateTimeLocal(note.reminderAt)}
               onPointerDown={(event) => event.stopPropagation()}

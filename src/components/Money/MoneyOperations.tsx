@@ -1,3 +1,4 @@
+import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
@@ -893,7 +894,7 @@ function CashOrderModal({
             </label>
             <label className="flex flex-col gap-1 text-sm text-slate-600">
               Дата
-              <input
+              <SystemDateInput
                 type="date"
                 value={form.date}
                 disabled={isCancelled}
@@ -2033,7 +2034,7 @@ function MoneyOperationModal({
             </label>
             <label className="flex flex-col gap-1 text-sm text-slate-600">
               Дата
-              <input
+              <SystemDateInput
                 type="date"
                 value={form.date}
                 onChange={(event) => setField('date', event.target.value)}
@@ -2042,10 +2043,11 @@ function MoneyOperationModal({
             </label>
             <label className="flex flex-col gap-1 text-sm text-slate-600">
               Дата признания {form.direction === 'Income' ? 'дохода' : 'расхода'}
-              <input
+              <SystemDateInput
                 type="date"
                 value={form.recognitionDate ?? ''}
                 onChange={(event) => setField('recognitionDate', event.target.value)}
+                aria-label={`Дата признания ${form.direction === 'Income' ? 'дохода' : 'расхода'}`}
                 className="rounded-lg border border-slate-200 px-3 py-2 focus:border-blue-500 focus:outline-none"
               />
             </label>
@@ -4097,7 +4099,7 @@ export function MoneyOperations({
             <div className="flex flex-wrap items-end gap-3">
               <label className="flex flex-col gap-1 text-xs font-medium uppercase tracking-wide text-slate-400">
                 С
-                <input
+                <SystemDateInput
                   type="date"
                   value={from}
                   onChange={(event) => setFrom(event.target.value)}
@@ -4106,7 +4108,7 @@ export function MoneyOperations({
               </label>
               <label className="flex flex-col gap-1 text-xs font-medium uppercase tracking-wide text-slate-400">
                 По
-                <input
+                <SystemDateInput
                   type="date"
                   value={to}
                   onChange={(event) => setTo(event.target.value)}

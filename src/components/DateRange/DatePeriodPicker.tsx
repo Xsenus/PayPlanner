@@ -1,3 +1,4 @@
+import { SystemDateInput } from '../ui/SystemDateInput';
 import { Calendar, X } from 'lucide-react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -183,7 +184,7 @@ export function DatePeriodPicker({
     <div className="grid gap-3 sm:grid-cols-2">
       <label className="flex flex-col gap-1 text-xs text-slate-500">
         С
-        <input
+        <SystemDateInput
           type="date"
           value={customRange.from}
           onChange={(event) => handleCustomChange({ from: event.target.value })}
@@ -192,7 +193,7 @@ export function DatePeriodPicker({
       </label>
       <label className="flex flex-col gap-1 text-xs text-slate-500">
         По
-        <input
+        <SystemDateInput
           type="date"
           value={customRange.to}
           onChange={(event) => handleCustomChange({ to: event.target.value })}

@@ -1,4 +1,5 @@
 import { SystemSelect } from './SystemSelect';
+import { SystemDateInput } from './SystemDateInput';
 import { X } from 'lucide-react';
 import { useRef, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
@@ -133,6 +134,17 @@ export function FormPromptModal({
                         </option>
                       ))}
                     </SystemSelect>
+                  ) : field.type === 'date' ? (
+                    <SystemDateInput
+                      type="date"
+                      value={field.value}
+                      onChange={(event) => field.onChange(event.target.value)}
+                      required={field.required}
+                      autoFocus={field.autoFocus}
+                      disabled={fieldDisabled}
+                      aria-label={field.label}
+                      className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+                    />
                   ) : (
                     <input
                       type={field.type ?? 'text'}

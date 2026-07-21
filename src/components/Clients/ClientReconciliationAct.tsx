@@ -1,3 +1,4 @@
+import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import {
   AlertCircle,
@@ -899,7 +900,7 @@ export function ClientReconciliationAct({
             </label>
             <label className="text-sm font-medium text-slate-700">
               Период с
-              <input
+              <SystemDateInput
                 type="date"
                 value={draft.periodFrom}
                 onChange={(event) => updateDraft({ periodFrom: event.target.value })}
@@ -908,7 +909,7 @@ export function ClientReconciliationAct({
             </label>
             <label className="text-sm font-medium text-slate-700">
               Период по
-              <input
+              <SystemDateInput
                 type="date"
                 value={draft.periodTo}
                 onChange={(event) => updateDraft({ periodTo: event.target.value })}
@@ -1299,7 +1300,7 @@ export function ClientReconciliationAct({
                       {draft.disagreements.map((row) => (
                         <tr key={row.id}>
                           <td className="px-2 py-2">
-                            <input
+                            <SystemDateInput
                               type="date"
                               value={row.date}
                               onChange={(event) =>

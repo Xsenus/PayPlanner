@@ -1,3 +1,4 @@
+import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { AlertTriangle, ArrowLeft, Ban, Check, Download, FileText, FileX, GripVertical, Loader2, Mail, Pencil, Plus, Printer, Save, Send, Settings2, UploadCloud, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
@@ -1189,7 +1190,7 @@ export function ContractDetailPage({
 
         <label className="text-sm">
           Дата договора
-          <input
+          <SystemDateInput
             type="date"
             value={toDateInputValue(contract.date) ?? ''}
             disabled={!editMode}
@@ -1204,7 +1205,7 @@ export function ContractDetailPage({
 
         <label className="text-sm">
           Дата начала действия
-          <input
+          <SystemDateInput
             type="date"
             value={toDateInputValue(contract.startDate) ?? ''}
             disabled={!editMode}
@@ -1246,7 +1247,7 @@ export function ContractDetailPage({
 
         <label className="text-sm">
           Действует до
-          <input
+          <SystemDateInput
             type="date"
             value={toDateInputValue(contract.validUntil) ?? ''}
             disabled={!editMode || contract.isOpenEnded}
@@ -1261,7 +1262,7 @@ export function ContractDetailPage({
 
         <label className="text-sm">
           Дата расторжения
-          <input
+          <SystemDateInput
             type="date"
             value={toDateInputValue(contract.terminationDate) ?? ''}
             disabled={!editMode}

@@ -1,3 +1,4 @@
+import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import {
   ArrowDown,
@@ -541,7 +542,7 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
             <label className="flex flex-col gap-1 text-sm text-slate-700">
               {t('contractsFrom') ?? 'С даты'}
-              <input
+              <SystemDateInput
                 type="date"
                 value={toDateInputValue(from)}
                 onChange={(event) => setFrom(event.target.value)}
@@ -550,7 +551,7 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
             </label>
             <label className="flex flex-col gap-1 text-sm text-slate-700">
               {t('contractsTo') ?? 'По дату'}
-              <input
+              <SystemDateInput
                 type="date"
                 value={toDateInputValue(to)}
                 onChange={(event) => setTo(event.target.value)}

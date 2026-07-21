@@ -1,3 +1,4 @@
+import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -3098,8 +3099,8 @@ export function PaymentModal({
                       </div>
                     </div>
                     <div className="grid gap-3 sm:grid-cols-2">
-                      <div><label className={centeredLabelClass}>{t('expectedPaymentDate') ?? 'Expected date'}</label><input type="date" name="date" value={formData.date} onChange={handleChange} required className={`${centeredFieldClass} ${isRequired('Date') ? 'border-red-400 focus:border-red-500 focus:ring-red-200' : ''}`} /></div>
-                      <div><label className={centeredLabelClass}>{t('plannedScheduleDate') ?? 'Planned date'}</label><input type="date" name="plannedDate" value={formData.plannedDate} onChange={handleChange} className={centeredFieldClass} /></div>
+                      <div><label className={centeredLabelClass}>{t('expectedPaymentDate') ?? 'Expected date'}</label><SystemDateInput type="date" name="date" value={formData.date} onChange={handleChange} required className={`${centeredFieldClass} ${isRequired('Date') ? 'border-red-400 focus:border-red-500 focus:ring-red-200' : ''}`} /></div>
+                      <div><label className={centeredLabelClass}>{t('plannedScheduleDate') ?? 'Planned date'}</label><SystemDateInput type="date" name="plannedDate" value={formData.plannedDate} onChange={handleChange} className={centeredFieldClass} /></div>
                     </div>
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div><label className={centeredLabelClass}>{t('amount')}</label><input ref={amountRef} type="text" name="amount" value={formData.amount} onFocus={() => handleMoneyFieldFocus('amount')} onChange={(e) => handleAmountInput(e.target.value, e.currentTarget)} onBlur={formatAmountOnBlur} onWheel={(e) => (e.currentTarget as HTMLInputElement).blur()} inputMode="decimal" className={`${centeredFieldClass} ${isRequired('Amount') ? 'border-red-400 focus:border-red-500 focus:ring-red-200' : ''}`} placeholder="0.00" /></div>
@@ -3140,7 +3141,7 @@ export function PaymentModal({
                               <label className="block text-center text-sm font-medium text-gray-700" htmlFor="reschedule-date">
                                 Новая дата остатка
                               </label>
-                              <input
+                              <SystemDateInput
                                 id="reschedule-date"
                                 type="date"
                                 value={rescheduleDate}
@@ -3300,13 +3301,13 @@ export function PaymentModal({
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div>
                         <label className={centeredLabelClass}>{t('lastPaymentDate') ?? 'Дата фактического платежа'}</label>
-                        <input type="date" name="lastPaymentDate" value={formData.lastPaymentDate} onChange={handleChange} className={centeredFieldClass} />
+                        <SystemDateInput type="date" name="lastPaymentDate" value={formData.lastPaymentDate} onChange={handleChange} className={centeredFieldClass} />
                       </div>
                       <div>
                         {formData.isPaid ? (
                           <>
                             <label className={centeredLabelClass}>{t('paidDate') ?? 'Дата оплаты'}</label>
-                            <input type="date" name="paidDate" value={formData.paidDate} onChange={handleChange} className={centeredFieldClass} />
+                            <SystemDateInput type="date" name="paidDate" value={formData.paidDate} onChange={handleChange} className={centeredFieldClass} />
                           </>
                         ) : (
                           <div className="hidden h-full sm:block" aria-hidden="true" />
@@ -3624,7 +3625,7 @@ export function PaymentModal({
                         <label className="block text-sm font-medium text-gray-700 mb-2">
                           {paymentDocumentDateLabel}
                         </label>
-                        <input
+                        <SystemDateInput
                           type="date"
                           name="paymentDocumentDate"
                           value={formData.paymentDocumentDate}
@@ -3655,7 +3656,7 @@ export function PaymentModal({
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         {t('accountDate') ?? '\u0414\u0430\u0442\u0430 \u0441\u0447\u0451\u0442\u0430'}
                       </label>
-                      <input
+                      <SystemDateInput
                         type="date"
                         name="accountDate"
                         value={formData.accountDate}
@@ -3833,7 +3834,7 @@ export function PaymentModal({
                     </label>
                     <label className="block text-sm font-medium text-gray-700">
                       Новая дата остатка
-                      <input
+                      <SystemDateInput
                         type="date"
                         value={adjustRemainderDate}
                         onChange={(event) => setAdjustRemainderDate(event.target.value)}
@@ -3865,7 +3866,7 @@ export function PaymentModal({
                 <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
                   <label className="block text-sm font-medium text-gray-700">
                     Новая дата платежа
-                    <input
+                    <SystemDateInput
                       type="date"
                       value={paymentMoveDate}
                       onChange={(event) => setPaymentMoveDate(event.target.value)}

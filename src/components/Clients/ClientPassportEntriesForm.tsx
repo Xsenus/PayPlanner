@@ -1,3 +1,4 @@
+import { SystemDateInput } from '../ui/SystemDateInput';
 import { Trash2 } from 'lucide-react';
 
 import { PASSPORT_ENTRY_VALIDITY_FIELDS_VISIBLE } from '../../config/features';
@@ -86,7 +87,7 @@ export function ClientPassportEntriesForm({
 
             <label className="text-sm text-slate-700">
               <span className="mb-1 block">Дата выдачи</span>
-              <input
+              <SystemDateInput
                 type="date"
                 value={passport.issueDate}
                 onChange={(event) => onUpdateEntry(index, 'issueDate', event.target.value)}
@@ -109,7 +110,7 @@ export function ClientPassportEntriesForm({
               <>
                 <label className="text-sm text-slate-700">
                   <span className="mb-1 block">Действует с</span>
-                  <input
+                  <SystemDateInput
                     type="date"
                     value={passport.validFrom}
                     onChange={(event) => onUpdateEntry(index, 'validFrom', event.target.value)}
@@ -120,7 +121,7 @@ export function ClientPassportEntriesForm({
 
                 <label className="text-sm text-slate-700">
                   <span className="mb-1 block">Действует по</span>
-                  <input
+                  <SystemDateInput
                     type="date"
                     value={passport.validTo}
                     onChange={(event) => onUpdateEntry(index, 'validTo', event.target.value)}

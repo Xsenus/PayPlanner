@@ -1,3 +1,4 @@
+import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -4039,11 +4040,11 @@ function CaseEditPage({
             <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-1">
               <label className="text-sm font-medium text-slate-700">
                 Дата начала
-                <input type="date" value={draft.startDate} onChange={(event) => setField('startDate', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+                <SystemDateInput type="date" value={draft.startDate} onChange={(event) => setField('startDate', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
               </label>
               <label className="text-sm font-medium text-slate-700">
                 Срок
-                <input type="date" value={draft.dueDate} onChange={(event) => setField('dueDate', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+                <SystemDateInput type="date" value={draft.dueDate} onChange={(event) => setField('dueDate', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
               </label>
               <label className="flex min-h-[58px] items-center gap-3 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700">
                 <input type="checkbox" checked={draft.isHiddenFromExecutor} onChange={(event) => setField('isHiddenFromExecutor', event.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
@@ -4070,7 +4071,7 @@ function CaseEditPage({
             </label>
             <label className="text-sm font-medium text-slate-700">
               Заседание
-              <input type="datetime-local" value={draft.nextHearingAt} onChange={(event) => setField('nextHearingAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
+              <SystemDateInput type="datetime-local" value={draft.nextHearingAt} onChange={(event) => setField('nextHearingAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
             </label>
             <label className="md:col-span-2 xl:col-span-3 text-sm font-medium text-slate-700">
               Ссылка на источник
@@ -4110,11 +4111,11 @@ function CaseEditPage({
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Процессуальные даты</h2>
           <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-            <label className="text-sm font-medium text-slate-700">Иск подан<input type="date" value={draft.claimFiledAt} onChange={(event) => setField('claimFiledAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
-            <label className="text-sm font-medium text-slate-700">Решение суда<input type="date" value={draft.courtDecisionAt} onChange={(event) => setField('courtDecisionAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
-            <label className="text-sm font-medium text-slate-700">Апелляция<input type="date" value={draft.appealDeadlineAt} onChange={(event) => setField('appealDeadlineAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
-            <label className="text-sm font-medium text-slate-700">Кассация<input type="date" value={draft.cassationDeadlineAt} onChange={(event) => setField('cassationDeadlineAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
-            <label className="text-sm font-medium text-slate-700">Возражения<input type="date" value={draft.objectionDeadlineAt} onChange={(event) => setField('objectionDeadlineAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
+            <label className="text-sm font-medium text-slate-700">Иск подан<SystemDateInput type="date" value={draft.claimFiledAt} onChange={(event) => setField('claimFiledAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
+            <label className="text-sm font-medium text-slate-700">Решение суда<SystemDateInput type="date" value={draft.courtDecisionAt} onChange={(event) => setField('courtDecisionAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
+            <label className="text-sm font-medium text-slate-700">Апелляция<SystemDateInput type="date" value={draft.appealDeadlineAt} onChange={(event) => setField('appealDeadlineAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
+            <label className="text-sm font-medium text-slate-700">Кассация<SystemDateInput type="date" value={draft.cassationDeadlineAt} onChange={(event) => setField('cassationDeadlineAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
+            <label className="text-sm font-medium text-slate-700">Возражения<SystemDateInput type="date" value={draft.objectionDeadlineAt} onChange={(event) => setField('objectionDeadlineAt', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" /></label>
           </div>
         </section>
 
@@ -4776,18 +4777,30 @@ function WorkOrderTextInput({
   type?: 'text' | 'date' | 'number';
   disabled?: boolean;
 }) {
+  const fieldClassName = 'w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100';
   return (
     <label className="text-sm font-medium text-slate-700">
       <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">{label}</span>
-      <input
-        type={type}
-        step={type === 'number' ? '0.01' : undefined}
-        min={type === 'number' ? '0' : undefined}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        disabled={disabled}
-        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
-      />
+      {type === 'date' ? (
+        <SystemDateInput
+          type="date"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          disabled={disabled}
+          aria-label={label}
+          className={fieldClassName}
+        />
+      ) : (
+        <input
+          type={type}
+          step={type === 'number' ? '0.01' : undefined}
+          min={type === 'number' ? '0' : undefined}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          disabled={disabled}
+          className={fieldClassName}
+        />
+      )}
     </label>
   );
 }
@@ -6146,7 +6159,7 @@ function CourtPanel({
               </label>
               <label className="text-sm font-medium text-slate-700">
                 <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Дата подачи</span>
-                <input type="date" value={courtComplaintDraft.filedAt} onChange={(event) => onCourtComplaintDraftChange({ ...courtComplaintDraft, filedAt: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+                <SystemDateInput type="date" value={courtComplaintDraft.filedAt} onChange={(event) => onCourtComplaintDraftChange({ ...courtComplaintDraft, filedAt: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
               </label>
               <label className="text-sm font-medium text-slate-700">
                 <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Статус</span>
@@ -6300,7 +6313,7 @@ function CourtPanel({
           </label>
           <label className="text-sm font-medium text-slate-700">
             <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Дата и время</span>
-            <input type="datetime-local" value={courtEventScheduledAtDraft} onChange={(event) => onCourtEventScheduledAtChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+            <SystemDateInput type="datetime-local" value={courtEventScheduledAtDraft} onChange={(event) => onCourtEventScheduledAtChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
           </label>
           <label className="text-sm font-medium text-slate-700">
             <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Статус</span>
@@ -6388,7 +6401,7 @@ function CourtPanel({
           </label>
           <label className="text-sm font-medium text-slate-700">
             <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Дата</span>
-            <input type="date" value={deadlineDueAtDraft} onChange={(event) => onDeadlineDueAtChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+            <SystemDateInput type="date" value={deadlineDueAtDraft} onChange={(event) => onDeadlineDueAtChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
           </label>
           <label className="text-sm font-medium text-slate-700">
             <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Предупр.</span>

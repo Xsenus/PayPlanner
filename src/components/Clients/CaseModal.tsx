@@ -1,3 +1,4 @@
+import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -1116,7 +1117,7 @@ export function CaseModal({
 
           <div>
             <label className="text-sm text-gray-600">Дата начала</label>
-            <input
+            <SystemDateInput
               aria-label="Дата начала"
               type="date"
               className="mt-1 w-full border rounded-lg px-3 py-2"
@@ -1128,7 +1129,7 @@ export function CaseModal({
 
           <div>
             <label className="text-sm text-gray-600">Крайний срок</label>
-            <input
+            <SystemDateInput
               aria-label="Крайний срок"
               type="date"
               className="mt-1 w-full border rounded-lg px-3 py-2"
@@ -1475,7 +1476,7 @@ export function CaseModal({
 
           <div>
             <label className="text-sm text-gray-600">Следующее заседание</label>
-            <input
+            <SystemDateInput
               aria-label="Следующее заседание"
               type="datetime-local"
               className="mt-1 w-full border rounded-lg px-3 py-2"
@@ -1521,7 +1522,7 @@ export function CaseModal({
 
           <div>
             <label className="text-sm text-gray-600">Дата подачи заявления</label>
-            <input
+            <SystemDateInput
               aria-label="Дата подачи заявления"
               type="date"
               className="mt-1 w-full border rounded-lg px-3 py-2"
@@ -1533,7 +1534,7 @@ export function CaseModal({
 
           <div>
             <label className="text-sm text-gray-600">Дата решения суда</label>
-            <input
+            <SystemDateInput
               aria-label="Дата решения суда"
               type="date"
               className="mt-1 w-full border rounded-lg px-3 py-2"
@@ -1545,7 +1546,7 @@ export function CaseModal({
 
           <div>
             <label className="text-sm text-gray-600">Срок апелляции</label>
-            <input
+            <SystemDateInput
               aria-label="Срок апелляции"
               type="date"
               className="mt-1 w-full border rounded-lg px-3 py-2"
@@ -1557,7 +1558,7 @@ export function CaseModal({
 
           <div>
             <label className="text-sm text-gray-600">Срок кассации</label>
-            <input
+            <SystemDateInput
               aria-label="Срок кассации"
               type="date"
               className="mt-1 w-full border rounded-lg px-3 py-2"
@@ -1569,7 +1570,7 @@ export function CaseModal({
 
           <div>
             <label className="text-sm text-gray-600">Срок подачи ходатайств</label>
-            <input
+            <SystemDateInput
               aria-label="Срок подачи ходатайств"
               type="date"
               className="mt-1 w-full border rounded-lg px-3 py-2"
@@ -1581,7 +1582,7 @@ export function CaseModal({
 
           <div>
             <label className="text-sm text-gray-600">Срок возражений</label>
-            <input
+            <SystemDateInput
               aria-label="Срок возражений"
               type="date"
               className="mt-1 w-full border rounded-lg px-3 py-2"

@@ -1,3 +1,4 @@
+import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Ban, Check, ChevronDown, Copy, Download, FileText, Link2, List, Loader2, Pencil, Plus, Printer, Send, Trash2, UploadCloud, UserRoundSearch, X } from 'lucide-react';
@@ -5048,7 +5049,7 @@ export function InvoiceModal({
                           <div className="mt-4 grid grid-cols-1 gap-4">
                             <label className="flex flex-col gap-1 text-sm">
                               <span className="font-medium text-slate-700">{t('invoiceDate') ?? 'Дата выставления'}</span>
-                              <input
+                              <SystemDateInput
                                 type="date"
                                 value={form.date}
                                 onChange={handleChange('date')}
@@ -5059,7 +5060,7 @@ export function InvoiceModal({
 
                             <label className="flex flex-col gap-1 text-sm">
                               <span className="font-medium text-slate-700">{t('invoiceDueDate') ?? 'Срок оплаты'}</span>
-                              <input
+                              <SystemDateInput
                                 type="date"
                                 value={form.dueDate}
                                 onChange={handleChange('dueDate')}
@@ -5075,7 +5076,7 @@ export function InvoiceModal({
 
                             <label className="flex flex-col gap-1 text-sm">
                               <span className="font-medium text-slate-700">{t('invoicePaidDate') ?? 'Дата оплаты'}</span>
-                              <input
+                              <SystemDateInput
                                 type="date"
                                 value={form.paidDate}
                                 onChange={handleChange('paidDate')}
@@ -5656,7 +5657,7 @@ export function InvoiceModal({
                               <option key={source} value={source}>{moneyOperationSourceLabel(source)}</option>
                             ))}
                           </SystemSelect>
-                          <input
+                          <SystemDateInput
                             data-testid="invoice-cancel-refund-date"
                             type="date"
                             value={cancelRefundDate}
@@ -5811,7 +5812,7 @@ export function InvoiceModal({
               </label>
               <label className="text-sm">
                 <span className="mb-1 block font-medium text-slate-700">{t('actDate') ?? 'Дата'}</span>
-                <input type="date" value={draftAct.date} onChange={(e) => setDraftAct((prev) => ({ ...prev, date: e.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                <SystemDateInput type="date" value={draftAct.date} onChange={(e) => setDraftAct((prev) => ({ ...prev, date: e.target.value }))} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
               </label>
               <label className="text-sm sm:col-span-2">
                 <span className="mb-1 block font-medium text-slate-700">{t('actTitle') ?? 'Название'}</span>

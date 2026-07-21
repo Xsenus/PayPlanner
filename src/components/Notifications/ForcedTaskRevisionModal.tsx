@@ -1,3 +1,4 @@
+import { SystemDateInput } from '../ui/SystemDateInput';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, Clock3, ExternalLink, Loader2, TimerReset, XCircle } from 'lucide-react';
 import { apiService, type UserNotificationDto } from '../../services/api';
@@ -687,7 +688,7 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
           <label className="mt-4 block text-sm font-semibold text-slate-700" htmlFor="forced-task-approval-revision-due-at">
             Срок доработки
           </label>
-          <input
+          <SystemDateInput
             id="forced-task-approval-revision-due-at"
             type="datetime-local"
             value={approvalRevisionDueAt}
@@ -828,7 +829,7 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
           <label className="mt-4 block text-sm font-semibold text-slate-700" htmlFor="forced-deadline-change-due-at">
             Новый срок задачи
           </label>
-          <input
+          <SystemDateInput
             id="forced-deadline-change-due-at"
             type="datetime-local"
             value={deadlineChangeDueAt}

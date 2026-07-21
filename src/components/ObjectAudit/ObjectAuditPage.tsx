@@ -1,3 +1,4 @@
+import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { Filter, Loader2, RefreshCw, Search, ShieldCheck } from 'lucide-react';
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
@@ -362,7 +363,7 @@ export function ObjectAuditPage() {
 
             <label className="space-y-2">
               <span className="text-sm font-medium text-slate-700">Дата с</span>
-              <input
+              <SystemDateInput
                 type="date"
                 value={from}
                 onChange={(event) => setFrom(event.target.value)}
@@ -372,7 +373,7 @@ export function ObjectAuditPage() {
 
             <label className="space-y-2">
               <span className="text-sm font-medium text-slate-700">Дата по</span>
-              <input
+              <SystemDateInput
                 type="date"
                 value={to}
                 onChange={(event) => setTo(event.target.value)}

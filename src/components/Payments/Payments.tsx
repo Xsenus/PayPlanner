@@ -1,3 +1,4 @@
+import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { JSX } from 'react';
@@ -1912,7 +1913,7 @@ export function Payments({
                   <label className={centeredFieldLabelClass}>
                     {t('paymentsFilterDateFrom') ?? t('dateFrom') ?? 'Дата от'}
                   </label>
-                  <input
+                  <SystemDateInput
                     type="date"
                     value={fromDate}
                     max={toDate || undefined}
@@ -1925,7 +1926,7 @@ export function Payments({
                   <label className={centeredFieldLabelClass}>
                     {t('paymentsFilterDateTo') ?? t('dateTo') ?? 'Дата до'}
                   </label>
-                  <input
+                  <SystemDateInput
                     type="date"
                     value={toDate}
                     min={fromDate || undefined}
@@ -2272,7 +2273,7 @@ export function Payments({
                               {formatCurrencySmart(candidate.remainderAmount).full}
                             </td>
                             <td className="px-4 py-3 align-middle">
-                              <input
+                              <SystemDateInput
                                 type="date"
                                 value={remainderCandidateDates[payment.id] ?? ''}
                                 onChange={(event) =>
@@ -2428,7 +2429,7 @@ export function Payments({
                     </label>
                     <label className="w-full text-xs font-medium text-amber-900 sm:w-40">
                       Дата платежа
-                      <input
+                      <SystemDateInput
                         aria-label="Дата платежа для диагностики аванса"
                         type="date"
                         value={advanceDiagnosticsDate}

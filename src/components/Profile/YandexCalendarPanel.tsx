@@ -1,3 +1,4 @@
+import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CalendarCheck, Loader2, Play, RefreshCw, Save, Unlink2 } from 'lucide-react';
@@ -311,7 +312,7 @@ export function YandexCalendarPanel({ canUseEmployeeCalendarMode = false }: Prop
             </label>
             <label className="rounded-2xl border border-slate-200 px-4 py-3 text-sm">
               <span className="font-semibold text-slate-700">Синхронизировать задачи с даты</span>
-              <input
+              <SystemDateInput
                 type="date"
                 value={form.syncFromDate ?? ''}
                 onChange={(event) => setForm((current) => ({ ...current, syncFromDate: event.target.value || null }))}

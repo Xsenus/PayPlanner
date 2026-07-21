@@ -1,3 +1,4 @@
+import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { ArrowLeft, ChevronDown, Link2, Loader2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -1530,7 +1531,7 @@ export function ActModal({
                   <span className="font-medium text-slate-700">
                     {t('actDate') ?? 'Дата'} {isRequired('Date') ? '*' : ''}
                   </span>
-                  <input
+                  <SystemDateInput
                     type="date"
                     value={form.date}
                     onChange={handleChange('date')}

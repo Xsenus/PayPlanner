@@ -1,3 +1,4 @@
+import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { Trash2 } from "lucide-react";
 
@@ -170,7 +171,7 @@ export function ClientAddressEntriesForm({
               <>
                 <label className="text-sm text-slate-700">
                   <span className="mb-1 block">Действует с</span>
-                  <input
+                  <SystemDateInput
                     type="date"
                     value={entry.validFrom}
                     onChange={(event) =>
@@ -183,7 +184,7 @@ export function ClientAddressEntriesForm({
 
                 <label className="text-sm text-slate-700">
                   <span className="mb-1 block">Действует по</span>
-                  <input
+                  <SystemDateInput
                     type="date"
                     value={entry.validTo}
                     onChange={(event) =>

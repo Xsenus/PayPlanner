@@ -1,4 +1,5 @@
 import { SystemSelect } from '../ui/SystemSelect';
+import { SystemDateInput } from '../ui/SystemDateInput';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Building2, Loader2, Plus, Save, ShieldCheck, Trash2, UserRound } from 'lucide-react';
 
@@ -293,16 +294,28 @@ function TextField(props: {
   disabled?: boolean;
   className?: string;
 }) {
+  const fieldClassName = 'w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500';
   return (
     <label className={`space-y-2 ${props.className ?? ''}`}>
       <span className="text-sm font-medium text-slate-700">{props.label}</span>
-      <input
-        type={props.type ?? 'text'}
-        value={props.value}
-        onChange={(event) => props.onChange(event.target.value)}
-        disabled={props.disabled}
-        className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500"
-      />
+      {props.type === 'date' ? (
+        <SystemDateInput
+          type="date"
+          value={props.value}
+          onChange={(event) => props.onChange(event.target.value)}
+          disabled={props.disabled}
+          aria-label={props.label}
+          className={fieldClassName}
+        />
+      ) : (
+        <input
+          type={props.type ?? 'text'}
+          value={props.value}
+          onChange={(event) => props.onChange(event.target.value)}
+          disabled={props.disabled}
+          className={fieldClassName}
+        />
+      )}
     </label>
   );
 }

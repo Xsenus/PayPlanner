@@ -1,3 +1,4 @@
+import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CalendarDays, Loader2, Plus, Save, Trash2 } from 'lucide-react';
@@ -171,7 +172,7 @@ export function ProceduralDeadlineCalendarSettings() {
         </label>
         <label className="text-sm font-medium text-slate-700">
           <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Дата</span>
-          <input
+          <SystemDateInput
             aria-label="Дата исключения календаря"
             type="date"
             value={draftDate}

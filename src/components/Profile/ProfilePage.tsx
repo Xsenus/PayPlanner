@@ -1,3 +1,4 @@
+import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { KeyRound, Link2, Loader2, RefreshCw, Save, ShieldCheck, Unlink2, Upload } from 'lucide-react';
@@ -1007,7 +1008,7 @@ export function ProfilePage() {
                 </label>
                 <label className="space-y-2">
                   <span className="text-sm font-medium text-slate-700">Дата рождения</span>
-                  <input
+                  <SystemDateInput
                     type="date"
                     value={form.dateOfBirth}
                     onChange={(event) => updateForm('dateOfBirth', event.target.value)}

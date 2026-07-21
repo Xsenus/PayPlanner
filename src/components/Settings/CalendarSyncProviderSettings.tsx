@@ -1,3 +1,4 @@
+import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { Activity, AlertTriangle, CalendarDays, CheckCircle2, ExternalLink, Filter, HelpCircle, Power, RefreshCw, Save, ShieldCheck, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -445,7 +446,7 @@ export function CalendarSyncProviderSettings() {
                   Дата начала по умолчанию
                   <SettingHelpButton helpKey="defaultSyncFromDate" onOpen={setActiveSettingHelpKey} />
                 </span>
-                <input
+                <SystemDateInput
                   type="date"
                   value={formatDateInputValue(draft.defaultSyncFromDate)}
                   onChange={(event) => updateDraft({ defaultSyncFromDate: event.target.value || null })}
@@ -643,7 +644,7 @@ export function CalendarSyncProviderSettings() {
             </label>
             <label className="block">
               <span className="text-[11px] font-semibold uppercase text-slate-500">С даты и времени</span>
-              <input
+              <SystemDateInput
                 type="datetime-local"
                 value={logFilters.createdFrom}
                 onChange={(event) => setLogFilters((current) => ({ ...current, createdFrom: event.target.value }))}
@@ -652,7 +653,7 @@ export function CalendarSyncProviderSettings() {
             </label>
             <label className="block">
               <span className="text-[11px] font-semibold uppercase text-slate-500">По дату и время</span>
-              <input
+              <SystemDateInput
                 type="datetime-local"
                 value={logFilters.createdTo}
                 onChange={(event) => setLogFilters((current) => ({ ...current, createdTo: event.target.value }))}

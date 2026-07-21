@@ -1,3 +1,4 @@
+import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Shield, RefreshCw, Search, Trash2, Filter, GripVertical } from 'lucide-react';
@@ -550,7 +551,7 @@ export const UserActivity = () => {
 
                 <label>
                   <span className="text-sm font-medium text-slate-600">Дата с</span>
-                  <input
+                  <SystemDateInput
                     type="datetime-local"
                     value={from}
                     onChange={(event) => setFrom(event.target.value)}
@@ -560,7 +561,7 @@ export const UserActivity = () => {
 
                 <label>
                   <span className="text-sm font-medium text-slate-600">Дата по</span>
-                  <input
+                  <SystemDateInput
                     type="datetime-local"
                     value={to}
                     onChange={(event) => setTo(event.target.value)}

@@ -1,3 +1,4 @@
+import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Plus, X } from 'lucide-react';
@@ -390,7 +391,7 @@ export function ContractModal({
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-slate-700">{t('contractDate') ?? 'Дата договора'}</span>
-              <input
+              <SystemDateInput
                 type="date"
                 value={form.date}
                 onChange={(event) => setForm((prev) => ({ ...prev, date: event.target.value }))}
@@ -469,7 +470,7 @@ export function ContractModal({
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-slate-700">{t('contractValidUntil') ?? 'Действует до'}</span>
-              <input
+              <SystemDateInput
                 type="date"
                 value={form.validUntil}
                 onChange={(event) => setForm((prev) => ({ ...prev, validUntil: event.target.value }))}

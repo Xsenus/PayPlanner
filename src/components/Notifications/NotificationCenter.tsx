@@ -1,3 +1,4 @@
+import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -916,7 +917,7 @@ export function NotificationCenter({
         <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-[10rem_10rem_minmax(12rem,1fr)_minmax(12rem,1fr)_12rem_auto]">
           <label className="block">
             <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">С даты</span>
-            <input
+            <SystemDateInput
               type="date"
               value={dateFrom}
               onChange={(event) => {
@@ -929,7 +930,7 @@ export function NotificationCenter({
 
           <label className="block">
             <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">По дату</span>
-            <input
+            <SystemDateInput
               type="date"
               value={dateTo}
               onChange={(event) => {
@@ -1070,7 +1071,7 @@ export function NotificationCenter({
                   <Clock className="h-3.5 w-3.5" />
                   Рабочий день с
                 </span>
-                <input
+                <SystemDateInput
                   type="time"
                   value={doNotDisturb.workStart}
                   onChange={(event) => {
@@ -1082,7 +1083,7 @@ export function NotificationCenter({
               </label>
               <label className="text-xs font-medium text-slate-600">
                 <span className="mb-1 block">Рабочий день до</span>
-                <input
+                <SystemDateInput
                   type="time"
                   value={doNotDisturb.workEnd}
                   onChange={(event) => {
@@ -1094,7 +1095,7 @@ export function NotificationCenter({
               </label>
               <label className="text-xs font-medium text-slate-600">
                 <span className="mb-1 block">Отпуск или выходной до</span>
-                <input
+                <SystemDateInput
                   type="date"
                   value={doNotDisturb.vacationUntil ?? ''}
                   onChange={(event) => {
