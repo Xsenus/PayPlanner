@@ -2481,7 +2481,7 @@ describe('TaskJournal', () => {
         id: 103,
         title: 'Задача по корпоративному спору',
         clientId: null,
-        clientName: null,
+        clientName: undefined,
         legalEntityId: 20,
         legalEntityName: 'ООО Ромашка',
         clientCaseId: 300,
