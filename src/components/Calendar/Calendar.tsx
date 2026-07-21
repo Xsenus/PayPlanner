@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { lazy, Suspense, useMemo, useState, useDeferredValue, useEffect, useRef } from 'react';
 import { CalendarDays, ChevronLeft, ChevronRight, Plus, Search, SlidersHorizontal, Table, X } from 'lucide-react';
 import { CalendarGrid } from './CalendarGrid';
@@ -698,7 +699,7 @@ export function Calendar({ onOpenClient, onOpenUser }: CalendarProps) {
               />
             </div>
 
-            <select
+            <SystemSelect
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
               className="w-full sm:w-auto sm:min-w-[220px] bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
@@ -708,7 +709,7 @@ export function Calendar({ onOpenClient, onOpenUser }: CalendarProps) {
               <option value="Pending">{t('pending') ?? 'Pending'}</option>
               <option value="Completed">{t('completed') ?? 'Completed'}</option>
               <option value="Overdue">{t('overdue') ?? 'Overdue'}</option>
-            </select>
+            </SystemSelect>
 
             <div className="flex items-center gap-2 w-full sm:w-auto">
               <MonthRangePicker
@@ -874,7 +875,7 @@ export function Calendar({ onOpenClient, onOpenUser }: CalendarProps) {
               footer={
                 <div className="flex items-center gap-2 text-sm text-slate-600">
                   <span>Строк на странице</span>
-                  <select
+                  <SystemSelect
                     value={pageSize}
                     onChange={(event) => setPageSize(Number(event.target.value) || pageSize)}
                     className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700">
@@ -883,7 +884,7 @@ export function Calendar({ onOpenClient, onOpenUser }: CalendarProps) {
                         {size}
                       </option>
                     ))}
-                  </select>
+                  </SystemSelect>
                 </div>
               }
             />

@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Bell, CalendarDays, ClipboardList, Cloud, Database, Flag, History, KeyRound, Save, Scale, ShieldCheck, SlidersHorizontal, Users } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -1135,14 +1136,14 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
 
                           <label className="block">
                             <span className="text-sm font-medium text-gray-700">Стратегия следующего номера</span>
-                            <select
+                            <SystemSelect
                               value={invoiceNumbering.allocationStrategy}
                               onChange={(e) => setInvoiceNumbering((prev) => ({ ...prev, allocationStrategy: e.target.value as InvoiceNumberingSettingsDto['allocationStrategy'] }))}
                               className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
                             >
                               <option value="max-plus-one">Максимальный номер + 1</option>
                               <option value="first-free">Первый свободный номер от стартового</option>
-                            </select>
+                            </SystemSelect>
                           </label>
                         </div>
 
@@ -1264,7 +1265,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
 
                           <label className="block">
                             <span className="text-sm font-medium text-gray-700">Стратегия следующего номера</span>
-                            <select
+                            <SystemSelect
                               value={contractNumbering.allocationStrategy}
                               onChange={(e) =>
                                 setContractNumbering((prev) => ({
@@ -1276,7 +1277,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
                             >
                               <option value="max-plus-one">Максимальный номер + 1</option>
                               <option value="first-free">Первый свободный номер</option>
-                            </select>
+                            </SystemSelect>
                           </label>
 
                           <label className="block">
@@ -1999,7 +2000,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
                 <div className="grid gap-4 md:grid-cols-3">
                   <label className="text-sm text-gray-700">
                     <span className="mb-1 block">Справочник</span>
-                    <select
+                    <SystemSelect
                       value={mergeKind}
                       onChange={(event) => setMergeKind(event.target.value as MergeKind)}
                       className="w-full rounded-lg border border-gray-300 px-3 py-2"
@@ -2011,12 +2012,12 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
                       <option value="timezones">Часовые пояса</option>
                       <option value="tax-systems">Системы налогообложения</option>
                       <option value="tax-system-modes">Режимы налогообложения</option>
-                    </select>
+                    </SystemSelect>
                   </label>
 
                   <label className="text-sm text-gray-700 md:col-span-2">
                     <span className="mb-1 block">Группа дублей</span>
-                    <select
+                    <SystemSelect
                       value={selectedGroupKey}
                       onChange={(event) => {
                         const canonical = event.target.value;
@@ -2032,7 +2033,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
                           {group.items.map((item) => item.name).join(' / ')}
                         </option>
                       ))}
-                    </select>
+                    </SystemSelect>
                   </label>
                 </div>
 

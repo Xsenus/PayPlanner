@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, Plus, X } from 'lucide-react';
 import { apiService, type ContractRulesSettingsDto } from '../../services/api';
@@ -408,7 +409,7 @@ export function ContractModal({
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-slate-700">Режим договора</span>
-              <select
+              <SystemSelect
                 value={form.billingMode}
                 onChange={(event) =>
                   setForm((prev) => ({
@@ -421,11 +422,11 @@ export function ContractModal({
               >
                 <option value="Fixed">Фиксированная сумма</option>
                 <option value="Actual">Оплата по факту</option>
-              </select>
+              </SystemSelect>
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-slate-700">Статус документа</span>
-              <select
+              <SystemSelect
                 value={form.status}
                 onChange={(event) => setForm((prev) => ({ ...prev, status: event.target.value as ContractStatus }))}
                 className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
@@ -441,7 +442,7 @@ export function ContractModal({
                 <option value="Concluded">Подписан клиентом</option>
                 <option value="Terminated">Расторгнут</option>
                 <option value="Cancelled">Аннулирован</option>
-              </select>
+              </SystemSelect>
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-slate-700">{t('contractAmount') ?? 'Сумма договора'}</span>

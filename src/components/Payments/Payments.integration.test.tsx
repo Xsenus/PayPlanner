@@ -993,7 +993,10 @@ describe('Payments integration', () => {
   it('passes the selected client role into the paged payments query', async () => {
     render(<Payments />);
 
-    fireEvent.change(screen.getByLabelText('Роль клиента'), {
+    const clientRoleSelect = Array.from(document.querySelectorAll('select'))
+      .find((select) => Array.from(select.options).some((option) => option.value === 'expenseClient'));
+    expect(clientRoleSelect).toBeTruthy();
+    fireEvent.change(clientRoleSelect!, {
       target: { value: 'expenseClient' },
     });
 

@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { useEffect, useMemo, useState } from 'react';
 import {
   Archive,
@@ -3210,7 +3211,7 @@ export function CaseDetailPage({
           <div className="grid items-stretch gap-3 md:grid-cols-2 xl:grid-cols-[170px_minmax(260px,1fr)_170px_230px_190px_190px_150px]">
             <label className="flex h-full flex-col justify-between gap-1 text-sm font-medium text-slate-700">
               <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Статус</span>
-              <select
+              <SystemSelect
                 aria-label="Статус дела"
                 value={statusDraft}
                 onChange={(event) => setStatusDraft(event.target.value)}
@@ -3218,7 +3219,7 @@ export function CaseDetailPage({
                 {CASE_STATUS_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
-              </select>
+              </SystemSelect>
             </label>
             <label className="flex h-full flex-col justify-between gap-1 text-sm font-medium text-slate-700">
               <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Стадия</span>
@@ -3232,7 +3233,7 @@ export function CaseDetailPage({
             </label>
             <label className="flex h-full flex-col justify-between gap-1 text-sm font-medium text-slate-700">
               <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Приоритет</span>
-              <select
+              <SystemSelect
                 aria-label="Приоритет дела"
                 value={priorityDraft}
                 onChange={(event) => setPriorityDraft(event.target.value)}
@@ -3240,11 +3241,11 @@ export function CaseDetailPage({
                 {CASE_PRIORITY_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
-              </select>
+              </SystemSelect>
             </label>
             <label className="flex h-full flex-col justify-between gap-1 text-sm font-medium text-slate-700">
               <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Ответственный</span>
-              <select
+              <SystemSelect
                 aria-label="Ответственный по делу"
                 value={responsibleDraft}
                 onChange={(event) => setResponsibleDraft(event.target.value)}
@@ -3253,7 +3254,7 @@ export function CaseDetailPage({
                 {responsibles.map((responsible) => (
                   <option key={responsible.id} value={responsible.id}>{responsible.fullName}</option>
                 ))}
-              </select>
+              </SystemSelect>
             </label>
             <label className="flex h-full min-h-[58px] flex-col justify-between rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700">
               <span className="mb-2 block text-xs uppercase tracking-[0.12em] text-slate-400">Доступ</span>
@@ -3358,7 +3359,7 @@ export function CaseDetailPage({
                 <div className="mt-4 grid gap-3 md:grid-cols-[180px_1.4fr_1fr_auto]">
                   <label className="text-sm font-medium text-slate-700">
                     <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Источник</span>
-                    <select
+                    <SystemSelect
                       aria-label="Тип участника"
                       value={participantSourceType}
                       onChange={(event) => setParticipantSourceType(event.target.value as ParticipantSourceType)}
@@ -3366,7 +3367,7 @@ export function CaseDetailPage({
                       <option value="client">Клиент</option>
                       <option value="legalEntity">Юрлицо</option>
                       <option value="externalContact">Контакт</option>
-                    </select>
+                    </SystemSelect>
                   </label>
                   <div className="space-y-2 text-sm font-medium text-slate-700">
                     <label className="block">
@@ -3381,7 +3382,7 @@ export function CaseDetailPage({
                     </label>
                     <label className="block">
                       <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Участник</span>
-                      <select
+                      <SystemSelect
                         aria-label="Участник дела"
                         value={participantSourceId}
                         onChange={(event) => setParticipantSourceId(event.target.value)}
@@ -3399,7 +3400,7 @@ export function CaseDetailPage({
                             {option.description ? `${option.label} · ${option.description}` : option.label}
                           </option>
                         ))}
-                      </select>
+                      </SystemSelect>
                     </label>
                   </div>
                   <label className="text-sm font-medium text-slate-700">
@@ -3631,7 +3632,7 @@ export function CaseDetailPage({
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
                     <label className="text-sm font-medium text-slate-700">
                       <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Шаблон</span>
-                      <select
+                      <SystemSelect
                         aria-label="Шаблон документа дела"
                         value={documentTemplateKey}
                         onChange={(event) => setDocumentTemplateKey(event.target.value)}
@@ -3639,7 +3640,7 @@ export function CaseDetailPage({
                         {availableDocumentTemplates.map((template) => (
                           <option key={template.key} value={template.key}>{template.label}</option>
                         ))}
-                      </select>
+                      </SystemSelect>
                     </label>
                     <button type="button" onClick={() => void generateDocument()} disabled={generatingDocument || availableDocumentTemplates.length === 0} className="inline-flex items-center gap-2 rounded-lg border border-blue-200 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50">
                       {generatingDocument ? <Loader2 className="h-4 w-4 animate-spin" /> : <FilePlus2 className="h-4 w-4" />} Сформировать
@@ -3682,7 +3683,7 @@ export function CaseDetailPage({
                     </label>
                     <label className="text-sm font-medium text-slate-700">
                       <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Статус</span>
-                      <select
+                      <SystemSelect
                         aria-label="Статус документа"
                         value={documentStatusDraft}
                         onChange={(event) => setDocumentStatusDraft(event.target.value)}
@@ -3692,11 +3693,11 @@ export function CaseDetailPage({
                         {documentStatusOptions.map((status) => (
                           <option key={status} value={status}>{status}</option>
                         ))}
-                      </select>
+                      </SystemSelect>
                     </label>
                     <label className="text-sm font-medium text-slate-700">
                       <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Источник</span>
-                      <select
+                      <SystemSelect
                         aria-label="Источник документа"
                         value={documentSourceType}
                         onChange={(event) => {
@@ -3711,7 +3712,7 @@ export function CaseDetailPage({
                         <option value="workOrder">Заказ-наряд</option>
                         <option value="invoice">Счет</option>
                         <option value="stage">Этап дела</option>
-                      </select>
+                      </SystemSelect>
                     </label>
                     {documentSourceType === 'stage' ? (
                       <label className="text-sm font-medium text-slate-700">
@@ -3727,7 +3728,7 @@ export function CaseDetailPage({
                     ) : (
                       <label className="text-sm font-medium text-slate-700">
                         <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Объект</span>
-                        <select
+                        <SystemSelect
                           aria-label="Объект документа"
                           value={documentSourceId}
                           onChange={(event) => setDocumentSourceId(event.target.value)}
@@ -3738,7 +3739,7 @@ export function CaseDetailPage({
                           {documentSourceOptions.map((option) => (
                             <option key={option.value} value={option.value}>{option.label}</option>
                           ))}
-                        </select>
+                        </SystemSelect>
                       </label>
                     )}
                     <button
@@ -4003,15 +4004,15 @@ function CaseEditPage({
               </label>
               <label className="text-sm font-medium text-slate-700">
                 Статус
-                <select aria-label="Статус дела" value={draft.status} onChange={(event) => setField('status', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm">
+                <SystemSelect aria-label="Статус дела" value={draft.status} onChange={(event) => setField('status', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm">
                   {CASE_STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </select>
+                </SystemSelect>
               </label>
               <label className="text-sm font-medium text-slate-700">
                 Приоритет
-                <select aria-label="Приоритет дела" value={draft.priority} onChange={(event) => setField('priority', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm">
+                <SystemSelect aria-label="Приоритет дела" value={draft.priority} onChange={(event) => setField('priority', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm">
                   {CASE_PRIORITY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </select>
+                </SystemSelect>
               </label>
               <label className="md:col-span-2 text-sm font-medium text-slate-700">
                 Стадия
@@ -4019,10 +4020,10 @@ function CaseEditPage({
               </label>
               <label className="text-sm font-medium text-slate-700">
                 Ответственный
-                <select aria-label="Ответственный" value={draft.responsibleUserId} onChange={(event) => setField('responsibleUserId', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm">
+                <SystemSelect aria-label="Ответственный" value={draft.responsibleUserId} onChange={(event) => setField('responsibleUserId', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm">
                   <option value="">Не выбран</option>
                   {responsibles.map((responsible) => <option key={responsible.id} value={responsible.id}>{responsible.fullName}</option>)}
-                </select>
+                </SystemSelect>
               </label>
               {canViewFinance ? (
                 <label className="text-sm font-medium text-slate-700">
@@ -4645,7 +4646,7 @@ function WorkOrderPanel({
           </label>
           <label className="text-sm font-medium text-slate-700">
             <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Статус</span>
-            <select
+            <SystemSelect
               value={draft.status}
               onChange={(event) => onDraftChange({ ...draft, status: event.target.value })}
               disabled={isWorkOrderLocked}
@@ -4653,7 +4654,7 @@ function WorkOrderPanel({
               {WORK_ORDER_STATUS_OPTIONS.map((status) => (
                 <option key={status.value} value={status.value}>{status.label}</option>
               ))}
-            </select>
+            </SystemSelect>
           </label>
           <label className="text-sm font-medium text-slate-700">
             <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Валюта</span>
@@ -4688,9 +4689,9 @@ function WorkOrderPanel({
             <WorkOrderTextInput label="Описание" value={newItemDraft.description} onChange={(value) => onNewItemDraftChange({ ...newItemDraft, description: value })} disabled={isWorkOrderLocked} />
             <label className="text-sm font-medium text-slate-700">
               <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Исполнитель</span>
-              <select value={newItemDraft.executorUserId} onChange={(event) => onNewItemDraftChange({ ...newItemDraft, executorUserId: event.target.value })} disabled={isWorkOrderLocked} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100">
+              <SystemSelect value={newItemDraft.executorUserId} onChange={(event) => onNewItemDraftChange({ ...newItemDraft, executorUserId: event.target.value })} disabled={isWorkOrderLocked} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100">
                 {renderExecutorOptions()}
-              </select>
+              </SystemSelect>
             </label>
             <WorkOrderTextInput label="Срок" type="date" value={newItemDraft.dueDate} onChange={(value) => onNewItemDraftChange({ ...newItemDraft, dueDate: value })} disabled={isWorkOrderLocked} />
             <WorkOrderTextInput label="Стоимость" type="number" value={newItemDraft.unitPrice} onChange={(value) => onNewItemDraftChange({ ...newItemDraft, unitPrice: value })} disabled={isWorkOrderLocked} />
@@ -4714,9 +4715,9 @@ function WorkOrderPanel({
                   <WorkOrderTextInput label="Описание" value={itemDraft.description} onChange={(value) => onItemDraftChange(item.id, { ...itemDraft, description: value })} disabled={isWorkOrderLocked} />
                   <label className="text-sm font-medium text-slate-700">
                     <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Исполнитель</span>
-                    <select value={itemDraft.executorUserId} onChange={(event) => onItemDraftChange(item.id, { ...itemDraft, executorUserId: event.target.value })} disabled={isWorkOrderLocked} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100">
+                    <SystemSelect value={itemDraft.executorUserId} onChange={(event) => onItemDraftChange(item.id, { ...itemDraft, executorUserId: event.target.value })} disabled={isWorkOrderLocked} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100">
                       {renderExecutorOptions()}
-                    </select>
+                    </SystemSelect>
                   </label>
                   <WorkOrderTextInput label="Срок" type="date" value={itemDraft.dueDate} onChange={(value) => onItemDraftChange(item.id, { ...itemDraft, dueDate: value })} disabled={isWorkOrderLocked} />
                   <WorkOrderTextInput label="Кол-во" type="number" value={itemDraft.quantity} onChange={(value) => onItemDraftChange(item.id, { ...itemDraft, quantity: value })} disabled={isWorkOrderLocked} />
@@ -6070,7 +6071,7 @@ function CourtPanel({
             <div className="grid gap-3 lg:grid-cols-2">
               <label className="text-sm font-medium text-slate-700">
                 <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Справочник суда</span>
-                <select
+                <SystemSelect
                   value={courtInstanceDraft.courtId}
                   onChange={(event) => onCourtInstanceDraftChange({ ...courtInstanceDraft, courtId: event.target.value })}
                   disabled={courtDirectoryLoading}
@@ -6079,7 +6080,7 @@ function CourtPanel({
                   {courtDirectoryForInstance.map((court) => (
                     <option key={court.id} value={court.id}>{court.name}</option>
                   ))}
-                </select>
+                </SystemSelect>
               </label>
               <label className="text-sm font-medium text-slate-700">
                 <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Суд</span>
@@ -6129,15 +6130,15 @@ function CourtPanel({
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               <label className="text-sm font-medium text-slate-700">
                 <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Тип</span>
-                <select value={courtComplaintDraft.complaintType} onChange={(event) => onCourtComplaintDraftChange({ ...courtComplaintDraft, complaintType: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                <SystemSelect value={courtComplaintDraft.complaintType} onChange={(event) => onCourtComplaintDraftChange({ ...courtComplaintDraft, complaintType: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
                   {COURT_COMPLAINT_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
-                </select>
+                </SystemSelect>
               </label>
               <label className="text-sm font-medium text-slate-700">
                 <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Подается в</span>
-                <select value={courtComplaintDraft.targetInstance} onChange={(event) => onCourtComplaintDraftChange({ ...courtComplaintDraft, targetInstance: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                <SystemSelect value={courtComplaintDraft.targetInstance} onChange={(event) => onCourtComplaintDraftChange({ ...courtComplaintDraft, targetInstance: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
                   {COURT_INSTANCE_TABS.filter((tab) => tab.value !== 'first').map((tab) => <option key={tab.value} value={tab.value}>{tab.label}</option>)}
-                </select>
+                </SystemSelect>
               </label>
               <label className="text-sm font-medium text-slate-700 md:col-span-2">
                 <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Название</span>
@@ -6149,18 +6150,18 @@ function CourtPanel({
               </label>
               <label className="text-sm font-medium text-slate-700">
                 <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Статус</span>
-                <select value={courtComplaintDraft.status} onChange={(event) => onCourtComplaintDraftChange({ ...courtComplaintDraft, status: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                <SystemSelect value={courtComplaintDraft.status} onChange={(event) => onCourtComplaintDraftChange({ ...courtComplaintDraft, status: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
                   {COURT_COMPLAINT_STATUSES.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}
-                </select>
+                </SystemSelect>
               </label>
               <label className="text-sm font-medium text-slate-700 md:col-span-2">
                 <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Документ</span>
-                <select value={courtComplaintDraft.clientCaseDocumentId} onChange={(event) => onCourtComplaintDraftChange({ ...courtComplaintDraft, clientCaseDocumentId: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+                <SystemSelect value={courtComplaintDraft.clientCaseDocumentId} onChange={(event) => onCourtComplaintDraftChange({ ...courtComplaintDraft, clientCaseDocumentId: event.target.value })} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
                   <option value="">Без документа</option>
                   {documents.map((document) => (
                     <option key={document.id} value={document.id}>{document.originalFileName || document.documentType || `Документ #${document.id}`}</option>
                   ))}
-                </select>
+                </SystemSelect>
               </label>
               <label className="text-sm font-medium text-slate-700 md:col-span-2">
                 <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Заметка</span>
@@ -6231,13 +6232,13 @@ function CourtPanel({
             </label>
             <label className="text-sm font-medium text-slate-700">
               <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Позиция</span>
-              <select value={courtPartySideDraft} onChange={(event) => onCourtPartySideChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+              <SystemSelect value={courtPartySideDraft} onChange={(event) => onCourtPartySideChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
                 <option value="claimant">Истец</option>
                 <option value="respondent">Ответчик</option>
                 <option value="thirdParty">Третье лицо</option>
                 <option value="applicant">Заявитель</option>
                 <option value="other">Иная</option>
-              </select>
+              </SystemSelect>
             </label>
             <label className="text-sm font-medium text-slate-700">
               <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Роль</span>
@@ -6285,13 +6286,13 @@ function CourtPanel({
         <div className="mt-4 grid gap-3 lg:grid-cols-[150px_1fr_180px_150px_1fr_1fr_1fr_auto]">
           <label className="text-sm font-medium text-slate-700">
             <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Тип</span>
-            <select value={courtEventTypeDraft} onChange={(event) => onCourtEventTypeChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+            <SystemSelect value={courtEventTypeDraft} onChange={(event) => onCourtEventTypeChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
               <option value="hearing">Заседание</option>
               <option value="decision">Решение</option>
               <option value="postponement">Перенос</option>
               <option value="suspension">Приостановление</option>
               <option value="movement">Движение дела</option>
-            </select>
+            </SystemSelect>
           </label>
           <label className="text-sm font-medium text-slate-700">
             <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Название</span>
@@ -6303,14 +6304,14 @@ function CourtPanel({
           </label>
           <label className="text-sm font-medium text-slate-700">
             <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Статус</span>
-            <select value={courtEventStatusDraft} onChange={(event) => onCourtEventStatusChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+            <SystemSelect value={courtEventStatusDraft} onChange={(event) => onCourtEventStatusChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
               <option value="scheduled">Назначено</option>
               <option value="held">Проведено</option>
               <option value="postponed">Отложено</option>
               <option value="suspended">Приостановлено</option>
               <option value="completed">Завершено</option>
               <option value="cancelled">Отменено</option>
-            </select>
+            </SystemSelect>
           </label>
           <label className="text-sm font-medium text-slate-700">
             <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Итог</span>
@@ -6318,25 +6319,25 @@ function CourtPanel({
           </label>
           <label className="text-sm font-medium text-slate-700">
             <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Документ</span>
-            <select value={courtEventDocumentIdDraft} onChange={(event) => onCourtEventDocumentIdChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+            <SystemSelect value={courtEventDocumentIdDraft} onChange={(event) => onCourtEventDocumentIdChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
               <option value="">Без документа</option>
               {documents.map((document) => (
                 <option key={document.id} value={document.id}>
                   {document.originalFileName || document.documentType || `Документ #${document.id}`}
                 </option>
               ))}
-            </select>
+            </SystemSelect>
           </label>
           <label className="text-sm font-medium text-slate-700">
             <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Суд</span>
-            <select value={courtEventCourtIdDraft} onChange={(event) => onCourtEventCourtIdChange(event.target.value)} disabled={courtDirectoryLoading} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-50">
+            <SystemSelect value={courtEventCourtIdDraft} onChange={(event) => onCourtEventCourtIdChange(event.target.value)} disabled={courtDirectoryLoading} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-50">
               <option value="">{courtDirectoryLoading ? 'Загрузка...' : 'Из карточки'}</option>
               {courtDirectoryForInstance.map((court) => (
                 <option key={court.id} value={court.id}>
                   {court.name}
                 </option>
               ))}
-            </select>
+            </SystemSelect>
           </label>
           <button type="button" onClick={() => void onAddCourtEvent()} disabled={savingCourtEvent} className="inline-flex items-center justify-center gap-2 self-end rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50">
             {savingCourtEvent ? <Loader2 className="h-4 w-4 animate-spin" /> : <Gavel className="h-4 w-4" />} Добавить
@@ -6372,14 +6373,14 @@ function CourtPanel({
         <div className="mt-4 grid gap-3 lg:grid-cols-[160px_1fr_150px_120px_1fr_1fr_auto_auto]">
           <label className="text-sm font-medium text-slate-700">
             <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Тип</span>
-            <select value={deadlineTypeDraft} onChange={(event) => onDeadlineTypeChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+            <SystemSelect value={deadlineTypeDraft} onChange={(event) => onDeadlineTypeChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
               <option value="appeal">Апелляция</option>
               <option value="cassation">Кассация</option>
               <option value="motion">Ходатайство</option>
               <option value="objection">Возражения</option>
               <option value="document">Документ</option>
               <option value="manual">Ручной срок</option>
-            </select>
+            </SystemSelect>
           </label>
           <label className="text-sm font-medium text-slate-700">
             <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Название</span>
@@ -6399,25 +6400,25 @@ function CourtPanel({
           </label>
           <label className="text-sm font-medium text-slate-700">
             <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Событие</span>
-            <select value={deadlineCourtEventIdDraft} onChange={(event) => onDeadlineCourtEventIdChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+            <SystemSelect value={deadlineCourtEventIdDraft} onChange={(event) => onDeadlineCourtEventIdChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
               <option value="">Без связи</option>
               {courtEvents.map((event) => (
                 <option key={event.id} value={event.id}>
                   {event.title || `Событие #${event.id}`}
                 </option>
               ))}
-            </select>
+            </SystemSelect>
           </label>
           <label className="text-sm font-medium text-slate-700">
             <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Документ</span>
-            <select value={deadlineDocumentIdDraft} onChange={(event) => onDeadlineDocumentIdChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
+            <SystemSelect value={deadlineDocumentIdDraft} onChange={(event) => onDeadlineDocumentIdChange(event.target.value)} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
               <option value="">Без документа</option>
               {documents.map((document) => (
                 <option key={document.id} value={document.id}>
                   {document.originalFileName || document.documentType || `Документ #${document.id}`}
                 </option>
               ))}
-            </select>
+            </SystemSelect>
           </label>
           <button type="button" onClick={() => void onAddProceduralDeadline()} disabled={savingProceduralDeadline} className="inline-flex items-center justify-center gap-2 self-end rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
             {savingProceduralDeadline ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clock3 className="h-4 w-4" />} Добавить
@@ -6608,7 +6609,7 @@ function DocumentList({
           </label>
           <label className="text-sm font-medium text-slate-700">
             <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Тип</span>
-            <select
+            <SystemSelect
               aria-label="Фильтр документов по типу"
               value={typeFilter}
               onChange={(event) => setTypeFilter(event.target.value)}
@@ -6617,11 +6618,11 @@ function DocumentList({
               {documentTypes.map((type) => (
                 <option key={type} value={type}>{type}</option>
               ))}
-            </select>
+            </SystemSelect>
           </label>
           <label className="text-sm font-medium text-slate-700">
             <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Статус</span>
-            <select
+            <SystemSelect
               aria-label="Фильтр документов по статусу"
               value={statusFilter}
               onChange={(event) => setStatusFilter(event.target.value)}
@@ -6630,7 +6631,7 @@ function DocumentList({
               {documentStatuses.map((status) => (
                 <option key={status} value={status}>{status}</option>
               ))}
-            </select>
+            </SystemSelect>
           </label>
           <label className="flex items-end gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 lg:self-end">
             <input
@@ -6817,7 +6818,7 @@ function DocumentCard({
         </label>
         <label className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
           Статус
-          <select
+          <SystemSelect
             aria-label={`Статус документа ${document.originalFileName}`}
             value={status}
             onChange={(event) => setStatus(event.target.value)}
@@ -6827,7 +6828,7 @@ function DocumentCard({
             {statusOptions.map((option) => (
               <option key={option} value={option}>{option}</option>
             ))}
-          </select>
+          </SystemSelect>
         </label>
       </div>
       <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">

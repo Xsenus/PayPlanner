@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import {
   AlertCircle,
   CheckCircle2,
@@ -880,7 +881,7 @@ export function ClientReconciliationAct({
             </label>
             <label className="text-sm font-medium text-slate-700">
               Статус
-              <select
+              <SystemSelect
                 value={draft.status}
                 onChange={(event) =>
                   updateDraft({
@@ -894,7 +895,7 @@ export function ClientReconciliationAct({
                     {option.label}
                   </option>
                 ))}
-              </select>
+              </SystemSelect>
             </label>
             <label className="text-sm font-medium text-slate-700">
               Период с
@@ -919,7 +920,7 @@ export function ClientReconciliationAct({
           <div className="mt-4 grid gap-4 md:grid-cols-2">
             <label className="text-sm font-medium text-slate-700">
               Дело
-              <select
+              <SystemSelect
                 value={draft.caseId}
                 onChange={(event) => updateDraft({ caseId: event.target.value })}
                 className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
@@ -930,11 +931,11 @@ export function ClientReconciliationAct({
                     {item.title}
                   </option>
                 ))}
-              </select>
+              </SystemSelect>
             </label>
             <label className="text-sm font-medium text-slate-700">
               Договор
-              <select
+              <SystemSelect
                 value={draft.contractId}
                 onChange={(event) => updateDraft({ contractId: event.target.value })}
                 className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
@@ -945,7 +946,7 @@ export function ClientReconciliationAct({
                     №{item.number} от {toRuDate(item.date)}
                   </option>
                 ))}
-              </select>
+              </SystemSelect>
             </label>
           </div>
 

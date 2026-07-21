@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus, Pencil, Trash2, Check, X, Search } from 'lucide-react';
 import { apiService, type DictKind } from '../../services/api';
@@ -740,7 +741,7 @@ export default function DictionariesModal({
             <div className="sm:col-span-4">
               <div className="flex flex-col gap-1">
                 <label className="text-xs text-gray-600">Категория</label>
-                <select
+                <SystemSelect
                   value={local.categoryId ?? ''}
                   onChange={(e) =>
                     set({
@@ -755,7 +756,7 @@ export default function DictionariesModal({
                       {category.name}
                     </option>
                   ))}
-                </select>
+                </SystemSelect>
               </div>
             </div>
           )}
@@ -874,7 +875,7 @@ export default function DictionariesModal({
             <div className="sm:col-span-4">
               <div className="flex flex-col gap-1">
                 <label className="text-xs text-gray-600">Категория</label>
-                <select
+                <SystemSelect
                   value={local.categoryId ?? ''}
                   onChange={(e) =>
                     set({
@@ -889,7 +890,7 @@ export default function DictionariesModal({
                       {category.name}
                     </option>
                   ))}
-                </select>
+                </SystemSelect>
               </div>
             </div>
           )}

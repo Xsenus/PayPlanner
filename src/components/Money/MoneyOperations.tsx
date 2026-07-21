@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -881,14 +882,14 @@ function CashOrderModal({
           <div className="grid gap-4 md:grid-cols-3">
             <label className="flex flex-col gap-1 text-sm text-slate-600">
               Тип
-              <select
+              <SystemSelect
                 value={form.type}
                 disabled={isCancelled}
                 onChange={(event) => setField('type', event.target.value as CashOrderType)}
                 className="rounded-lg border border-slate-200 px-3 py-2 disabled:bg-slate-100">
                 <option value="Incoming">ПКО</option>
                 <option value="Outgoing">РКО</option>
-              </select>
+              </SystemSelect>
             </label>
             <label className="flex flex-col gap-1 text-sm text-slate-600">
               Дата
@@ -1852,20 +1853,20 @@ function MoneyOperationModal({
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2">
               <span className="text-sm text-slate-500">Операция</span>
-              <select className="border-none bg-transparent text-sm font-medium text-slate-700 focus:outline-none">
+              <SystemSelect className="border-none bg-transparent text-sm font-medium text-slate-700 focus:outline-none">
                 <option>1 операция</option>
                 <option>2 операции</option>
-              </select>
+              </SystemSelect>
             </div>
             <div className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2">
               <span className="text-sm text-slate-500">Учёт</span>
-              <select
+              <SystemSelect
                 value={form.accountingType}
                 onChange={(event) => setField('accountingType', event.target.value as MoneyOperationAccountingType)}
                 className="border-none bg-transparent text-sm font-medium text-slate-700 focus:outline-none">
                 <option value="Fact">Факт</option>
                 <option value="Plan">План</option>
-              </select>
+              </SystemSelect>
             </div>
           </div>
 
@@ -1904,7 +1905,7 @@ function MoneyOperationModal({
             <label className="flex flex-col gap-1 text-sm text-slate-600">
               {SOURCE_ACCOUNT_FILTER_LABELS[source]}
               {sourceMoneyAccounts.length > 0 ? (
-                <select
+                <SystemSelect
                   value={form.moneyAccountId ?? ''}
                   onChange={(event) => handleMoneyAccountChange(event.target.value)}
                   className="rounded-lg border border-slate-200 px-3 py-2 focus:border-blue-500 focus:outline-none">
@@ -1914,7 +1915,7 @@ function MoneyOperationModal({
                       {account.name}
                     </option>
                   ))}
-                </select>
+                </SystemSelect>
               ) : (
                 <input
                   value={form.accountName ?? ''}
@@ -1927,7 +1928,7 @@ function MoneyOperationModal({
             {form.direction === 'Transfer' && (
               <label className="flex flex-col gap-1 text-sm text-slate-600">
                 Куда перевести
-                <select
+                <SystemSelect
                   value={form.transferTargetMoneyAccountId ?? ''}
                   onChange={(event) =>
                     setField('transferTargetMoneyAccountId', event.target.value ? Number(event.target.value) : null)
@@ -1939,7 +1940,7 @@ function MoneyOperationModal({
                       {account.name}
                     </option>
                   ))}
-                </select>
+                </SystemSelect>
               </label>
             )}
             <label className="flex flex-col gap-1 text-sm text-slate-600">
@@ -1954,7 +1955,7 @@ function MoneyOperationModal({
             </label>
             <label className="flex flex-col gap-1 text-sm text-slate-600">
               Ответственный
-              <select
+              <SystemSelect
                 value={form.responsibleUserId ?? ''}
                 onChange={(event) => {
                   const nextId = event.target.value ? Number(event.target.value) : null;
@@ -1969,7 +1970,7 @@ function MoneyOperationModal({
                     {responsible.fullName}
                   </option>
                 ))}
-              </select>
+              </SystemSelect>
             </label>
             {form.direction !== 'Transfer' && (
               <label className="flex flex-col gap-1 text-sm text-slate-600">
@@ -2009,7 +2010,7 @@ function MoneyOperationModal({
             </label>
             <label className="flex flex-col gap-1 text-sm text-slate-600">
               НДС, %
-              <select
+              <SystemSelect
                 value={form.vatRate ?? ''}
                 onChange={(event) => setVatRate(event.target.value === '' ? null : Number(event.target.value))}
                 className="rounded-lg border border-slate-200 px-3 py-2 focus:border-blue-500 focus:outline-none">
@@ -2019,7 +2020,7 @@ function MoneyOperationModal({
                 <option value="7">7%</option>
                 <option value="10">10%</option>
                 <option value="20">20%</option>
-              </select>
+              </SystemSelect>
             </label>
             <label className="flex flex-col gap-1 text-sm text-slate-600">
               Сумма НДС
@@ -2120,7 +2121,7 @@ function MoneyOperationModal({
                   </label>
                   <label className="flex flex-col gap-1 text-sm text-slate-600">
                     Статус
-                    <select
+                    <SystemSelect
                       value={form.linkedInvoiceId ? 'Matched' : form.matchStatus ?? 'None'}
                       onChange={(event) => {
                         const value = event.target.value as MoneyOperation['matchStatus'];
@@ -2137,7 +2138,7 @@ function MoneyOperationModal({
                         Сверено
                       </option>
                       <option value="Ignored">Не учитывать</option>
-                    </select>
+                    </SystemSelect>
                   </label>
                 </div>
                 {form.linkedInvoiceNumber && (
@@ -4197,7 +4198,7 @@ export function MoneyOperations({
                   <p className="text-sm text-slate-500">Все фактические и плановые операции из разделов денег.</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <select
+                  <SystemSelect
                     value={totalSourceFilter}
                     onChange={(event) => setTotalSourceFilter(event.target.value as 'all' | MoneyOperationSource)}
                     className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
@@ -4206,23 +4207,23 @@ export function MoneyOperations({
                     <option value="Cash">Касса</option>
                     <option value="Card">Карты</option>
                     <option value="EMoney">E-money</option>
-                  </select>
-                  <select
+                  </SystemSelect>
+                  <SystemSelect
                     value={directionFilter}
                     onChange={(event) => setDirectionFilter(event.target.value as 'all' | MoneyOperationDirection)}
                     className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
                     <option value="all">Все движения</option>
                     <option value="Income">Приход</option>
                     <option value="Expense">Расход</option>
-                  </select>
-                  <select
+                  </SystemSelect>
+                  <SystemSelect
                     value={accountingTypeFilter}
                     onChange={(event) => setAccountingTypeFilter(event.target.value as 'all' | MoneyOperationAccountingType)}
                     className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
                     <option value="all">Факт и план</option>
                     <option value="Fact">Факт</option>
                     <option value="Plan">План</option>
-                  </select>
+                  </SystemSelect>
                   <input
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
@@ -4349,7 +4350,7 @@ export function MoneyOperations({
           {(
             <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-slate-400">
               <span>{SOURCE_ACCOUNT_FILTER_LABELS[source]}</span>
-              <select
+              <SystemSelect
                 aria-label={`${SOURCE_ACCOUNT_FILTER_LABELS[source]} в заголовке`}
                 value={moneyAccountId === '' ? accountName : String(moneyAccountId)}
                 onChange={(event) => selectMoneyAccount(event.target.value)}
@@ -4360,7 +4361,7 @@ export function MoneyOperations({
                     {account.accountName}
                   </option>
                 ))}
-              </select>
+              </SystemSelect>
             </div>
           )}
           {source === 'Bank' && (
@@ -4756,7 +4757,7 @@ export function MoneyOperations({
                           />
                         </td>
                         <td className="px-3 py-2">
-                          <select
+                          <SystemSelect
                             value={rule.paymentType}
                             onChange={(event) =>
                               updateBankCategoryRule(rule.id, { paymentType: event.target.value as PaymentKind })
@@ -4764,7 +4765,7 @@ export function MoneyOperations({
                             className="w-32 rounded-lg border border-slate-200 px-2 py-1.5 text-sm text-slate-700">
                             <option value="Income">Приход</option>
                             <option value="Expense">Расход</option>
-                          </select>
+                          </SystemSelect>
                         </td>
                         <td className="px-3 py-2">
                           <input
@@ -4775,7 +4776,7 @@ export function MoneyOperations({
                           />
                         </td>
                         <td className="px-3 py-2">
-                          <select
+                          <SystemSelect
                             value={rule.incomeTypeId ?? ''}
                             onChange={(event) =>
                               updateBankCategoryRule(rule.id, {
@@ -4789,7 +4790,7 @@ export function MoneyOperations({
                                 {option.name}
                               </option>
                             ))}
-                          </select>
+                          </SystemSelect>
                         </td>
                         <td className="px-3 py-2">
                           <input
@@ -5298,7 +5299,7 @@ export function MoneyOperations({
                   <div className="grid gap-3 text-sm text-slate-600">
                     <label className="flex flex-col gap-1">
                       {SOURCE_ACCOUNT_FILTER_LABELS[source]}
-                      <select
+                      <SystemSelect
                         value={moneyAccountId === '' ? accountName : String(moneyAccountId)}
                         onChange={(event) => {
                           selectMoneyAccount(event.target.value);
@@ -5312,7 +5313,7 @@ export function MoneyOperations({
                             {account.accountName}
                           </option>
                         ))}
-                      </select>
+                      </SystemSelect>
                     </label>
                     {selectedAccountSummary && (
                       <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-slate-600">
@@ -5330,25 +5331,25 @@ export function MoneyOperations({
                     )}
                     <label className="flex flex-col gap-1">
                       Приход/Расход
-                      <select
+                      <SystemSelect
                         value={directionFilter}
                         onChange={(event) => setDirectionFilter(event.target.value as 'all' | MoneyOperationDirection)}
                         className="rounded-lg border border-slate-200 px-3 py-2">
                         <option value="all">Все</option>
                         <option value="Income">Приход</option>
                         <option value="Expense">Расход</option>
-                      </select>
+                      </SystemSelect>
                     </label>
                     <label className="flex flex-col gap-1">
                       Учет
-                      <select
+                      <SystemSelect
                         value={accountingTypeFilter}
                         onChange={(event) => setAccountingTypeFilter(event.target.value as 'all' | MoneyOperationAccountingType)}
                         className="rounded-lg border border-slate-200 px-3 py-2">
                         <option value="all">Факт и план</option>
                         <option value="Fact">Факт</option>
                         <option value="Plan">План</option>
-                      </select>
+                      </SystemSelect>
                     </label>
                     <label className="flex flex-col gap-1">
                       Статья
@@ -5445,19 +5446,19 @@ export function MoneyOperations({
               </label>
               <label className="flex flex-col gap-1 text-sm text-slate-600">
                 Сумма
-                <select className="rounded-lg border border-slate-200 px-3 py-2">
+                <SystemSelect className="rounded-lg border border-slate-200 px-3 py-2">
                   <option>Равно</option>
                   <option>Больше</option>
                   <option>Меньше</option>
-                </select>
+                </SystemSelect>
               </label>
               <label className="flex flex-col gap-1 text-sm text-slate-600">
                 Поиск
-                <select className="rounded-lg border border-slate-200 px-3 py-2">
+                <SystemSelect className="rounded-lg border border-slate-200 px-3 py-2">
                   <option>Приход и Расход</option>
                   <option>Приход</option>
                   <option>Расход</option>
-                </select>
+                </SystemSelect>
               </label>
             </div>
           </div>
@@ -5483,7 +5484,7 @@ export function MoneyOperations({
               footer={
                 <div className="flex items-center gap-2 text-sm text-slate-600">
                   <span>Строк на странице</span>
-                  <select
+                  <SystemSelect
                     value={pageSize}
                     onChange={(event) => setPageSize(Number(event.target.value) || pageSize)}
                     className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700">
@@ -5492,7 +5493,7 @@ export function MoneyOperations({
                         {size}
                       </option>
                     ))}
-                  </select>
+                  </SystemSelect>
                 </div>
               }
             />

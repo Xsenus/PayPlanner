@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Trash2, Info, History, Search, UserRoundSearch, Ban, WalletCards, Printer } from 'lucide-react';
@@ -3057,35 +3058,35 @@ export function PaymentModal({
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div>
                         <label className={centeredLabelClass}>{t('type') ?? 'Type'}</label>
-                        <select name="type" value={formData.type} onChange={handleChange} disabled={!canChangePaymentType} className={paymentInfoSelectClass}>
+                        <SystemSelect name="type" value={formData.type} onChange={handleChange} disabled={!canChangePaymentType} className={paymentInfoSelectClass}>
                           <option value="Income">{t('income') ?? 'Income'}</option><option value="Expense">{t('expense') ?? 'Expense'}</option>
-                        </select>
+                        </SystemSelect>
                       </div>
                       <div>
                         <label className={centeredLabelClass}>{t('status')}</label>
-                        <select name="status" value={formData.status} onChange={handleChange} className={paymentInfoSelectClass}>
+                        <SystemSelect name="status" value={formData.status} onChange={handleChange} className={paymentInfoSelectClass}>
                           <option value="Pending">{t('pending')}</option><option value="Completed">{t('completedStatus')}</option><option value="Overdue">{t('overdue')}</option><option value="Cancelled">{t('cancelledStatus') ?? 'Отменен'}</option>
-                        </select>
+                        </SystemSelect>
                       </div>
                     </div>
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div>
                         <label className={centeredLabelClass}>{t('dealType')}</label>
-                        <select name="dealTypeId" value={formData.dealTypeId} onChange={handleChange} className={paymentInfoSelectClass}>
+                        <SystemSelect name="dealTypeId" value={formData.dealTypeId} onChange={handleChange} className={paymentInfoSelectClass}>
                           <option value="">{t('selectDealType')}</option>
                           {buildOptionsWithSelected(dealTypes, selDealTypeId, (d) => d.isActive).map((d) => (<option key={d.id} value={String(d.id)}>{d.name}{!d.isActive ? ' (inactive)' : ''}</option>))}
-                        </select>
+                        </SystemSelect>
                       </div>
                       <div>
                         <label className={centeredLabelClass}>{formData.type === 'Income' ? t('incomeType') ?? 'Income type' : t('expenseType') ?? 'Expense type'}</label>
-                        <select name="incomeTypeId" value={formData.incomeTypeId} onChange={handleChange} className={paymentInfoSelectClass}>
+                        <SystemSelect name="incomeTypeId" value={formData.incomeTypeId} onChange={handleChange} className={paymentInfoSelectClass}>
                           <option value="">{formData.type === 'Income' ? t('selectIncomeType') ?? 'Select income type' : t('selectExpenseType') ?? 'Select expense type'}</option>
                           {buildOptionsWithSelected(incomeTypes, selIncomeTypeId, (it) => it.isActive && it.paymentType === formData.type).map((it) => (<option key={it.id} value={String(it.id)}>{it.name}{!it.isActive ? ' (inactive)' : ''}{it.paymentType !== formData.type ? ' (other direction)' : ''}</option>))}
-                        </select>
+                        </SystemSelect>
                       </div>
                       <div className="sm:col-span-2">
                         <label className={centeredLabelClass}>Тип услуги</label>
-                        <select name="serviceId" value={formData.serviceId} onChange={handleChange} className={paymentInfoSelectClass}>
+                        <SystemSelect name="serviceId" value={formData.serviceId} onChange={handleChange} className={paymentInfoSelectClass}>
                           <option value="">Выберите тип услуги</option>
                           {buildOptionsWithSelected(services, selServiceId, (service) => service.isActive).map((service) => (
                             <option key={service.id} value={String(service.id)}>
@@ -3093,7 +3094,7 @@ export function PaymentModal({
                               {!service.isActive ? ' (не активно)' : ''}
                             </option>
                           ))}
-                        </select>
+                        </SystemSelect>
                       </div>
                     </div>
                     <div className="grid gap-3 sm:grid-cols-2">
@@ -3391,7 +3392,7 @@ export function PaymentModal({
                         ) : null}
                       </div>
                     ) : null}
-                    <select
+                    <SystemSelect
                       name="clientId"
                       value={formData.clientId}
                       onChange={handleChange}
@@ -3406,8 +3407,8 @@ export function PaymentModal({
                           {client.company ? ` — ${client.company}` : ''}
                         </option>
                       ))}
-                      </select>
-                    <select
+                      </SystemSelect>
+                    <SystemSelect
                       name="legalEntityId"
                       value={formData.legalEntityId}
                       onChange={handleChange}
@@ -3421,7 +3422,7 @@ export function PaymentModal({
                           {getLegalEntityDisplayName(entity)}
                         </option>
                       ))}
-                    </select>
+                    </SystemSelect>
                   </div>
 
                   {formData.type === 'Expense' && (
@@ -3474,7 +3475,7 @@ export function PaymentModal({
                           Для привязки расхода к делу выберите клиента или юрлицо расхода и затем дело.
                         </div>
                       ) : null}
-                      <select
+                      <SystemSelect
                         name="expenseClientId"
                         value={formData.expenseClientId}
                         onChange={handleChange}
@@ -3489,8 +3490,8 @@ export function PaymentModal({
                             {client.company ? ` — ${client.company}` : ''}
                           </option>
                         ))}
-                      </select>
-                      <select
+                      </SystemSelect>
+                      <SystemSelect
                         name="expenseLegalEntityId"
                         value={formData.expenseLegalEntityId}
                         onChange={handleChange}
@@ -3504,7 +3505,7 @@ export function PaymentModal({
                             {getLegalEntityDisplayName(entity)}
                           </option>
                         ))}
-                      </select>
+                      </SystemSelect>
                     </div>
                   )}
 
@@ -3513,7 +3514,7 @@ export function PaymentModal({
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         {formData.type === 'Expense' ? 'Дело клиента расхода' : (t('case') ?? 'Дело')}
                       </label>
-                      <select
+                      <SystemSelect
                         key={(caseOwnerKey || 'no-owner') + ':' + cases.length}
                         name="clientCaseId"
                         value={formData.clientCaseId}
@@ -3537,14 +3538,14 @@ export function PaymentModal({
                             {c.title}
                           </option>
                         ))}
-                      </select>
+                      </SystemSelect>
                     </div>
 
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Договор
                       </label>
-                      <select
+                      <SystemSelect
                         name="contractId"
                         value={formData.contractId}
                         onChange={handleChange}
@@ -3563,7 +3564,7 @@ export function PaymentModal({
                             {getContractDisplayName(contract)}
                           </option>
                         ))}
-                      </select>
+                      </SystemSelect>
                       {contractsError && (
                         <div className="mt-1 text-xs text-rose-600">
                           {contractsError}
@@ -3575,7 +3576,7 @@ export function PaymentModal({
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         {t('paymentSource')}
                       </label>
-                      <select
+                      <SystemSelect
                         name="paymentSourceId"
                         value={formData.paymentSourceId}
                         onChange={handleChange}
@@ -3587,7 +3588,7 @@ export function PaymentModal({
                             {!s.isActive ? ' (не активно)' : ''}
                           </option>
                         ))}
-                      </select>
+                      </SystemSelect>
                       {(() => {
                         const picked = paymentSources.find((s) => s.id === selSourceId);
                         if (picked && !picked.isActive) {

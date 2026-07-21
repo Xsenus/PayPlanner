@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { JSX } from 'react';
 import { AlertTriangle, Ban, CalendarPlus, ChevronDown, Download, Loader2, Lock, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, Trash2, X } from 'lucide-react';
@@ -1935,7 +1936,7 @@ export function Payments({
 
                 <div className="flex flex-col gap-1">
                   <label className={fieldLabelClass}>{t('status') ?? 'Статус'}</label>
-                  <select
+                  <SystemSelect
                     className={inputClass}
                     value={statusFilter}
                     onChange={(event) => {
@@ -1948,12 +1949,12 @@ export function Payments({
                         {statusLabels[status] ?? status}
                       </option>
                     ))}
-                  </select>
+                  </SystemSelect>
                 </div>
 
                 <div className="flex flex-col gap-1">
                   <label className={fieldLabelClass}>Контроль аванса</label>
-                  <select
+                  <SystemSelect
                     className={inputClass}
                     value={advanceReviewFilter}
                     onChange={(event) => setAdvanceReviewFilter(event.target.value as AdvanceReviewFilter)}
@@ -1964,7 +1965,7 @@ export function Payments({
                     <option value="Allocated">{advanceReviewLabels.Allocated}</option>
                     <option value="Ignored">{advanceReviewLabels.Ignored}</option>
                     <option value="Refunded">{advanceReviewLabels.Refunded}</option>
-                  </select>
+                  </SystemSelect>
                 </div>
 
                 <div className="flex flex-col gap-1 md:col-span-2">
@@ -1988,7 +1989,7 @@ export function Payments({
                   <label htmlFor="payments-client-role-filter" className={fieldLabelClass}>
                     Роль клиента
                   </label>
-                  <select
+                  <SystemSelect
                     id="payments-client-role-filter"
                     value={clientRoleFilter}
                     onChange={(event) => setClientRoleFilter(event.target.value as ClientRoleFilter)}
@@ -1997,7 +1998,7 @@ export function Payments({
                     <option value="all">Любая связь</option>
                     <option value="counterparty">Контрагент / поставщик</option>
                     <option value="expenseClient">Клиент расхода</option>
-                  </select>
+                  </SystemSelect>
                 </div>
 
                 <div className="relative flex flex-col gap-1 md:col-span-2">
@@ -2154,7 +2155,7 @@ export function Payments({
               footer={
                 <div className="flex items-center gap-2 text-sm text-slate-600">
                   <span>{t('rowsPerPage') ?? 'Строк на странице'}</span>
-                  <select
+                  <SystemSelect
                     value={pageSize}
                     onChange={(event) => setPageSize(Number(event.target.value) || pageSize)}
                     className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700">
@@ -2163,7 +2164,7 @@ export function Payments({
                         {size}
                       </option>
                     ))}
-                  </select>
+                  </SystemSelect>
                 </div>
               }
             />
@@ -2656,7 +2657,7 @@ export function Payments({
                 <>
                   <label className="block text-sm font-medium text-slate-700">
                     Долг для зачета
-                    <select
+                    <SystemSelect
                       value={advanceAllocation.selectedTargetId ?? ''}
                       onChange={(event) => handleAdvanceAllocationTargetChange(Number(event.target.value))}
                       disabled={advanceAllocation.submitting}
@@ -2676,7 +2677,7 @@ export function Payments({
                           </option>
                         );
                       })}
-                    </select>
+                    </SystemSelect>
                   </label>
 
                   <label className="block text-sm font-medium text-slate-700">

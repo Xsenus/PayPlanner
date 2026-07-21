@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Archive,
@@ -884,7 +885,7 @@ export function NotificationCenter({
             />
           </label>
 
-          <select
+          <SystemSelect
             value={status}
             onChange={(event) => {
               setStatus(event.target.value as NotificationStatusFilter);
@@ -895,9 +896,9 @@ export function NotificationCenter({
             {STATUS_FILTERS.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
-          </select>
+          </SystemSelect>
 
-          <select
+          <SystemSelect
             value={type}
             onChange={(event) => {
               setType(event.target.value);
@@ -909,7 +910,7 @@ export function NotificationCenter({
             {types.map((item) => (
               <option key={item.key} value={item.key}>{item.label}</option>
             ))}
-          </select>
+          </SystemSelect>
         </div>
 
         <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-[10rem_10rem_minmax(12rem,1fr)_minmax(12rem,1fr)_12rem_auto]">
@@ -941,7 +942,7 @@ export function NotificationCenter({
 
           <label className="block">
             <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Сотрудник</span>
-            <select
+            <SystemSelect
               value={employeeId}
               onChange={(event) => {
                 setEmployeeId(event.target.value);
@@ -954,12 +955,12 @@ export function NotificationCenter({
               {assignees.map((item) => (
                 <option key={item.id} value={item.id}>{item.name || item.email}</option>
               ))}
-            </select>
+            </SystemSelect>
           </label>
 
           <label className="block">
             <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Клиент</span>
-            <select
+            <SystemSelect
               value={clientId}
               onChange={(event) => {
                 setClientId(event.target.value);
@@ -972,12 +973,12 @@ export function NotificationCenter({
               {clients.map((item) => (
                 <option key={item.id} value={item.id}>{item.name || item.company || `Клиент #${item.id}`}</option>
               ))}
-            </select>
+            </SystemSelect>
           </label>
 
           <label className="block">
             <span className="mb-1 block text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Роль</span>
-            <select
+            <SystemSelect
               value={taskRole}
               onChange={(event) => {
                 setTaskRole(event.target.value as NotificationTaskRoleFilter);
@@ -988,7 +989,7 @@ export function NotificationCenter({
               {TASK_ROLE_FILTERS.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
-            </select>
+            </SystemSelect>
           </label>
 
           <div className="flex items-end">

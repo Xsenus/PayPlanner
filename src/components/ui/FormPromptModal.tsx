@@ -1,3 +1,4 @@
+import { SystemSelect } from './SystemSelect';
 import { X } from 'lucide-react';
 import { useRef, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
@@ -118,7 +119,7 @@ export function FormPromptModal({
                     {field.required ? ' *' : ''}
                   </span>
                   {field.type === 'select' ? (
-                    <select
+                    <SystemSelect
                       value={field.value}
                       onChange={(event) => field.onChange(event.target.value)}
                       required={field.required}
@@ -131,7 +132,7 @@ export function FormPromptModal({
                           {option.label}
                         </option>
                       ))}
-                    </select>
+                    </SystemSelect>
                   ) : (
                     <input
                       type={field.type ?? 'text'}

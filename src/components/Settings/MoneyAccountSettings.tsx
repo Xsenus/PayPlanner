@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { Building2, CreditCard, Landmark, Pencil, Plus, Save, Trash2, WalletCards, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -264,7 +265,7 @@ export function MoneyAccountSettings() {
       </div>
 
       <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-        <select
+        <SystemSelect
           value={sourceFilter}
           onChange={(event) => setSourceFilter(event.target.value as 'all' | MoneyOperationSource)}
           className="rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 focus:border-blue-500 focus:outline-none">
@@ -273,7 +274,7 @@ export function MoneyAccountSettings() {
           <option value="Cash">Касса</option>
           <option value="Card">Карты</option>
           <option value="EMoney">E-money</option>
-        </select>
+        </SystemSelect>
 
         <button
           type="button"
@@ -392,7 +393,7 @@ export function MoneyAccountSettings() {
 
                 <label className="flex flex-col gap-1 text-sm font-medium text-gray-700">
                   Источник
-                  <select
+                  <SystemSelect
                     value={form.source}
                     onChange={(event) => setForm((prev) => ({ ...prev, source: event.target.value as MoneyOperationSource }))}
                     className="rounded-xl border border-gray-200 px-3 py-2 font-normal focus:border-blue-500 focus:outline-none">
@@ -400,7 +401,7 @@ export function MoneyAccountSettings() {
                     <option value="Cash">Касса</option>
                     <option value="Card">Карты</option>
                     <option value="EMoney">E-money</option>
-                  </select>
+                  </SystemSelect>
                 </label>
 
                 <label className="flex flex-col gap-1 text-sm font-medium text-gray-700">

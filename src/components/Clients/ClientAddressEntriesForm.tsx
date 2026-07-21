@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { Trash2 } from "lucide-react";
 
 import type { DadataAddressSuggestion } from "../../types";
@@ -149,7 +150,7 @@ export function ClientAddressEntriesForm({
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <label className="text-sm text-slate-700 xl:col-span-2">
               <span className="mb-1 block">Основной тип</span>
-              <select
+              <SystemSelect
                 value={entry.type}
                 onChange={(event) =>
                   onUpdateEntry(index, "type", event.target.value)
@@ -162,7 +163,7 @@ export function ClientAddressEntriesForm({
                     {option.label}
                   </option>
                 ))}
-              </select>
+              </SystemSelect>
             </label>
 
             {shouldShowValidityFields ? (

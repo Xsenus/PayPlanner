@@ -823,7 +823,7 @@ describe('PaymentModal integration', () => {
     fireEvent.change(amountInput!, { target: { value: '1500' } });
 
     const contractSelect = await screen.findByLabelText('Договор');
-    await waitFor(() => expect(screen.getByRole('option', { name: /1-14\/07-2025/ })).toBeTruthy());
+    await waitFor(() => expect(within(contractSelect).getByText(/1-14\/07-2025/, { selector: 'option' })).toBeTruthy());
     expect(contractSelect).toHaveProperty('disabled', false);
     fireEvent.change(contractSelect, { target: { value: '321' } });
 
@@ -1309,7 +1309,7 @@ describe('PaymentModal integration', () => {
     );
 
     const contractSelect = await screen.findByLabelText('Договор');
-    await waitFor(() => expect(screen.getByRole('option', { name: /1-14\/07-2025/ })).toBeTruthy());
+    await waitFor(() => expect(within(contractSelect).getByText(/1-14\/07-2025/, { selector: 'option' })).toBeTruthy());
     fireEvent.change(contractSelect, { target: { value: '321' } });
     fireEvent.click(screen.getByRole('button', { name: 'save' }));
 

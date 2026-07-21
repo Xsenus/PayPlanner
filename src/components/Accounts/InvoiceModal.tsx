@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Ban, Check, ChevronDown, Copy, Download, FileText, Link2, List, Loader2, Pencil, Plus, Printer, Send, Trash2, UploadCloud, UserRoundSearch, X } from 'lucide-react';
 import type {
@@ -4444,7 +4445,7 @@ export function InvoiceModal({
                             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                               <label className="flex flex-col gap-1 text-sm">
                                 <span className="flex min-h-7 items-center font-medium text-slate-700">{t('invoiceStatus') ?? 'Статус'}</span>
-                                <select
+                                <SystemSelect
                                   value={form.status}
                                   onChange={handleChange('status')}
                                   className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
@@ -4454,12 +4455,12 @@ export function InvoiceModal({
                                   <option value="Overdue">{t('invoiceOverdueBadge') ?? t('overdue') ?? 'Просрочен'}</option>
                                   <option value="Processing">Частично оплачен</option>
                                   <option value="Cancelled">{t('cancelledStatus') ?? 'Отменён'}</option>
-                                </select>
+                                </SystemSelect>
                               </label>
 
                               <label className="flex flex-col gap-1 text-sm">
                                 <span className="flex min-h-7 items-center font-medium text-slate-700">Статус документа</span>
-                                <select
+                                <SystemSelect
                                   value={form.workflowStatus}
                                   onChange={handleChange('workflowStatus')}
                                   className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
@@ -4474,7 +4475,7 @@ export function InvoiceModal({
                                   <option value="OnSigning">На подписании</option>
                                   <option value="SignedByClient">Подписан клиентом</option>
                                   <option value="Cancelled">Аннулирован</option>
-                                </select>
+                                </SystemSelect>
                               </label>
 
                               <LookupSelect
@@ -4998,7 +4999,7 @@ export function InvoiceModal({
                             <label className="flex flex-col gap-1 text-sm">
                               <span className="font-medium text-slate-700">Договор</span>
                               <div className="flex items-stretch gap-2">
-                                <select
+                                <SystemSelect
                                   value={form.contractId}
                                   onChange={handleChange('contractId')}
                                   className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
@@ -5010,7 +5011,7 @@ export function InvoiceModal({
                                       {contract.number}{contract.title ? ` — ${contract.title}` : ''}
                                     </option>
                                   ))}
-                                </select>
+                                </SystemSelect>
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -5645,7 +5646,7 @@ export function InvoiceModal({
                       <span className="mt-1 block text-slate-600">Будет создан расход денег на сумму полученной оплаты.</span>
                       {cancelMoneyAction === 'Refund' && (
                         <span className="mt-2 grid gap-2 sm:grid-cols-2">
-                          <select
+                          <SystemSelect
                             data-testid="invoice-cancel-refund-source"
                             value={cancelRefundSource}
                             onChange={(event) => setCancelRefundSource(event.target.value as InvoiceCancellationRefundSource)}
@@ -5654,7 +5655,7 @@ export function InvoiceModal({
                             {(['Bank', 'Cash', 'Card', 'EMoney'] as InvoiceCancellationRefundSource[]).map((source) => (
                               <option key={source} value={source}>{moneyOperationSourceLabel(source)}</option>
                             ))}
-                          </select>
+                          </SystemSelect>
                           <input
                             data-testid="invoice-cancel-refund-date"
                             type="date"

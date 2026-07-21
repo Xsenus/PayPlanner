@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CalendarCheck, Loader2, Play, RefreshCw, Save, Unlink2 } from 'lucide-react';
 import {
@@ -263,42 +264,42 @@ export function YandexCalendarPanel({ canUseEmployeeCalendarMode = false }: Prop
           <div className="grid gap-4 md:grid-cols-2">
             <label className="rounded-2xl border border-slate-200 px-4 py-3 text-sm">
               <span className="font-semibold text-slate-700">Подключение</span>
-              <select
+              <SystemSelect
                 value={form.isEnabled ? 'enabled' : 'disabled'}
                 onChange={(event) => setForm((current) => ({ ...current, isEnabled: event.target.value === 'enabled' }))}
                 className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
               >
                 <option value="enabled">Включено</option>
                 <option value="disabled">Отключено</option>
-              </select>
+              </SystemSelect>
             </label>
             <label className="rounded-2xl border border-slate-200 px-4 py-3 text-sm">
               <span className="font-semibold text-slate-700">Синхронизация</span>
-              <select
+              <SystemSelect
                 value={form.syncEnabled ? 'enabled' : 'disabled'}
                 onChange={(event) => setForm((current) => ({ ...current, syncEnabled: event.target.value === 'enabled' }))}
                 className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
               >
                 <option value="enabled">Включена</option>
                 <option value="disabled">Остановлена</option>
-              </select>
+              </SystemSelect>
             </label>
             {canUseEmployeeCalendarMode ? (
               <label className="rounded-2xl border border-slate-200 px-4 py-3 text-sm">
                 <span className="font-semibold text-slate-700">Режим календарей</span>
-                <select
+                <SystemSelect
                   value={form.calendarMode}
                   onChange={(event) => setForm((current) => ({ ...current, calendarMode: event.target.value }))}
                   className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
                 >
                   <option value="adminByAssignee">Отдельные календари сотрудников</option>
                   <option value="personal">Один календарь задач</option>
-                </select>
+                </SystemSelect>
               </label>
             ) : null}
             <label className="rounded-2xl border border-slate-200 px-4 py-3 text-sm">
               <span className="font-semibold text-slate-700">Правило конфликтов</span>
-              <select
+              <SystemSelect
                 value={form.conflictResolutionMode}
                 onChange={(event) => setForm((current) => ({ ...current, conflictResolutionMode: event.target.value }))}
                 className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2"
@@ -306,7 +307,7 @@ export function YandexCalendarPanel({ canUseEmployeeCalendarMode = false }: Prop
                 <option value="latestWins">Последнее изменение главное</option>
                 <option value="crmWins">CRM главная</option>
                 <option value="yandexWins">Яндекс.Календарь главный</option>
-              </select>
+              </SystemSelect>
             </label>
             <label className="rounded-2xl border border-slate-200 px-4 py-3 text-sm">
               <span className="font-semibold text-slate-700">Синхронизировать задачи с даты</span>

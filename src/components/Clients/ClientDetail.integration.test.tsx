@@ -903,7 +903,7 @@ describe('ClientDetail integration', () => {
         pageSize: 20,
       });
     });
-    expect(screen.getByText(/ООО Ромашка/)).toBeTruthy();
+    expect(screen.getAllByText(/ООО Ромашка/).length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole('button', { name: 'Редактировать' }));
     await user.type(screen.getByLabelText('Поиск юридического лица клиента'), 'ром');

@@ -1263,7 +1263,7 @@ describe('StickyNotes', () => {
     const user = userEvent.setup();
     renderStickyNotes();
 
-    await screen.findByRole('option', { name: 'Анна Юрист' });
+    await screen.findByText('Анна Юрист', { selector: 'option' });
     await user.click(screen.getByTitle('Добавить участника'));
 
     expect(apiMock.upsertStickyNoteBoardMember).not.toHaveBeenCalled();
@@ -1300,7 +1300,7 @@ describe('StickyNotes', () => {
     renderStickyNotes();
 
     const memberSelect = await screen.findByLabelText('Сотрудник для доступа к доске') as HTMLSelectElement;
-    await screen.findByRole('option', { name: 'Анна Юрист' });
+    await screen.findByText('Анна Юрист', { selector: 'option' });
     await user.selectOptions(memberSelect, '3');
     expect(memberSelect.value).toBe('3');
 
@@ -1308,7 +1308,7 @@ describe('StickyNotes', () => {
 
     await waitFor(() => expect(apiMock.getStickyNoteBoardMembers).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(memberSelect.value).toBe(''));
-    expect(screen.queryByRole('option', { name: 'Анна Юрист' })).toBeNull();
+    expect(screen.queryByText('Анна Юрист', { selector: 'option' })).toBeNull();
   });
 
   it('ignores stale member candidate responses after switching boards', async () => {
@@ -1337,15 +1337,15 @@ describe('StickyNotes', () => {
     await user.click(screen.getByRole('button', { name: /Мои заметки/i }));
     await screen.findByText('Участники');
     await waitFor(() => expect(apiMock.getStickyNoteMemberCandidates).toHaveBeenCalledTimes(2));
-    expect(screen.queryByRole('option', { name: 'Анна Юрист' })).toBeNull();
+    expect(screen.queryByText('Анна Юрист', { selector: 'option' })).toBeNull();
 
     await act(async () => {
       freshCandidates.resolve([{ userId: 4, displayName: 'Олег Бухгалтер', email: 'oleg@example.com' }]);
       await freshCandidates.promise;
     });
 
-    expect(await screen.findByRole('option', { name: 'Олег Бухгалтер' })).toBeTruthy();
-    expect(screen.queryByRole('option', { name: 'Анна Юрист' })).toBeNull();
+    expect(await screen.findByText('Олег Бухгалтер', { selector: 'option' })).toBeTruthy();
+    expect(screen.queryByText('Анна Юрист', { selector: 'option' })).toBeNull();
   });
 
   it('autosaves note text after typing pauses', async () => {
@@ -1432,7 +1432,7 @@ describe('StickyNotes', () => {
     await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledWith(11, expect.objectContaining({ isUnderline: true })));
     expect(textarea.className).toContain('underline');
 
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Размер текста заметки' }), '24');
+    await user.selectOptions(screen.getByLabelText('Размер текста заметки'), '24');
     await waitFor(() => expect(apiMock.updateStickyNote).toHaveBeenCalledWith(11, expect.objectContaining({ fontSize: 24 })));
 
     await user.click(screen.getByRole('button', { name: 'Прозрачность 85%' }));

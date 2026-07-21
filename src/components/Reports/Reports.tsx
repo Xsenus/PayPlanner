@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   AlertTriangle,
@@ -8009,7 +8010,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
                 >
                   Источник денег
                 </label>
-                <select
+                <SystemSelect
                   id="reports-money-source"
                   value={moneySource}
                   onChange={(event) => setMoneySource(event.target.value as 'all' | MoneyOperationSource)}
@@ -8020,7 +8021,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
                       {option.label}
                     </option>
                   ))}
-                </select>
+                </SystemSelect>
               </div>
               <div className="mt-4">
                 <label
@@ -8029,7 +8030,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
                 >
                   Денежный счет
                 </label>
-                <select
+                <SystemSelect
                   id="reports-money-account"
                   value={moneyAccountName}
                   onChange={(event) => setMoneyAccountName(event.target.value)}
@@ -8042,7 +8043,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
                       {account.name}
                     </option>
                   ))}
-                </select>
+                </SystemSelect>
                 {moneyAccountsError ? (
                   <div className="mt-2 text-xs text-rose-600">{moneyAccountsError}</div>
                 ) : null}
@@ -8070,7 +8071,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
                 >
                   Клиент
                 </label>
-                <select
+                <SystemSelect
                   id="reports-client"
                   value={clientId}
                   onChange={(event) => setClientId(event.target.value)}
@@ -8083,7 +8084,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
                       {client.name}
                     </option>
                   ))}
-                </select>
+                </SystemSelect>
                 {clientsError ? (
                   <div className="mt-2 text-xs text-rose-600">{clientsError}</div>
                 ) : null}
@@ -8095,7 +8096,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
                 >
                   Дело
                 </label>
-                <select
+                <SystemSelect
                   id="reports-case"
                   value={caseId}
                   onChange={(event) => setCaseId(event.target.value)}
@@ -8108,7 +8109,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
                       {formatCaseOptionLabel(item)}
                     </option>
                   ))}
-                </select>
+                </SystemSelect>
                 {casesError ? (
                   <div className="mt-2 text-xs text-rose-600">{casesError}</div>
                 ) : null}
@@ -8120,7 +8121,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
                 >
                   Договор
                 </label>
-                <select
+                <SystemSelect
                   id="reports-contract"
                   value={contractId}
                   onChange={(event) => setContractId(event.target.value)}
@@ -8133,7 +8134,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
                       {formatContractOptionLabel(item)}
                     </option>
                   ))}
-                </select>
+                </SystemSelect>
                 {contractsError ? (
                   <div className="mt-2 text-xs text-rose-600">{contractsError}</div>
                 ) : null}
@@ -8145,7 +8146,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
                 >
                   Статья
                 </label>
-                <select
+                <SystemSelect
                   id="reports-income-type"
                   value={incomeTypeId}
                   onChange={(event) => setIncomeTypeId(event.target.value)}
@@ -8158,7 +8159,7 @@ export function Reports({ onOpenCase, onOpenCaseSection, onOpenTask }: ReportsPr
                       {item.name}
                     </option>
                   ))}
-                </select>
+                </SystemSelect>
                 {incomeTypesError ? (
                   <div className="mt-2 text-xs text-rose-600">{incomeTypesError}</div>
                 ) : null}

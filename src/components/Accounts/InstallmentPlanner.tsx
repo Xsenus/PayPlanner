@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { CalendarDays, CreditCard, Loader2, ReceiptText, UserRoundSearch, Wallet } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useClientCases } from '../../hooks/useClientCases';
@@ -701,7 +702,7 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
                 {canSelectCase ? (
                   <label className="flex flex-col text-sm">
                     <span className={fieldLabelClass}>Дело</span>
-                    <select
+                    <SystemSelect
                       value={selectedCaseId ? String(selectedCaseId) : ''}
                       onChange={handleCaseChange}
                       disabled={(!selectedClientId && !selectedLegalEntityId) || casesLoading}
@@ -713,7 +714,7 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
                           {clientCase.title}
                         </option>
                       ))}
-                    </select>
+                    </SystemSelect>
                   </label>
                 ) : null}
               </>
@@ -792,7 +793,7 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
             <div className="grid grid-cols-1 gap-3.5">
               <label className="flex flex-col text-sm">
                 <span className={fieldLabelClass}>Округление</span>
-                <select
+                <SystemSelect
                   value={requestForm.roundingMode}
                   onChange={handleRoundingModeChange}
                   className={fieldSelectClass}
@@ -802,7 +803,7 @@ export function InstallmentPlanner(props: InstallmentPlannerProps) {
                       {option.label}
                     </option>
                   ))}
-                </select>
+                </SystemSelect>
               </label>
 
               <label className="flex flex-col text-sm">

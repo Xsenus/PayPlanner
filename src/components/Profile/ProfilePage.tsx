@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { KeyRound, Link2, Loader2, RefreshCw, Save, ShieldCheck, Unlink2, Upload } from 'lucide-react';
 import {
@@ -1066,7 +1067,7 @@ export function ProfilePage() {
                 </label>
                 <label className="space-y-2">
                   <span className="text-sm font-medium text-slate-700">Часовой пояс</span>
-                  <select
+                  <SystemSelect
                     value={timeZoneId}
                     onChange={(event) => setTimeZoneId(event.target.value)}
                     className="w-full rounded-2xl border border-slate-300 px-3 py-3"
@@ -1074,7 +1075,7 @@ export function ProfilePage() {
                     {USER_TIME_ZONE_OPTIONS.map((option) => (
                       <option key={option.value} value={option.value}>{option.label}</option>
                     ))}
-                  </select>
+                  </SystemSelect>
                 </label>
               </div>
 

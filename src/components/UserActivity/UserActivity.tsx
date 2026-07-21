@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Shield, RefreshCw, Search, Trash2, Filter, GripVertical } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
@@ -451,7 +452,7 @@ export const UserActivity = () => {
 
                 <label>
                   <span className="text-sm font-medium text-slate-600">Статус</span>
-                  <select
+                  <SystemSelect
                     value={status}
                     onChange={(event) => setStatus(event.target.value as UserActivityStatus | 'all')}
                     className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500/60 focus:border-slate-400"
@@ -462,12 +463,12 @@ export const UserActivity = () => {
                         {statusLabels[item]}
                       </option>
                     ))}
-                  </select>
+                  </SystemSelect>
                 </label>
 
                 <label>
                   <span className="text-sm font-medium text-slate-600">Категория</span>
-                  <select
+                  <SystemSelect
                     value={category}
                     onChange={(event) => setCategory(event.target.value)}
                     className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500/60 focus:border-slate-400"
@@ -478,12 +479,12 @@ export const UserActivity = () => {
                         {item}
                       </option>
                     ))}
-                  </select>
+                  </SystemSelect>
                 </label>
 
                 <label>
                   <span className="text-sm font-medium text-slate-600">Действие</span>
-                  <select
+                  <SystemSelect
                     value={action}
                     onChange={(event) => setAction(event.target.value)}
                     className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500/60 focus:border-slate-400"
@@ -494,12 +495,12 @@ export const UserActivity = () => {
                         {item}
                       </option>
                     ))}
-                  </select>
+                  </SystemSelect>
                 </label>
 
                 <label>
                   <span className="text-sm font-medium text-slate-600">Раздел</span>
-                  <select
+                  <SystemSelect
                     value={section}
                     onChange={(event) => setSection(event.target.value)}
                     className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500/60 focus:border-slate-400"
@@ -510,12 +511,12 @@ export const UserActivity = () => {
                         {item}
                       </option>
                     ))}
-                  </select>
+                  </SystemSelect>
                 </label>
 
                 <label>
                   <span className="text-sm font-medium text-slate-600">HTTP-метод</span>
-                  <select
+                  <SystemSelect
                     value={method}
                     onChange={(event) => setMethod(event.target.value)}
                     className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500/60 focus:border-slate-400"
@@ -526,12 +527,12 @@ export const UserActivity = () => {
                         {item}
                       </option>
                     ))}
-                  </select>
+                  </SystemSelect>
                 </label>
 
                 <label>
                   <span className="text-sm font-medium text-slate-600">Пользователь</span>
-                  <select
+                  <SystemSelect
                     value={actor}
                     onChange={(event) =>
                       setActor(event.target.value === 'all' ? 'all' : Number.parseInt(event.target.value, 10) || 'all')
@@ -544,7 +545,7 @@ export const UserActivity = () => {
                         {item.fullName || item.email || `ID ${item.id}`}
                       </option>
                     ))}
-                  </select>
+                  </SystemSelect>
                 </label>
 
                 <label>
@@ -625,7 +626,7 @@ export const UserActivity = () => {
               footer={
                 <div className="flex items-center gap-2 text-sm text-slate-600">
                   <span>Строк на странице</span>
-                  <select
+                  <SystemSelect
                     value={pageSize}
                     onChange={(event) => setPageSize(Number(event.target.value) || pageSize)}
                     className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700">
@@ -634,7 +635,7 @@ export const UserActivity = () => {
                         {size}
                       </option>
                     ))}
-                  </select>
+                  </SystemSelect>
                 </div>
               }
             />

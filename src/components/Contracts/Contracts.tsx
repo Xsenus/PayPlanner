@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import {
   ArrowDown,
   ArrowUp,
@@ -574,7 +575,7 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
             ) : null}
             <label className="flex flex-col gap-1 text-sm text-slate-700">
               Статус
-              <select
+              <SystemSelect
                 value={statusFilter}
                 onChange={(event) => setStatusFilter(event.target.value === 'all' ? 'all' : (event.target.value as ContractStatus))}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
@@ -585,7 +586,7 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
                     {contractStatusLabels[status]}
                   </option>
                 ))}
-              </select>
+              </SystemSelect>
             </label>
             <label className="flex flex-col gap-1 text-sm text-slate-700">
               {t('search') ?? 'Поиск'}
@@ -633,7 +634,7 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
               footer={
                 <div className="flex items-center gap-2 text-sm text-slate-600">
                   <span>{t('rowsPerPage') ?? 'Строк на странице'}</span>
-                  <select
+                  <SystemSelect
                     value={pageSize}
                     onChange={(event) => setPageSize(Number(event.target.value) || pageSize)}
                     className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700"
@@ -643,7 +644,7 @@ export function Contracts({ onOpenContract, onOpenClient }: ContractsProps) {
                         {size}
                       </option>
                     ))}
-                  </select>
+                  </SystemSelect>
                 </div>
               }
             />

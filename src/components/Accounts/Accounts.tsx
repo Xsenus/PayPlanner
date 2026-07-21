@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -2700,7 +2701,7 @@ export function Accounts({
                 </div>
                 <label className="flex flex-col gap-1 text-sm">
                   <span className="font-medium text-gray-700">{t('invoiceFiltersStatus') ?? t('status') ?? 'Статус'}</span>
-                  <select
+                  <SystemSelect
                     value={statusFilter}
                     onChange={(event) => setStatusFilter(event.target.value as 'all' | AccountStatus)}
                     className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
@@ -2711,7 +2712,7 @@ export function Accounts({
                     <option value="overdue">{accountStatusLabels.overdue}</option>
                     <option value="paid">{accountStatusLabels.paid}</option>
                     <option value="cancelled">{accountStatusLabels.cancelled}</option>
-                  </select>
+                  </SystemSelect>
                 </label>
                 <div className="sm:col-span-2 lg:col-span-2">
                   <div className="flex flex-col gap-1 text-sm">
@@ -2743,7 +2744,7 @@ export function Accounts({
                 </div>
                 <label className="flex flex-col gap-1 text-sm lg:col-start-3">
                   <span className="flex min-h-7 items-center font-medium text-gray-700">Роль клиента</span>
-                  <select
+                  <SystemSelect
                     value={clientRoleFilter}
                     onChange={(event) => setClientRoleFilter(event.target.value as ClientRoleFilter)}
                     className="min-h-[42px] w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
@@ -2751,7 +2752,7 @@ export function Accounts({
                     <option value="all">Любая связь</option>
                     <option value="counterparty">Контрагент / поставщик</option>
                     <option value="expenseClient">Клиент расхода</option>
-                  </select>
+                  </SystemSelect>
                 </label>
                 <div className="sm:col-span-2 lg:col-span-3">
                   <LookupSelect
@@ -3044,7 +3045,7 @@ export function Accounts({
               footer={
                 <div className="flex items-center gap-2 text-sm text-slate-600">
                   <span>{t('rowsPerPage') ?? 'Строк на странице'}</span>
-                  <select
+                  <SystemSelect
                     value={pageSize}
                     onChange={(event) => setPageSize(Number(event.target.value) || pageSize)}
                     className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700"
@@ -3054,7 +3055,7 @@ export function Accounts({
                         {size}
                       </option>
                     ))}
-                  </select>
+                  </SystemSelect>
                 </div>
               }
             />

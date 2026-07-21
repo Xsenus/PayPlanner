@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { AlertTriangle, CheckCircle2, Loader2, X } from 'lucide-react';
 import type {
   YealinkContactImportDecisionAction,
@@ -190,7 +191,7 @@ export function YealinkImportPreviewModal({
                               Пропуск
                             </div>
                           ) : (
-                            <select
+                            <SystemSelect
                               value={currentAction}
                               onChange={(event) =>
                                 onChangeDecision(detail.rowId, event.target.value as YealinkContactImportDecisionAction)
@@ -209,7 +210,7 @@ export function YealinkImportPreviewModal({
                                   <option value="skip">{actionLabel('skip', detail)}</option>
                                 </>
                               )}
-                            </select>
+                            </SystemSelect>
                           )}
                         </td>
                       </tr>

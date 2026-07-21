@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import {
   ArrowLeft,
   Ban,
@@ -3963,7 +3964,7 @@ export function ClientDetail({
   ) {
     return (
       <ClientSectionFilterField label={label} className={className}>
-        <select
+        <SystemSelect
           value={value}
           onChange={(event) => {
             onChange(event.target.value);
@@ -3977,7 +3978,7 @@ export function ClientDetail({
               {getLabel(item)}
             </option>
           ))}
-        </select>
+        </SystemSelect>
       </ClientSectionFilterField>
     );
   }
@@ -6284,7 +6285,7 @@ export function ClientDetail({
                     {(t("clientStatus") || "Статус клиента") +
                       requiredMark("ClientStatusId")}
                   </label>
-                  <select
+                  <SystemSelect
                     name="clientStatusId"
                     value={clientFormState.clientStatusId}
                     onChange={handleClientFormChange}
@@ -6299,7 +6300,7 @@ export function ClientDetail({
                         {status.name}
                       </option>
                     ))}
-                  </select>
+                  </SystemSelect>
                   {selectedClientStatus?.description && (
                     <p className="mt-2 text-xs text-gray-500">
                       {selectedClientStatus.description}
@@ -6416,7 +6417,7 @@ export function ClientDetail({
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Пол
                       </label>
-                      <select
+                      <SystemSelect
                         name="gender"
                         value={clientFormState.gender}
                         onChange={handleClientFormChange}
@@ -6426,7 +6427,7 @@ export function ClientDetail({
                         <option value="">Не указан</option>
                         <option value="male">Мужской</option>
                         <option value="female">Женский</option>
-                      </select>
+                      </SystemSelect>
                     </div>
                   </div>
 
@@ -6474,7 +6475,7 @@ export function ClientDetail({
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Семейное положение
                       </label>
-                      <select
+                      <SystemSelect
                         name="maritalStatus"
                         value={clientFormState.maritalStatus}
                         onChange={handleClientFormChange}
@@ -6487,7 +6488,7 @@ export function ClientDetail({
                             {item.label}
                           </option>
                         ))}
-                      </select>
+                      </SystemSelect>
                     </div>
                   </div>
 
@@ -6629,7 +6630,7 @@ export function ClientDetail({
                     aria-label="Поиск юридического лица клиента"
                     className="mb-2 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 disabled:bg-gray-100"
                   />
-                  <select
+                  <SystemSelect
                     name="legalEntityId"
                     value={clientFormState.legalEntityId}
                     onChange={handleClientFormChange}
@@ -6643,7 +6644,7 @@ export function ClientDetail({
                         {entity.inn ? ` · ${entity.inn}` : ""}
                       </option>
                     ))}
-                  </select>
+                  </SystemSelect>
                   <div className="mt-1 text-xs text-slate-500">
                     {legalEntityLookupLoading
                       ? "Загрузка юрлиц..."
@@ -7661,7 +7662,7 @@ export function ClientDetail({
                 />
 
                 <div className="relative w-full sm:w-56">
-                  <select
+                  <SystemSelect
                     aria-label="Вид платежей клиента"
                     value={paymentViewMode}
                     onChange={(event) => {
@@ -7676,11 +7677,11 @@ export function ClientDetail({
                         {option.label}
                       </option>
                     ))}
-                  </select>
+                  </SystemSelect>
                 </div>
 
                 <div className="relative w-full sm:w-56">
-                  <select
+                  <SystemSelect
                     aria-label="Статус платежей клиента"
                     value={statusFilter}
                     onChange={(e) =>
@@ -7694,11 +7695,11 @@ export function ClientDetail({
                     <option value="pending">Ожидается</option>
                     <option value="completed">Выполнено</option>
                     <option value="overdue">Просрочено</option>
-                  </select>
+                  </SystemSelect>
                 </div>
 
                 <div className="relative w-full sm:w-48">
-                  <select
+                  <SystemSelect
                     aria-label="Тип платежей клиента"
                     value={paymentTypeFilter}
                     onChange={(event) =>
@@ -7712,7 +7713,7 @@ export function ClientDetail({
                     <option value="all">Все типы</option>
                     <option value="Income">Доходы</option>
                     <option value="Expense">Расходы</option>
-                  </select>
+                  </SystemSelect>
                 </div>
 
                 {renderRelatedFilterSelect(
@@ -7975,7 +7976,7 @@ export function ClientDetail({
                 label="Вид"
                 className="w-full min-w-[260px] sm:w-72"
               >
-                <select
+                <SystemSelect
                   aria-label="Вид счетов в карточке"
                   value={invoiceViewMode}
                   onChange={(event) => {
@@ -7990,7 +7991,7 @@ export function ClientDetail({
                       {option.label}
                     </option>
                   ))}
-                </select>
+                </SystemSelect>
               </ClientSectionFilterField>
               <DatePeriodPicker
                 label="Период"
@@ -8002,7 +8003,7 @@ export function ClientDetail({
                 label="Статус"
                 className="w-full sm:w-56"
               >
-                <select
+                <SystemSelect
                   aria-label="Статус счетов клиента"
                   value={invoiceStatusFilter}
                   onChange={(event) =>
@@ -8024,7 +8025,7 @@ export function ClientDetail({
                   <option value="Cancelled">
                     {invoiceStatusLabels.Cancelled}
                   </option>
-                  </select>
+                  </SystemSelect>
                 </ClientSectionFilterField>
               {renderRelatedFilterSelect(
                 "Договор",
@@ -8231,7 +8232,7 @@ export function ClientDetail({
                           label="Статус"
                           className="w-full sm:w-56"
                         >
-                          <select
+                          <SystemSelect
                             aria-label="Статус дел клиента"
                             value={caseStatusFilter}
                             onChange={(event) =>
@@ -8246,7 +8247,7 @@ export function ClientDetail({
                             <option value="hold">Приостановлено</option>
                             <option value="closed">Закрыто</option>
                             <option value="lost">Проиграно</option>
-                          </select>
+                          </SystemSelect>
                         </ClientSectionFilterField>
                       </ClientSectionFilterPanel>
 
@@ -8548,7 +8549,7 @@ export function ClientDetail({
                         footer={
                           <div className="flex items-center gap-2 text-sm text-slate-600">
                             <span>Строк на странице</span>
-                            <select
+                            <SystemSelect
                               value={paymentPageSize}
                               onChange={(event) =>
                                 setPaymentPageSize(
@@ -8562,7 +8563,7 @@ export function ClientDetail({
                                   {size}
                                 </option>
                               ))}
-                            </select>
+                            </SystemSelect>
                           </div>
                         }
                       />
@@ -9146,7 +9147,7 @@ export function ClientDetail({
                         footer={
                           <div className="flex items-center gap-2 text-sm text-slate-600">
                             <span>Строк на странице</span>
-                            <select
+                            <SystemSelect
                               value={invoicePageSize}
                               onChange={(event) =>
                                 setInvoicePageSize(
@@ -9160,7 +9161,7 @@ export function ClientDetail({
                                   {size}
                                 </option>
                               ))}
-                            </select>
+                            </SystemSelect>
                           </div>
                         }
                       />
@@ -9648,7 +9649,7 @@ export function ClientDetail({
                       />
                     </div>
                     <div>
-                      <select
+                      <SystemSelect
                         aria-label="Статус актов клиента"
                         value={actStatusFilter}
                         onChange={(event) =>
@@ -9666,7 +9667,7 @@ export function ClientDetail({
                             {actStatusLabels[status]}
                           </option>
                         ))}
-                      </select>
+                      </SystemSelect>
                     </div>
                     {renderRelatedFilterSelect(
                       "Договор",
@@ -9761,7 +9762,7 @@ export function ClientDetail({
                         footer={
                           <div className="flex items-center gap-2 text-sm text-slate-600">
                             <span>Строк на странице</span>
-                            <select
+                            <SystemSelect
                               value={actPageSize}
                               onChange={(event) =>
                                 setActPageSize(
@@ -9775,7 +9776,7 @@ export function ClientDetail({
                                   {size}
                                 </option>
                               ))}
-                            </select>
+                            </SystemSelect>
                           </div>
                         }
                       />
@@ -10222,7 +10223,7 @@ export function ClientDetail({
                         footer={
                           <div className="flex items-center gap-2 text-sm text-slate-600">
                             <span>Строк на странице</span>
-                            <select
+                            <SystemSelect
                               value={contractPageSize}
                               onChange={(event) =>
                                 setContractPageSize(
@@ -10237,7 +10238,7 @@ export function ClientDetail({
                                   {size}
                                 </option>
                               ))}
-                            </select>
+                            </SystemSelect>
                           </div>
                         }
                       />

@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import { Calendar, X } from 'lucide-react';
 
@@ -257,7 +258,7 @@ export function MonthRangePicker({
             <div>
               <div className="mb-2 flex items-center justify-between">
                 <label className="text-xs text-slate-500">Начало</label>
-                <select
+                <SystemSelect
                   value={leftYear}
                   onChange={(e) => setLeftYear(Number(e.target.value))}
                   className="rounded-md border border-slate-300 px-3 py-2 text-sm">
@@ -266,7 +267,7 @@ export function MonthRangePicker({
                       {y}
                     </option>
                   ))}
-                </select>
+                </SystemSelect>
               </div>
               <div className="grid grid-cols-3 gap-2">
                 {ruMonths.map((_, i) => (
@@ -278,7 +279,7 @@ export function MonthRangePicker({
             <div>
               <div className="mb-2 flex items-center justify-between">
                 <label className="text-xs text-slate-500">Конец</label>
-                <select
+                <SystemSelect
                   value={rightYear}
                   onChange={(e) => setRightYear(Number(e.target.value))}
                   className="rounded-md border border-slate-300 px-3 py-2 text-sm">
@@ -287,7 +288,7 @@ export function MonthRangePicker({
                       {y}
                     </option>
                   ))}
-                </select>
+                </SystemSelect>
               </div>
               <div className="grid grid-cols-3 gap-2">
                 {ruMonths.map((_, i) => (
@@ -346,7 +347,7 @@ export function MonthRangePicker({
       <div className="flex items-start gap-4">
         <div className="flex-1">
           <div className="mb-2 flex items-center justify-between">
-            <select
+            <SystemSelect
               value={leftYear}
               onChange={(e) => setLeftYear(Number(e.target.value))}
               className="rounded-md border border-slate-300 px-2 py-1 text-sm">
@@ -355,7 +356,7 @@ export function MonthRangePicker({
                   {y}
                 </option>
               ))}
-            </select>
+            </SystemSelect>
             <span className="text-xs text-slate-500">Начало</span>
           </div>
           <div className="grid grid-cols-4 gap-2">
@@ -367,7 +368,7 @@ export function MonthRangePicker({
 
         <div className="flex-1">
           <div className="mb-2 flex items-center justify-between">
-            <select
+            <SystemSelect
               value={rightYear}
               onChange={(e) => setRightYear(Number(e.target.value))}
               className="rounded-md border border-slate-300 px-2 py-1 text-sm">
@@ -376,7 +377,7 @@ export function MonthRangePicker({
                   {y}
                 </option>
               ))}
-            </select>
+            </SystemSelect>
             <span className="text-xs text-slate-500">Конец</span>
           </div>
           <div className="grid grid-cols-4 gap-2">

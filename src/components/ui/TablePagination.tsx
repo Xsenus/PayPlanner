@@ -1,3 +1,4 @@
+import { SystemSelect } from './SystemSelect';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface TablePaginationProps {
@@ -41,7 +42,7 @@ export function TablePagination({
         </span>
         <label className="flex items-center gap-2">
           <span>{pageSizeLabel}</span>
-          <select
+          <SystemSelect
             value={pageSize}
             onChange={(event) => onPageSizeChange(Number(event.target.value) || pageSize)}
             className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700"
@@ -51,7 +52,7 @@ export function TablePagination({
                 {size}
               </option>
             ))}
-          </select>
+          </SystemSelect>
         </label>
       </div>
 

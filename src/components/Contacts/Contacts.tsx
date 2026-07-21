@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Building2,
@@ -580,7 +581,7 @@ export function Contacts({ initialScope = 'all', onScopeChange }: ContactsProps)
 
           <label className="block">
             <span className="text-sm font-medium text-slate-700">Организация</span>
-            <select
+            <SystemSelect
               value={legalEntityId}
               onChange={(event) => setLegalEntityId(event.target.value)}
               className="mt-1 w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
@@ -591,12 +592,12 @@ export function Contacts({ initialScope = 'all', onScopeChange }: ContactsProps)
                   {item.shortName}
                 </option>
               ))}
-            </select>
+            </SystemSelect>
           </label>
 
           <label className="block">
             <span className="text-sm font-medium text-slate-700">Телефония</span>
-            <select
+            <SystemSelect
               value={syncOnly}
               onChange={(event) => setSyncOnly(event.target.value as typeof syncOnly)}
               className="mt-1 w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
@@ -604,7 +605,7 @@ export function Contacts({ initialScope = 'all', onScopeChange }: ContactsProps)
               <option value="all">Все контакты</option>
               <option value="only-sync">Только в синхронизации</option>
               <option value="excluded">Исключённые из синхронизации</option>
-            </select>
+            </SystemSelect>
           </label>
 
           <label className="flex items-end">
@@ -669,7 +670,7 @@ export function Contacts({ initialScope = 'all', onScopeChange }: ContactsProps)
               footer={
                 <div className="flex items-center gap-2 text-sm text-slate-600">
                   <span>Строк на странице</span>
-                  <select
+                  <SystemSelect
                     value={pageSize}
                     onChange={(event) => setPageSize(Number(event.target.value) || pageSize)}
                     className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700"
@@ -679,7 +680,7 @@ export function Contacts({ initialScope = 'all', onScopeChange }: ContactsProps)
                         {size}
                       </option>
                     ))}
-                  </select>
+                  </SystemSelect>
                 </div>
               }
             />

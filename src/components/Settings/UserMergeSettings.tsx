@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, GitMerge, Loader2, RefreshCw } from 'lucide-react';
 import { authService, type User } from '../../services/authService';
@@ -355,7 +356,7 @@ export function UserMergeSettings() {
           <div className="mt-5 space-y-4">
             <label className="space-y-2">
               <span className="text-sm font-medium text-slate-700">Основной email</span>
-              <select
+              <SystemSelect
                 value={form.primaryEmail}
                 onChange={(event) => setForm((current) => ({ ...current, primaryEmail: event.target.value }))}
                 className="w-full rounded-2xl border border-slate-300 px-3 py-3"
@@ -369,12 +370,12 @@ export function UserMergeSettings() {
                     {option}
                   </option>
                 ))}
-              </select>
+              </SystemSelect>
             </label>
 
             <label className="space-y-2">
               <span className="text-sm font-medium text-slate-700">Основной телефон</span>
-              <select
+              <SystemSelect
                 value={form.primaryPhoneNumber}
                 onChange={(event) =>
                   setForm((current) => ({ ...current, primaryPhoneNumber: event.target.value }))
@@ -390,7 +391,7 @@ export function UserMergeSettings() {
                     {option}
                   </option>
                 ))}
-              </select>
+              </SystemSelect>
             </label>
           </div>
 

@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { useEffect, useMemo, useState } from 'react';
 import {
   BarChart3,
@@ -1161,7 +1162,7 @@ export function RolePermissionsModal({
                               <span className="text-sm font-semibold text-slate-700">
                                 {sectionKey === 'calendar' ? 'Видимость календарей' : 'Область видимости данных'}
                               </span>
-                              <select
+                              <SystemSelect
                                 value={sectionScope}
                                 onChange={(event) =>
                                   setSectionViewScope(sectionKey, event.target.value as DataVisibilityScope)
@@ -1174,7 +1175,7 @@ export function RolePermissionsModal({
                                     {option.label}
                                   </option>
                                 ))}
-                              </select>
+                              </SystemSelect>
                             </label>
                             <div className="mt-2 text-sm leading-6 text-slate-500">
                               {section.canView

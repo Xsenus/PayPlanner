@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Download, ExternalLink, FileText, Link2, Plus, RotateCw, Trash2, Upload, X } from 'lucide-react';
@@ -1082,7 +1083,7 @@ export function CaseModal({
 
           <div>
             <label className="text-sm text-gray-600">Ответственный</label>
-            <select
+            <SystemSelect
               aria-label="Ответственный"
               className="mt-1 w-full border rounded-lg px-3 py-2 bg-white"
               value={responsibleUserId}
@@ -1094,12 +1095,12 @@ export function CaseModal({
                   {item.fullName}
                 </option>
               ))}
-            </select>
+            </SystemSelect>
           </div>
 
           <div>
             <label className="text-sm text-gray-600">Приоритет</label>
-            <select
+            <SystemSelect
               aria-label="Приоритет"
               className="mt-1 w-full border rounded-lg px-3 py-2 bg-white"
               value={priority}
@@ -1110,7 +1111,7 @@ export function CaseModal({
                   {o.label}
                 </option>
               ))}
-            </select>
+            </SystemSelect>
           </div>
 
           <div>
@@ -1169,7 +1170,7 @@ export function CaseModal({
 
           <div>
             <label className="text-sm text-gray-600">Статус</label>
-            <select
+            <SystemSelect
               aria-label="Статус"
               className="mt-1 w-full border rounded-lg px-3 py-2 bg-white"
               value={status}
@@ -1180,7 +1181,7 @@ export function CaseModal({
                   {o.label}
                 </option>
               ))}
-            </select>
+            </SystemSelect>
           </div>
 
           {canViewFinance ? (
@@ -1300,7 +1301,7 @@ export function CaseModal({
 
             {caseData.id > 0 ? (
               <div className="mt-3 grid gap-2 lg:grid-cols-[150px_minmax(220px,1fr)_160px_auto]">
-                <select
+                <SystemSelect
                   aria-label="Тип связанного участника"
                   className="rounded-lg border px-3 py-2 text-sm bg-white"
                   value={relatedPartyMode}
@@ -1313,14 +1314,14 @@ export function CaseModal({
                   disabled={relatedPartiesSaving || saving || !allowEdit || (!canUseContactRelatedParties && !canUseLegalEntityRelatedParties)}>
                   {canUseContactRelatedParties ? <option value="contact">Лицо/контакт</option> : null}
                   {canUseLegalEntityRelatedParties ? <option value="legalEntity">Организация</option> : null}
-                </select>
+                </SystemSelect>
 
                 {!canUseContactRelatedParties && !canUseLegalEntityRelatedParties ? (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
                     Справочники клиентов и организаций закрыты для вашей роли.
                   </div>
                 ) : relatedPartyMode === 'legalEntity' ? (
-                  <select
+                  <SystemSelect
                     aria-label="Связанная организация"
                     className="rounded-lg border px-3 py-2 text-sm bg-white"
                     value={relatedPartyLegalEntityId}
@@ -1332,9 +1333,9 @@ export function CaseModal({
                         {item.shortName || item.fullName || `Юрлицо #${item.id}`}
                       </option>
                     ))}
-                  </select>
+                  </SystemSelect>
                 ) : (
-                  <select
+                  <SystemSelect
                     aria-label="Связанное лицо"
                     className="rounded-lg border px-3 py-2 text-sm bg-white"
                     value={relatedPartySourceKey}
@@ -1346,7 +1347,7 @@ export function CaseModal({
                         {item.fullName}{item.organizationName ? ` · ${item.organizationName}` : ''}
                       </option>
                     ))}
-                  </select>
+                  </SystemSelect>
                 )}
 
                 <input
@@ -1602,7 +1603,7 @@ export function CaseModal({
               </div>
               {caseData.id > 0 && (
                 <div className="grid gap-2 sm:grid-cols-[minmax(150px,1fr)_minmax(150px,1fr)_auto_minmax(170px,1fr)_auto]">
-                  <select
+                  <SystemSelect
                     aria-label="Тип файла дела"
                     className="border rounded-lg px-3 py-2 bg-white text-sm"
                     value={documentType}
@@ -1611,8 +1612,8 @@ export function CaseModal({
                     {DOCUMENT_TYPE_OPTIONS.map((item) => (
                       <option key={item} value={item}>{item}</option>
                     ))}
-                  </select>
-                  <select
+                  </SystemSelect>
+                  <SystemSelect
                     aria-label="Статус файла дела"
                     className="border rounded-lg px-3 py-2 bg-white text-sm"
                     value={documentStatus}
@@ -1621,7 +1622,7 @@ export function CaseModal({
                     {DOCUMENT_STATUS_OPTIONS.map((item) => (
                       <option key={item} value={item}>{item}</option>
                     ))}
-                  </select>
+                  </SystemSelect>
                   <label className={`inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-blue-300 bg-white text-blue-700 text-sm hover:bg-blue-50 ${documentsSaving || saving || !allowEdit ? 'opacity-60 pointer-events-none' : 'cursor-pointer'}`}>
                     <Upload size={16} /> Загрузить
                     <input
@@ -1635,7 +1636,7 @@ export function CaseModal({
                       }}
                     />
                   </label>
-                  <select
+                  <SystemSelect
                     aria-label="Шаблон документа дела"
                     className="border rounded-lg px-3 py-2 bg-white text-sm"
                     value={documentTemplateKey}
@@ -1644,7 +1645,7 @@ export function CaseModal({
                     {availableDocumentTemplates.map((item) => (
                       <option key={item.key} value={item.key}>{item.label}</option>
                     ))}
-                  </select>
+                  </SystemSelect>
                   <button
                     type="button"
                     className="inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-300 bg-white px-3 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
@@ -1690,7 +1691,7 @@ export function CaseModal({
                       </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <select
+                      <SystemSelect
                         aria-label={`Тип документа ${document.originalFileName}`}
                         className="rounded-lg border px-3 py-2 text-sm bg-white disabled:opacity-60"
                         value={document.documentType}
@@ -1701,8 +1702,8 @@ export function CaseModal({
                           .map((item) => (
                             <option key={item} value={item}>{item}</option>
                           ))}
-                      </select>
-                      <select
+                      </SystemSelect>
+                      <SystemSelect
                         aria-label={`Статус документа ${document.originalFileName}`}
                         className="rounded-lg border px-3 py-2 text-sm bg-white disabled:opacity-60"
                         value={document.status}
@@ -1713,7 +1714,7 @@ export function CaseModal({
                           .map((item) => (
                             <option key={item} value={item}>{item}</option>
                           ))}
-                      </select>
+                      </SystemSelect>
                       <button
                         type="button"
                         className="inline-flex items-center gap-1 rounded-lg border px-3 py-2 text-sm hover:bg-gray-50 disabled:opacity-60"

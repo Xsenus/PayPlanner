@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import {
   ArrowLeft,
   ArrowUp,
@@ -776,7 +777,7 @@ export function S3Storage({ embedded = false }: S3StorageProps = {}) {
               <div className="grid gap-4 lg:grid-cols-2">
                 <label className="flex flex-col gap-1.5 text-sm font-medium text-slate-700">
                   Провайдер
-                  <select
+                  <SystemSelect
                     value={draft.provider}
                     onChange={(event) => applyPreset(event.target.value)}
                     className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-100">
@@ -784,7 +785,7 @@ export function S3Storage({ embedded = false }: S3StorageProps = {}) {
                       <option key={preset.key} value={preset.key}>{preset.name}</option>
                     ))}
                     <option value="custom">S3-совместимое</option>
-                  </select>
+                  </SystemSelect>
                 </label>
 
                 <label className="flex flex-col gap-1.5 text-sm font-medium text-slate-700">
@@ -1182,7 +1183,7 @@ export function S3Storage({ embedded = false }: S3StorageProps = {}) {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <select
+            <SystemSelect
               value={selectedConnectionId ?? ''}
               onChange={(event) => setSelectedConnectionId(event.target.value || null)}
               className="min-h-9 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm">
@@ -1190,7 +1191,7 @@ export function S3Storage({ embedded = false }: S3StorageProps = {}) {
               {connections.map((connection) => (
                 <option key={connection.id} value={connection.id}>{connection.name}</option>
               ))}
-            </select>
+            </SystemSelect>
             <button type="button" onClick={() => void loadObjects(parentPath(currentPath))} className={iconButtonClass()} disabled={!selectedConnectionId || currentPath === '/' || listingLoading} title="Перейти на уровень выше">
               <ArrowUp className="h-4 w-4" />
               Вверх

@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Plus, Pencil, Trash2, Check, X, ShieldAlert } from 'lucide-react';
 import { apiService, type DictKind } from '../../services/api';
@@ -506,7 +507,7 @@ export const Dictionaries = () => {
           {supportsServiceCategory(kind) && (
             <div className="lg:col-span-3">
               <label className="block text-xs font-medium text-slate-700 mb-1.5">Категория</label>
-              <select
+              <SystemSelect
                 value={local.categoryId ?? ''}
                 onChange={(e) => set({ categoryId: e.target.value ? Number(e.target.value) : null })}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900"
@@ -517,7 +518,7 @@ export const Dictionaries = () => {
                     {category.name}
                   </option>
                 ))}
-              </select>
+              </SystemSelect>
             </div>
           )}
 
@@ -679,7 +680,7 @@ export const Dictionaries = () => {
           {supportsServiceCategory(kind) && (
             <div className="lg:col-span-3">
               <label className="block text-xs font-medium text-slate-700 mb-1.5">Категория</label>
-              <select
+              <SystemSelect
                 value={local.categoryId ?? ''}
                 onChange={(e) => set({ categoryId: e.target.value ? Number(e.target.value) : null })}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900"
@@ -690,7 +691,7 @@ export const Dictionaries = () => {
                     {category.name}
                   </option>
                 ))}
-              </select>
+              </SystemSelect>
             </div>
           )}
 

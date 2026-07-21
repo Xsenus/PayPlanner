@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import { ArrowLeft, Bell, Bot, CheckCircle2, Link2, Mail, MessageSquare, Monitor, Pencil, Plus, RefreshCw, Save, Send, Smartphone, Trash2, Unlink } from 'lucide-react';
 import {
@@ -1531,7 +1532,7 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="text-sm font-medium text-gray-700">
                   Канал
-                  <select
+                  <SystemSelect
                     value={form.channel}
                     onChange={(event) => openNewSender(event.target.value as NotificationChannel)}
                     disabled={!canEdit || Boolean(form.id)}
@@ -1539,7 +1540,7 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
                   >
                     <option value="email">Email</option>
                     <option value="telegram">Telegram</option>
-                  </select>
+                  </SystemSelect>
                 </label>
                 <label className="text-sm font-medium text-gray-700">
                   Название
@@ -1736,7 +1737,7 @@ function SmsSettingsPanel({
         </label>
         <label className="text-sm font-medium text-gray-700">
           Провайдер
-          <select
+          <SystemSelect
             value={form.providerKey}
             disabled={!canEdit || saving}
             onChange={(event) => setForm((prev) => ({ ...prev, providerKey: event.target.value }))}
@@ -1746,7 +1747,7 @@ function SmsSettingsPanel({
             <option value="sms-ru">SMS.RU</option>
             <option value="sms-aero">SMS Aero</option>
             <option value="custom">Другой провайдер</option>
-          </select>
+          </SystemSelect>
         </label>
         <label className="text-sm font-medium text-gray-700">
           Имя отправителя
@@ -1983,7 +1984,7 @@ function DeliveryLogPanel({
           <p className="text-sm text-gray-500">Последние попытки отправки email и Telegram. Ошибочные и пропущенные можно повторить вручную.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <select
+          <SystemSelect
             value={status}
             onChange={(event) => onStatusChange(event.target.value)}
             className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm"
@@ -1992,7 +1993,7 @@ function DeliveryLogPanel({
             <option value="skipped">Пропущенные</option>
             <option value="sent">Отправленные</option>
             <option value="all">Все</option>
-          </select>
+          </SystemSelect>
           <button
             type="button"
             onClick={() => void onRefresh()}
@@ -2301,7 +2302,7 @@ function TelegramFields({
       )}
       <label className="text-sm font-medium text-gray-700">
         Режим входящих сообщений
-        <select
+        <SystemSelect
           value={form.updateMode}
           onChange={(event) => setForm((prev) => ({ ...prev, updateMode: normalizeUpdateMode(event.target.value) }))}
           className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
@@ -2309,7 +2310,7 @@ function TelegramFields({
           <option value="disabled">Отключены</option>
           <option value="webhook">Webhook</option>
           <option value="polling">Polling</option>
-        </select>
+        </SystemSelect>
       </label>
       <label className="text-sm font-medium text-gray-700">
         Webhook secret {webhookSecretSet ? '(сохранён)' : ''}

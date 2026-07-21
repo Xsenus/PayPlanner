@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CalendarDays, Loader2, Plus, Save, Trash2 } from 'lucide-react';
 
@@ -158,7 +159,7 @@ export function ProceduralDeadlineCalendarSettings() {
       <div className="mt-5 grid gap-3 lg:grid-cols-[180px_170px_minmax(220px,1fr)_auto]">
         <label className="text-sm font-medium text-slate-700">
           <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Тип</span>
-          <select
+          <SystemSelect
             aria-label="Тип исключения календаря"
             value={draftKind}
             onChange={(event) => setDraftKind(event.target.value as CalendarDateKind)}
@@ -166,7 +167,7 @@ export function ProceduralDeadlineCalendarSettings() {
           >
             <option value="nonWorking">Нерабочий день</option>
             <option value="working">Рабочий день</option>
-          </select>
+          </SystemSelect>
         </label>
         <label className="text-sm font-medium text-slate-700">
           <span className="mb-1 block text-xs uppercase tracking-[0.12em] text-slate-400">Дата</span>

@@ -224,8 +224,8 @@ describe('NotificationCenter', () => {
     render(<NotificationCenter />);
 
     expect(await screen.findByText('Срочная задача клиента')).toBeTruthy();
-    expect(await screen.findByRole('option', { name: 'Анна Иванова' })).toBeTruthy();
-    expect(await screen.findByRole('option', { name: 'ООО Ромашка' })).toBeTruthy();
+    expect(await screen.findByText('Анна Иванова', { selector: 'option' })).toBeTruthy();
+    expect(await screen.findByText('ООО Ромашка', { selector: 'option' })).toBeTruthy();
 
     fireEvent.change(screen.getByPlaceholderText('Поиск по уведомлению, задаче или событию'), {
       target: { value: '  срочная задача  ' },

@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { AlertTriangle, ArrowLeft, Ban, Check, Download, FileText, FileX, GripVertical, Loader2, Mail, Pencil, Plus, Printer, Save, Send, Settings2, UploadCloud, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
@@ -1218,7 +1219,7 @@ export function ContractDetailPage({
 
         <label className="text-sm">
           Режим договора
-          <select
+          <SystemSelect
             value={contract.billingMode}
             disabled={!editMode}
             onChange={(event) => {
@@ -1240,7 +1241,7 @@ export function ContractDetailPage({
           >
             <option value="Fixed">Фиксированная сумма</option>
             <option value="Actual">Оплата по факту</option>
-          </select>
+          </SystemSelect>
         </label>
 
         <label className="text-sm">
@@ -1676,7 +1677,7 @@ export function ContractDetailPage({
                 footer={
                   <div className="flex items-center gap-2 text-sm text-slate-600">
                     <span>Строк на странице</span>
-                    <select
+                    <SystemSelect
                       value={invoicePageSize}
                       onChange={(event) => setInvoicePageSize(Number(event.target.value) || invoicePageSize)}
                       className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700"
@@ -1686,7 +1687,7 @@ export function ContractDetailPage({
                           {size}
                         </option>
                       ))}
-                    </select>
+                    </SystemSelect>
                   </div>
                 }
               />
@@ -1878,7 +1879,7 @@ export function ContractDetailPage({
                 footer={
                   <div className="flex items-center gap-2 text-sm text-slate-600">
                     <span>Строк на странице</span>
-                    <select
+                    <SystemSelect
                       value={actPageSize}
                       onChange={(event) => setActPageSize(Number(event.target.value) || actPageSize)}
                       className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700"
@@ -1888,7 +1889,7 @@ export function ContractDetailPage({
                           {size}
                         </option>
                       ))}
-                    </select>
+                    </SystemSelect>
                   </div>
                 }
               />
@@ -2061,7 +2062,7 @@ export function ContractDetailPage({
                 footer={
                   <div className="flex items-center gap-2 text-sm text-slate-600">
                     <span>Строк на странице</span>
-                    <select
+                    <SystemSelect
                       value={paymentPageSize}
                       onChange={(event) => setPaymentPageSize(Number(event.target.value) || paymentPageSize)}
                       className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700"
@@ -2071,7 +2072,7 @@ export function ContractDetailPage({
                           {size}
                         </option>
                       ))}
-                    </select>
+                    </SystemSelect>
                   </div>
                 }
               />

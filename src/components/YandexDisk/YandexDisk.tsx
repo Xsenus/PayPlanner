@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import {
   ArrowLeft,
   ArrowUp,
@@ -882,9 +883,9 @@ export function YandexDisk({ embedded = false }: YandexDiskProps = {}) {
             <p className="mt-1 text-sm text-slate-500">{selectedConnection ? `${selectedConnection.name}: ${currentPath}` : 'Выберите подключение'}</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <select value={selectedConnection?.id ?? ''} onChange={(event) => { setSelectedConnectionId(event.target.value || null); setCurrentPath('/'); }} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">
+            <SystemSelect value={selectedConnection?.id ?? ''} onChange={(event) => { setSelectedConnectionId(event.target.value || null); setCurrentPath('/'); }} className="rounded-lg border border-slate-300 px-3 py-2 text-sm">
               {connections.map((connection) => <option key={connection.id} value={connection.id}>{connection.name}</option>)}
-            </select>
+            </SystemSelect>
             <button type="button" onClick={() => void loadObjects(parentPath(currentPath))} disabled={!selectedConnection || currentPath === '/'} className={iconButtonClass()} title="Вверх">
               <ArrowUp className="h-4 w-4" />
               Вверх

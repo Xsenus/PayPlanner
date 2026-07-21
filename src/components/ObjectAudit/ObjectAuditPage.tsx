@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { Filter, Loader2, RefreshCw, Search, ShieldCheck } from 'lucide-react';
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
@@ -319,7 +320,7 @@ export function ObjectAuditPage() {
 
             <label className="space-y-2">
               <span className="text-sm font-medium text-slate-700">Объект</span>
-              <select
+              <SystemSelect
                 value={objectType}
                 onChange={(event) => setObjectType(event.target.value as (typeof OBJECT_TYPE_OPTIONS)[number])}
                 className="w-full rounded-2xl border border-slate-300 px-3 py-3 text-sm text-slate-700"
@@ -330,12 +331,12 @@ export function ObjectAuditPage() {
                     {getObjectAuditTypeLabel(item)}
                   </option>
                 ))}
-              </select>
+              </SystemSelect>
             </label>
 
             <label className="space-y-2">
               <span className="text-sm font-medium text-slate-700">Действие</span>
-              <select
+              <SystemSelect
                 value={action}
                 onChange={(event) => setAction(event.target.value as (typeof ACTION_OPTIONS)[number])}
                 className="w-full rounded-2xl border border-slate-300 px-3 py-3 text-sm text-slate-700"
@@ -346,7 +347,7 @@ export function ObjectAuditPage() {
                     {getObjectAuditActionLabel(item)}
                   </option>
                 ))}
-              </select>
+              </SystemSelect>
             </label>
 
             <label className="space-y-2">

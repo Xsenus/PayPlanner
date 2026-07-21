@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { Check, ChevronDown, Search, X } from 'lucide-react';
 import { useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
@@ -140,7 +141,7 @@ export function InvoiceLineItemLookupDialog({
                 <label className="min-w-0 flex-1">
                   <span className="mb-2 block text-sm font-medium text-slate-700">{filterLabel}</span>
                   <div className="relative">
-                    <select
+                    <SystemSelect
                       value={filterValue}
                       onChange={(event) => onFilterChange(event.target.value)}
                       data-testid="invoice-line-item-lookup-filter-select"
@@ -152,7 +153,7 @@ export function InvoiceLineItemLookupDialog({
                           {option.label}
                         </option>
                       ))}
-                    </select>
+                    </SystemSelect>
                     <ChevronDown className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                   </div>
                 </label>

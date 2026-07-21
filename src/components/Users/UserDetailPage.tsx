@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Building2, Loader2, Plus, Save, ShieldCheck, Trash2, UserRound } from 'lucide-react';
 
@@ -657,9 +658,9 @@ export function UserDetailPage({ userId, onBack, onSaved, canOpenContractorPayme
                 <div className="grid gap-4 md:grid-cols-2">
                   <label className="space-y-2">
                     <span className="text-sm font-medium text-slate-700">Роль</span>
-                    <select value={form.roleId} onChange={(event) => updateForm('roleId', Number(event.target.value) || 0)} disabled={administrativeFieldsDisabled} className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500">
+                    <SystemSelect value={form.roleId} onChange={(event) => updateForm('roleId', Number(event.target.value) || 0)} disabled={administrativeFieldsDisabled} className="w-full rounded-2xl border border-slate-300 px-3 py-3 disabled:bg-slate-100 disabled:text-slate-500">
                       {roles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}
-                    </select>
+                    </SystemSelect>
                   </label>
                   <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
                     <input type="checkbox" checked={form.isActive} onChange={(event) => updateForm('isActive', event.target.checked)} disabled={administrativeFieldsDisabled} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
@@ -689,7 +690,7 @@ export function UserDetailPage({ userId, onBack, onSaved, canOpenContractorPayme
                   />
                   <label className="space-y-2">
                     <span className="text-sm font-medium text-slate-700">Часовой пояс</span>
-                    <select
+                    <SystemSelect
                       value={timeZoneId}
                       onChange={(event) => setTimeZoneId(event.target.value)}
                       disabled={administrativeFieldsDisabled}
@@ -698,7 +699,7 @@ export function UserDetailPage({ userId, onBack, onSaved, canOpenContractorPayme
                       {USER_TIME_ZONE_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value}>{option.label}</option>
                       ))}
-                    </select>
+                    </SystemSelect>
                     <span className="block text-xs leading-5 text-slate-500">Используется для задач во внутренних и внешних календарях.</span>
                   </label>
                   <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 md:col-span-2">

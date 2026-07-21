@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import {
   Users,
@@ -1380,7 +1381,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
                 )}
               </div>
               <div className="w-full lg:w-56">
-                <select
+                <SystemSelect
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
                   className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -1392,10 +1393,10 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
                       {status.name}
                     </option>
                   ))}
-                </select>
+                </SystemSelect>
               </div>
               <div className="w-full lg:w-40">
-                <select
+                <SystemSelect
                   value={activityFilter}
                   onChange={(e) => setActivityFilter(e.target.value as 'all' | 'active' | 'inactive')}
                   className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -1403,7 +1404,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
                   <option value="all">Все</option>
                   <option value="active">Активные</option>
                   <option value="inactive">Неактивные</option>
-                </select>
+                </SystemSelect>
               </div>
               <div className="flex w-full justify-center gap-1 rounded-lg bg-gray-100 p-1 md:w-auto md:justify-start">
                 <button
@@ -1490,7 +1491,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
               footer={
                 <div className="flex items-center gap-2 text-sm text-slate-600">
                   <span>Строк на странице</span>
-                  <select
+                  <SystemSelect
                     value={pageSize}
                     onChange={(event) => setPageSizeValue(Number(event.target.value))}
                     className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700"
@@ -1500,7 +1501,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
                         {size}
                       </option>
                     ))}
-                  </select>
+                  </SystemSelect>
                 </div>
               }
             />
@@ -1529,7 +1530,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
                 <label className="block text-xs font-medium text-gray-600 mb-2">
                   Колонки для фильтра
                 </label>
-                <select
+                <SystemSelect
                   multiple
                   value={activeFilterColumns}
                   onChange={handleFilterColumnsChange}
@@ -1540,7 +1541,7 @@ export function Clients({ onOpenContract, onOpenInvoice, onOpenAct, onOpenPaymen
                       {column.label}
                     </option>
                   ))}
-                </select>
+                </SystemSelect>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 {activeFilterColumns.length === 0 ? (

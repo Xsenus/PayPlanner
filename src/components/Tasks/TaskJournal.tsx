@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   AlarmClock,
@@ -4319,7 +4320,7 @@ export function TaskJournal({
                   </button>
                   <label className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700">
                     <Bell className="h-4 w-4 text-slate-500" />
-                    <select
+                    <SystemSelect
                       value={icsReminderPreset}
                       onChange={(event) => setIcsReminderPreset(event.target.value as IcsReminderPreset)}
                       data-testid="task-ics-reminder-preset"
@@ -4328,7 +4329,7 @@ export function TaskJournal({
                       {ICS_REMINDER_PRESET_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value}>{option.label}</option>
                       ))}
-                    </select>
+                    </SystemSelect>
                   </label>
                 </>
               ) : null}
@@ -4428,7 +4429,7 @@ export function TaskJournal({
           </div>
 
           <div className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
-            <select
+            <SystemSelect
               value={selectedSavedViewId}
               onChange={(event) => handleSavedViewSelect(event.target.value)}
               aria-label="Сохраненные представления задач"
@@ -4439,7 +4440,7 @@ export function TaskJournal({
               {savedViews.map((view) => (
                 <option key={view.id} value={view.id}>{view.name}</option>
               ))}
-            </select>
+            </SystemSelect>
 
             <button
               type="button"
@@ -4490,7 +4491,7 @@ export function TaskJournal({
               />
             </label>
 
-            <select
+            <SystemSelect
               value={statusFilter}
               onChange={(event) => setStatusFilter(event.target.value as TaskStatusFilter)}
               className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
@@ -4502,9 +4503,9 @@ export function TaskJournal({
               {STATUS_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
-            </select>
+            </SystemSelect>
 
-            <select
+            <SystemSelect
               value={counterpartyFilter}
               onChange={(event) => {
                 setCounterpartyFilter(event.target.value);
@@ -4518,9 +4519,9 @@ export function TaskJournal({
               {counterpartyCaseFilterData.counterparties.map((counterparty) => (
                 <option key={counterparty.value} value={counterparty.value}>{counterparty.label}</option>
               ))}
-            </select>
+            </SystemSelect>
 
-            <select
+            <SystemSelect
               value={caseFilter}
               onChange={(event) => setCaseFilter(event.target.value)}
               disabled={counterpartyFilter === 'all'}
@@ -4532,9 +4533,9 @@ export function TaskJournal({
               {caseFilterOptions.map((clientCase) => (
                 <option key={clientCase.id} value={String(clientCase.id)}>{clientCase.label}</option>
               ))}
-            </select>
+            </SystemSelect>
 
-            <select
+            <SystemSelect
               value={assigneeFilter}
               onChange={(event) => setAssigneeFilter(event.target.value)}
               className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
@@ -4544,9 +4545,9 @@ export function TaskJournal({
               {assigneeOptions.map((assignee) => (
                 <option key={assignee.id} value={String(assignee.id)}>{assignee.name}</option>
               ))}
-            </select>
+            </SystemSelect>
 
-            <select
+            <SystemSelect
               value={typeFilter}
               onChange={(event) => setTypeFilter(event.target.value as TaskJournalType | 'all')}
               className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
@@ -4556,9 +4557,9 @@ export function TaskJournal({
               {TYPE_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
-            </select>
+            </SystemSelect>
 
-            <select
+            <SystemSelect
               value={priorityFilter}
               onChange={(event) => setPriorityFilter(event.target.value as TaskJournalPriority | 'all')}
               className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
@@ -4569,7 +4570,7 @@ export function TaskJournal({
               {PRIORITY_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
-            </select>
+            </SystemSelect>
           </div>
 
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between" data-testid="task-date-and-view-row">
@@ -5715,7 +5716,7 @@ function TaskBulkActionsPanel({
           </div>
           <label className="block">
             <span className="text-xs font-semibold text-slate-500">Исполнитель</span>
-            <select
+            <SystemSelect
               value={assigneeUserId}
               onChange={(event) => onAssigneeChange(event.target.value)}
               className="mt-1 h-10 w-full rounded-xl border border-blue-100 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
@@ -5725,11 +5726,11 @@ function TaskBulkActionsPanel({
               {assignees.map((assignee) => (
                 <option key={assignee.id} value={String(assignee.id)}>{assignee.name}</option>
               ))}
-            </select>
+            </SystemSelect>
           </label>
           <label className="block">
             <span className="text-xs font-semibold text-slate-500">Приоритет</span>
-            <select
+            <SystemSelect
               value={priority}
               onChange={(event) => onPriorityChange(event.target.value as TaskJournalPriority | '')}
               className="mt-1 h-10 w-full rounded-xl border border-blue-100 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
@@ -5739,11 +5740,11 @@ function TaskBulkActionsPanel({
               {PRIORITY_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
-            </select>
+            </SystemSelect>
           </label>
           <label className="block">
             <span className="text-xs font-semibold text-slate-500">Статус</span>
-            <select
+            <SystemSelect
               value={status}
               onChange={(event) => onStatusChange(event.target.value as TaskJournalStatus | '')}
               className="mt-1 h-10 w-full rounded-xl border border-blue-100 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
@@ -5753,7 +5754,7 @@ function TaskBulkActionsPanel({
               {BULK_STATUS_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
               ))}
-            </select>
+            </SystemSelect>
           </label>
           <label className="block sm:col-span-2 xl:col-span-1">
             <span className="text-xs font-semibold text-slate-500">Срок</span>
@@ -6087,7 +6088,7 @@ function TaskTable({
                       </div>
                     ) : (
                       <div>
-                        <select
+                        <SystemSelect
                           value={task.status}
                           onChange={(event) => onStatusChange(task, event.target.value as TaskJournalStatus)}
                           className={`rounded-xl border-0 px-3 py-2 text-sm font-semibold outline-none ${statusClass(task.status)}`}
@@ -6095,7 +6096,7 @@ function TaskTable({
                           {STATUS_OPTIONS.map((option) => (
                             <option key={option.value} value={option.value}>{option.label}</option>
                           ))}
-                        </select>
+                        </SystemSelect>
                         {isOverdue ? <div className="mt-1 text-xs font-semibold text-rose-600">Просрочена</div> : null}
                       </div>
                     )}
@@ -6379,7 +6380,7 @@ function CaseCalendarEventsPanel({
             <>
               <label className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-slate-700">
                 <Bell className="h-3.5 w-3.5 text-slate-500" />
-                <select
+                <SystemSelect
                   value={reminderPreset}
                   onChange={(event) => onReminderPresetChange(event.target.value as IcsReminderPreset)}
                   data-testid="case-calendar-ics-reminder-preset"
@@ -6388,7 +6389,7 @@ function CaseCalendarEventsPanel({
                   {ICS_REMINDER_PRESET_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
-                </select>
+                </SystemSelect>
               </label>
               <button
                 type="button"
@@ -7769,7 +7770,7 @@ function TaskBillingCreateWizard({
             />
             <label className="block text-sm font-semibold text-slate-700">
               Дело
-              <select
+              <SystemSelect
                 value={clientCaseId}
                 onChange={(event) => { setClientCaseId(event.target.value); setError(null); }}
                 disabled={!ownerId || casesLoading}
@@ -7778,7 +7779,7 @@ function TaskBillingCreateWizard({
               >
                 <option value="">{casesLoading ? 'Загрузка дел…' : 'Выберите дело'}</option>
                 {availableCases.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
-              </select>
+              </SystemSelect>
             </label>
             {!casesLoading && ownerId && availableCases.length === 0 ? <div className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">У контрагента нет активных дел. Платную задачу можно создать после добавления дела, а неоплачиваемую — прямо сейчас с привязкой к контрагенту.</div> : null}
             {error ? <div className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700">{error}</div> : null}
@@ -7821,9 +7822,9 @@ function TaskBillingCreateWizard({
             {billingContext && billingContext.contracts.length > 1 ? (
               <label className="mb-3 block text-sm font-semibold text-slate-700">
                 Договор
-                <select value={selectedContractId} onChange={(event) => setSelectedContractId(event.target.value)} className="mt-1.5 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm">
+                <SystemSelect value={selectedContractId} onChange={(event) => setSelectedContractId(event.target.value)} className="mt-1.5 h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm">
                   {billingContext.contracts.map((contract) => <option key={contract.id} value={contract.id}>№{contract.number} · {contract.billingMode === 'Actual' ? 'по факту' : 'фиксированная сумма'}</option>)}
-                </select>
+                </SystemSelect>
               </label>
             ) : null}
             <div className={`rounded-xl border p-4 ${mode === 'Actual' ? 'border-rose-200 bg-rose-50' : mode === 'Fixed' ? 'border-violet-200 bg-violet-50' : 'border-amber-200 bg-amber-50'}`}>
@@ -9460,7 +9461,7 @@ function TaskModal({
 
             <aside className="space-y-3 xl:sticky xl:top-0 xl:self-start">
               <div className="grid grid-cols-[minmax(0,1fr)_44px] gap-2">
-                <select
+                <SystemSelect
                   value={form.status}
                   onChange={(event) => update('status', event.target.value as TaskJournalStatus)}
                   disabled={isReadOnly}
@@ -9468,7 +9469,7 @@ function TaskModal({
                   className="h-11 rounded-xl border border-orange-300 bg-white px-3 text-sm font-semibold text-slate-700 outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 disabled:bg-slate-50"
                 >
                   {STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </select>
+                </SystemSelect>
                 {!isReadOnly || canCompleteReadOnlyTask || isAwaitingApproval ? (
                   <button
                     type="button"
@@ -9485,7 +9486,7 @@ function TaskModal({
 
               <section className="space-y-2 rounded-xl border border-slate-200 bg-white p-2">
                 <ModernTaskQuickField icon={<UsersRound className="h-4 w-4" />} label="Исполнитель">
-                  <select
+                  <SystemSelect
                     value={form.assigneeUserId ?? ''}
                     onChange={(event) => setPrimaryAssignee(Number(event.target.value) || null)}
                     disabled={isReadOnly}
@@ -9496,11 +9497,11 @@ function TaskModal({
                     {assignees.map((assignee) => (
                       <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
                     ))}
-                  </select>
+                  </SystemSelect>
                 </ModernTaskQuickField>
                 {state?.task ? (
                   <ModernTaskQuickField icon={<Pencil className="h-4 w-4" />} label="Постановщик">
-                    <select
+                    <SystemSelect
                       value={form.authorUserId ?? ''}
                       onChange={(event) => update('authorUserId', Number(event.target.value) || null)}
                       disabled={isReadOnly || !isAdminUser}
@@ -9513,7 +9514,7 @@ function TaskModal({
                       {assignees.map((assignee) => (
                         <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
                       ))}
-                    </select>
+                    </SystemSelect>
                   </ModernTaskQuickField>
                 ) : null}
                 <ModernTaskQuickField icon={<CalendarClock className="h-4 w-4" />} label="Дата">
@@ -9528,7 +9529,7 @@ function TaskModal({
                   <div className="mt-1 text-xs text-slate-500">{dueAtText}</div>
                 </ModernTaskQuickField>
                 <ModernTaskQuickField icon={<Clock3 className="h-4 w-4" />} label="Длительность">
-                  <select
+                  <SystemSelect
                     value={normalizeTaskDuration(form.plannedDurationMinutes)}
                     onChange={(event) => update('plannedDurationMinutes', Number(event.target.value))}
                     disabled={isReadOnly}
@@ -9537,17 +9538,17 @@ function TaskModal({
                     {[15, 30, 45, 60, 90, 120, 180, 240, 360, 480].map((minutes) => (
                       <option key={minutes} value={minutes}>{formatDuration(minutes)}</option>
                     ))}
-                  </select>
+                  </SystemSelect>
                 </ModernTaskQuickField>
                 <ModernTaskQuickField icon={<TypeIcon className="h-4 w-4" />} label="Тип задачи">
-                  <select value={form.type} onChange={(event) => update('type', event.target.value as TaskJournalType)} disabled={isReadOnly} className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white">
+                  <SystemSelect value={form.type} onChange={(event) => update('type', event.target.value as TaskJournalType)} disabled={isReadOnly} className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white">
                     {TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                  </select>
+                  </SystemSelect>
                 </ModernTaskQuickField>
                 <ModernTaskQuickField icon={<Scale className="h-4 w-4" />} label="Приоритет">
-                  <select value={form.priority} onChange={(event) => update('priority', event.target.value as TaskJournalPriority)} disabled={isReadOnly} className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white">
+                  <SystemSelect value={form.priority} onChange={(event) => update('priority', event.target.value as TaskJournalPriority)} disabled={isReadOnly} className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white">
                     {PRIORITY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                  </select>
+                  </SystemSelect>
                   <div className="mt-1 text-xs text-slate-500">{priorityOption.label}</div>
                 </ModernTaskQuickField>
                 <ModernTaskQuickField icon={<WalletCards className="h-4 w-4" />} label="Оплата исполнителю">
@@ -9693,7 +9694,7 @@ function TaskModal({
                   buttonClassName="h-10 border-slate-200 text-sm"
                   disabled={isReadOnly || form.isInternal || isCreationBillingBindingLocked}
                 />
-                <select
+                <SystemSelect
                   aria-label="Дело"
                   value={form.clientCaseId ?? ''}
                   onChange={(event) => handleCaseChange(event.target.value)}
@@ -9704,7 +9705,7 @@ function TaskModal({
                   {selectableClientCases.map((clientCase) => (
                     <option key={clientCase.id} value={clientCase.id}>{clientCase.title}</option>
                   ))}
-                </select>
+                </SystemSelect>
               </section>
 
               <section className="rounded-xl border border-slate-200 bg-white p-3">
@@ -9730,7 +9731,7 @@ function TaskModal({
                 ) : null}
                 {!isReadOnly ? (
                   <div className="mt-2 grid gap-2">
-                    <select
+                    <SystemSelect
                       aria-label="Добавить согласующего"
                       value=""
                       onChange={(event) => {
@@ -9743,9 +9744,9 @@ function TaskModal({
                       {getAvailableAssigneesForRole('approver').map((assignee) => (
                         <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
                       ))}
-                    </select>
+                    </SystemSelect>
                     {renderModernSelectedParticipantList('approver', visibleApprovers, 'task-modern-approver-list')}
-                    <select
+                    <SystemSelect
                       aria-label="Добавить наблюдателя"
                       value=""
                       onChange={(event) => {
@@ -9758,7 +9759,7 @@ function TaskModal({
                       {availableObservers.map((assignee) => (
                         <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
                       ))}
-                    </select>
+                    </SystemSelect>
                     {renderModernSelectedParticipantList('observer', visibleObservers, 'task-modern-observer-list')}
                   </div>
                 ) : null}
@@ -10038,7 +10039,7 @@ function TaskModal({
           {quickPanel === 'assignee' ? (
             <section className="mb-5 rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
               <Field label="Новый исполнитель">
-                <select
+                <SystemSelect
                   aria-label="Новый исполнитель"
                   value={form.assigneeUserId ?? ''}
                   onChange={(event) => setPrimaryAssignee(Number(event.target.value) || null)}
@@ -10048,7 +10049,7 @@ function TaskModal({
                   {assignees.map((assignee) => (
                     <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
                   ))}
-                </select>
+                </SystemSelect>
               </Field>
             </section>
           ) : null}
@@ -10056,7 +10057,7 @@ function TaskModal({
           {quickPanel === 'observer' ? (
             <section className="mb-5 rounded-2xl border border-blue-100 bg-blue-50/70 p-4">
               <Field label="Наблюдатель">
-                <select
+                <SystemSelect
                   aria-label="Наблюдатель"
                   value=""
                   onChange={(event) => {
@@ -10071,7 +10072,7 @@ function TaskModal({
                   {availableObservers.map((assignee) => (
                     <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
                   ))}
-                </select>
+                </SystemSelect>
               </Field>
             </section>
           ) : null}
@@ -10111,7 +10112,7 @@ function TaskModal({
               />
             </Field>
             <Field label="Исполнитель">
-              <select
+              <SystemSelect
                 value={form.assigneeUserId ?? ''}
                 disabled={isReadOnly}
                 onChange={(event) => setPrimaryAssignee(Number(event.target.value) || null)}
@@ -10122,11 +10123,11 @@ function TaskModal({
                 {assignees.map((assignee) => (
                   <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
                 ))}
-              </select>
+              </SystemSelect>
             </Field>
             <Field label="Постановщик">
               {state?.task && isAdminUser ? (
-                <select
+                <SystemSelect
                   value={form.authorUserId ?? ''}
                   onChange={(event) => update('authorUserId', Number(event.target.value) || null)}
                   disabled={isReadOnly}
@@ -10139,7 +10140,7 @@ function TaskModal({
                   {assignees.map((assignee) => (
                     <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
                   ))}
-                </select>
+                </SystemSelect>
               ) : (
                 <input
                   value={taskAuthorLabel}
@@ -10156,7 +10157,7 @@ function TaskModal({
               <input ref={titleInputRef} value={form.title} onChange={(event) => update('title', event.target.value)} disabled={isReadOnly} data-testid="task-title-input" className="form-input" placeholder="Что нужно сделать" />
             </Field>
             <Field label="Дело">
-              <select
+              <SystemSelect
                 aria-label="Дело"
                 value={form.clientCaseId ?? ''}
                 onChange={(event) => handleCaseChange(event.target.value)}
@@ -10167,7 +10168,7 @@ function TaskModal({
                 {selectableClientCases.map((clientCase) => (
                   <option key={clientCase.id} value={clientCase.id}>{clientCase.title}</option>
                 ))}
-              </select>
+              </SystemSelect>
             </Field>
             <Field label="Дата и время исполнения">
               <div className="flex gap-2">
@@ -10219,7 +10220,7 @@ function TaskModal({
               </div>
             ) : null}
             <Field label="Длительность">
-              <select
+              <SystemSelect
                 value={normalizeTaskDuration(form.plannedDurationMinutes)}
                 onChange={(event) => update('plannedDurationMinutes', Number(event.target.value))}
                 disabled={isReadOnly}
@@ -10228,22 +10229,22 @@ function TaskModal({
                 {[15, 30, 45, 60, 90, 120, 180, 240, 360, 480].map((minutes) => (
                   <option key={minutes} value={minutes}>{formatDuration(minutes)}</option>
                 ))}
-              </select>
+              </SystemSelect>
             </Field>
             <Field label="Тип задачи">
-              <select value={form.type} onChange={(event) => update('type', event.target.value as TaskJournalType)} disabled={isReadOnly} className="form-input">
+              <SystemSelect value={form.type} onChange={(event) => update('type', event.target.value as TaskJournalType)} disabled={isReadOnly} className="form-input">
                 {TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
+              </SystemSelect>
             </Field>
             <Field label="Приоритет">
-              <select value={form.priority} onChange={(event) => update('priority', event.target.value as TaskJournalPriority)} disabled={isReadOnly} className="form-input">
+              <SystemSelect value={form.priority} onChange={(event) => update('priority', event.target.value as TaskJournalPriority)} disabled={isReadOnly} className="form-input">
                 {PRIORITY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
+              </SystemSelect>
             </Field>
             <Field label="Статус">
-              <select data-testid="task-editor-status-select" value={form.status} onChange={(event) => update('status', event.target.value as TaskJournalStatus)} disabled={isReadOnly} className="form-input">
+              <SystemSelect data-testid="task-editor-status-select" value={form.status} onChange={(event) => update('status', event.target.value as TaskJournalStatus)} disabled={isReadOnly} className="form-input">
                 {STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
+              </SystemSelect>
             </Field>
           </div>
 
@@ -10398,7 +10399,7 @@ function TaskModal({
                         })}
                       </div>
                       {!isReadOnly ? (
-                        <select
+                        <SystemSelect
                           aria-label={`Добавить: ${PARTICIPANT_ROLE_LABELS[role]}`}
                           value=""
                           onChange={(event) => {
@@ -10418,7 +10419,7 @@ function TaskModal({
                               {assignee.email ? `${assignee.name} - ${assignee.email}` : assignee.name}
                             </option>
                           ))}
-                        </select>
+                        </SystemSelect>
                       ) : null}
                     </div>
                   </Field>

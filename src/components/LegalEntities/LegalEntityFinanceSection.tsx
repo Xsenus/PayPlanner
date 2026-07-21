@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import {
   CreditCard,
   Landmark,
@@ -861,7 +862,7 @@ export function LegalEntityFinanceSection({
       <div className="grid gap-4 md:grid-cols-2">
         <label className="block">
           <span className="mb-2 block text-sm font-medium text-slate-700">Банк из справочника</span>
-          <select
+          <SystemSelect
             value={bankAccountForm.bankId}
             onChange={(event) => {
               const bank = getBankById(banks, event.target.value);
@@ -876,7 +877,7 @@ export function LegalEntityFinanceSection({
                 {bank.bik ? ` · ${bank.bik}` : ''}
               </option>
             ))}
-          </select>
+          </SystemSelect>
         </label>
 
         <label className="block">
@@ -913,7 +914,7 @@ export function LegalEntityFinanceSection({
 
         <label className="block">
           <span className="mb-2 block text-sm font-medium text-slate-700">Валюта</span>
-          <select
+          <SystemSelect
             value={bankAccountForm.currency}
             onChange={(event) => updateBankAccountForm({ currency: event.target.value })}
             className={SELECT_CLASS}
@@ -924,7 +925,7 @@ export function LegalEntityFinanceSection({
                 {currency}
               </option>
             ))}
-          </select>
+          </SystemSelect>
         </label>
 
         <label className="block">
@@ -940,7 +941,7 @@ export function LegalEntityFinanceSection({
 
         <label className="block">
           <span className="mb-2 block text-sm font-medium text-slate-700">Тип счета</span>
-          <select
+          <SystemSelect
             value={bankAccountForm.accountType}
             onChange={(event) => updateBankAccountForm({ accountType: event.target.value })}
             className={SELECT_CLASS}
@@ -950,7 +951,7 @@ export function LegalEntityFinanceSection({
                 {item}
               </option>
             ))}
-          </select>
+          </SystemSelect>
         </label>
 
         <label className="block">
@@ -1008,7 +1009,7 @@ export function LegalEntityFinanceSection({
 
         <label className="block">
           <span className="mb-2 block text-sm font-medium text-slate-700">Валюта</span>
-          <select
+          <SystemSelect
             value={cashRegisterForm.currency}
             onChange={(event) => updateCashRegisterForm({ currency: event.target.value })}
             className={SELECT_CLASS}
@@ -1019,7 +1020,7 @@ export function LegalEntityFinanceSection({
                 {currency}
               </option>
             ))}
-          </select>
+          </SystemSelect>
         </label>
 
         <label className="block md:col-span-2">
@@ -1035,7 +1036,7 @@ export function LegalEntityFinanceSection({
 
         <label className="block">
           <span className="mb-2 block text-sm font-medium text-slate-700">Тип</span>
-          <select
+          <SystemSelect
             value={cashRegisterForm.accountType}
             onChange={(event) =>
               updateCashRegisterForm({
@@ -1050,7 +1051,7 @@ export function LegalEntityFinanceSection({
                 {item}
               </option>
             ))}
-          </select>
+          </SystemSelect>
         </label>
 
         <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
@@ -1102,7 +1103,7 @@ export function LegalEntityFinanceSection({
       <div className="grid gap-4 md:grid-cols-2">
         <label className="block">
           <span className="mb-2 block text-sm font-medium text-slate-700">Банк из справочника</span>
-          <select
+          <SystemSelect
             value={cardForm.bankId}
             onChange={(event) => {
               const bank = getBankById(banks, event.target.value);
@@ -1117,7 +1118,7 @@ export function LegalEntityFinanceSection({
                 {bank.bik ? ` · ${bank.bik}` : ''}
               </option>
             ))}
-          </select>
+          </SystemSelect>
         </label>
 
         <label className="block">
@@ -1144,7 +1145,7 @@ export function LegalEntityFinanceSection({
 
         <label className="block">
           <span className="mb-2 block text-sm font-medium text-slate-700">Валюта</span>
-          <select
+          <SystemSelect
             value={cardForm.currency}
             onChange={(event) => updateCardForm({ currency: event.target.value })}
             className={SELECT_CLASS}
@@ -1155,7 +1156,7 @@ export function LegalEntityFinanceSection({
                 {currency}
               </option>
             ))}
-          </select>
+          </SystemSelect>
         </label>
 
         <label className="block">

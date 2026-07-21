@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useState } from 'react';
 import { RefreshCcw, Save } from 'lucide-react';
 import { apiService, type TaskJournalAutomationDiagnosticsDto, type TaskJournalSettingsDto } from '../../services/api';
@@ -398,7 +399,7 @@ export function TaskJournalSettings() {
 
           <label className="block">
             <span className="text-sm font-medium text-gray-700">Резервный исполнитель</span>
-            <select
+            <SystemSelect
               value={settings.caseInactivityDefaultAssigneeUserId ?? ''}
               onChange={(event) => setSettings((prev) => ({
                 ...prev,
@@ -411,7 +412,7 @@ export function TaskJournalSettings() {
               {assignees.map((assignee) => (
                 <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
               ))}
-            </select>
+            </SystemSelect>
             <span className="mt-1 block text-xs text-gray-500">Используется только если у дела, клиента или юрлица нет ответственного.</span>
           </label>
 
@@ -434,7 +435,7 @@ export function TaskJournalSettings() {
 
           <label className="block md:col-span-2">
             <span className="text-sm font-medium text-gray-700">Ответственный за эскалации</span>
-            <select
+            <SystemSelect
               value={settings.caseInactivityEscalationUserId ?? ''}
               onChange={(event) => setSettings((prev) => ({
                 ...prev,
@@ -447,7 +448,7 @@ export function TaskJournalSettings() {
               {assignees.map((assignee) => (
                 <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
               ))}
-            </select>
+            </SystemSelect>
             <span className="mt-1 block text-xs text-gray-500">Если дело превысило порог эскалации, этот пользователь добавится наблюдателем.</span>
           </label>
         </div>

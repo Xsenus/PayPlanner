@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { Archive, ArrowUpDown, Bookmark, Briefcase, ClipboardPlus, Download, Loader2, LockKeyhole, Pencil, Plus, Printer, RefreshCw, Search, Settings2, ShieldAlert, Trash2, UserRound, WalletCards } from 'lucide-react';
 
@@ -1532,7 +1533,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
               ))}
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <select
+              <SystemSelect
                 value={selectedSavedViewId}
                 onChange={(event) => selectSavedView(event.target.value)}
                 aria-label="Сохраненные представления"
@@ -1541,7 +1542,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
                 {savedViews.map((view) => (
                   <option key={view.id} value={view.id}>{view.name}</option>
                 ))}
-              </select>
+              </SystemSelect>
               <button
                 type="button"
                 onClick={saveCurrentView}
@@ -1577,9 +1578,9 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
                 placeholder="Поиск по делу, клиенту, суду"
               />
             </label>
-            <select value={status} onChange={(event) => setStatus(event.target.value)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm">
+            <SystemSelect value={status} onChange={(event) => setStatus(event.target.value)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm">
               {STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
+            </SystemSelect>
             <input
               list="case-types"
               value={caseType}
@@ -1590,16 +1591,16 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
             <datalist id="case-types">
               {typeOptions.map((type) => <option key={type} value={type} />)}
             </datalist>
-            <select value={responsibleUserId} onChange={(event) => setResponsibleUserId(event.target.value)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm">
+            <SystemSelect value={responsibleUserId} onChange={(event) => setResponsibleUserId(event.target.value)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm">
               <option value="">Все ответственные</option>
               {responsibles.map((responsible) => <option key={responsible.id} value={responsible.id}>{responsible.fullName}</option>)}
-            </select>
-            <select value={priority} onChange={(event) => setPriority(event.target.value)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm">
+            </SystemSelect>
+            <SystemSelect value={priority} onChange={(event) => setPriority(event.target.value)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm">
               {PRIORITY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
-            <select value={activityFilter} onChange={(event) => setActivityFilter(event.target.value as CaseActivityFilter)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm">
+            </SystemSelect>
+            <SystemSelect value={activityFilter} onChange={(event) => setActivityFilter(event.target.value as CaseActivityFilter)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm">
               {CASE_ACTIVITY_FILTER_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-            </select>
+            </SystemSelect>
           </div>
 
           <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-6">
@@ -1611,9 +1612,9 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
                 <input type="number" min="0" value={maxFee} onChange={(event) => setMaxFee(event.target.value)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm" placeholder="Гонорар до" />
               </>
             ) : null}
-            <select value={pageSize} onChange={(event) => setPageSize(Number(event.target.value))} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm">
+            <SystemSelect value={pageSize} onChange={(event) => setPageSize(Number(event.target.value))} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm">
               {[25, 50, 100, 200].map((size) => <option key={size} value={size}>{size} строк</option>)}
-            </select>
+            </SystemSelect>
             <button
               type="button"
               onClick={() => {
@@ -1715,7 +1716,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
                   <span>Долг: {formatCurrencySmart(selectedSummary.incomeOutstanding).full}</span>
                 </div>
               ) : null}
-              <select
+              <SystemSelect
                 value={bulkStatus}
                 onChange={(event) => setBulkStatus(event.target.value)}
                 className="h-10 rounded-lg border border-blue-100 bg-white px-3 text-sm">
@@ -1723,8 +1724,8 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
                 {STATUS_OPTIONS.filter((option) => option.value).map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
-              </select>
-              <select
+              </SystemSelect>
+              <SystemSelect
                 value={bulkResponsibleUserId}
                 onChange={(event) => setBulkResponsibleUserId(event.target.value)}
                 aria-label="Массово сменить ответственного"
@@ -1733,7 +1734,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
                 {responsibles.map((responsible) => (
                   <option key={responsible.id} value={responsible.id}>{responsible.fullName}</option>
                 ))}
-              </select>
+              </SystemSelect>
               <input
                 value={bulkStage}
                 onChange={(event) => setBulkStage(event.target.value)}
@@ -1741,7 +1742,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
                 placeholder="Не менять стадию"
                 className="h-10 rounded-lg border border-blue-100 bg-white px-3 text-sm"
               />
-              <select
+              <SystemSelect
                 value={bulkPriority}
                 onChange={(event) => setBulkPriority(event.target.value)}
                 aria-label="Массово сменить приоритет"
@@ -1750,8 +1751,8 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
                 {PRIORITY_OPTIONS.filter((option) => option.value).map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
-              </select>
-              <select
+              </SystemSelect>
+              <SystemSelect
                 value={bulkControlState}
                 onChange={(event) => setBulkControlState(event.target.value as 'keep' | 'on' | 'off')}
                 aria-label="Массово изменить контроль"
@@ -1759,7 +1760,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
                 <option value="keep">Не менять контроль</option>
                 <option value="on">Поставить на контроль</option>
                 <option value="off">Снять с контроля</option>
-              </select>
+              </SystemSelect>
               <button
                 type="button"
                 onClick={() => void applyBulkUpdate()}

@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { useEffect, useMemo, useState } from 'react';
 import { Loader2, Save, X } from 'lucide-react';
 import { apiService, type ContactDirectoryItemDto, type UpsertExternalContactRequestDto, type UpdateClientContactRequestDto } from '../../services/api';
@@ -227,7 +228,7 @@ export function ContactEditorModal({
                 Организация
                 {requiredMark(isRequired('LegalEntityId'))}
               </span>
-              <select
+              <SystemSelect
                 value={form.legalEntityId}
                 onChange={(event) => setForm((prev) => ({ ...prev, legalEntityId: event.target.value }))}
                 className="mt-1 w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
@@ -238,7 +239,7 @@ export function ContactEditorModal({
                     {item.shortName}
                   </option>
                 ))}
-              </select>
+              </SystemSelect>
             </label>
 
             <label className="block">
@@ -303,7 +304,7 @@ export function ContactEditorModal({
                   Ответственный
                   {requiredMark(isRequired('ResponsibleUserId'))}
                 </span>
-                <select
+                <SystemSelect
                   value={form.responsibleUserId}
                   onChange={(event) => setForm((prev) => ({ ...prev, responsibleUserId: event.target.value }))}
                   className="mt-1 w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
@@ -314,7 +315,7 @@ export function ContactEditorModal({
                       {item.fullName}
                     </option>
                   ))}
-                </select>
+                </SystemSelect>
               </label>
             ) : (
               <div className="hidden md:block" />

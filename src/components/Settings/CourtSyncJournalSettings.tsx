@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ExternalLink, RefreshCw, Search } from 'lucide-react';
 import { apiService } from '../../services/api';
@@ -118,7 +119,7 @@ export function CourtSyncJournalSettings() {
       </div>
 
       <div className="mt-5 flex flex-col gap-3 lg:flex-row lg:items-center">
-        <select
+        <SystemSelect
           value={statusFilter}
           onChange={(event) => setStatusFilter(event.target.value)}
           aria-label="Статус судебной синхронизации"
@@ -127,7 +128,7 @@ export function CourtSyncJournalSettings() {
           {STATUS_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>{option.label}</option>
           ))}
-        </select>
+        </SystemSelect>
         <div className="flex min-w-0 flex-1 gap-2">
           <div className="relative min-w-0 flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />

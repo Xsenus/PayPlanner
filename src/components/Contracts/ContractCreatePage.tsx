@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { ArrowLeft, Loader2, Plus, Save, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
@@ -321,7 +322,7 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-slate-700">Режим договора</span>
-              <select
+              <SystemSelect
                 value={form.billingMode}
                 onChange={(e) =>
                   setForm((prev) => ({
@@ -334,11 +335,11 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
               >
                 <option value="Fixed">Фиксированная сумма</option>
                 <option value="Actual">Оплата по факту</option>
-              </select>
+              </SystemSelect>
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-slate-700">Статус документа</span>
-              <select
+              <SystemSelect
                 value={form.status}
                 onChange={(e) => setForm((prev) => ({ ...prev, status: e.target.value as ContractStatus }))}
                 className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
@@ -354,7 +355,7 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
                 <option value="Concluded">Подписан клиентом</option>
                 <option value="Terminated">Расторгнут</option>
                 <option value="Cancelled">Аннулирован</option>
-              </select>
+              </SystemSelect>
             </label>
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-slate-700">Действует до</span>

@@ -1,3 +1,4 @@
+import { SystemSelect } from './SystemSelect';
 import { Building2, Check, ChevronLeft, ChevronRight, Loader2, Search, UserRoundSearch, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
@@ -458,7 +459,7 @@ export function CounterpartyPickerModal({
         <div className="flex flex-col gap-3 border-t border-slate-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
             <span>Найдено: {total}</span>
-            <select
+            <SystemSelect
               value={pageSize}
               onChange={(event) => setPageSize(Number(event.target.value))}
               className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-sm text-slate-700"
@@ -468,7 +469,7 @@ export function CounterpartyPickerModal({
                   {option} строк
                 </option>
               ))}
-            </select>
+            </SystemSelect>
             {mode === 'multiple' && draftSelected.length > 0 ? (
               <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700">
                 Выбрано: {draftSelected.length}

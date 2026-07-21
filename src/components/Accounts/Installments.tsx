@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { AlertTriangle, ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, GripVertical, Loader2, Pencil, Plus, RotateCcw, Search, SlidersHorizontal, Trash2, WalletCards } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
@@ -343,12 +344,12 @@ export function Installments({ defaultType, lockType = false }: AccountsProps) {
           </div>
 
           <div>
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as 'all' | PaymentStatus)} className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200">
+            <SystemSelect value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as 'all' | PaymentStatus)} className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200">
               <option value="all">{t('allStatuses') ?? 'Все статусы'}</option>
               {STATUS_ORDER.map((status) => (
                 <option key={status} value={status}>{statusLabels[status]}</option>
               ))}
-            </select>
+            </SystemSelect>
           </div>
 
           <div className="relative min-w-[220px] flex-1">
@@ -379,9 +380,9 @@ export function Installments({ defaultType, lockType = false }: AccountsProps) {
               footer={
                 <div className="flex items-center gap-2 text-sm text-slate-600">
                   <span>{t('rowsPerPage') ?? 'Строк на странице'}</span>
-                  <select value={pageSize} onChange={(event) => setPageSize(Number(event.target.value) || pageSize)} className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700">
+                  <SystemSelect value={pageSize} onChange={(event) => setPageSize(Number(event.target.value) || pageSize)} className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700">
                     {PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size}</option>)}
-                  </select>
+                  </SystemSelect>
                 </div>
               }
             />

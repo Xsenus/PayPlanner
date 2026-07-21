@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Archive, Database, Download, Loader2, RefreshCw, Save, ShieldAlert, Trash2, UploadCloud } from 'lucide-react';
 import { apiService } from '../../services/api';
@@ -952,7 +953,7 @@ export function DatabaseMaintenanceSettings() {
                     <span className="mt-1 block text-gray-600">
                       Для SQLite доступны архив или прямая копия файла. Для PostgreSQL — custom backup или plain SQL.
                     </span>
-                    <select
+                    <SystemSelect
                       value={databaseBackupFormat}
                       onChange={(event) => setDatabaseBackupFormat(event.target.value)}
                       className="mt-3 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
@@ -960,7 +961,7 @@ export function DatabaseMaintenanceSettings() {
                       {(databaseBackupOverview?.availableFormats ?? []).map((item) => (
                         <option key={item.key} value={item.key}>{item.label}</option>
                       ))}
-                    </select>
+                    </SystemSelect>
                   </label>
 
                   <label className="rounded-2xl border border-gray-200 p-4 text-sm text-gray-700">

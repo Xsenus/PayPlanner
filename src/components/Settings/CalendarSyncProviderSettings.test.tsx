@@ -228,8 +228,8 @@ describe('CalendarSyncProviderSettings', () => {
 
     await screen.findByText('Модель синхронизации и конфликты');
     fireEvent.click(screen.getAllByLabelText(/Включить Google Calendar/i)[0]);
-    const syncModeSelect = screen.getAllByRole('combobox')
-      .find((element) => (element as HTMLSelectElement).value === 'notConfigured');
+    const syncModeSelect = Array.from(document.querySelectorAll('select'))
+      .find((element) => element.value === 'notConfigured');
     expect(syncModeSelect).toBeTruthy();
     fireEvent.change(syncModeSelect!, { target: { value: 'hybrid' } });
     fireEvent.click(screen.getAllByLabelText(/Dry-run на копии базы выполнен/i)[0]);

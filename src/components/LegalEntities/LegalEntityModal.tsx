@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -3223,7 +3224,7 @@ export function LegalEntityModal({
               </label>
               <label className="block text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Статус
-                <select
+                <SystemSelect
                   value={caseStatusFilter}
                   onChange={(event) =>
                     setCaseStatusFilter(
@@ -3237,7 +3238,7 @@ export function LegalEntityModal({
                   <option value="hold">Приостановлено</option>
                   <option value="closed">Закрыто</option>
                   <option value="lost">Проиграно</option>
-                </select>
+                </SystemSelect>
               </label>
             </div>
             {caseFilterBadges.length > 0 ? (
@@ -3910,7 +3911,7 @@ export function LegalEntityModal({
                 <label className="mb-2 block text-sm font-medium text-gray-700">
                   Ответственный
                 </label>
-                <select
+                <SystemSelect
                   name="responsibleUserId"
                   value={formState.responsibleUserId}
                   onChange={handleInputChange}
@@ -3923,13 +3924,13 @@ export function LegalEntityModal({
                       {item.fullName}
                     </option>
                   ))}
-                </select>
+                </SystemSelect>
               </div>
               <div>
                 <label className="mb-2 block text-sm font-medium text-gray-700">
                   Статус принадлежности
                 </label>
-                <select
+                <SystemSelect
                   name="clientStatusId"
                   value={formState.clientStatusId}
                   onChange={handleInputChange}
@@ -3942,7 +3943,7 @@ export function LegalEntityModal({
                       {status.name}
                     </option>
                   ))}
-                </select>
+                </SystemSelect>
                 {selectedLegalEntityClientStatus?.description ? (
                   <p className="mt-2 text-xs text-gray-500">
                     {selectedLegalEntityClientStatus.description}
@@ -4062,7 +4063,7 @@ export function LegalEntityModal({
                           </button>
                         ) : null}
                       </div>
-                      <select
+                      <SystemSelect
                         name={item.key}
                         value={value}
                         onChange={handleInputChange}
@@ -4078,7 +4079,7 @@ export function LegalEntityModal({
                             {opt.name}
                           </option>
                         ))}
-                      </select>
+                      </SystemSelect>
                     </div>
                   );
                 })}
@@ -4105,7 +4106,7 @@ export function LegalEntityModal({
                       </button>
                     ) : null}
                   </div>
-                  <select
+                  <SystemSelect
                     name="taxSystem"
                     value={formState.taxSystem}
                     onChange={handleInputChange}
@@ -4124,7 +4125,7 @@ export function LegalEntityModal({
                         {x.name}
                       </option>
                     ))}
-                  </select>
+                  </SystemSelect>
                 </div>
                 <div>
                   <div className="mb-2 flex items-center justify-between gap-2">
@@ -4144,7 +4145,7 @@ export function LegalEntityModal({
                       </button>
                     ) : null}
                   </div>
-                  <select
+                  <SystemSelect
                     name="taxSystemMode"
                     value={formState.taxSystemMode}
                     onChange={handleInputChange}
@@ -4164,7 +4165,7 @@ export function LegalEntityModal({
                         {x.name}
                       </option>
                     ))}
-                  </select>
+                  </SystemSelect>
                 </div>
                 {[
                   ["incomeTaxRate", "Ставка (доход)"],

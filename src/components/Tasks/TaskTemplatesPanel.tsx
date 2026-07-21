@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   CheckCircle2,
@@ -421,19 +422,19 @@ export function TaskTemplatesPanel({ assignees, canCreate, canEdit, canDelete, o
             className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
           />
         </label>
-        <select value={activeFilter} onChange={(event) => setActiveFilter(event.target.value as typeof activeFilter)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-blue-400">
+        <SystemSelect value={activeFilter} onChange={(event) => setActiveFilter(event.target.value as typeof activeFilter)} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-blue-400">
           <option value="active">Активные</option>
           <option value="all">Все</option>
           <option value="inactive">Скрытые</option>
-        </select>
-        <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value as TaskJournalType | 'all')} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-blue-400">
+        </SystemSelect>
+        <SystemSelect value={typeFilter} onChange={(event) => setTypeFilter(event.target.value as TaskJournalType | 'all')} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-blue-400">
           <option value="all">Все типы</option>
           {TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-        </select>
-        <select value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value as TaskJournalPriority | 'all')} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-blue-400">
+        </SystemSelect>
+        <SystemSelect value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value as TaskJournalPriority | 'all')} className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-blue-400">
           <option value="all">Все приоритеты</option>
           {PRIORITY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-        </select>
+        </SystemSelect>
       </div>
 
       {error ? <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
@@ -469,15 +470,15 @@ export function TaskTemplatesPanel({ assignees, canCreate, canEdit, canDelete, o
           <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <label className="space-y-1">
               <span className="text-xs font-semibold text-slate-500">Тип</span>
-              <select value={form.type} onChange={(event) => update('type', event.target.value as TaskJournalType)} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-400">
+              <SystemSelect value={form.type} onChange={(event) => update('type', event.target.value as TaskJournalType)} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-400">
                 {TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
+              </SystemSelect>
             </label>
             <label className="space-y-1">
               <span className="text-xs font-semibold text-slate-500">Приоритет</span>
-              <select value={form.priority} onChange={(event) => update('priority', event.target.value as TaskJournalPriority)} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-400">
+              <SystemSelect value={form.priority} onChange={(event) => update('priority', event.target.value as TaskJournalPriority)} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-400">
                 {PRIORITY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
+              </SystemSelect>
             </label>
             <label className="space-y-1">
               <span className="text-xs font-semibold text-slate-500">Длительность, мин.</span>
@@ -492,16 +493,16 @@ export function TaskTemplatesPanel({ assignees, canCreate, canEdit, canDelete, o
           <div className="mt-3 grid gap-3 lg:grid-cols-3">
             <label className="space-y-1">
               <span className="text-xs font-semibold text-slate-500">Исполнитель</span>
-              <select value={form.assigneeUserId} onChange={(event) => update('assigneeUserId', event.target.value)} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-400">
+              <SystemSelect value={form.assigneeUserId} onChange={(event) => update('assigneeUserId', event.target.value)} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-400">
                 <option value="">Не задан</option>
                 {assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.name}</option>)}
-              </select>
+              </SystemSelect>
             </label>
             <label className="space-y-1">
               <span className="text-xs font-semibold text-slate-500">Привязка</span>
-              <select value={form.bindingType} onChange={(event) => update('bindingType', event.target.value as TaskJournalTemplateBindingType)} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-400">
+              <SystemSelect value={form.bindingType} onChange={(event) => update('bindingType', event.target.value as TaskJournalTemplateBindingType)} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-400">
                 {BINDING_TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
+              </SystemSelect>
             </label>
             <label className="space-y-1">
               <span className="text-xs font-semibold text-slate-500">Ключ этапа или типа</span>
@@ -533,14 +534,14 @@ export function TaskTemplatesPanel({ assignees, canCreate, canEdit, canDelete, o
             <div className="rounded-lg border border-slate-200 bg-white p-3">
               <div className="text-xs font-semibold uppercase text-slate-500">Участники</div>
               <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                <select aria-label="Добавить согласующего в шаблон" defaultValue="" onChange={(event) => { addUserParticipant('approver', event.target.value); event.currentTarget.value = ''; }} className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm">
+                <SystemSelect aria-label="Добавить согласующего в шаблон" defaultValue="" onChange={(event) => { addUserParticipant('approver', event.target.value); event.currentTarget.value = ''; }} className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm">
                   <option value="">Добавить согласующего</option>
                   {assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.name}</option>)}
-                </select>
-                <select aria-label="Добавить наблюдателя в шаблон" defaultValue="" onChange={(event) => { addUserParticipant('observer', event.target.value); event.currentTarget.value = ''; }} className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm">
+                </SystemSelect>
+                <SystemSelect aria-label="Добавить наблюдателя в шаблон" defaultValue="" onChange={(event) => { addUserParticipant('observer', event.target.value); event.currentTarget.value = ''; }} className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm">
                   <option value="">Добавить наблюдателя</option>
                   {assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.name}</option>)}
-                </select>
+                </SystemSelect>
               </div>
               <div className="mt-2 flex gap-2">
                 <input value={form.observerName} onChange={(event) => update('observerName', event.target.value)} placeholder="Внешний наблюдатель" className="h-9 min-w-0 flex-1 rounded-lg border border-slate-200 px-2 text-sm" />

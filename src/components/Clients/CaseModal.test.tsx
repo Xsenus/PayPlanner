@@ -249,7 +249,7 @@ describe('CaseModal', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole('option', { name: 'Земцов Виктор Александрович' })).toBeTruthy();
+      expect(screen.getByText('Земцов Виктор Александрович', { selector: 'option' })).toBeTruthy();
     });
 
     fireEvent.change(screen.getByLabelText('Связанное лицо'), { target: { value: 'client:10' } });

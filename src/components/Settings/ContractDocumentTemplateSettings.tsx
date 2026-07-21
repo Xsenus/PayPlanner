@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { RotateCcw, Save } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { apiService, type InvoiceDocumentTemplateDto, type InvoiceDocumentTemplateSettingsDto } from '../../services/api';
@@ -140,7 +141,7 @@ export function ContractDocumentTemplateSettings() {
             <div className="grid gap-4 md:grid-cols-2">
               <label className="block">
                 <span className="text-sm font-medium text-gray-700">Активный шаблон</span>
-                <select
+                <SystemSelect
                   value={selectedKey}
                   onChange={(event) => {
                     const nextKey = event.target.value;
@@ -154,7 +155,7 @@ export function ContractDocumentTemplateSettings() {
                       {template.name}
                     </option>
                   ))}
-                </select>
+                </SystemSelect>
               </label>
 
               <label className="block">

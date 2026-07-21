@@ -1637,7 +1637,12 @@ describe('MoneyOperations integration', () => {
       expectAbortOptions(),
     );
 
-    await user.selectOptions(screen.getAllByRole('combobox')[0], 'Cash');
+    const journalSelects = Array.from(document.querySelectorAll('select'));
+    const sourceSelect = journalSelects.find((select) => Array.from(select.options).some((option) => option.value === 'Cash'));
+    const directionSelect = journalSelects.find((select) => Array.from(select.options).some((option) => option.value === 'Income'));
+    expect(sourceSelect).toBeTruthy();
+    expect(directionSelect).toBeTruthy();
+    await user.selectOptions(sourceSelect!, 'Cash');
 
     await waitFor(() =>
       expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
@@ -1646,7 +1651,7 @@ describe('MoneyOperations integration', () => {
       ),
     );
 
-    await user.selectOptions(screen.getAllByRole('combobox')[1], 'Income');
+    await user.selectOptions(directionSelect!, 'Income');
 
     await waitFor(() =>
       expect(getMoneyOperationsPagedMock).toHaveBeenLastCalledWith(
@@ -1724,7 +1729,7 @@ describe('MoneyOperations integration', () => {
     expect(await screen.findByText('Другой клиент')).toBeTruthy();
     expect(screen.queryByText('Онлайн клиент')).toBeNull();
 
-    expect(screen.getByRole('option', { name: 'Все кошельки' })).toBeTruthy();
+    expect(screen.getByText('Все кошельки', { selector: 'option' })).toBeTruthy();
   });
 
   it('applies direction and accounting filters to the money journal request', async () => {

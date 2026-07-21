@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { Ban, CalendarRange, CheckCircle2, FileCheck2, GripVertical, Loader2, Pencil, Plus, RotateCcw, Search, Send, SlidersHorizontal, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
@@ -844,7 +845,7 @@ export function Acts({
           </div>
           <label className="flex min-w-[200px] flex-col gap-1 text-sm">
             <span className="font-medium text-slate-700">{t('status') ?? 'Статус'}</span>
-            <select
+            <SystemSelect
               value={statusFilter}
               onChange={(event) => setStatusFilter(event.target.value === 'all' ? 'all' : (event.target.value as ActStatus))}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200">
@@ -854,11 +855,11 @@ export function Acts({
                   {statusLabels[status]}
                 </option>
               ))}
-            </select>
+            </SystemSelect>
           </label>
           <label className="flex min-w-[220px] flex-col gap-1 text-sm">
             <span className="font-medium text-slate-700">Статус документа</span>
-            <select
+            <SystemSelect
               value={workflowStatusFilter}
               onChange={(event) => setWorkflowStatusFilter(event.target.value === 'all' ? 'all' : (event.target.value as ActWorkflowStatus))}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200">
@@ -868,7 +869,7 @@ export function Acts({
                   {workflowStatusLabels[status]}
                 </option>
               ))}
-            </select>
+            </SystemSelect>
           </label>
         </div>
 
@@ -930,7 +931,7 @@ export function Acts({
               footer={
                 <div className="flex items-center gap-2 text-sm text-slate-600">
                   <span>{t('rowsPerPage') ?? 'Строк на странице'}</span>
-                  <select
+                  <SystemSelect
                     value={pageSize}
                     onChange={(event) => setPageSize(Number(event.target.value) || pageSize)}
                     className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700">
@@ -939,7 +940,7 @@ export function Acts({
                         {size}
                       </option>
                     ))}
-                  </select>
+                  </SystemSelect>
                 </div>
               }
             />

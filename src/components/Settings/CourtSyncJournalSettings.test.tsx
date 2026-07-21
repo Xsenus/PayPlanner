@@ -63,7 +63,7 @@ describe('CourtSyncJournalSettings', () => {
     render(<CourtSyncJournalSettings />);
     await screen.findByText('Земцов - суд');
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Статус судебной синхронизации' }), {
+    fireEvent.change(screen.getByLabelText('Статус судебной синхронизации'), {
       target: { value: 'external-sync-error' },
     });
     fireEvent.change(screen.getByPlaceholderText('Поиск по делу, суду, номеру или сообщению'), {

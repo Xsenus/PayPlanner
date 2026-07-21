@@ -625,7 +625,7 @@ describe('TaskJournal', () => {
     ]);
 
     const statusSelect = screen.getByLabelText('Статус');
-    expect(within(statusSelect).getByRole('option', { name: 'Просроченные' })).toBeTruthy();
+    expect(within(statusSelect).getByText('Просроченные', { selector: 'option' })).toBeTruthy();
 
     fireEvent.change(statusSelect, { target: { value: 'overdue' } });
 
@@ -716,8 +716,8 @@ describe('TaskJournal', () => {
       dueAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
     })]);
 
-    const statusSelect = screen.getAllByRole('combobox')
-      .find((element) => (element as HTMLSelectElement).value === 'new') as HTMLSelectElement | undefined;
+    const statusSelect = Array.from(document.querySelectorAll('select'))
+      .find((element) => element.value === 'new') as HTMLSelectElement | undefined;
     expect(statusSelect).toBeTruthy();
 
     fireEvent.change(statusSelect!, { target: { value: 'revision' } });
@@ -855,7 +855,7 @@ describe('TaskJournal', () => {
     expect(screen.getAllByText('Суд. заседание').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Встреча').length).toBeGreaterThan(0);
 
-    const typeFilterSelect = screen.getByRole('combobox', { name: 'Тип задачи' }) as HTMLSelectElement;
+    const typeFilterSelect = screen.getByLabelText('Тип задачи') as HTMLSelectElement;
     expect(Array.from(typeFilterSelect.options).map((option) => option.textContent)).toEqual(expect.arrayContaining([
       'Суд. заседание',
       'Встреча',
@@ -863,8 +863,7 @@ describe('TaskJournal', () => {
 
     await openNewTaskFormAsGlobalInternal();
 
-    const formTypeSelect = screen.getAllByRole('combobox')
-      .map((element) => element as HTMLSelectElement)
+    const formTypeSelect = Array.from(document.querySelectorAll('select'))
       .find((select) => (
         Array.from(select.options).some((option) => option.value === 'courtHearing') &&
         !Array.from(select.options).some((option) => option.value === 'all')
@@ -2491,14 +2490,14 @@ describe('TaskJournal', () => {
 
     const caseFilter = screen.getByTestId('task-case-filter') as HTMLSelectElement;
     expect(caseFilter.disabled).toBe(true);
-    expect(within(caseFilter).queryByRole('option', { name: 'БАНКРОТСТВО' })).toBeNull();
-    expect(within(caseFilter).queryByRole('option', { name: 'НАСЛЕДСТВО' })).toBeNull();
+    expect(within(caseFilter).queryByText('БАНКРОТСТВО', { selector: 'option' })).toBeNull();
+    expect(within(caseFilter).queryByText('НАСЛЕДСТВО', { selector: 'option' })).toBeNull();
 
     fireEvent.change(screen.getByTestId('task-counterparty-filter'), { target: { value: 'client:11' } });
 
     expect(caseFilter.disabled).toBe(false);
-    expect(within(caseFilter).queryByRole('option', { name: 'БАНКРОТСТВО' })).toBeNull();
-    expect(within(caseFilter).getByRole('option', { name: 'НАСЛЕДСТВО' })).toBeTruthy();
+    expect(within(caseFilter).queryByText('БАНКРОТСТВО', { selector: 'option' })).toBeNull();
+    expect(within(caseFilter).getByText('НАСЛЕДСТВО', { selector: 'option' })).toBeTruthy();
 
     fireEvent.change(caseFilter, { target: { value: '200' } });
 
@@ -2525,8 +2524,8 @@ describe('TaskJournal', () => {
 
     fireEvent.change(screen.getByTestId('task-counterparty-filter'), { target: { value: 'client:10' } });
     expect(caseFilter.value).toBe('all');
-    expect(within(caseFilter).getByRole('option', { name: 'БАНКРОТСТВО' })).toBeTruthy();
-    expect(within(caseFilter).queryByRole('option', { name: 'НАСЛЕДСТВО' })).toBeNull();
+    expect(within(caseFilter).getByText('БАНКРОТСТВО', { selector: 'option' })).toBeTruthy();
+    expect(within(caseFilter).queryByText('НАСЛЕДСТВО', { selector: 'option' })).toBeNull();
 
     apiMock.downloadTaskPlanningReport.mockClear();
     fireEvent.click(screen.getByRole('button', { name: 'Word' }));
@@ -2537,8 +2536,8 @@ describe('TaskJournal', () => {
     })));
 
     fireEvent.change(screen.getByTestId('task-counterparty-filter'), { target: { value: 'legal:20' } });
-    expect(within(caseFilter).getByRole('option', { name: 'КОРПОРАТИВНЫЙ СПОР' })).toBeTruthy();
-    expect(within(caseFilter).queryByRole('option', { name: 'БАНКРОТСТВО' })).toBeNull();
+    expect(within(caseFilter).getByText('КОРПОРАТИВНЫЙ СПОР', { selector: 'option' })).toBeTruthy();
+    expect(within(caseFilter).queryByText('БАНКРОТСТВО', { selector: 'option' })).toBeNull();
   });
 
   it('saves, applies and deletes custom task journal views', async () => {
@@ -2906,7 +2905,7 @@ describe('TaskJournal', () => {
 
     const row = (await screen.findByText('Ожидающая просроченная задача')).closest('tr');
     expect(row).not.toBeNull();
-    expect(within(row as HTMLTableRowElement).getByText('Ожидает')).toBeTruthy();
+    expect(within(row as HTMLTableRowElement).getByText('Ожидает', { selector: ':not(option)' })).toBeTruthy();
     expect(within(row as HTMLTableRowElement).getByText('Просрочена')).toBeTruthy();
   });
 
@@ -3155,7 +3154,7 @@ describe('TaskJournal', () => {
     fireEvent.focus(screen.getByRole('combobox', { name: 'Клиент' }));
     fireEvent.click(within(await screen.findByRole('listbox', { name: 'Клиент' })).getByRole('option', { name: /Иванов Иван Иванович/ }));
 
-    const caseSelect = screen.getByRole('combobox', { name: 'Дело' });
+    const caseSelect = screen.getByLabelText('Дело');
     const options = Array.from(caseSelect.querySelectorAll('option')).map((option) => option.textContent);
 
     expect(options).toContain('Открытое дело');

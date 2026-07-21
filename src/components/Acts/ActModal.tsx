@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { ArrowLeft, ChevronDown, Link2, Loader2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiService } from '../../services/api';
@@ -1544,7 +1545,7 @@ export function ActModal({
 
                 <label className="flex flex-col gap-1 text-sm">
                   <span className="font-medium text-slate-700">Статус документа</span>
-                  <select
+                  <SystemSelect
                     value={form.workflowStatus}
                     onChange={handleChange('workflowStatus')}
                     className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
@@ -1554,7 +1555,7 @@ export function ActModal({
                         {workflowStatusLabels[status]}
                       </option>
                     ))}
-                  </select>
+                  </SystemSelect>
                 </label>
 
                 <label className="flex flex-col gap-1 text-sm">

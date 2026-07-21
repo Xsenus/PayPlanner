@@ -1,3 +1,4 @@
+import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent } from 'react';
 import {
   Bold,
@@ -289,6 +290,8 @@ export function StickyNotes() {
     setSavingNoteIds(new Set());
     setNotes([]);
     setMembers([]);
+    setMemberCandidates([]);
+    setMemberUserId('');
     setSelectedNoteId(null);
     setDeletedNoteId(null);
     setColorPaletteNoteId(null);
@@ -1471,7 +1474,7 @@ export function StickyNotes() {
                   >
                     <ListChecks className="h-4 w-4" />
                   </button>
-                  <select
+                  <SystemSelect
                     value={currentFontSize}
                     onChange={(event) => setNoteFontSize(note, event.target.value)}
                     className="ml-auto h-8 rounded border border-slate-200 bg-white px-1 text-xs font-medium"
@@ -1481,7 +1484,7 @@ export function StickyNotes() {
                     {[10, 12, 14, 16, 18, 20, 24, 28].map((size) => (
                       <option key={size} value={size}>{size} пт</option>
                     ))}
-                  </select>
+                  </SystemSelect>
                 </div>
                 <div className="flex items-center gap-2 border-t border-slate-100 pt-2">
                   <Eye className="h-4 w-4 shrink-0 text-slate-500" />
@@ -1561,7 +1564,7 @@ export function StickyNotes() {
         <div className="mb-1 grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-1">
           <label className="flex min-w-0 items-center gap-1 rounded border border-black/10 bg-white/35 px-1.5 py-1 text-[10px] text-slate-600">
             <UserCheck className="h-3 w-3 shrink-0" />
-            <select
+            <SystemSelect
               value={note.assignedUserId ?? ''}
               onPointerDown={(event) => event.stopPropagation()}
               onChange={(event) => assignNote(note, event.target.value)}
@@ -1576,7 +1579,7 @@ export function StickyNotes() {
                   {candidate.displayName}
                 </option>
               ))}
-            </select>
+            </SystemSelect>
           </label>
           <label className="flex min-w-0 items-center gap-1 rounded border border-black/10 bg-white/35 px-1.5 py-1 text-[10px] text-slate-600">
             <CalendarClock className="h-3 w-3 shrink-0" />
@@ -1741,7 +1744,7 @@ export function StickyNotes() {
             </div>
             {activeBoard.canManageMembers ? (
               <div className="mt-2 space-y-2">
-                <select
+                <SystemSelect
                   aria-label="Сотрудник для доступа к доске"
                   value={memberUserId}
                   onChange={(event) => setMemberUserId(event.target.value)}
@@ -1753,9 +1756,9 @@ export function StickyNotes() {
                       {candidate.displayName}
                     </option>
                   ))}
-                </select>
+                </SystemSelect>
                 <div className="grid grid-cols-[1fr_auto] gap-2">
-                  <select
+                  <SystemSelect
                     aria-label="Роль участника доски"
                     value={memberRole}
                     onChange={(event) => setMemberRole(event.target.value as Exclude<StickyNoteBoardMemberRole, 'owner'>)}
@@ -1763,7 +1766,7 @@ export function StickyNotes() {
                   >
                     <option value="viewer">Просмотр</option>
                     <option value="editor">Редактор</option>
-                  </select>
+                  </SystemSelect>
                   <button
                     type="button"
                     onClick={upsertMember}
@@ -1825,7 +1828,7 @@ export function StickyNotes() {
             </label>
             <label className="relative">
               <Filter className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <select
+              <SystemSelect
                 aria-label="Фильтр заметок"
                 value={filter}
                 onChange={(event) => setFilter(event.target.value as NoteFilter)}
@@ -1838,7 +1841,7 @@ export function StickyNotes() {
                 {COLORS.map((item) => (
                   <option key={item.value} value={item.value}>{item.label}</option>
                 ))}
-              </select>
+              </SystemSelect>
             </label>
             <button
               type="button"
@@ -1910,7 +1913,7 @@ export function StickyNotes() {
             </label>
             <label className="min-w-0">
               <span className="sr-only">Фон доски</span>
-              <select
+              <SystemSelect
                 aria-label="Фон доски"
                 value={boardBackground}
                 onChange={(event) => setBoardBackground(event.target.value as StickyNoteBoardBackground)}
@@ -1919,7 +1922,7 @@ export function StickyNotes() {
               >
                 <option value="cork">Пробковая доска</option>
                 <option value="gray">Серый фон</option>
-              </select>
+              </SystemSelect>
             </label>
             <div className="flex gap-2">
               <button
