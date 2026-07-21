@@ -323,6 +323,42 @@ public class InvoicesControllerCrudTests
     }
 
     [Fact]
+    public async Task Create_RejectsInternalClientTaskFromInvoice()
+    {
+        await using var db = await CreateContextAsync();
+        var actorUserId = await CreateUserAsync(db, "Internal Billing Admin", roleName: "admin");
+        var clientId = await CreateClientAsync(db, "Internal Billing Client");
+        var caseId = await CreateClientCaseAsync(db, clientId, "Internal Billing Case");
+        var task = new TaskJournalItem
+        {
+            ClientId = clientId,
+            ClientCaseId = caseId,
+            ObjectName = "Internal Billing Client - Internal Billing Case",
+            Title = "Unpaid client work",
+            AssigneeName = "Internal Billing Admin",
+            AuthorUserId = actorUserId,
+            AuthorName = "Internal Billing Admin",
+            DueAt = DateTime.UtcNow.AddDays(1),
+            ClientBillingClassification = TaskClientBillingClassification.Internal,
+            BillingDecisionAt = DateTime.UtcNow,
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var controller = CreateController(db, isAdmin: true, userId: actorUserId);
+        var request = CreateRequest("INV-INTERNAL-1", clientId, new DateTime(2026, 7, 21), 0m);
+        request.ClientCaseId = caseId;
+        request.ClientCaseIds = [caseId];
+        request.BillingTaskIds = [task.Id];
+
+        var action = await controller.Create(request, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(action.Result);
+        Assert.Contains("только ещё не выставленные платные задачи", Convert.ToString(badRequest.Value), StringComparison.OrdinalIgnoreCase);
+        Assert.Null((await db.TaskJournalItems.SingleAsync(item => item.Id == task.Id)).BillingInvoiceId);
+    }
+
+    [Fact]
     public async Task Create_RejectsInvoiceForTerminatedContract()
     {
         await using var db = await CreateContextAsync();

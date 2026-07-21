@@ -539,8 +539,49 @@ public class YandexCalendarSyncServiceTests
 
         Assert.Equal(2, result.ProcessedTasks);
         Assert.Equal(0, result.ErrorCount);
-        Assert.Single(handler.Requests.Where(request =>
-            string.Equals(request.Method.Method, "PROPFIND", StringComparison.Ordinal)));
+        Assert.Single(handler.Requests, request =>
+            string.Equals(request.Method.Method, "PROPFIND", StringComparison.Ordinal));
+        Assert.Equal(2, handler.Requests.Count(request => request.Method == HttpMethod.Put));
+    }
+
+    [Fact]
+    public async Task SyncNowAsync_LoadsCalendarHomeOnlyOnceForMultipleExistingCalendars()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateUserAsync(db, "admin-yandex-home-snapshot@example.com", "admin");
+        var firstAssignee = await CreateUserAsync(db, "first-yandex-home-snapshot@example.com", "first-user");
+        var secondAssignee = await CreateUserAsync(db, "second-yandex-home-snapshot@example.com", "second-user");
+        firstAssignee.FullName = "Первый сотрудник";
+        secondAssignee.FullName = "Второй сотрудник";
+        await db.SaveChangesAsync();
+        var connection = await CreateConnectionAsync(db, admin.Id, calendarMode: "adminByAssignee");
+        await CreateCalendarAsync(
+            db,
+            connection.Id,
+            "events-first",
+            "PayPlanner - Первый сотрудник",
+            firstAssignee.Id,
+            "https://caldav.yandex.ru/calendars/user/events-first/");
+        await CreateCalendarAsync(
+            db,
+            connection.Id,
+            "events-second",
+            "PayPlanner - Второй сотрудник",
+            secondAssignee.Id,
+            "https://caldav.yandex.ru/calendars/user/events-second/");
+        await CreateTaskAsync(db, firstAssignee.Id, "Задача первого сотрудника");
+        await CreateTaskAsync(db, secondAssignee.Id, "Задача второго сотрудника");
+        var handler = new RecordingYandexHandler(calendarHomeResponse: BuildYandexCalendarHomeResponseForCalendars(
+            ("/calendars/yandex%40example.com/events-first/", "PayPlanner - Первый сотрудник"),
+            ("/calendars/yandex%40example.com/events-second/", "PayPlanner - Второй сотрудник")));
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        var result = await service.SyncNowAsync(admin.Id, CreateHttpRequest(admin.Id, "admin"), CancellationToken.None);
+
+        Assert.Equal(2, result.ProcessedTasks);
+        Assert.Equal(0, result.ErrorCount);
+        Assert.Single(handler.Requests, request =>
+            string.Equals(request.Method.Method, "PROPFIND", StringComparison.Ordinal));
         Assert.Equal(2, handler.Requests.Count(request => request.Method == HttpMethod.Put));
     }
 
@@ -1140,6 +1181,37 @@ END:VCALENDAR
       <D:status>HTTP/1.1 200 OK</D:status>
     </D:propstat>
   </D:response>
+</D:multistatus>
+""";
+    }
+
+    private static string BuildYandexCalendarHomeResponseForCalendars(
+        params (string CalendarHref, string DisplayName)[] calendars)
+    {
+        var responses = string.Join(
+            Environment.NewLine,
+            calendars.Select(calendar => $"""
+  <D:response>
+    <D:href>{calendar.CalendarHref}</D:href>
+    <D:propstat>
+      <D:prop>
+        <D:displayname>{WebUtility.HtmlEncode(calendar.DisplayName)}</D:displayname>
+        <D:resourcetype>
+          <D:collection />
+          <C:calendar />
+        </D:resourcetype>
+        <C:supported-calendar-component-set>
+          <C:comp name="VEVENT" />
+        </C:supported-calendar-component-set>
+      </D:prop>
+      <D:status>HTTP/1.1 200 OK</D:status>
+    </D:propstat>
+  </D:response>
+"""));
+        return $"""
+<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+{responses}
 </D:multistatus>
 """;
     }

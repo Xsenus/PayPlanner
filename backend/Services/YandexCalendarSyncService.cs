@@ -43,6 +43,9 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
     private readonly ILogger<YandexCalendarSyncService> _logger;
     private readonly HashSet<string> _calendarTimeZoneEnsured = [];
     private readonly HashSet<string> _calendarUrlsRefreshed = [];
+    private readonly Dictionary<string, IReadOnlyList<YandexCalendarCreateResult>> _calendarHomeSnapshots = new(StringComparer.Ordinal);
+    private readonly Dictionary<int, DataVisibilityAccess?> _calendarVisibilityByUser = [];
+    private readonly Dictionary<int, TimeZoneInfo> _timeZonesByUser = [];
 
     public YandexCalendarSyncService(
         PaymentContext db,
@@ -885,8 +888,8 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         var calendar = await EnsureCalendarForTaskAsync(connection, task, accessToken, cancellationToken);
         var timeZone = await ResolveTaskTimeZoneAsync(connection, null, task, cancellationToken);
         var crmHash = BuildCrmHash(task, timeZone);
-        var link = await _db.YandexCalendarTaskLinks
-            .FirstOrDefaultAsync(item => item.ConnectionId == connection.Id && item.TaskJournalItemId == task.Id, cancellationToken);
+        var link = connection.TaskLinks
+            .FirstOrDefault(item => item.TaskJournalItemId == task.Id);
 
         if (link is not null
             && string.Equals(link.LastCrmHash, crmHash, StringComparison.Ordinal)
@@ -1042,7 +1045,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             : "PayPlanner задачи";
 
         var calendar = connection.Calendars.FirstOrDefault(item => item.OwnerUserId == ownerUserId);
-        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, ownerUserId ?? connection.UserId, cancellationToken);
+        var timeZone = await ResolveUserTimeZoneAsync(ownerUserId ?? connection.UserId, cancellationToken);
         if (calendar is not null)
         {
             await RefreshYandexCalendarUrlAsync(accessToken, connection, calendar, cancellationToken);
@@ -1066,6 +1069,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         connection.DefaultCalendarId ??= created.Id;
         connection.DefaultCalendarName ??= name;
         await _db.SaveChangesAsync(cancellationToken);
+        _calendarUrlsRefreshed.Add($"{connection.Id}:{calendar.Id}");
         await AddLogAsync(connection.Id, calendar.Id, null, "system", "create-calendar", "success", $"В Яндекс.Календаре создан календарь «{name}».", null, cancellationToken);
         return calendar;
     }
@@ -1089,7 +1093,9 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         }
 
         var homeUrl = $"{CalDavBaseUrl}/calendars/{Uri.EscapeDataString(email)}/";
-        var discovered = await ResolveYandexCalendarByNameAsync(accessToken, homeUrl, calendar.Name, cancellationToken);
+        var snapshotKey = $"{connection.Id}:{homeUrl}";
+        var calendars = await LoadYandexCalendarSnapshotAsync(snapshotKey, accessToken, homeUrl, cancellationToken);
+        var discovered = calendars.FirstOrDefault(item => string.Equals(item.Name, calendar.Name, StringComparison.Ordinal));
         if (discovered is null || string.Equals(calendar.CalendarUrl, discovered.Url, StringComparison.Ordinal))
         {
             return;
@@ -1180,7 +1186,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
                 : connection.UserId;
         }
 
-        return await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, ownerUserId ?? connection.UserId, cancellationToken);
+        return await ResolveUserTimeZoneAsync(ownerUserId ?? connection.UserId, cancellationToken);
     }
 
     private async Task<int> DeleteLinksOutsideSyncWindowAsync(YandexCalendarConnection connection, CancellationToken cancellationToken)
@@ -1573,7 +1579,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
             ?? throw new InvalidOperationException("Для Яндекс.Календаря не определён email пользователя.");
         var slug = $"payplanner-{(ownerUserId.HasValue ? $"user-{ownerUserId.Value}" : "tasks")}";
         var homeUrl = $"{CalDavBaseUrl}/calendars/{Uri.EscapeDataString(email)}/";
-        var existing = await ResolveYandexCalendarByNameAsync(accessToken, homeUrl, name, cancellationToken);
+        var existing = await TryResolveYandexCalendarByNameAsync(accessToken, homeUrl, name, cancellationToken);
         if (existing is not null)
         {
             return existing;
@@ -1643,6 +1649,29 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         string calendarHomeUrl,
         string name,
         CancellationToken cancellationToken)
+        => (await TryLoadYandexCalendarsAsync(accessToken, calendarHomeUrl, cancellationToken))?
+            .FirstOrDefault(item => string.Equals(item.Name, name, StringComparison.Ordinal));
+
+    private async Task<IReadOnlyList<YandexCalendarCreateResult>> LoadYandexCalendarSnapshotAsync(
+        string snapshotKey,
+        string accessToken,
+        string calendarHomeUrl,
+        CancellationToken cancellationToken)
+    {
+        if (_calendarHomeSnapshots.TryGetValue(snapshotKey, out var cached))
+        {
+            return cached;
+        }
+
+        var calendars = await TryLoadYandexCalendarsAsync(accessToken, calendarHomeUrl, cancellationToken) ?? [];
+        _calendarHomeSnapshots[snapshotKey] = calendars;
+        return calendars;
+    }
+
+    private async Task<IReadOnlyList<YandexCalendarCreateResult>?> TryLoadYandexCalendarsAsync(
+        string accessToken,
+        string calendarHomeUrl,
+        CancellationToken cancellationToken)
     {
         var body = """
 <?xml version="1.0" encoding="utf-8" ?>
@@ -1665,8 +1694,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         }
 
         var payload = await response.Content.ReadAsStringAsync(cancellationToken);
-        return ParseYandexCalendarHome(payload, calendarHomeUrl)
-            .FirstOrDefault(item => string.Equals(item.Name, name, StringComparison.Ordinal));
+        return ParseYandexCalendarHome(payload, calendarHomeUrl);
     }
 
     private async Task<bool> DeleteYandexCalendarAsync(string accessToken, string calendarUrl, CancellationToken cancellationToken)
@@ -2202,12 +2230,31 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         int userId,
         CancellationToken cancellationToken)
     {
+        if (_calendarVisibilityByUser.TryGetValue(userId, out var cached))
+        {
+            return cached;
+        }
+
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
         [
             new Claim(ClaimTypes.NameIdentifier, userId.ToString(CultureInfo.InvariantCulture)),
         ], "calendar-sync"));
 
-        return await _db.ResolveDataVisibilityAsync(principal, RolePermissionCatalog.Calendar, cancellationToken);
+        var visibility = await _db.ResolveDataVisibilityAsync(principal, RolePermissionCatalog.Calendar, cancellationToken);
+        _calendarVisibilityByUser[userId] = visibility;
+        return visibility;
+    }
+
+    private async Task<TimeZoneInfo> ResolveUserTimeZoneAsync(int userId, CancellationToken cancellationToken)
+    {
+        if (_timeZonesByUser.TryGetValue(userId, out var cached))
+        {
+            return cached;
+        }
+
+        var timeZone = await CalendarTimeZoneHelper.ResolveUserTimeZoneAsync(_db, userId, cancellationToken);
+        _timeZonesByUser[userId] = timeZone;
+        return timeZone;
     }
 
     private static bool IsAssigneeCalendarMode(

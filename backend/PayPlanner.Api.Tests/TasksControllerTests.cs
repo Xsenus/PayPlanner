@@ -925,6 +925,7 @@ public class TasksControllerTests
             ClientId = client.Id,
             ClientCaseId = null,
             ClientBillingClassification = TaskClientBillingClassification.Internal,
+            BillingContractId = 999_999,
             Title = "Неоплачиваемая задача клиента",
             DueAt = DateTime.UtcNow.AddHours(2),
         }, CancellationToken.None);

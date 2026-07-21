@@ -945,9 +945,11 @@ describe('TaskJournal', () => {
   });
 
   it.each([
-    { taskCardWindowMode: 'legacy' as const, caseId: null },
-    { taskCardWindowMode: 'modern' as const, caseId: '100' },
-  ])('creates an unpaid client task without a contract check in the $taskCardWindowMode card', async ({ taskCardWindowMode, caseId }) => {
+    { taskCardWindowMode: 'legacy' as const, legalEntity: false, caseId: null },
+    { taskCardWindowMode: 'modern' as const, legalEntity: false, caseId: '100' },
+    { taskCardWindowMode: 'legacy' as const, legalEntity: true, caseId: null },
+    { taskCardWindowMode: 'modern' as const, legalEntity: true, caseId: '200' },
+  ])('creates an unpaid counterparty task without a contract check in the $taskCardWindowMode card', async ({ taskCardWindowMode, legalEntity, caseId }) => {
     await renderJournal([], {
       waitForTitle: null,
       settings: { taskCardWindowMode },
@@ -960,7 +962,9 @@ describe('TaskJournal', () => {
     expect(unpaidButton.disabled).toBe(true);
 
     fireEvent.focus(screen.getByRole('combobox', { name: 'Клиент' }));
-    fireEvent.click(within(await screen.findByRole('listbox', { name: 'Клиент' })).getByRole('option', { name: /Иванов Иван Иванович/ }));
+    fireEvent.click(within(await screen.findByRole('listbox', { name: 'Клиент' })).getByRole('option', {
+      name: legalEntity ? /ООО Ромашка/ : /Иванов Иван Иванович/,
+    }));
     if (caseId) {
       fireEvent.change(screen.getByTestId('task-billing-wizard-case'), { target: { value: caseId } });
     }
@@ -980,9 +984,9 @@ describe('TaskJournal', () => {
     expect(apiMock.getTaskBillingContext).not.toHaveBeenCalled();
     expect(apiMock.createTaskJournalItem).toHaveBeenCalledWith(expect.objectContaining({
       isInternal: false,
-      clientId: 10,
-      legalEntityId: null,
-      clientCaseId: caseId ? 100 : null,
+      clientId: legalEntity ? null : 10,
+      legalEntityId: legalEntity ? 20 : null,
+      clientCaseId: caseId ? Number(caseId) : null,
       clientBillingClassification: 'internal',
       title: 'Бесплатная работа по клиенту',
     }));
@@ -2473,6 +2477,16 @@ describe('TaskJournal', () => {
         clientCaseId: 200,
         clientCaseTitle: 'НАСЛЕДСТВО',
       }),
+      createTask({
+        id: 103,
+        title: 'Задача по корпоративному спору',
+        clientId: null,
+        clientName: null,
+        legalEntityId: 20,
+        legalEntityName: 'ООО Ромашка',
+        clientCaseId: 300,
+        clientCaseTitle: 'КОРПОРАТИВНЫЙ СПОР',
+      }),
     ]);
 
     const caseFilter = screen.getByTestId('task-case-filter') as HTMLSelectElement;
@@ -2513,6 +2527,18 @@ describe('TaskJournal', () => {
     expect(caseFilter.value).toBe('all');
     expect(within(caseFilter).getByRole('option', { name: 'БАНКРОТСТВО' })).toBeTruthy();
     expect(within(caseFilter).queryByRole('option', { name: 'НАСЛЕДСТВО' })).toBeNull();
+
+    apiMock.downloadTaskPlanningReport.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Word' }));
+    await waitFor(() => expect(apiMock.downloadTaskPlanningReport).toHaveBeenCalledWith(expect.objectContaining({
+      clientId: 10,
+      legalEntityId: undefined,
+      clientCaseId: undefined,
+    })));
+
+    fireEvent.change(screen.getByTestId('task-counterparty-filter'), { target: { value: 'legal:20' } });
+    expect(within(caseFilter).getByRole('option', { name: 'КОРПОРАТИВНЫЙ СПОР' })).toBeTruthy();
+    expect(within(caseFilter).queryByRole('option', { name: 'БАНКРОТСТВО' })).toBeNull();
   });
 
   it('saves, applies and deletes custom task journal views', async () => {
