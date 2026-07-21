@@ -42,6 +42,7 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
     private readonly IExternalCalendarSyncCoordinator? _externalCalendarSyncCoordinator;
     private readonly ILogger<YandexCalendarSyncService> _logger;
     private readonly HashSet<string> _calendarTimeZoneEnsured = [];
+    private readonly HashSet<string> _calendarUrlsRefreshed = [];
 
     public YandexCalendarSyncService(
         PaymentContext db,
@@ -1075,6 +1076,12 @@ public sealed class YandexCalendarSyncService : IYandexCalendarSyncService
         YandexCalendarSyncCalendar calendar,
         CancellationToken cancellationToken)
     {
+        var refreshKey = $"{connection.Id}:{calendar.Id}";
+        if (!_calendarUrlsRefreshed.Add(refreshKey))
+        {
+            return;
+        }
+
         var email = NormalizeOptional(connection.YandexEmail);
         if (email is null)
         {

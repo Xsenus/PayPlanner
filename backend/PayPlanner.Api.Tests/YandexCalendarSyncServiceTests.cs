@@ -522,6 +522,29 @@ public class YandexCalendarSyncServiceTests
     }
 
     [Fact]
+    public async Task SyncNowAsync_RefreshesSharedYandexCalendarUrlOnlyOncePerRun()
+    {
+        await using var db = await CreateContextAsync();
+        var user = await CreateUserAsync(db, "executor-yandex-refresh-once@example.com", "user");
+        var connection = await CreateConnectionAsync(db, user.Id);
+        var calendar = await CreateCalendarAsync(db, connection.Id, "payplanner-tasks", "PayPlanner задачи");
+        await CreateTaskAsync(db, user.Id, "Первая задача общего календаря");
+        await CreateTaskAsync(db, user.Id, "Вторая задача общего календаря");
+        var handler = new RecordingYandexHandler(calendarHomeResponse: BuildYandexCalendarHomeResponse(
+            "/calendars/yandex%40example.com/events-shared/",
+            calendar.Name));
+        var service = CreateService(db, new FakeHttpClientFactory(handler));
+
+        var result = await service.SyncNowAsync(user.Id, CreateHttpRequest(user.Id), CancellationToken.None);
+
+        Assert.Equal(2, result.ProcessedTasks);
+        Assert.Equal(0, result.ErrorCount);
+        Assert.Single(handler.Requests.Where(request =>
+            string.Equals(request.Method.Method, "PROPFIND", StringComparison.Ordinal)));
+        Assert.Equal(2, handler.Requests.Count(request => request.Method == HttpMethod.Put));
+    }
+
+    [Fact]
     public async Task SyncNowAsync_AppliesYandexMoveAndWritesLocalTimeLog()
     {
         await using var db = await CreateContextAsync();
