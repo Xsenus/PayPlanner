@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -479,7 +480,7 @@ export function ContractModal({
               />
             </label>
             <label className="flex items-center gap-3 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
-              <input
+              <SystemCheckbox
                 type="checkbox"
                 checked={form.isOpenEnded}
                 onChange={(event) =>

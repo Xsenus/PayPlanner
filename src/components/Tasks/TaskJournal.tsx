@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -5893,7 +5894,7 @@ function TaskTable({
           <thead className="border-b border-slate-200 bg-slate-50">
             <tr className="text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
               <th className="w-10 px-2 py-4 sm:px-3 xl:w-12 xl:px-4">
-                <input
+                <SystemCheckbox
                   type="checkbox"
                   checked={allVisibleSelected}
                   disabled={selectableTaskIds.size === 0}
@@ -5971,7 +5972,7 @@ function TaskTable({
                   }`}
                 >
                   <td className="px-2 py-4 sm:px-3 xl:px-4">
-                    <input
+                    <SystemCheckbox
                       type="checkbox"
                       checked={selectedTaskIds.has(task.id)}
                       disabled={!canSelectTask}
@@ -9554,7 +9555,7 @@ function TaskModal({
                 </ModernTaskQuickField>
                 <ModernTaskQuickField icon={<WalletCards className="h-4 w-4" />} label="Оплата исполнителю">
                   <label className="flex items-start gap-2 rounded-lg border border-emerald-100 bg-emerald-50/70 px-2 py-2 text-sm text-slate-700">
-                    <input
+                    <SystemCheckbox
                       type="checkbox"
                       checked={Boolean(form.contractorPaymentEnabled)}
                       disabled={isReadOnly || !canUseContractorPayment}
@@ -9600,7 +9601,7 @@ function TaskModal({
                         />
                       </label>
                       <label className="flex items-center gap-2 rounded-lg border border-emerald-100 bg-white px-2 py-2 text-xs font-medium text-slate-700">
-                        <input
+                        <SystemCheckbox
                           type="checkbox"
                           checked={Boolean(form.contractorPaymentOnResult)}
                           onChange={(event) => {
@@ -9673,7 +9674,7 @@ function TaskModal({
               <section className="rounded-xl border border-slate-200 bg-white p-3">
                 <div className="mb-2 text-sm font-semibold text-slate-700">Связи</div>
                 <label className="mb-2 flex items-center gap-2 text-sm text-slate-600">
-                  <input
+                  <SystemCheckbox
                     type="checkbox"
                     checked={Boolean(form.isInternal)}
                     disabled={isReadOnly}
@@ -10079,7 +10080,7 @@ function TaskModal({
           ) : null}
 
           <label className="mb-5 flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-700">
-            <input
+            <SystemCheckbox
               type="checkbox"
               checked={Boolean(form.isInternal)}
               disabled={isReadOnly}
@@ -10251,7 +10252,7 @@ function TaskModal({
 
           <section className="mt-5 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4">
             <label className="flex items-start gap-3 text-sm text-slate-700">
-              <input
+              <SystemCheckbox
                 type="checkbox"
                 checked={Boolean(form.contractorPaymentEnabled)}
                 disabled={isReadOnly || !canUseContractorPayment}
@@ -10294,7 +10295,7 @@ function TaskModal({
                 </Field>
                 <div className="rounded-xl border border-emerald-100 bg-white px-3 py-3">
                   <label className="flex items-center gap-3 text-sm font-medium text-slate-700">
-                    <input
+                    <SystemCheckbox
                       type="checkbox"
                       checked={Boolean(form.contractorPaymentOnResult)}
                       onChange={(event) => {
@@ -10516,7 +10517,7 @@ function TaskModal({
                 <div className="grid gap-2 sm:grid-cols-2">
                   {REMINDER_OPTIONS.map((option) => (
                     <label key={option.value} className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700">
-                      <input type="checkbox" checked={form.reminders.includes(option.value)} disabled={isReadOnly} onChange={() => toggleArray('reminders', option.value)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                      <SystemCheckbox type="checkbox" checked={form.reminders.includes(option.value)} disabled={isReadOnly} onChange={() => toggleArray('reminders', option.value)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
                       {option.label}
                     </label>
                   ))}
@@ -10528,7 +10529,7 @@ function TaskModal({
                     const Icon = option.icon;
                     return (
                       <label key={option.value} className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700">
-                        <input type="checkbox" checked={form.channels.includes(option.value)} disabled={isReadOnly} onChange={() => toggleArray('channels', option.value)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                        <SystemCheckbox type="checkbox" checked={form.channels.includes(option.value)} disabled={isReadOnly} onChange={() => toggleArray('channels', option.value)} className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
                         <Icon className="h-4 w-4 text-slate-400" />
                         {option.label}
                       </label>

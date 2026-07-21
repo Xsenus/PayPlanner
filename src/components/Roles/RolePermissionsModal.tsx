@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -429,7 +430,7 @@ function PermissionToggle({
           : 'cursor-pointer hover:border-slate-300 hover:bg-slate-50'
       }`}
     >
-      <input
+      <SystemCheckbox
         type="checkbox"
         className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
         checked={checked}
@@ -1246,7 +1247,7 @@ export function RolePermissionsModal({
                                           checked ? 'bg-blue-50/60' : 'bg-white'
                                         }`}
                                       >
-                                        <input
+                                        <SystemCheckbox
                                           type="checkbox"
                                           checked={checked}
                                           onChange={() => toggleCalendarVisibleUser(user.id)}

@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Plus, Pencil, Trash2, Check, X, ShieldAlert } from 'lucide-react';
@@ -556,7 +557,7 @@ export const Dictionaries = () => {
 
           <div className="lg:col-span-2 flex items-center lg:pt-7">
             <label className="inline-flex items-center gap-2 cursor-pointer">
-              <input
+              <SystemCheckbox
                 type="checkbox"
                 checked={!!local.isActive}
                 onChange={(e) => set({ isActive: e.target.checked })}
@@ -585,7 +586,7 @@ export const Dictionaries = () => {
             {isDocumentStatusKind(kind) && (
               <div className="mb-3 flex flex-wrap gap-4 rounded-lg border border-slate-200 bg-white px-3 py-2">
                 <label className="inline-flex items-center gap-2 text-sm text-slate-700">
-                  <input
+                  <SystemCheckbox
                     type="checkbox"
                     checked={!!local.useForInvoices && isDocumentStatusScopeAllowed(local, 'invoice')}
                     disabled={!isDocumentStatusScopeAllowed(local, 'invoice')}
@@ -595,7 +596,7 @@ export const Dictionaries = () => {
                   Счета
                 </label>
                 <label className="inline-flex items-center gap-2 text-sm text-slate-700">
-                  <input
+                  <SystemCheckbox
                     type="checkbox"
                     checked={!!local.useForActs && isDocumentStatusScopeAllowed(local, 'act')}
                     disabled={!isDocumentStatusScopeAllowed(local, 'act')}
@@ -605,7 +606,7 @@ export const Dictionaries = () => {
                   Акты
                 </label>
                 <label className="inline-flex items-center gap-2 text-sm text-slate-700">
-                  <input
+                  <SystemCheckbox
                     type="checkbox"
                     checked={!!local.useForContracts && isDocumentStatusScopeAllowed(local, 'contract')}
                     disabled={!isDocumentStatusScopeAllowed(local, 'contract')}
@@ -727,7 +728,7 @@ export const Dictionaries = () => {
 
           <div className="lg:col-span-2 flex items-center lg:pt-7">
             <label className="inline-flex items-center gap-2 cursor-pointer">
-              <input
+              <SystemCheckbox
                 type="checkbox"
                 checked={!!local.isActive}
                 onChange={(e) => set({ isActive: e.target.checked })}
@@ -756,7 +757,7 @@ export const Dictionaries = () => {
             {isDocumentStatusKind(kind) && (
               <div className="mb-3 flex flex-wrap gap-4 rounded-lg border border-slate-200 bg-white px-3 py-2">
                 <label className="inline-flex items-center gap-2 text-sm text-slate-700">
-                  <input
+                  <SystemCheckbox
                     type="checkbox"
                     checked={!!local.useForInvoices && isDocumentStatusScopeAllowed(local, 'invoice')}
                     disabled={!isDocumentStatusScopeAllowed(local, 'invoice')}
@@ -766,7 +767,7 @@ export const Dictionaries = () => {
                   Счета
                 </label>
                 <label className="inline-flex items-center gap-2 text-sm text-slate-700">
-                  <input
+                  <SystemCheckbox
                     type="checkbox"
                     checked={!!local.useForActs && isDocumentStatusScopeAllowed(local, 'act')}
                     disabled={!isDocumentStatusScopeAllowed(local, 'act')}
@@ -776,7 +777,7 @@ export const Dictionaries = () => {
                   Акты
                 </label>
                 <label className="inline-flex items-center gap-2 text-sm text-slate-700">
-                  <input
+                  <SystemCheckbox
                     type="checkbox"
                     checked={!!local.useForContracts && isDocumentStatusScopeAllowed(local, 'contract')}
                     disabled={!isDocumentStatusScopeAllowed(local, 'contract')}

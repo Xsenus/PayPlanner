@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus, Pencil, Trash2, Check, X, Search } from 'lucide-react';
@@ -92,7 +93,7 @@ function Checkbox(props: {
   const { checked, onChange, id, label, disabled = false } = props;
   return (
     <label htmlFor={id} className={`inline-flex select-none items-center gap-2 ${disabled ? 'opacity-50' : ''}`}>
-      <input
+      <SystemCheckbox
         id={id}
         type="checkbox"
         className="h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"

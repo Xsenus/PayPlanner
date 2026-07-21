@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, Copy, Eye, FileText, Loader2, Plus, RefreshCw, Save, Search } from 'lucide-react';
 
@@ -392,7 +393,7 @@ export function CaseDocumentTemplateSettings() {
               </label>
 
               <label className="mt-4 flex items-center gap-2 text-sm font-medium text-gray-700">
-                <input
+                <SystemCheckbox
                   type="checkbox"
                   checked={selectedTemplate.isActive !== false}
                   onChange={(event) => updateSelectedTemplate({ isActive: event.target.checked })}

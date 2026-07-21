@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { CheckSquare, FileSpreadsheet, Loader2, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -562,7 +563,7 @@ export function SpreadsheetImportPreviewModal({
                     >
                       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                         <div className="flex gap-3">
-                          <input
+                          <SystemCheckbox
                             type="checkbox"
                             checked={checked}
                             disabled={!canSelectRow(row)}
@@ -656,7 +657,7 @@ export function SpreadsheetImportPreviewModal({
                                   }`}
                                 >
                                   <div className="flex items-start gap-3">
-                                    <input
+                                    <SystemCheckbox
                                       type="checkbox"
                                       checked={documentChecked}
                                       disabled={!canSelectRow(documentRow)}

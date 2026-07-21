@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
@@ -1315,7 +1316,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
     return (
       <article key={item.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex items-start gap-3">
-          <input
+          <SystemCheckbox
             type="checkbox"
             checked={selectedIdSet.has(item.id)}
             onChange={() => toggleSelected(item.id)}
@@ -1842,7 +1843,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
               <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
                 <tr>
                   <th className="w-12 px-4 py-3">
-                    <input
+                    <SystemCheckbox
                       type="checkbox"
                       checked={allPageSelected}
                       onChange={togglePageSelected}
@@ -1891,7 +1892,7 @@ export function CasesRegistry({ onOpenCase, onOpenClient, onOpenLegalEntity, onO
                       onContextMenu={(event) => openCaseContextMenu(event, item)}
                       className="align-top hover:bg-slate-50">
                       <td className="px-4 py-3">
-                        <input
+                        <SystemCheckbox
                           type="checkbox"
                           checked={selectedIdSet.has(item.id)}
                           onChange={() => toggleSelected(item.id)}

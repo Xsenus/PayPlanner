@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, RefreshCw, Save } from 'lucide-react';
 import { apiService } from '../../services/api';
@@ -101,7 +102,7 @@ export function CourtSyncSchedulerSettings() {
 
       <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_180px_180px]">
         <label className="flex min-h-[86px] items-center gap-3 rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3">
-          <input
+          <SystemCheckbox
             type="checkbox"
             checked={isEnabled}
             onChange={(event) => setIsEnabled(event.target.checked)}

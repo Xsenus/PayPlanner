@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { ArrowLeft, Loader2, Plus, Save, X } from 'lucide-react';
@@ -374,7 +375,7 @@ export function ContractCreatePage({ onBack, onCreated }: ContractCreatePageProp
               )}
             </label>
             <label className="flex items-center gap-3 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 sm:col-span-2">
-              <input
+              <SystemCheckbox
                 type="checkbox"
                 checked={form.isOpenEnded}
                 onChange={(e) =>

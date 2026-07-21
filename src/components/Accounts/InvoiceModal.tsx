@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -4510,7 +4511,7 @@ export function InvoiceModal({
                             </label>
 
                             <label className="inline-flex items-start gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
-                              <input
+                              <SystemCheckbox
                                 type="checkbox"
                                 checked={form.isNotForAccounting}
                                 onChange={handleBooleanChange('isNotForAccounting')}

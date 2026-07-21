@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useEffect, useMemo, useState } from 'react';
@@ -3260,7 +3261,7 @@ export function CaseDetailPage({
             <label className="flex h-full min-h-[58px] flex-col justify-between rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700">
               <span className="mb-2 block text-xs uppercase tracking-[0.12em] text-slate-400">Доступ</span>
               <span className="inline-flex items-center gap-2">
-                <input
+                <SystemCheckbox
                   type="checkbox"
                   aria-label="Скрыть дело от исполнителя"
                   checked={hiddenFromExecutorDraft}
@@ -3273,7 +3274,7 @@ export function CaseDetailPage({
             <label className="flex h-full min-h-[58px] flex-col justify-between rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700">
               <span className="mb-2 block text-xs uppercase tracking-[0.12em] text-slate-400">Автоконтроль</span>
               <span className="inline-flex items-center gap-2">
-                <input
+                <SystemCheckbox
                   type="checkbox"
                   aria-label="Учитывать дело в автоконтроле"
                   checked={inactivityRemindersDraft}
@@ -4047,11 +4048,11 @@ function CaseEditPage({
                 <SystemDateInput type="date" value={draft.dueDate} onChange={(event) => setField('dueDate', event.target.value)} className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm" />
               </label>
               <label className="flex min-h-[58px] items-center gap-3 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700">
-                <input type="checkbox" checked={draft.isHiddenFromExecutor} onChange={(event) => setField('isHiddenFromExecutor', event.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
+                <SystemCheckbox type="checkbox" checked={draft.isHiddenFromExecutor} onChange={(event) => setField('isHiddenFromExecutor', event.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
                 Скрыть от исполнителя
               </label>
               <label className="flex min-h-[58px] items-center gap-3 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700">
-                <input type="checkbox" checked={draft.inactivityRemindersEnabled} onChange={(event) => setField('inactivityRemindersEnabled', event.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
+                <SystemCheckbox type="checkbox" checked={draft.inactivityRemindersEnabled} onChange={(event) => setField('inactivityRemindersEnabled', event.target.checked)} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
                 Автоконтроль включен
               </label>
             </div>
@@ -6647,7 +6648,7 @@ function DocumentList({
             </SystemSelect>
           </label>
           <label className="flex items-end gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 lg:self-end">
-            <input
+            <SystemCheckbox
               type="checkbox"
               checked={latestOnly}
               onChange={(event) => setLatestOnly(event.target.checked)}

@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -3951,7 +3952,7 @@ export function LegalEntityModal({
                 ) : null}
               </div>
               <label className="flex items-start gap-3 rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2 text-sm text-gray-700">
-                <input
+                <SystemCheckbox
                   type="checkbox"
                   name="isClientAndSupplier"
                   checked={formState.isClientAndSupplier}
@@ -4208,7 +4209,7 @@ export function LegalEntityModal({
                   </div>
                 ))}
                 <label className="flex items-center gap-2 text-sm text-gray-700">
-                  <input
+                  <SystemCheckbox
                     type="checkbox"
                     name="vatWithoutVat"
                     checked={formState.vatWithoutVat}

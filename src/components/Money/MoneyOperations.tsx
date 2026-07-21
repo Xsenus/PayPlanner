@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
@@ -2052,7 +2053,7 @@ function MoneyOperationModal({
               />
             </label>
             <label className="flex items-center gap-2 text-sm text-slate-600">
-              <input
+              <SystemCheckbox
                 type="checkbox"
                 data-testid="money-advance-checkbox"
                 checked={form.isAdvancePayment}
@@ -4385,7 +4386,7 @@ export function MoneyOperations({
               </button>
               <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
                 <label className="inline-flex items-center gap-2">
-                  <input
+                  <SystemCheckbox
                     type="checkbox"
                     role="switch"
                     checked={bankAutoImportSettings.enabled}
@@ -4495,7 +4496,7 @@ export function MoneyOperations({
         <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3">
           <div className="grid gap-3 md:grid-cols-[auto_240px_auto_1fr]">
             <label className="flex items-center gap-2 text-sm font-medium text-amber-900">
-              <input
+              <SystemCheckbox
                 type="checkbox"
                 role="switch"
                 checked={cashLimitSettings.enabled}
@@ -4624,7 +4625,7 @@ export function MoneyOperations({
           </div>
 
           <label className="mt-3 inline-flex items-center gap-2 text-sm text-slate-600">
-            <input
+            <SystemCheckbox
               type="checkbox"
               checked={cashInventoryCreateCorrection}
               disabled={!canEditMoneyOperations}
@@ -4750,7 +4751,7 @@ export function MoneyOperations({
                     return (
                       <tr key={rule.id} className="align-top">
                         <td className="px-3 py-2">
-                          <input
+                          <SystemCheckbox
                             type="checkbox"
                             checked={rule.enabled}
                             onChange={(event) => updateBankCategoryRule(rule.id, { enabled: event.target.checked })}

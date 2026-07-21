@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -516,7 +517,7 @@ export function TaskTemplatesPanel({ assignees, canCreate, canEdit, canDelete, o
               <div className="mt-2 flex flex-wrap gap-2">
                 {REMINDER_OPTIONS.map((option) => (
                   <label key={option.value} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-2 py-1.5 text-sm text-slate-700">
-                    <input type="checkbox" checked={form.reminders.includes(option.value)} onChange={() => update('reminders', toggleValue(form.reminders, option.value))} />
+                    <SystemCheckbox type="checkbox" checked={form.reminders.includes(option.value)} onChange={() => update('reminders', toggleValue(form.reminders, option.value))} />
                     {option.label}
                   </label>
                 ))}
@@ -524,7 +525,7 @@ export function TaskTemplatesPanel({ assignees, canCreate, canEdit, canDelete, o
               <div className="mt-2 flex flex-wrap gap-2">
                 {CHANNEL_OPTIONS.map((option) => (
                   <label key={option.value} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-2 py-1.5 text-sm text-slate-700">
-                    <input type="checkbox" checked={form.channels.includes(option.value)} onChange={() => update('channels', toggleValue(form.channels, option.value))} />
+                    <SystemCheckbox type="checkbox" checked={form.channels.includes(option.value)} onChange={() => update('channels', toggleValue(form.channels, option.value))} />
                     {option.label}
                   </label>
                 ))}
@@ -571,7 +572,7 @@ export function TaskTemplatesPanel({ assignees, canCreate, canEdit, canDelete, o
               <input value={form.tagsText} onChange={(event) => update('tagsText', event.target.value)} className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-blue-400" />
             </label>
             <label className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700">
-              <input type="checkbox" checked={form.isActive} onChange={(event) => update('isActive', event.target.checked)} />
+              <SystemCheckbox type="checkbox" checked={form.isActive} onChange={(event) => update('isActive', event.target.checked)} />
               Активный шаблон
             </label>
           </div>

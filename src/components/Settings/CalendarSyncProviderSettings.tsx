@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { Activity, AlertTriangle, CalendarDays, CheckCircle2, ExternalLink, Filter, HelpCircle, Power, RefreshCw, Save, ShieldCheck, X } from 'lucide-react';
@@ -474,7 +475,7 @@ export function CalendarSyncProviderSettings() {
 
           <div className="mt-4 grid gap-2 md:grid-cols-2">
             <label className="flex items-start gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 text-xs text-gray-700">
-              <input
+              <SystemCheckbox
                 type="checkbox"
                 checked={draft.requireManualConfirmation}
                 onChange={(event) => updateDraft({ requireManualConfirmation: event.target.checked })}
@@ -486,7 +487,7 @@ export function CalendarSyncProviderSettings() {
               </span>
             </label>
             <label className="flex items-start gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 text-xs text-gray-700">
-              <input
+              <SystemCheckbox
                 type="checkbox"
                 checked={draft.dryRunConfirmed}
                 onChange={(event) => updateDraft({ dryRunConfirmed: event.target.checked })}
@@ -873,7 +874,7 @@ function ProviderToggle({
 }) {
   return (
     <label className={`flex items-start gap-3 rounded-2xl border px-4 py-4 ${checked ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
-      <input
+      <SystemCheckbox
         type="checkbox"
         checked={checked}
         onChange={(event) => onChange(event.target.checked)}

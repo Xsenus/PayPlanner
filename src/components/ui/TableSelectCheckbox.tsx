@@ -1,3 +1,4 @@
+import { SystemCheckbox } from './SystemCheckbox';
 import { useEffect, useRef, type InputHTMLAttributes } from 'react';
 
 interface TableSelectCheckboxProps
@@ -18,7 +19,7 @@ export function TableSelectCheckbox({
   }, [indeterminate]);
 
   return (
-    <input
+    <SystemCheckbox
       {...props}
       ref={inputRef}
       type="checkbox"

@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -610,7 +611,7 @@ export function Contacts({ initialScope = 'all', onScopeChange }: ContactsProps)
 
           <label className="flex items-end">
             <span className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
-              <input
+              <SystemCheckbox
                 type="checkbox"
                 checked={includeInactive}
                 onChange={(event) => setIncludeInactive(event.target.checked)}

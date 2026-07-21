@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
 import { Building2, CreditCard, Landmark, Pencil, Plus, Save, Trash2, WalletCards, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -435,7 +436,7 @@ export function MoneyAccountSettings() {
                 </label>
 
                 <label className="flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700">
-                  <input
+                  <SystemCheckbox
                     type="checkbox"
                     checked={form.isDefault}
                     onChange={(event) => setForm((prev) => ({ ...prev, isDefault: event.target.checked }))}
@@ -444,7 +445,7 @@ export function MoneyAccountSettings() {
                 </label>
 
                 <label className="flex items-center gap-2 rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700">
-                  <input
+                  <SystemCheckbox
                     type="checkbox"
                     checked={form.isActive}
                     onChange={(event) => setForm((prev) => ({ ...prev, isActive: event.target.checked }))}

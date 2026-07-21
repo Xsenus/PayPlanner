@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -676,15 +677,15 @@ export function UserDetailPage({ userId, onBack, onSaved, canOpenContractorPayme
                     </SystemSelect>
                   </label>
                   <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
-                    <input type="checkbox" checked={form.isActive} onChange={(event) => updateForm('isActive', event.target.checked)} disabled={administrativeFieldsDisabled} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
+                    <SystemCheckbox type="checkbox" checked={form.isActive} onChange={(event) => updateForm('isActive', event.target.checked)} disabled={administrativeFieldsDisabled} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
                     Пользователь активен
                   </label>
                   <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
-                    <input type="checkbox" checked={form.isEmployee} onChange={(event) => handleEmployeeToggle(event.target.checked)} disabled={administrativeFieldsDisabled} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
+                    <SystemCheckbox type="checkbox" checked={form.isEmployee} onChange={(event) => handleEmployeeToggle(event.target.checked)} disabled={administrativeFieldsDisabled} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
                     Учитывать как сотрудника
                   </label>
                   <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
-                    <input type="checkbox" checked={form.isExternalContractor} onChange={(event) => updateForm('isExternalContractor', event.target.checked)} disabled={administrativeFieldsDisabled} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
+                    <SystemCheckbox type="checkbox" checked={form.isExternalContractor} onChange={(event) => updateForm('isExternalContractor', event.target.checked)} disabled={administrativeFieldsDisabled} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
                     Привлеченный исполнитель
                   </label>
                   <LookupSelect
@@ -716,7 +717,7 @@ export function UserDetailPage({ userId, onBack, onSaved, canOpenContractorPayme
                     <span className="block text-xs leading-5 text-slate-500">Используется для задач во внутренних и внешних календарях.</span>
                   </label>
                   <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700 md:col-span-2">
-                    <input type="checkbox" checked={form.requiresFinancialActionReason} onChange={(event) => updateForm('requiresFinancialActionReason', event.target.checked)} disabled={administrativeFieldsDisabled} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
+                    <SystemCheckbox type="checkbox" checked={form.requiresFinancialActionReason} onChange={(event) => updateForm('requiresFinancialActionReason', event.target.checked)} disabled={administrativeFieldsDisabled} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
                     Требовать причину при действиях с финансовыми документами
                   </label>
                   <TextField label="Начало работы" type="date" value={form.employmentStartDate} onChange={(value) => updateForm('employmentStartDate', value)} disabled={administrativeFieldsDisabled} />

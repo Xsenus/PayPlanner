@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import {
@@ -962,7 +963,7 @@ export function ClientReconciliationAct({
                 key={key}
                 className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700"
               >
-                <input
+                <SystemCheckbox
                   type="checkbox"
                   checked={Boolean(draft[key as keyof ReconciliationDraft])}
                   onChange={(event) =>
@@ -1230,7 +1231,7 @@ export function ClientReconciliationAct({
         <div className="space-y-4 border-t border-slate-200 p-5">
           <div className="grid gap-3 md:grid-cols-2">
             <label className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700">
-              <input
+              <SystemCheckbox
                 type="checkbox"
                 checked={draft.noDisagreements}
                 onChange={(event) =>
@@ -1246,7 +1247,7 @@ export function ClientReconciliationAct({
               Расчёты проверены, разногласий нет
             </label>
             <label className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700">
-              <input
+              <SystemCheckbox
                 type="checkbox"
                 checked={draft.hasDisagreements}
                 onChange={(event) =>

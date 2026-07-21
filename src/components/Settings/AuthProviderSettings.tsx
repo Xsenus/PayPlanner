@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Copy, ExternalLink, Loader2, RefreshCw, Save } from 'lucide-react';
 import {
@@ -728,7 +729,7 @@ export function AuthProviderSettings() {
                   </label>
                 </div>
                 <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
-                  <input
+                  <SystemCheckbox
                     type="checkbox"
                     checked={settings.googleEnabled}
                     onChange={(event) => setSettings((current) => ({ ...current, googleEnabled: event.target.checked }))}
@@ -829,7 +830,7 @@ export function AuthProviderSettings() {
                   </label>
                 </div>
                 <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
-                  <input
+                  <SystemCheckbox
                     type="checkbox"
                     checked={settings.vkEnabled}
                     onChange={(event) => setSettings((current) => ({ ...current, vkEnabled: event.target.checked }))}
@@ -930,7 +931,7 @@ export function AuthProviderSettings() {
                   </label>
                 </div>
                 <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
-                  <input
+                  <SystemCheckbox
                     type="checkbox"
                     checked={settings.yandexEnabled}
                     onChange={(event) => setSettings((current) => ({ ...current, yandexEnabled: event.target.checked }))}
@@ -1011,7 +1012,7 @@ export function AuthProviderSettings() {
                   />
                 </label>
                 <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
-                  <input
+                  <SystemCheckbox
                     type="checkbox"
                     checked={settings.telegramEnabled}
                     onChange={(event) => setSettings((current) => ({ ...current, telegramEnabled: event.target.checked }))}
@@ -1088,7 +1089,7 @@ export function AuthProviderSettings() {
                 }
               >
                 <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
-                  <input
+                  <SystemCheckbox
                     type="checkbox"
                     checked={settings.telegramWidgetEnabled}
                     onChange={(event) => setSettings((current) => ({ ...current, telegramWidgetEnabled: event.target.checked }))}

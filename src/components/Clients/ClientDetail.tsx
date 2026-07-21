@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import {
@@ -6309,7 +6310,7 @@ export function ClientDetail({
                   )}
                 </div>
                 <label className="md:col-span-2 flex items-start gap-3 rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2 text-sm text-gray-700">
-                  <input
+                  <SystemCheckbox
                     type="checkbox"
                     name="isClientAndSupplier"
                     checked={clientFormState.isClientAndSupplier}
@@ -7593,7 +7594,7 @@ export function ClientDetail({
                 </div>
               </div>
               <div className="md:col-span-2 flex items-center gap-3">
-                <input
+                <SystemCheckbox
                   type="checkbox"
                   name="isActive"
                   checked={clientFormState.isActive}

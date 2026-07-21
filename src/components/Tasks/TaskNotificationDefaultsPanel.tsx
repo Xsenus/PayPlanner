@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import {
   ALL_TASK_NOTIFICATION_DEFAULTS,
   DEFAULT_TASK_NOTIFICATION_DEFAULTS,
@@ -47,7 +48,7 @@ export function TaskNotificationDefaultsPanel({ value, onChange, disabled = fals
           <div className="mt-3 grid gap-2 sm:grid-cols-2">
             {TASK_REMINDER_DEFAULT_OPTIONS.map((option) => (
               <label key={option.value} className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
-                <input
+                <SystemCheckbox
                   type="checkbox"
                   checked={normalized.reminders.includes(option.value)}
                   disabled={disabled}
@@ -65,7 +66,7 @@ export function TaskNotificationDefaultsPanel({ value, onChange, disabled = fals
           <div className="mt-3 grid gap-2 sm:grid-cols-3">
             {TASK_CHANNEL_DEFAULT_OPTIONS.map((option) => (
               <label key={option.value} className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
-                <input
+                <SystemCheckbox
                   type="checkbox"
                   checked={normalized.channels.includes(option.value)}
                   disabled={disabled}

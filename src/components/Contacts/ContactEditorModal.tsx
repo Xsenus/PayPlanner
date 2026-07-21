@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useEffect, useMemo, useState } from 'react';
 import { Loader2, Save, X } from 'lucide-react';
@@ -336,7 +337,7 @@ export function ContactEditorModal({
           <div className="mt-6 grid gap-3 md:grid-cols-2">
             {mode !== 'edit-client' ? (
               <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
-                <input
+                <SystemCheckbox
                   type="checkbox"
                   checked={form.isActive}
                   onChange={(event) => setForm((prev) => ({ ...prev, isActive: event.target.checked }))}
@@ -347,7 +348,7 @@ export function ContactEditorModal({
             ) : null}
 
             <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-700">
-              <input
+              <SystemCheckbox
                 type="checkbox"
                 checked={form.syncToPhonebook}
                 onChange={(event) => setForm((prev) => ({ ...prev, syncToPhonebook: event.target.checked }))}

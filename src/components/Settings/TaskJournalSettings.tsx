@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useState } from 'react';
 import { RefreshCcw, Save } from 'lucide-react';
@@ -190,7 +191,7 @@ export function TaskJournalSettings() {
         </div>
 
         <label className="flex items-start gap-3 rounded-2xl border border-gray-200 bg-white p-4 text-sm text-gray-700">
-          <input
+          <SystemCheckbox
             type="checkbox"
             checked={settings.restrictExecutorEditing}
             onChange={(event) => setSettings((prev) => ({ ...prev, restrictExecutorEditing: event.target.checked }))}
@@ -204,7 +205,7 @@ export function TaskJournalSettings() {
         </label>
 
         <label className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-gray-700">
-          <input
+          <SystemCheckbox
             type="checkbox"
             checked={settings.dailyOverdueReminderEnabled}
             onChange={(event) => setSettings((prev) => ({ ...prev, dailyOverdueReminderEnabled: event.target.checked }))}
@@ -256,7 +257,7 @@ export function TaskJournalSettings() {
               const checked = settings.executorCompletionAllowedUserIds.includes(assignee.id);
               return (
                 <label key={assignee.id} className="flex cursor-pointer items-start gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 hover:border-emerald-300">
-                  <input
+                  <SystemCheckbox
                     type="checkbox"
                     checked={checked}
                     onChange={(event) => setSettings((prev) => ({
@@ -282,7 +283,7 @@ export function TaskJournalSettings() {
         </section>
 
         <label className="flex items-start gap-3 rounded-2xl border border-gray-200 bg-white p-4 text-sm text-gray-700">
-          <input
+          <SystemCheckbox
             type="checkbox"
             checked={settings.allowExecutorDeadlineChangeRequests}
             onChange={(event) => setSettings((prev) => ({ ...prev, allowExecutorDeadlineChangeRequests: event.target.checked }))}
@@ -296,7 +297,7 @@ export function TaskJournalSettings() {
         </label>
 
         <label className="flex items-start gap-3 rounded-2xl border border-gray-200 bg-white p-4 text-sm text-gray-700">
-          <input
+          <SystemCheckbox
             type="checkbox"
             checked={settings.requireCompletionResult}
             onChange={(event) => setSettings((prev) => ({ ...prev, requireCompletionResult: event.target.checked }))}
@@ -328,7 +329,7 @@ export function TaskJournalSettings() {
         </label>
 
         <label className="flex items-start gap-3 rounded-2xl border border-gray-200 bg-white p-4 text-sm text-gray-700">
-          <input
+          <SystemCheckbox
             type="checkbox"
             checked={settings.allowAdminCompleteAnyTask}
             onChange={(event) => setSettings((prev) => ({ ...prev, allowAdminCompleteAnyTask: event.target.checked }))}
@@ -349,7 +350,7 @@ export function TaskJournalSettings() {
             <p className="mt-1 text-sm text-gray-500">Система сама создает контрольную задачу, если по делу давно не было задач, просмотра или ручного подтверждения активности.</p>
           </div>
           <label className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700">
-            <input
+            <SystemCheckbox
               type="checkbox"
               checked={settings.caseInactivityAutomationEnabled}
               onChange={(event) => setSettings((prev) => ({ ...prev, caseInactivityAutomationEnabled: event.target.checked }))}

@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -1032,7 +1033,7 @@ export function NotificationCenter({
           <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50/70 p-3">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <label className="flex cursor-pointer gap-3">
-                <input
+                <SystemCheckbox
                   type="checkbox"
                   checked={doNotDisturb.enabled}
                   onChange={(event) => {
@@ -1052,7 +1053,7 @@ export function NotificationCenter({
               </label>
 
               <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
-                <input
+                <SystemCheckbox
                   type="checkbox"
                   checked={doNotDisturb.allowCritical}
                   onChange={(event) => {
@@ -1106,7 +1107,7 @@ export function NotificationCenter({
                 />
               </label>
               <label className="flex items-center gap-2 rounded-lg border border-white bg-white px-3 py-2 text-xs font-medium text-slate-600">
-                <input
+                <SystemCheckbox
                   type="checkbox"
                   checked={doNotDisturb.muteWeekends}
                   onChange={(event) => {
@@ -1149,7 +1150,7 @@ export function NotificationCenter({
                           }`}
                         >
                           <label className="flex cursor-pointer gap-3">
-                            <input
+                            <SystemCheckbox
                               type="checkbox"
                               checked={isEnabled}
                               onChange={(event) => {
@@ -1195,7 +1196,7 @@ export function NotificationCenter({
                                     } ${isEnabled ? '' : 'cursor-not-allowed opacity-60'}`}
                                     title={`Канал: ${label}`}
                                   >
-                                    <input
+                                    <SystemCheckbox
                                       type="checkbox"
                                       checked={channelEnabled}
                                       disabled={!isEnabled}
@@ -1225,7 +1226,7 @@ export function NotificationCenter({
       <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
         <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 xl:hidden">
           <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
-            <input
+            <SystemCheckbox
               type="checkbox"
               checked={allPageSelected}
               disabled={loading || currentPageIds.length === 0}
@@ -1238,7 +1239,7 @@ export function NotificationCenter({
         </div>
         <div className="grid grid-cols-[3rem_minmax(0,1fr)_12rem_16rem] border-b border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500 max-xl:hidden">
           <div>
-            <input
+            <SystemCheckbox
               ref={pageSelectionRef}
               type="checkbox"
               checked={allPageSelected}
@@ -1285,7 +1286,7 @@ export function NotificationCenter({
                   }`}
                 >
                   <div className="flex items-start xl:pt-1">
-                    <input
+                    <SystemCheckbox
                       type="checkbox"
                       checked={selectedIds.has(item.id)}
                       onClick={(event) => event.stopPropagation()}

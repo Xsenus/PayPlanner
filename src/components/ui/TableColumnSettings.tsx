@@ -1,3 +1,4 @@
+import { SystemCheckbox } from './SystemCheckbox';
 import {
   ArrowDown,
   ArrowUp,
@@ -97,7 +98,7 @@ export function TableColumnSettings<K extends string>({
                 <GripVertical className="h-4 w-4" />
               </button>
 
-              <input
+              <SystemCheckbox
                 type="checkbox"
                 aria-label={`Показать колонку ${column.label}`}
                 checked={isVisible}

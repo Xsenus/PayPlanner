@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Bell, CalendarDays, ClipboardList, Cloud, Database, Flag, History, KeyRound, Save, Scale, ShieldCheck, SlidersHorizontal, Users } from 'lucide-react';
@@ -1328,7 +1329,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
                           </div>
 
                           <label className="flex items-start gap-3 rounded-xl border border-gray-200 px-4 py-3 text-sm text-gray-700">
-                            <input
+                            <SystemCheckbox
                               type="checkbox"
                               checked={contractRules.autoGenerateWhenEmpty}
                               onChange={(e) =>
@@ -1346,7 +1347,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
                           </label>
 
                           <label className="flex items-start gap-3 rounded-xl border border-gray-200 px-4 py-3 text-sm text-gray-700">
-                            <input
+                            <SystemCheckbox
                               type="checkbox"
                               checked={contractRules.allowManualNumberEdit}
                               onChange={(e) =>
@@ -1830,7 +1831,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
                                   const checked = requiredFieldKeys.has(id);
                                   return (
                                     <label key={id} className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm">
-                                      <input
+                                      <SystemCheckbox
                                         type="checkbox"
                                         checked={checked}
                                         disabled={requirementsLoading}
@@ -1856,7 +1857,7 @@ export function AppSettings({ initialSection }: AppSettingsProps = {}) {
               <>
                 <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-4">
                   <label className="flex items-start gap-3 text-sm text-gray-700">
-                    <input
+                    <SystemCheckbox
                       type="checkbox"
                       checked={validateWithDadata}
                       onChange={(event) => setValidateWithDadata(event.target.checked)}

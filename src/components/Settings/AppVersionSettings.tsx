@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { History, Loader2, Plus, Save, Trash2 } from 'lucide-react';
@@ -353,7 +354,7 @@ export function AppVersionSettings() {
             />
           </label>
           <label className="flex items-center gap-2 self-end rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
-            <input
+            <SystemCheckbox
               type="checkbox"
               checked={form.isActive}
               onChange={(event) => setForm((current) => ({ ...current, isActive: event.target.checked }))}

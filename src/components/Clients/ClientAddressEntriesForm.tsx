@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { Trash2 } from "lucide-react";
@@ -207,7 +208,7 @@ export function ClientAddressEntriesForm({
                     key={option.value}
                     className="inline-flex items-center gap-1 text-xs text-gray-700"
                   >
-                    <input
+                    <SystemCheckbox
                       type="checkbox"
                       checked={entry.additionalTypes.includes(option.value)}
                       onChange={() =>

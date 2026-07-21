@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
 import {
   CreditCard,
@@ -977,7 +978,7 @@ export function LegalEntityFinanceSection({
         </label>
 
         <label className="mt-2 inline-flex items-center gap-3 text-sm font-medium text-slate-700">
-          <input
+          <SystemCheckbox
             type="checkbox"
             checked={bankAccountForm.isForeignBank}
             onChange={(event) => updateBankAccountForm({ isForeignBank: event.target.checked })}
@@ -1057,7 +1058,7 @@ export function LegalEntityFinanceSection({
         <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
           <div className="grid gap-3 sm:grid-cols-3">
             <label className="inline-flex items-center gap-3 text-sm font-medium text-slate-700">
-              <input
+              <SystemCheckbox
                 type="checkbox"
                 checked={cashRegisterForm.isPrimary}
                 onChange={(event) =>
@@ -1071,7 +1072,7 @@ export function LegalEntityFinanceSection({
               Основная
             </label>
             <label className="inline-flex items-center gap-3 text-sm font-medium text-slate-700">
-              <input
+              <SystemCheckbox
                 type="checkbox"
                 checked={cashRegisterForm.isClosed}
                 onChange={(event) => updateCashRegisterForm({ isClosed: event.target.checked })}
@@ -1080,7 +1081,7 @@ export function LegalEntityFinanceSection({
               Касса закрыта
             </label>
             <label className="inline-flex items-center gap-3 text-sm font-medium text-slate-700">
-              <input
+              <SystemCheckbox
                 type="checkbox"
                 checked={cashRegisterForm.accountingEnabled}
                 onChange={(event) => updateCashRegisterForm({ accountingEnabled: event.target.checked })}
@@ -1226,7 +1227,7 @@ export function LegalEntityFinanceSection({
         </label>
 
         <label className="mt-2 inline-flex items-center gap-3 text-sm font-medium text-slate-700">
-          <input
+          <SystemCheckbox
             type="checkbox"
             checked={cardForm.accountingEnabled}
             onChange={(event) => updateCardForm({ accountingEnabled: event.target.checked })}

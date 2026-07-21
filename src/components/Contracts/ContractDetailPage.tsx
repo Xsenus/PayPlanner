@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import { AlertTriangle, ArrowLeft, Ban, Check, Download, FileText, FileX, GripVertical, Loader2, Mail, Pencil, Plus, Printer, Save, Send, Settings2, UploadCloud, X } from 'lucide-react';
@@ -1298,7 +1299,7 @@ export function ContractDetailPage({
         </label>
 
         <label className="flex items-center gap-3 rounded border px-3 py-2 text-sm md:col-span-2 lg:col-span-1">
-          <input
+          <SystemCheckbox
             type="checkbox"
             checked={contract.isOpenEnded}
             disabled={!editMode}
@@ -1793,7 +1794,7 @@ export function ContractDetailPage({
                         </td>
                       ))}
                       <td className="px-3 py-2 text-right">
-                        <input
+                        <SystemCheckbox
                           type="checkbox"
                           disabled={!editMode}
                           checked={(contract.invoiceIds ?? []).includes(item.id)}
@@ -2000,7 +2001,7 @@ export function ContractDetailPage({
                             typeof item.invoiceId === 'number' && (contract.invoiceIds ?? []).includes(item.invoiceId);
                           const checked = linkedViaInvoice || (contract.actIds ?? []).includes(item.id);
                           return (
-                            <input
+                            <SystemCheckbox
                               type="checkbox"
                               disabled={!editMode || linkedViaInvoice}
                               checked={checked}
@@ -2178,7 +2179,7 @@ export function ContractDetailPage({
                         </td>
                       ))}
                       <td className="px-3 py-2 text-right">
-                        <input
+                        <SystemCheckbox
                           type="checkbox"
                           disabled={!editMode}
                           checked={(contract.paymentIds ?? []).includes(item.id)}

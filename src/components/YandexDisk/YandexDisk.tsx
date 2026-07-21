@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
 import {
   ArrowLeft,
@@ -732,7 +733,7 @@ export function YandexDisk({ embedded = false }: YandexDiskProps = {}) {
                 <input value={draft.rootPath} onChange={(event) => setDraft((current) => ({ ...current, rootPath: event.target.value }))} placeholder="disk:/PayPlanner" autoComplete="off" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
               </label>
               <label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
-                <input type="checkbox" checked={draft.isEnabled} onChange={(event) => setDraft((current) => ({ ...current, isEnabled: event.target.checked }))} className="h-4 w-4 rounded border-slate-300 text-sky-600" />
+                <SystemCheckbox type="checkbox" checked={draft.isEnabled} onChange={(event) => setDraft((current) => ({ ...current, isEnabled: event.target.checked }))} className="h-4 w-4 rounded border-slate-300 text-sky-600" />
                 Включить подключение
               </label>
               <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 lg:col-span-2">
@@ -969,7 +970,7 @@ export function YandexDisk({ embedded = false }: YandexDiskProps = {}) {
 
         <div className="mt-5 grid gap-4 lg:grid-cols-2">
           <label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
-            <input type="checkbox" checked={crmSyncDraft.enabled} onChange={(event) => setCrmSyncDraft((draft) => ({ ...draft, enabled: event.target.checked }))} className="h-4 w-4 rounded border-slate-300 text-sky-600" />
+            <SystemCheckbox type="checkbox" checked={crmSyncDraft.enabled} onChange={(event) => setCrmSyncDraft((draft) => ({ ...draft, enabled: event.target.checked }))} className="h-4 w-4 rounded border-slate-300 text-sky-600" />
             Включить синхронизацию CRM-документов
           </label>
           {[
@@ -980,7 +981,7 @@ export function YandexDisk({ embedded = false }: YandexDiskProps = {}) {
             ['syncTaskFiles', 'Файлы задач'],
           ].map(([field, label]) => (
             <label key={field} className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700">
-              <input
+              <SystemCheckbox
                 type="checkbox"
                 checked={Boolean(crmSyncDraft[field as keyof UpdateYandexDiskCrmSyncSettingsRequest])}
                 onChange={(event) => setCrmSyncDraft((draft) => ({ ...draft, [field]: event.target.checked }))}

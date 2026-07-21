@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemDateInput } from '../ui/SystemDateInput';
 import { SystemSelect } from '../ui/SystemSelect';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -3129,7 +3130,7 @@ export function PaymentModal({
                           </div>
                           <div className="space-y-3 rounded-md border border-amber-200 bg-white/80 p-3 text-amber-900">
                             <label className="flex items-center gap-2 text-sm font-medium text-amber-900">
-                              <input
+                              <SystemCheckbox
                                 type="checkbox"
                                 checked={rescheduleRemainder}
                                 onChange={(e) => setRescheduleRemainder(e.target.checked)}
@@ -3316,11 +3317,11 @@ export function PaymentModal({
                     </div>
                     <div className="space-y-3 rounded-lg border border-gray-100 bg-gray-50/70 p-3">
                       <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-                        <input type="checkbox" name="isPaid" checked={formData.isPaid} onChange={handleChange} className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                        <SystemCheckbox type="checkbox" name="isPaid" checked={formData.isPaid} onChange={handleChange} className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
                         <span>{t('paymentReceived')}</span>
                       </label>
                       <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-                        <input type="checkbox" checked={syncDateWithPayment} onChange={(e) => { void handleSyncDateWithPaymentChange(e.target.checked); }} className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                        <SystemCheckbox type="checkbox" checked={syncDateWithPayment} onChange={(e) => { void handleSyncDateWithPaymentChange(e.target.checked); }} className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
                         <span>{t('syncExpectedWithFact') ?? 'Синхронизировать ожидаемую дату с фактической'}</span>
                       </label>
                     </div>

@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import { ArrowLeft, Bell, Bot, CheckCircle2, Link2, Mail, MessageSquare, Monitor, Pencil, Plus, RefreshCw, Save, Send, Smartphone, Trash2, Unlink } from 'lucide-react';
@@ -1125,7 +1126,7 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
                 </p>
               </div>
               <label className="inline-flex items-center gap-3 rounded-xl border border-gray-200 px-4 py-3 text-sm font-semibold text-gray-700">
-                <input
+                <SystemCheckbox
                   type="checkbox"
                   className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                   checked={settings?.email.contractTerminationClientEmailsEnabled ?? false}
@@ -1238,7 +1239,7 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
                               }`}
                             >
                               <label className="flex cursor-pointer gap-3">
-                                <input
+                                <SystemCheckbox
                                   type="checkbox"
                                   checked={isEnabled}
                                   disabled={!canEdit || !selectedRolePreference}
@@ -1284,7 +1285,7 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
                                       } ${isEnabled && canEdit ? '' : 'cursor-not-allowed opacity-60'}`}
                                       title={`Канал: ${label}`}
                                     >
-                                      <input
+                                      <SystemCheckbox
                                         type="checkbox"
                                         checked={channelEnabled}
                                         disabled={!canEdit || !isEnabled || !selectedRolePreference}
@@ -1357,7 +1358,7 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
                         <p className="mt-1 text-xs text-gray-500">{selectedTemplate.description}</p>
                       </div>
                       <label className="inline-flex items-center gap-2 text-sm font-semibold text-gray-700">
-                        <input
+                        <SystemCheckbox
                           type="checkbox"
                           className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                           checked={templateDraft.isEnabled}
@@ -1560,7 +1561,7 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
                   />
                 </label>
                 <label className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700">
-                  <input
+                  <SystemCheckbox
                     type="checkbox"
                     checked={form.isEnabled}
                     onChange={(event) => setForm((prev) => ({ ...prev, isEnabled: event.target.checked }))}
@@ -1575,7 +1576,7 @@ export function NotificationSettings({ canEdit = true }: NotificationSettingsPro
                 <div className="grid gap-2 md:grid-cols-2">
                   {purposes.map((purpose) => (
                     <label key={purpose.key} className="flex items-start gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700">
-                      <input
+                      <SystemCheckbox
                         type="checkbox"
                         checked={form.purposes.includes(purpose.key)}
                         onChange={() => togglePurpose(purpose.key)}
@@ -1726,7 +1727,7 @@ function SmsSettingsPanel({
 
       <div className="mt-5 grid gap-4 md:grid-cols-2">
         <label className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700">
-          <input
+          <SystemCheckbox
             type="checkbox"
             checked={form.enabled}
             disabled={!canEdit || saving}
@@ -2246,12 +2247,12 @@ function EmailFields({
         <input value={form.fromName} onChange={(event) => setForm((prev) => ({ ...prev, fromName: event.target.value }))} className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm" />
       </label>
       <label className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700">
-        <input type="checkbox" checked={form.enableSsl} onChange={(event) => setForm((prev) => ({ ...prev, enableSsl: event.target.checked }))} className="h-4 w-4 rounded border-gray-300 text-blue-600" />
+        <SystemCheckbox type="checkbox" checked={form.enableSsl} onChange={(event) => setForm((prev) => ({ ...prev, enableSsl: event.target.checked }))} className="h-4 w-4 rounded border-gray-300 text-blue-600" />
         SSL
       </label>
       {passwordSet && (
         <label className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700">
-          <input type="checkbox" checked={form.keepExistingPassword} onChange={(event) => setForm((prev) => ({ ...prev, keepExistingPassword: event.target.checked }))} className="h-4 w-4 rounded border-gray-300 text-blue-600" />
+          <SystemCheckbox type="checkbox" checked={form.keepExistingPassword} onChange={(event) => setForm((prev) => ({ ...prev, keepExistingPassword: event.target.checked }))} className="h-4 w-4 rounded border-gray-300 text-blue-600" />
           Оставить сохранённый пароль
         </label>
       )}
@@ -2296,7 +2297,7 @@ function TelegramFields({
       </label>
       {tokenSet && (
         <label className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700">
-          <input type="checkbox" checked={form.keepExistingToken} onChange={(event) => setForm((prev) => ({ ...prev, keepExistingToken: event.target.checked }))} className="h-4 w-4 rounded border-gray-300 text-blue-600" />
+          <SystemCheckbox type="checkbox" checked={form.keepExistingToken} onChange={(event) => setForm((prev) => ({ ...prev, keepExistingToken: event.target.checked }))} className="h-4 w-4 rounded border-gray-300 text-blue-600" />
           Оставить сохранённый token
         </label>
       )}
@@ -2324,7 +2325,7 @@ function TelegramFields({
       </label>
       {webhookSecretSet && (
         <label className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700">
-          <input
+          <SystemCheckbox
             type="checkbox"
             checked={form.keepExistingWebhookSecret}
             onChange={(event) => setForm((prev) => ({ ...prev, keepExistingWebhookSecret: event.target.checked }))}
@@ -2361,7 +2362,7 @@ function TelegramFields({
       </label>
       {proxyPasswordSet && (
         <label className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700">
-          <input
+          <SystemCheckbox
             type="checkbox"
             checked={form.keepExistingProxyPassword}
             onChange={(event) => setForm((prev) => ({ ...prev, keepExistingProxyPassword: event.target.checked }))}

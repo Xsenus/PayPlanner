@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Archive, Database, Download, Loader2, RefreshCw, Save, ShieldAlert, Trash2, UploadCloud } from 'lucide-react';
@@ -703,7 +704,7 @@ export function DatabaseMaintenanceSettings() {
 
               <div className="mt-5 space-y-4">
                 <label className="flex items-start gap-3 rounded-2xl border border-gray-200 p-4 text-sm text-gray-700">
-                  <input
+                  <SystemCheckbox
                     type="checkbox"
                     checked={userActivityLoggingEnabled}
                     onChange={(event) => setUserActivityLoggingEnabled(event.target.checked)}
@@ -992,7 +993,7 @@ export function DatabaseMaintenanceSettings() {
                     <span className="block font-medium text-gray-900">Автобэкапы</span>
                     <span className="mt-1 block text-gray-600">Фоновый сервис проверяет расписание и создает пропущенные копии.</span>
                     <div className="mt-4">
-                      <input
+                      <SystemCheckbox
                         type="checkbox"
                         checked={databaseBackupAutomaticEnabled}
                         onChange={(event) => setDatabaseBackupAutomaticEnabled(event.target.checked)}
@@ -1020,7 +1021,7 @@ export function DatabaseMaintenanceSettings() {
                   </div>
 
                   <label className="mt-4 flex items-start gap-3 text-sm text-slate-700">
-                    <input
+                    <SystemCheckbox
                       type="checkbox"
                       checked={databaseBackupS3UploadEnabled}
                       onChange={(event) => setDatabaseBackupS3UploadEnabled(event.target.checked)}
@@ -1044,7 +1045,7 @@ export function DatabaseMaintenanceSettings() {
                                 key={connection.id}
                                 className={`flex items-start gap-3 rounded-xl border bg-white px-3 py-2 text-sm ${disabled ? 'border-slate-200 opacity-60' : 'border-slate-200'}`}
                               >
-                                <input
+                                <SystemCheckbox
                                   type="checkbox"
                                   checked={databaseBackupS3ConnectionIds.includes(connection.id)}
                                   disabled={disabled}
@@ -1101,7 +1102,7 @@ export function DatabaseMaintenanceSettings() {
                   </div>
 
                   <label className="mt-4 flex items-start gap-3 text-sm text-slate-700">
-                    <input
+                    <SystemCheckbox
                       type="checkbox"
                       checked={databaseBackupYandexDiskUploadEnabled}
                       onChange={(event) => setDatabaseBackupYandexDiskUploadEnabled(event.target.checked)}

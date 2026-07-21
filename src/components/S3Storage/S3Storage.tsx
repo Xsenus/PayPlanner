@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
 import {
   ArrowLeft,
@@ -881,7 +882,7 @@ export function S3Storage({ embedded = false }: S3StorageProps = {}) {
               <div className="mt-5 grid gap-3 lg:grid-cols-2">
                 {draft.id ? (
                   <label className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                    <input
+                    <SystemCheckbox
                       type="checkbox"
                       checked={draft.clearSecret}
                       onChange={(event) => setDraft((current) => ({ ...current, clearSecret: event.target.checked, secretAccessKey: event.target.checked ? '' : current.secretAccessKey }))}
@@ -892,7 +893,7 @@ export function S3Storage({ embedded = false }: S3StorageProps = {}) {
                 ) : null}
 
                 <label className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                  <input
+                  <SystemCheckbox
                     type="checkbox"
                     checked={draft.isEnabled}
                     onChange={(event) => setDraft((current) => ({ ...current, isEnabled: event.target.checked }))}

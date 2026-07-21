@@ -1,3 +1,4 @@
+import { SystemCheckbox } from '../ui/SystemCheckbox';
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Loader2, Search, X } from 'lucide-react';
@@ -400,7 +401,7 @@ export function ClientModal({
             </div>
 
             <label className="flex items-start gap-3 rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2 text-sm text-gray-700">
-              <input
+              <SystemCheckbox
                 type="checkbox"
                 name="isClientAndSupplier"
                 checked={formData.isClientAndSupplier}
