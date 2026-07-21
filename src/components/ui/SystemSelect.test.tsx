@@ -79,4 +79,33 @@ describe('SystemSelect', () => {
     fireEvent.click(screen.getByRole('option', { name: 'Администратор' }));
     expect(onChange).not.toHaveBeenCalled();
   });
+
+  it('поддерживает многострочное оформление выбранного значения и пунктов', () => {
+    const renderPerson = () => (
+      <span>
+        <strong>Иванов Иван Иванович</strong>
+        <small>ivanov@example.com</small>
+      </span>
+    );
+
+    render(
+      <SystemSelect
+        aria-label="Исполнитель"
+        value="7"
+        renderValue={renderPerson}
+        renderOption={renderPerson}
+      >
+        <option value="7">Иванов Иван Иванович — ivanov@example.com</option>
+      </SystemSelect>,
+    );
+
+    const combobox = screen.getByRole('combobox');
+    expect(within(combobox).getByText('Иванов Иван Иванович')).toBeTruthy();
+    expect(within(combobox).getByText('ivanov@example.com')).toBeTruthy();
+
+    fireEvent.click(combobox);
+    const option = screen.getByRole('option', { name: 'Иванов Иван Иванович — ivanov@example.com' });
+    expect(within(option).getByText('Иванов Иван Иванович')).toBeTruthy();
+    expect(within(option).getByText('ivanov@example.com')).toBeTruthy();
+  });
 });

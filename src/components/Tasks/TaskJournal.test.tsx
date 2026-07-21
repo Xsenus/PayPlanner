@@ -3696,6 +3696,13 @@ describe('TaskJournal', () => {
     const selected = within(card).getByTestId('task-additional-assignees-list');
     expect(within(selected).getByText('Второй исполнитель')).toBeTruthy();
     expect(within(selected).getByText('Третий исполнитель')).toBeTruthy();
+    expect(within(selected).getByText('second@example.com')).toBeTruthy();
+    expect(within(selected).getByText('third@example.com')).toBeTruthy();
+
+    if (taskCardWindowMode === 'modern') {
+      expect(within(card).getByTestId('task-schedule-fields-row')).toBeTruthy();
+      expect(within(card).getByTestId('task-classification-fields-row')).toBeTruthy();
+    }
 
     fireEvent.click(within(selected).getByRole('button', { name: 'Удалить участника Второй исполнитель' }));
     expect(within(selected).queryByText('Второй исполнитель')).toBeNull();

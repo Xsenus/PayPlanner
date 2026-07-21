@@ -8800,7 +8800,7 @@ function TaskModal({
       ? 'flex w-full flex-col overflow-visible rounded-xl border border-slate-200 bg-white shadow-sm'
       : 'flex w-full flex-col overflow-visible rounded-2xl border border-slate-200 bg-white shadow-sm'
     : isModernChrome
-      ? 'flex max-h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl'
+      ? 'flex max-h-[94vh] w-full max-w-7xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl'
       : 'flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl';
   const headerClassName = isModernChrome
     ? 'flex flex-col gap-3 border-b border-slate-200 bg-slate-50/80 px-5 py-4 lg:flex-row lg:items-start lg:justify-between'
@@ -8810,14 +8810,29 @@ function TaskModal({
     : isModernChrome ? 'min-h-0 overflow-y-auto px-5 py-4' : 'min-h-0 overflow-y-auto px-6 py-5';
   const canEditResult = form.status === 'done';
   const statusOption = STATUS_OPTIONS.find((option) => option.value === form.status) ?? STATUS_OPTIONS[0];
-  const priorityOption = PRIORITY_OPTIONS.find((option) => option.value === form.priority) ?? PRIORITY_OPTIONS[1];
   const typeOption = TYPE_OPTIONS.find((option) => option.value === form.type) ?? TYPE_OPTIONS[0];
-  const dueAtText = form.dueAt ? formatDateTime(fromLocalInputValue(form.dueAt)) : 'Не задано';
+  const assigneesById = useMemo(
+    () => new Map(assignees.map((assignee) => [assignee.id, assignee])),
+    [assignees],
+  );
   const selectedCaseTitle = selectableClientCases.find((item) => item.id === form.clientCaseId)?.title ?? state?.task?.clientCaseTitle ?? '';
   const visibleAdditionalAssignees = getVisibleParticipantsByRole('assignee');
   const availableAdditionalAssignees = getAvailableAssigneesForRole('assignee');
   const visibleObservers = getVisibleParticipantsByRole('observer');
   const visibleApprovers = getVisibleParticipantsByRole('approver');
+  const renderAssigneeIdentity = (option: { value: string; label: ReactNode }) => {
+    const assignee = assigneesById.get(Number(option.value));
+    if (!assignee) {
+      return option.label;
+    }
+
+    return (
+      <span className="flex min-w-0 flex-col gap-0.5 leading-tight">
+        <span className="whitespace-normal break-words font-semibold text-slate-800">{assignee.name}</span>
+        {assignee.email ? <span className="break-all text-xs font-normal text-slate-500">{assignee.email}</span> : null}
+      </span>
+    );
+  };
   const renderAssigneeControl = (compact = false) => (
     <div className="space-y-2" data-testid="task-assignees-control">
       <SystemSelect
@@ -8826,13 +8841,17 @@ function TaskModal({
         disabled={isReadOnly}
         data-testid="task-assignee-select"
         aria-label="Основной исполнитель"
+        renderOption={renderAssigneeIdentity}
+        renderValue={renderAssigneeIdentity}
         className={compact
           ? 'w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white'
           : 'form-input'}
       >
         <option value="">Без привязки к пользователю</option>
         {assignees.map((assignee) => (
-          <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
+          <option key={assignee.id} value={assignee.id}>
+            {assignee.email ? `${assignee.name} — ${assignee.email}` : assignee.name}
+          </option>
         ))}
       </SystemSelect>
 
@@ -8840,12 +8859,19 @@ function TaskModal({
         <div className="space-y-1.5" data-testid="task-additional-assignees-list">
           {visibleAdditionalAssignees.map((participant, index) => {
             const participantName = getParticipantDisplayName(participant);
+            const participantEmail = participant.email
+              || (participant.userId ? assigneesById.get(participant.userId)?.email : '')
+              || '';
             return (
               <div
                 key={`assignee-direct-${participant.id ?? participant.userId ?? participantName}-${index}`}
-                className="flex items-center justify-between gap-2 rounded-lg border border-blue-100 bg-blue-50/70 px-2.5 py-2 text-sm"
+                className="flex items-center justify-between gap-3 rounded-lg border border-blue-100 bg-blue-50/70 px-2.5 py-2 text-sm"
+                data-testid="task-additional-assignee"
               >
-                <span className="min-w-0 truncate font-semibold text-slate-700">{participantName}</span>
+                <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
+                  <span className="whitespace-normal break-words font-semibold text-slate-800">{participantName}</span>
+                  {participantEmail ? <span className="break-all text-xs font-normal text-slate-500">{participantEmail}</span> : null}
+                </span>
                 {!isReadOnly ? (
                   <button
                     type="button"
@@ -8867,6 +8893,7 @@ function TaskModal({
         <SystemSelect
           aria-label="Добавить исполнителя"
           data-testid="task-assignee-add-select"
+          renderOption={renderAssigneeIdentity}
           value=""
           onChange={(event) => {
             const selected = assignees.find((assignee) => assignee.id === Number(event.target.value));
@@ -9362,7 +9389,7 @@ function TaskModal({
             </div>
           </div>
 
-          <div className={isPage ? 'grid gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_300px]' : 'grid min-h-0 gap-4 overflow-y-auto p-4 xl:grid-cols-[minmax(0,1fr)_300px]'}>
+          <div className={isPage ? 'grid gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_380px]' : 'grid min-h-0 gap-4 overflow-y-auto p-4 xl:grid-cols-[minmax(0,1fr)_380px]'}>
             <main className="min-w-0 space-y-4">
               <section className="space-y-3">
                 <div className="flex flex-wrap items-center gap-2">
@@ -9589,40 +9616,44 @@ function TaskModal({
                     </SystemSelect>
                   </ModernTaskQuickField>
                 ) : null}
-                <ModernTaskQuickField icon={<CalendarClock className="h-4 w-4" />} label="Дата">
-                  <SystemDateInput
-                    type="datetime-local"
-                    value={form.dueAt}
-                    onChange={(event) => update('dueAt', event.target.value)}
-                    disabled={isReadOnly}
-                    data-testid="task-due-at-input"
-                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white"
-                  />
-                  <div className="mt-1 text-xs text-slate-500">{dueAtText}</div>
-                </ModernTaskQuickField>
-                <ModernTaskQuickField icon={<Clock3 className="h-4 w-4" />} label="Длительность">
-                  <SystemSelect
-                    value={normalizeTaskDuration(form.plannedDurationMinutes)}
-                    onChange={(event) => update('plannedDurationMinutes', Number(event.target.value))}
-                    disabled={isReadOnly}
-                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white"
-                  >
-                    {[15, 30, 45, 60, 90, 120, 180, 240, 360, 480].map((minutes) => (
-                      <option key={minutes} value={minutes}>{formatDuration(minutes)}</option>
-                    ))}
-                  </SystemSelect>
-                </ModernTaskQuickField>
-                <ModernTaskQuickField icon={<TypeIcon className="h-4 w-4" />} label="Тип задачи">
-                  <SystemSelect value={form.type} onChange={(event) => update('type', event.target.value as TaskJournalType)} disabled={isReadOnly} className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white">
-                    {TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                  </SystemSelect>
-                </ModernTaskQuickField>
-                <ModernTaskQuickField icon={<Scale className="h-4 w-4" />} label="Приоритет">
-                  <SystemSelect value={form.priority} onChange={(event) => update('priority', event.target.value as TaskJournalPriority)} disabled={isReadOnly} className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white">
-                    {PRIORITY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                  </SystemSelect>
-                  <div className="mt-1 text-xs text-slate-500">{priorityOption.label}</div>
-                </ModernTaskQuickField>
+                <div className="grid grid-cols-2 items-start gap-3 rounded-xl bg-slate-50 p-2.5" data-testid="task-schedule-fields-row">
+                  <ModernTaskQuickField icon={<CalendarClock className="h-4 w-4" />} label="Дата" embedded>
+                    <SystemDateInput
+                      type="datetime-local"
+                      value={form.dueAt}
+                      onChange={(event) => update('dueAt', event.target.value)}
+                      disabled={isReadOnly}
+                      data-testid="task-due-at-input"
+                      displayClassName="text-center"
+                      showInlineClear={false}
+                      className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white"
+                    />
+                  </ModernTaskQuickField>
+                  <ModernTaskQuickField icon={<Clock3 className="h-4 w-4" />} label="Длительность" embedded>
+                    <SystemSelect
+                      value={normalizeTaskDuration(form.plannedDurationMinutes)}
+                      onChange={(event) => update('plannedDurationMinutes', Number(event.target.value))}
+                      disabled={isReadOnly}
+                      className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-center text-sm outline-none focus:border-blue-400 focus:bg-white"
+                    >
+                      {[15, 30, 45, 60, 90, 120, 180, 240, 360, 480].map((minutes) => (
+                        <option key={minutes} value={minutes}>{formatDuration(minutes)}</option>
+                      ))}
+                    </SystemSelect>
+                  </ModernTaskQuickField>
+                </div>
+                <div className="grid grid-cols-2 items-start gap-3 rounded-xl bg-slate-50 p-2.5" data-testid="task-classification-fields-row">
+                  <ModernTaskQuickField icon={<TypeIcon className="h-4 w-4" />} label="Тип задачи" embedded>
+                    <SystemSelect value={form.type} onChange={(event) => update('type', event.target.value as TaskJournalType)} disabled={isReadOnly} className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white">
+                      {TYPE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </SystemSelect>
+                  </ModernTaskQuickField>
+                  <ModernTaskQuickField icon={<Scale className="h-4 w-4" />} label="Приоритет" embedded>
+                    <SystemSelect value={form.priority} onChange={(event) => update('priority', event.target.value as TaskJournalPriority)} disabled={isReadOnly} className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white">
+                      {PRIORITY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </SystemSelect>
+                  </ModernTaskQuickField>
+                </div>
                 <ModernTaskQuickField icon={<WalletCards className="h-4 w-4" />} label="Оплата исполнителю">
                   <label className="flex items-start gap-2 rounded-lg border border-emerald-100 bg-emerald-50/70 px-2 py-2 text-sm text-slate-700">
                     <SystemCheckbox
@@ -10958,11 +10989,23 @@ function Field({ label, children, className = '' }: { label: string; children: R
   );
 }
 
-function ModernTaskQuickField({ icon, label, children }: { icon: ReactNode; label: string; children: ReactNode }) {
+function ModernTaskQuickField({
+  icon,
+  label,
+  children,
+  className = '',
+  embedded = false,
+}: {
+  icon: ReactNode;
+  label: string;
+  children: ReactNode;
+  className?: string;
+  embedded?: boolean;
+}) {
   return (
-    <div className="rounded-xl bg-slate-50 p-2">
-      <div className="mb-1.5 flex items-center gap-2 text-sm font-semibold text-slate-700">
-        <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-white text-slate-500 ring-1 ring-slate-200">
+    <div className={`${embedded ? 'min-w-0' : 'rounded-xl bg-slate-50 p-2'} ${className}`}>
+      <div className={`mb-1.5 flex items-center font-semibold text-slate-700 ${embedded ? 'justify-center gap-1.5 text-center text-xs' : 'gap-2 text-sm'}`}>
+        <span className={`inline-flex shrink-0 items-center justify-center rounded-lg bg-white text-slate-500 ring-1 ring-slate-200 ${embedded ? 'h-6 w-6' : 'h-7 w-7'}`}>
           {icon}
         </span>
         {label}

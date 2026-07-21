@@ -24,12 +24,22 @@ interface SelectOption {
   group?: string;
 }
 
+export interface SystemSelectOptionView {
+  value: string;
+  label: ReactNode;
+  searchLabel: string;
+  disabled: boolean;
+  group?: string;
+}
+
 export interface SystemSelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
   /** Enables search explicitly. By default it appears for lists longer than 12 items. */
   searchable?: boolean;
   searchPlaceholder?: string;
   emptyMessage?: string;
   menuClassName?: string;
+  renderOption?: (option: SystemSelectOptionView) => ReactNode;
+  renderValue?: (option: SystemSelectOptionView) => ReactNode;
 }
 
 interface MenuPosition {
@@ -133,6 +143,8 @@ export const SystemSelect = forwardRef<HTMLSelectElement, SystemSelectProps>(fun
     searchPlaceholder = 'Поиск по списку',
     emptyMessage = 'Ничего не найдено',
     menuClassName = '',
+    renderOption,
+    renderValue,
     id,
     title,
     ...nativeProps
@@ -348,7 +360,9 @@ export const SystemSelect = forwardRef<HTMLSelectElement, SystemSelectProps>(fun
     );
   }
 
-  const visibleLabel = selectedOption?.label ?? 'Выберите значение';
+  const visibleLabel = selectedOption
+    ? renderValue?.(selectedOption) ?? selectedOption.label
+    : 'Выберите значение';
   const ariaLabel = nativeProps['aria-label'];
   const activeDescendant = open && activeValue ? `${listboxId}-${encodeURIComponent(activeValue)}` : undefined;
 
@@ -424,7 +438,7 @@ export const SystemSelect = forwardRef<HTMLSelectElement, SystemSelectProps>(fun
         }}
         className={`flex min-h-[38px] max-w-full items-center justify-between gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-left text-sm text-slate-700 outline-none transition hover:border-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 ${className}`}
       >
-        <span className="min-w-0 flex-1 truncate">{visibleLabel}</span>
+        <span className={`min-w-0 flex-1 ${renderValue ? '' : 'truncate'}`}>{visibleLabel}</span>
         <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
 
@@ -516,6 +530,7 @@ export const SystemSelect = forwardRef<HTMLSelectElement, SystemSelectProps>(fun
                           id={`${listboxId}-${encodeURIComponent(option.value)}`}
                           type="button"
                           role="option"
+                          aria-label={option.searchLabel}
                           aria-selected={isSelected}
                           disabled={option.disabled}
                           title={option.searchLabel}
@@ -530,7 +545,9 @@ export const SystemSelect = forwardRef<HTMLSelectElement, SystemSelectProps>(fun
                                 : 'text-slate-700 hover:bg-slate-50'
                           }`}
                         >
-                          <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                          <span className={`min-w-0 flex-1 ${renderOption ? '' : 'truncate'}`}>
+                            {renderOption?.(option) ?? option.label}
+                          </span>
                           {isSelected ? <Check className="h-4 w-4 shrink-0 text-blue-600" /> : null}
                         </button>
                       </Fragment>

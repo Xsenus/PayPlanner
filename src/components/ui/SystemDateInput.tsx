@@ -17,6 +17,8 @@ type SupportedDateInputType = 'date' | 'datetime-local' | 'time';
 export interface SystemDateInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'type'> {
   type?: SupportedDateInputType;
   emptyLabel?: string;
+  displayClassName?: string;
+  showInlineClear?: boolean;
 }
 
 type MenuPosition = {
@@ -102,6 +104,8 @@ export const SystemDateInput = forwardRef<HTMLInputElement, SystemDateInputProps
     required,
     autoFocus = false,
     emptyLabel = 'Выберите дату',
+    displayClassName = '',
+    showInlineClear = true,
     'aria-label': ariaLabel,
     ...inputProps
   },
@@ -376,9 +380,11 @@ export const SystemDateInput = forwardRef<HTMLInputElement, SystemDateInputProps
           className,
         ].filter(Boolean).join(' ')}
       >
-        <span className={currentValue ? 'truncate' : 'truncate text-slate-400'}>{formatDisplayValue(currentValue, type, type === 'time' ? 'Выберите время' : emptyLabel)}</span>
+        <span className={`min-w-0 flex-1 truncate ${currentValue ? '' : 'text-slate-400'} ${displayClassName}`}>
+          {formatDisplayValue(currentValue, type, type === 'time' ? 'Выберите время' : emptyLabel)}
+        </span>
         <span className="flex shrink-0 items-center gap-1 text-slate-400">
-          {currentValue && !required && !readOnly ? (
+          {showInlineClear && currentValue && !required && !readOnly ? (
             <span
               aria-hidden="true"
               onClick={(event) => { event.stopPropagation(); clear(); }}
