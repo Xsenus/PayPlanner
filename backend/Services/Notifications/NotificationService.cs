@@ -557,62 +557,87 @@ public sealed class NotificationService : INotificationService
         DateTime nowUtc,
         CancellationToken cancellationToken = default)
     {
-        if (!task.AssigneeUserId.HasValue)
+        var recipientUserIds = ResolveTaskAssigneeUserIds(task);
+        if (recipientUserIds.Count == 0)
         {
             return Array.Empty<NotificationDelivery>();
         }
 
         var inAppEnabled = HasTaskChannel(task, NotificationChannels.InApp);
         var channels = ResolveTaskMessageChannels(task);
-        var recipientTimeZone = await ResolveTaskRecipientTimeZoneAsync(task.AssigneeUserId.Value, cancellationToken);
-
         var dueAt = DateTime.SpecifyKind(task.DueAt, DateTimeKind.Utc);
         var dueAtKey = dueAt.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
-        var eventKey = reminderKey == "dailyOverdue"
-            ? $"task:{task.Id}:reminder:{reminderKey}:{CalendarTimeZoneHelper.ToUserLocal(nowUtc, recipientTimeZone):yyyyMMdd}"
-            : $"task:{task.Id}:reminder:{reminderKey}:{dueAtKey}";
-
-        var reminderSubject = BuildTaskReminderSubject(task, reminderKey, nowUtc);
-        var reminderBody = BuildTaskReminderBody(task, reminderKey, nowUtc, recipientTimeZone);
-        var message = await RenderTemplateAsync(
-            NotificationTemplateKeys.TaskReminder,
-            reminderSubject,
-            reminderBody,
-            NotificationTemplateCatalog.MergeValues(
-                BuildTaskTemplateValues(task, recipientTimeZone),
-                new Dictionary<string, string?>
-                {
-                    ["reminder.subject"] = reminderSubject,
-                    ["reminder.body"] = reminderBody,
-                }),
-            purpose: NotificationPurposes.TaskReminder,
-            cancellationToken: cancellationToken);
-
-        if (inAppEnabled)
-        {
-            await CreateUserNotificationAsync(
-                task.AssigneeUserId.Value,
-                UserNotificationTypes.TaskReminder,
-                eventKey,
-                message.Subject,
-                message.Body,
-                IsReminderOverdue(task, reminderKey, nowUtc) ? "rose" : "amber",
-                task,
-                new { reminderKey, dueAt = task.DueAt },
-                cancellationToken);
-        }
-
-        var enabledChannels = await ResolveUserNotificationChannelsAsync(
-            task.AssigneeUserId.Value,
-            UserNotificationTypes.TaskReminder,
-            channels,
+        var recipientTimeZones = await CalendarTimeZoneHelper.ResolveUserTimeZonesAsync(
+            _context,
+            recipientUserIds,
             cancellationToken);
-        if (enabledChannels.Count == 0)
+        var recipientNotificationChannels = await ResolveUserNotificationChannelsAsync(
+            recipientUserIds,
+            UserNotificationTypes.TaskReminder,
+            channels.Concat([
+                NotificationChannels.InApp,
+                NotificationChannels.Toast,
+                NotificationChannels.WebPush,
+            ]),
+            cancellationToken);
+        var externalRecipientIds = recipientUserIds
+            .Where(userId => channels.Any(recipientNotificationChannels[userId].Contains))
+            .ToList();
+        var externalRecipients = await ResolveRecipientsAsync(externalRecipientIds, cancellationToken);
+        var templateDefinition = NotificationTemplateCatalog.Find(NotificationTemplateKeys.TaskReminder);
+        var templateStorage = templateDefinition is null
+            ? new NotificationTemplateStorage()
+            : await LoadTemplateStorageAsync(cancellationToken);
+        var deliveries = new List<NotificationDelivery>();
+
+        foreach (var recipientUserId in recipientUserIds)
         {
-            return Array.Empty<NotificationDelivery>();
+            var recipientTimeZone = recipientTimeZones[recipientUserId];
+            var eventKey = reminderKey == "dailyOverdue"
+                ? $"task:{task.Id}:reminder:{reminderKey}:{CalendarTimeZoneHelper.ToUserLocal(nowUtc, recipientTimeZone):yyyyMMdd}"
+                : $"task:{task.Id}:reminder:{reminderKey}:{dueAtKey}";
+            var reminderSubject = BuildTaskReminderSubject(task, reminderKey, nowUtc);
+            var reminderBody = BuildTaskReminderBody(task, reminderKey, nowUtc, recipientTimeZone);
+            var message = RenderTemplate(
+                templateDefinition,
+                templateStorage,
+                reminderSubject,
+                reminderBody,
+                NotificationTemplateCatalog.MergeValues(
+                    BuildTaskTemplateValues(task, recipientTimeZone),
+                    new Dictionary<string, string?>
+                    {
+                        ["reminder.subject"] = reminderSubject,
+                        ["reminder.body"] = reminderBody,
+                    }),
+                isSensitive: false,
+                purpose: NotificationPurposes.TaskReminder);
+
+            if (inAppEnabled)
+            {
+                await CreateUserNotificationAsync(
+                    recipientUserId,
+                    UserNotificationTypes.TaskReminder,
+                    eventKey,
+                    message.Subject,
+                    message.Body,
+                    IsReminderOverdue(task, reminderKey, nowUtc) ? "rose" : "amber",
+                    task,
+                    new { reminderKey, dueAt = task.DueAt },
+                    cancellationToken,
+                    recipientNotificationChannels[recipientUserId]);
+            }
+
+            var enabledChannels = channels
+                .Where(recipientNotificationChannels[recipientUserId].Contains)
+                .ToList();
+            if (enabledChannels.Count > 0 && externalRecipients.TryGetValue(recipientUserId, out var recipient))
+            {
+                deliveries.AddRange(await SendAsync(recipient, message, enabledChannels, eventKey, cancellationToken));
+            }
         }
 
-        return await SendToUserAsync(task.AssigneeUserId.Value, message, enabledChannels, eventKey, cancellationToken);
+        return deliveries;
     }
 
     public async Task<IReadOnlyList<NotificationDelivery>> NotifyTaskAssignedAsync(
@@ -6860,6 +6885,26 @@ public sealed class NotificationService : INotificationService
 
         return userIds
             .Where(userId => userId > 0 && !UserNotificationAntiSpamPolicy.ShouldSuppressSelfNotification(userId, actorUserId))
+            .Distinct()
+            .ToList();
+    }
+
+    private static IReadOnlyList<int> ResolveTaskAssigneeUserIds(TaskJournalItem task)
+    {
+        var userIds = new List<int>();
+        if (task.AssigneeUserId.HasValue)
+        {
+            userIds.Add(task.AssigneeUserId.Value);
+        }
+
+        userIds.AddRange(task.Participants
+            .Where(participant =>
+                participant.UserId.HasValue
+                && string.Equals(participant.Role, "assignee", StringComparison.OrdinalIgnoreCase))
+            .Select(participant => participant.UserId!.Value));
+
+        return userIds
+            .Where(userId => userId > 0)
             .Distinct()
             .ToList();
     }

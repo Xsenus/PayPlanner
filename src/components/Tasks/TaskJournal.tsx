@@ -8093,8 +8093,8 @@ function TaskModal({
     return Boolean(primaryName) && getParticipantDisplayName(participant).trim().toLowerCase() === primaryName;
   }, [form.assigneeName, form.assigneeUserId]);
   const additionalParticipantsCount = useMemo(
-    () => (form.participants ?? []).filter((participant) => !isImplicitPrimaryAssigneeParticipant(participant)).length,
-    [form.participants, isImplicitPrimaryAssigneeParticipant],
+    () => (form.participants ?? []).filter((participant) => participant.role !== 'assignee').length,
+    [form.participants],
   );
   const fileGroups = useMemo(() => {
     const grouped = new Map<string, TaskJournalFile[]>();
@@ -8814,8 +8814,89 @@ function TaskModal({
   const typeOption = TYPE_OPTIONS.find((option) => option.value === form.type) ?? TYPE_OPTIONS[0];
   const dueAtText = form.dueAt ? formatDateTime(fromLocalInputValue(form.dueAt)) : 'Не задано';
   const selectedCaseTitle = selectableClientCases.find((item) => item.id === form.clientCaseId)?.title ?? state?.task?.clientCaseTitle ?? '';
+  const visibleAdditionalAssignees = getVisibleParticipantsByRole('assignee');
+  const availableAdditionalAssignees = getAvailableAssigneesForRole('assignee');
   const visibleObservers = getVisibleParticipantsByRole('observer');
   const visibleApprovers = getVisibleParticipantsByRole('approver');
+  const renderAssigneeControl = (compact = false) => (
+    <div className="space-y-2" data-testid="task-assignees-control">
+      <SystemSelect
+        value={form.assigneeUserId ?? ''}
+        onChange={(event) => setPrimaryAssignee(Number(event.target.value) || null)}
+        disabled={isReadOnly}
+        data-testid="task-assignee-select"
+        aria-label="Основной исполнитель"
+        className={compact
+          ? 'w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white'
+          : 'form-input'}
+      >
+        <option value="">Без привязки к пользователю</option>
+        {assignees.map((assignee) => (
+          <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
+        ))}
+      </SystemSelect>
+
+      {visibleAdditionalAssignees.length > 0 ? (
+        <div className="space-y-1.5" data-testid="task-additional-assignees-list">
+          {visibleAdditionalAssignees.map((participant, index) => {
+            const participantName = getParticipantDisplayName(participant);
+            return (
+              <div
+                key={`assignee-direct-${participant.id ?? participant.userId ?? participantName}-${index}`}
+                className="flex items-center justify-between gap-2 rounded-lg border border-blue-100 bg-blue-50/70 px-2.5 py-2 text-sm"
+              >
+                <span className="min-w-0 truncate font-semibold text-slate-700">{participantName}</span>
+                {!isReadOnly ? (
+                  <button
+                    type="button"
+                    onClick={() => removeParticipant('assignee', participant)}
+                    className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-white hover:text-rose-600"
+                    aria-label={`Удалить участника ${participantName}`}
+                    title="Удалить исполнителя"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+
+      {!isReadOnly ? (
+        <SystemSelect
+          aria-label="Добавить исполнителя"
+          data-testid="task-assignee-add-select"
+          value=""
+          onChange={(event) => {
+            const selected = assignees.find((assignee) => assignee.id === Number(event.target.value));
+            if (selected) addParticipant('assignee', selected);
+          }}
+          className={compact
+            ? 'w-full rounded-lg border border-dashed border-blue-200 bg-white px-2 py-2 text-sm font-medium text-blue-700 outline-none focus:border-blue-400'
+            : 'form-input border-dashed border-blue-200 bg-white text-blue-700'}
+          disabled={!form.assigneeUserId || availableAdditionalAssignees.length === 0}
+        >
+          <option value="">
+            {!form.assigneeUserId
+              ? 'Сначала выберите основного исполнителя'
+              : availableAdditionalAssignees.length === 0
+                ? 'Все исполнители уже выбраны'
+                : '+ Добавить ещё исполнителя'}
+          </option>
+          {availableAdditionalAssignees.map((assignee) => (
+            <option key={assignee.id} value={assignee.id}>
+              {assignee.email ? `${assignee.name} — ${assignee.email}` : assignee.name}
+            </option>
+          ))}
+        </SystemSelect>
+      ) : null}
+
+      <div className="text-[11px] leading-4 text-slate-400">
+        Основной и дополнительные исполнители видят задачу и могут работать с ней.
+      </div>
+    </div>
+  );
   const renderModernSelectedParticipantList = (
     role: TaskJournalParticipantRole,
     participants: TaskJournalParticipant[],
@@ -9487,19 +9568,8 @@ function TaskModal({
               </div>
 
               <section className="space-y-2 rounded-xl border border-slate-200 bg-white p-2">
-                <ModernTaskQuickField icon={<UsersRound className="h-4 w-4" />} label="Исполнитель">
-                  <SystemSelect
-                    value={form.assigneeUserId ?? ''}
-                    onChange={(event) => setPrimaryAssignee(Number(event.target.value) || null)}
-                    disabled={isReadOnly}
-                    data-testid="task-assignee-select"
-                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2 py-2 text-sm outline-none focus:border-blue-400 focus:bg-white"
-                  >
-                    <option value="">Без исполнителя</option>
-                    {assignees.map((assignee) => (
-                      <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
-                    ))}
-                  </SystemSelect>
+                <ModernTaskQuickField icon={<UsersRound className="h-4 w-4" />} label="Исполнители">
+                  {renderAssigneeControl(true)}
                 </ModernTaskQuickField>
                 {state?.task ? (
                   <ModernTaskQuickField icon={<Pencil className="h-4 w-4" />} label="Постановщик">
@@ -10113,19 +10183,8 @@ function TaskModal({
                 disabled={isReadOnly || form.isInternal || isCreationBillingBindingLocked}
               />
             </Field>
-            <Field label="Исполнитель">
-              <SystemSelect
-                value={form.assigneeUserId ?? ''}
-                disabled={isReadOnly}
-                onChange={(event) => setPrimaryAssignee(Number(event.target.value) || null)}
-                data-testid="task-assignee-select"
-                className="form-input"
-              >
-                <option value="">Без привязки к пользователю</option>
-                {assignees.map((assignee) => (
-                  <option key={assignee.id} value={assignee.id}>{assignee.name}</option>
-                ))}
-              </SystemSelect>
+            <Field label="Исполнители">
+              {renderAssigneeControl()}
             </Field>
             <Field label="Постановщик">
               {state?.task && isAdminUser ? (
@@ -10152,8 +10211,13 @@ function TaskModal({
                 />
               )}
             </Field>
-            <Field label="Имя исполнителя">
-              <input value={form.assigneeName} onChange={(event) => update('assigneeName', event.target.value)} disabled={isReadOnly} className="form-input" />
+            <Field label="Имя основного исполнителя (если нет пользователя)">
+              <input
+                value={form.assigneeName}
+                onChange={(event) => update('assigneeName', event.target.value)}
+                disabled={isReadOnly || Boolean(form.assigneeUserId)}
+                className="form-input disabled:bg-slate-50 disabled:text-slate-500"
+              />
             </Field>
             <Field label="Наименование задачи">
               <input ref={titleInputRef} value={form.title} onChange={(event) => update('title', event.target.value)} disabled={isReadOnly} data-testid="task-title-input" className="form-input" placeholder="Что нужно сделать" />
@@ -10354,15 +10418,15 @@ function TaskModal({
           <section className="mt-5 rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Участники и согласование</h3>
-                <p className="mt-1 text-sm text-slate-500">Выберите дополнительных исполнителей, наблюдателей и согласующих из пользователей системы.</p>
+                <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">Наблюдатели и согласование</h3>
+                <p className="mt-1 text-sm text-slate-500">Выберите наблюдателей и согласующих из пользователей системы.</p>
               </div>
               <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-500 ring-1 ring-slate-200">
                 {additionalParticipantsCount} доп. участников
               </span>
             </div>
             <div className="mt-4 grid gap-4 lg:grid-cols-3">
-              {(['assignee', 'approver', 'observer'] as TaskJournalParticipantRole[]).map((role) => {
+              {(['approver', 'observer'] as TaskJournalParticipantRole[]).map((role) => {
                 const visibleParticipants = getVisibleParticipantsByRole(role);
                 const availableAssignees = getAvailableAssigneesForRole(role);
 

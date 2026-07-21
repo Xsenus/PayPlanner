@@ -3653,7 +3653,7 @@ describe('TaskJournal', () => {
 
     await openFirstTaskForEdit();
 
-    const extraExecutorSelect = screen.getByLabelText('Добавить: Дополнительные исполнители');
+    const extraExecutorSelect = screen.getByLabelText('Добавить исполнителя');
     expect(within(extraExecutorSelect).queryByRole('option', { name: /Администратор/ })).toBeNull();
 
     fireEvent.change(extraExecutorSelect, { target: { value: '8' } });
@@ -3668,6 +3668,78 @@ describe('TaskJournal', () => {
       expect.objectContaining({ role: 'assignee', userId: 8, displayName: 'Дополнительный исполнитель' }),
     ]));
     expect(payload.participants.filter((participant: { role: string; userId?: number | null }) => participant.role === 'assignee' && participant.userId === 7)).toHaveLength(1);
+  });
+
+  it.each(['legacy', 'modern'] as const)('adds and removes several executors directly in the %s executor field', async (taskCardWindowMode) => {
+    await renderJournal([
+      createTask({
+        participants: [
+          { userId: 7, role: 'assignee', displayName: 'Администратор', approvalStatus: 'pending' },
+        ],
+      }),
+    ], {
+      assignees: [
+        { id: 7, name: 'Администратор', email: 'admin@example.com' },
+        { id: 8, name: 'Второй исполнитель', email: 'second@example.com' },
+        { id: 9, name: 'Третий исполнитель', email: 'third@example.com' },
+      ],
+      settings: { taskCardWindowMode },
+    });
+
+    await openFirstTaskForEdit();
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    const addExecutor = within(card).getByLabelText('Добавить исполнителя');
+
+    fireEvent.change(addExecutor, { target: { value: '8' } });
+    fireEvent.change(addExecutor, { target: { value: '9' } });
+
+    const selected = within(card).getByTestId('task-additional-assignees-list');
+    expect(within(selected).getByText('Второй исполнитель')).toBeTruthy();
+    expect(within(selected).getByText('Третий исполнитель')).toBeTruthy();
+
+    fireEvent.click(within(selected).getByRole('button', { name: 'Удалить участника Второй исполнитель' }));
+    expect(within(selected).queryByText('Второй исполнитель')).toBeNull();
+    expect(within(selected).getByText('Третий исполнитель')).toBeTruthy();
+
+    fireEvent.click(within(card).getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalItem).toHaveBeenCalledTimes(1));
+    const [, payload] = apiMock.updateTaskJournalItem.mock.calls[0];
+    const executorIds = payload.participants
+      .filter((participant: { role: string }) => participant.role === 'assignee')
+      .map((participant: { userId?: number | null }) => participant.userId);
+
+    expect(executorIds).toEqual(expect.arrayContaining([7, 9]));
+    expect(executorIds).not.toContain(8);
+  });
+
+  it.each(['legacy', 'modern'] as const)('creates a task with several executors from the %s executor field', async (taskCardWindowMode) => {
+    await renderJournal([], {
+      assignees: [
+        { id: 7, name: 'Администратор', email: 'admin@example.com' },
+        { id: 8, name: 'Второй исполнитель', email: 'second@example.com' },
+        { id: 9, name: 'Третий исполнитель', email: 'third@example.com' },
+      ],
+      settings: { taskCardWindowMode },
+      waitForTitle: null,
+    });
+
+    await openNewTaskFormAsGlobalInternal();
+    const card = await screen.findByTestId(`task-${taskCardWindowMode}-card-window`);
+    fireEvent.change(within(card).getByTestId('task-title-input'), { target: { value: 'Совместная задача' } });
+
+    const addExecutor = within(card).getByLabelText('Добавить исполнителя');
+    fireEvent.change(addExecutor, { target: { value: '8' } });
+    fireEvent.change(addExecutor, { target: { value: '9' } });
+    fireEvent.click(within(card).getAllByRole('button', { name: 'Создать задачу' }).at(-1)!);
+
+    await waitFor(() => expect(apiMock.createTaskJournalItem).toHaveBeenCalledTimes(1));
+    const [payload] = apiMock.createTaskJournalItem.mock.calls[0];
+    const executorIds = payload.participants
+      .filter((participant: { role: string }) => participant.role === 'assignee')
+      .map((participant: { userId?: number | null }) => participant.userId);
+
+    expect(executorIds).toEqual(expect.arrayContaining([7, 8, 9]));
   });
 
   it.each(['legacy', 'modern'] as const)('keeps multiple approvers selected in the %s task card', async (taskCardWindowMode) => {

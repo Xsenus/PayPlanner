@@ -4206,6 +4206,7 @@ public class TasksControllerTests
         await using var db = await CreateContextAsync();
         var author = await CreateAdminUserAsync(db, "author@example.com", "Автор");
         var assignee = await CreateAdminUserAsync(db, "assignee@example.com", "Исполнитель");
+        var additionalAssignee = await CreateAdminUserAsync(db, "additional-assignee@example.com", "Дополнительный исполнитель");
         var approver = await CreateAdminUserAsync(db, "approver@example.com", "Согласующий");
         var observer = await CreateAdminUserAsync(db, "observer@example.com", "Наблюдатель");
         var client = await CreateClientAsync(db, "Иванов Иван Иванович");
@@ -4220,6 +4221,7 @@ public class TasksControllerTests
             DueAt = DateTime.UtcNow.AddHours(2),
             Participants =
             [
+                new() { UserId = additionalAssignee.Id, Role = "assignee", SortOrder = 1 },
                 new() { UserId = approver.Id, Role = "approver", SortOrder = 0 },
                 new() { UserId = observer.Id, Role = "observer", SortOrder = 0 },
             ],
@@ -4230,6 +4232,7 @@ public class TasksControllerTests
 
         Assert.Equal(assignee.Id, dto.AssigneeUserId);
         Assert.Contains(dto.Participants, item => item.Role == "assignee" && item.UserId == assignee.Id);
+        Assert.Contains(dto.Participants, item => item.Role == "assignee" && item.UserId == additionalAssignee.Id);
         Assert.Contains(dto.Participants, item => item.Role == "approver" && item.UserId == approver.Id);
         Assert.Contains(dto.Participants, item => item.Role == "observer" && item.UserId == observer.Id);
         Assert.Equal([dto.Id], notifications.AssignedTaskIds);

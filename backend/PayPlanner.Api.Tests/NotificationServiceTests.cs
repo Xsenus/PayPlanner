@@ -988,6 +988,66 @@ public class NotificationServiceTests
     }
 
     [Fact]
+    public async Task NotifyTaskReminderAsync_SendsReminderToEveryTaskAssignee()
+    {
+        await using var db = await CreateContextAsync();
+        await SeedEmailSettingsAsync(db);
+        var primary = await CreateUserAsync(db, "primary-assignee@example.com");
+        var additional = new User
+        {
+            Email = "additional-assignee@example.com",
+            FullName = "additional-assignee@example.com",
+            PasswordHash = "hash",
+            RoleId = primary.RoleId,
+            IsActive = true,
+            IsApproved = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        db.Users.Add(additional);
+        await db.SaveChangesAsync();
+        var task = new TaskJournalItem
+        {
+            ObjectName = "Дело клиента",
+            Title = "Совместная задача",
+            AssigneeUserId = primary.Id,
+            AssigneeName = primary.FullName,
+            DueAt = DateTime.UtcNow.AddMinutes(10),
+            RemindersJson = "[\"before15m\"]",
+            ChannelsJson = "[\"email\"]",
+            Status = "new",
+            Participants =
+            [
+                new()
+                {
+                    UserId = primary.Id,
+                    Role = "assignee",
+                    DisplayName = primary.FullName,
+                },
+                new()
+                {
+                    UserId = additional.Id,
+                    Role = "assignee",
+                    DisplayName = additional.FullName,
+                },
+            ],
+        };
+        db.TaskJournalItems.Add(task);
+        await db.SaveChangesAsync();
+
+        var emailService = new RecordingEmailService();
+        var service = CreateService(db, emailService, new RecordingTelegramService());
+
+        var deliveries = await service.NotifyTaskReminderAsync(task, "before15m", DateTime.UtcNow);
+
+        Assert.Equal(2, deliveries.Count);
+        Assert.Equal(2, emailService.Messages.Count);
+        Assert.Contains(emailService.Messages, message => message.To == primary.Email);
+        Assert.Contains(emailService.Messages, message => message.To == additional.Email);
+        Assert.Equal(2, await db.NotificationDeliveries.CountAsync());
+    }
+
+    [Fact]
     public async Task NotifyTaskReminderAsync_FormatsDueAtInRecipientTimeZone()
     {
         await using var db = await CreateContextAsync();
