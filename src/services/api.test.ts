@@ -53,6 +53,31 @@ describe('apiService contacts directory', () => {
   });
 });
 
+describe('apiService task journal settings', () => {
+  it('deduplicates only simultaneous settings requests', async () => {
+    const responseBody = {
+      restrictExecutorEditing: true,
+      stickerStyles: {},
+    };
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify(responseBody), {
+      headers: { 'content-type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const [first, second] = await Promise.all([
+      apiService.getTaskJournalSettings(),
+      apiService.getTaskJournalSettings(),
+    ]);
+
+    expect(first).toEqual(responseBody);
+    expect(second).toEqual(responseBody);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await apiService.getTaskJournalSettings();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('apiService case access requests', () => {
   it('passes the abort signal to the pending access requests call', async () => {
     const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify([]), {

@@ -2175,6 +2175,8 @@ export async function extractResponseErrorMessage(response: Response): Promise<s
 }
 
 export class ApiService {
+  private taskJournalSettingsRequest: Promise<TaskJournalSettingsDto> | null = null;
+
   private async fetchWithSessionRefresh(
     url: string,
     options: RequestInit,
@@ -3986,7 +3988,24 @@ export class ApiService {
   }
 
   async getTaskJournalSettings() {
-    return this.request<TaskJournalSettingsDto>('/tasks/settings');
+    if (!this.taskJournalSettingsRequest) {
+      const request = this.request<TaskJournalSettingsDto>('/tasks/settings');
+      this.taskJournalSettingsRequest = request;
+      request.then(
+        () => {
+          if (this.taskJournalSettingsRequest === request) {
+            this.taskJournalSettingsRequest = null;
+          }
+        },
+        () => {
+          if (this.taskJournalSettingsRequest === request) {
+            this.taskJournalSettingsRequest = null;
+          }
+        },
+      );
+    }
+
+    return this.taskJournalSettingsRequest;
   }
 
   async getTaskJournalOverdueSummary() {
@@ -3994,10 +4013,12 @@ export class ApiService {
   }
 
   async updateTaskJournalSettings(payload: UpdateTaskJournalSettingsRequest) {
-    return this.request<TaskJournalSettingsDto>('/tasks/settings', {
+    const response = await this.request<TaskJournalSettingsDto>('/tasks/settings', {
       method: 'PUT',
       body: JSON.stringify(payload),
     });
+    this.taskJournalSettingsRequest = null;
+    return response;
   }
 
   async getTaskJournalAutomationDiagnostics() {
