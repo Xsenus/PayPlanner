@@ -1,3 +1,5 @@
+using PayPlanner.Api.Models;
+
 namespace PayPlanner.Api.Models.Requests;
 
 public class TaskJournalSettingsRequest
@@ -17,4 +19,5 @@ public class TaskJournalSettingsRequest
     public int? CaseInactivityDefaultAssigneeUserId { get; set; }
     public int CaseInactivityEscalationDays { get; set; } = 30;
     public int? CaseInactivityEscalationUserId { get; set; }
+    public Dictionary<string, TaskStickerStyle>? StickerStyles { get; set; }
 }

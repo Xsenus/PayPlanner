@@ -85,6 +85,7 @@ public class TasksController : ControllerBase
     private const string ApprovalQuickActionModeSettingKey = "tasks.approvalQuickActionMode";
     private const string ApprovalQuickActionModeCompletionButton = "completionButton";
     private const string ApprovalQuickActionModeSeparateButton = "separateButton";
+    private const string TaskStickerStylesSettingKey = "tasks.stickerStyles";
     private const string CaseInactivityAutomationEnabledSettingKey = "tasks.automation.caseControl.enabled";
     private const string CaseInactivityAutomationDaysSettingKey = "tasks.automation.caseControl.inactiveDays";
     private const string CaseInactivityAutomationLimitSettingKey = "tasks.automation.caseControl.limit";
@@ -94,6 +95,19 @@ public class TasksController : ControllerBase
     private const string ContractorPaymentMarker = "[PayPlanner:TaskContractorPayment]";
     private const string CalendarSyncSettingsKey = "calendarSync.settings";
     private const string ProfileTimeZoneSettingKey = "profile.timeZoneId";
+    private static readonly IReadOnlyDictionary<string, TaskStickerStyle> DefaultTaskStickerStyles =
+        new Dictionary<string, TaskStickerStyle>(StringComparer.Ordinal)
+        {
+            ["priority.low"] = new() { Label = "Низкий", ShortLabel = "Низкий", BackgroundColor = "#f8fafc", TextColor = "#475569", BorderColor = "#e2e8f0" },
+            ["priority.normal"] = new() { Label = "Обычный", ShortLabel = "Обычный", BackgroundColor = "#eff6ff", TextColor = "#1d4ed8", BorderColor = "#bfdbfe" },
+            ["priority.high"] = new() { Label = "Высокий", ShortLabel = "Высокий", BackgroundColor = "#fffbeb", TextColor = "#b45309", BorderColor = "#fde68a" },
+            ["priority.urgent"] = new() { Label = "Срочно", ShortLabel = "Срочно", BackgroundColor = "#fff1f2", TextColor = "#be123c", BorderColor = "#fecdd3" },
+            ["billing.unbilled"] = new() { Label = "ПЛАТНАЯ · НЕ ВЫСТАВЛЕН СЧЁТ", ShortLabel = "БЕЗ СЧЁТА", BackgroundColor = "#ffe4e6", TextColor = "#9f1239", BorderColor = "#fda4af" },
+            ["billing.invoiced"] = new() { Label = "В СЧЁТЕ", ShortLabel = "В СЧЁТЕ", BackgroundColor = "#d1fae5", TextColor = "#065f46", BorderColor = "#6ee7b7" },
+            ["billing.fixed"] = new() { Label = "КЛИЕНТСКАЯ · ФИКСИРОВАННЫЙ ДОГОВОР", ShortLabel = "ФИКС. ДОГОВОР", BackgroundColor = "#ede9fe", TextColor = "#5b21b6", BorderColor = "#c4b5fd" },
+            ["billing.unpaid"] = new() { Label = "НЕОПЛАЧИВАЕМАЯ · НЕ ДЛЯ СЧЁТА", ShortLabel = "НЕ ДЛЯ СЧЁТА", BackgroundColor = "#f1f5f9", TextColor = "#334155", BorderColor = "#cbd5e1" },
+            ["billing.internal"] = new() { Label = "ВНУТРЕННЯЯ · НЕ ДЛЯ СЧЁТА", ShortLabel = "НЕ ДЛЯ СЧЁТА", BackgroundColor = "#f1f5f9", TextColor = "#334155", BorderColor = "#cbd5e1" },
+        };
 
     private readonly PaymentContext _db;
     private readonly INotificationService _notificationService;
@@ -402,6 +416,15 @@ public class TasksController : ControllerBase
             }
         }
 
+        Dictionary<string, TaskStickerStyle>? normalizedStickerStyles = null;
+        if (request.StickerStyles is not null)
+        {
+            if (!TryNormalizeTaskStickerStyles(request.StickerStyles, rejectUnknownKeys: true, out normalizedStickerStyles, out var stickerStylesError))
+            {
+                return BadRequest(new { message = stickerStylesError });
+            }
+        }
+
         await UpsertSystemSettingAsync(RestrictExecutorEditingSettingKey, request.RestrictExecutorEditing ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(AllowExecutorDeadlineChangeRequestsSettingKey, request.AllowExecutorDeadlineChangeRequests ? "true" : "false", now, ct);
         await UpsertSystemSettingAsync(ExecutorCompletionAllowedUserIdsSettingKey, JsonSerializer.Serialize(executorCompletionAllowedUserIds, JsonOptions), now, ct);
@@ -417,6 +440,10 @@ public class TasksController : ControllerBase
         await UpsertSystemSettingAsync(CaseInactivityAutomationDefaultAssigneeSettingKey, defaultAssigneeUserId, now, ct);
         await UpsertSystemSettingAsync(CaseInactivityAutomationEscalationDaysSettingKey, escalationDays.ToString(), now, ct);
         await UpsertSystemSettingAsync(CaseInactivityAutomationEscalationUserSettingKey, escalationUserId, now, ct);
+        if (normalizedStickerStyles is not null)
+        {
+            await UpsertSystemSettingAsync(TaskStickerStylesSettingKey, JsonSerializer.Serialize(normalizedStickerStyles, JsonOptions), now, ct);
+        }
         await _db.SaveChangesAsync(ct);
 
         return Ok(await GetTaskJournalSettingsAsync(ct));
@@ -3893,6 +3920,7 @@ public class TasksController : ControllerBase
                 item.Key == ApprovalDueDaysSettingKey ||
                 item.Key == TaskCardWindowModeSettingKey ||
                 item.Key == ApprovalQuickActionModeSettingKey ||
+                item.Key == TaskStickerStylesSettingKey ||
                 item.Key == CaseInactivityAutomationEnabledSettingKey ||
                 item.Key == CaseInactivityAutomationDaysSettingKey ||
                 item.Key == CaseInactivityAutomationLimitSettingKey ||
@@ -3904,6 +3932,7 @@ public class TasksController : ControllerBase
         var defaultAssigneeUserId = ParseIntSetting(settings.GetValueOrDefault(CaseInactivityAutomationDefaultAssigneeSettingKey), 0);
         var escalationUserId = ParseIntSetting(settings.GetValueOrDefault(CaseInactivityAutomationEscalationUserSettingKey), 0);
         var inactivityDays = Math.Clamp(ParseIntSetting(settings.GetValueOrDefault(CaseInactivityAutomationDaysSettingKey), 14), 1, 365);
+        var stickerStyles = ParseTaskStickerStyles(settings.GetValueOrDefault(TaskStickerStylesSettingKey));
         return new TaskJournalSettingsDto
         {
             RestrictExecutorEditing = ParseBoolSetting(settings.GetValueOrDefault(RestrictExecutorEditingSettingKey), true),
@@ -3921,7 +3950,112 @@ public class TasksController : ControllerBase
             CaseInactivityDefaultAssigneeUserId = defaultAssigneeUserId > 0 ? defaultAssigneeUserId : null,
             CaseInactivityEscalationDays = Math.Clamp(ParseIntSetting(settings.GetValueOrDefault(CaseInactivityAutomationEscalationDaysSettingKey), 30), inactivityDays, 365),
             CaseInactivityEscalationUserId = escalationUserId > 0 ? escalationUserId : null,
+            StickerStyles = stickerStyles,
         };
+    }
+
+    private static Dictionary<string, TaskStickerStyle> ParseTaskStickerStyles(string? rawValue)
+    {
+        if (!string.IsNullOrWhiteSpace(rawValue))
+        {
+            try
+            {
+                var storedStyles = JsonSerializer.Deserialize<Dictionary<string, TaskStickerStyle>>(rawValue, JsonOptions);
+                if (storedStyles is not null &&
+                    TryNormalizeTaskStickerStyles(storedStyles, rejectUnknownKeys: false, out var normalized, out _))
+                {
+                    return normalized;
+                }
+            }
+            catch (JsonException)
+            {
+                // Поврежденная настройка не должна ломать журнал задач: возвращаем безопасные значения.
+            }
+        }
+
+        return CloneDefaultTaskStickerStyles();
+    }
+
+    private static bool TryNormalizeTaskStickerStyles(
+        IReadOnlyDictionary<string, TaskStickerStyle> requestedStyles,
+        bool rejectUnknownKeys,
+        out Dictionary<string, TaskStickerStyle> normalizedStyles,
+        out string error)
+    {
+        if (rejectUnknownKeys)
+        {
+            var unknownKey = requestedStyles.Keys.FirstOrDefault(key => !DefaultTaskStickerStyles.ContainsKey(key));
+            if (unknownKey is not null)
+            {
+                normalizedStyles = [];
+                error = $"Неизвестный тип стикера: {unknownKey}.";
+                return false;
+            }
+        }
+
+        normalizedStyles = CloneDefaultTaskStickerStyles();
+        foreach (var (key, defaultStyle) in DefaultTaskStickerStyles)
+        {
+            if (!requestedStyles.TryGetValue(key, out var requestedStyle) || requestedStyle is null)
+            {
+                continue;
+            }
+
+            var label = requestedStyle.Label?.Trim();
+            var shortLabel = requestedStyle.ShortLabel?.Trim();
+            if (string.IsNullOrWhiteSpace(label) || label.Length > 80)
+            {
+                error = $"Полное название стикера «{defaultStyle.Label}» должно содержать от 1 до 80 символов.";
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(shortLabel) || shortLabel.Length > 30)
+            {
+                error = $"Короткое название стикера «{defaultStyle.Label}» должно содержать от 1 до 30 символов.";
+                return false;
+            }
+
+            if (!TryNormalizeHexColor(requestedStyle.BackgroundColor, out var backgroundColor) ||
+                !TryNormalizeHexColor(requestedStyle.TextColor, out var textColor) ||
+                !TryNormalizeHexColor(requestedStyle.BorderColor, out var borderColor))
+            {
+                error = $"Цвета стикера «{defaultStyle.Label}» должны быть указаны в формате #RRGGBB.";
+                return false;
+            }
+
+            normalizedStyles[key] = new TaskStickerStyle
+            {
+                Label = label,
+                ShortLabel = shortLabel,
+                BackgroundColor = backgroundColor,
+                TextColor = textColor,
+                BorderColor = borderColor,
+            };
+        }
+
+        error = string.Empty;
+        return true;
+    }
+
+    private static Dictionary<string, TaskStickerStyle> CloneDefaultTaskStickerStyles()
+        => DefaultTaskStickerStyles.ToDictionary(
+            pair => pair.Key,
+            pair => new TaskStickerStyle
+            {
+                Label = pair.Value.Label,
+                ShortLabel = pair.Value.ShortLabel,
+                BackgroundColor = pair.Value.BackgroundColor,
+                TextColor = pair.Value.TextColor,
+                BorderColor = pair.Value.BorderColor,
+            },
+            StringComparer.Ordinal);
+
+    private static bool TryNormalizeHexColor(string? value, out string normalized)
+    {
+        normalized = value?.Trim().ToLowerInvariant() ?? string.Empty;
+        return normalized.Length == 7 &&
+               normalized[0] == '#' &&
+               normalized.AsSpan(1).IndexOfAnyExcept("0123456789abcdef") < 0;
     }
 
     private static string NormalizeTaskCardWindowMode(string? value)

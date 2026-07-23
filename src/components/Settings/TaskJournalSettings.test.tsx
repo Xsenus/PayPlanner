@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { TaskJournalSettingsDto } from '../../services/api';
+import { cloneDefaultTaskStickerStyles } from '../../utils/taskStickerStyles';
 import { TaskJournalSettings } from './TaskJournalSettings';
 
 const apiMock = vi.hoisted(() => ({
@@ -33,6 +34,7 @@ const settings: TaskJournalSettingsDto = {
   caseInactivityDefaultAssigneeUserId: null,
   caseInactivityEscalationDays: 30,
   caseInactivityEscalationUserId: null,
+  stickerStyles: cloneDefaultTaskStickerStyles(),
 };
 
 describe('TaskJournalSettings', () => {
@@ -78,6 +80,26 @@ describe('TaskJournalSettings', () => {
 
     await waitFor(() => expect(apiMock.updateTaskJournalSettings).toHaveBeenCalledWith(
       expect.objectContaining({ approvalQuickActionMode: 'separateButton' }),
+    ));
+  });
+
+  it('lets an administrator customize task sticker labels and colors', async () => {
+    render(<TaskJournalSettings />);
+
+    const shortLabel = await screen.findByRole('textbox', { name: 'Обычный приоритет: короткое название' });
+    fireEvent.change(shortLabel, { target: { value: 'СРЕДНИЙ' } });
+    fireEvent.change(screen.getByLabelText('Обычный приоритет: фон'), { target: { value: '#fef3c7' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+    await waitFor(() => expect(apiMock.updateTaskJournalSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stickerStyles: expect.objectContaining({
+          'priority.normal': expect.objectContaining({
+            shortLabel: 'СРЕДНИЙ',
+            backgroundColor: '#fef3c7',
+          }),
+        }),
+      }),
     ));
   });
 });

@@ -1,5 +1,6 @@
 import { API_BASE_URL } from './apiBaseUrl';
 import { authService } from './authService';
+import type { TaskStickerStyles } from '../utils/taskStickerStyles';
 
 export const AUTH_SESSION_EXPIRED_EVENT = 'payplanner:auth-session-expired';
 const AUTH_SESSION_EXPIRED_MESSAGE = 'Сессия истекла. Войдите снова.';
@@ -1702,6 +1703,7 @@ export interface TaskJournalSettingsDto {
   caseInactivityDefaultAssigneeUserId?: number | null;
   caseInactivityEscalationDays: number;
   caseInactivityEscalationUserId?: number | null;
+  stickerStyles: TaskStickerStyles;
 }
 
 export interface TaskJournalAutomationDiagnosticsDto {
@@ -1736,6 +1738,7 @@ export interface UpdateTaskJournalSettingsRequest {
   caseInactivityDefaultAssigneeUserId?: number | null;
   caseInactivityEscalationDays: number;
   caseInactivityEscalationUserId?: number | null;
+  stickerStyles: TaskStickerStyles;
 }
 
 export interface MainCompanySettingsDto {

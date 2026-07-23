@@ -1,11 +1,18 @@
 import { SystemCheckbox } from '../ui/SystemCheckbox';
 import { SystemSelect } from '../ui/SystemSelect';
 import { useCallback, useEffect, useState } from 'react';
-import { RefreshCcw, Save } from 'lucide-react';
+import { RefreshCcw, RotateCcw, Save } from 'lucide-react';
 import { apiService, type TaskJournalAutomationDiagnosticsDto, type TaskJournalSettingsDto } from '../../services/api';
 import { useToast } from '../../hooks/useToast';
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import type { TaskJournalAssignee } from '../../utils/taskJournalStore';
+import {
+  cloneDefaultTaskStickerStyles,
+  getTaskStickerInlineStyle,
+  normalizeTaskStickerStyles,
+  TASK_STICKER_DEFINITIONS,
+  type TaskStickerStyle,
+} from '../../utils/taskStickerStyles';
 
 const DEFAULT_SETTINGS: TaskJournalSettingsDto = {
   restrictExecutorEditing: true,
@@ -23,6 +30,7 @@ const DEFAULT_SETTINGS: TaskJournalSettingsDto = {
   caseInactivityDefaultAssigneeUserId: null,
   caseInactivityEscalationDays: 30,
   caseInactivityEscalationUserId: null,
+  stickerStyles: cloneDefaultTaskStickerStyles(),
 };
 
 function formatDiagnosticDate(value?: string | null) {
@@ -42,6 +50,102 @@ function formatDiagnosticDate(value?: string | null) {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+function TaskStickerStyleEditor({
+  title,
+  style,
+  disabled,
+  onChange,
+  onReset,
+}: {
+  title: string;
+  style: TaskStickerStyle;
+  disabled: boolean;
+  onChange: (nextStyle: TaskStickerStyle) => void;
+  onReset: () => void;
+}) {
+  const update = <K extends keyof TaskStickerStyle>(field: K, value: TaskStickerStyle[K]) => {
+    onChange({ ...style, [field]: value });
+  };
+
+  const colorFields = [
+    { key: 'backgroundColor' as const, label: 'Фон' },
+    { key: 'textColor' as const, label: 'Текст' },
+    { key: 'borderColor' as const, label: 'Рамка' },
+  ];
+
+  return (
+    <article className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h6 className="text-sm font-semibold text-slate-800">{title}</h6>
+          <span
+            className="mt-2 inline-flex max-w-full rounded-full border px-2.5 py-1 text-[11px] font-semibold"
+            style={getTaskStickerInlineStyle(style)}
+            title={style.label}
+          >
+            <span className="truncate">{style.shortLabel}</span>
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={onReset}
+          disabled={disabled}
+          className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-slate-200 px-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+          title={`Сбросить оформление «${title}»`}
+          aria-label={`Сбросить оформление «${title}»`}
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+          Сбросить
+        </button>
+      </div>
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <label className="text-xs font-medium text-slate-600">
+          Полное название
+          <input
+            value={style.label}
+            onChange={(event) => update('label', event.target.value)}
+            disabled={disabled}
+            maxLength={80}
+            aria-label={`${title}: полное название`}
+            className="mt-1 h-9 w-full rounded-lg border border-slate-200 px-2.5 text-sm text-slate-800 outline-none focus:border-blue-400"
+          />
+        </label>
+        <label className="text-xs font-medium text-slate-600">
+          Короткое название
+          <input
+            value={style.shortLabel}
+            onChange={(event) => update('shortLabel', event.target.value)}
+            disabled={disabled}
+            maxLength={30}
+            aria-label={`${title}: короткое название`}
+            className="mt-1 h-9 w-full rounded-lg border border-slate-200 px-2.5 text-sm text-slate-800 outline-none focus:border-blue-400"
+          />
+        </label>
+      </div>
+
+      <div className="mt-2 grid gap-2 sm:grid-cols-3">
+        {colorFields.map((field) => (
+          <label key={field.key} className="text-xs font-medium text-slate-600">
+            {field.label}
+            <span className="mt-1 flex h-9 items-center gap-2 rounded-lg border border-slate-200 bg-white px-2">
+              <input
+                type="color"
+                value={style[field.key]}
+                onChange={(event) => update(field.key, event.target.value)}
+                disabled={disabled}
+                aria-label={`${title}: ${field.label.toLowerCase()}`}
+                className="h-6 w-7 cursor-pointer rounded border-0 bg-transparent p-0"
+              />
+              <span className="truncate font-mono text-[11px] uppercase text-slate-500">{style[field.key]}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+    </article>
+  );
 }
 
 export function TaskJournalSettings() {
@@ -76,7 +180,7 @@ export function TaskJournalSettings() {
     ])
       .then(([response, nextAssignees, nextDiagnostics]) => {
         if (active) {
-          setSettings(response);
+          setSettings({ ...response, stickerStyles: normalizeTaskStickerStyles(response.stickerStyles) });
           setAssignees(nextAssignees);
           setDiagnostics(nextDiagnostics);
         }
@@ -102,7 +206,7 @@ export function TaskJournalSettings() {
     setMessage(null);
     try {
       const response = await apiService.updateTaskJournalSettings(settings);
-      setSettings(response);
+      setSettings({ ...response, stickerStyles: normalizeTaskStickerStyles(response.stickerStyles) });
       void refreshDiagnostics();
       setMessage('Настройки сохранены.');
       toast.success('Настройки журнала задач сохранены.', 'Журнал задач');
@@ -151,6 +255,64 @@ export function TaskJournalSettings() {
             </div>
           </div>
         </div>
+
+        <section className="rounded-2xl border border-sky-200 bg-sky-50/40 p-3 text-sm text-gray-700">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h5 className="font-semibold text-gray-900">Стикеры задач</h5>
+              <p className="mt-1 max-w-3xl text-gray-500">
+                Настройте единые названия и цвета меток приоритета и учёта в счёте. Оформление применяется для всех сотрудников в журнале, на доске и в карточках задач.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSettings((prev) => ({ ...prev, stickerStyles: cloneDefaultTaskStickerStyles() }))}
+              disabled={loading || saving}
+              className="inline-flex h-9 shrink-0 items-center gap-2 rounded-lg border border-sky-200 bg-white px-3 text-xs font-semibold text-sky-700 transition hover:bg-sky-50 disabled:opacity-50"
+            >
+              <RotateCcw className="h-4 w-4" />
+              Сбросить все
+            </button>
+          </div>
+
+          {([
+            { group: 'priority' as const, title: 'Приоритеты' },
+            { group: 'billing' as const, title: 'Учёт в счёте' },
+          ]).map((section) => (
+            <div key={section.group} className="mt-4">
+              <h6 className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">{section.title}</h6>
+              <div className="grid gap-3 xl:grid-cols-2">
+                {TASK_STICKER_DEFINITIONS
+                  .filter((definition) => definition.group === section.group)
+                  .map((definition) => (
+                    <TaskStickerStyleEditor
+                      key={definition.key}
+                      title={definition.title}
+                      style={settings.stickerStyles[definition.key]}
+                      disabled={loading || saving}
+                      onChange={(nextStyle) => setSettings((prev) => ({
+                        ...prev,
+                        stickerStyles: {
+                          ...prev.stickerStyles,
+                          [definition.key]: nextStyle,
+                        },
+                      }))}
+                      onReset={() => {
+                        const defaults = cloneDefaultTaskStickerStyles();
+                        setSettings((prev) => ({
+                          ...prev,
+                          stickerStyles: {
+                            ...prev.stickerStyles,
+                            [definition.key]: defaults[definition.key],
+                          },
+                        }));
+                      }}
+                    />
+                  ))}
+              </div>
+            </div>
+          ))}
+        </section>
 
         <div className="rounded-2xl border border-violet-200 bg-violet-50/50 p-3 text-sm text-gray-700">
           <div className="font-semibold text-gray-900">Действие кнопки завершения при согласовании</div>

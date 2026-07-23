@@ -7,6 +7,7 @@ import type { TaskJournalSettingsDto } from '../../services/api';
 import type { Client, ClientCase, LegalEntitySummary } from '../../types';
 import { fromTimeZoneDateTimeInput, getZonedParts, toTimeZoneDateKey } from '../../utils/timeZoneDate';
 import { TASK_JOURNAL_EVENT, type TaskJournalAssignee, type TaskJournalItem } from '../../utils/taskJournalStore';
+import { cloneDefaultTaskStickerStyles } from '../../utils/taskStickerStyles';
 import {
   FORCED_TASK_SNOOZE_STORAGE_KEY,
   getForcedTaskApprovalSnoozeKey,
@@ -313,6 +314,7 @@ async function renderJournal(
     caseInactivityDefaultAssigneeUserId: null,
     caseInactivityEscalationDays: 30,
     caseInactivityEscalationUserId: null,
+    stickerStyles: cloneDefaultTaskStickerStyles(),
     ...options.settings,
   });
   const currentUserId = authState.user.id;
@@ -1037,6 +1039,25 @@ describe('TaskJournal', () => {
     expect(within(billingBadge).getByText('НЕ ДЛЯ СЧЁТА')).toBeTruthy();
     expect(billingBadge.className).toContain('text-[10px]');
     expect(billingBadge.getAttribute('title')).toBe('НЕОПЛАЧИВАЕМАЯ · НЕ ДЛЯ СЧЁТА');
+  });
+
+  it('applies administrator sticker labels and colors in the journal', async () => {
+    const stickerStyles = cloneDefaultTaskStickerStyles();
+    stickerStyles['priority.normal'] = {
+      ...stickerStyles['priority.normal'],
+      shortLabel: 'СРЕДНИЙ',
+      backgroundColor: '#fef3c7',
+      textColor: '#92400e',
+      borderColor: '#f59e0b',
+    };
+
+    await renderJournal([createTask()], { settings: { stickerStyles } });
+
+    const badges = screen.getByTestId('task-meta-badges-101');
+    const priorityBadge = within(badges).getByText('СРЕДНИЙ').closest('span[title]');
+    expect(priorityBadge).toBeTruthy();
+    expect(priorityBadge?.getAttribute('style')).toContain('background-color: rgb(254, 243, 199)');
+    expect(priorityBadge?.getAttribute('style')).toContain('color: rgb(146, 64, 14)');
   });
 
   it('shows who assigned the task in the journal and task card', async () => {

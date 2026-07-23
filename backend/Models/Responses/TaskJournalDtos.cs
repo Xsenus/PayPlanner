@@ -1,3 +1,5 @@
+using PayPlanner.Api.Models;
+
 namespace PayPlanner.Api.Models.Responses;
 
 public class TaskJournalItemDto
@@ -243,6 +245,7 @@ public class TaskJournalSettingsDto
     public int? CaseInactivityDefaultAssigneeUserId { get; set; }
     public int CaseInactivityEscalationDays { get; set; } = 30;
     public int? CaseInactivityEscalationUserId { get; set; }
+    public Dictionary<string, TaskStickerStyle> StickerStyles { get; set; } = [];
 }
 
 public class TaskJournalOverdueSummaryDto

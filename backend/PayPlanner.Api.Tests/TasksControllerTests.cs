@@ -515,6 +515,75 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task UpdateSettings_PersistsAndReturnsNormalizedTaskStickerStyles()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateAdminUserAsync(db, "admin-stickers@example.com", "Администратор");
+        var controller = CreateController(db, new RecordingNotificationService(), admin);
+
+        var result = await controller.UpdateSettings(new TaskJournalSettingsRequest
+        {
+            StickerStyles = new Dictionary<string, TaskStickerStyle>
+            {
+                ["priority.normal"] = new()
+                {
+                    Label = "Средний",
+                    ShortLabel = "СРЕДНИЙ",
+                    BackgroundColor = "#FEF3C7",
+                    TextColor = "#92400E",
+                    BorderColor = "#F59E0B",
+                },
+            },
+        }, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalSettingsDto>(ok.Value);
+        var style = dto.StickerStyles["priority.normal"];
+
+        Assert.Equal("Средний", style.Label);
+        Assert.Equal("СРЕДНИЙ", style.ShortLabel);
+        Assert.Equal("#fef3c7", style.BackgroundColor);
+        Assert.Equal("#92400e", style.TextColor);
+        Assert.Equal("#f59e0b", style.BorderColor);
+        Assert.Equal(9, dto.StickerStyles.Count);
+
+        var stored = await db.SystemSettings
+            .AsNoTracking()
+            .SingleAsync(item => item.Key == "tasks.stickerStyles");
+        var storedStyles = JsonSerializer.Deserialize<Dictionary<string, TaskStickerStyle>>(
+            stored.Value,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.NotNull(storedStyles);
+        Assert.Equal("СРЕДНИЙ", storedStyles["priority.normal"].ShortLabel);
+    }
+
+    [Fact]
+    public async Task UpdateSettings_RejectsInvalidTaskStickerColor()
+    {
+        await using var db = await CreateContextAsync();
+        var admin = await CreateAdminUserAsync(db, "admin-invalid-stickers@example.com", "Администратор");
+        var controller = CreateController(db, new RecordingNotificationService(), admin);
+
+        var result = await controller.UpdateSettings(new TaskJournalSettingsRequest
+        {
+            StickerStyles = new Dictionary<string, TaskStickerStyle>
+            {
+                ["priority.normal"] = new()
+                {
+                    Label = "Средний",
+                    ShortLabel = "СРЕДНИЙ",
+                    BackgroundColor = "yellow",
+                    TextColor = "#92400e",
+                    BorderColor = "#f59e0b",
+                },
+            },
+        }, CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.False(await db.SystemSettings.AnyAsync(item => item.Key == "tasks.stickerStyles"));
+    }
+
+    [Fact]
     public async Task GetOverdueSummary_CountsOnlyCurrentEmployeesActiveOverdueTasks()
     {
         await using var db = await CreateContextAsync();

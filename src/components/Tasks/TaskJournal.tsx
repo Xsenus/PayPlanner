@@ -54,6 +54,16 @@ import { useLegalEntities } from '../../hooks/useLegalEntities';
 import { useRolePermissions } from '../../hooks/useRolePermissions';
 import { useToast } from '../../hooks/useToast';
 import { apiService, type TaskJournalSettingsDto } from '../../services/api';
+import {
+  TaskStickerBadge,
+  TaskStickerStylesProvider,
+} from './TaskStickerBadge';
+import {
+  cloneDefaultTaskStickerStyles,
+  normalizeTaskStickerStyles,
+  taskPriorityStickerKey,
+  type TaskStickerKey,
+} from '../../utils/taskStickerStyles';
 import type { CaseCalendarEvent, CaseCalendarSummary, Client, ClientCase, LegalEntitySummary } from '../../types';
 import type { MenuSectionPermissions, TaskSectionPermissions } from '../../types/permissions';
 import { extractDisplayErrorMessage, isHttpErrorStatus } from '../../utils/errorUtils';
@@ -209,6 +219,7 @@ const DEFAULT_TASK_JOURNAL_SETTINGS: TaskJournalSettingsDto = {
   caseInactivityDefaultAssigneeUserId: null,
   caseInactivityEscalationDays: 30,
   caseInactivityEscalationUserId: null,
+  stickerStyles: cloneDefaultTaskStickerStyles(),
 };
 
 const AUTOMATION_CANDIDATES_SEARCH_DELAY_MS = 300;
@@ -1417,17 +1428,19 @@ function canPostTaskCommentForCurrentUser(
   );
 }
 
-function priorityClass(priority: TaskJournalPriority) {
-  switch (priority) {
-    case 'urgent':
-      return 'border-rose-200 bg-rose-50 text-rose-700';
-    case 'high':
-      return 'border-amber-200 bg-amber-50 text-amber-700';
-    case 'low':
-      return 'border-slate-200 bg-slate-50 text-slate-600';
-    default:
-      return 'border-blue-200 bg-blue-50 text-blue-700';
-  }
+function TaskPriorityBadge({
+  priority,
+  compact = false,
+}: {
+  priority: TaskJournalPriority;
+  compact?: boolean;
+}) {
+  return (
+    <TaskStickerBadge
+      stickerKey={taskPriorityStickerKey(priority)}
+      compact={compact}
+    />
+  );
 }
 
 function statusClass(status: TaskJournalStatus) {
@@ -2423,7 +2436,10 @@ export function TaskJournal({
       setAutomationCandidates(automationResponse);
       automationCandidatesRequestKeyRef.current = buildAutomationCandidatesRequestKey(settingsResponse, automationSearchValue);
       automationCandidatesInitializedRef.current = true;
-      setTaskSettings(settingsResponse);
+      setTaskSettings({
+        ...settingsResponse,
+        stickerStyles: normalizeTaskStickerStyles(settingsResponse.stickerStyles),
+      });
       setTaskNotificationDefaults(parseTaskNotificationDefaults(notificationDefaultsResponse?.value));
       setCurrentTimeZoneId(normalizeUserTimeZoneId(timeZoneResponse?.value));
       setCompletedTaskCalendarAction(calendarSyncSettingsResponse?.completedTaskCalendarAction === 'hide' ? 'hide' : 'color');
@@ -4230,7 +4246,8 @@ export function TaskJournal({
 
   if (isRouteTaskPage) {
     return (
-      <div className="min-h-screen bg-slate-50">
+      <TaskStickerStylesProvider styles={taskSettings.stickerStyles}>
+        <div className="min-h-screen bg-slate-50">
         {routeTaskState ? (
           <TaskCardComponent
             key={`page-${routeTaskState.task!.id}-${routeTaskState.mode}`}
@@ -4275,12 +4292,14 @@ export function TaskJournal({
             </div>
           </div>
         )}
-      </div>
+        </div>
+      </TaskStickerStylesProvider>
     );
   }
 
   return (
-    <div className={embedded ? 'bg-transparent' : 'min-h-screen bg-slate-50'}>
+    <TaskStickerStylesProvider styles={taskSettings.stickerStyles}>
+      <div className={embedded ? 'bg-transparent' : 'min-h-screen bg-slate-50'}>
       <div data-testid="task-journal-shell" className={embedded ? 'w-full min-w-0' : 'w-full min-w-0 p-3 sm:p-4 lg:p-4'}>
         <section className="mb-6">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
@@ -5128,7 +5147,8 @@ export function TaskJournal({
           onSnooze={snoozeApprovalDecisionPrompt}
         />
       ) : null}
-    </div>
+      </div>
+    </TaskStickerStylesProvider>
   );
 }
 
@@ -6113,9 +6133,7 @@ function TaskTable({
                       className="mt-3 flex max-w-full flex-nowrap items-center gap-1.5"
                       data-testid={`task-meta-badges-${task.id}`}
                     >
-                      <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${priorityClass(task.priority)}`}>
-                        {getPriorityLabel(task.priority)}
-                      </span>
+                      <TaskPriorityBadge priority={task.priority} compact />
                       <TaskBillingBadge task={task} compact />
                     </div>
                     {pendingDeadlineRequest ? (
@@ -6272,35 +6290,31 @@ function TaskBillingBadge({
   className?: string;
   compact?: boolean;
 }) {
-  if (!task.billingStatus || task.billingStatus === 'legacy') return null;
+  const billingStatus = task.billingStatus;
+  const stickerKey: TaskStickerKey = billingStatus === 'unbilled'
+    ? 'billing.unbilled'
+    : billingStatus === 'invoiced'
+      ? 'billing.invoiced'
+      : billingStatus === 'fixed'
+        ? 'billing.fixed'
+        : task.clientId || task.legalEntityId
+          ? 'billing.unpaid'
+          : 'billing.internal';
+  if (!billingStatus || billingStatus === 'legacy') return null;
 
-  const meta = task.billingStatus === 'unbilled'
-    ? { label: 'ПЛАТНАЯ · НЕ ВЫСТАВЛЕН СЧЁТ', compactLabel: 'БЕЗ СЧЁТА', className: 'border-rose-300 bg-rose-100 text-rose-800' }
-    : task.billingStatus === 'invoiced'
-      ? {
-          label: `В СЧЁТЕ${task.billingInvoiceNumber ? ` №${task.billingInvoiceNumber}` : ''}`,
-          compactLabel: `В СЧЁТЕ${task.billingInvoiceNumber ? ` №${task.billingInvoiceNumber}` : ''}`,
-          className: 'border-emerald-300 bg-emerald-100 text-emerald-800',
-        }
-      : task.billingStatus === 'fixed'
-        ? { label: 'КЛИЕНТСКАЯ · ФИКСИРОВАННЫЙ ДОГОВОР', compactLabel: 'ФИКС. ДОГОВОР', className: 'border-violet-300 bg-violet-100 text-violet-800' }
-        : {
-            label: task.clientId || task.legalEntityId
-              ? 'НЕОПЛАЧИВАЕМАЯ · НЕ ДЛЯ СЧЁТА'
-              : 'ВНУТРЕННЯЯ · НЕ ДЛЯ СЧЁТА',
-            compactLabel: 'НЕ ДЛЯ СЧЁТА',
-            className: 'border-slate-300 bg-slate-100 text-slate-700',
-          };
+  const invoiceSuffix = billingStatus === 'invoiced' && task.billingInvoiceNumber
+    ? ` №${task.billingInvoiceNumber}`
+    : '';
 
   return (
-    <span
-      className={`${className} inline-flex max-w-full items-center gap-1 rounded-full border font-bold ${compact ? 'px-2 py-0.5 text-[10px]' : 'px-2.5 py-1 text-[11px] tracking-wide'} ${meta.className}`}
-      data-testid={`task-billing-badge-${task.id}`}
-      title={meta.label}
-    >
-      <WalletCards className={`${compact ? 'h-3 w-3' : 'h-3.5 w-3.5'} shrink-0`} />
-      <span className="truncate">{compact ? meta.compactLabel : meta.label}</span>
-    </span>
+    <TaskStickerBadge
+      stickerKey={stickerKey}
+      compact={compact}
+      className={className}
+      labelSuffix={invoiceSuffix}
+      testId={`task-billing-badge-${task.id}`}
+      icon={<WalletCards className={`${compact ? 'h-3 w-3' : 'h-3.5 w-3.5'} shrink-0`} />}
+    />
   );
 }
 
@@ -6359,9 +6373,7 @@ function TaskBoard({
                   }`}
                 >
                   <div className="flex items-start justify-between gap-3">
-                    <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${priorityClass(task.priority)}`}>
-                      {getPriorityLabel(task.priority)}
-                    </span>
+                    <TaskPriorityBadge priority={task.priority} />
                     <button type="button" onClick={() => onEdit(task)} className="rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700" title="Просмотр">
                       <Eye className="h-4 w-4" />
                     </button>
@@ -9501,14 +9513,14 @@ function TaskModal({
                     {statusOption.label}
                   </span>
                   {state?.task ? <TaskBillingBadge task={state.task} /> : form.clientBillingClassification ? (
-                    <span className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-bold ${form.clientBillingClassification === 'billable' ? 'border-rose-300 bg-rose-100 text-rose-800' : 'border-slate-300 bg-slate-100 text-slate-700'}`}>
-                      <WalletCards className="h-3.5 w-3.5" />
-                      {form.clientBillingClassification === 'billable'
-                        ? form.billingMode === 'Fixed' ? 'КЛИЕНТСКАЯ · ФИКСИРОВАННЫЙ ДОГОВОР' : 'ПЛАТНАЯ ЗАДАЧА'
+                    <TaskStickerBadge
+                      stickerKey={form.clientBillingClassification === 'billable'
+                        ? form.billingMode === 'Fixed' ? 'billing.fixed' : 'billing.unbilled'
                         : form.clientId || form.legalEntityId
-                          ? 'НЕОПЛАЧИВАЕМАЯ · НЕ ДЛЯ СЧЁТА'
-                          : 'ВНУТРЕННЯЯ · НЕ ДЛЯ СЧЁТА'}
-                    </span>
+                          ? 'billing.unpaid'
+                          : 'billing.internal'}
+                      icon={<WalletCards className="h-3.5 w-3.5 shrink-0" />}
+                    />
                   ) : null}
                 </div>
                 <h2 className="sr-only">{titleText}</h2>
