@@ -2054,6 +2054,7 @@ export function TaskJournal({
   const [periodMode, setPeriodMode] = useState<PeriodMode>(initialPreferences.periodMode);
   const [statusFilter, setStatusFilter] = useState<TaskStatusFilter>(initialPreferences.statusFilter);
   const [counterpartyFilter, setCounterpartyFilter] = useState(initialPreferences.counterpartyFilter);
+  const [counterpartySearchOpen, setCounterpartySearchOpen] = useState(false);
   const [caseFilter, setCaseFilter] = useState(initialPreferences.caseFilter);
   const selectedFilterClientId = counterpartyFilter.startsWith('client:')
     ? Number(counterpartyFilter.slice('client:'.length))
@@ -2563,6 +2564,22 @@ export function TaskJournal({
           .sort((left, right) => left.label.localeCompare(right.label, 'ru'))
       : [];
   }, [counterpartyCaseFilterData, counterpartyFilter]);
+
+  const selectedFilterCounterparty = useMemo(
+    () => counterpartyCaseFilterData.counterparties.find((counterparty) => counterparty.value === counterpartyFilter) ?? null,
+    [counterpartyCaseFilterData.counterparties, counterpartyFilter],
+  );
+
+  const counterpartySearchOptions = useMemo(() => {
+    const normalizedSearch = search.trim().toLocaleLowerCase('ru');
+    if (normalizedSearch.length < 2) {
+      return [];
+    }
+
+    return counterpartyCaseFilterData.counterparties
+      .filter((counterparty) => counterparty.label.toLocaleLowerCase('ru').includes(normalizedSearch))
+      .slice(0, 8);
+  }, [counterpartyCaseFilterData.counterparties, search]);
 
   useEffect(() => {
     if (caseFilter === 'all' || counterpartyFilter !== 'all') {
@@ -4480,18 +4497,94 @@ export function TaskJournal({
 
         <section className="mb-6 min-w-0 max-w-full space-y-3" data-testid="task-filters-panel">
           <div
-            className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(220px,1fr)_repeat(6,minmax(130px,180px))]"
+            className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(240px,1fr)_repeat(5,minmax(140px,190px))]"
             data-testid="task-main-filter-row"
           >
-            <label className="relative block">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Поиск по контрагенту, делу или наименованию задачи"
-                className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-              />
-            </label>
+            <div
+              className="relative"
+              onBlur={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                  setCounterpartySearchOpen(false);
+                }
+              }}
+              data-testid="task-counterparty-search"
+              data-selected-value={counterpartyFilter}
+            >
+              <div className="flex h-11 min-w-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white pl-3 pr-2 transition focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100">
+                <Search className="h-4 w-4 shrink-0 text-slate-400" />
+                {selectedFilterCounterparty ? (
+                  <span
+                    className="inline-flex min-w-0 max-w-[55%] shrink-0 items-center gap-1 rounded-lg bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700"
+                    title={selectedFilterCounterparty.label}
+                  >
+                    <span className="truncate">{selectedFilterCounterparty.label}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCounterpartyFilter('all');
+                        setCaseFilter('all');
+                      }}
+                      className="shrink-0 rounded p-0.5 text-blue-400 transition hover:bg-blue-100 hover:text-blue-700"
+                      aria-label={`Очистить контрагента ${selectedFilterCounterparty.label}`}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </span>
+                ) : null}
+                <input
+                  value={search}
+                  onFocus={() => setCounterpartySearchOpen(true)}
+                  onChange={(event) => {
+                    setSearch(event.target.value);
+                    setCounterpartySearchOpen(true);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') {
+                      setCounterpartySearchOpen(false);
+                    } else if (event.key === 'Enter' && counterpartySearchOptions[0]) {
+                      event.preventDefault();
+                      setCounterpartyFilter(counterpartySearchOptions[0].value);
+                      setCaseFilter('all');
+                      setSearch('');
+                      setCounterpartySearchOpen(false);
+                    }
+                  }}
+                  placeholder={selectedFilterCounterparty
+                    ? 'Поиск по делу или задаче'
+                    : 'Поиск по контрагенту, делу или наименованию задачи'}
+                  className="h-full min-w-0 flex-1 bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400"
+                  aria-label="Поиск по контрагенту, делу или наименованию задачи"
+                  aria-autocomplete="list"
+                  aria-expanded={counterpartySearchOpen && counterpartySearchOptions.length > 0}
+                />
+              </div>
+              {counterpartySearchOpen && counterpartySearchOptions.length > 0 ? (
+                <div
+                  role="listbox"
+                  aria-label="Найденные контрагенты"
+                  className="absolute left-0 right-0 top-full z-40 mt-2 max-h-72 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-2xl"
+                >
+                  {counterpartySearchOptions.map((counterparty) => (
+                    <button
+                      key={counterparty.value}
+                      type="button"
+                      role="option"
+                      aria-selected={counterparty.value === counterpartyFilter}
+                      onClick={() => {
+                        setCounterpartyFilter(counterparty.value);
+                        setCaseFilter('all');
+                        setSearch('');
+                        setCounterpartySearchOpen(false);
+                      }}
+                      className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-semibold text-slate-800 transition hover:bg-blue-50 focus:bg-blue-50 focus:outline-none"
+                    >
+                      <span className="truncate">{counterparty.label}</span>
+                      {counterparty.value === counterpartyFilter ? <CheckCircle2 className="h-4 w-4 shrink-0 text-blue-600" /> : null}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
 
             <SystemSelect
               value={statusFilter}
@@ -4504,22 +4597,6 @@ export function TaskJournal({
               <option value="overdue">Просроченные</option>
               {STATUS_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </SystemSelect>
-
-            <SystemSelect
-              value={counterpartyFilter}
-              onChange={(event) => {
-                setCounterpartyFilter(event.target.value);
-                setCaseFilter('all');
-              }}
-              className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-              aria-label="Контрагент"
-              data-testid="task-counterparty-filter"
-            >
-              <option value="all">Все контрагенты</option>
-              {counterpartyCaseFilterData.counterparties.map((counterparty) => (
-                <option key={counterparty.value} value={counterparty.value}>{counterparty.label}</option>
               ))}
             </SystemSelect>
 

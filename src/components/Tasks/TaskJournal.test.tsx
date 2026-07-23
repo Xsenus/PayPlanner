@@ -2493,9 +2493,14 @@ describe('TaskJournal', () => {
     expect(within(caseFilter).queryByText('БАНКРОТСТВО', { selector: 'option' })).toBeNull();
     expect(within(caseFilter).queryByText('НАСЛЕДСТВО', { selector: 'option' })).toBeNull();
 
-    fireEvent.change(screen.getByTestId('task-counterparty-filter'), { target: { value: 'client:11' } });
+    const counterpartySearch = screen.getByRole('textbox', {
+      name: 'Поиск по контрагенту, делу или наименованию задачи',
+    }) as HTMLInputElement;
+    fireEvent.change(counterpartySearch, { target: { value: 'Петров' } });
+    fireEvent.click(screen.getByRole('option', { name: 'Петров Петр Петрович' }));
 
     expect(caseFilter.disabled).toBe(false);
+    expect(screen.getByTestId('task-counterparty-search').getAttribute('data-selected-value')).toBe('client:11');
     expect(within(caseFilter).queryByText('БАНКРОТСТВО', { selector: 'option' })).toBeNull();
     expect(within(caseFilter).getByText('НАСЛЕДСТВО', { selector: 'option' })).toBeTruthy();
 
@@ -2522,7 +2527,8 @@ describe('TaskJournal', () => {
       includeTasks: false,
     })));
 
-    fireEvent.change(screen.getByTestId('task-counterparty-filter'), { target: { value: 'client:10' } });
+    fireEvent.change(counterpartySearch, { target: { value: 'Иванов' } });
+    fireEvent.click(screen.getByRole('option', { name: 'Иванов Иван Иванович' }));
     expect(caseFilter.value).toBe('all');
     expect(within(caseFilter).getByText('БАНКРОТСТВО', { selector: 'option' })).toBeTruthy();
     expect(within(caseFilter).queryByText('НАСЛЕДСТВО', { selector: 'option' })).toBeNull();
@@ -2535,7 +2541,8 @@ describe('TaskJournal', () => {
       clientCaseId: undefined,
     })));
 
-    fireEvent.change(screen.getByTestId('task-counterparty-filter'), { target: { value: 'legal:20' } });
+    fireEvent.change(counterpartySearch, { target: { value: 'Ромашка' } });
+    fireEvent.click(screen.getByRole('option', { name: 'ООО Ромашка' }));
     expect(within(caseFilter).getByText('КОРПОРАТИВНЫЙ СПОР', { selector: 'option' })).toBeTruthy();
     expect(within(caseFilter).queryByText('БАНКРОТСТВО', { selector: 'option' })).toBeNull();
   });
@@ -2558,7 +2565,8 @@ describe('TaskJournal', () => {
       ], { waitForTitle: null });
 
       const searchInput = screen.getByPlaceholderText('Поиск по контрагенту, делу или наименованию задачи') as HTMLInputElement;
-      fireEvent.change(screen.getByTestId('task-counterparty-filter'), { target: { value: 'client:10' } });
+      fireEvent.change(searchInput, { target: { value: 'Иванов' } });
+      fireEvent.click(screen.getByRole('option', { name: 'Иванов Иван Иванович' }));
       fireEvent.change(screen.getByTestId('task-case-filter'), { target: { value: '100' } });
       fireEvent.change(screen.getByTestId('task-priority-filter'), { target: { value: 'urgent' } });
       fireEvent.change(searchInput, { target: { value: 'Срочная' } });
@@ -2588,14 +2596,14 @@ describe('TaskJournal', () => {
       });
 
       fireEvent.change(screen.getByTestId('task-priority-filter'), { target: { value: 'all' } });
-      fireEvent.change(screen.getByTestId('task-counterparty-filter'), { target: { value: 'all' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Очистить контрагента Иванов Иван Иванович' }));
       fireEvent.change(searchInput, { target: { value: '' } });
 
       fireEvent.change(screen.getByTestId('task-saved-view-select'), { target: { value: savedViews[0].id } });
 
       await waitFor(() => {
         expect((screen.getByTestId('task-priority-filter') as HTMLSelectElement).value).toBe('urgent');
-        expect((screen.getByTestId('task-counterparty-filter') as HTMLSelectElement).value).toBe('client:10');
+        expect(screen.getByTestId('task-counterparty-search').getAttribute('data-selected-value')).toBe('client:10');
         expect((screen.getByTestId('task-case-filter') as HTMLSelectElement).value).toBe('100');
         expect(searchInput.value).toBe('Срочная');
       });
@@ -2620,6 +2628,9 @@ describe('TaskJournal', () => {
     const dateFrom = screen.getByTestId('task-date-from-filter');
     const dateTo = screen.getByTestId('task-date-to-filter');
 
+    expect(mainFilterRow.className).toContain('xl:grid-cols-[minmax(240px,1fr)_repeat(5,minmax(140px,190px))]');
+    expect(screen.queryByTestId('task-counterparty-filter')).toBeNull();
+    expect(screen.getByTestId('task-counterparty-search')).toBeTruthy();
     expect(mainFilterRow.contains(dateFrom)).toBe(false);
     expect(dateFilterRow.contains(dateFrom)).toBe(true);
     expect(dateFilterRow.contains(dateTo)).toBe(true);
