@@ -211,7 +211,9 @@ describe('StickyNotes', () => {
 
     expect(await screen.findByText('Досок пока нет.')).toBeTruthy();
     expect(apiMock.getStickyNotes).not.toHaveBeenCalled();
-    expect(window.localStorage.getItem('payplanner.stickyNotes.activeBoardId')).toBeNull();
+    await waitFor(() => {
+      expect(window.localStorage.getItem('payplanner.stickyNotes.activeBoardId')).toBeNull();
+    });
   });
 
   it('ignores stale notes responses after switching boards', async () => {
