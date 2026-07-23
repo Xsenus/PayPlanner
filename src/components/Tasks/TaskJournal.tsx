@@ -6097,7 +6097,7 @@ function TaskTable({
                       ))}
                     </div>
                   </td>
-                  <td className="max-w-[250px] px-2 py-4 sm:px-3 xl:max-w-[320px] xl:px-4">
+                  <td className="min-w-[250px] max-w-[250px] px-2 py-4 sm:px-3 xl:min-w-[280px] xl:max-w-[320px] xl:px-4">
                     <button
                       type="button"
                       onClick={() => onEdit(task)}
@@ -6109,10 +6109,15 @@ function TaskTable({
                       {task.title}
                     </button>
                     <div className="mt-1 line-clamp-2 text-sm text-slate-500" title={taskDescription}>{taskDescription}</div>
-                    <span className={`mt-3 inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${priorityClass(task.priority)}`}>
-                      {getPriorityLabel(task.priority)}
-                    </span>
-                    <TaskBillingBadge task={task} className="mt-2" />
+                    <div
+                      className="mt-3 flex max-w-full flex-nowrap items-center gap-1.5"
+                      data-testid={`task-meta-badges-${task.id}`}
+                    >
+                      <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${priorityClass(task.priority)}`}>
+                        {getPriorityLabel(task.priority)}
+                      </span>
+                      <TaskBillingBadge task={task} compact />
+                    </div>
                     {pendingDeadlineRequest ? (
                       <div
                         className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800"
@@ -6258,26 +6263,43 @@ function TaskTable({
   );
 }
 
-function TaskBillingBadge({ task, className = '' }: { task: TaskJournalItem; className?: string }) {
+function TaskBillingBadge({
+  task,
+  className = '',
+  compact = false,
+}: {
+  task: TaskJournalItem;
+  className?: string;
+  compact?: boolean;
+}) {
   if (!task.billingStatus || task.billingStatus === 'legacy') return null;
 
   const meta = task.billingStatus === 'unbilled'
-    ? { label: 'ПЛАТНАЯ · НЕ ВЫСТАВЛЕН СЧЁТ', className: 'border-rose-300 bg-rose-100 text-rose-800' }
+    ? { label: 'ПЛАТНАЯ · НЕ ВЫСТАВЛЕН СЧЁТ', compactLabel: 'БЕЗ СЧЁТА', className: 'border-rose-300 bg-rose-100 text-rose-800' }
     : task.billingStatus === 'invoiced'
-      ? { label: `В СЧЁТЕ${task.billingInvoiceNumber ? ` №${task.billingInvoiceNumber}` : ''}`, className: 'border-emerald-300 bg-emerald-100 text-emerald-800' }
+      ? {
+          label: `В СЧЁТЕ${task.billingInvoiceNumber ? ` №${task.billingInvoiceNumber}` : ''}`,
+          compactLabel: `В СЧЁТЕ${task.billingInvoiceNumber ? ` №${task.billingInvoiceNumber}` : ''}`,
+          className: 'border-emerald-300 bg-emerald-100 text-emerald-800',
+        }
       : task.billingStatus === 'fixed'
-        ? { label: 'КЛИЕНТСКАЯ · ФИКСИРОВАННЫЙ ДОГОВОР', className: 'border-violet-300 bg-violet-100 text-violet-800' }
+        ? { label: 'КЛИЕНТСКАЯ · ФИКСИРОВАННЫЙ ДОГОВОР', compactLabel: 'ФИКС. ДОГОВОР', className: 'border-violet-300 bg-violet-100 text-violet-800' }
         : {
             label: task.clientId || task.legalEntityId
               ? 'НЕОПЛАЧИВАЕМАЯ · НЕ ДЛЯ СЧЁТА'
               : 'ВНУТРЕННЯЯ · НЕ ДЛЯ СЧЁТА',
+            compactLabel: 'НЕ ДЛЯ СЧЁТА',
             className: 'border-slate-300 bg-slate-100 text-slate-700',
           };
 
   return (
-    <span className={`${className} inline-flex max-w-full items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold tracking-wide ${meta.className}`} data-testid={`task-billing-badge-${task.id}`}>
-      <WalletCards className="h-3.5 w-3.5 shrink-0" />
-      <span className="truncate">{meta.label}</span>
+    <span
+      className={`${className} inline-flex max-w-full items-center gap-1 rounded-full border font-bold ${compact ? 'px-2 py-0.5 text-[10px]' : 'px-2.5 py-1 text-[11px] tracking-wide'} ${meta.className}`}
+      data-testid={`task-billing-badge-${task.id}`}
+      title={meta.label}
+    >
+      <WalletCards className={`${compact ? 'h-3 w-3' : 'h-3.5 w-3.5'} shrink-0`} />
+      <span className="truncate">{compact ? meta.compactLabel : meta.label}</span>
     </span>
   );
 }

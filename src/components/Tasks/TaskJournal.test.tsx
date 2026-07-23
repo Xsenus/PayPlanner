@@ -1006,7 +1006,9 @@ describe('TaskJournal', () => {
     await renderJournal([unbilledTask], { onCreateInvoiceDraft });
 
     expect(screen.getByTestId('task-unbilled-reminder').textContent).toContain('Платные задачи без счёта: 1');
-    expect(screen.getByText('ПЛАТНАЯ · НЕ ВЫСТАВЛЕН СЧЁТ')).toBeTruthy();
+    const unbilledBadge = screen.getByText('БЕЗ СЧЁТА').closest('[data-testid="task-billing-badge-321"]');
+    expect(unbilledBadge).toBeTruthy();
+    expect(unbilledBadge?.getAttribute('title')).toBe('ПЛАТНАЯ · НЕ ВЫСТАВЛЕН СЧЁТ');
     fireEvent.click(screen.getByRole('checkbox', { name: 'Выбрать задачу Подготовить иск' }));
     fireEvent.click(screen.getByRole('button', { name: 'Подготовить счёт (1)' }));
 
@@ -1015,6 +1017,26 @@ describe('TaskJournal', () => {
       selectedClientCaseIds: [100],
       lineItems: [expect.objectContaining({ name: expect.stringMatching(/Подготовить иск \(задача №321 от/) })],
     }));
+  });
+
+  it('keeps priority and billing badges in one compact metadata row', async () => {
+    await renderJournal([
+      createTask({
+        clientBillingClassification: 'internal',
+        billingStatus: 'internal',
+      }),
+    ]);
+
+    const badges = screen.getByTestId('task-meta-badges-101');
+    const billingBadge = within(badges).getByTestId('task-billing-badge-101');
+
+    expect(badges.className).toContain('flex');
+    expect(badges.className).toContain('flex-nowrap');
+    expect(badges.className).toContain('items-center');
+    expect(within(badges).getByText('Обычный')).toBeTruthy();
+    expect(within(billingBadge).getByText('НЕ ДЛЯ СЧЁТА')).toBeTruthy();
+    expect(billingBadge.className).toContain('text-[10px]');
+    expect(billingBadge.getAttribute('title')).toBe('НЕОПЛАЧИВАЕМАЯ · НЕ ДЛЯ СЧЁТА');
   });
 
   it('shows who assigned the task in the journal and task card', async () => {
