@@ -3155,6 +3155,7 @@ public sealed class NotificationService : INotificationService
                         request.RequestedByName,
                         request.ReviewerUserId,
                         request.ReviewerName,
+                        currentDueAt = request.CurrentDueAt,
                         requestedDueAt = request.RequestedDueAt,
                         reason = request.Reason
                     },

@@ -3184,6 +3184,9 @@ public class NotificationServiceTests
             Assert.Equal(UserNotificationTypes.TaskDeadlineChangeRequested, notification.Type);
             Assert.Contains("Нужно дождаться новых документов.", notification.BodyPreview);
             Assert.Contains($"\"deadlineChangeRequestId\":{request.Id}", notification.MetadataJson);
+            using var metadata = JsonDocument.Parse(notification.MetadataJson);
+            Assert.Equal(dueAt, metadata.RootElement.GetProperty("currentDueAt").GetDateTime());
+            Assert.Equal(requestedDueAt, metadata.RootElement.GetProperty("requestedDueAt").GetDateTime());
         });
     }
 

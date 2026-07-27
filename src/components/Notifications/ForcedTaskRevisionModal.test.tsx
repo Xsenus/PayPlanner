@@ -12,6 +12,7 @@ import {
 const apiMock = vi.hoisted(() => ({
   approveTaskJournalDeadlineChangeRequest: vi.fn(),
   downloadTaskJournalFile: vi.fn(),
+  getTaskJournalDeadlineChangeRequest: vi.fn(),
   getTaskJournalFiles: vi.fn(),
   getTaskJournalItem: vi.fn(),
   getUserSetting: vi.fn(),
@@ -89,6 +90,7 @@ function createDeadlineChangeNotification(overrides: Partial<UserNotificationDto
       deadlineChangeRequestId: 901,
       requestedByName: 'Иван Петров',
       reviewerName: 'Анна Смирнова',
+      currentDueAt: '2026-06-28T09:00:00Z',
       requestedDueAt: '2026-06-30T09:00:00Z',
       reason: 'Нужно дождаться ответа клиента.',
     }),
@@ -170,6 +172,7 @@ describe('ForcedTaskRevisionModal', () => {
   beforeEach(() => {
     apiMock.approveTaskJournalDeadlineChangeRequest.mockReset();
     apiMock.downloadTaskJournalFile.mockReset();
+    apiMock.getTaskJournalDeadlineChangeRequest.mockReset();
     apiMock.getTaskJournalFiles.mockReset();
     apiMock.getTaskJournalItem.mockReset();
     apiMock.getUserSetting.mockReset();
@@ -180,6 +183,19 @@ describe('ForcedTaskRevisionModal', () => {
     window.localStorage.clear();
     apiMock.approveTaskJournalDeadlineChangeRequest.mockResolvedValue({});
     apiMock.getTaskJournalFiles.mockResolvedValue([]);
+    apiMock.getTaskJournalDeadlineChangeRequest.mockResolvedValue({
+      id: 901,
+      taskJournalItemId: 303,
+      requestedByUserId: 7,
+      requestedByName: 'Иван Петров',
+      reviewerUserId: 8,
+      reviewerName: 'Анна Смирнова',
+      currentDueAt: '2026-06-28T09:00:00Z',
+      requestedDueAt: '2026-06-30T09:00:00Z',
+      reason: 'Нужно дождаться ответа клиента.',
+      status: 'pending',
+      createdAt: '2026-06-27T09:00:00Z',
+    });
     apiMock.getTaskJournalItem.mockResolvedValue(createApprovalTask());
     apiMock.getUserSetting.mockResolvedValue({ key: 'profile.timeZoneId', value: 'Europe/Samara' });
     apiMock.markUserNotificationRead.mockImplementation(async (id: number) => createNotification({ id, isRead: true }));
@@ -337,6 +353,8 @@ describe('ForcedTaskRevisionModal', () => {
     expect(screen.getByText('У вас запросили перенос срока по задаче')).toBeTruthy();
     expect(screen.getByText('Подготовить претензию')).toBeTruthy();
     expect(screen.getByText(/Нужно дождаться ответа клиента/)).toBeTruthy();
+    expect(screen.getByText('28.06.2026, 13:00')).toBeTruthy();
+    expect(screen.getAllByText('30.06.2026, 13:00').length).toBeGreaterThan(0);
 
     const dueAtInput = screen.getByLabelText('Новый срок задачи') as HTMLInputElement;
     await waitFor(() => expect(dueAtInput.value).toBe('2026-06-30T13:00'));
@@ -350,6 +368,27 @@ describe('ForcedTaskRevisionModal', () => {
     }));
     await waitFor(() => expect(apiMock.markUserNotificationRead).toHaveBeenCalledWith(51));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('uses the persisted requested deadline instead of stale notification metadata', async () => {
+    mockNotificationPages([], [], [createDeadlineChangeNotification({
+      metadataJson: JSON.stringify({
+        deadlineChangeRequestId: 901,
+        requestedByName: 'Иван Петров',
+        reviewerName: 'Анна Смирнова',
+        currentDueAt: '2026-06-28T09:00:00Z',
+        requestedDueAt: '2026-06-28T09:00:00Z',
+        reason: 'Нужно дождаться ответа клиента.',
+      }),
+    })]);
+
+    render(<ForcedTaskRevisionModal />);
+
+    const dueAtInput = await screen.findByLabelText('Новый срок задачи') as HTMLInputElement;
+    await waitFor(() => expect(apiMock.getTaskJournalDeadlineChangeRequest).toHaveBeenCalledWith(303, 901));
+    await waitFor(() => expect(dueAtInput.value).toBe('2026-06-30T13:00'));
+    expect(screen.getByText('28.06.2026, 13:00')).toBeTruthy();
+    expect(screen.getAllByText('30.06.2026, 13:00').length).toBeGreaterThan(0);
   });
 
   it('requires a comment before rejecting a deadline change request from the forced queue', async () => {

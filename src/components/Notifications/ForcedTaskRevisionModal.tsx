@@ -7,7 +7,12 @@ import { parseUserNotificationMetadata } from '../../utils/userNotificationMetad
 import { extractDisplayErrorMessage } from '../../utils/errorUtils';
 import { formatDateTimeInTimeZone, fromTimeZoneDateTimeInput, toTimeZoneDateTimeInput } from '../../utils/timeZoneDate';
 import { normalizeUserTimeZoneId, USER_TIME_ZONE_SETTING_KEY } from '../../utils/timeZoneOptions';
-import type { TaskJournalFile, TaskJournalItem, TaskJournalParticipant } from '../../utils/taskJournalStore';
+import type {
+  TaskJournalDeadlineChangeRequest,
+  TaskJournalFile,
+  TaskJournalItem,
+  TaskJournalParticipant,
+} from '../../utils/taskJournalStore';
 import {
   FORCED_TASK_SNOOZE_OPTIONS,
   getForcedTaskApprovalSnoozeKey,
@@ -128,16 +133,6 @@ function readString(value: unknown): string {
 function getDeadlineChangeRequestId(notification: UserNotificationDto): number | null {
   const metadata = getNotificationMetadata(notification);
   return readPositiveInteger(metadata.deadlineChangeRequestId);
-}
-
-function getDeadlineChangeRequestedDueAt(notification: UserNotificationDto): string {
-  const metadata = getNotificationMetadata(notification);
-  return readString(metadata.requestedDueAt);
-}
-
-function getDeadlineChangeReason(notification: UserNotificationDto): string {
-  const metadata = getNotificationMetadata(notification);
-  return readString(metadata.reason) || notification.bodyPreview || 'Причина переноса срока не указана.';
 }
 
 function getApprovalParticipantId(notification: UserNotificationDto): number | null {
@@ -323,6 +318,8 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
   const [deadlineChangeDueAt, setDeadlineChangeDueAt] = useState('');
   const [deadlineChangeComment, setDeadlineChangeComment] = useState('');
   const [deadlineChangeError, setDeadlineChangeError] = useState<string | null>(null);
+  const [deadlineChangeRequest, setDeadlineChangeRequest] = useState<TaskJournalDeadlineChangeRequest | null>(null);
+  const [deadlineChangeRequestLoading, setDeadlineChangeRequestLoading] = useState(false);
   const [deadlineChangeSaving, setDeadlineChangeSaving] = useState<'approve' | 'reject' | null>(null);
   const [approvalTask, setApprovalTask] = useState<TaskJournalItem | null>(null);
   const [approvalTaskLoading, setApprovalTaskLoading] = useState(false);
@@ -419,18 +416,62 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
   const decisionKind = currentItem?.decisionKind ?? null;
   const decisionText = useMemo(() => current && decisionKind ? getDecisionText(current, decisionKind) : '', [current, decisionKind]);
   const approvalLatestFiles = useMemo(() => getLatestTaskFiles(approvalFiles), [approvalFiles]);
+  const currentMetadata = useMemo(() => current ? getNotificationMetadata(current) : {}, [current]);
+  const currentDeadlineChangeRequestId = readPositiveInteger(currentMetadata.deadlineChangeRequestId);
+  const currentDeadlineChangeTaskId = current?.taskId ?? null;
+  const notificationRequestedDueAt = readString(currentMetadata.requestedDueAt);
 
   useEffect(() => {
-    if (!current || decisionKind !== 'deadlineChangeRequest') {
+    if (decisionKind !== 'deadlineChangeRequest') {
+      setDeadlineChangeRequest(null);
+      setDeadlineChangeRequestLoading(false);
       return;
     }
 
-    const requestedDueAt = getDeadlineChangeRequestedDueAt(current);
-    setDeadlineChangeDueAt(requestedDueAt ? toTimeZoneDateTimeInput(requestedDueAt, timeZoneId) : '');
+    let cancelled = false;
+    setDeadlineChangeRequest(null);
+    setDeadlineChangeDueAt(notificationRequestedDueAt ? toTimeZoneDateTimeInput(notificationRequestedDueAt, timeZoneId) : '');
     setDeadlineChangeComment('');
     setDeadlineChangeError(null);
     setDeadlineChangeSaving(null);
-  }, [current?.id, current, decisionKind, timeZoneId]);
+
+    if (!currentDeadlineChangeTaskId || !currentDeadlineChangeRequestId) {
+      setDeadlineChangeRequestLoading(false);
+      return;
+    }
+
+    setDeadlineChangeRequestLoading(true);
+    apiService.getTaskJournalDeadlineChangeRequest(currentDeadlineChangeTaskId, currentDeadlineChangeRequestId)
+      .then((persistedRequest) => {
+        if (cancelled) return;
+
+        setDeadlineChangeRequest(persistedRequest);
+        if (persistedRequest?.requestedDueAt) {
+          setDeadlineChangeDueAt(toTimeZoneDateTimeInput(persistedRequest.requestedDueAt, timeZoneId));
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.error('Failed to load the deadline change request.', error);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setDeadlineChangeRequestLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    current?.id,
+    currentDeadlineChangeRequestId,
+    currentDeadlineChangeTaskId,
+    decisionKind,
+    notificationRequestedDueAt,
+    timeZoneId,
+  ]);
 
   useEffect(() => {
     if (!current || decisionKind !== 'approvalRequest' || !current.taskId) {
@@ -918,10 +959,18 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
   }
 
   if (currentItem?.rule.action === 'deadlineChangeDecision') {
-    const requestedDueAt = getDeadlineChangeRequestedDueAt(current);
+    const requestedDueAt = deadlineChangeRequest?.requestedDueAt || notificationRequestedDueAt;
+    const currentDueAt = deadlineChangeRequest?.currentDueAt || readString(currentMetadata.currentDueAt);
     const formattedRequestedDueAt = requestedDueAt ? formatDateTimeInTimeZone(requestedDueAt, timeZoneId) : 'Не указано';
+    const formattedCurrentDueAt = currentDueAt ? formatDateTimeInTimeZone(currentDueAt, timeZoneId) : 'Не указано';
+    const requestedByName = deadlineChangeRequest?.requestedByName || readString(currentMetadata.requestedByName) || 'Не указано';
+    const reviewerName = deadlineChangeRequest?.reviewerName || readString(currentMetadata.reviewerName) || 'Не указано';
+    const reason = deadlineChangeRequest?.reason
+      || readString(currentMetadata.reason)
+      || current.bodyPreview
+      || 'Причина переноса срока не указана.';
     const queueCountText = items.length > 1 ? `Еще обязательных уведомлений: ${items.length - 1}` : null;
-    const isSaving = Boolean(deadlineChangeSaving);
+    const isSaving = Boolean(deadlineChangeSaving) || deadlineChangeRequestLoading;
 
     return (
       <div className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto bg-slate-950/55 px-3 py-4 backdrop-blur-sm sm:items-center sm:px-4 sm:py-6" role="dialog" aria-modal="true" aria-labelledby="forced-deadline-change-title" data-testid="forced-deadline-change-prompt">
@@ -950,17 +999,25 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
 
           <div className="mt-5 grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 sm:grid-cols-2">
             <div>
-              <div className="text-xs font-semibold uppercase text-slate-400">Запрошенный срок</div>
-              <div className="mt-1 font-semibold text-slate-900">{formattedRequestedDueAt}</div>
+              <div className="text-xs font-semibold uppercase text-slate-400">Запросил</div>
+              <div className="mt-1 font-semibold text-slate-900">{requestedByName}</div>
             </div>
             <div>
-              <div className="text-xs font-semibold uppercase text-slate-400">Действие</div>
-              <div className="mt-1 font-semibold text-slate-900">Согласуйте новый срок или откажите</div>
+              <div className="text-xs font-semibold uppercase text-slate-400">Постановщик</div>
+              <div className="mt-1 font-semibold text-slate-900">{reviewerName}</div>
+            </div>
+            <div>
+              <div className="text-xs font-semibold uppercase text-slate-400">Текущий срок</div>
+              <div className="mt-1 font-medium text-slate-900">{formattedCurrentDueAt}</div>
+            </div>
+            <div>
+              <div className="text-xs font-semibold uppercase text-slate-400">Запрошенный срок</div>
+              <div className="mt-1 font-semibold text-blue-700">{formattedRequestedDueAt}</div>
             </div>
           </div>
 
           <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm leading-6 text-amber-950">
-            <span className="font-semibold">Причина переноса:</span> {getDeadlineChangeReason(current)}
+            <span className="font-semibold">Причина переноса:</span> {reason}
           </div>
 
           <label className="mt-4 block text-sm font-semibold text-slate-700" htmlFor="forced-deadline-change-due-at">
@@ -980,7 +1037,9 @@ export function ForcedTaskRevisionModal({ onOpenTask }: ForcedTaskRevisionModalP
             autoFocus
           />
           <p className="mt-2 text-sm text-slate-500">
-            По умолчанию указана дата, которую запросил исполнитель. Перед согласованием ее можно изменить.
+            {deadlineChangeRequestLoading
+              ? 'Загружаем дату из сохраненного запроса...'
+              : 'По умолчанию указана дата, которую запросил исполнитель. Перед согласованием ее можно изменить.'}
           </p>
 
           <label className="mt-4 block text-sm font-semibold text-slate-700" htmlFor="forced-deadline-change-comment">

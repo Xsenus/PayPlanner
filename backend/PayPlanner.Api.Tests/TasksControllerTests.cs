@@ -2107,6 +2107,42 @@ public class TasksControllerTests
     }
 
     [Fact]
+    public async Task GetDeadlineChangeRequest_ReturnsExactPersistedDates()
+    {
+        await using var db = await CreateContextAsync();
+        var author = await CreateAdminUserAsync(db, "deadline-item-author@example.com", "Автор");
+        var assignee = await CreateTaskUserAsync(db, "deadline-item-assignee@example.com", "Исполнитель", canEdit: false);
+        var client = await CreateClientAsync(db, "Клиент точного запроса");
+        var task = await CreateTaskAsync(db, author.Id, client.Id, assignee.Id);
+        var currentDueAt = task.DueAt;
+        var requestedDueAt = currentDueAt.AddDays(3);
+        var deadlineRequest = new TaskJournalDeadlineChangeRequest
+        {
+            TaskJournalItemId = task.Id,
+            RequestedByUserId = assignee.Id,
+            RequestedByName = assignee.FullName,
+            ReviewerUserId = author.Id,
+            ReviewerName = author.FullName,
+            CurrentDueAt = currentDueAt,
+            RequestedDueAt = requestedDueAt,
+            Reason = "Требуется дополнительное время.",
+            Status = "pending",
+            CreatedAt = DateTime.UtcNow,
+        };
+        db.TaskJournalDeadlineChangeRequests.Add(deadlineRequest);
+        await db.SaveChangesAsync();
+        var controller = CreateController(db, new RecordingNotificationService(), author);
+
+        var result = await controller.GetDeadlineChangeRequest(task.Id, deadlineRequest.Id, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var dto = Assert.IsType<TaskJournalDeadlineChangeRequestDto>(ok.Value);
+        Assert.Equal(deadlineRequest.Id, dto.Id);
+        Assert.Equal(DateTime.SpecifyKind(currentDueAt, DateTimeKind.Utc).ToString("O"), dto.CurrentDueAt);
+        Assert.Equal(DateTime.SpecifyKind(requestedDueAt, DateTimeKind.Utc).ToString("O"), dto.RequestedDueAt);
+    }
+
+    [Fact]
     public async Task GetTasks_IncludesActiveDeadlineChangeRequestsWhenRequested()
     {
         await using var db = await CreateContextAsync();

@@ -4382,6 +4382,10 @@ export class ApiService {
     return this.request<TaskJournalDeadlineChangeRequest[]>(`/tasks/${id}/deadline-change-requests`);
   }
 
+  async getTaskJournalDeadlineChangeRequest(id: number, requestId: number) {
+    return this.request<TaskJournalDeadlineChangeRequest>(`/tasks/${id}/deadline-change-requests/${requestId}`);
+  }
+
   async approveTaskJournalDeadlineChangeRequest(id: number, requestId: number, payload: { approvedDueAt: string; comment?: string | null }) {
     return this.request<TaskJournalItem>(`/tasks/${id}/deadline-change-requests/${requestId}/approve`, {
       method: 'POST',

@@ -4472,6 +4472,8 @@ describe('TaskJournal', () => {
       requestedDueAt: expect.any(String),
       reason: 'Нужны документы от клиента',
     }));
+    const requestPayload = apiMock.createTaskJournalDeadlineChangeRequest.mock.calls.at(-1)?.[1];
+    expect(toDatetimeLocalInputValue(new Date(requestPayload.requestedDueAt))).toBe('2026-05-15T10:30');
     expect(apiMock.updateTaskJournalItem).not.toHaveBeenCalled();
   });
 
@@ -4553,6 +4555,8 @@ describe('TaskJournal', () => {
 
     const prompt = await screen.findByTestId('deadline-change-decision-prompt');
     expect(within(prompt).getByText('Нужно получить ответ суда')).toBeTruthy();
+    const approvedDueAtInput = within(prompt).getByLabelText('Новый срок задачи') as HTMLInputElement;
+    expect(approvedDueAtInput.value).toBe(toDatetimeLocalInputValue(new Date(todayAt(20))));
   });
 
   it('renders task calendar as a journal subgroup', async () => {

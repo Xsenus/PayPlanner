@@ -1652,6 +1652,34 @@ public class TasksController : ControllerBase
         return Ok(requests.Select(MapDeadlineChangeRequest).ToList());
     }
 
+    [HttpGet("{id:int}/deadline-change-requests/{requestId:int}")]
+    public async Task<ActionResult<TaskJournalDeadlineChangeRequestDto>> GetDeadlineChangeRequest(
+        int id,
+        int requestId,
+        CancellationToken ct)
+    {
+        var access = await GetTaskAccessAsync(ct);
+        if (access is null)
+        {
+            return Unauthorized();
+        }
+
+        if (!access.IsAdmin && access.Permission?.CanView != true)
+        {
+            return Forbid();
+        }
+
+        var visibleTasks = BuildVisibleTaskBaseQuery(access);
+        var request = await _db.TaskJournalDeadlineChangeRequests
+            .AsNoTracking()
+            .Where(item => item.Id == requestId
+                && item.TaskJournalItemId == id
+                && visibleTasks.Any(task => task.Id == item.TaskJournalItemId))
+            .FirstOrDefaultAsync(ct);
+
+        return request is null ? NotFound() : Ok(MapDeadlineChangeRequest(request));
+    }
+
     [HttpPost("{id:int}/deadline-change-requests/{requestId:int}/approve")]
     public async Task<ActionResult<TaskJournalItemDto>> ApproveDeadlineChangeRequest(
         int id,

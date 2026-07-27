@@ -5582,8 +5582,8 @@ function TaskDeadlineChangeDecisionPrompt({
             <div className="mt-1 font-medium">{formatDateTime(request.currentDueAt)}</div>
           </div>
           <div>
-            <div className="text-xs font-semibold uppercase text-slate-400">Запрошенный срок</div>
-            <div className="mt-1 font-medium">{formatDateTime(request.requestedDueAt)}</div>
+            <div className="text-xs font-semibold uppercase text-slate-400">Запрошенный исполнителем срок</div>
+            <div className="mt-1 font-semibold text-blue-700">{formatDateTime(request.requestedDueAt)}</div>
           </div>
         </div>
 
